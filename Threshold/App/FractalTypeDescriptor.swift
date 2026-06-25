@@ -2,10 +2,18 @@
 //  FractalTypeDescriptor.swift
 //  Threshold
 //
-//  Protocol + registry that replaces exhaustive switches in FractalModelType.
-//  Adding a new fractal = one new descriptor + one registration line.
+//  Base CLASS + registry that replaces exhaustive switches in FractalModelType.
+//  Adding a new fractal = one new subclass + one registration line.
 //
-//  Phase 5 of the architecture rebuild.
+//  Phase 5 of the architecture rebuild; converted from a protocol to a class
+//  hierarchy in Stage 3 of the class-based module refactor (mirrors the Module
+//  base-class pattern). The base owns all shared metadata defaults; concrete
+//  fractal subclasses override only what differs. `FractalModelType.descriptor`
+//  returns a `FractalTypeDescriptor` instance — Codable stays on the enum, so the
+//  class is a non-Codable metadata façade and on-disk formats are unchanged.
+//
+//  NOTE: the base is named `FractalTypeDescriptor` (not `FractalType`) on purpose
+//  — `FractalType` is the C NS_ENUM bridged from ShaderTypes.h and would collide.
 //
 
 import Foundation
@@ -69,46 +77,39 @@ enum SpaceTransform: String, Codable, CaseIterable, Sendable {
     case sphereProjection
 }
 
-// MARK: - Protocol
+// MARK: - Base class
 
-protocol FractalTypeDescriptor: Sendable {
-    var rawValue: Int32 { get }
-    var displayName: String { get }
-    var icon: String { get }
-    var category: String { get }
-    var codableString: String { get }
-    var supportedCoreGestureActions: [FingerGestureAction] { get }
-    var supportedEffectTags: Set<EffectTag> { get }
-    /// Space-domain transforms this fractal supports (e.g. sphere projection).
-    /// Defaults to `universalSpaceTransforms`; override to prune by fractal.
-    var supportedSpaceTransforms: Set<SpaceTransform> { get }
-    var isSelectableInUI: Bool { get }
-    func defaultFormulaParams() -> FormulaParams
+/// Base class for a fractal type's metadata. Concrete fractals subclass it and
+/// override only what differs from the universal defaults.
+///
+/// @unchecked Sendable justification: every stored property is an immutable `let`
+/// set at init and never mutated; overridable members are pure computed values.
+/// The `.custom` overlay shares a single instance across threads, so post-init
+/// immutability is load-bearing (see `CustomFractalDescriptor`).
+class FractalTypeDescriptor: @unchecked Sendable {
+    let rawValue: Int32
+    let displayName: String
+    let icon: String
+    let category: String
+    let codableString: String
+    let isSelectableInUI: Bool
 
-    // Gesture configuration
-    var gestureRanges: GestureParamRanges { get }
-    var gestureRangesExtended: GestureParamRanges { get }
-    var grabScaleClamp: ClosedRange<Float> { get }
-    var defaultViewState: FractalViewDefaults { get }
-    var defaultShapeParams: FractalShapeDefaults { get }
+    init(rawValue: Int32,
+         displayName: String,
+         icon: String,
+         category: String,
+         codableString: String,
+         isSelectableInUI: Bool) {
+        self.rawValue = rawValue
+        self.displayName = displayName
+        self.icon = icon
+        self.category = category
+        self.codableString = codableString
+        self.isSelectableInUI = isSelectableInUI
+    }
 
-    /// Per-type default gesture bindings mapping single-hand slots to formula
-    /// parameter triplet groups (e.g. "Mins", "Maxs").  Resolved from the
-    /// formula catalog when the fractal type is switched.
-    var defaultTripletBindings: [(slot: GestureSlot, groupName: String)] { get }
+    // ── Shared constants (formerly the protocol extension) ────────────────
 
-    /// Per-type default gesture bindings mapping single-hand slots to scalar
-    /// formula parameters (e.g. "Power", "PolarRotation").  Resolved from the
-    /// formula catalog when the fractal type is switched.
-    var defaultScalarBindings: [(slot: GestureSlot, paramName: String)] { get }
-
-    /// Color scheme applied when switching to this fractal type (nil = keep current).
-    var defaultColorScheme: ColorScheme? { get }
-}
-
-// MARK: - Shared constants
-
-extension FractalTypeDescriptor {
     /// Effects supported by all fractal types.
     static var universalEffectTags: Set<EffectTag> {
         [.hueRotation, .pulse, .glow, .bloom, .fog, .gradientCycle, .linearRail]
@@ -117,12 +118,9 @@ extension FractalTypeDescriptor {
     /// Space transforms enabled for every fractal by default. Sphere projection
     /// works across all types because it is applied as a domain warp at the
     /// dispatch boundary (non-Mandelbox) or natively inside `Map()` (Mandelbox).
-    /// "Enable broadly, prune by eye": individual descriptors can override
+    /// "Enable broadly, prune by eye": individual subclasses can override
     /// `supportedSpaceTransforms` to `[]` (or a subset) once tuned visually.
     static var universalSpaceTransforms: Set<SpaceTransform> { [.sphereProjection] }
-
-    /// Default: every fractal supports the universal space transforms.
-    var supportedSpaceTransforms: Set<SpaceTransform> { Self.universalSpaceTransforms }
 
     /// Default core gesture actions for non-Mandelbox types.
     static var standardCoreGestureActions: [FingerGestureAction] {
@@ -138,21 +136,55 @@ extension FractalTypeDescriptor {
         return fp
     }
 
-    // ── Gesture defaults ──────────────────────────────────────────────
+    /// Shared "look down the Julia-like view" camera (was cloned verbatim across
+    /// Mandelbulb / MandelbulbJulia / QuaternionJulia — only the position differs).
+    static func juliaLikeView(position: SIMD3<Float>) -> FractalViewDefaults {
+        let qx = simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0))
+        let qy = simd_quatf(angle: 75.0 * .pi / 180.0, axis: SIMD3<Float>(0, 1, 0))
+        let qz = simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 0, 1))
+        return FractalViewDefaults(
+            position: position,
+            rotation: simd_normalize(qz * qy * qx),
+            detailScale: 0.25,
+            safetyBubbleEnabled: false
+        )
+    }
+
+    // ── Overridable capability / default members (universal defaults) ─────
+    // Subclasses override only what differs; everything else is inherited.
+
+    var supportedCoreGestureActions: [FingerGestureAction] { Self.standardCoreGestureActions }
+    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
+    /// Space-domain transforms this fractal supports (e.g. sphere projection).
+    var supportedSpaceTransforms: Set<SpaceTransform> { Self.universalSpaceTransforms }
+
+    func defaultFormulaParams() -> FormulaParams { Self.baseFormulaParams() }
+
+    // Gesture configuration
     var gestureRanges: GestureParamRanges { .standard }
     var gestureRangesExtended: GestureParamRanges { .extended }
     var grabScaleClamp: ClosedRange<Float> { 0.001...500.0 }
     var defaultViewState: FractalViewDefaults { FractalViewDefaults() }
     var defaultShapeParams: FractalShapeDefaults { FractalShapeDefaults() }
+
+    /// Per-type default gesture bindings mapping single-hand slots to formula
+    /// parameter triplet groups (e.g. "Mins", "Maxs"). Resolved from the formula
+    /// catalog when the fractal type is switched.
     var defaultTripletBindings: [(slot: GestureSlot, groupName: String)] { [] }
+
+    /// Per-type default gesture bindings mapping single-hand slots to scalar
+    /// formula parameters (e.g. "Power", "PolarRotation"). Resolved from the
+    /// formula catalog when the fractal type is switched.
     var defaultScalarBindings: [(slot: GestureSlot, paramName: String)] { [] }
+
+    /// Color scheme applied when switching to this fractal type (nil = keep current).
     var defaultColorScheme: ColorScheme? { nil }
 }
 
 // MARK: - Registry
 
 enum FractalTypeRegistry {
-    private static let allDescriptors: [any FractalTypeDescriptor] = [
+    private static let allDescriptors: [FractalTypeDescriptor] = [
         MandelboxDescriptor(),
         MandelboxSphereProjectionDescriptor(),
         MandelbulbDescriptor(),
@@ -169,21 +201,44 @@ enum FractalTypeRegistry {
         CustomFractalDescriptor.placeholder,
     ]
 
-    private static let staticDescriptors: [Int32: any FractalTypeDescriptor] = {
-        var d: [Int32: any FractalTypeDescriptor] = [:]
+    private static let staticDescriptors: [Int32: FractalTypeDescriptor] = {
+        var d: [Int32: FractalTypeDescriptor] = [:]
         for desc in allDescriptors { d[desc.rawValue] = desc }
         #if DEBUG
-        for c in FractalModelType.allCases {
-            assert(d[c.rawValue] != nil,
-                   "FractalTypeRegistry: missing descriptor for \(c) (rawValue \(c.rawValue))")
-        }
+        validateRegistry(d)
         #endif
         return d
     }()
 
+    #if DEBUG
+    /// Startup tripwire for registry integrity. Catches a fat-fingered
+    /// `super.init(rawValue:)` or a missing/duplicate descriptor BEFORE it can
+    /// silently shift the Int32-fallback decode of an old `.threshscene`.
+    /// NOTE: this validates the SWIFT side only — it does NOT bind the Metal
+    /// dispatch switches / relaxedOmegaCap (those stay hand-synced until the
+    /// shader-codegen step lands).
+    private static func validateRegistry(_ d: [Int32: FractalTypeDescriptor]) {
+        // Presence: every enum case resolves to a descriptor.
+        for c in FractalModelType.allCases {
+            assert(d[c.rawValue] != nil,
+                   "FractalTypeRegistry: missing descriptor for \(c) (rawValue \(c.rawValue))")
+        }
+        // Count: the descriptor set covers exactly the enum (a non-colliding wrong
+        // rawValue would leave one enum case unmapped → also tripped by presence).
+        assert(d.count == FractalModelType.allCases.count,
+               "FractalTypeRegistry: descriptor count \(d.count) != enum case count \(FractalModelType.allCases.count)")
+        // Uniqueness: no two descriptors share a rawValue (a collision would
+        // overwrite a slot) or a codableString (the primary on-disk key).
+        assert(allDescriptors.count == Set(allDescriptors.map(\.rawValue)).count,
+               "FractalTypeRegistry: duplicate rawValue across descriptors")
+        assert(allDescriptors.count == Set(allDescriptors.map(\.codableString)).count,
+               "FractalTypeRegistry: duplicate codableString across descriptors")
+    }
+    #endif
+
     /// Lock-protected overlay for ephemeral descriptors (currently only `.custom`).
     private static let overlayLock = NSLock()
-    nonisolated(unsafe) private static var overlay: [Int32: any FractalTypeDescriptor] = [:]
+    nonisolated(unsafe) private static var overlay: [Int32: FractalTypeDescriptor] = [:]
 
     static func descriptor(for type: FractalModelType) -> FractalTypeDescriptor {
         overlayLock.lock()
@@ -201,6 +256,9 @@ enum FractalTypeRegistry {
     static func registerCustom(_ formula: EmbeddedFormula) {
         let desc = CustomFractalDescriptor(formula: formula)
         overlayLock.lock()
+        // The instance is shared across threads via the overlay; its @unchecked
+        // Sendable contract depends on every stored property staying immutable
+        // after init (a fresh instance is built per registerCustom call).
         overlay[FractalModelType.custom.rawValue] = desc
         overlayLock.unlock()
     }
@@ -216,19 +274,16 @@ enum FractalTypeRegistry {
 
 // MARK: - Concrete Descriptors
 
-private struct MandelboxDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 0
-    let displayName = "Mandelbox"
-    let icon = "cube.transparent"
-    let category = "Box Folds"
-    let codableString = "mandelbox"
-    let isSelectableInUI = true
-    var supportedCoreGestureActions: [FingerGestureAction] {
+private final class MandelboxDescriptor: FractalTypeDescriptor, @unchecked Sendable {
+    init() {
+        super.init(rawValue: 0, displayName: "Mandelbox", icon: "cube.transparent",
+                   category: "Box Folds", codableString: "mandelbox", isSelectableInUI: true)
+    }
+    override var supportedCoreGestureActions: [FingerGestureAction] {
         [.none, .grab, .minDistance, .foldingLimit, .sphereRadius, .fractalScale, .translate]
     }
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
-    var defaultColorScheme: ColorScheme? { .rainbow }
-    func defaultFormulaParams() -> FormulaParams {
+    override var defaultColorScheme: ColorScheme? { .rainbow }
+    override func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = 0.8; fp.params.1 = 1.0; fp.params.2 = 0.5
         FormulaCatalog.normalizeRotationFlags(&fp)
@@ -236,17 +291,13 @@ private struct MandelboxDescriptor: FractalTypeDescriptor {
     }
 }
 
-private struct MandelboxSphereProjectionDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 21
-    let displayName = "Mandelbox Sphere Projection"
-    let icon = "globe.asia.australia"
-    let category = "Box Folds"
-    let codableString = "mandelboxSphereProjection"
-    let isSelectableInUI = true
-    let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
-    var defaultColorScheme: ColorScheme? { .rainbow }
-    func defaultFormulaParams() -> FormulaParams {
+private final class MandelboxSphereProjectionDescriptor: FractalTypeDescriptor, @unchecked Sendable {
+    init() {
+        super.init(rawValue: 21, displayName: "Mandelbox Sphere Projection", icon: "globe.asia.australia",
+                   category: "Box Folds", codableString: "mandelboxSphereProjection", isSelectableInUI: true)
+    }
+    override var defaultColorScheme: ColorScheme? { .rainbow }
+    override func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = 0.8   // Min Distance
         fp.params.1 = 1.0   // Folding Limit
@@ -259,34 +310,23 @@ private struct MandelboxSphereProjectionDescriptor: FractalTypeDescriptor {
     }
 }
 
-private struct MandelbulbDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 1
-    let displayName = "Mandelbulb"
-    let icon = "globe"
-    let category = "Power / Quaternion"
-    let codableString = "mandelbulb"
-    let isSelectableInUI = true
-    let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags.union([.polarRotation]) }
-    func defaultFormulaParams() -> FormulaParams {
+private final class MandelbulbDescriptor: FractalTypeDescriptor, @unchecked Sendable {
+    init() {
+        super.init(rawValue: 1, displayName: "Mandelbulb", icon: "globe",
+                   category: "Power / Quaternion", codableString: "mandelbulb", isSelectableInUI: true)
+    }
+    override var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags.union([.polarRotation]) }
+    override func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = 8.0; fp.params.1 = 4.0; fp.params.2 = 1.0
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
     }
-    var grabScaleClamp: ClosedRange<Float> { 0.0005...2000.0 }
-    var defaultViewState: FractalViewDefaults {
-        let qx = simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0))
-        let qy = simd_quatf(angle: 75.0 * .pi / 180.0, axis: SIMD3<Float>(0, 1, 0))
-        let qz = simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 0, 1))
-        return FractalViewDefaults(
-            position: SIMD3<Float>(0.1, 0.1, -0.9),
-            rotation: simd_normalize(qz * qy * qx),
-            detailScale: 0.25,
-            safetyBubbleEnabled: false
-        )
+    override var grabScaleClamp: ClosedRange<Float> { 0.0005...2000.0 }
+    override var defaultViewState: FractalViewDefaults {
+        Self.juliaLikeView(position: SIMD3<Float>(0.1, 0.1, -0.9))
     }
-    var defaultScalarBindings: [(slot: GestureSlot, paramName: String)] {
+    override var defaultScalarBindings: [(slot: GestureSlot, paramName: String)] {
         [
             (GestureSlot(hand: .left, finger: .middle), "PolarRotation"),
             (GestureSlot(hand: .left, finger: .index), "Power"),
@@ -294,16 +334,12 @@ private struct MandelbulbDescriptor: FractalTypeDescriptor {
     }
 }
 
-private struct MengerDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 2
-    let displayName = "Menger Sponge"
-    let icon = "square.grid.3x3"
-    let category = "Kaleidoscopic IFS"
-    let codableString = "menger"
-    let isSelectableInUI = true
-    let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
-    func defaultFormulaParams() -> FormulaParams {
+private final class MengerDescriptor: FractalTypeDescriptor, @unchecked Sendable {
+    init() {
+        super.init(rawValue: 2, displayName: "Menger Sponge", icon: "square.grid.3x3",
+                   category: "Kaleidoscopic IFS", codableString: "menger", isSelectableInUI: true)
+    }
+    override func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = 3.0; fp.params.1 = 1.0; fp.params.2 = 1.0; fp.params.3 = 1.0
         FormulaCatalog.normalizeRotationFlags(&fp)
@@ -311,16 +347,13 @@ private struct MengerDescriptor: FractalTypeDescriptor {
     }
 }
 
-private struct MandelbulbJuliaDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 5
-    let displayName = "Mandelbulb Julia"
-    let icon = "globe.badge.chevron.backward"
-    let category = "Power / Quaternion"
-    let codableString = "mandelbulbJulia"
-    let isSelectableInUI = true
-    let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags.union([.polarRotation, .juliaDrift]) }
-    func defaultFormulaParams() -> FormulaParams {
+private final class MandelbulbJuliaDescriptor: FractalTypeDescriptor, @unchecked Sendable {
+    init() {
+        super.init(rawValue: 5, displayName: "Mandelbulb Julia", icon: "globe.badge.chevron.backward",
+                   category: "Power / Quaternion", codableString: "mandelbulbJulia", isSelectableInUI: true)
+    }
+    override var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags.union([.polarRotation, .juliaDrift]) }
+    override func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = 8.0   // Power
         fp.params.1 = 4.0   // Bailout
@@ -332,24 +365,16 @@ private struct MandelbulbJuliaDescriptor: FractalTypeDescriptor {
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
     }
-    var grabScaleClamp: ClosedRange<Float> { 0.0005...2000.0 }
-    var defaultViewState: FractalViewDefaults {
-        let qx = simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0))
-        let qy = simd_quatf(angle: 75.0 * .pi / 180.0, axis: SIMD3<Float>(0, 1, 0))
-        let qz = simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 0, 1))
-        return FractalViewDefaults(
-            position: SIMD3<Float>(0.1, 0.1, -1.45),
-            rotation: simd_normalize(qz * qy * qx),
-            detailScale: 0.25,
-            safetyBubbleEnabled: false
-        )
+    override var grabScaleClamp: ClosedRange<Float> { 0.0005...2000.0 }
+    override var defaultViewState: FractalViewDefaults {
+        Self.juliaLikeView(position: SIMD3<Float>(0.1, 0.1, -1.45))
     }
-    var defaultTripletBindings: [(slot: GestureSlot, groupName: String)] {
+    override var defaultTripletBindings: [(slot: GestureSlot, groupName: String)] {
         [
             (GestureSlot(hand: .right, finger: .middle), "JuliaC"),
         ]
     }
-    var defaultScalarBindings: [(slot: GestureSlot, paramName: String)] {
+    override var defaultScalarBindings: [(slot: GestureSlot, paramName: String)] {
         [
             (GestureSlot(hand: .left, finger: .middle), "PolarRotation"),
             (GestureSlot(hand: .left, finger: .index), "Power"),
@@ -357,49 +382,34 @@ private struct MandelbulbJuliaDescriptor: FractalTypeDescriptor {
     }
 }
 
-private struct QuaternionJuliaDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 6
-    let displayName = "Quaternion Julia"
-    let icon = "atom"
-    let category = "Power / Quaternion"
-    let codableString = "quaternionJulia"
-    let isSelectableInUI = true
-    let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags.union([.polarRotation]) }
-    func defaultFormulaParams() -> FormulaParams {
+private final class QuaternionJuliaDescriptor: FractalTypeDescriptor, @unchecked Sendable {
+    init() {
+        super.init(rawValue: 6, displayName: "Quaternion Julia", icon: "atom",
+                   category: "Power / Quaternion", codableString: "quaternionJulia", isSelectableInUI: true)
+    }
+    override var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags.union([.polarRotation]) }
+    override func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = -0.2; fp.params.1 = 0.8; fp.params.4 = 10.0
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
     }
-    var defaultTripletBindings: [(slot: GestureSlot, groupName: String)] {
+    override var defaultTripletBindings: [(slot: GestureSlot, groupName: String)] {
         [
             (GestureSlot(hand: .right, finger: .middle), "C"),
         ]
     }
-    var defaultViewState: FractalViewDefaults {
-        let qx = simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0))
-        let qy = simd_quatf(angle: 75.0 * .pi / 180.0, axis: SIMD3<Float>(0, 1, 0))
-        let qz = simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 0, 1))
-        return FractalViewDefaults(
-            position: SIMD3<Float>(0.1, 0.1, -1.45),
-            rotation: simd_normalize(qz * qy * qx),
-            detailScale: 0.25,
-            safetyBubbleEnabled: false
-        )
+    override var defaultViewState: FractalViewDefaults {
+        Self.juliaLikeView(position: SIMD3<Float>(0.1, 0.1, -1.45))
     }
 }
 
-private struct OctahedronDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 11
-    let displayName = "Octahedron"
-    let icon = "diamond"
-    let category = "Kaleidoscopic IFS"
-    let codableString = "octahedron"
-    let isSelectableInUI = true
-    let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
-    func defaultFormulaParams() -> FormulaParams {
+private final class OctahedronDescriptor: FractalTypeDescriptor, @unchecked Sendable {
+    init() {
+        super.init(rawValue: 11, displayName: "Octahedron", icon: "diamond",
+                   category: "Kaleidoscopic IFS", codableString: "octahedron", isSelectableInUI: true)
+    }
+    override func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = 2.0; fp.params.1 = 1.0
         FormulaCatalog.normalizeRotationFlags(&fp)
@@ -407,16 +417,12 @@ private struct OctahedronDescriptor: FractalTypeDescriptor {
     }
 }
 
-private struct MengerSphereDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 14
-    let displayName = "Menger Sphere"
-    let icon = "circle.grid.cross"
-    let category = "Kaleidoscopic IFS"
-    let codableString = "mengerSphere"
-    let isSelectableInUI = true
-    let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
-    func defaultFormulaParams() -> FormulaParams {
+private final class MengerSphereDescriptor: FractalTypeDescriptor, @unchecked Sendable {
+    init() {
+        super.init(rawValue: 14, displayName: "Menger Sphere", icon: "circle.grid.cross",
+                   category: "Kaleidoscopic IFS", codableString: "mengerSphere", isSelectableInUI: true)
+    }
+    override func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = 3.0; fp.params.1 = 1.0; fp.params.2 = 1.0; fp.params.3 = 1.0
         FormulaCatalog.normalizeRotationFlags(&fp)
@@ -424,16 +430,12 @@ private struct MengerSphereDescriptor: FractalTypeDescriptor {
     }
 }
 
-private struct TheliPseudoKleinianDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 15
-    let displayName = "Theli Pseudo Kleinian"
-    let icon = "cube"
-    let category = "Hybrid Folds"
-    let codableString = "theliPseudoKleinian"
-    let isSelectableInUI = true
-    let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
-    func defaultFormulaParams() -> FormulaParams {
+private final class TheliPseudoKleinianDescriptor: FractalTypeDescriptor, @unchecked Sendable {
+    init() {
+        super.init(rawValue: 15, displayName: "Theli Pseudo Kleinian", icon: "cube",
+                   category: "Hybrid Folds", codableString: "theliPseudoKleinian", isSelectableInUI: true)
+    }
+    override func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = 1.0
         fp.params.1 = 1.0; fp.params.2 = 1.0; fp.params.3 = 1.0
@@ -446,22 +448,18 @@ private struct TheliPseudoKleinianDescriptor: FractalTypeDescriptor {
     }
 }
 
-private struct KleinianDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 17
-    let displayName = "Kleinian"
-    let icon = "wand.and.stars"
-    let category = "Hybrid Folds"
-    let codableString = "kleinian"
-    let isSelectableInUI = true
-    let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
-    var defaultTripletBindings: [(slot: GestureSlot, groupName: String)] {
+private final class KleinianDescriptor: FractalTypeDescriptor, @unchecked Sendable {
+    init() {
+        super.init(rawValue: 17, displayName: "Kleinian", icon: "wand.and.stars",
+                   category: "Hybrid Folds", codableString: "kleinian", isSelectableInUI: true)
+    }
+    override var defaultTripletBindings: [(slot: GestureSlot, groupName: String)] {
         [
             (GestureSlot(hand: .left, finger: .middle), "Mins"),
             (GestureSlot(hand: .right, finger: .middle), "Maxs"),
         ]
     }
-    func defaultFormulaParams() -> FormulaParams {
+    override func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = -0.3252; fp.params.1 = -0.7862; fp.params.2 = -0.0948
         fp.params.3 = 0.69
@@ -472,16 +470,12 @@ private struct KleinianDescriptor: FractalTypeDescriptor {
     }
 }
 
-private struct BoxSphereFolderDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 20
-    let displayName = "Box Sphere Folder"
-    let icon = "cube.transparent"
-    let category = "Hybrid Folds"
-    let codableString = "boxSphereFolder"
-    let isSelectableInUI = true
-    let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
-    func defaultFormulaParams() -> FormulaParams {
+private final class BoxSphereFolderDescriptor: FractalTypeDescriptor, @unchecked Sendable {
+    init() {
+        super.init(rawValue: 20, displayName: "Box Sphere Folder", icon: "cube.transparent",
+                   category: "Hybrid Folds", codableString: "boxSphereFolder", isSelectableInUI: true)
+    }
+    override func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = 1.0   // Offset.x
         fp.params.1 = 1.0   // Offset.y
@@ -496,45 +490,38 @@ private struct BoxSphereFolderDescriptor: FractalTypeDescriptor {
     }
 }
 
-
 // MARK: - Custom (runtime-compiled embedded formula)
 
 /// Descriptor for the single active embedded formula loaded from a `.threshfx`
 /// payload (or embedded inside a `.threshanim` / `.threshscene` file).
 /// Built dynamically by `FractalTypeRegistry.registerCustom(_:)`.
 ///
+/// Unlike the static types, its displayName/category/isSelectableInUI are derived
+/// at runtime from the formula, so it has its own init (not the uniform 6-scalar
+/// designated init). `formula` and all stored props stay `let` so the shared
+/// overlay instance is safe across threads (see registerCustom).
+///
 /// Until a real formula is registered, the registry holds `placeholder`, which
 /// keeps lookups safe but reports `isSelectableInUI = false` so the picker hides it.
-struct CustomFractalDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 1000
-    let icon = "scroll"
-    let codableString = "custom"
-    let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
-
-    let displayName: String
-    let category: String
-    let isSelectableInUI: Bool
+final class CustomFractalDescriptor: FractalTypeDescriptor, @unchecked Sendable {
     private let formula: EmbeddedFormula?
 
     init(formula: EmbeddedFormula) {
         self.formula = formula
-        self.displayName = formula.name
-        self.category = formula.category ?? "Custom"
-        self.isSelectableInUI = true
+        super.init(rawValue: 1000, displayName: formula.name, icon: "scroll",
+                   category: formula.category ?? "Custom", codableString: "custom", isSelectableInUI: true)
     }
 
     private init() {
         self.formula = nil
-        self.displayName = "Custom Formula"
-        self.category = "Custom"
-        self.isSelectableInUI = false
+        super.init(rawValue: 1000, displayName: "Custom Formula", icon: "scroll",
+                   category: "Custom", codableString: "custom", isSelectableInUI: false)
     }
 
     /// Empty descriptor used until an embedded formula is registered.
     static let placeholder = CustomFractalDescriptor()
 
-    func defaultFormulaParams() -> FormulaParams {
+    override func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         if let formula {
             for p in formula.params {
