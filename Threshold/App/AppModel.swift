@@ -69,6 +69,18 @@ class AppModel {
     /// a view that's about to navigate elsewhere can dedupe.
     static let requestOpenImmersiveSpaceNotification = Notification.Name("AppModel.requestOpenImmersiveSpace")
 
+    /// Profiling/automation hook. When the process is launched with the
+    /// `-ThresholdAutoOpenImmersive` argument — set ONLY in the Profile
+    /// scheme's "Generate Optimization Profile" run — the
+    /// `ImmersiveSpaceAutoOpener` brings the full immersive space up once on
+    /// launch, so a PGO run exercises the GPU render path without a human
+    /// tapping "Show Immersive Space" while wearing the headset. A normal Run
+    /// never passes the flag, so the default windowed launch is unchanged.
+    /// (The device still has to be worn for tracking — this only removes the
+    /// manual tap once it's running.)
+    static let autoOpenImmersiveOnLaunch: Bool =
+        ProcessInfo.processInfo.arguments.contains("-ThresholdAutoOpenImmersive")
+
     static nonisolated(unsafe) var shared: AppModel?
 
     enum ImmersiveSpaceState {

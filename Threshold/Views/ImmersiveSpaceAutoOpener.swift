@@ -31,6 +31,25 @@ struct ImmersiveSpaceAutoOpener: View {
             .accessibilityHidden(true)
             .task {
 #if os(visionOS)
+                // Profiling/automation: when launched under the Profile
+                // scheme's PGO run (`-ThresholdAutoOpenImmersive`), bring the
+                // immersive space up once on launch so the optimization
+                // profile captures the render path with no manual tap. Done
+                // before the `for await` below so it can't race the listener
+                // setup. No-op on a normal Run (flag absent).
+                if AppModel.autoOpenImmersiveOnLaunch,
+                   appModel.immersiveSpaceState == .closed {
+                    appModel.immersiveSpaceState = .inTransition
+                    let result = await openImmersiveSpace(id: appModel.immersiveSpaceID)
+                    if case .userCancelled = result {
+                        appModel.immersiveSpaceState = .closed
+                    } else if case .error = result {
+                        appModel.immersiveSpaceState = .closed
+                    }
+                    // On `.opened` leave the state as `.inTransition`; the
+                    // normal `ImmersiveView.onAppear` path flips it to `.open`.
+                }
+
                 let notifications = NotificationCenter.default.notifications(
                     named: AppModel.requestOpenImmersiveSpaceNotification
                 )
