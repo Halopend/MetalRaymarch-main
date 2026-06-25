@@ -52,6 +52,12 @@ struct MetalProjectTestApp: App {
                 .environment(appModel)
                 .background(ImmersiveSpaceAutoOpener().environment(appModel))
                 .onAppear {
+                    // PGO: if this is an instrumented "Generate Optimization
+                    // Profile" build, start periodic counter flushing so the
+                    // profile survives the SIGKILL teardown typical of
+                    // immersive apps. No-op in normal builds.
+                    PGOProfile.startPeriodicFlushIfInstrumented()
+
                     // Dismiss any secondary windows that may have been restored
                     // by the system from a previous session. Without this, windows
                     // like Music Library can reappear and block immersive mode entry.
@@ -138,6 +144,10 @@ struct MetalProjectTestApp: App {
         .onChange(of: appModel.immersiveSpaceState) { oldValue, newValue in
             if newValue == .closed {
                 appModel.cancelActiveRenderLoop()
+                // PGO: capture render-path coverage at the moment the
+                // immersive space tears down — the data a profiling run is
+                // really after. No-op when not instrumented.
+                PGOProfile.flush()
             }
 
             // When exiting immersive mode, ensure window is visible and populated
@@ -160,6 +170,9 @@ struct MetalProjectTestApp: App {
                     appModel.ensureWindowContentVisible()
                 }
             } else if newPhase == .background || newPhase == .inactive {
+                // PGO: persist profile counters before the system can SIGKILL
+                // us. No-op when not instrumented.
+                if newPhase == .background { PGOProfile.flush() }
                 Task { @MainActor in
                     appModel.isAppActive = false
                     // Save current state when going to background
