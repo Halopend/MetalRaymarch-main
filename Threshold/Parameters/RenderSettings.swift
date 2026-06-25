@@ -7,6 +7,14 @@ final class RenderSettings: @unchecked Sendable {
     static let maxViewDistance: Float = 12.0
     static let logDepthScale: Float = 4.0
     static let depthMissValue: Float = 2.0
+
+    // ── INFINITE ZOOM (continuous auto-descent on the detailScale channel) ──
+    // Phase 1: a steady multiplicative dive bounded to an fp32-safe scale band.
+    // (Phase 2 octave-rebase lifts this ceiling to true infinity via self-similar
+    // scale-folding.) Rate is signed log-units/sec: e^(rate·dt) per frame.
+    static let infiniteZoomMaxRate: Float = 1.5    // cap on |log-units/sec|
+    static let infiniteZoomMinScale: Float = 0.02  // deepest zoom-out (detailScale)
+    static let infiniteZoomMaxScale: Float = 4096.0 // deepest zoom-in before octave-rebase is needed
     // os_unfair_lock is a low-level spinlock - fastest for short critical sections
     private var _lock = os_unfair_lock()
     
@@ -307,6 +315,11 @@ final class RenderSettings: @unchecked Sendable {
     private var _detailScale: Float = 1.0         // Two-point grab scale factor (multiplied with _scale)
     private var _targetDetailScale: Float = 1.0
 
+    // Infinite zoom: when enabled, the per-frame smoothing pass advances the
+    // detailScale (zoom) target by e^(rate·dt) for a continuous, seamless dive.
+    private var _infiniteZoomEnabled: Bool = false
+    private var _infiniteZoomRate: Float = 0.15   // signed log-units/sec; + = zoom in, − = zoom out
+
     // Animation-override model for rotation (quaternion) and zoom (detailScale).
     // These mirror the animationBase + manualOffset model used by position/shape so a
     // grab gesture overrides rotation/zoom even while the playing scene animates them.
@@ -387,7 +400,20 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _targetDetailScale } }
         set { withLock { _targetDetailScale = newValue } }
     }
-    
+
+    /// When true, the per-frame smoothing pass continuously advances the zoom
+    /// (detailScale) target for a seamless infinite descent.
+    var infiniteZoomEnabled: Bool {
+        get { withLock { _infiniteZoomEnabled } }
+        set { withLock { _infiniteZoomEnabled = newValue } }
+    }
+    /// Signed continuous-zoom rate in log-units/sec (e^(rate·dt) per frame).
+    /// Positive dives in; negative pulls out. Clamped to ±infiniteZoomMaxRate.
+    var infiniteZoomRate: Float {
+        get { withLock { _infiniteZoomRate } }
+        set { withLock { _infiniteZoomRate = max(-Self.infiniteZoomMaxRate, min(Self.infiniteZoomMaxRate, newValue)) } }
+    }
+
     var fractalScale: Float {
         get { withLock { _fractalScale } }
         set { withLock { _fractalScale = newValue } }
@@ -2774,6 +2800,22 @@ final class RenderSettings: @unchecked Sendable {
     private func _interpolateToTargets_locked(deltaTime: Float) {
             // Guard against bad deltaTime values that could cause instability
             let clampedDT = max(0.001, min(0.1, deltaTime))  // 10ms to 100ms range
+
+            // ═══════════════════════════════════════════════════════════════════════════
+            // INFINITE ZOOM — continuous multiplicative descent on the zoom channel.
+            // Advances the detailScale *target*; the smoothing below (exp-lerp when
+            // settling, snap-to-target when converged) eases the live value toward it,
+            // giving a steady seamless dive. Honors the animation kill-switch via
+            // _animationActivityFactor (so the music fade / stop gestures damp it for
+            // free) and is bounded to an fp32-safe band (Phase 2 octave-rebase removes
+            // the ceiling). Skipped while a scene animates detailScale directly
+            // (applyKeyframe owns the channel then) to avoid a per-frame fight.
+            // ═══════════════════════════════════════════════════════════════════════════
+            if _infiniteZoomEnabled && !_isAnimationPlaying && _animationActivityFactor > 0.0001 {
+                let step = exp(_infiniteZoomRate * clampedDT * _animationActivityFactor)
+                _targetDetailScale = max(Self.infiniteZoomMinScale,
+                                         min(Self.infiniteZoomMaxScale, _targetDetailScale * step))
+            }
 
             // Scene-transition override: ease toward the new target over the
             // configured duration instead of the default snappy smoothing.

@@ -302,7 +302,10 @@ private final class ThresholdMacRenderer {
     private static let maxBuffersInFlight = 2
     private static let defaultTargetPosition = SIMD3<Float>(0.1, 0.1, 0.1)
     private static let minDetailScale: Float = 0.05
-    private static let maxDetailScale: Float = 40.0
+    // Manual scroll/pinch zoom ceiling. Raised for infinite-zoom: lets manual zoom
+    // dive as deep as the auto driver (RenderSettings.infiniteZoomMaxScale). The
+    // fp32-safe band ends ~4096× before the Phase 2 octave-rebase is needed.
+    private static let maxDetailScale: Float = 4096.0
     private static let mouseRotationSpeed: Float = 0.006
     private static let mousePanSpeed: Float = 0.003
     private static let scrollZoomSpeed: Float = 0.035
