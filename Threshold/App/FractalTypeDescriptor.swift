@@ -169,6 +169,12 @@ class FractalTypeDescriptor: @unchecked Sendable {
     /// the per-type switch that lived in `FractalBrowserWindow.primaryEquation`.
     func primaryEquation() -> String? { nil }
 
+    /// Fold the accumulated polar-rotation animation offset into the formula
+    /// params. Default no-op (the type doesn't animate polar rotation). Absorbs
+    /// the per-type switch that lived in `RenderSettings.snapshot()` — runs in the
+    /// per-frame snapshot path, so subclasses must preserve their param indices.
+    func applyPolarRotation(into fp: inout FormulaParams, accum: Float) {}
+
     // Gesture configuration
     var gestureRanges: GestureParamRanges { .standard }
     var gestureRangesExtended: GestureParamRanges { .extended }
@@ -327,6 +333,11 @@ private final class MandelbulbDescriptor: FractalTypeDescriptor, @unchecked Send
                    category: "Power / Quaternion", codableString: "mandelbulb", isSelectableInUI: true)
     }
     override func primaryEquation() -> String? { "z_{n+1} = z_n^p + c" }
+    override func applyPolarRotation(into fp: inout FormulaParams, accum: Float) {
+        // params[4] = PolarRotation — add the accumulated offset to the user's static value.
+        let base = FormulaCatalog.getParam(fp, index: 4)
+        FormulaCatalog.setParam(&fp, index: 4, value: base + accum)
+    }
     override func qualityValues(for preset: QualityPreset) -> (fractalIterations: Int, raySteps: Int)? {
         switch preset {
         case .low:    return (4, 68)
@@ -374,6 +385,11 @@ private final class MandelbulbJuliaDescriptor: FractalTypeDescriptor, @unchecked
                    category: "Power / Quaternion", codableString: "mandelbulbJulia", isSelectableInUI: true)
     }
     override func primaryEquation() -> String? { "z_{n+1} = z_n^p + c_{julia}" }
+    override func applyPolarRotation(into fp: inout FormulaParams, accum: Float) {
+        // params[4] = PolarRotation — same as Mandelbulb.
+        let base = FormulaCatalog.getParam(fp, index: 4)
+        FormulaCatalog.setParam(&fp, index: 4, value: base + accum)
+    }
     override func qualityValues(for preset: QualityPreset) -> (fractalIterations: Int, raySteps: Int)? {
         switch preset {
         case .low:    return (4, 68)
@@ -418,6 +434,15 @@ private final class QuaternionJuliaDescriptor: FractalTypeDescriptor, @unchecked
                    category: "Power / Quaternion", codableString: "quaternionJulia", isSelectableInUI: true)
     }
     override func primaryEquation() -> String? { "q_{n+1} = q_n^2 + c" }
+    override func applyPolarRotation(into fp: inout FormulaParams, accum: Float) {
+        // Rotate the C-constant through the (x,y) plane of quaternion space.
+        let cx = FormulaCatalog.getParam(fp, index: 0)
+        let cy = FormulaCatalog.getParam(fp, index: 1)
+        let cosA = cos(accum)
+        let sinA = sin(accum)
+        FormulaCatalog.setParam(&fp, index: 0, value: cx * cosA - cy * sinA)
+        FormulaCatalog.setParam(&fp, index: 1, value: cx * sinA + cy * cosA)
+    }
     override var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags.union([.polarRotation]) }
     override func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()

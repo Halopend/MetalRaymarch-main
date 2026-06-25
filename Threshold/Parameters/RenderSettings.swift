@@ -2125,23 +2125,11 @@ final class RenderSettings: @unchecked Sendable {
         return withLock {
             // Apply animated polar rotation offset into a local copy of formulaParams
             var fp = _formulaParams
+            // Per-type polar-rotation animation now lives on the fractal type
+            // (FractalTypeDescriptor.applyPolarRotation — Stage 3 step 5). The guard
+            // (effect enabled + capability) stays here; only the per-type math moved.
             if _polarRotationEffect.enabled && _fractalType.supports(.polarRotation) {
-                switch _fractalType {
-                case .mandelbulb, .mandelbulbJulia:
-                    // params[4] = PolarRotation — add accumulated anim offset to user's static value
-                    let base = FormulaCatalog.getParam(fp, index: 4)
-                    FormulaCatalog.setParam(&fp, index: 4, value: base + _polarRotationAccum)
-                case .quaternionJulia:
-                    // Rotate the C-constant through the (x,y) plane of quaternion space
-                    let cx = FormulaCatalog.getParam(fp, index: 0)
-                    let cy = FormulaCatalog.getParam(fp, index: 1)
-                    let cosA = cos(_polarRotationAccum)
-                    let sinA = sin(_polarRotationAccum)
-                    FormulaCatalog.setParam(&fp, index: 0, value: cx * cosA - cy * sinA)
-                    FormulaCatalog.setParam(&fp, index: 1, value: cx * sinA + cy * cosA)
-                default:
-                    break
-                }
+                _fractalType.descriptor.applyPolarRotation(into: &fp, accum: _polarRotationAccum)
             }
 
             // Apply Julia C drift — orbit Julia C vector around diagonal axis (1,1,1)/√3
