@@ -106,6 +106,13 @@ private struct ThresholdMacRootView: View {
         .onChange(of: appModel.isMenuInteractionActive) { _, _ in
             updateAutoHideState(animated: true)
         }
+        .onChange(of: appModel.menuAutoHideRequestID) { _, _ in
+            // Auto-hide the controls panel when a scene is selected — unless pinned.
+            guard !isControlsPinnedOpen else { return }
+            pendingAutoHide?.cancel()
+            pendingAutoHide = nil
+            setHoverVisible(false, animated: true)
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)) { _ in
             activeMenuTrackingCount += 1
             showControls(animated: true)

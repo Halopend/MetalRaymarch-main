@@ -257,7 +257,11 @@ struct FractalPreset: Codable, Identifiable {
 
         if let formula = try container.decodeIfPresent(EmbeddedFormula.self, forKey: .embeddedFormula) {
             try formula.validate()
-            fractalType = .custom
+            // Only a fractal DE drives FractalModelType.custom; a space-warp
+            // effect rides whatever fractalType was decoded.
+            if formula.effectKind == .fractal {
+                fractalType = .custom
+            }
             embeddedFormula = formula
         } else {
             embeddedFormula = nil
@@ -509,9 +513,10 @@ struct FractalPreset: Codable, Identifiable {
         preset.audioReactiveConfig = arc
         // Keep legacy field in sync so files remain readable by older builds.
         preset.musicReactiveMappings = arc.musicReactiveMappings
-        if preset.fractalType == .custom {
-            preset.embeddedFormula = embeddedFormula
-        }
+        // Persist any embedded effect (custom fractal OR space warp). The decoder
+        // only forces fractalType = .custom for a `.fractal` kind, so a warp
+        // round-trips on top of whatever built-in fractal is active.
+        preset.embeddedFormula = embeddedFormula
 
         return preset
     }

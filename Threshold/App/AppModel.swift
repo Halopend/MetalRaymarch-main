@@ -461,7 +461,11 @@ class AppModel {
         // custom scenes survive app relaunch.
         if let restoredPreset = presetManager.restoreLastState(to: renderSettings),
            let formula = restoredPreset.embeddedFormula {
-            installEmbeddedFormulaIfNeeded(formula)
+            if formula.effectKind == .spaceWarp {
+                installSpaceWarp(formula)
+            } else {
+                installEmbeddedFormulaIfNeeded(formula)
+            }
         }
         
         // Restore domain config structs (new persistence format, overlays legacy per-key values)
@@ -545,6 +549,14 @@ class AppModel {
         case "threshfx":
             do {
                 let container = try EmbeddedFormulaContainer.decode(fromContainerAt: url)
+                if container.formula.effectKind == .spaceWarp {
+                    // A space-warp effect applies to the current fractal — install
+                    // it directly rather than routing through the custom-fractal
+                    // preset/preview path (which would force fractalType = .custom).
+                    installSpaceWarp(container.formula)
+                    ensureWindowContentVisible()
+                    return
+                }
                 let preset = AppModel.makeCustomPreset(from: container.formula)
                 pendingExternalImport = ExternalFileImportRequest(
                     fileName: url.lastPathComponent,
@@ -787,10 +799,54 @@ class AppModel {
         )
     }
 
-    /// Dismiss the menu window during scene load so hand gestures are immediately available.
+    /// Bumped whenever a scene is selected, to ask the Mac/iPad controls panels to
+    /// auto-hide (Mac respects its pin; iPad always hides). Observed via `.onChange`.
+    var menuAutoHideRequestID: Int = 0
+
+    /// Dismiss the menu during scene load so the result is immediately visible
+    /// (and, on visionOS, hand gestures are available). Cross-platform: bumps the
+    /// auto-hide signal for the Mac/iPad panels, then closes the visionOS window.
     func dismissMenuWindowForSceneLoad() {
+        menuAutoHideRequestID &+= 1
         guard isMenuWindowVisible else { return }
         closeMenuWindow(reason: "scene load", bypassGuard: true)
+    }
+
+    /// Load a space-warp `.threshfx` into the single active custom slot WITHOUT
+    /// changing the fractal type — the warp applies to whatever fractal is active.
+    /// Gated by `allowCustomScenes`; nudges `spaceWarpStrength` up so it's visible.
+    @MainActor
+    func installSpaceWarp(_ warp: EmbeddedFormula) {
+        guard Self.allowCustomScenes else {
+            errorReporter.report(.preset(.importFailed("Enable “Allow custom scenes” in Settings to load space warps.")))
+            return
+        }
+        do { try warp.validate() } catch {
+            errorReporter.report(.preset(.importFailed("Invalid space warp: \(error.localizedDescription)")))
+            return
+        }
+        activeEmbeddedFormula = warp
+        // Set the hash too, so `uninstallEmbeddedFormula()` (whose guard is
+        // `activeEmbeddedFormulaHash != nil`) can detach the warp when a plain
+        // scene is later loaded.
+        activeEmbeddedFormulaHash = warp.shortHash
+        if renderSettings.spaceWarpStrength <= 0 {
+            renderSettings.spaceWarpStrength = 0.6
+        }
+        // Activate now if the renderer is up; otherwise the handler's didSet
+        // re-activates `activeEmbeddedFormula` when it binds (cold-start opens).
+        if let handler = activateEmbeddedFormulaHandler {
+            Task { @MainActor in
+                do { try await handler(warp) }
+                catch {
+                    self.errorReporter.report(.preset(.importFailed("Failed to compile space warp: \(error.localizedDescription)")))
+                    // Clear stale state so a failed warp doesn't linger.
+                    self.activeEmbeddedFormula = nil
+                    self.activeEmbeddedFormulaHash = nil
+                    self.renderSettings.spaceWarpStrength = 0
+                }
+            }
+        }
     }
 
     /// Toggle scene playback without opening a separate player window.
@@ -902,7 +958,11 @@ class AppModel {
         let source = options.isEmpty ? "keyboard" : "external"
         Task { @MainActor in
             customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene source=\(source) name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
-            if let formula = preset.embeddedFormula {
+            if let formula = preset.embeddedFormula, formula.effectKind == .spaceWarp {
+                // A space warp rides the preset's built-in fractalType — install it
+                // and fall through to apply the rest of the scene normally.
+                installSpaceWarp(formula)
+            } else if let formula = preset.embeddedFormula {
                 let installResult = await installEmbeddedFormulaIfNeededAndWait(formula)
                 customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene installEmbeddedFormula returned \(installResult)")
                 if installResult == .failed { return }

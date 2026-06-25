@@ -48,6 +48,11 @@ private struct ThresholdiOSRootView: View {
                         .environment(appModel)
                         .inspectorColumnWidth(min: widths.min, ideal: widths.ideal, max: widths.max)
                 }
+                .onChange(of: appModel.menuAutoHideRequestID) { _, _ in
+                    // Auto-hide the controls inspector when a scene is selected.
+                    // (iPad has no pin concept, so it always collapses.)
+                    setControlsVisible(false)
+                }
         }
     }
 

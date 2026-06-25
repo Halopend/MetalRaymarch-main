@@ -132,10 +132,15 @@ extension AppModel {
     /// Detach the active custom formula and restore default rendering paths.
     func uninstallEmbeddedFormula() {
         guard activeEmbeddedFormulaHash != nil else { return }
+        // A space warp leaves fractalType untouched and drives spaceWarpStrength;
+        // reset it on detach so the built-in Twist default doesn't linger at the
+        // strength the warp set. (Harmless no-op for custom fractals.)
+        let wasWarp = (activeEmbeddedFormula?.effectKind == .spaceWarp)
         FormulaCatalog.shared.unregisterEphemeral()
         FractalTypeRegistry.unregisterCustom()
         activeEmbeddedFormula = nil
         activeEmbeddedFormulaHash = nil
+        if wasWarp { renderSettings.spaceWarpStrength = 0 }
         let handler = activateEmbeddedFormulaHandler
         Task { @MainActor in
             try? await handler?(nil)

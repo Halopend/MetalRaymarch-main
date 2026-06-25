@@ -30,6 +30,21 @@ struct EmbeddedFormulaContainer: Codable, Equatable {
     }
 }
 
+// MARK: - Effect kind
+
+/// What kind of GPU effect an embedded payload carries. The format is otherwise
+/// identical (`.threshfx`); only the required Metal functions + the compiler's
+/// injection point differ. Stored as an OPTIONAL on `EmbeddedFormula` so old files
+/// (no key) decode to nil → treated as `.fractal` (full backward compatibility).
+enum EffectKind: String, Codable, Equatable, Sendable {
+    /// A fractal distance estimator: defines `DE_<stem>` + `DE_<stem>_Dist`,
+    /// injected at the dispatch markers; rides `FractalModelType.custom`.
+    case fractal
+    /// A space-domain warp: defines `customSpaceWarp` + `customSpaceWarpDEScale`,
+    /// injected at `// __CUSTOM_SPACE_WARP__`; applies to any fractal.
+    case spaceWarp
+}
+
 // MARK: - Embedded formula payload
 
 /// A self-contained fractal distance estimator: Metal source + parameter metadata.
@@ -53,6 +68,13 @@ struct EmbeddedFormula: Codable, Equatable {
 
     /// Schema version. Lets future fields land without breaking older readers.
     var schemaVersion: Int
+
+    /// Effect kind. Optional so old files (no key) decode to nil; use `effectKind`
+    /// to read the resolved value (nil → `.fractal`).
+    var kind: EffectKind?
+
+    /// Resolved effect kind (defaults to `.fractal` for legacy payloads).
+    var effectKind: EffectKind { kind ?? .fractal }
 
     /// Stable identifier (e.g. `"user.boxFold01"`). Must be unique within a session.
     var id: String
@@ -118,6 +140,7 @@ struct EmbeddedFormula: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion
+        case kind
         case id
         case name
         case category
@@ -133,6 +156,7 @@ struct EmbeddedFormula: Codable, Equatable {
 
     init(
         schemaVersion: Int = 1,
+        kind: EffectKind? = nil,
         id: String,
         name: String,
         category: String? = nil,
@@ -146,6 +170,7 @@ struct EmbeddedFormula: Codable, Equatable {
         supportedEffectTagsRaw: [String]? = nil
     ) {
         self.schemaVersion = schemaVersion
+        self.kind = kind
         self.id = id
         self.name = name
         self.category = category
@@ -235,14 +260,18 @@ extension EmbeddedFormula {
             throw ValidationError.forbiddenToken(token)
         }
 
-        // Cheap text check — confirm both DE variants appear by name.
-        let fullName = "DE_\(functionStem)"
-        let distName = "DE_\(functionStem)_Dist"
-        if !Self.containsFunctionDefinition(in: metalSource, named: fullName) {
-            throw ValidationError.missingFunctionDefinition(fullName)
+        // Cheap text check — confirm the kind's required functions appear by name.
+        let requiredFunctions: [String]
+        switch effectKind {
+        case .fractal:
+            requiredFunctions = ["DE_\(functionStem)", "DE_\(functionStem)_Dist"]
+        case .spaceWarp:
+            // Bare names: the compiler's `#define THRESHOLD_CUSTOM_SPACE_WARP`
+            // skips the built-in defaults, so there is no symbol collision.
+            requiredFunctions = ["customSpaceWarp", "customSpaceWarpDEScale"]
         }
-        if !Self.containsFunctionDefinition(in: metalSource, named: distName) {
-            throw ValidationError.missingFunctionDefinition(distName)
+        for fn in requiredFunctions where !Self.containsFunctionDefinition(in: metalSource, named: fn) {
+            throw ValidationError.missingFunctionDefinition(fn)
         }
 
         // Parameter index bounds + uniqueness.

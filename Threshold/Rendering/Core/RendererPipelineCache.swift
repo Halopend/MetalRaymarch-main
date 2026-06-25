@@ -219,7 +219,7 @@ extension Renderer {
     func getPipeline(forPreset preset: FractalPreset, useQuadShared: Bool = false) -> MTLRenderPipelineState {
         let prefix = customCacheKeyPrefix(for: preset.fractalType)
         let cacheKey = prefix + preset.pipelineCacheKey + (useQuadShared ? "_QS" : "")
-        let library = preset.fractalType == .custom ? renderingLibrary(for: preset.fractalType) : nil
+        let library = renderingLibrary(for: preset.fractalType)
 
         if preset.fractalType == .custom {
             customSceneDiagnostic("🔬 [CSDiag] getPipeline(forPreset) FT=custom name='\(preset.name)' libraryPresent=\(library != nil) hash=\(customShaderHash ?? "nil") key=\(cacheKey) cacheHit=\(pipelineCache[cacheKey] != nil)")
@@ -264,7 +264,7 @@ extension Renderer {
         // Build cache key matching the preset format
         let colorIterations = Int32(appModel.renderSettings.colorIterations)  // Direct read (own lock) — avoids full snapshot
         let fractalType = appModel.renderSettings.fractalType
-        let library = fractalType == .custom ? renderingLibrary(for: fractalType) : nil
+        let library = renderingLibrary(for: fractalType)
 
         if fractalType == .custom, library == nil {
             return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
@@ -719,7 +719,7 @@ extension Renderer {
     /// Prewarms the exact adaptive-compute pipeline for a preset without using
     /// the bundled generic fallback as the selected frame-time pipeline.
     func prewarmComputePipeline(forPreset preset: FractalPreset) {
-        let library = preset.fractalType == .custom ? renderingLibrary(for: preset.fractalType) : nil
+        let library = renderingLibrary(for: preset.fractalType)
 
         if preset.fractalType == .custom, library == nil {
             return

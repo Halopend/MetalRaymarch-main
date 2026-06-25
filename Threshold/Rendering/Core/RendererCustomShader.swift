@@ -77,7 +77,10 @@ extension Renderer {
     /// embedded formula (returns "" when no custom library is active or when
     /// the supplied fractal type isn't `.custom`).
     func customCacheKeyPrefix(for fractalType: FractalModelType) -> String {
-        guard fractalType == .custom, let h = customShaderHash else { return "" }
+        // Namespace whenever ANY custom library is active — a custom fractal OR a
+        // custom space warp riding a built-in — so warp-on-built-in pipelines do
+        // not collide with the default-library built-in pipelines.
+        guard let h = customShaderHash else { return "" }
         return "CX\(h)_"
     }
 
@@ -85,8 +88,11 @@ extension Renderer {
     /// the supplied fractal type. Built-in fractals continue to render through
     /// the bundled default library so their cache stays hot.
     func renderingLibrary(for fractalType: FractalModelType) -> MTLLibrary? {
-        if fractalType == .custom { return customShaderLibrary }
-        return nil
+        // Return the active custom library for ANY fractal type: a custom fractal
+        // renders its own DE; a built-in with an active space warp renders the
+        // built-in DE (present in the superset library) with the warp injected.
+        // nil → the bundled default library.
+        return customShaderLibrary
     }
 
     // MARK: - Activation / deactivation
@@ -112,26 +118,33 @@ extension Renderer {
             return
         }
 
-        // Already active and unchanged — no work (and no warm-start cut:
-        // self-heal retries and startup re-activations land here).
-        if customShaderHash == formula.shortHash, customShaderLibrary != nil {
+        // Resolve the effect into the (fractal, spaceWarp) set for this single
+        // active slot, and key the library + pipelines by the combined hash.
+        let isWarp = (formula.effectKind == .spaceWarp)
+        let fractalEffect = isWarp ? nil : formula
+        let warpEffect = isWarp ? formula : nil
+        let newHash = CustomShaderCompiler.combinedHash(fractal: fractalEffect, spaceWarp: warpEffect)
+
+        // Already active and unchanged — no work (self-heal retries and startup
+        // re-activations land here).
+        if customShaderHash == newHash, customShaderLibrary != nil {
             customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula NO-OP (hash unchanged + library present)")
             return
         }
 
-        // All custom formulas share FractalTypeCustom, so the warm-start gate's
-        // geometry key cannot tell two .threshfx DEs apart — depth rendered by
-        // the outgoing formula must never seed the incoming one's marches.
+        // All custom effects share the namespaced cache, so the warm-start gate's
+        // geometry key cannot tell two effect sets apart — depth rendered by the
+        // outgoing effect must never seed the incoming one's marches.
         warmStartGate.invalidate()
 
-        // Compile (cached internally by sourceHash).
-        customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula compiling library…")
+        // Compile (cached internally by combined hash).
+        customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula compiling library… kind=\(formula.effectKind.rawValue)")
         let compiler = ensureCompiler()
-        let library = try await compiler.library(for: formula)
+        let library = try await compiler.library(forFractal: fractalEffect, spaceWarp: warpEffect)
 
         customShaderLibrary = library
-        customShaderHash = formula.shortHash
-        retainCustomShaderPipelines(mostRecentHash: formula.shortHash)
+        customShaderHash = newHash
+        retainCustomShaderPipelines(mostRecentHash: newHash)
 
         customSceneDiagnostic("🔬 [CSDiag] ✅ activateEmbeddedFormula INSTALLED '\(formula.name)' hash=\(formula.shortHash) — library now present")
         if RENDERER_DEBUG {

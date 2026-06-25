@@ -30,6 +30,7 @@ extension ContentView {
                     },
                     onLoadStaticScene: { preset in
                         appModel.loadStaticScene(preset)
+                        appModel.dismissMenuWindowForSceneLoad()
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

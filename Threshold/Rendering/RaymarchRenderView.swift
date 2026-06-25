@@ -63,12 +63,18 @@ final class MacCustomShaderBox: @unchecked Sendable {
             cache.evict(prefix: "CX")   // drop every custom pipeline
             return
         }
-        if hash == formula.shortHash, library != nil { return }   // unchanged → no-op
-        let compiled = try await sharedCompiler(device: device).library(for: formula)
-        if let old = hash, old != formula.shortHash {
-            cache.evict(prefix: "CX\(old)_")   // retire the previous formula's pipelines
+        // Single active slot: a .threshfx is EITHER a fractal DE or a space warp.
+        // Key the library + pipelines by the combined hash so the two never alias.
+        let isWarp = (formula.effectKind == .spaceWarp)
+        let fractalEffect = isWarp ? nil : formula
+        let warpEffect = isWarp ? formula : nil
+        let newHash = CustomShaderCompiler.combinedHash(fractal: fractalEffect, spaceWarp: warpEffect)
+        if hash == newHash, library != nil { return }   // unchanged → no-op
+        let compiled = try await sharedCompiler(device: device).library(forFractal: fractalEffect, spaceWarp: warpEffect)
+        if let old = hash, old != newHash {
+            cache.evict(prefix: "CX\(old)_")   // retire the previous effect's pipelines
         }
-        set(library: compiled, hash: formula.shortHash)
+        set(library: compiled, hash: newHash)
     }
 }
 
@@ -746,7 +752,9 @@ private final class ThresholdMacRenderer {
         // exactly one formula's set.
         let custom = customShaderBox.snapshot()
         let customPrefix: String = {
-            guard settings.fractalType == .custom, let h = custom.hash else { return "" }
+            // Namespace whenever ANY custom library is active (custom fractal OR a
+            // space warp riding a built-in), not only fractalType == .custom.
+            guard let h = custom.hash else { return "" }
             return "CX\(h)_"
         }()
         let key = customPrefix + "FT\(fractalType)_FI\(iterations)_RS\(raySteps)_CI\(colorIterations)\(powerKey)"

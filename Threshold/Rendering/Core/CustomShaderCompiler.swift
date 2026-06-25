@@ -123,12 +123,24 @@ actor CustomShaderCompiler {
     /// The library exposes the same fragment/compute/vertex entry points as the
     /// bundled `default.metallib` — function-constant specialization for `FI`/`RS`/etc.
     /// continues to work via `library.makeFunction(name:constantValues:)`.
+    /// Stable cache key for an effect set (fractal + space warp). Distinct from a
+    /// single formula's `sourceHash`, so old and combined entries never collide.
+    static func combinedHash(fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?) -> String {
+        "f\(fractal?.shortHash ?? "0")w\(spaceWarp?.shortHash ?? "0")"
+    }
+
+    /// Back-compat wrapper: a single fractal effect, no space warp.
     func library(for formula: EmbeddedFormula) throws -> MTLLibrary {
-        let key = formula.sourceHash
+        try library(forFractal: formula, spaceWarp: nil)
+    }
+
+    /// Compile (or return cached) the combined library for an effect set.
+    func library(forFractal fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?) throws -> MTLLibrary {
+        let key = Self.combinedHash(fractal: fractal, spaceWarp: spaceWarp)
         if let cached = libraryCache[key] {
             return cached
         }
-        let source = try Self.synthesizeSource(for: formula)
+        let source = try Self.synthesizeSource(fractal: fractal, spaceWarp: spaceWarp)
         let options = MTLCompileOptions()
         if #available(visionOS 2.0, *) {
             options.mathMode = .fast
@@ -143,7 +155,7 @@ actor CustomShaderCompiler {
         } catch {
             let detail = (error as NSError).localizedDescription
             throw CustomShaderCompilerError.metalCompileFailed(
-                formula: formula.name,
+                formula: fractal?.name ?? spaceWarp?.name ?? "effect",
                 detail: detail
             )
         }
@@ -158,33 +170,67 @@ actor CustomShaderCompiler {
 
     /// Stitch the user's DE source into the bundled Metal sources to produce a
     /// self-contained string suitable for `device.makeLibrary(source:)`.
+    /// Back-compat wrapper: a single fractal effect, no space warp.
     static func synthesizeSource(for formula: EmbeddedFormula) throws -> String {
-        var pieces: [String] = []
-        pieces.reserveCapacity(7)
+        try synthesizeSource(fractal: formula, spaceWarp: nil)
+    }
 
-        pieces.append("// === Custom DE shader (auto-synthesized at runtime) ===")
-        pieces.append("// Embedded formula: \(formula.id) — \(formula.name)")
-        pieces.append("// sourceHash = \(formula.shortHash)")
+    /// Stitch the active effect SET into one self-contained Metal source. A custom
+    /// fractal DE is injected at the dispatch markers; a custom space warp is
+    /// injected at `// __CUSTOM_SPACE_WARP__`. Either may be nil (the corresponding
+    /// markers keep their built-in defaults).
+    static func synthesizeSource(fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?) throws -> String {
+        var pieces: [String] = []
+        pieces.reserveCapacity(9)
+
+        pieces.append("// === Custom effect shader (auto-synthesized at runtime) ===")
+        if let fractal { pieces.append("// Fractal: \(fractal.id) — \(fractal.name) [\(fractal.shortHash)]") }
+        if let spaceWarp { pieces.append("// Space warp: \(spaceWarp.id) — \(spaceWarp.name) [\(spaceWarp.shortHash)]") }
         pieces.append(Self.synthesizedSourcePrefix)
 
-        // User's DE source — defines DE_<stem> + DE_<stem>_Dist. Wrapped in a
-        // banner so any compile error includes a clear marker in the diagnostic
-        // line numbering.
-        pieces.append("// === Embedded user formula source — '\(formula.id)' ===")
-        pieces.append(formula.metalSource)
-        pieces.append("// === End embedded user formula source ===")
+        // Custom fractal DE source — defines DE_<stem> + DE_<stem>_Dist.
+        if let fractal {
+            pieces.append("// === Embedded fractal source — '\(fractal.id)' ===")
+            pieces.append(fractal.metalSource)
+            pieces.append("// === End embedded fractal source ===")
+        }
 
-        // FractalFormulas.h with the custom dispatch arms injected.
-        let dispatchH = try injectCustomDispatch(
-            Self.strippedDispatchTemplate,
-            stem: formula.functionStem
-        )
+        // FractalFormulas.h: inject the custom dispatch arm only when a fractal is
+        // present; otherwise the markers stay as comments (FractalTypeCustom → far).
+        let dispatchH: String
+        if let fractal {
+            dispatchH = try injectCustomDispatch(Self.strippedDispatchTemplate, stem: fractal.functionStem)
+        } else {
+            dispatchH = Self.strippedDispatchTemplate
+        }
         pieces.append(dispatchH)
 
-        // Render kernels + helpers.
-        pieces.append(Self.synthesizedSourceSuffix)
+        // Render kernels + helpers (Shaders.metal body) — inject the space warp at
+        // its marker when present (replaces the built-in Twist default).
+        var suffix = Self.synthesizedSourceSuffix
+        if let spaceWarp {
+            suffix = try injectCustomSpaceWarp(suffix, warpSource: spaceWarp.metalSource)
+        }
+        pieces.append(suffix)
 
         return pieces.joined(separator: "\n\n")
+    }
+
+    /// Replace the `// __CUSTOM_SPACE_WARP__` marker with the plugin's warp source,
+    /// preceded by `#define THRESHOLD_CUSTOM_SPACE_WARP` so the built-in default
+    /// definitions (guarded by `#ifndef THRESHOLD_CUSTOM_SPACE_WARP`) are skipped —
+    /// no duplicate-symbol collision.
+    static func injectCustomSpaceWarp(_ src: String, warpSource: String) throws -> String {
+        let marker = "// __CUSTOM_SPACE_WARP__"
+        guard src.contains(marker) else { throw CustomShaderCompilerError.missingDispatchMarker(marker) }
+        let replacement = """
+        // __CUSTOM_SPACE_WARP__ (custom space warp injected)
+        #define THRESHOLD_CUSTOM_SPACE_WARP
+        // === Embedded space-warp source ===
+        \(warpSource)
+        // === End embedded space-warp source ===
+        """
+        return src.replacingOccurrences(of: marker, with: replacement)
     }
 
     /// Remove `#include "..."` and `#import "..."` directives that reference
