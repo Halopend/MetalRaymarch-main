@@ -118,7 +118,7 @@ extension ContentView {
             if cache.fractalType == .mandelbox {
                 Divider()
                 EffectSliderRow(icon: "arrow.up.left.and.arrow.down.right", label: "Scale",
-                    value: $cache.fractalScale, range: -3.0...5.0,
+                    value: $cache.fractalScale, range: ControlCatalog.fractalScale.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.targetFractalScale, value: cache.fractalScale) },
                     showToggle: false,

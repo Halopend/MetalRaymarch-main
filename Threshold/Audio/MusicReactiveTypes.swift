@@ -285,34 +285,14 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     }
 
     var displayName: String {
+        // Canonical core/effect controls source their label from ControlCatalog
+        // (single source of truth). Formula slots + legacy targets fall through.
+        if let id = parameterTargetID, let spec = ControlCatalog.spec(id) { return spec.name }
+        if let slot = formulaParamSlot { return "Formula Param \(slot + 1)" }
         switch self {
-        case .fractalScale: return "Fractal Scale"
-        case .colorMix: return "Color Mix"
-        case .iterations: return "Iterations"
-        case .glow: return "Glow"
-        case .fog: return "Fog"
-        case .bloom: return "Bloom"
-        case .hueSpeed: return "Hue Speed"
-        case .saturation: return "Saturation"
-        case .safetyBubbleRadius: return "Inner Radius"
-        case .formulaParam0: return "Formula Param 1"
-        case .formulaParam1: return "Formula Param 2"
-        case .formulaParam2: return "Formula Param 3"
-        case .formulaParam3: return "Formula Param 4"
-        case .formulaParam4: return "Formula Param 5"
-        case .formulaParam5: return "Formula Param 6"
-        case .formulaParam6: return "Formula Param 7"
-        case .formulaParam7: return "Formula Param 8"
-        case .formulaParam8: return "Formula Param 9"
-        case .formulaParam9: return "Formula Param 10"
-        case .formulaParam10: return "Formula Param 11"
-        case .formulaParam11: return "Formula Param 12"
-        case .formulaParam12: return "Formula Param 13"
-        case .formulaParam13: return "Formula Param 14"
-        case .formulaParam14: return "Formula Param 15"
-        case .formulaParam15: return "Formula Param 16"
         case .foldingLimit: return "Folding Limit"
         case .sphereRadius: return "Sphere Radius"
+        default: return ""   // unreachable: core/effect handled above
         }
     }
 
@@ -324,22 +304,12 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     }
 
     var icon: String {
+        // Canonical core/effect controls source their glyph from ControlCatalog.
+        if let id = parameterTargetID, let spec = ControlCatalog.spec(id) { return spec.icon }
         switch self {
-        case .fractalScale: return "arrow.up.left.and.arrow.down.right"
-        case .colorMix: return "paintpalette"
-        case .iterations: return "number"
-        case .glow: return "sparkles"
-        case .fog: return "cloud.fog"
-        case .bloom: return "sun.max"
-        case .hueSpeed: return "dial.high"
-        case .saturation: return "circle.lefthalf.filled"
-        case .safetyBubbleRadius: return "circle.dashed"
-        case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
-             .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
-             .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
-             .formulaParam12, .formulaParam13, .formulaParam14, .formulaParam15: return "function"
         case .foldingLimit: return "square.dashed"
         case .sphereRadius: return "circle.circle"
+        default: return "function"   // formula param slots
         }
     }
 
@@ -353,22 +323,12 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     }
 
     var allowedRange: ClosedRange<Float> {
+        // Canonical core/effect controls source their range from ControlCatalog.
+        if let id = parameterTargetID, let spec = ControlCatalog.spec(id) { return spec.range }
         switch self {
-        case .fractalScale: return -5.0...8.0
-        case .colorMix: return 0.0...1.0
-        case .iterations: return 2.0...24.0
-        case .glow: return 0.0...2.0
-        case .fog: return 0.0...1.0
-        case .bloom: return 0.0...2.0
-        case .hueSpeed: return 0.0...0.5
-        case .saturation: return 0.0...3.0
-        case .safetyBubbleRadius: return 0.5...2.5
-        case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
-             .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
-             .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
-             .formulaParam12, .formulaParam13, .formulaParam14, .formulaParam15: return -10.0...64.0
         case .foldingLimit: return -10.0...30.0
         case .sphereRadius: return -5.0...8.0
+        default: return -10.0...64.0   // formula param slots
         }
     }
 

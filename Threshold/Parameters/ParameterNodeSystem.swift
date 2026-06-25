@@ -101,6 +101,30 @@ class FloatParameterNode: AnyParameterNodeBase, @unchecked Sendable {
     }
 }
 
+extension FloatParameterNode {
+    /// Build a live node from a canonical `ControlSpec`, supplying only the
+    /// consumer-specific bits (grouping, gesture-mappability, and the read/write
+    /// closures). Range/default/name/icon/motion come from the spec — the single
+    /// source of truth — so the node cannot drift from the dispatcher, music, or
+    /// UI layers.
+    convenience init(spec: ControlSpec,
+                     group: ParameterGroup?,
+                     isGestureMappable: Bool,
+                     readValue: @MainActor @escaping (UISettingsCache) -> Float,
+                     writeValue: @MainActor @escaping (UISettingsCache, Float) -> Void) {
+        self.init(id: spec.id,
+                  name: spec.name,
+                  group: group,
+                  icon: spec.icon,
+                  defaultValue: spec.defaultValue,
+                  range: spec.range,
+                  isGestureMappable: isGestureMappable,
+                  motionStrategy: spec.motionStrategy,
+                  readValue: readValue,
+                  writeValue: writeValue)
+    }
+}
+
 /// @unchecked Sendable justification: stores immutable metadata plus MainActor-only closures.
 final class BoolParameterNode: AnyParameterNodeBase, @unchecked Sendable {
     let readValue: @MainActor (UISettingsCache) -> Bool
@@ -367,39 +391,28 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         var effectNodes: [String: FloatParameterNode] = [:]
 
         // --- Core geometry nodes ---
+        // Range/default/name/icon/motion come from ControlCatalog (single source
+        // of truth); only the grouping + read/write wiring is local here.
 
-        coreNodes[ParameterTargetID.Core.fractalScale] = FloatParameterNode(
-            id: ParameterTargetID.Core.fractalScale,
-            name: "Fractal Scale",
+        coreNodes[ControlCatalog.fractalScale.id] = FloatParameterNode(
+            spec: ControlCatalog.fractalScale,
             group: coreGroup,
-            icon: "arrow.up.left.and.arrow.down.right",
-            defaultValue: 2.0,
-            range: -5.0...8.0,
             isGestureMappable: true,
-            motionStrategy: .smoothDamp,
             readValue: { $0.fractalScale },
             writeValue: { cache, v in cache.fractalScale = v; cache.push(\.targetFractalScale, value: v) }
         )
 
-        coreNodes[ParameterTargetID.Core.colorMix] = FloatParameterNode(
-            id: ParameterTargetID.Core.colorMix,
-            name: "Color Mix",
+        coreNodes[ControlCatalog.colorMix.id] = FloatParameterNode(
+            spec: ControlCatalog.colorMix,
             group: coreGroup,
-            icon: "paintpalette",
-            defaultValue: 0.5,
-            range: 0.0...1.0,
             isGestureMappable: true,
             readValue: { $0.color.colorMix },
             writeValue: { cache, v in cache.color.colorMix = v; cache.push(\.colorMix, value: v) }
         )
 
-        coreNodes[ParameterTargetID.Core.iterations] = FloatParameterNode(
-            id: ParameterTargetID.Core.iterations,
-            name: "Iterations",
+        coreNodes[ControlCatalog.iterations.id] = FloatParameterNode(
+            spec: ControlCatalog.iterations,
             group: coreGroup,
-            icon: "number",
-            defaultValue: 12.0,
-            range: 2.0...24.0,
             isGestureMappable: false,
             readValue: { Float($0.liveFractalIterations) },
             writeValue: { cache, v in
@@ -410,73 +423,49 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         )
 
         // --- Effect nodes ---
-        effectNodes[ParameterTargetID.Effect.glow] = FloatParameterNode(
-            id: ParameterTargetID.Effect.glow,
-            name: "Glow",
+        effectNodes[ControlCatalog.glow.id] = FloatParameterNode(
+            spec: ControlCatalog.glow,
             group: effectGroup,
-            icon: "sun.max",
-            defaultValue: 0.0,
-            range: 0.0...2.0,
             isGestureMappable: false,
             readValue: { $0.lighting.glowEffect.intensity },
             writeValue: { cache, v in cache.lighting.glowEffect.intensity = v; cache.commitGlowEffect() }
         )
 
-        effectNodes[ParameterTargetID.Effect.fog] = FloatParameterNode(
-            id: ParameterTargetID.Effect.fog,
-            name: "Fog",
+        effectNodes[ControlCatalog.fog.id] = FloatParameterNode(
+            spec: ControlCatalog.fog,
             group: effectGroup,
-            icon: "cloud.fog",
-            defaultValue: 0.32,
-            range: 0.0...1.0,
             isGestureMappable: false,
             readValue: { $0.lighting.fogEffect.intensity },
             writeValue: { cache, v in cache.lighting.fogEffect.intensity = v; cache.commitFogEffect() }
         )
 
-        effectNodes[ParameterTargetID.Effect.bloom] = FloatParameterNode(
-            id: ParameterTargetID.Effect.bloom,
-            name: "Bloom",
+        effectNodes[ControlCatalog.bloom.id] = FloatParameterNode(
+            spec: ControlCatalog.bloom,
             group: effectGroup,
-            icon: "sparkle",
-            defaultValue: 0.0,
-            range: 0.0...2.0,
             isGestureMappable: false,
             readValue: { $0.lighting.bloomEffect.strength },
             writeValue: { cache, v in cache.lighting.bloomEffect.strength = v; cache.commitBloomEffect() }
         )
 
-        effectNodes[ParameterTargetID.Effect.hueSpeed] = FloatParameterNode(
-            id: ParameterTargetID.Effect.hueSpeed,
-            name: "Hue Speed",
+        effectNodes[ControlCatalog.hueSpeed.id] = FloatParameterNode(
+            spec: ControlCatalog.hueSpeed,
             group: effectGroup,
-            icon: "arrow.trianglehead.2.clockwise.rotate.90",
-            defaultValue: 0.0,
-            range: 0.0...0.5,
             isGestureMappable: false,
             readValue: { $0.lighting.hueRotationEffect.speed },
             writeValue: { cache, v in cache.lighting.hueRotationEffect.speed = v; cache.commitHueRotationEffect() }
         )
 
-        effectNodes[ParameterTargetID.Effect.saturation] = FloatParameterNode(
-            id: ParameterTargetID.Effect.saturation,
-            name: "Saturation",
+        effectNodes[ControlCatalog.saturation.id] = FloatParameterNode(
+            spec: ControlCatalog.saturation,
             group: effectGroup,
-            icon: "drop.halffull",
-            defaultValue: 2.0,
-            range: 0.0...3.0,
             isGestureMappable: false,
             readValue: { $0.color.colorSchemeSaturation },
             writeValue: { cache, v in cache.color.colorSchemeSaturation = v; cache.commitColorSchemeSaturation() }
         )
 
-        effectNodes[ParameterTargetID.Effect.safetyBubbleRadius] = FloatParameterNode(
-            id: ParameterTargetID.Effect.safetyBubbleRadius,
-            name: "Safety Bubble Radius",
+        effectNodes[ControlCatalog.safetyBubbleRadius.id] = FloatParameterNode(
+            spec: ControlCatalog.safetyBubbleRadius,
             group: effectGroup,
-            icon: "circle.dashed",
-            defaultValue: 1.8,
-            range: 0.5...2.5,
             isGestureMappable: false,
             readValue: { $0.safetyBubble.radius },
             writeValue: { cache, v in cache.safetyBubble.radius = v; cache.push(\.safetyBubbleRadius, value: v) }

@@ -60,5 +60,21 @@ enum ParameterRoutingValidation {
             let nodeCount = (registry.coreNodes[id] != nil ? 1 : 0) + (registry.effectNodes[id] != nil ? 1 : 0)
             precondition(descriptorCount == 1 && nodeCount == 1, "Routable target ID '\(id)' must resolve to exactly one descriptor and one node.")
         }
+
+        // ControlCatalog is the single source of truth for range/default/name/icon.
+        // Guard that the live consumers haven't re-hardcoded a divergent range —
+        // this is what caught the Fractal Scale -3...5 vs -5...8 drift.
+        for spec in ControlCatalog.allSpecs {
+            let node = registry.coreNodes[spec.id] ?? registry.effectNodes[spec.id]
+            precondition(node != nil, "ControlCatalog spec '\(spec.id)' has no matching parameter node.")
+            if let node {
+                precondition(node.range == spec.range,
+                             "Range drift: node '\(spec.id)' \(node.range) != ControlCatalog \(spec.range).")
+            }
+            if let target = MusicReactiveTarget.availableCases.first(where: { $0.parameterTargetID == spec.id }) {
+                precondition(target.allowedRange == spec.range,
+                             "Range drift: music target for '\(spec.id)' \(target.allowedRange) != ControlCatalog \(spec.range).")
+            }
+        }
     }
 }
