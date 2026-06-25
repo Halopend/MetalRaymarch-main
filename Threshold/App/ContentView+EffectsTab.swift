@@ -58,8 +58,7 @@ extension ContentView {
                     onChanged: { cache.commitFogEffect() }
                 )
             }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
+            .moduleCard(.orange)
             
         }
     }
@@ -126,25 +125,10 @@ extension ContentView {
                         .padding(.leading, 24)
                 }
             }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.06)))
+            .moduleCard(.blue)
             
-            // ── Pulse ──
-            VStack(spacing: 4) {
-                EffectSliderRow(icon: "waveform.path.ecg", label: "Pulse Speed",
-                    value: Binding(get: { cache.lighting.pulseEffect.speed }, set: { cache.lighting.pulseEffect.speed = $0 }),
-                    range: 0...2,
-                    enabled: Binding(get: { cache.lighting.pulseEffect.enabled }, set: { cache.lighting.pulseEffect.enabled = $0 }),
-                    onChanged: { cache.commitPulseEffect() })
-                EffectSliderRow(icon: "waveform.path", label: "Pulse Amount",
-                    value: Binding(get: { cache.lighting.pulseEffect.amount }, set: { cache.lighting.pulseEffect.amount = $0 }),
-                    range: 0...1,
-                    enabled: Binding(get: { cache.lighting.pulseEffect.enabled }, set: { cache.lighting.pulseEffect.enabled = $0 }),
-                    onChanged: { cache.commitPulseEffect() },
-                    showToggle: false)
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
+            // ── Pulse ── (data-driven via LightingModule's pulse section)
+            ModuleSectionView(section: .pulse(cache: cache))
 
             linearRailControls
 
@@ -178,8 +162,7 @@ extension ContentView {
                             showToggle: false)
                     }
                 }
-                .padding(10)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
+                .moduleCard(.green)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
@@ -210,8 +193,7 @@ extension ContentView {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.teal.opacity(0.06)))
+        .moduleCard(.teal)
     }
 
     private var linearRailControls: some View {
@@ -268,8 +250,7 @@ extension ContentView {
                 }
             }
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.06)))
+        .moduleCard(.indigo)
     }
 
     private var dynamicPresetDisclosure: some View {
@@ -305,7 +286,6 @@ extension ContentView {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.06)))
+        .moduleCard(.gray)
     }
 }

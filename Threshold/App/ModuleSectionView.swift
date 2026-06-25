@@ -23,6 +23,23 @@
 
 import SwiftUI
 
+extension View {
+    /// The shared "module card" chrome: padded rounded rect tinted by an accent.
+    /// This is the box wrapper that was copy-pasted ~15× across the control tabs
+    /// (`.padding(10).background(RoundedRectangle(cornerRadius: 10).fill(...))`).
+    func moduleCard(_ accent: Color, opacity: Double = 0.06) -> some View {
+        self
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(accent.opacity(opacity)))
+    }
+}
+
+/// A live on/off binding for a module control or section.
+struct ModuleToggle {
+    let get: @MainActor () -> Bool
+    let set: @MainActor (Bool) -> Void
+}
+
 /// One slider control inside a data-driven module section. Carries its own live
 /// get/set into the UI store plus the commit hook that pushes to the renderer.
 struct ModuleSliderControl: Identifiable {
@@ -36,59 +53,74 @@ struct ModuleSliderControl: Identifiable {
     var commit: @MainActor () -> Void = {}
     /// Only rendered when true (e.g. sub-sliders shown once the box is enabled).
     var isVisible: @MainActor () -> Bool = { true }
+    /// Disabled (greyed) when this returns false. Default: always enabled.
+    var isEnabled: @MainActor () -> Bool = { true }
+    /// When set, an inline switch is shown bound to this (writes the enable state).
+    var toggle: ModuleToggle? = nil
+    /// Live "derived value" ghost marker target while music drives this param.
+    var musicTargetID: String? = nil
 }
 
 /// A data-driven UI section ("box") for a module route. Replaces the hand-written
 /// header + toggle + description + capability-fallback + sliders scaffolding.
 struct ModuleUISection {
-    let title: String
-    let icon: String
-    let description: String
+    /// nil = headerless box (just controls in a card).
+    var title: String? = nil
+    var icon: String = ""
+    var description: String? = nil
     /// nil = always available; else the header dims and a fallback note replaces
     /// the controls when this returns false.
     var isAvailable: @MainActor () -> Bool = { true }
     var unavailableNote: String = "Not available for this fractal."
     /// Optional master enable toggle shown in the header.
-    var enabled: (get: @MainActor () -> Bool, set: @MainActor (Bool) -> Void)? = nil
+    var enabled: ModuleToggle? = nil
     let controls: [ModuleSliderControl]
     var accent: Color = .teal
+    /// Vertical spacing between rows (boxes historically used 4 / 6 / 8).
+    var rowSpacing: CGFloat = 8
 }
 
 /// Renders any `ModuleUISection` with the shared box styling. The single home for
-/// what used to be ~15 lines of copy-pasted VStack/Toggle/Divider/background per
-/// section.
+/// the copy-pasted VStack/Toggle/background scaffolding.
 struct ModuleSectionView: View {
     let section: ModuleUISection
 
     var body: some View {
         let available = section.isAvailable()
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label(section.title, systemImage: section.icon)
-                    .font(.headline)
-                    .foregroundStyle(available ? .primary : .secondary)
-                Spacer()
-                if available, let enabled = section.enabled {
-                    Toggle("", isOn: Binding(get: { enabled.get() }, set: { enabled.set($0) }))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
+        VStack(alignment: .leading, spacing: section.rowSpacing) {
+            if section.title != nil || section.enabled != nil {
+                HStack {
+                    if let title = section.title {
+                        Label(title, systemImage: section.icon)
+                            .font(.headline)
+                            .foregroundStyle(available ? .primary : .secondary)
+                    }
+                    Spacer()
+                    if available, let enabled = section.enabled {
+                        Toggle("", isOn: Binding(get: { enabled.get() }, set: { enabled.set($0) }))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                    }
                 }
             }
 
-            Text(section.description)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            if let description = section.description {
+                Text(description)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if available {
                 ForEach(section.controls.filter { $0.isVisible() }) { control in
                     EffectSliderRow(icon: control.icon, label: control.label,
                         value: Binding(get: { control.get() }, set: { control.set($0) }),
                         range: control.range,
-                        enabled: .constant(true),
+                        enabled: Binding(get: { control.isEnabled() }, set: { control.toggle?.set($0) }),
                         onChanged: { control.commit() },
-                        showToggle: false)
+                        showToggle: control.toggle != nil,
+                        musicTargetID: control.musicTargetID)
                 }
             } else {
                 Label(section.unavailableNote, systemImage: AppIcons.infoCircle)
@@ -97,8 +129,7 @@ struct ModuleSectionView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(section.accent.opacity(0.06)))
+        .moduleCard(section.accent)
     }
 }
 
@@ -123,11 +154,11 @@ extension ModuleUISection {
                 ? "Radially projects each fold onto a sphere right after the sphere-fold step — the \u{201C}accidental sphere\u{201D} look. Box detail melts into a glowing spherical shell."
                 : "Warps space radially toward a sphere before the fractal is evaluated — pulls this shape\u{2019}s detail onto a spherical shell. Blend low for a subtle bulge, high for a full sphere melt.",
             isAvailable: { cache.fractalType.supports(.sphereProjection) },
-            enabled: (get: { cache.display.sphereProjectionEnabled },
-                      set: { newValue in
-                          cache.display.sphereProjectionEnabled = newValue
-                          cache.commitSphereProjection()
-                      }),
+            enabled: ModuleToggle(get: { cache.display.sphereProjectionEnabled },
+                                  set: { newValue in
+                                      cache.display.sphereProjectionEnabled = newValue
+                                      cache.commitSphereProjection()
+                                  }),
             controls: [
                 ModuleSliderControl(
                     label: "Projection", icon: "circle.lefthalf.filled",
@@ -165,5 +196,34 @@ extension ModuleUISection {
                     set: { renderSettings.spaceWarpStrength = $0 }),
             ],
             accent: .purple)
+    }
+
+    // MARK: - Lighting-module section factories
+
+    /// Pulse box (Effects → Dynamic): two sliders sharing the pulse enable. The
+    /// "Pulse Speed" slider shows the enable switch; "Pulse Amount" greys with it.
+    @MainActor
+    static func pulse(cache: UISettingsCache) -> ModuleUISection {
+        let pulseEnabled = ModuleToggle(
+            get: { cache.lighting.pulseEffect.enabled },
+            set: { cache.lighting.pulseEffect.enabled = $0 })
+        return ModuleUISection(
+            controls: [
+                ModuleSliderControl(
+                    label: "Pulse Speed", icon: "waveform.path.ecg", range: 0...2,
+                    get: { cache.lighting.pulseEffect.speed },
+                    set: { cache.lighting.pulseEffect.speed = $0 },
+                    commit: { cache.commitPulseEffect() },
+                    isEnabled: { cache.lighting.pulseEffect.enabled },
+                    toggle: pulseEnabled),
+                ModuleSliderControl(
+                    label: "Pulse Amount", icon: "waveform.path", range: 0...1,
+                    get: { cache.lighting.pulseEffect.amount },
+                    set: { cache.lighting.pulseEffect.amount = $0 },
+                    commit: { cache.commitPulseEffect() },
+                    isEnabled: { cache.lighting.pulseEffect.enabled }),
+            ],
+            accent: .purple,
+            rowSpacing: 4)
     }
 }
