@@ -513,34 +513,9 @@ struct FractalBrowserWindow: View {
     }
 
     private func primaryEquation(for info: FractalTypeBrowserInfo) -> String? {
-        guard let type = info.type else { return nil }
-
-        switch type {
-        case .mandelbox:
-            return "p_{n+1} = scale * boxFold(sphereFold(p_n)) + c"
-        case .mandelboxSphereProjection:
-            return "p_{n+1} = scale * projSphere(boxFold(sphereFold(p_n))) + c"
-        case .mandelbulb:
-            return "z_{n+1} = z_n^p + c"
-        case .mandelbulbJulia:
-            return "z_{n+1} = z_n^p + c_{julia}"
-        case .menger:
-            return "p_{n+1} = scale * fold_menger(p_n) + c"
-        case .quaternionJulia:
-            return "q_{n+1} = q_n^2 + c"
-        case .octahedron:
-            return "p_{n+1} = scale * fold_octahedral(p_n) + c"
-        case .mengerSphere:
-            return "p_{n+1} = scale * blend_menger_sphere(p_n) + c"
-        case .theliPseudoKleinian:
-            return "p_{n+1} = fold(p_n) + c"
-        case .kleinian:
-            return "z_{n+1} = fold(z_n) + c"
-        case .boxSphereFolder:
-            return "p_{n+1} = fold_box_sphere(p_n) + c"
-        case .custom:
-            return nil
-        }
+        // Per-type display formula now lives on the fractal type
+        // (see FractalTypeDescriptor.primaryEquation).
+        info.type?.descriptor.primaryEquation()
     }
 
     @ViewBuilder

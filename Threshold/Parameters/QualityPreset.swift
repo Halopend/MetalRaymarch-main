@@ -48,21 +48,9 @@ enum QualityPreset: String, CaseIterable {
     }
 
     func values(for fractalType: FractalModelType) -> (fractalIterations: Int, raySteps: Int) {
-        switch fractalType {
-        case .mandelbulb, .mandelbulbJulia:
-            switch self {
-            case .low:
-                return (4, 68)
-            case .medium:
-                return (6, 88)
-            case .high:
-                return (8, 97)
-            case .ultra:
-                return (10, 102)
-            }
-        default:
-            return (fractalIterations, raySteps)
-        }
+        // Per-type quality tiers now live on the fractal type (see
+        // FractalTypeDescriptor.qualityValues); nil = use this preset's defaults.
+        fractalType.descriptor.qualityValues(for: self) ?? (fractalIterations, raySteps)
     }
 
     /// Try to detect preset from current settings
