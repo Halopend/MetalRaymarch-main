@@ -305,10 +305,16 @@ final class GestureController {
         let normalLen = simd_length(rawNormal)
         data.palmNormal = normalLen > 1e-6 ? rawNormal / normalLen : .zero
         
-        // Calculate pinch values based on distance between thumb and each finger
-        // Ring finger has shorter reach to thumb anatomically, so use tighter range
-        let pinchMinDist: Float = 0.02  // 2cm = full pinch (same for all)
-        
+        // Calculate pinch values based on distance between thumb and each finger.
+        // Modeled as two fingertip "spheres": pinchMinDist is where they fully
+        // touch (strength 1.0) and maxDist is where they are far enough apart to
+        // read as no pinch (strength 0.0). The range was previously 8cm (6cm ring),
+        // which let a pinch trigger while fingertips were still ~4cm apart. Tightened
+        // so a pinch only registers near actual fingertip contact.
+        let pinchMinDist: Float = 0.02   // 2cm = full pinch (same for all)
+        let pinchMaxDist: Float = 0.05   // 5cm = released (index/middle reach)
+        let ringMaxDist: Float = 0.04    // ring has shorter reach to the thumb
+
         func calculatePinch(fingerTip: SIMD3<Float>, maxDist: Float) -> Float {
             // Guard against untracked joints (both at zero would give false positive)
             if simd_length_squared(data.thumbTip) < 1e-6 || simd_length_squared(fingerTip) < 1e-6 {
@@ -319,10 +325,9 @@ final class GestureController {
             return simd_clamp(normalized, 0, 1)
         }
         
-        // Index/middle have longer reach (8cm range), ring has shorter reach (6cm range)
-        data.indexPinch = calculatePinch(fingerTip: data.indexTip, maxDist: 0.08)
-        data.middlePinch = calculatePinch(fingerTip: data.middleTip, maxDist: 0.08)
-        data.ringPinch = calculatePinch(fingerTip: data.ringTip, maxDist: 0.06)
+        data.indexPinch = calculatePinch(fingerTip: data.indexTip, maxDist: pinchMaxDist)
+        data.middlePinch = calculatePinch(fingerTip: data.middleTip, maxDist: pinchMaxDist)
+        data.ringPinch = calculatePinch(fingerTip: data.ringTip, maxDist: ringMaxDist)
         
         return data
     }

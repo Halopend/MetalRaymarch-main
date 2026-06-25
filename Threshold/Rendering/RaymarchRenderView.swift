@@ -1325,6 +1325,9 @@ private final class ThresholdMacRenderer {
                         fractalIterations: Int32(settings.fractalIterations),
                         maxRaySteps: Int32(settings.maxRaySteps),
                         maxViewDistance: maxViewDistance,
+                        // Infinite zoom: tighten the march hit-threshold floor as we zoom in
+                        // so fine detail keeps resolving (1.0 at base → byte-identical).
+                        marchEpsilonScale: 1.0 / max(effectiveScale, 1.0),
                         colorMix: animatedColorMix,
                         glowIntensity: animatedGlow,
                         foldingLimit: settings.foldingLimit,

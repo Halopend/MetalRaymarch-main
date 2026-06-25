@@ -1360,15 +1360,17 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
 
 // Near-range coarse raymarch (24 steps, max 12 units)
 // Compiler unrolls based on FC_FRACTAL_ITERATIONS when defined
-FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations, int fractalType = 0, FormulaParams fp = {}, float maxRayDistance = kMaxRayDistanceDefault)
+FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations, int fractalType = 0, FormulaParams fp = {}, float maxRayDistance = kMaxRayDistanceDefault, float epsilonScale = 1.0f)
 {
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
     bool isMandelbulb = (type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia);
 
     // Mandelbulb DE returns much smaller values near the surface; start closer
     // and use a finer hit threshold to avoid overshooting the thin front face.
+    // epsilonScale (=1/effectiveScale) tightens the coarse seed on deep zoom so the
+    // fine march starts near the true (sub-unit) surface rather than overshooting it.
     float t = isMandelbulb ? 0.005f : 0.05f;
-    float hitThreshold = isMandelbulb ? 0.005f : 0.02f;
+    float hitThreshold = (isMandelbulb ? 0.005f : 0.02f) * epsilonScale;
     int maxCoarseSteps = isMandelbulb ? 28 : 24;
     
     // Use MapContinuous with 0.6× iterations for smooth fractional DE.
@@ -1511,7 +1513,7 @@ FORCE_INLINE bool smartStepUpdate(float h,
 }
 
 // Raymarch that caches orbit state on hit for reuse in normals/colors
-FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float boundingSphereRadius = 0.0, float stepMultiplier = 1.0, float maxRayDistance = kMaxRayDistanceDefault, bool smartAdvance = false)
+FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float boundingSphereRadius = 0.0, float stepMultiplier = 1.0, float maxRayDistance = kMaxRayDistanceDefault, bool smartAdvance = false, float epsilonScale = 1.0f)
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
@@ -1565,9 +1567,12 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
     for(int j = 0; j < maxSteps; j++)
     {
         // Mandelbulb needs ~4x finer threshold (its DE returns much smaller values).
+        // The fixed additive floor is scaled by epsilonScale (=1/effectiveScale) so it
+        // shrinks with the marched region on deep zoom — without it the floor dominates
+        // once the hit distance falls below ~0.6 and fine detail stops resolving.
         float threshold = isMandelbulb
-            ? fma(t, 0.0002f, 0.00012f) + (1.0f - quality) * 0.001f
-            : fma(t, 0.0008f, 0.0005f)  + (1.0f - quality) * 0.003f;
+            ? fma(t, 0.0002f, 0.00012f * epsilonScale) + (1.0f - quality) * 0.001f
+            : fma(t, 0.0008f, 0.0005f * epsilonScale)  + (1.0f - quality) * 0.003f;
 
         float3 p = fma(rD, float3(t), rO);
         // Use unified dispatch for the march loop (no Jacobian overhead)
@@ -1598,7 +1603,7 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
 }
 
 // Raymarch with cache that starts from a known distance (for hierarchical acceleration)
-FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float stepMultiplier = 1.0, bool smartAdvance = false)
+FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float stepMultiplier = 1.0, bool smartAdvance = false, float epsilonScale = 1.0f)
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
@@ -1634,9 +1639,11 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
 
     for(int j = 0; j < maxSteps; j++)
     {
+        // Additive floor scaled by epsilonScale (=1/effectiveScale) so detail keeps
+        // resolving on deep zoom (1.0 at base → unchanged).
         float threshold = isMandelbulb
-            ? fma(t, 0.00015f, 0.00012f)
-            : fma(t, 0.0006f, 0.0005f);
+            ? fma(t, 0.00015f, 0.00012f * epsilonScale)
+            : fma(t, 0.0006f, 0.0005f * epsilonScale);
         float3 p = fma(rD, float3(t), rO);
         // Use unified dispatch for the march loop (no Jacobian overhead)
         float h = MapUnified(p, params, foldingLimit, iterations, type, fp);
@@ -1923,11 +1930,27 @@ FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimi
 // function whose float-op sequence is identical to the inlined originals, so
 // results are bit-for-bit unchanged.
 
-// Unproject a viewport-pixel coordinate to a model-space point on the near ray.
+// Unproject a PHYSICAL drawable pixel to a model-space point on the near ray.
 // Mirrors the fragment-shader unprojection exactly, including the asymmetric
 // per-eye frustum w-guard used on visionOS.
-FORCE_INLINE float3 reconstructModelPoint(float2 pixelCoord, constant TileUniforms& uniforms) {
-    float2 ndc = (pixelCoord / uniforms.resolution) * 2.0 - 1.0;
+//
+// Under foveation the compositor interprets the drawable color texture as
+// variable-density physical space and un-foveates it via a rasterization rate
+// map. This kernel writes physical pixels, so a naive linear `pixelCoord /
+// resolution` unproject (which assumes physical == screen) is pre-distorted by
+// the compositor's inverse rate map — the warp that scales with renderQuality.
+// When a valid rate map is bound we decode the physical coordinate to logical/
+// screen space first, exactly matching the rasterizer-driven fragment path.
+FORCE_INLINE float3 reconstructModelPoint(float2 pixelCoord, constant TileUniforms& uniforms,
+                                          constant rasterization_rate_map_data& rateMapData) {
+    float2 ndc;
+    if (uniforms.rateMapValid != 0) {
+        rasterization_rate_map_decoder decoder(rateMapData);
+        float2 screenCoord = decoder.map_physical_to_screen_coordinates(pixelCoord, uniforms.rateMapLayer);
+        ndc = (screenCoord / uniforms.screenResolution) * 2.0 - 1.0;
+    } else {
+        ndc = (pixelCoord / uniforms.resolution) * 2.0 - 1.0;
+    }
     ndc.y = -ndc.y;
     float4 clipPos = float4(ndc.x, ndc.y, 0.0, 1.0);
     float4 viewPoint4 = uniforms.invProjMatrix * clipPos;
@@ -1936,6 +1959,20 @@ FORCE_INLINE float3 reconstructModelPoint(float2 pixelCoord, constant TileUnifor
         : (viewPoint4.w >= 0.0f ? 1e-6f : -1e-6f);
     float3 viewPoint = viewPoint4.xyz / viewPointW;
     return (uniforms.invViewMatrix * float4(viewPoint, 1.0)).xyz;
+}
+
+// Convert a SCREEN-space UV (derived from clip space, e.g. temporal reprojection)
+// to a PHYSICAL pixel coordinate for indexing depth textures stored in physical
+// space. Mirror of reconstructModelPoint's decode: with a valid rate map the
+// screen→physical relationship is the rate map; otherwise it is linear.
+FORCE_INLINE float2 screenUVToPhysicalPixel(float2 screenUV, constant TileUniforms& uniforms,
+                                            constant rasterization_rate_map_data& rateMapData) {
+    if (uniforms.rateMapValid != 0) {
+        rasterization_rate_map_decoder decoder(rateMapData);
+        float2 screenPx = screenUV * uniforms.screenResolution;
+        return decoder.map_screen_to_physical_coordinates(screenPx, uniforms.rateMapLayer);
+    }
+    return screenUV * uniforms.resolution;
 }
 
 // Project a model-space point into the previous frame and return its texture UV
@@ -1977,6 +2014,7 @@ kernel void adaptiveHierarchical8x8(
     uint2 localId [[thread_position_in_threadgroup]],
     uint localIndex [[thread_index_in_threadgroup]],
     constant TileUniforms& uniforms [[buffer(0)]],
+    constant rasterization_rate_map_data& rateMapData [[buffer(1)]],
     texture2d_array<float, access::write> outputTexture [[texture(0)]],
     texture2d_array<float, access::read> prevDepthTexture [[texture(1)]],
     texture2d_array<float, access::write> curDepthTexture [[texture(2)]]
@@ -2012,7 +2050,7 @@ kernel void adaptiveHierarchical8x8(
     float3 cameraPos = uniforms.cameraPos;
 
     // Match the fragment path exactly for visionOS's asymmetric per-eye frusta.
-    float3 modelPoint = reconstructModelPoint(pixelCenter, uniforms);
+    float3 modelPoint = reconstructModelPoint(pixelCenter, uniforms, rateMapData);
     float3 rd = normalize(modelPoint - cameraPos);
     
     int lodIterations = max(uniforms.fractalIterations, 2);
@@ -2075,8 +2113,9 @@ kernel void adaptiveHierarchical8x8(
         
         // 3. Check if the reprojected UV is within bounds
         if (prevUV.x >= 0.0 && prevUV.x <= 1.0 && prevUV.y >= 0.0 && prevUV.y <= 1.0) {
-            // Sample previous depth at the reprojected location
-            uint2 prevPixel = uint2(prevUV * uniforms.resolution);
+            // Sample previous depth at the reprojected location. prevUV is in
+            // SCREEN space; the depth texture is in PHYSICAL space, so decode.
+            uint2 prevPixel = uint2(screenUVToPhysicalPixel(prevUV, uniforms, rateMapData));
             prevPixel = clamp(prevPixel, uint2(0), viewportSize - 1);
             prevPixel += viewportOrigin;
             float prevDepth = prevDepthTexture.read(prevPixel, uniforms.eyeIndex).x;
@@ -2088,7 +2127,7 @@ kernel void adaptiveHierarchical8x8(
                 float2 betterUV = reprojectToPrevUV(betterPoint, uniforms);
                 
                 if (betterUV.x >= 0.0 && betterUV.x <= 1.0 && betterUV.y >= 0.0 && betterUV.y <= 1.0) {
-                    uint2 betterPixel = uint2(betterUV * uniforms.resolution);
+                    uint2 betterPixel = uint2(screenUVToPhysicalPixel(betterUV, uniforms, rateMapData));
                     betterPixel = clamp(betterPixel, uint2(0), viewportSize - 1);
                     betterPixel += viewportOrigin;
                     float refinedDepth = prevDepthTexture.read(betterPixel, uniforms.eyeIndex).x;
@@ -2218,7 +2257,7 @@ kernel void adaptiveHierarchical8x8(
             int bsMissCount = 0;
             for (int i = 0; i < 5; ++i) {
                 float2 px = float2(tileId * ADAPTIVE_TILE_SIZE) + bsOffsets[i];
-                float3 bsModelPoint = reconstructModelPoint(px, uniforms);
+                float3 bsModelPoint = reconstructModelPoint(px, uniforms, rateMapData);
                 float3 bsRd = normalize(bsModelPoint - marchOrigin);
                 float bsT = rayIntersectBoundingSphere(marchOrigin, bsRd, float3(0.0), uniforms.boundingSphereRadius);
                 if (bsT < 0.0) bsMissCount++;
@@ -2303,7 +2342,7 @@ kernel void adaptiveHierarchical8x8(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
                 marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3);
-            coarseTCenter = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, coarseParams, lodIterations, fractalType, uniforms.formulaParams, uniforms.maxViewDistance);
+            coarseTCenter = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, coarseParams, lodIterations, fractalType, uniforms.formulaParams, uniforms.maxViewDistance, uniforms.marchEpsilonScale);
             ranCoarseMarch = true;
 
             if (coarseTCenter >= kRayMissThreshold) {
@@ -2323,7 +2362,7 @@ kernel void adaptiveHierarchical8x8(
                 int cornerEmpty = 0;
                 for (int c = 0; c < 5; ++c) {
                     float2 cornerPx = float2(tileId * ADAPTIVE_TILE_SIZE) + cornerOffsets[c];
-                    float3 cModelPoint = reconstructModelPoint(cornerPx, uniforms);
+                    float3 cModelPoint = reconstructModelPoint(cornerPx, uniforms, rateMapData);
                     float3 cOrigin = uniforms.cameraPos;
                     float3 cRd = normalize(cModelPoint - cOrigin);
                     applySphericalInversionRay(cOrigin, cRd, uniforms.sphericalInversionMode, uniforms.sphericalInversionRadius);
@@ -2404,10 +2443,10 @@ kernel void adaptiveHierarchical8x8(
     SceneResult sceneResult;
     if (fineStartT > 0.06f) {
         sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, fineStartT, pixelCenter, 1.0, maxSteps,
-                                              uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier, uniforms.smartAdvanceEnabled != 0);
+                                              uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale);
     } else {
         sceneResult = SceneWithCache(marchOrigin, marchDir, pixelCenter, 1.0, maxSteps,
-                         uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance, uniforms.smartAdvanceEnabled != 0);
+                         uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale);
     }
     
     float adjustedDist = sceneResult.distGlow.x;
@@ -2708,11 +2747,11 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     SceneResult sceneResult;
     bool needFullMarch = true;
     if (FC_WARM_START_ON && warmStartT > 0.0f) {
-        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, warmStartT, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier, uniforms.smartAdvanceEnabled != 0);
+        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, warmStartT, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale);
         needFullMarch = sceneResult.distGlow.x >= kRayMissThreshold;
     }
     if (needFullMarch) {
-        sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance, uniforms.smartAdvanceEnabled != 0);
+        sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale);
     }
     ret = sceneResult.distGlow;
     hitCache = sceneResult.cache;
@@ -2941,7 +2980,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     {
         float leaderCoarseT = 0.05;
         if (quadLaneId == 0) {
-            leaderCoarseT = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, fractalParams, lodIterations, fractalType, uniforms.formulaParams, uniforms.maxViewDistance);
+            leaderCoarseT = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, fractalParams, lodIterations, fractalType, uniforms.formulaParams, uniforms.maxViewDistance, uniforms.marchEpsilonScale);
         }
         coarseStartT = quad_broadcast(leaderCoarseT, 0);
     }
@@ -2949,10 +2988,10 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     SceneResult sceneResult;
     if (coarseStartT < kRayMissThreshold) {
         // Coarse pass found something — start fine march from nearby
-        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, coarseStartT, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier, uniforms.smartAdvanceEnabled != 0);
+        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, coarseStartT, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale);
     } else {
         // Coarse pass missed — full march needed
-        sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance, uniforms.smartAdvanceEnabled != 0);
+        sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale);
     }
     float2 ret = sceneResult.distGlow;
     OrbitCache hitCache = sceneResult.cache;

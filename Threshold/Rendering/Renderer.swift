@@ -80,7 +80,15 @@ actor Renderer {
     // Tile-based compute pipelines (adaptive 8x8 hierarchical cascade)
     var adaptiveHierarchicalPipeline8x8: MTLComputePipelineState?  // Adaptive 3-level cascade
     var tileUniformBuffer: MTLBuffer?
-    
+
+    // Per-eye foveation rate-map parameter buffers for the adaptive compute path.
+    // The kernel decodes physical→screen coordinates from these so it stops
+    // distorting under foveation / renderQuality. `rateMapDummyBuffer` keeps the
+    // kernel's buffer(1) argument bound when no usable rate map exists.
+    private var rateMapParamBuffers: [MTLBuffer?] = [nil, nil]
+    private var rateMapDummyBuffer: MTLBuffer?
+    private var loggedFoveationDecodeOnce = false
+
     // Dedicated compute output texture (has .shaderWrite flag that drawable textures lack)
     var computeOutputTexture: MTLTexture?
 
@@ -1267,7 +1275,65 @@ actor Renderer {
         let maxViewportHeight = max(1, outputTexture.height - viewportOriginY)
         let viewportWidth = min(max(1, Int(viewport.width.rounded(.up))), maxViewportWidth)
         let viewportHeight = min(max(1, Int(viewport.height.rounded(.up))), maxViewportHeight)
-        
+
+        // === Foveation rate-map decode setup ===
+        // With foveation on, the drawable color texture is variable-density
+        // physical space the compositor un-foveates via a rasterization rate map.
+        // The compute kernel writes physical pixels, so it must decode
+        // physical→screen to reconstruct rays (see reconstructModelPoint). Fall
+        // back to the legacy linear path when no usable rate map exists
+        // (Simulator, foveation off, or a physical-size mismatch).
+        let rateMaps = drawable.rasterizationRateMaps
+        var rateMapValid = false
+        var rateMapLayer = 0
+        var screenResolution = SIMD2<Float>(Float(viewportWidth), Float(viewportHeight))
+        var selectedRateMap: MTLRasterizationRateMap? = nil
+        if !rateMaps.isEmpty {
+            // Layered drawable: a single map services every eye via its layer.
+            // Dedicated drawable: one map per eye (layer 0).
+            let perEye = rateMaps.count == drawable.views.count
+            let map = perEye ? rateMaps[viewIndex] : rateMaps[0]
+            let layer = perEye ? 0 : viewIndex
+            let phys = map.physicalSize(layer: layer)
+            if phys.width == outputTexture.width && phys.height == outputTexture.height {
+                selectedRateMap = map
+                rateMapLayer = layer
+                rateMapValid = true
+                screenResolution = SIMD2<Float>(Float(map.screenSize.width), Float(map.screenSize.height))
+            }
+            if !loggedFoveationDecodeOnce && RENDERER_DEBUG {
+                loggedFoveationDecodeOnce = true
+                print("🔬 Foveation decode: maps=\(rateMaps.count) perEye=\(perEye) layer=\(layer) " +
+                      "physical=\(phys.width)x\(phys.height) screen=\(map.screenSize.width)x\(map.screenSize.height) " +
+                      "output=\(outputTexture.width)x\(outputTexture.height) viewport=\(viewportWidth)x\(viewportHeight) " +
+                      "valid=\(rateMapValid)")
+            }
+        }
+
+        // Parameter buffer bound at buffer(1). The kernel only builds a decoder
+        // from it when rateMapValid == 1; otherwise a small dummy keeps the
+        // argument bound so the dispatch never faults on an unbound buffer.
+        var rateMapParamBuffer: MTLBuffer?
+        if let map = selectedRateMap {
+            let need = map.parameterDataSizeAndAlign.size
+            if rateMapParamBuffers[viewIndex] == nil || rateMapParamBuffers[viewIndex]!.length < need {
+                rateMapParamBuffers[viewIndex] = device.makeBuffer(length: max(need, 16), options: .storageModeShared)
+                rateMapParamBuffers[viewIndex]?.label = "RateMapParams eye\(viewIndex)"
+            }
+            if let buf = rateMapParamBuffers[viewIndex] {
+                map.copyParameterData(buffer: buf, offset: 0)
+                rateMapParamBuffer = buf
+            }
+        }
+        if rateMapParamBuffer == nil {
+            rateMapValid = false  // allocation failed or no map → stay linear
+            if rateMapDummyBuffer == nil {
+                rateMapDummyBuffer = device.makeBuffer(length: 256, options: .storageModeShared)
+                rateMapDummyBuffer?.label = "RateMapParams (dummy)"
+            }
+            rateMapParamBuffer = rateMapDummyBuffer
+        }
+
         var tileUniforms = TileUniforms(
             invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
             invProjMatrix: projection.inverse,
@@ -1291,6 +1357,9 @@ actor Renderer {
             colorIterations: Int32(settingsSnapshot.colorIterations),
             maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
             maxViewDistance: framePreparation.maxViewDistance,
+            // Infinite zoom: tighten the march hit-threshold floor as we zoom in so
+            // fine detail keeps resolving (1.0 at base → byte-identical).
+            marchEpsilonScale: 1.0 / max(framePreparation.effectiveScale, 1.0),
             eyeIndex: UInt32(viewIndex),
             debugHierarchical: settingsSnapshot.debugHierarchical ? 1 : 0,
             limitFlash: settingsSnapshot.limitFlash,
@@ -1330,7 +1399,10 @@ actor Renderer {
             precomputedLighting: framePreparation.precomputedLighting,
             precomputedAudio: framePreparation.precomputedAudio,
             precomputedFog: framePreparation.precomputedFog,
-            colorScheme: colorSchemeParams
+            colorScheme: colorSchemeParams,
+            screenResolution: screenResolution,
+            rateMapValid: rateMapValid ? 1 : 0,
+            rateMapLayer: UInt32(rateMapLayer)
         )
         
         // Copy uniforms to buffer (pointer cached by caller across both eyes)
@@ -1346,6 +1418,10 @@ actor Renderer {
         computeEncoder.label = viewIndex == 0 ? "Adaptive Compute - Eye 0" : "Adaptive Compute - Eye 1"
         computeEncoder.setComputePipelineState(pipeline)
         computeEncoder.setBuffer(uniformBuffer, offset: uniformOffset, index: 0)
+        if let rateMapParamBuffer {
+            computeEncoder.setBuffer(rateMapParamBuffer, offset: 0, index: 1)
+            computeEncoder.useResource(rateMapParamBuffer, usage: .read)
+        }
         computeEncoder.setTexture(outputTexture, index: 0)
         
         // Temporal reprojection depth textures

@@ -229,6 +229,9 @@ extension Renderer {
                             fractalIterations: Int32(settingsSnapshot.fractalIterations),
                             maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
                             maxViewDistance: maxViewDistance,
+                            // Infinite zoom: tighten the march hit-threshold floor as we zoom
+                            // in so fine detail keeps resolving (1.0 at base → byte-identical).
+                            marchEpsilonScale: 1.0 / max(effectiveScale, 1.0),
                             colorMix: animatedColorMix,
                             glowIntensity: animatedGlow,
                             foldingLimit: settingsSnapshot.foldingLimit,

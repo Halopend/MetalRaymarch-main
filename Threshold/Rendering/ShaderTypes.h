@@ -228,6 +228,10 @@ typedef struct
     int fractalIterations;
     int maxRaySteps;
     float maxViewDistance;
+    // Infinite zoom: 1/max(effectiveScale,1). Scales the raymarch hit-threshold
+    // floor down as you zoom in so fine detail keeps resolving (1.0 at base zoom
+    // → byte-identical). See the RenderSettings infinite-zoom driver.
+    float marchEpsilonScale;
     float colorMix;
     float glowIntensity;
     float foldingLimit;      // Box folding limit (default 1.0)
@@ -312,6 +316,9 @@ typedef struct
     int colorIterations;
     int maxRaySteps;
     float maxViewDistance;
+    // Infinite zoom: 1/max(effectiveScale,1). Scales the raymarch hit-threshold
+    // floor down as you zoom in so fine detail keeps resolving (1.0 at base zoom).
+    float marchEpsilonScale;
     uint32_t eyeIndex;
     uint32_t debugHierarchical;  // 1 = overlay a yellow tile-boundary grid
     float limitFlash;            // Edge flash when gesture hits limit (0-1)
@@ -369,6 +376,19 @@ typedef struct
     PrecomputedAudio precomputedAudio;            // Aggregated audio energy
     PrecomputedFog precomputedFog;                // Fog helpers
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
+
+    // === FOVEATION RATE-MAP DECODE (visionOS adaptive compute path only) ===
+    // When foveation is enabled the compositor treats the drawable color texture
+    // as variable-density PHYSICAL space and un-foveates it through a
+    // rasterization rate map before display. The fragment path gets this for free
+    // via the rasterizer; the compute kernel writes physical pixels directly, so
+    // it must reconstruct rays in SCREEN (logical) space by decoding
+    // physical→screen through the rate map (see reconstructModelPoint). These
+    // fields drive that decode. rateMapValid == 0 keeps the legacy linear path,
+    // which is correct when foveation is off or no usable rate map exists.
+    vector_float2 screenResolution;  // rateMap.screenSize: logical viewport size for NDC normalization
+    int rateMapValid;                // 1 = rateMapData (buffer 1) is a valid rate map to decode
+    uint32_t rateMapLayer;           // rate-map layer for this eye (layered: eyeIndex; dedicated: 0)
 } TileUniforms;
 
 // Include Buddhabrot types so they're visible through the bridging header
