@@ -48,5 +48,15 @@ final class MacSpecializedPipelineCache: Sendable {
     func failBuild(_ key: String) {
         state.withLock { $0.pending.remove(key) }
     }
+
+    /// Drop every cached pipeline (and any in-flight build) whose key starts with
+    /// `prefix`. Used to retire a custom formula's `CX{hash}_` pipelines on switch
+    /// or deactivation (pass `"CX"` to clear all custom pipelines).
+    func evict(prefix: String) {
+        state.withLock { current in
+            current.cache = current.cache.filter { !$0.key.hasPrefix(prefix) }
+            current.pending = current.pending.filter { !$0.hasPrefix(prefix) }
+        }
+    }
 }
 #endif

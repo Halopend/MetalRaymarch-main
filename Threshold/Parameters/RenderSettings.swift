@@ -99,6 +99,12 @@ final class RenderSettings: @unchecked Sendable {
     private var _sphereProjectionEnabled: Bool = false
     private var _sphereProjectionBlend: Float = 1.0
     private var _sphereProjectionRadius: Float = 1.0
+    // Custom space warp (built-in "Twist" by default; a loaded .threshfx warp can
+    // override the GPU function). Strength 0 = off (dead-code-eliminated).
+    private var _spaceWarpStrength: Float = 0.0
+    private var _spaceWarpParam1: Float = 0.0
+    private var _spaceWarpParam2: Float = 0.0
+    private var _spaceWarpParam3: Float = 0.0
     private var _platformRadius: Float = 1.888
     private var _platformEnabled: Bool = true
     private var _audioLevel: Float = 0.0            // Current audio level (0-1) for reactive lighting
@@ -477,6 +483,25 @@ final class RenderSettings: @unchecked Sendable {
             withLock { _sphereProjectionRadius = max(0.2, min(12.0, newValue)) }
             persistDisplay()
         }
+    }
+
+    /// Custom space-warp strength (0 = off). Drives the built-in "Twist" warp, or
+    /// a loaded `.threshfx` space-warp effect once that overrides the GPU function.
+    var spaceWarpStrength: Float {
+        get { withLock { _spaceWarpStrength } }
+        set { withLock { _spaceWarpStrength = max(0.0, min(2.0, newValue)) } }
+    }
+    var spaceWarpParam1: Float {
+        get { withLock { _spaceWarpParam1 } }
+        set { withLock { _spaceWarpParam1 = newValue } }
+    }
+    var spaceWarpParam2: Float {
+        get { withLock { _spaceWarpParam2 } }
+        set { withLock { _spaceWarpParam2 = newValue } }
+    }
+    var spaceWarpParam3: Float {
+        get { withLock { _spaceWarpParam3 } }
+        set { withLock { _spaceWarpParam3 = newValue } }
     }
 
     var platformRadius: Float {
@@ -2157,6 +2182,10 @@ final class RenderSettings: @unchecked Sendable {
                 sphereProjectionEnabled: _sphereProjectionEnabled,
                 sphereProjectionBlend: _sphereProjectionBlend,
                 sphereProjectionRadius: _sphereProjectionRadius,
+                spaceWarpStrength: _spaceWarpStrength,
+                spaceWarpParam1: _spaceWarpParam1,
+                spaceWarpParam2: _spaceWarpParam2,
+                spaceWarpParam3: _spaceWarpParam3,
                 platformRadius: _platformRadius,
                 platformEnabled: _platformEnabled,
                 audioLevel: _audioLevel,

@@ -160,4 +160,83 @@ struct SpaceModuleTests {
         #expect(ModuleRegistry.capability(.space, param: "sphereProjectionEnabled", for: .kleinian)
                 == FractalModelType.kleinian.supports(.sphereProjection))
     }
+
+    // MARK: Lighting module
+
+    @Test("Lighting module routes universal effects (glow/hue/fog) on any fractal")
+    func lightingModuleRoutesUniversal() {
+        let settings = RenderSettings()
+        settings.fractalType = .kleinian
+        let block = ModuleParamBlock(params: [
+            "glowEnabled": .bool(true), "glowIntensity": .double(0.5),
+            "hueRotationEnabled": .bool(true), "hueRotationSpeed": .double(0.07),
+            "fogEnabled": .bool(true), "fogIntensity": .double(0.3),
+            "lightingMode": .string("animated"),
+        ])
+        ModuleRegistry.apply(.lighting, block: block, to: settings)
+
+        #expect(settings.glowEffect.enabled == true)
+        #expect(abs(settings.glowEffect.intensity - 0.5) < 1e-5)
+        #expect(settings.hueRotationEffect.enabled == true)
+        #expect(abs(settings.hueRotationEffect.speed - 0.07) < 1e-5)
+        #expect(settings.fogEffect.enabled == true)
+        #expect(settings.lightingMode == .animated)
+    }
+
+    @Test("Lighting capability gate: polar rotation skipped on unsupported, applied on supported")
+    func lightingCapabilityGate() {
+        let block = ModuleParamBlock(params: [
+            "polarRotationDirection": .string("clockwise"),
+            "polarRotationSpeed": .double(0.3),
+        ])
+
+        // Kleinian does NOT support polar rotation → skipped (stays off).
+        #expect(FractalModelType.kleinian.supports(.polarRotation) == false)
+        let kleinian = RenderSettings()
+        kleinian.fractalType = .kleinian
+        ModuleRegistry.apply(.lighting, block: block, to: kleinian)
+        #expect(kleinian.polarRotationEffect.direction == .off)
+
+        // Mandelbulb DOES support it → applied.
+        #expect(FractalModelType.mandelbulb.supports(.polarRotation) == true)
+        let mandelbulb = RenderSettings()
+        mandelbulb.fractalType = .mandelbulb
+        ModuleRegistry.apply(.lighting, block: block, to: mandelbulb)
+        #expect(mandelbulb.polarRotationEffect.direction == .clockwise)
+        #expect(abs(mandelbulb.polarRotationEffect.speed - 0.3) < 1e-5)
+    }
+
+    @Test("Lighting module decodes from a scene's modules block")
+    func lightingModuleDecodesFromScene() throws {
+        let json = """
+        {
+          "id": "00000000-0000-0000-0000-0000000000CC",
+          "name": "Lit Scene",
+          "createdAt": 0,
+          "fractalIterations": 9,
+          "maxRaySteps": 64,
+          "colorMix": 0.5,
+          "colorIterations": 8,
+          "position": [0, 0, -1.2],
+          "scale": 1,
+          "fractalType": "mandelbox",
+          "minDistance": 0.8,
+          "fractalScale": 2.8,
+          "foldingLimit": 1.0,
+          "sphereRadius": 0.5,
+          "schemaVersion": 2,
+          "modules": {
+            "lighting": { "params": { "glowEnabled": true, "glowIntensity": 0.6, "pulseEnabled": true, "pulseAmount": 0.2 } }
+          }
+        }
+        """
+        let preset = try JSONDecoder().decode(FractalPreset.self, from: Data(json.utf8))
+        let settings = RenderSettings()
+        settings.fractalType = .mandelbox
+        preset.apply(to: settings)
+        #expect(settings.glowEffect.enabled == true)
+        #expect(abs(settings.glowEffect.intensity - 0.6) < 1e-5)
+        #expect(settings.pulseEffect.enabled == true)
+        #expect(abs(settings.pulseEffect.amount - 0.2) < 1e-5)
+    }
 }

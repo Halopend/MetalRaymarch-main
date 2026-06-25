@@ -162,29 +162,94 @@ enum ModuleRegistry {
             "sphereProjectionEnabled",
             "sphereProjectionBlend",
             "sphereProjectionRadius",
+            "spaceWarpStrength",
+            "spaceWarpParam1",
+            "spaceWarpParam2",
+            "spaceWarpParam3",
+        ]
+    )
+
+    static let lighting = ModuleDescriptor(
+        key: .lighting,
+        displayName: "Lighting",
+        icon: "lightbulb",
+        route: ModuleRoute(tab: "Visualizations", section: "Lighting"),
+        paramNames: [
+            // Master
+            "lightVariationRate", "lightingMode",
+            // Hue Rotation (universal)
+            "hueRotationEnabled", "hueRotationSpeed", "hueRotationIntensity",
+            // Pulse (universal)
+            "pulseEnabled", "pulseSpeed", "pulseAmount",
+            // Glow (universal)
+            "glowEnabled", "glowIntensity",
+            // Bloom (universal)
+            "bloomEnabled", "bloomStrength",
+            // Fog (universal)
+            "fogEnabled", "fogIntensity", "fogHueRotateEnabled", "fogHueRotateSpeed",
+            "fogColorR", "fogColorG", "fogColorB",
+            // Gradient Cycle (universal)
+            "gradientCycleEnabled", "gradientCycleSpeed", "gradientCycleMirrorLoop",
+            // Linear Rail (universal)
+            "linearRailEnabled", "linearRailAxis", "linearRailSpeed", "linearRailAmplitude",
+            "linearRailMultiplier", "linearRailOrbitAmount", "linearRailOrbitSpeed",
+            // Beat Flash (universal, audio-driven)
+            "beatFlashEnabled", "beatFlashIntensity",
+            // Polar Rotation (fractal-gated: Mandelbulb / Quaternion Julia)
+            "polarRotationDirection", "polarRotationSpeed",
+            // Julia Drift (fractal-gated: Mandelbulb Julia)
+            "juliaDriftEnabled", "juliaDriftSpeed",
         ]
     )
 
     /// All registered modules. Add new domains here.
-    static let all: [ModuleDescriptor] = [space]
+    static let all: [ModuleDescriptor] = [space, lighting]
 
     static func descriptor(for key: ModuleKey) -> ModuleDescriptor? {
         all.first { $0.key == key }
     }
 
     /// Whether a typed param applies to the active fractal. Universal params
-    /// (e.g. the global spherical inversion) always pass; fractal-specific ones
-    /// defer to the capability key so a scene that sets sphere projection on a
-    /// fractal you've pruned it from is silently ignored rather than misapplied.
+    /// (e.g. the global spherical inversion, glow, fog) always pass; fractal-
+    /// specific ones defer to the capability key so a scene that sets, say,
+    /// sphere projection or polar rotation on a fractal that doesn't support it
+    /// is silently ignored rather than misapplied.
     static func capability(_ key: ModuleKey, param: String, for fractal: FractalModelType) -> Bool {
-        switch (key, param) {
-        case (.space, "sphereProjectionEnabled"),
-             (.space, "sphereProjectionBlend"),
-             (.space, "sphereProjectionRadius"):
-            return fractal.supports(.sphereProjection)
+        switch key {
+        case .space:
+            switch param {
+            case "sphereProjectionEnabled", "sphereProjectionBlend", "sphereProjectionRadius":
+                return fractal.supports(.sphereProjection)
+            default:
+                return true   // spherical inversion is universal
+            }
+        case .lighting:
+            // Only polar rotation and Julia drift are fractal-gated; every other
+            // lighting effect (and the master/mode params) is universal.
+            if let tag = lightingTag(forParam: param), tag == .polarRotation || tag == .juliaDrift {
+                return fractal.supports(tag)
+            }
+            return true
         default:
             return true
         }
+    }
+
+    /// Maps a lighting param name to its EffectTag (nil for master/mode params).
+    /// Prefix-based; `fog*` covers fogHueRotate/fogColor, `linearRail*` covers
+    /// the orbit sub-fields, etc.
+    private static func lightingTag(forParam name: String) -> EffectTag? {
+        if name.hasPrefix("fog") { return .fog }
+        if name.hasPrefix("hueRotation") { return .hueRotation }
+        if name.hasPrefix("pulse") { return .pulse }
+        if name.hasPrefix("glow") { return .glow }
+        if name.hasPrefix("bloom") { return .bloom }
+        if name.hasPrefix("gradientCycle") { return .gradientCycle }
+        if name.hasPrefix("linearRail") { return .linearRail }
+        if name.hasPrefix("beatFlash") { return .beatFlash }
+        if name.hasPrefix("polarRotation") { return .polarRotation }
+        if name.hasPrefix("juliaDrift") { return .juliaDrift }
+        return nil   // lightVariationRate, lightingMode
     }
 
     /// Apply a scene's module block to live settings, filtering each param by
@@ -201,6 +266,8 @@ enum ModuleRegistry {
         switch key {
         case .space:
             applySpaceParam(name: name, value: value, to: settings)
+        case .lighting:
+            applyLightingParam(name: name, value: value, to: settings)
         default:
             // Other domains route through the flat FractalPreset fields for now;
             // they get module handlers here as they are converted.
@@ -226,8 +293,133 @@ enum ModuleRegistry {
             if let f = value.floatValue { settings.sphereProjectionBlend = f }
         case "sphereProjectionRadius":
             if let f = value.floatValue { settings.sphereProjectionRadius = f }
+        case "spaceWarpStrength":
+            if let f = value.floatValue { settings.spaceWarpStrength = f }
+        case "spaceWarpParam1":
+            if let f = value.floatValue { settings.spaceWarpParam1 = f }
+        case "spaceWarpParam2":
+            if let f = value.floatValue { settings.spaceWarpParam2 = f }
+        case "spaceWarpParam3":
+            if let f = value.floatValue { settings.spaceWarpParam3 = f }
         default:
             break
+        }
+    }
+
+    // MARK: Lighting module application
+    //
+    // Each param is a flat scalar/bool/enum-string that read-modify-writes the
+    // relevant effect struct via the SAME RenderSettings accessor the UI uses.
+    // Effects are value types, so sequential get-mutate-set is correct even when
+    // a scene sets several fields of the same effect.
+    private static func applyLightingParam(name: String, value: ParamValue, to settings: RenderSettings) {
+        switch name {
+        // ── Master ──
+        case "lightVariationRate":
+            if let f = value.floatValue { settings.lightVariationRate = f }
+        case "lightingMode":
+            if let s = value.stringValue, let m = lightingMode(from: s) { settings.lightingMode = m }
+
+        // ── Hue Rotation ──
+        case "hueRotationEnabled":
+            if let b = value.boolValue { var e = settings.hueRotationEffect; e.enabled = b; settings.hueRotationEffect = e }
+        case "hueRotationSpeed":
+            if let f = value.floatValue { var e = settings.hueRotationEffect; e.speed = f; settings.hueRotationEffect = e }
+        case "hueRotationIntensity":
+            if let f = value.floatValue { var e = settings.hueRotationEffect; e.intensity = f; settings.hueRotationEffect = e }
+
+        // ── Pulse ──
+        case "pulseEnabled":
+            if let b = value.boolValue { var e = settings.pulseEffect; e.enabled = b; settings.pulseEffect = e }
+        case "pulseSpeed":
+            if let f = value.floatValue { var e = settings.pulseEffect; e.speed = f; settings.pulseEffect = e }
+        case "pulseAmount":
+            if let f = value.floatValue { var e = settings.pulseEffect; e.amount = f; settings.pulseEffect = e }
+
+        // ── Glow ──
+        case "glowEnabled":
+            if let b = value.boolValue { var e = settings.glowEffect; e.enabled = b; settings.glowEffect = e }
+        case "glowIntensity":
+            if let f = value.floatValue { var e = settings.glowEffect; e.intensity = f; settings.glowEffect = e }
+
+        // ── Bloom ──
+        case "bloomEnabled":
+            if let b = value.boolValue { var e = settings.bloomEffect; e.enabled = b; settings.bloomEffect = e }
+        case "bloomStrength":
+            if let f = value.floatValue { var e = settings.bloomEffect; e.strength = f; settings.bloomEffect = e }
+
+        // ── Fog ──
+        case "fogEnabled":
+            if let b = value.boolValue { var e = settings.fogEffect; e.enabled = b; settings.fogEffect = e }
+        case "fogIntensity":
+            if let f = value.floatValue { var e = settings.fogEffect; e.intensity = f; settings.fogEffect = e }
+        case "fogHueRotateEnabled":
+            if let b = value.boolValue { var e = settings.fogEffect; e.hueRotateEnabled = b; settings.fogEffect = e }
+        case "fogHueRotateSpeed":
+            if let f = value.floatValue { var e = settings.fogEffect; e.hueRotateSpeed = f; settings.fogEffect = e }
+        case "fogColorR":
+            if let f = value.floatValue { var e = settings.fogEffect; e.color.x = f; settings.fogEffect = e }
+        case "fogColorG":
+            if let f = value.floatValue { var e = settings.fogEffect; e.color.y = f; settings.fogEffect = e }
+        case "fogColorB":
+            if let f = value.floatValue { var e = settings.fogEffect; e.color.z = f; settings.fogEffect = e }
+
+        // ── Gradient Cycle ──
+        case "gradientCycleEnabled":
+            if let b = value.boolValue { var e = settings.gradientCycleEffect; e.enabled = b; settings.gradientCycleEffect = e }
+        case "gradientCycleSpeed":
+            if let f = value.floatValue { var e = settings.gradientCycleEffect; e.speed = f; settings.gradientCycleEffect = e }
+        case "gradientCycleMirrorLoop":
+            if let b = value.boolValue { var e = settings.gradientCycleEffect; e.mirrorLoop = b; settings.gradientCycleEffect = e }
+
+        // ── Linear Rail ──
+        case "linearRailEnabled":
+            if let b = value.boolValue { var e = settings.linearRailEffect; e.enabled = b; settings.linearRailEffect = e }
+        case "linearRailAxis":
+            if let s = value.stringValue, let axis = LinearRailAxis(rawValue: s) { var e = settings.linearRailEffect; e.axis = axis; settings.linearRailEffect = e }
+        case "linearRailSpeed":
+            if let f = value.floatValue { var e = settings.linearRailEffect; e.speed = f; settings.linearRailEffect = e }
+        case "linearRailAmplitude":
+            if let f = value.floatValue { var e = settings.linearRailEffect; e.amplitude = f; settings.linearRailEffect = e }
+        case "linearRailMultiplier":
+            if let f = value.floatValue { var e = settings.linearRailEffect; e.multiplier = f; settings.linearRailEffect = e }
+        case "linearRailOrbitAmount":
+            if let f = value.floatValue { var e = settings.linearRailEffect; e.orbitAmount = f; settings.linearRailEffect = e }
+        case "linearRailOrbitSpeed":
+            if let f = value.floatValue { var e = settings.linearRailEffect; e.orbitSpeed = f; settings.linearRailEffect = e }
+
+        // ── Beat Flash ──
+        case "beatFlashEnabled":
+            if let b = value.boolValue { var e = settings.beatFlashEffect; e.enabled = b; settings.beatFlashEffect = e }
+        case "beatFlashIntensity":
+            if let f = value.floatValue { var e = settings.beatFlashEffect; e.intensity = f; settings.beatFlashEffect = e }
+
+        // ── Polar Rotation (fractal-gated) ──
+        case "polarRotationDirection":
+            if let s = value.stringValue, let d = PolarRotationDirection(rawValue: s) { var e = settings.polarRotationEffect; e.direction = d; settings.polarRotationEffect = e }
+        case "polarRotationSpeed":
+            if let f = value.floatValue { var e = settings.polarRotationEffect; e.speed = f; settings.polarRotationEffect = e }
+
+        // ── Julia Drift (fractal-gated) ──
+        case "juliaDriftEnabled":
+            if let b = value.boolValue { var e = settings.juliaDriftEffect; e.enabled = b; settings.juliaDriftEffect = e }
+        case "juliaDriftSpeed":
+            if let f = value.floatValue { var e = settings.juliaDriftEffect; e.speed = f; settings.juliaDriftEffect = e }
+
+        default:
+            break
+        }
+    }
+
+    /// Maps a scene's lighting-mode string to the enum (mirrors
+    /// LightingMode.codableString, with the legacy "static" alias).
+    private static func lightingMode(from s: String) -> LightingMode? {
+        switch s {
+        case "staticLight", "static": return .staticLight
+        case "animated":              return .animated
+        case "audioReactive":         return .audioReactive
+        case "visualizer":            return .visualizer
+        default:                      return nil
         }
     }
 }

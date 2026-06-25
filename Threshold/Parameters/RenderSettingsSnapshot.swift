@@ -19,6 +19,10 @@ struct RenderSettingsSnapshot {
     let sphereProjectionEnabled: Bool
     let sphereProjectionBlend: Float
     let sphereProjectionRadius: Float
+    let spaceWarpStrength: Float
+    let spaceWarpParam1: Float
+    let spaceWarpParam2: Float
+    let spaceWarpParam3: Float
     let platformRadius: Float
     let platformEnabled: Bool
     let audioLevel: Float

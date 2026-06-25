@@ -294,6 +294,8 @@ extension ContentView {
 
             sphereProjectionSection
 
+            spaceWarpSection
+
             // ── Detail (Grab Gesture Transform) ──────────────────────────────
             VStack(spacing: 8) {
                 HStack {
@@ -480,6 +482,33 @@ extension ContentView {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.teal.opacity(0.06)))
+    }
+
+    /// Custom space warp (the cross-platform space-module seam). The built-in
+    /// default is a "Twist" about the vertical axis; a loaded `.threshfx`
+    /// space-warp effect will override the GPU function (Stage 2). 0 = off.
+    private var spaceWarpSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Space Warp", systemImage: "tornado")
+                    .font(.headline)
+                Spacer()
+            }
+            Text("A domain-space twist applied to this fractal before it is evaluated. The built-in default twists about the vertical axis; loadable space-effect plugins replace it. 0 = off.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            EffectSliderRow(icon: "tornado", label: "Twist",
+                value: Binding(get: { appModel.renderSettings.spaceWarpStrength },
+                               set: { appModel.renderSettings.spaceWarpStrength = $0 }),
+                range: 0.0...2.0,
+                enabled: .constant(true),
+                onChanged: { },
+                showToggle: false)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
     }
 
     private var fractalQualityContent: some View {

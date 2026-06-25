@@ -1300,6 +1300,10 @@ actor Renderer {
             sphericalInversionRadius: settingsSnapshot.sphericalInversionRadius,
             sphereProjectionBlend: settingsSnapshot.sphereProjectionEnabled ? settingsSnapshot.sphereProjectionBlend : 0,
             sphereProjectionRadius: settingsSnapshot.sphereProjectionRadius,
+            spaceWarpStrength: settingsSnapshot.spaceWarpStrength,
+            spaceWarpParam1: settingsSnapshot.spaceWarpParam1,
+            spaceWarpParam2: settingsSnapshot.spaceWarpParam2,
+            spaceWarpParam3: settingsSnapshot.spaceWarpParam3,
             // === GMT-FRACTALS OPTIMIZATIONS ===
             stepMultiplier: settingsSnapshot.stepMultiplier,
             boundingSphereRadius: 0.0,  // Disabled: Mandelbox extent varies with minDistance/scale; needs dynamic radius

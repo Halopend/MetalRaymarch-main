@@ -34,6 +34,15 @@
         "sphereProjectionBlend" : 0.65,
         "sphereProjectionRadius" : 1.4
       }
+    },
+    "lighting" : {
+      "params" : {
+        "hueRotationEnabled" : true,
+        "hueRotationSpeed" : 0.06,
+        "hueRotationIntensity" : 0.4,
+        "fogEnabled" : true,
+        "fogIntensity" : 0.28
+      }
     }
   }
 }

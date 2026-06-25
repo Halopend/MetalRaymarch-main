@@ -9,6 +9,69 @@ import simd
 import AppKit
 #endif
 
+// MARK: - Custom Shader Box (runtime-compiled .threshfx → Mac/iPad)
+
+/// NSLock-guarded holder for the active runtime-compiled custom `MTLLibrary` and
+/// its `EmbeddedFormula.shortHash`, plus the per-renderer `CustomShaderCompiler`.
+///
+/// `ThresholdMacRenderer` is a plain class touched from two threads — the render
+/// thread reads `library`/`hash` every frame (in `resolveActivePipeline`), while
+/// the activation handler writes them after an off-thread compile — so this box
+/// serializes those accesses. It mirrors the visionOS `CustomShaderState`, and
+/// because it owns the compile logic the activation handler can capture only
+/// Sendable values (box + cache + device), never the non-Sendable renderer.
+final class MacCustomShaderBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _library: MTLLibrary?
+    private var _hash: String?
+    private var _compiler: CustomShaderCompiler?
+
+    /// The active custom library, or nil when no custom formula is installed.
+    var library: MTLLibrary? { lock.lock(); defer { lock.unlock() }; return _library }
+    /// `shortHash` of the active custom formula (used in the `CX{hash}_` cache key).
+    var hash: String? { lock.lock(); defer { lock.unlock() }; return _hash }
+
+    /// Atomic read of (library, hash) under a single lock. The render thread uses
+    /// this so the cache-key hash and the build library always come from the SAME
+    /// activation — two separate getter calls could otherwise tear if an
+    /// activation lands between them (caching a library-B pipeline under hash-A).
+    func snapshot() -> (library: MTLLibrary?, hash: String?) {
+        lock.lock(); defer { lock.unlock() }; return (_library, _hash)
+    }
+
+    private func sharedCompiler(device: MTLDevice) -> CustomShaderCompiler {
+        lock.lock(); defer { lock.unlock() }
+        if let existing = _compiler { return existing }
+        let made = CustomShaderCompiler(device: device)
+        _compiler = made
+        return made
+    }
+
+    private func set(library: MTLLibrary?, hash: String?) {
+        lock.lock(); _library = library; _hash = hash; lock.unlock()
+    }
+
+    /// Compile + install a custom embedded formula (or pass nil to deactivate).
+    /// The ~0.5–5 s compile runs on the `CustomShaderCompiler` actor — off the
+    /// render and main threads. Library + hash are published together under one
+    /// lock so a frame never sees library-A with hash-B.
+    func activate(_ formula: EmbeddedFormula?,
+                  device: MTLDevice,
+                  cache: MacSpecializedPipelineCache) async throws {
+        guard let formula else {
+            set(library: nil, hash: nil)
+            cache.evict(prefix: "CX")   // drop every custom pipeline
+            return
+        }
+        if hash == formula.shortHash, library != nil { return }   // unchanged → no-op
+        let compiled = try await sharedCompiler(device: device).library(for: formula)
+        if let old = hash, old != formula.shortHash {
+            cache.evict(prefix: "CX\(old)_")   // retire the previous formula's pipelines
+        }
+        set(library: compiled, hash: formula.shortHash)
+    }
+}
+
 
 #if os(macOS)
 
@@ -76,12 +139,19 @@ struct ThresholdMacRenderView: NSViewRepresentable {
                                             clearColor: view.clearColor)
             renderer?.drawableSizeDidChange(view.drawableSize)
             appModel.rendererStartupWarmupComplete = renderer != nil
+            // Compile + activate runtime `.threshfx` formulas on Mac/iPad (was
+            // visionOS-only). Binding here triggers the handler's didSet, which
+            // re-activates any formula loaded before the view existed.
+            if let renderer {
+                appModel.activateEmbeddedFormulaHandler = renderer.embeddedFormulaActivator()
+            }
         }
 
         func tearDown() {
             inputController.setFocus(false)
             renderer = nil
             Task { @MainActor [appModel] in
+                appModel.activateEmbeddedFormulaHandler = nil
                 appModel.rendererStartupWarmupComplete = false
             }
         }
@@ -241,6 +311,9 @@ private final class ThresholdMacRenderer {
     private let colorPixelFormat: MTLPixelFormat
     private let vertexDescriptor: MTLVertexDescriptor
     private let specializedPipelineCache = MacSpecializedPipelineCache()
+    /// Holds the active runtime-compiled custom (`.threshfx`) library + hash.
+    /// Read on the render thread, written by the activation handler; guarded.
+    private let customShaderBox = MacCustomShaderBox()
     private let spatialUpscaler: MacSpatialUpscaler
     private let temporalUpscaler: MacTemporalUpscaler
     /// Dynamic-resolution controller: lowers the offscreen render scale under GPU
@@ -666,7 +739,17 @@ private final class ThresholdMacRenderer {
         )
 
         let powerKey = power.map { "_P\($0)" } ?? ""
-        let key = "FT\(fractalType)_FI\(iterations)_RS\(raySteps)_CI\(colorIterations)\(powerKey)"
+        // Atomic (library, hash) read so the cache-key hash and the build library
+        // always come from the SAME activation. Namespace custom-formula pipelines
+        // by source hash so library-A's FT1000 pipeline is never reused for
+        // library-B (matches visionOS `CX{hash}_`), and so deactivation can evict
+        // exactly one formula's set.
+        let custom = customShaderBox.snapshot()
+        let customPrefix: String = {
+            guard settings.fractalType == .custom, let h = custom.hash else { return "" }
+            return "CX\(h)_"
+        }()
+        let key = customPrefix + "FT\(fractalType)_FI\(iterations)_RS\(raySteps)_CI\(colorIterations)\(powerKey)"
 
         if let specialized = specializedPipelineCache.pipeline(for: key) {
             appModel.isUsingSpecializedPipeline = true
@@ -682,7 +765,8 @@ private final class ThresholdMacRenderer {
                 raySteps: raySteps,
                 fractalType: fractalType,
                 colorIterations: colorIterations,
-                power: power
+                power: power,
+                customLibrary: custom.library
             )
         }
         appModel.isUsingSpecializedPipeline = false
@@ -697,9 +781,15 @@ private final class ThresholdMacRenderer {
                                           raySteps: Int32,
                                           fractalType: Int32,
                                           colorIterations: Int32,
-                                          power: Int32?) {
+                                          power: Int32?,
+                                          customLibrary: MTLLibrary?) {
         let cache = specializedPipelineCache
-        guard let library = device.makeDefaultLibrary(),
+        // When a custom `.threshfx` is active, build against its runtime-compiled
+        // library (a drop-in for default.metallib whose FractalFormulas.h has the
+        // `case FractalTypeCustom` arm). Built-ins resolve identically against it.
+        // `customLibrary` is snapshotted together with the key's hash in
+        // resolveActivePipeline, so the pipeline and its `CX{hash}_` key agree.
+        guard let library = customLibrary ?? device.makeDefaultLibrary(),
               let vertexFunction = library.makeFunction(name: "screenshotVertexShader") else {
             cache.failBuild(key)
             return
@@ -745,6 +835,21 @@ private final class ThresholdMacRenderer {
             } else {
                 cache.failBuild(key)
             }
+        }
+    }
+
+    /// A `@Sendable` activation closure for `AppModel.activateEmbeddedFormulaHandler`,
+    /// bound to this renderer's custom-shader box + pipeline cache. Lets Mac/iPad
+    /// load runtime-compiled `.threshfx` formulas exactly as visionOS does — the
+    /// compiled library is a drop-in for `default.metallib`, so the existing
+    /// function-constant specialization renders the custom DE. Captures only
+    /// Sendable values (box, cache, device), never the renderer itself.
+    func embeddedFormulaActivator() -> @Sendable (EmbeddedFormula?) async throws -> Void {
+        let box = customShaderBox
+        let cache = specializedPipelineCache
+        let device = self.device
+        return { formula in
+            try await box.activate(formula, device: device, cache: cache)
         }
     }
 
@@ -1229,6 +1334,10 @@ private final class ThresholdMacRenderer {
                         sphericalInversionRadius: settings.sphericalInversionRadius,
                         sphereProjectionBlend: settings.sphereProjectionEnabled ? settings.sphereProjectionBlend : 0,
                         sphereProjectionRadius: settings.sphereProjectionRadius,
+                        spaceWarpStrength: settings.spaceWarpStrength,
+                        spaceWarpParam1: settings.spaceWarpParam1,
+                        spaceWarpParam2: settings.spaceWarpParam2,
+                        spaceWarpParam3: settings.spaceWarpParam3,
                         stepMultiplier: settings.stepMultiplier,
                         boundingSphereRadius: settings.estimatedBoundingSphereRadius,
                         smartAdvanceEnabled: settings.smartAdvanceEnabled ? 1 : 0,
@@ -1457,6 +1566,12 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                                             clearColor: view.clearColor)
             renderer?.drawableSizeDidChange(view.drawableSize)
             appModel.rendererStartupWarmupComplete = renderer != nil
+            // Compile + activate runtime `.threshfx` formulas on Mac/iPad (was
+            // visionOS-only). Binding here triggers the handler's didSet, which
+            // re-activates any formula loaded before the view existed.
+            if let renderer {
+                appModel.activateEmbeddedFormulaHandler = renderer.embeddedFormulaActivator()
+            }
         }
 
         func attachGestures(to view: UIView) {
@@ -1489,6 +1604,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             inputController.setFocus(false)
             renderer = nil
             Task { @MainActor [appModel] in
+                appModel.activateEmbeddedFormulaHandler = nil
                 appModel.rendererStartupWarmupComplete = false
             }
         }

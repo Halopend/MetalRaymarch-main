@@ -248,6 +248,10 @@ typedef struct
     float sphericalInversionRadius; // Radius for spherical inversion mode
     float sphereProjectionBlend;    // 0 = off; >0 blends a post-fold radial sphere projection (Mandelbox fast path)
     float sphereProjectionRadius;   // Target radius for the post-fold sphere projection
+    float spaceWarpStrength;        // 0 = off; drives the custom space warp (built-in Twist or a loaded .threshfx warp)
+    float spaceWarpParam1;          // generic warp params (meaning defined by the active warp)
+    float spaceWarpParam2;
+    float spaceWarpParam3;
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;    // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius; // Bounding sphere for early ray rejection (0 = disabled)
@@ -317,6 +321,10 @@ typedef struct
     float sphericalInversionRadius; // Radius for spherical inversion mode
     float sphereProjectionBlend;    // 0 = off; >0 blends a post-fold radial sphere projection (Mandelbox fast path)
     float sphereProjectionRadius;   // Target radius for the post-fold sphere projection
+    float spaceWarpStrength;        // 0 = off; drives the custom space warp (built-in Twist or a loaded .threshfx warp)
+    float spaceWarpParam1;          // generic warp params (meaning defined by the active warp)
+    float spaceWarpParam2;
+    float spaceWarpParam3;
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;        // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius;  // Bounding sphere for early ray rejection (0 = disabled)
