@@ -413,7 +413,7 @@ extension ContentView {
             if cache.display.sphericalInversionMode != .off {
                 EffectSliderRow(icon: "circle", label: "Inversion Radius",
                     value: Binding(get: { cache.display.sphericalInversionRadius }, set: { cache.display.sphericalInversionRadius = $0 }),
-                    range: 0.5...6.0,
+                    range: ControlCatalog.sphericalInversionRadius.range,
                     enabled: Binding(get: { cache.display.sphericalInversionMode != .off }, set: { isEnabled in
                         cache.display.sphericalInversionMode = isEnabled ? .outwardIn : .off
                         cache.commitSphericalInversion()
@@ -634,7 +634,7 @@ extension ContentView {
                             cache.quality.resolutionScale = snapped
                             cache.push(\.resolutionScale, value: snapped)
                         }
-                    ), in: 0.34...1.0, step: 0.01)
+                    ), in: ControlCatalog.resolutionScale.range, step: 0.01)
                     .disabled(cache.quality.tileSize == 8)
                 }
 

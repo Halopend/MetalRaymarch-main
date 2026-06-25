@@ -257,7 +257,7 @@ extension ContentView {
                     musicTargetID: ParameterTargetID.Core.colorMix)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "number", label: "Iterations",
-                    value: $cache.color.colorIterations, range: 4...16,
+                    value: $cache.color.colorIterations, range: ControlCatalog.colorIterations.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorIterations, value: cache.color.colorIterations) },
                     showToggle: false)

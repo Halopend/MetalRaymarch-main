@@ -695,7 +695,9 @@ final class RenderSettings: @unchecked Sendable {
     var colorIterations: Float {
         get { withLock { _colorIterations } }
         set {
-            withLock { _colorIterations = newValue }
+            // Clamp via the single-source spec — feeds a per-pixel GPU loop count,
+            // so an unclamped value was a watchdog-hang risk (was raw assignment).
+            withLock { _colorIterations = ControlCatalog.colorIterations.clamp(newValue) }
             persistColor()
         }
     }
@@ -1434,7 +1436,7 @@ final class RenderSettings: @unchecked Sendable {
     var safetyBubbleRadius: Float {
         get { withLock { _safetyBubbleRadius } }
         set {
-            withLock { _safetyBubbleRadius = max(0.05, min(2.5, newValue)) }
+            withLock { _safetyBubbleRadius = ControlCatalog.safetyBubbleRadius.clamp(newValue) }
             persistSafetyBubble()
         }
     }
@@ -3437,7 +3439,7 @@ final class RenderSettings: @unchecked Sendable {
                 _fractalIterations = newValue.baseFractalIterations
                 _baseMaxRaySteps = newValue.baseMaxRaySteps
                 _maxRaySteps = newValue.baseMaxRaySteps
-                _resolutionScale = newValue.resolutionScale
+                _resolutionScale = ControlCatalog.resolutionScale.clamp(newValue.resolutionScale)
                 _renderQuality = max(0.1, min(QualityConfig.visionMaxRenderQuality, newValue.renderQuality))
                 _tileSize = newValue.tileSize
                 _debugHierarchical = newValue.debugHierarchical
@@ -3481,7 +3483,7 @@ final class RenderSettings: @unchecked Sendable {
                 }
                 _gradientState = newValue.gradientState
                 _colorMix = newValue.colorMix
-                _colorIterations = newValue.colorIterations
+                _colorIterations = ControlCatalog.colorIterations.clamp(newValue.colorIterations)
                 _colorSchemeSaturation = newValue.colorSchemeSaturation
                 _colorSchemeContrast = newValue.colorSchemeContrast
                 _colorSchemeGamma = newValue.colorSchemeGamma
@@ -3617,7 +3619,7 @@ final class RenderSettings: @unchecked Sendable {
                 _extendedGestureRange = newValue.extendedGestureRange
                 _translationSensitivity = newValue.translationSensitivity
                 _rotationAutoSnap = newValue.rotationAutoSnap
-                _rotationSnapWindowDegrees = newValue.rotationSnapWindowDegrees
+                _rotationSnapWindowDegrees = ControlCatalog.rotationSnapWindowDegrees.clamp(newValue.rotationSnapWindowDegrees)
                 _rotationBreakawayDegrees = newValue.rotationBreakawayDegrees
                 _menuToggleGestureEnabled = newValue.menuToggleGestureEnabled
                 _menuToggleGestureMode = newValue.menuToggleGestureMode
@@ -3660,7 +3662,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             withLock {
                 _safetyBubbleEnabled = newValue.enabled
-                _safetyBubbleRadius = newValue.radius
+                _safetyBubbleRadius = ControlCatalog.safetyBubbleRadius.clamp(newValue.radius)
                 _safetyBubbleShape = newValue.shape
                 _safetyBubbleFadeEnabled = newValue.fadeEnabled
                 _safetyBubbleFadeWidth = newValue.fadeWidth

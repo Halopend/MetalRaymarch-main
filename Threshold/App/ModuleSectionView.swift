@@ -169,7 +169,7 @@ extension ModuleUISection {
                     isVisible: { cache.display.sphereProjectionEnabled }),
                 ModuleSliderControl(
                     label: "Projection Radius", icon: "circle",
-                    range: 0.2...6.0,
+                    range: ControlCatalog.sphereProjectionRadius.range,
                     get: { cache.display.sphereProjectionRadius },
                     set: { cache.display.sphereProjectionRadius = $0 },
                     commit: { cache.commitSphereProjection() },

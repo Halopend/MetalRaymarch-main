@@ -143,6 +143,58 @@ enum ControlCatalog {
         range: 0.5...2.5,
         defaultValue: 1.8)
 
+    // MARK: Long-tail controls
+    //
+    // Controls consumed by the property setter + config clamp + UI slider but NOT
+    // the music/gesture node layers — so they are deliberately NOT in `allSpecs`
+    // / `all` (the startup node-agreement validation only covers the canonical
+    // set above). These were each a range/clamp drift bug: the setter clamp and
+    // the slider range had diverged, leaving dead UI range (or, for colorIterations,
+    // an unclamped GPU-loop-count that could hang the watchdog). Canonical values
+    // adversarially verified GPU-safe.
+
+    /// Setter clamped 0.2…12 but the slider only reached 0.5…6 (dead range).
+    static let sphericalInversionRadius = ControlSpec(
+        id: "space.sphericalInversionRadius",
+        name: "Inversion Radius",
+        icon: "circle",
+        range: 0.2...12.0,
+        defaultValue: 2.0)
+
+    /// Twin of the above — setter 0.2…12 vs slider 0.2…6.
+    static let sphereProjectionRadius = ControlSpec(
+        id: "space.sphereProjectionRadius",
+        name: "Projection Radius",
+        icon: "circle",
+        range: 0.2...12.0,
+        defaultValue: 1.0)
+
+    /// Was UNCLAMPED in the setter + raw on restore; feeds a per-pixel GPU loop
+    /// (`steps = max(int(colorIters*quality), 2)`), so an out-of-band persisted
+    /// value was a watchdog-hang vector. Clamp = the slider span 4…16.
+    static let colorIterations = ControlSpec(
+        id: "color.colorIterations",
+        name: "Iterations",
+        icon: "number",
+        range: 4.0...16.0,
+        defaultValue: 8.0)
+
+    /// Setter clamped 1…30 but the slider floored at 2.
+    static let rotationSnapWindowDegrees = ControlSpec(
+        id: "gesture.rotationSnapWindowDegrees",
+        name: "Snap Window",
+        icon: "rotate.3d",
+        range: 1.0...30.0,
+        defaultValue: 6.0)
+
+    /// Setter clamped 0.33…1 but the slider floored at 0.34 (dead sliver).
+    static let resolutionScale = ControlSpec(
+        id: "quality.resolutionScale",
+        name: "Resolution Scale",
+        icon: "rectangle.compress.vertical",
+        range: 0.33...1.0,
+        defaultValue: 1.0)
+
     /// Every canonical spec in declaration order.
     static let allSpecs: [ControlSpec] = [
         fractalScale, colorMix, iterations,

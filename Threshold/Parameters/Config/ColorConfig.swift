@@ -15,7 +15,7 @@ struct ColorConfig: Codable, Equatable, Sendable {
 
     // Color grading
     var colorMix: Float = 0.5              // 0.0 - 1.0
-    var colorIterations: Float = 5.0
+    var colorIterations: Float = 8.0   // 4.0 - 16.0 (matches runtime default; was 5.0)
     var colorSchemeSaturation: Float = 1.7 // 0.0 - 3.0
     var colorSchemeContrast: Float = 1.08  // 0.95 - 1.15
     var colorSchemeGamma: Float = 0.85     // 0.2 - 1.0
@@ -36,6 +36,7 @@ struct ColorConfig: Codable, Equatable, Sendable {
 
     mutating func clamp() {
         colorMix = max(0.0, min(1.0, colorMix))
+        colorIterations = ControlCatalog.colorIterations.clamp(colorIterations)
         colorSchemeSaturation = max(0.0, min(3.0, colorSchemeSaturation))
         colorSchemeContrast = max(0.95, min(1.15, colorSchemeContrast))
         colorSchemeGamma = max(0.2, min(1.0, colorSchemeGamma))

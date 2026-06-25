@@ -108,7 +108,7 @@ struct SafetyBubbleConfig: Codable, Equatable, Sendable {
     // MARK: - Validation
 
     mutating func clamp() {
-        radius = max(0.05, min(2.5, radius))
+        radius = ControlCatalog.safetyBubbleRadius.clamp(radius)
         shape = max(0.0, min(SafetyBubbleShapePreset.maxStoredValue, shape))
         fadeWidth = max(0.0, min(1.0, fadeWidth))
         strength = max(0.0, min(1.0, strength))

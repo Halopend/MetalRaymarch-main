@@ -135,7 +135,7 @@ extension ContentView {
 
             if cache.gesture.rotationAutoSnap {
                 EffectSliderRow(icon: "rotate.3d", label: "Snap Window (°)",
-                    value: $cache.gesture.rotationSnapWindowDegrees, range: 2...30,
+                    value: $cache.gesture.rotationSnapWindowDegrees, range: ControlCatalog.rotationSnapWindowDegrees.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.rotationSnapWindowDegrees, value: cache.gesture.rotationSnapWindowDegrees) },
                     showToggle: false)
