@@ -2534,43 +2534,60 @@ FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float folding
 //   fractalType != 0 dispatches through FractalDE_Dispatch (Formulas/FractalFormulas.h)
 // Safety bubble is now applied to ALL fractal types via applySafetyBubble().
 
+// Space-domain transforms applied to the sample point BEFORE the DE, uniformly
+// for every fractal — so the fractal-type branch below only selects the DE
+// evaluator (Map vs FractalDE_Dispatch), never the warp. `deScale` is the
+// combined DE divisor (max Jacobian stretch) that keeps the raymarch valid.
+// No-op (returns pos, deScale = 1) when nothing is active.
+//
+// Sphere projection stays cross-fractal-only because Mandelbox has its OWN
+// native per-fold projection inside Map(); the custom space warp is universal.
+struct SpaceTransform { float3 point; float deScale; };
+
+FORCE_INLINE SpaceTransform applySpaceTransforms(float3 pos, int type, FractalParams params) {
+    SpaceTransform r;
+    r.point = pos;
+    r.deScale = 1.0f;
+    if (type != FractalTypeMandelbox) {
+        r.deScale *= sphereProjectionDEScale(pos, params.sphereProjBlend, params.sphereProjRadius);
+        r.point = applySphereProjectionDomain(pos, params.sphereProjBlend, params.sphereProjRadius);
+    }
+    r.deScale *= customSpaceWarpDEScale(r.point, params.spaceWarpStrength, params.spaceWarpParam1, params.spaceWarpParam2, params.spaceWarpParam3);
+    r.point = customSpaceWarp(r.point, params.spaceWarpStrength, params.spaceWarpParam1, params.spaceWarpParam2, params.spaceWarpParam3);
+    return r;
+}
+
 FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLimit,
                                int iterations, int fractalType, FormulaParams fp) {
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
+    SpaceTransform w = applySpaceTransforms(pos, type, params);
     if (type == FractalTypeMandelbox) {
-        return Map(pos, params, foldingLimit, iterations);  // bubble applied inside Map()
+        // Bubble applied inside Map(); |w.point| == |pos| for rotational warps.
+        return Map(w.point, params, foldingLimit, iterations) / w.deScale;
     }
     int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
-    // Space module: sphere projection then custom space warp (domain warps; no-op when off).
-    float3 q = applySphereProjectionDomain(pos, params.sphereProjBlend, params.sphereProjRadius);
-    float warpScale = customSpaceWarpDEScale(q, params.spaceWarpStrength, params.spaceWarpParam1, params.spaceWarpParam2, params.spaceWarpParam3);
-    q = customSpaceWarp(q, params.spaceWarpStrength, params.spaceWarpParam1, params.spaceWarpParam2, params.spaceWarpParam3);
-    float d = FractalDE_Dispatch(q, type, fp, loopCount)
-              / (sphereProjectionDEScale(pos, params.sphereProjBlend, params.sphereProjRadius) * warpScale);
+    float d = FractalDE_Dispatch(w.point, type, fp, loopCount) / w.deScale;
     return applySafetyBubble(d, pos, params);
 }
 
 FORCE_INLINE float MapDistOnlyUnified(float3 pos, FractalParams params, float foldingLimit,
                                        int iterations, int fractalType, FormulaParams fp) {
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
+    SpaceTransform w = applySpaceTransforms(pos, type, params);
     if (type == FractalTypeMandelbox) {
-        return MapDistOnly(pos, params, foldingLimit, iterations);  // bubble applied inside
+        return MapDistOnly(w.point, params, foldingLimit, iterations) / w.deScale;
     }
     int loopCount = is_function_constant_defined(FC_SHADOW_ITERATIONS) ? FC_SHADOW_ITERATIONS : iterations;
-    // Space module: sphere projection then custom space warp (domain warps; no-op when off).
-    float3 q = applySphereProjectionDomain(pos, params.sphereProjBlend, params.sphereProjRadius);
-    float warpScale = customSpaceWarpDEScale(q, params.spaceWarpStrength, params.spaceWarpParam1, params.spaceWarpParam2, params.spaceWarpParam3);
-    q = customSpaceWarp(q, params.spaceWarpStrength, params.spaceWarpParam1, params.spaceWarpParam2, params.spaceWarpParam3);
-    float d = FractalDE_Dispatch(q, type, fp, loopCount)
-              / (sphereProjectionDEScale(pos, params.sphereProjBlend, params.sphereProjRadius) * warpScale);
+    float d = FractalDE_Dispatch(w.point, type, fp, loopCount) / w.deScale;
     return applySafetyBubble(d, pos, params);
 }
 
 FORCE_INLINE float MapContinuousUnified(float3 pos, FractalParams params, float foldingLimit,
                                          float fractionalIterations, int fractalType, FormulaParams fp) {
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
+    SpaceTransform w = applySpaceTransforms(pos, type, params);
     if (type == FractalTypeMandelbox) {
-        return MapContinuous(pos, params, foldingLimit, fractionalIterations);  // bubble applied inside
+        return MapContinuous(w.point, params, foldingLimit, fractionalIterations) / w.deScale;
     }
     // Formula DEs do not support Mandelbox-style fractional interpolation yet.
     // For Mandelbulb/MandelbulbJulia, rounding up keeps the coarse pass
@@ -2579,12 +2596,7 @@ FORCE_INLINE float MapContinuousUnified(float3 pos, FractalParams params, float 
     int loopCount = max(isMB
                         ? int(ceil(fractionalIterations))
                         : int(fractionalIterations), 1);
-    // Space module: sphere projection then custom space warp (domain warps; no-op when off).
-    float3 q = applySphereProjectionDomain(pos, params.sphereProjBlend, params.sphereProjRadius);
-    float warpScale = customSpaceWarpDEScale(q, params.spaceWarpStrength, params.spaceWarpParam1, params.spaceWarpParam2, params.spaceWarpParam3);
-    q = customSpaceWarp(q, params.spaceWarpStrength, params.spaceWarpParam1, params.spaceWarpParam2, params.spaceWarpParam3);
-    float d = FractalDE_Dispatch(q, type, fp, loopCount)
-              / (sphereProjectionDEScale(pos, params.sphereProjBlend, params.sphereProjRadius) * warpScale);
+    float d = FractalDE_Dispatch(w.point, type, fp, loopCount) / w.deScale;
     return applySafetyBubble(d, pos, params);
 }
 
@@ -3003,20 +3015,24 @@ FORCE_INLINE float MapWithOrbitCacheUnified(float3 pos, FractalParams params, fl
                                              int iterations, int fractalType, FormulaParams fp,
                                              int colorIterations, thread OrbitCache& cache) {
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
+    // Space transforms applied uniformly; the orbit trap (coloring) and the cached
+    // center distance (used by GetNormal) are evaluated in the same warped space
+    // as the marching DE. No-op when off.
+    SpaceTransform w = applySpaceTransforms(pos, type, params);
     if (type == FractalTypeMandelbox) {
-        return MapWithOrbitCache(pos, params, foldingLimit, iterations, cache);
+        float d = MapWithOrbitCache(w.point, params, foldingLimit, iterations, cache) / w.deScale;
+        if (params.spaceWarpStrength > 0.0f) {
+            // The analytic Jacobian in `cache` is now in warped space — invalidate
+            // it so GetNormal uses the (correct) warped finite-difference path.
+            cache.hasJacobian = false;
+            cache.distance = d;
+        }
+        return d;
     }
-    
+
     // Non-Mandelbox: use formula orbit tracking.
-    // Space module: warp the sample point (sphere projection then custom warp) so
-    // the orbit trap (coloring) and the cached center distance (used by GetNormal)
-    // are evaluated in the same warped space as the marching DE. No-op when off.
-    float3 q = applySphereProjectionDomain(pos, params.sphereProjBlend, params.sphereProjRadius);
-    float warpScale = customSpaceWarpDEScale(q, params.spaceWarpStrength, params.spaceWarpParam1, params.spaceWarpParam2, params.spaceWarpParam3);
-    q = customSpaceWarp(q, params.spaceWarpStrength, params.spaceWarpParam1, params.spaceWarpParam2, params.spaceWarpParam3);
     OrbitData orbit;
-    float d = FractalDE_WithOrbit(q, type, fp, iterations, colorIterations, orbit)
-              / (sphereProjectionDEScale(pos, params.sphereProjBlend, params.sphereProjRadius) * warpScale);
+    float d = FractalDE_WithOrbit(w.point, type, fp, iterations, colorIterations, orbit) / w.deScale;
 
     // Apply safety bubble to non-Mandelbox fractals
     d = applySafetyBubble(d, pos, params);
@@ -3106,16 +3122,20 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
         // (below) produces correct normals on the projected surface.
         return ApproximateMandelbulbNormal(pos, distance, params, foldingLimit, iterations, fp, cache.distance, cache);
     } else if (cache.valid && type == FractalTypeMandelbox) {
-        // Fallback: use cached center distance, reduced iterations
+        // Fallback: use cached center distance, reduced iterations.
         int normalIters = ReducedSecondaryIterations(iterations, type, false);
         float e = max(distance * 0.0005f, 0.0001f);
-        float d0 = cache.distance;
-        
+        // Custom space warp: warp the probes + recover the unscaled warped center
+        // (cache.distance is post-scale when warped). Reduces to the original when off.
+        float sw = params.spaceWarpStrength;
+        float sp1 = params.spaceWarpParam1, sp2 = params.spaceWarpParam2, sp3 = params.spaceWarpParam3;
+        float d0 = cache.distance * customSpaceWarpDEScale(pos, sw, sp1, sp2, sp3);
+
         OrbitCache dummy;
-        float dx = MapWithOrbitCache(pos + float3(e, 0, 0), params, foldingLimit, normalIters, dummy);
-        float dy = MapWithOrbitCache(pos + float3(0, e, 0), params, foldingLimit, normalIters, dummy);
-        float dz = MapWithOrbitCache(pos + float3(0, 0, e), params, foldingLimit, normalIters, dummy);
-        
+        float dx = MapWithOrbitCache(customSpaceWarp(pos + float3(e, 0, 0), sw, sp1, sp2, sp3), params, foldingLimit, normalIters, dummy);
+        float dy = MapWithOrbitCache(customSpaceWarp(pos + float3(0, e, 0), sw, sp1, sp2, sp3), params, foldingLimit, normalIters, dummy);
+        float dz = MapWithOrbitCache(customSpaceWarp(pos + float3(0, 0, e), sw, sp1, sp2, sp3), params, foldingLimit, normalIters, dummy);
+
         float3 gradient = float3(dx - d0, dy - d0, dz - d0);
         return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
     } else if (type != FractalTypeMandelbox && cache.valid) {

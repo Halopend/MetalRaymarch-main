@@ -228,7 +228,7 @@ classDiagram
         +resolvedValue(at) Float
     }
     class ParameterNodeRegistry {
-        +shared$ : ParameterNodeRegistry
+        +shared : ParameterNodeRegistry
         +coreNodes : Dictionary~String, FloatParameterNode~
         +effectNodes : Dictionary~String, FloatParameterNode~
         -formulaBatches : Dictionary~FractalModelType, ParameterNodeBatch~
@@ -248,12 +248,12 @@ classDiagram
     }
     class ParameterTargetID {
         <<enumeration>>
-        +Core.fractalScale$ : String
-        +Core.colorMix$ : String
-        +Effect.glow$ : String
-        +coreAndEffect$ : String[]
-        +formula(type, index, name)$ String
-        +parseFormulaID(id)$ FormulaRef?
+        +Core_fractalScale : String
+        +Core_colorMix : String
+        +Effect_glow : String
+        +coreAndEffect : String[]
+        +formula(type, index, name) String
+        +parseFormulaID(id) FormulaRef?
     }
 
     AnyParameterNodeBase <|-- FloatParameterNode
@@ -332,19 +332,19 @@ classDiagram
         +worldRotation : simd_quatf
         +colorSchemeParams : ColorSchemeParams
         +safetyBubbleRadius : Float
-        +«… +40 read-only fields»
+        +more_40_readonly_fields
         +prefersAdaptiveComputePath() Bool
         +estimatedBoundingSphereRadius() Float
     }
     class SettingsPersistence {
         <<enumeration>>
-        +encoder$ : JSONEncoder
-        +decoder$ : JSONDecoder
-        +save(value, domain)$ void
-        +load(type, domain)$ T?
-        +saveAll(from)$ void
-        +restoreAll(into)$ void
-        +loadMusicConfig(defaults)$ MusicConfig
+        +encoder : JSONEncoder
+        +decoder : JSONDecoder
+        +save(value, domain) void
+        +load(type, domain) T?
+        +saveAll(from) void
+        +restoreAll(into) void
+        +loadMusicConfig(defaults) MusicConfig
     }
 
     RenderSettings ..> RenderSettingsSnapshot : snapshot()
@@ -438,7 +438,7 @@ classDiagram
         +perFingerTapLeftActions : PerFingerTapAction[]
         +perFingerTapRightActions : PerFingerTapAction[]
         +twoHandPinchActivateThreshold : Float
-        +«… +18 tuning fields»
+        +more_18_tuning_fields
         +clamp() void
     }
     class SafetyBubbleConfig {
@@ -473,7 +473,7 @@ classDiagram
         +deletePreset(preset) void
         +loadPreset(preset, into, includePerformance, resetEnvironment) void
         +importPreset(fromURL) FractalPreset?
-        +exportPresetFile(preset)$ URL?
+        +exportPresetFile(preset) URL?
         +saveLastState(from, embeddedFormula) void
         +restoreLastState(to) FractalPreset?
     }
@@ -493,21 +493,21 @@ classDiagram
         +embeddedFormula : EmbeddedFormula?
         +schemaVersion : Int?
         +modules : Dictionary~String, ModuleParamBlock~?
-        +«… +40 optional fields»
-        +fromSettings(settings, name, id)$ FractalPreset
+        +more_40_optional_fields
+        +fromSettings(settings, name, id) FractalPreset
         +apply(to, includePerformance, resetEnvironment) void
         +deriveFunctionConstants() FunctionConstants
         +pipelineCacheKey : String
     }
     class ModuleRegistry {
         <<enumeration>>
-        +space$ : ModuleDescriptor
-        +lighting$ : ModuleDescriptor
-        +all$ : ModuleDescriptor[]
-        +descriptor(forKey)$ ModuleDescriptor?
-        +capability(key, param, forType)$ Bool
-        +apply(key, block, to)$ void
-        +applyParam(key, name, value, to)$ void
+        +space : ModuleDescriptor
+        +lighting : ModuleDescriptor
+        +all : ModuleDescriptor[]
+        +descriptor(forKey) ModuleDescriptor?
+        +capability(key, param, forType) Bool
+        +apply(key, block, to) void
+        +applyParam(key, name, value, to) void
     }
     class ModuleDescriptor {
         <<struct>>
@@ -577,7 +577,7 @@ classDiagram
         fire
         nebula
         rainbow
-        «… +9 more»
+        more_9_presets
         +makeGradient() GradientColorMap
         +isNeonMode : Bool
     }
@@ -628,7 +628,7 @@ classDiagram
         +appModel : AppModel
         +arSession : ARKitSession
         +handTracking : HandTrackingProvider?
-        +«… +35 more stored props»
+        +more_35_stored_props
         +renderFrame() void
         +updateGameState(drawable, snapshot) RendererFramePreparation
         +updateHandTracking(atTime) void
@@ -638,7 +638,7 @@ classDiagram
         +activateEmbeddedFormula(formula) void
         +captureScreenshot() Data?
         +startARSession() void
-        +«… +25 more actor methods»
+        +more_25_actor_methods()
     }
     class RaymarchRenderView {
         <<struct>>
@@ -703,7 +703,7 @@ classDiagram
         -_queue : Mutex~JobQueue~
         -semaphore : DispatchSemaphore
         -renderThread : Thread?
-        +shared$ : RendererTaskExecutor
+        +shared : RendererTaskExecutor
         +enqueue(job) void
         +asUnownedSerialExecutor() UnownedTaskExecutor
     }
@@ -944,7 +944,7 @@ classDiagram
         +pinchStrength(digit) Float
         +fistStrength() Float
         +wristTapStrength(otherHand) Float
-        +zero$ : HandData
+        +zero : HandData
     }
     class GrabZoomMapping {
         <<struct>>
@@ -956,14 +956,14 @@ classDiagram
         +startDetailScale : Float
         +rebase(leftPos, rightPos, position, rotation, detailScale) void
         +evaluate(leftPos, rightPos, scaleClamp) GrabResult
-        +quaternionBetweenAxes(from, to)$ simd_quatf
+        +quaternionBetweenAxes(from, to) simd_quatf
     }
     class GestureActionBinding {
         <<enumeration>>
         core(FingerGestureAction)
         parameter(GestureBindableParameter)
         parameterTriplet(GestureBindableTriplet)
-        +availableBindings(forType, handMode)$ GestureActionBinding[]
+        +availableBindings(forType, handMode) GestureActionBinding[]
         +contextualDisplayName(forType) String
     }
     class GestureSlot {
@@ -972,7 +972,7 @@ classDiagram
         +finger : FingerDigit
         +direction : GestureDirection?
         +persistenceKey : String
-        +allSlots$ : GestureSlot[]
+        +allSlots : GestureSlot[]
     }
     class GestureBindableTriplet {
         <<struct>>
@@ -986,10 +986,10 @@ classDiagram
     }
     class FractalDefaultsStore {
         <<enumeration>>
-        +loadStoredDefaultsMap()$ StoredDefaultsMap
-        +makeFactoryDefaults(forType)$ StoredFractalDefaults
-        +applyFractalDefaults(forType, to)$ void
-        +saveCurrentAsFractalDefaults(from)$ Bool
+        +loadStoredDefaultsMap() StoredDefaultsMap
+        +makeFactoryDefaults(forType) StoredFractalDefaults
+        +applyFractalDefaults(forType, to) void
+        +saveCurrentAsFractalDefaults(from) Bool
     }
 
     GestureActionBinding ..> GestureBindableTriplet
@@ -1154,7 +1154,7 @@ classDiagram
         fog
         bloom
         saturation
-        «… +16 formula params»
+        formulaParam0_to_15
         +allowedRange(forType) ClosedRange~Float~
         +parameterTargetID(forType) String?
     }
@@ -1239,7 +1239,7 @@ classDiagram
         +fogEffect : FogEffect?
         +musicReactiveConfig : AudioReactiveConfig?
         +formulaParamValues : Float[]?
-        +«… +20 effect / color fields»
+        +more_20_effect_color_fields
         +interpolated(to, t) AnimationKeyframe
     }
     class AnimationPlayhead {
@@ -1268,8 +1268,8 @@ classDiagram
         +cp1y : Float
         +cp2x : Float
         +cp2y : Float
-        +easeInOut$ : BezierHandle
-        +overshoot$ : BezierHandle
+        +easeInOut : BezierHandle
+        +overshoot : BezierHandle
     }
     class SongAttachment {
         <<struct>>
@@ -1324,7 +1324,7 @@ classDiagram
         kleinian
         quaternionJulia
         custom
-        «… +6 more»
+        more_6_types
         +descriptor : FractalTypeDescriptor
         +supports(tag) Bool
         +supports(transform) Bool
@@ -1334,9 +1334,9 @@ classDiagram
         <<enumeration>>
         -staticDescriptors : Dictionary~Int32, FractalTypeDescriptor~
         -overlay : Dictionary~Int32, FractalTypeDescriptor~
-        +descriptor(forType)$ FractalTypeDescriptor
-        +registerCustom(formula)$ void
-        +unregisterCustom()$ void
+        +descriptor(forType) FractalTypeDescriptor
+        +registerCustom(formula) void
+        +unregisterCustom() void
     }
     class MandelboxDescriptor {
         <<struct>>
@@ -1353,7 +1353,7 @@ classDiagram
         +displayName : String
         +category : String
         -formula : EmbeddedFormula?
-        +placeholder$ : CustomFractalDescriptor
+        +placeholder : CustomFractalDescriptor
         +defaultFormulaParams() FormulaParams
     }
 
@@ -1375,11 +1375,11 @@ classDiagram
         +categories : String[]
         -byType : Dictionary~Int32, FormulaDescriptor~
         -byId : Dictionary~String, FormulaDescriptor~
-        +shared$ : FormulaCatalog
+        +shared : FormulaCatalog
         +descriptor(forType) FormulaDescriptor?
         +buildParams(forType, overrides) FormulaParams
-        +getParam(fp, index)$ Float
-        +setParam(fp, index, value)$ void
+        +getParam(fp, index) Float
+        +setParam(fp, index, value) void
         +registerEphemeral(formula) void
     }
     class FormulaDescriptor {
@@ -1408,7 +1408,7 @@ classDiagram
         <<struct>>
         +version : Int
         +formula : EmbeddedFormula
-        +decode(fromContainerAt)$ EmbeddedFormulaContainer
+        +decode(fromContainerAt) EmbeddedFormulaContainer
         +exportToFile() URL?
     }
     class FormulaParamDescriptor {
