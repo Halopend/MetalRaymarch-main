@@ -425,91 +425,18 @@ extension ContentView {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.06)))
     }
 
+    // Data-driven (Stage 4): these boxes render SpaceModule's params at its route
+    // via the shared `ModuleSectionView`, replacing the hand-written scaffolding.
+    // The section content lives as data in ModuleSectionView.swift.
     private var sphereProjectionSection: some View {
-        // Space-module capability: sphere projection is no longer Mandelbox-only.
-        // Mandelbox uses its native per-fold projection; every other supported
-        // fractal gets a domain-space sphere warp at the dispatch boundary.
-        let isMandelbox = cache.fractalType == .mandelbox
-        let supportsProjection = cache.fractalType.supports(.sphereProjection)
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("Sphere Projection", systemImage: AppIcons.globeAsiaAustralia)
-                    .font(.headline)
-                    .foregroundStyle(supportsProjection ? .primary : .secondary)
-                Spacer()
-                if supportsProjection {
-                    Toggle("", isOn: Binding(
-                        get: { cache.display.sphereProjectionEnabled },
-                        set: { newValue in
-                            cache.display.sphereProjectionEnabled = newValue
-                            cache.commitSphereProjection()
-                        }
-                    ))
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                }
-            }
-
-            Text(isMandelbox
-                 ? "Radially projects each fold onto a sphere right after the sphere-fold step — the \u{201C}accidental sphere\u{201D} look. Box detail melts into a glowing spherical shell."
-                 : "Warps space radially toward a sphere before the fractal is evaluated — pulls this shape\u{2019}s detail onto a spherical shell. Blend low for a subtle bulge, high for a full sphere melt.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if supportsProjection {
-                if cache.display.sphereProjectionEnabled {
-                    EffectSliderRow(icon: "circle.lefthalf.filled", label: "Projection",
-                        value: Binding(get: { cache.display.sphereProjectionBlend }, set: { cache.display.sphereProjectionBlend = $0 }),
-                        range: 0.0...1.0,
-                        enabled: .constant(true),
-                        onChanged: { cache.commitSphereProjection() },
-                        showToggle: false)
-
-                    EffectSliderRow(icon: "circle", label: "Projection Radius",
-                        value: Binding(get: { cache.display.sphereProjectionRadius }, set: { cache.display.sphereProjectionRadius = $0 }),
-                        range: 0.2...6.0,
-                        enabled: .constant(true),
-                        onChanged: { cache.commitSphereProjection() },
-                        showToggle: false)
-                }
-            } else {
-                Label("Not available for this fractal.", systemImage: AppIcons.infoCircle)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.teal.opacity(0.06)))
+        ModuleSectionView(section: .sphereProjection(cache: cache))
     }
 
     /// Custom space warp (the cross-platform space-module seam). The built-in
     /// default is a "Twist" about the vertical axis; a loaded `.threshfx`
     /// space-warp effect will override the GPU function (Stage 2). 0 = off.
     private var spaceWarpSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("Space Warp", systemImage: "tornado")
-                    .font(.headline)
-                Spacer()
-            }
-            Text("A domain-space twist applied to this fractal before it is evaluated. The built-in default twists about the vertical axis; loadable space-effect plugins replace it. 0 = off.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            EffectSliderRow(icon: "tornado", label: "Twist",
-                value: Binding(get: { appModel.renderSettings.spaceWarpStrength },
-                               set: { appModel.renderSettings.spaceWarpStrength = $0 }),
-                range: 0.0...2.0,
-                enabled: .constant(true),
-                onChanged: { },
-                showToggle: false)
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
+        ModuleSectionView(section: .spaceWarp(renderSettings: appModel.renderSettings))
     }
 
     private var fractalQualityContent: some View {
