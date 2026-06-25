@@ -30,7 +30,7 @@ struct ThresholdiOSApp: App {
 private struct ThresholdiOSRootView: View {
     @Environment(AppModel.self) private var appModel
     @State private var isShowingControls = true
-    private let controlsAnimation = Animation.spring(response: 0.35, dampingFraction: 0.85)
+    private let controlsAnimation = MenuChrome.panelSpring
 
     var body: some View {
         GeometryReader { proxy in
@@ -48,7 +48,7 @@ private struct ThresholdiOSRootView: View {
                         .environment(appModel)
                         .inspectorColumnWidth(min: widths.min, ideal: widths.ideal, max: widths.max)
                 }
-                .onChange(of: appModel.menuAutoHideRequestID) { _, _ in
+                .onSceneLoadAutoHide {
                     // Auto-hide the controls inspector when a scene is selected.
                     // (iPad has no pin concept, so it always collapses.)
                     setControlsVisible(false)
@@ -124,7 +124,7 @@ private struct ThresholdiOSInspectorContent: View {
                     guard horizontalDistance > swipeDismissThreshold,
                           horizontalDistance > verticalDistance * 1.25 else { return }
 
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    withAnimation(MenuChrome.panelSpring) {
                         isShowingControls = false
                     }
                 }

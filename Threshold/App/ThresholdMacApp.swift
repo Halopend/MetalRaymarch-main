@@ -58,7 +58,7 @@ private struct ThresholdMacRootView: View {
     private let edgeRevealWidth: CGFloat = 30
     private let panelMaterialOpacity: Double = 0.68
     private let autoHideDelay: TimeInterval = 0.22
-    private let panelAnimation = Animation.spring(response: 0.35, dampingFraction: 0.85)
+    private let panelAnimation = MenuChrome.panelSpring
 
     private var shouldShowControls: Bool {
         isControlsPinnedOpen || isHoverVisible || appModel.isMenuInteractionActive || activeMenuTrackingCount > 0
@@ -106,7 +106,7 @@ private struct ThresholdMacRootView: View {
         .onChange(of: appModel.isMenuInteractionActive) { _, _ in
             updateAutoHideState(animated: true)
         }
-        .onChange(of: appModel.menuAutoHideRequestID) { _, _ in
+        .onSceneLoadAutoHide {
             // Auto-hide the controls panel when a scene is selected — unless pinned.
             guard !isControlsPinnedOpen else { return }
             pendingAutoHide?.cancel()
