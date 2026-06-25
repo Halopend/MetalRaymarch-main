@@ -195,6 +195,30 @@ enum ControlCatalog {
         range: 0.33...1.0,
         defaultValue: 1.0)
 
+    // Color-grading controls — not drift bugs (setter / ColorConfig.clamp / slider
+    // already agreed), folded onto specs so their range lives in ONE place and the
+    // three consumers can't diverge in future.
+
+    static let colorSchemeContrast = ControlSpec(
+        id: "color.contrast", name: "Contrast", icon: "circle.righthalf.filled",
+        range: 0.95...1.15, defaultValue: 1.08)
+
+    static let colorSchemeVibrance = ControlSpec(
+        id: "color.vibrance", name: "Vibrance", icon: "drop.fill",
+        range: 0.0...1.0, defaultValue: 0.8)
+
+    static let colorSchemeCurve = ControlSpec(
+        id: "color.curve", name: "Curve", icon: "scribble.variable",
+        range: -1.0...1.0, defaultValue: 0.0)
+
+    static let colorSchemeShadows = ControlSpec(
+        id: "color.shadows", name: "Shadows", icon: "moon.fill",
+        range: -0.05...0.05, defaultValue: -0.018)
+
+    static let colorSchemeHighlights = ControlSpec(
+        id: "color.highlights", name: "Highlights", icon: "sun.max.fill",
+        range: -0.5...1.0, defaultValue: 0.02)
+
     /// Every canonical spec in declaration order.
     static let allSpecs: [ControlSpec] = [
         fractalScale, colorMix, iterations,

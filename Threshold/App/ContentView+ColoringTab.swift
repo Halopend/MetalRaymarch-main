@@ -297,19 +297,19 @@ extension ContentView {
             // Tone controls
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "circle.lefthalf.filled", label: "Contrast",
-                    value: $cache.color.colorSchemeContrast, range: 0.95...1.15,
+                    value: $cache.color.colorSchemeContrast, range: ControlCatalog.colorSchemeContrast.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorSchemeContrast, value: cache.color.colorSchemeContrast) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "paintpalette.fill", label: "Vibrance",
-                    value: $cache.color.colorSchemeVibrance, range: 0...1.0,
+                    value: $cache.color.colorSchemeVibrance, range: ControlCatalog.colorSchemeVibrance.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorSchemeVibrance, value: cache.color.colorSchemeVibrance) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "waveform.path", label: "Midtone Curve",
-                    value: $cache.color.colorSchemeCurve, range: -1.0...1.0,
+                    value: $cache.color.colorSchemeCurve, range: ControlCatalog.colorSchemeCurve.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorSchemeCurve, value: cache.color.colorSchemeCurve) },
                     showToggle: false)
@@ -320,13 +320,13 @@ extension ContentView {
             // Shadows & Highlights
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "shadow", label: "Shadows",
-                    value: $cache.color.colorSchemeShadows, range: -0.05...0.05,
+                    value: $cache.color.colorSchemeShadows, range: ControlCatalog.colorSchemeShadows.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorSchemeShadows, value: cache.color.colorSchemeShadows) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "sun.max.fill", label: "Highlights",
-                    value: $cache.color.colorSchemeHighlights, range: -0.5...1.0,
+                    value: $cache.color.colorSchemeHighlights, range: ControlCatalog.colorSchemeHighlights.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorSchemeHighlights, value: cache.color.colorSchemeHighlights) },
                     showToggle: false)

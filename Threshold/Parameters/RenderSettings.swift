@@ -1531,7 +1531,7 @@ final class RenderSettings: @unchecked Sendable {
     var colorSchemeContrast: Float {
         get { withLock { _colorSchemeContrast } }
         set {
-            withLock { _colorSchemeContrast = max(0.95, min(1.15, newValue)) }
+            withLock { _colorSchemeContrast = ControlCatalog.colorSchemeContrast.clamp(newValue) }
             persistColor()
         }
     }
@@ -1549,7 +1549,7 @@ final class RenderSettings: @unchecked Sendable {
     var colorSchemeVibrance: Float {
         get { withLock { _colorSchemeVibrance } }
         set {
-            withLock { _colorSchemeVibrance = max(0.0, min(1.0, newValue)) }
+            withLock { _colorSchemeVibrance = ControlCatalog.colorSchemeVibrance.clamp(newValue) }
             persistColor()
         }
     }
@@ -1583,7 +1583,7 @@ final class RenderSettings: @unchecked Sendable {
     var colorSchemeCurve: Float {
         get { withLock { _colorSchemeCurve } }
         set {
-            withLock { _colorSchemeCurve = max(-1.0, min(1.0, newValue)) }
+            withLock { _colorSchemeCurve = ControlCatalog.colorSchemeCurve.clamp(newValue) }
             persistColor()
         }
     }
@@ -1592,7 +1592,7 @@ final class RenderSettings: @unchecked Sendable {
     var colorSchemeShadows: Float {
         get { withLock { _colorSchemeShadows } }
         set {
-            withLock { _colorSchemeShadows = max(-0.05, min(0.05, newValue)) }
+            withLock { _colorSchemeShadows = ControlCatalog.colorSchemeShadows.clamp(newValue) }
             persistColor()
         }
     }
@@ -1601,7 +1601,7 @@ final class RenderSettings: @unchecked Sendable {
     var colorSchemeHighlights: Float {
         get { withLock { _colorSchemeHighlights } }
         set {
-            withLock { _colorSchemeHighlights = max(-0.5, min(1.0, newValue)) }
+            withLock { _colorSchemeHighlights = ControlCatalog.colorSchemeHighlights.clamp(newValue) }
             persistColor()
         }
     }
