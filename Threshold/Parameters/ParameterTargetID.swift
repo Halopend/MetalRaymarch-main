@@ -16,6 +16,13 @@ enum ParameterTargetID {
         static let safetyBubbleRadius = "effect.safetyBubbleRadius"
     }
 
+    /// Space-transform scalars (cross-fractal). Routed like core/effect params so
+    /// they can be driven by gesture and music, not just the slider.
+    enum Space {
+        static let sphereProjectionBlend = "space.sphereProjectionBlend"
+        static let sphereProjectionRadius = "space.sphereProjectionRadius"
+    }
+
     static let coreAndEffect: [String] = [
         Core.fractalScale,
         Core.colorMix,
@@ -25,7 +32,9 @@ enum ParameterTargetID {
         Effect.bloom,
         Effect.hueSpeed,
         Effect.saturation,
-        Effect.safetyBubbleRadius
+        Effect.safetyBubbleRadius,
+        Space.sphereProjectionBlend,
+        Space.sphereProjectionRadius
     ]
 
     static func formula(fractalType: FractalModelType, formulaIndex: Int, name: String) -> String {

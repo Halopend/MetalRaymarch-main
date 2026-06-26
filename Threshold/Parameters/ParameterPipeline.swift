@@ -38,4 +38,10 @@ final class ParameterPipeline: @unchecked Sendable {
     func liveValue(for targetID: String) -> ParameterOperationDispatcher.LiveValue? {
         dispatcher.liveValue(for: targetID)
     }
+
+    /// Current value of a core/effect target read from RenderSettings (for seeding
+    /// a gesture scalar drag on core params). nil for non-core ids.
+    func currentValue(for targetID: String, settings: RenderSettings) -> Float? {
+        dispatcher.coreValue(for: targetID, settings: settings)
+    }
 }

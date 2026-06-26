@@ -162,18 +162,20 @@ extension ModuleUISection {
             controls: [
                 ModuleSliderControl(
                     label: "Projection", icon: "circle.lefthalf.filled",
-                    range: 0.0...1.0,
+                    range: ControlCatalog.sphereProjectionBlend.range,
                     get: { cache.display.sphereProjectionBlend },
                     set: { cache.display.sphereProjectionBlend = $0 },
                     commit: { cache.commitSphereProjection() },
-                    isVisible: { cache.display.sphereProjectionEnabled }),
+                    isVisible: { cache.display.sphereProjectionEnabled },
+                    musicTargetID: ParameterTargetID.Space.sphereProjectionBlend),
                 ModuleSliderControl(
                     label: "Projection Radius", icon: "circle",
                     range: ControlCatalog.sphereProjectionRadius.range,
                     get: { cache.display.sphereProjectionRadius },
                     set: { cache.display.sphereProjectionRadius = $0 },
                     commit: { cache.commitSphereProjection() },
-                    isVisible: { cache.display.sphereProjectionEnabled }),
+                    isVisible: { cache.display.sphereProjectionEnabled },
+                    musicTargetID: ParameterTargetID.Space.sphereProjectionRadius),
             ],
             accent: .teal)
     }

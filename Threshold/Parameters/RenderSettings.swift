@@ -707,6 +707,22 @@ final class RenderSettings: @unchecked Sendable {
             _safetyBubbleRadius = max(0.5, min(2.5, value))
         }
     }
+
+    /// Modulate sphere-projection blend (gesture/audio path). Writes the backing
+    /// value directly (no persistence), mirroring the other `audioModulate*` setters.
+    func audioModulateSphereProjectionBlend(_ value: Float) {
+        withLock {
+            _sphereProjectionBlend = max(0.0, min(1.0, value))
+        }
+    }
+
+    /// Modulate sphere-projection radius (gesture/audio path). Writes the backing
+    /// value directly (no persistence), mirroring the other `audioModulate*` setters.
+    func audioModulateSphereProjectionRadius(_ value: Float) {
+        withLock {
+            _sphereProjectionRadius = max(0.2, min(12.0, value))
+        }
+    }
     
     var foldingLimit: Float {
         get { withLock { _foldingLimit } }
@@ -793,7 +809,10 @@ final class RenderSettings: @unchecked Sendable {
                             binding = .core(.none)
                         }
                     case .parameter(let descriptor):
-                        if descriptor.fractalType != newValue {
+                        // Universal core params (no formulaIndex, e.g. sphere
+                        // projection) work on every fractal — keep them. Only
+                        // type-specific formula params get cleared cross-type.
+                        if descriptor.formulaIndex != nil && descriptor.fractalType != newValue {
                             binding = .core(.none)
                         }
                     case .parameterTriplet(let triplet):

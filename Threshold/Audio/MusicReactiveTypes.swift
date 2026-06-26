@@ -170,6 +170,10 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     // Universal geometry parameter — safety bubble inner radius.
     case safetyBubbleRadius
 
+    // Universal space-transform params — cross-fractal sphere projection.
+    case sphereProjectionBlend
+    case sphereProjectionRadius
+
     // Dynamic formula-parameter slots — resolve via FormulaCatalog for the active fractal.
     // formulaParam0 maps to the 1st non-bool param, formulaParam1 to the 2nd, etc.
     // Supports up to 16 slots to match FormulaParams capacity.
@@ -208,7 +212,8 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     /// Formula param slots beyond what the active fractal supports are hidden.
     static var availableCases: [MusicReactiveTarget] {
         [.fractalScale, .colorMix, .iterations,
-         .glow, .fog, .bloom, .hueSpeed, .saturation, .safetyBubbleRadius]
+         .glow, .fog, .bloom, .hueSpeed, .saturation, .safetyBubbleRadius,
+         .sphereProjectionBlend, .sphereProjectionRadius]
     }
 
     /// Returns the full list of available targets for a given fractal type,
@@ -217,7 +222,8 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         let formulaCount = floatFormulaParams(for: fractalType).count
         let formulaSlots = Array(allFormulaParamCases.prefix(formulaCount))
         return [.fractalScale, .colorMix, .iterations,
-                .glow, .fog, .bloom, .hueSpeed, .saturation, .safetyBubbleRadius] + formulaSlots
+                .glow, .fog, .bloom, .hueSpeed, .saturation, .safetyBubbleRadius,
+                .sphereProjectionBlend, .sphereProjectionRadius] + formulaSlots
     }
 
     /// Whether this target is a dynamic formula parameter slot.
@@ -269,7 +275,8 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     /// fall through to `.geometry` here and are never read via this property.
     var category: MusicReactiveTargetCategory {
         switch self {
-        case .fractalScale, .iterations, .safetyBubbleRadius:
+        case .fractalScale, .iterations, .safetyBubbleRadius,
+             .sphereProjectionBlend, .sphereProjectionRadius:
             return .geometry
         case .colorMix, .hueSpeed, .saturation:
             return .color
@@ -343,6 +350,8 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .hueSpeed: return .treble
         case .saturation: return .mid
         case .safetyBubbleRadius: return .composite
+        case .sphereProjectionBlend: return .composite
+        case .sphereProjectionRadius: return .bass
         case .formulaParam0: return .bass
         case .formulaParam1: return .mid
         case .formulaParam2: return .treble
@@ -376,6 +385,8 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .hueSpeed:      return .drift
         case .saturation:    return .drift
         case .safetyBubbleRadius: return .drift
+        case .sphereProjectionBlend:  return .drift
+        case .sphereProjectionRadius: return .drift
         case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
              .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
              .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
@@ -392,6 +403,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
             return true
         case .fractalScale, .colorMix, .iterations,
              .fog, .safetyBubbleRadius,
+             .sphereProjectionBlend, .sphereProjectionRadius,
              .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
              .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
              .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
@@ -424,6 +436,8 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .hueSpeed: return ParameterTargetID.Effect.hueSpeed
         case .saturation: return ParameterTargetID.Effect.saturation
         case .safetyBubbleRadius: return ParameterTargetID.Effect.safetyBubbleRadius
+        case .sphereProjectionBlend: return ParameterTargetID.Space.sphereProjectionBlend
+        case .sphereProjectionRadius: return ParameterTargetID.Space.sphereProjectionRadius
         case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
              .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
              .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,

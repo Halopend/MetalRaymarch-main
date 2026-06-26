@@ -452,13 +452,18 @@ final class GestureController {
             }
 
             if case .parameter(let descriptor) = binding,
-               let formulaIndex = descriptor.formulaIndex,
                let node = ParameterNodeRegistry.shared.node(for: descriptor) {
                 guard var digitState = twoHandStateByDigit[digit] else { continue }
+                // Formula params read from formulaParams; universal core params
+                // (formulaIndex == nil, e.g. sphere projection) read from settings.
+                let currentTarget: Float = descriptor.formulaIndex
+                    .map { FormulaCatalog.getParam(settings.formulaParams, index: $0) }
+                    ?? parameterPipeline.currentValue(for: node.id, settings: settings)
+                    ?? node.range.lowerBound
                 processTwoHandGesture(
                     digit: digit,
                     state: &digitState,
-                    currentTarget: FormulaCatalog.getParam(settings.formulaParams, index: formulaIndex),
+                    currentTarget: currentTarget,
                     range: node.range,
                     parameterID: node.id
                 ) { newValue in
@@ -1149,15 +1154,20 @@ final class GestureController {
 
         case .parameter(let descriptor):
             // 1D scalar pinch-drag (vertical movement → parameter value)
-            guard let formulaIndex = descriptor.formulaIndex,
-                  let node = ParameterNodeRegistry.shared.node(for: descriptor) else {
+            guard let node = ParameterNodeRegistry.shared.node(for: descriptor) else {
                 state.isActive = false
                 singleHandState.perSlot[key] = state
                 return
             }
             if active && !state.isActive {
                 state.isActive = true
-                state.startValue = FormulaCatalog.getParam(settings.formulaParams, index: formulaIndex)
+                // Formula params read from formulaParams; universal core params
+                // (formulaIndex == nil, e.g. sphere projection) read from settings.
+                if let formulaIndex = descriptor.formulaIndex {
+                    state.startValue = FormulaCatalog.getParam(settings.formulaParams, index: formulaIndex)
+                } else {
+                    state.startValue = parameterPipeline.currentValue(for: node.id, settings: settings) ?? node.range.lowerBound
+                }
                 state.prevPos = hand.pinchPosition(digit: digit)
             }
             if active && state.isActive {

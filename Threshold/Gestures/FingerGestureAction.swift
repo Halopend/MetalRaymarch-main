@@ -172,12 +172,15 @@ struct GestureBindableParameter: Codable, Sendable, Hashable {
     let formulaIndex: Int?
     let display: GestureDisplayMetadata
 
-    // Compare by semantic identity only — display metadata is cosmetic.
+    // Compare by node id only — it's globally unique (formula ids embed the
+    // fractal rawValue; core/effect ids are namespaced), so two bindings for the
+    // same control match regardless of which fractal was active when bound. This
+    // lets a universal param (e.g. sphere projection) stay selected across a
+    // fractal-type switch. Display metadata is cosmetic.
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.fractalType == rhs.fractalType && lhs.parameterNodeID == rhs.parameterNodeID
+        lhs.parameterNodeID == rhs.parameterNodeID
     }
     func hash(into hasher: inout Hasher) {
-        hasher.combine(fractalType)
         hasher.combine(parameterNodeID)
     }
 }
@@ -294,7 +297,10 @@ enum GestureActionBinding: Codable, Hashable, Sendable {
             triplets = ParameterNodeRegistry.shared.gestureBindableTriplets(for: type).map { .parameterTriplet($0) }
             params = ParameterNodeRegistry.shared.gestureBindableParameters(for: type).map { .parameter($0) }
         }
-        return core + triplets + params
+        // Cross-fractal core/effect scalars (sphere projection) — scalar drag, both
+        // single- and two-hand. Appended for every hand mode.
+        let coreParams = ParameterNodeRegistry.shared.gestureBindableCoreParameters(for: type).map { GestureActionBinding.parameter($0) }
+        return core + triplets + params + coreParams
     }
 
     var icon: String {
@@ -313,7 +319,9 @@ enum GestureActionBinding: Codable, Hashable, Sendable {
         case .core(let action):
             return action.displayName
         case .parameter(let descriptor):
-            if descriptor.fractalType == currentType {
+            // Universal core params (no formulaIndex) read the same on every
+            // fractal — show the plain title, never a "OtherFractal: …" prefix.
+            if descriptor.formulaIndex == nil || descriptor.fractalType == currentType {
                 return descriptor.display.title
             }
             return "\(descriptor.fractalType.displayName): \(descriptor.display.title)"
