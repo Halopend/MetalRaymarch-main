@@ -111,6 +111,14 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         _liveValues.withLock { $0[targetID] }
     }
 
+    /// Current value of a core/effect target read straight from RenderSettings, or
+    /// nil if the id isn't a routable core descriptor. Lets the gesture path seed a
+    /// scalar drag for core params (which, unlike formula params, aren't read via
+    /// `settings.formulaParams`).
+    func coreValue(for targetID: String, settings: RenderSettings) -> Float? {
+        coreDescriptors[targetID].map { $0.read(settings) }
+    }
+
     private func recordLiveValue(_ targetID: String, base: Float, resolved: Float) {
         _liveValues.withLock { $0[targetID] = LiveValue(base: base, resolved: resolved) }
     }
@@ -180,6 +188,16 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
             spec: ControlCatalog.safetyBubbleRadius,
             read: { $0.safetyBubbleRadius },
             write: { settings, value in settings.audioModulateSafetyBubbleRadius(value) }
+        ),
+        ControlCatalog.sphereProjectionBlend.id: CoreParameterDescriptor(
+            spec: ControlCatalog.sphereProjectionBlend,
+            read: { $0.sphereProjectionBlend },
+            write: { settings, value in settings.audioModulateSphereProjectionBlend(value) }
+        ),
+        ControlCatalog.sphereProjectionRadius.id: CoreParameterDescriptor(
+            spec: ControlCatalog.sphereProjectionRadius,
+            read: { $0.sphereProjectionRadius },
+            write: { settings, value in settings.audioModulateSphereProjectionRadius(value) }
         )
     ]
 

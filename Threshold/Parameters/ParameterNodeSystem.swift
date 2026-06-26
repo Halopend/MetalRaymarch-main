@@ -471,6 +471,28 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             writeValue: { cache, v in cache.safetyBubble.radius = v; cache.push(\.safetyBubbleRadius, value: v) }
         )
 
+        // --- Space-transform nodes (cross-fractal sphere projection) ---
+        // Gesture-mappable so they surface in the finger-binding menu via
+        // `gestureBindableCoreParameters`; music-mappable via the dispatcher
+        // descriptors of the same id.
+        let spaceGroup = ParameterGroup(id: "space.transform", title: "Space Transform")
+
+        coreNodes[ControlCatalog.sphereProjectionBlend.id] = FloatParameterNode(
+            spec: ControlCatalog.sphereProjectionBlend,
+            group: spaceGroup,
+            isGestureMappable: true,
+            readValue: { $0.display.sphereProjectionBlend },
+            writeValue: { cache, v in cache.display.sphereProjectionBlend = v; cache.commitSphereProjection() }
+        )
+
+        coreNodes[ControlCatalog.sphereProjectionRadius.id] = FloatParameterNode(
+            spec: ControlCatalog.sphereProjectionRadius,
+            group: spaceGroup,
+            isGestureMappable: true,
+            readValue: { $0.display.sphereProjectionRadius },
+            writeValue: { cache, v in cache.display.sphereProjectionRadius = v; cache.commitSphereProjection() }
+        )
+
         return (coreNodes, effectNodes)
     }
 
@@ -566,8 +588,36 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         }
     }
 
+    /// Cross-fractal core/effect scalars that are gesture-mappable but aren't
+    /// formula params (e.g. sphere-projection blend/radius). Surfaced with
+    /// `formulaIndex == nil` so the gesture system treats them as universal —
+    /// they read/write through the dispatcher's core descriptors and survive a
+    /// fractal-type switch. `fractalType` is set to the current type only for
+    /// display context; binding identity is by node id.
+    func gestureBindableCoreParameters(for type: FractalModelType) -> [GestureBindableParameter] {
+        let ids = [ControlCatalog.sphereProjectionBlend.id, ControlCatalog.sphereProjectionRadius.id]
+        return ids.compactMap { id -> GestureBindableParameter? in
+            guard let node = coreNodes[id] ?? effectNodes[id], node.isGestureMappable else { return nil }
+            return GestureBindableParameter(
+                fractalType: type,
+                parameterNodeID: node.id,
+                formulaIndex: nil,
+                display: GestureDisplayMetadata(
+                    title: node.name,
+                    subtitle: node.group?.title,
+                    icon: node.icon
+                )
+            )
+        }
+    }
+
     func node(for binding: GestureBindableParameter) -> FloatParameterNode? {
-        formulaBatch(for: binding.fractalType).floatNodes.first { $0.id == binding.parameterNodeID }
+        if let formulaNode = formulaBatch(for: binding.fractalType).floatNodes.first(where: { $0.id == binding.parameterNodeID }) {
+            return formulaNode
+        }
+        // Universal core/effect scalars (sphere projection) live outside the
+        // per-fractal formula batch.
+        return coreNodes[binding.parameterNodeID] ?? effectNodes[binding.parameterNodeID]
     }
 
     private static func buildFormulaBatch(for type: FractalModelType) -> ParameterNodeBatch {

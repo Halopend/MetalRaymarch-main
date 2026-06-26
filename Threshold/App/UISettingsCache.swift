@@ -339,8 +339,13 @@ final class UISettingsCache {
     func commitSphereProjection() {
         guard let settings else { return }
         settings.sphereProjectionEnabled = display.sphereProjectionEnabled
+        // Persist the base values via the direct setters, then route blend & radius
+        // through the parameter layer stack so music/gesture compose additively with
+        // the slider (and a slider edit recenters the music drift), mirroring fog/glow.
         settings.sphereProjectionBlend = display.sphereProjectionBlend
         settings.sphereProjectionRadius = display.sphereProjectionRadius
+        pushEffectParam(ParameterTargetID.Space.sphereProjectionBlend, value: display.sphereProjectionBlend)
+        pushEffectParam(ParameterTargetID.Space.sphereProjectionRadius, value: display.sphereProjectionRadius)
     }
 
     func commitPlatformRadius() {

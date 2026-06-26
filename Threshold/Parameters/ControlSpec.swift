@@ -143,6 +143,28 @@ enum ControlCatalog {
         range: 0.5...2.5,
         defaultValue: 1.8)
 
+    // MARK: Space transforms
+    //
+    // Cross-fractal sphere-projection blend + radius. Canonical (in `allSpecs`) so
+    // they route through the node/dispatcher/music layers and can be driven by
+    // gesture and music — not just the slider.
+
+    /// 0 = no projection, 1 = full sphere melt.
+    static let sphereProjectionBlend = ControlSpec(
+        id: ParameterTargetID.Space.sphereProjectionBlend,
+        name: "Projection Blend",
+        icon: "circle.lefthalf.filled",
+        range: 0.0...1.0,
+        defaultValue: 1.0)
+
+    /// Radius of the sphere detail is projected onto. Setter clamps 0.2…12.
+    static let sphereProjectionRadius = ControlSpec(
+        id: ParameterTargetID.Space.sphereProjectionRadius,
+        name: "Projection Radius",
+        icon: "circle",
+        range: 0.2...12.0,
+        defaultValue: 1.0)
+
     // MARK: Long-tail controls
     //
     // Controls consumed by the property setter + config clamp + UI slider but NOT
@@ -160,14 +182,6 @@ enum ControlCatalog {
         icon: "circle",
         range: 0.2...12.0,
         defaultValue: 2.0)
-
-    /// Twin of the above — setter 0.2…12 vs slider 0.2…6.
-    static let sphereProjectionRadius = ControlSpec(
-        id: "space.sphereProjectionRadius",
-        name: "Projection Radius",
-        icon: "circle",
-        range: 0.2...12.0,
-        defaultValue: 1.0)
 
     /// Was UNCLAMPED in the setter + raw on restore; feeds a per-pixel GPU loop
     /// (`steps = max(int(colorIters*quality), 2)`), so an out-of-band persisted
@@ -222,7 +236,8 @@ enum ControlCatalog {
     /// Every canonical spec in declaration order.
     static let allSpecs: [ControlSpec] = [
         fractalScale, colorMix, iterations,
-        glow, fog, bloom, hueSpeed, saturation, safetyBubbleRadius
+        glow, fog, bloom, hueSpeed, saturation, safetyBubbleRadius,
+        sphereProjectionBlend, sphereProjectionRadius
     ]
 
     /// Canonical specs keyed by id.
