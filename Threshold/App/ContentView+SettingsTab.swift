@@ -93,6 +93,11 @@ extension ContentView {
             // controls.
             handednessSection
 
+            // Interface size — scales the menu's chrome buttons so eye/hand
+            // targets can be tuned. Lives in Display because it's a pure visual
+            // preference.
+            interfaceSizeSection
+
             // Touch indicators — only meaningful where fingers touch the
             // render view directly.
 #if os(iOS)
@@ -190,6 +195,45 @@ extension ContentView {
             Text("Choose your dominant hand. Some per-finger tap defaults are mirrored automatically.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.07)))
+    }
+
+    /// Interface-size control: scales the menu's chrome buttons (top dock,
+    /// context rail, bottom bar) so eye/hand targets can be tuned to taste.
+    /// Backed by `@AppStorage(DS.buttonScaleStorageKey)` on `ContentView` and
+    /// applied live through the `\.thresholdButtonScale` environment value, so
+    /// the buttons resize as the slider moves.
+    private var interfaceSizeSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Button Size", systemImage: "arrow.up.left.and.arrow.down.right")
+                    .font(.headline)
+                Spacer()
+                Text("\(Int((uiButtonScale * 100).rounded()))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            Slider(
+                value: $uiButtonScale,
+                in: DS.minButtonScale...DS.maxButtonScale,
+                step: 0.05
+            )
+            .tint(.indigo)
+
+            HStack {
+                Text("Scales the menu's buttons — top dock, side rail, and bottom controls. Larger sizes are easier to target with your eyes and hands.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button("Reset") { uiButtonScale = DS.defaultButtonScale }
+                    .buttonStyle(.borderless)
+                    .font(.caption.weight(.semibold))
+                    .disabled(abs(uiButtonScale - DS.defaultButtonScale) < 0.001)
+            }
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.07)))

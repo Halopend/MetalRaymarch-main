@@ -21,22 +21,23 @@ import AppKit
 struct ResetAndSaveControls: View {
     let onReset: () -> Void
     let onAdd: () -> Void
+    @Environment(\.thresholdButtonScale) private var buttonScale
 
     var body: some View {
         // Reset and Save are distinct actions, so keep them visually separated:
         // a wider gap plus a neutral *outlined* Reset against a *solid* green "+"
         // so they don't read as one control on the visionOS glass material (where
         // two similarly-tinted adjacent buttons blended together).
-        HStack(spacing: DS.scaledButton(16)) {
+        HStack(spacing: DS.scaled(16, by: buttonScale)) {
             Button(action: onReset) {
-                HStack(spacing: DS.scaledButton(6)) {
+                HStack(spacing: DS.scaled(6, by: buttonScale)) {
                     Image(systemName: AppIcons.arrowCounterclockwise)
-                        .font(.system(size: DS.scaledButton(IconSize.small), weight: .semibold))
+                        .font(.system(size: DS.scaled(IconSize.small, by: buttonScale), weight: .semibold))
                     Text("Reset")
-                        .font(.thresholdButtonLabel(.subheadline))
+                        .font(.thresholdButtonLabel(.subheadline, scale: buttonScale))
                 }
-                .padding(.horizontal, DS.scaledButton(14))
-                .frame(height: DS.scaledButton(34))
+                .padding(.horizontal, DS.scaled(14, by: buttonScale))
+                .frame(height: DS.scaled(34, by: buttonScale))
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -47,8 +48,8 @@ struct ResetAndSaveControls: View {
 
             Button(action: onAdd) {
                 Image(systemName: AppIcons.plus)
-                    .font(.system(size: DS.scaledButton(15), weight: .bold))
-                    .frame(width: DS.scaledButton(34), height: DS.scaledButton(34))
+                    .font(.system(size: DS.scaled(15, by: buttonScale), weight: .bold))
+                    .frame(width: DS.scaled(34, by: buttonScale), height: DS.scaled(34, by: buttonScale))
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
@@ -68,23 +69,24 @@ struct ActivityLightButton: View {
     let count: Int?
     let action: () -> Void
     @State private var isHovering = false
+    @Environment(\.thresholdButtonScale) private var buttonScale
 
     var body: some View {
         Button(action: action) {
             ZStack(alignment: .topTrailing) {
-                HStack(spacing: DS.scaledButton(5)) {
+                HStack(spacing: DS.scaled(5, by: buttonScale)) {
                     Circle()
                         .fill(isActive ? color : Color.secondary.opacity(0.35))
-                        .frame(width: DS.scaledButton(8), height: DS.scaledButton(8))
+                        .frame(width: DS.scaled(8, by: buttonScale), height: DS.scaled(8, by: buttonScale))
                         .shadow(color: isActive ? color.opacity(0.65) : .clear, radius: 4)
 
                     Image(systemName: systemImage)
-                        .font(.system(size: DS.scaledButton(IconSize.small), weight: .semibold))
+                        .font(.system(size: DS.scaled(IconSize.small, by: buttonScale), weight: .semibold))
                         .foregroundStyle(isActive ? color : .secondary)
-                        .frame(width: DS.scaledButton(14), height: DS.scaledButton(14))
+                        .frame(width: DS.scaled(14, by: buttonScale), height: DS.scaled(14, by: buttonScale))
                 }
-                .padding(.horizontal, DS.scaledButton(8))
-                .padding(.vertical, DS.scaledButton(6))
+                .padding(.horizontal, DS.scaled(8, by: buttonScale))
+                .padding(.vertical, DS.scaled(6, by: buttonScale))
                 .background(
                     Capsule()
                         .fill((isActive ? color : Color.secondary).opacity(isHovering ? 0.2 : (isActive ? 0.14 : 0.08)))
@@ -97,13 +99,13 @@ struct ActivityLightButton: View {
 
                 if let count {
                     Text("\(count)")
-                        .font(.system(size: DS.scaledButton(8), weight: .bold, design: .rounded))
+                        .font(.system(size: DS.scaled(8, by: buttonScale), weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(.white)
-                        .frame(minWidth: DS.scaledButton(13), minHeight: DS.scaledButton(13))
+                        .frame(minWidth: DS.scaled(13, by: buttonScale), minHeight: DS.scaled(13, by: buttonScale))
                         .padding(.horizontal, 1)
                         .background(Capsule().fill(color))
-                        .offset(x: DS.scaledButton(5), y: DS.scaledButton(-5))
+                        .offset(x: DS.scaled(5, by: buttonScale), y: DS.scaled(-5, by: buttonScale))
                 }
             }
         }

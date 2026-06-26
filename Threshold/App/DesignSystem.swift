@@ -60,14 +60,17 @@ enum DS {
         static let prominent: CGFloat = 20
     }
 
-    // MARK: - Button Scale (visionOS)
+    // MARK: - Button Scale (user-adjustable)
 
-    /// Multiplier applied to interactive chrome buttons (top dock, context rail,
-    /// bottom-bar controls) so eye/hand targets are comfortably large in the
-    /// headset. `1.0` on Mac/iPad — pointer and touch targets there are already
-    /// correctly sized — and `1.6` on visionOS, which is ≈2.5× the *area*
-    /// (1.6² ≈ 2.56). Tweak this single value to retune every chrome button.
-    static var buttonScale: CGFloat {
+    /// UserDefaults key backing the "Button Size" slider in Settings ▸ Display.
+    /// Read on the owning views with `@AppStorage(DS.buttonScaleStorageKey)`.
+    static let buttonScaleStorageKey = "uiButtonScale"
+
+    /// Platform default for the chrome-button scale. visionOS ships large
+    /// eye/hand targets (1.6 ≈ 2.56× the *area*); pointer/touch platforms start
+    /// at the design baseline of 1.0. Used as both the `@AppStorage` default and
+    /// the environment fallback.
+    static var defaultButtonScale: Double {
         #if os(visionOS)
         return 1.6
         #else
@@ -75,18 +78,22 @@ enum DS {
         #endif
     }
 
-    /// Scales a base point dimension (icon size, padding, frame, radius) by
-    /// `buttonScale`, rounded to a whole point so glyphs stay crisp.
-    static func scaledButton(_ base: CGFloat) -> CGFloat {
-        (base * buttonScale).rounded()
+    /// Slider bounds. `1.0` is the original (Mac/iPad-baseline) button size.
+    static let minButtonScale: Double = 1.0
+    static let maxButtonScale: Double = 2.0
+
+    /// Scales a base point dimension (icon size, padding, frame, radius) by the
+    /// live `scale`, rounded to a whole point so glyphs stay crisp.
+    static func scaled(_ base: CGFloat, by scale: CGFloat) -> CGFloat {
+        (base * scale).rounded()
     }
 }
 
 // MARK: - Scaled Button Label Fonts
 
-/// Text styles used by chrome button labels. On Mac/iPad these resolve to the
-/// matching semantic `Font` (so Dynamic Type behaviour is unchanged); on
-/// visionOS `Font.thresholdButtonLabel` enlarges them with `DS.buttonScale`.
+/// Text styles used by chrome button labels. At scale 1.0 these resolve to the
+/// matching semantic `Font` (so Dynamic Type behaviour is preserved at the
+/// baseline); above 1.0 `Font.thresholdButtonLabel` enlarges them.
 enum ThresholdButtonTextStyle {
     case subheadline   // ≈15 pt
     case footnote      // ≈13 pt
@@ -110,15 +117,32 @@ enum ThresholdButtonTextStyle {
 }
 
 extension Font {
-    /// A chrome-button label font. On visionOS it grows with `DS.buttonScale`
-    /// (fixed point size); on Mac/iPad it returns the matching semantic text
-    /// style so nothing about the existing desktop UI changes.
-    static func thresholdButtonLabel(_ style: ThresholdButtonTextStyle, weight: Font.Weight = .semibold) -> Font {
-        #if os(visionOS)
-        return .system(size: DS.scaledButton(style.basePointSize), weight: weight)
-        #else
-        return style.semanticFont.weight(weight)
-        #endif
+    /// A chrome-button label font scaled by the live `scale`. At the 1.0 baseline
+    /// it returns the matching semantic text style (preserving Dynamic Type);
+    /// above 1.0 it returns a fixed, enlarged system font so the label grows with
+    /// its button.
+    static func thresholdButtonLabel(_ style: ThresholdButtonTextStyle, scale: CGFloat, weight: Font.Weight = .semibold) -> Font {
+        if abs(scale - 1.0) < 0.01 {
+            return style.semanticFont.weight(weight)
+        }
+        return .system(size: DS.scaled(style.basePointSize, by: scale), weight: weight)
+    }
+}
+
+// MARK: - Button Scale Environment
+
+private struct ThresholdButtonScaleKey: EnvironmentKey {
+    static let defaultValue: CGFloat = CGFloat(DS.defaultButtonScale)
+}
+
+extension EnvironmentValues {
+    /// The live interface-button scale (1.0 = baseline). ContentView injects it
+    /// from the `uiButtonScale` AppStorage value; standalone chrome components
+    /// (e.g. `ResetAndSaveControls`, `ActivityLightButton`) read it so they
+    /// re-layout when the slider moves.
+    var thresholdButtonScale: CGFloat {
+        get { self[ThresholdButtonScaleKey.self] }
+        set { self[ThresholdButtonScaleKey.self] = newValue }
     }
 }
 
