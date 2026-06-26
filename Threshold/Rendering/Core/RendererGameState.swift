@@ -274,6 +274,7 @@ extension Renderer {
                                 viewportHeight: Float(view.textureMap.viewport.height)),
                             shadowsEnabled: settingsSnapshot.shadowsEnabled ? 1 : 0,
                             distanceLODFalloff: settingsSnapshot.distanceLODStrength * 0.5,
+                            benchCollectSteps: BenchmarkManager.shared.collectIterations ? 1 : 0,
                             springDisplacementX: settingsSnapshot.springDisplacement.x,
                             springDisplacementY: settingsSnapshot.springDisplacement.y,
                             springDisplacementZ: settingsSnapshot.springDisplacement.z,

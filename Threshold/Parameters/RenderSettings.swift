@@ -144,6 +144,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _coherentPacketEnabled: Bool = loadBool("coherentPacketEnabled", default: false)  // Experimental predict-validate raymarch (Stages 0-3)
     private var _foveationStrength: Float = loadFloat("foveationStrength", default: 0.0)  // Peripheral step reduction on the 8x8 compute path (0 = off)
     private var _smartAdvanceEnabled: Bool = loadBool("smartAdvanceEnabled", default: false)  // Grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient)
+    private var _adaptiveRenderQualityEnabled: Bool = loadBool("adaptiveRenderQualityEnabled", default: true)  // visionOS: auto-lower compositor Render Quality to hold FPS (slider = ceiling)
     private var _coneMarchStrength: Float = loadFloat("coneMarchStrength", default: 0.0)  // 0 = off; scales the distance-growing hit threshold (projected pixel footprint, ConeMarchingPen)
     private var _overRelaxationMax: Float = loadFloat("overRelaxationMax", default: 1.4)  // Keinert over-relaxation ceiling the auto-ramp may reach (1.0 = conservative)
     private var _distanceLODStrength: Float = loadFloat("distanceLODStrength", default: 0.0)  // 0 = off; drops fractal iterations on faraway samples
@@ -363,7 +364,35 @@ final class RenderSettings: @unchecked Sendable {
     private var _manualOffsetFogIntensity: Float = 0.0
     private var _manualOffsetSaturation: Float = 0.0
     private var _manualOffsetFormulaParams: [Float] = Array(repeating: 0.0, count: 16)
-    
+
+    // === ANIMATION AUDIO (MUSIC) OFFSETS ===
+    // Parallel to the gesture `_manualOffset*` layer above. During animation playback
+    // applyKeyframe / the formula rebuild own the backing vars every frame, so a music
+    // write that sets the absolute value is overwritten and "music stops working".
+    // Instead, the dispatcher deposits the pure music delta here while playing, and the
+    // same composers that add `manualOffset` also add `audioOffset` — so music modulates
+    // *around* the live animated value. Centered at zero; the music engine refreshes them
+    // every frame (≈0 when silent), so unlike `manualOffset` they are NOT decayed.
+    private var _animationBaseHueSpeed: Float = 0.0
+    private var _audioOffsetMinDistance: Float = 0.0
+    private var _audioOffsetFoldingLimit: Float = 0.0
+    private var _audioOffsetSphereRadius: Float = 0.0
+    private var _audioOffsetFractalScale: Float = 0.0
+    private var _audioOffsetGlowIntensity: Float = 0.0
+    private var _audioOffsetBloomStrength: Float = 0.0
+    private var _audioOffsetFogIntensity: Float = 0.0
+    private var _audioOffsetSaturation: Float = 0.0
+    private var _audioOffsetHueSpeed: Float = 0.0
+    private var _audioOffsetFormulaParams: [Float] = Array(repeating: 0.0, count: 16)
+    // Which effect channels the *current* scene keyframe drives. When false the channel
+    // is user-owned and the dispatcher's plain absolute music write already survives, so
+    // the playback-relative offset path (which only applyKeyframe consumes) is skipped.
+    private var _sceneDrivesGlow: Bool = false
+    private var _sceneDrivesBloom: Bool = false
+    private var _sceneDrivesFog: Bool = false
+    private var _sceneDrivesSaturation: Bool = false
+    private var _sceneDrivesHueSpeed: Bool = false
+
     // === VELOCITY STATE FOR SMOOTH DAMP ===
     // Track velocities for critically-damped spring interpolation
     private var _velocityMinDistance: Float = 0.0
@@ -765,7 +794,18 @@ final class RenderSettings: @unchecked Sendable {
     /// scale) — this is the preferred sharpness/perf lever on Vision Pro.
     var renderQuality: Float {
         get { withLock { _renderQuality } }
-        set { withLock { _renderQuality = max(0.1, min(QualityConfig.visionMaxRenderQuality, newValue)) } }
+        set { withLock { _renderQuality = max(QualityConfig.visionMinRenderQuality, min(QualityConfig.visionMaxRenderQuality, newValue)) } }
+    }
+
+    /// visionOS-only: when on, the renderer auto-lowers the applied compositor
+    /// Render Quality to hold the frame rate and recovers toward `renderQuality`
+    /// (the ceiling) when FPS has headroom. See `AdaptiveRenderQualityController`.
+    var adaptiveRenderQualityEnabled: Bool {
+        get { withLock { _adaptiveRenderQualityEnabled } }
+        set {
+            withLock { _adaptiveRenderQualityEnabled = newValue }
+            persistQuality()
+        }
     }
 
     var fractalType: FractalModelType {
@@ -2600,7 +2640,104 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _manualOffsetSaturation } }
         set { withLock { _manualOffsetSaturation = newValue } }
     }
-    
+
+    // === ANIMATION AUDIO (MUSIC) OFFSET ACCESSORS ===
+    // Set by the parameter dispatcher (music delta) while playing; read by applyKeyframe
+    // when it composes the live value on top of the animation base.
+    var animationBaseHueSpeed: Float {
+        get { withLock { _animationBaseHueSpeed } }
+        set { withLock { _animationBaseHueSpeed = newValue } }
+    }
+    var audioOffsetMinDistance: Float {
+        get { withLock { _audioOffsetMinDistance } }
+        set { withLock { _audioOffsetMinDistance = newValue } }
+    }
+    var audioOffsetFoldingLimit: Float {
+        get { withLock { _audioOffsetFoldingLimit } }
+        set { withLock { _audioOffsetFoldingLimit = newValue } }
+    }
+    var audioOffsetSphereRadius: Float {
+        get { withLock { _audioOffsetSphereRadius } }
+        set { withLock { _audioOffsetSphereRadius = newValue } }
+    }
+    var audioOffsetFractalScale: Float {
+        get { withLock { _audioOffsetFractalScale } }
+        set { withLock { _audioOffsetFractalScale = newValue } }
+    }
+    var audioOffsetGlowIntensity: Float {
+        get { withLock { _audioOffsetGlowIntensity } }
+        set { withLock { _audioOffsetGlowIntensity = newValue } }
+    }
+    var audioOffsetBloomStrength: Float {
+        get { withLock { _audioOffsetBloomStrength } }
+        set { withLock { _audioOffsetBloomStrength = newValue } }
+    }
+    var audioOffsetFogIntensity: Float {
+        get { withLock { _audioOffsetFogIntensity } }
+        set { withLock { _audioOffsetFogIntensity = newValue } }
+    }
+    var audioOffsetSaturation: Float {
+        get { withLock { _audioOffsetSaturation } }
+        set { withLock { _audioOffsetSaturation = newValue } }
+    }
+    var audioOffsetHueSpeed: Float {
+        get { withLock { _audioOffsetHueSpeed } }
+        set { withLock { _audioOffsetHueSpeed = newValue } }
+    }
+    // Scene-drives flags (set by applyKeyframe each frame; read by the dispatcher).
+    var sceneDrivesGlow: Bool {
+        get { withLock { _sceneDrivesGlow } }
+        set { withLock { _sceneDrivesGlow = newValue } }
+    }
+    var sceneDrivesBloom: Bool {
+        get { withLock { _sceneDrivesBloom } }
+        set { withLock { _sceneDrivesBloom = newValue } }
+    }
+    var sceneDrivesFog: Bool {
+        get { withLock { _sceneDrivesFog } }
+        set { withLock { _sceneDrivesFog = newValue } }
+    }
+    var sceneDrivesSaturation: Bool {
+        get { withLock { _sceneDrivesSaturation } }
+        set { withLock { _sceneDrivesSaturation = newValue } }
+    }
+    var sceneDrivesHueSpeed: Bool {
+        get { withLock { _sceneDrivesHueSpeed } }
+        set { withLock { _sceneDrivesHueSpeed = newValue } }
+    }
+
+    /// Store the per-frame music delta for a formula param while a scene animates, so the
+    /// rebuild composes it on top of the animation base instead of the dispatcher's
+    /// absolute write (which the rebuild would stomp). For mandelbox the shape params are
+    /// read from dedicated uniforms, so also mirror the offset into those.
+    func setAudioFormulaParamOffset(index: Int, offset: Float) {
+        withLock {
+            guard index >= 0 && index < 16 else { return }
+            _audioOffsetFormulaParams[index] = offset
+            _syncMandelboxAudioShapeOffset_locked(index: index, offset: offset)
+            _rebuildFormulaParamsFromAnimationState_locked()
+        }
+    }
+
+    /// Zero every audio-modulation offset (e.g. music disabled, or playback stops). Cheap
+    /// no-lock-reentrancy variant for callers already inside `withLock` is below.
+    func clearAudioPlaybackOffsets() {
+        withLock { _clearAudioPlaybackOffsets_locked() }
+    }
+
+    private func _clearAudioPlaybackOffsets_locked() {
+        _audioOffsetMinDistance = 0.0
+        _audioOffsetFoldingLimit = 0.0
+        _audioOffsetSphereRadius = 0.0
+        _audioOffsetFractalScale = 0.0
+        _audioOffsetGlowIntensity = 0.0
+        _audioOffsetBloomStrength = 0.0
+        _audioOffsetFogIntensity = 0.0
+        _audioOffsetSaturation = 0.0
+        _audioOffsetHueSpeed = 0.0
+        for index in 0..<16 { _audioOffsetFormulaParams[index] = 0.0 }
+    }
+
     var effectiveTargetMinDistance: Float {
         withLock {
             _isAnimationPlaying ? _animationBaseMinDistance + _manualOffsetMinDistance : _targetMinDistance
@@ -2683,7 +2820,7 @@ final class RenderSettings: @unchecked Sendable {
         var params = _formulaParams
         for index in 0..<16 {
             let resolved = _clampFormulaParamValue_locked(
-                _animationBaseFormulaParams[index] + _manualOffsetFormulaParams[index],
+                _animationBaseFormulaParams[index] + _manualOffsetFormulaParams[index] + _audioOffsetFormulaParams[index],
                 index: index
             )
             FormulaCatalog.setParam(&params, index: index, value: resolved)
@@ -2701,6 +2838,24 @@ final class RenderSettings: @unchecked Sendable {
             _manualOffsetFoldingLimit = value - _animationBaseFoldingLimit
         case 2:
             _manualOffsetSphereRadius = value - _animationBaseSphereRadius
+        default:
+            break
+        }
+    }
+
+    /// Mandelbox reads minDistance/foldingLimit/sphereRadius from dedicated uniforms (not
+    /// formulaParams), so mirror the music offset (already a pure delta from the dispatcher)
+    /// into the matching dedicated-shape audio offset that applyKeyframe composes.
+    private func _syncMandelboxAudioShapeOffset_locked(index: Int, offset: Float) {
+        guard _fractalType == .mandelbox else { return }
+
+        switch index {
+        case 0:
+            _audioOffsetMinDistance = offset
+        case 1:
+            _audioOffsetFoldingLimit = offset
+        case 2:
+            _audioOffsetSphereRadius = offset
         default:
             break
         }
@@ -3261,6 +3416,15 @@ final class RenderSettings: @unchecked Sendable {
             _manualOffsetFogIntensity = 0.0
             _manualOffsetSaturation = 0.0
             _manualOffsetFormulaParams = Array(repeating: 0.0, count: 16)
+            // Drop any leftover music modulation so it doesn't bake a frozen offset into
+            // the baked targets; the dispatcher re-centers music around the user value
+            // once playback stops.
+            _clearAudioPlaybackOffsets_locked()
+            _sceneDrivesGlow = false
+            _sceneDrivesBloom = false
+            _sceneDrivesFog = false
+            _sceneDrivesSaturation = false
+            _sceneDrivesHueSpeed = false
             _syncAnimationBaseFormulaParamsFromCurrent_locked()
             // Zero spring velocities so interpolation doesn't overshoot
             _velocityMinDistance = 0.0
@@ -3558,6 +3722,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.coherentPacketEnabled = _coherentPacketEnabled
                 c.foveationStrength = _foveationStrength
                 c.smartAdvanceEnabled = _smartAdvanceEnabled
+                c.adaptiveRenderQualityEnabled = _adaptiveRenderQualityEnabled
                 c.coneMarchStrength = _coneMarchStrength
                 c.overRelaxationMax = _overRelaxationMax
                 c.distanceLODStrength = _distanceLODStrength
@@ -3578,12 +3743,13 @@ final class RenderSettings: @unchecked Sendable {
                 _baseMaxRaySteps = newValue.baseMaxRaySteps
                 _maxRaySteps = newValue.baseMaxRaySteps
                 _resolutionScale = ControlCatalog.resolutionScale.clamp(newValue.resolutionScale)
-                _renderQuality = max(0.1, min(QualityConfig.visionMaxRenderQuality, newValue.renderQuality))
+                _renderQuality = max(QualityConfig.visionMinRenderQuality, min(QualityConfig.visionMaxRenderQuality, newValue.renderQuality))
                 _tileSize = newValue.tileSize
                 _debugHierarchical = newValue.debugHierarchical
                 _coherentPacketEnabled = newValue.coherentPacketEnabled
                 _foveationStrength = newValue.foveationStrength
                 _smartAdvanceEnabled = newValue.smartAdvanceEnabled
+                _adaptiveRenderQualityEnabled = newValue.adaptiveRenderQualityEnabled
                 _coneMarchStrength = max(0.0, min(1.0, newValue.coneMarchStrength))
                 _overRelaxationMax = max(1.0, min(1.6, newValue.overRelaxationMax))
                 _distanceLODStrength = max(0.0, min(1.0, newValue.distanceLODStrength))

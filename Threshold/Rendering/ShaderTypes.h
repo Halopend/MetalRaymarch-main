@@ -28,7 +28,8 @@ typedef NS_ENUM(EnumBackingType, BufferIndex)
 {
     BufferIndexMeshPositions = 0,
     BufferIndexMeshGenerics  = 1,
-    BufferIndexUniforms      = 2
+    BufferIndexUniforms      = 2,
+    BufferIndexBenchCounters = 3   // device atomic_uint[2] = {stepSum, hitCount} for the benchmark iteration counter
 };
 
 typedef NS_ENUM(EnumBackingType, VertexAttribute)
@@ -263,6 +264,7 @@ typedef struct
     float coneMarchScale;    // Cone marching: per-distance growth of the march hit threshold (= projected pixel footprint × stop margin). 0 = off
     int shadowsEnabled;      // 0 = skip the per-pixel shadow marches (flat, cheaper lighting); 1 = full soft shadows
     float distanceLODFalloff;// Distance iteration LOD: fractal iterations dropped per unit ray distance. 0 = off
+    int benchCollectSteps;   // 1 = accumulate per-ray march step counts into BufferIndexBenchCounters (benchmark only)
 
     // === SPRING BLOB NAVIGATION WIDGET ===
     float springDisplacementX;        // Spring displacement X (NDC-ish space)

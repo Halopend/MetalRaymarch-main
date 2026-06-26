@@ -73,6 +73,268 @@ extension ContentView {
         }
     }
 
+    // MARK: - Quick Toggles pane
+
+    /// A standalone pane (selected from the section rail) holding a flat,
+    /// scannable page of master on/off switches for feature categories whose
+    /// controls are otherwise scattered across the Effects, Shape, and Advanced
+    /// tabs. Each switch binds to the same underlying enable flag the detailed
+    /// control surfaces use, so flipping one here is identical to toggling it on
+    /// its home tab — this is just one place to find them all.
+    var quickTogglesTabContent: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack {
+                    Label("Quick Toggles", systemImage: SidebarTab.quickToggles.icon)
+                        .font(.headline)
+                    Spacer()
+                }
+                Text("Tap a tile to flip a feature on or off. Lit tiles are on. Each tile drives the same switch as its home tab.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                // Formula section auto-populates from the active fractal type's
+                // capabilities — empty for fractals with no formula-specific knobs.
+                quickToggleFormulaSection
+
+                quickToggleSection("Lighting & Color", icon: "lightbulb", rows: quickToggleLightingRows)
+                quickToggleSection("Space", icon: "globe.asia.australia", rows: quickToggleSpaceRows)
+                quickToggleSection("Audio", icon: "waveform", rows: quickToggleAudioRows,
+                                   footnote: "Bands are quick mutes — turning one back on restores full sensitivity. Available while Audio Reactive is on.")
+                quickToggleSection("Performance", icon: AppIcons.boltFill, rows: quickTogglePerformanceRows)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+    }
+
+    // ── Row models, grouped by section ──────────────────────────────────────
+
+    /// Fractal-type-specific toggles. Built dynamically from
+    /// `cache.fractalType.supports(_:)` so the section reflects the active
+    /// formula (e.g. Julia Drift only on Mandelbulb Julia).
+    private var quickToggleFormulaRows: [QuickToggleRow] {
+        var rows: [QuickToggleRow] = []
+        if cache.fractalType.supports(.polarRotation) {
+            rows.append(QuickToggleRow("Polar Rotation", AppIcons.arrowTriangleheadCounterclockwiseRotate90,
+                get: { cache.lighting.polarRotationEffect.enabled },
+                set: { v in
+                    cache.lighting.polarRotationEffect.enabled = v
+                    cache.push(\.polarRotationEffect, value: cache.lighting.polarRotationEffect)
+                }))
+        }
+        if cache.fractalType.supports(.juliaDrift) {
+            rows.append(QuickToggleRow("Julia Drift", "wind",
+                get: { cache.lighting.juliaDriftEffect.enabled },
+                set: { cache.lighting.juliaDriftEffect.enabled = $0; cache.commitJuliaDriftEffect() }))
+        }
+        return rows
+    }
+
+    private var quickToggleLightingRows: [QuickToggleRow] {
+        [
+            QuickToggleRow("Glow", "sun.max",
+                get: { cache.lighting.glowEffect.enabled },
+                set: { cache.lighting.glowEffect.enabled = $0; cache.commitGlowEffect() }),
+            QuickToggleRow("Bloom", "sparkles",
+                get: { cache.lighting.bloomEffect.enabled },
+                set: { cache.lighting.bloomEffect.enabled = $0; cache.commitBloomEffect() }),
+            QuickToggleRow("Fog", "cloud.fog",
+                get: { cache.lighting.fogEffect.enabled },
+                set: { cache.lighting.fogEffect.enabled = $0; cache.commitFogEffect() }),
+            QuickToggleRow("Hue Rotation", "paintpalette",
+                get: { cache.lighting.hueRotationEffect.enabled },
+                set: { cache.lighting.hueRotationEffect.enabled = $0; cache.commitHueRotationEffect() }),
+            QuickToggleRow("Pulse", "waveform.path.ecg",
+                get: { cache.lighting.pulseEffect.enabled },
+                set: { cache.lighting.pulseEffect.enabled = $0; cache.commitPulseEffect() }),
+            QuickToggleRow("Gradient Cycle", "circle.hexagongrid",
+                get: { cache.lighting.gradientCycleEffect.enabled },
+                set: { cache.lighting.gradientCycleEffect.enabled = $0; cache.commitGradientCycleEffect() }),
+            QuickToggleRow("Linear Rail", "slider.horizontal.below.rectangle",
+                get: { cache.lighting.linearRailEffect.enabled },
+                set: { cache.lighting.linearRailEffect.enabled = $0; cache.commitLinearRailEffect() }),
+        ]
+    }
+
+    private var quickToggleSpaceRows: [QuickToggleRow] {
+        [
+            QuickToggleRow("Sphere Projection", "globe.asia.australia",
+                available: { cache.fractalType.supports(.sphereProjection) },
+                get: { cache.display.sphereProjectionEnabled },
+                set: { cache.display.sphereProjectionEnabled = $0; cache.commitSphereProjection() }),
+        ]
+    }
+
+    /// Individual audio components: the master reactive switch, beat-driven
+    /// flash, and per-band quick mutes (bass/mid/treble/beat). Bands map an
+    /// on/off tile to full (1.0) / muted (0.0) sensitivity.
+    private var quickToggleAudioRows: [QuickToggleRow] {
+        let masterOn: @MainActor () -> Bool = { cache.audioReactive.fractalAudioReactiveEnabled }
+        func band(_ label: String, _ icon: String,
+                  get: @escaping @MainActor () -> Float,
+                  set: @escaping @MainActor (Float) -> Void) -> QuickToggleRow {
+            QuickToggleRow(label, icon, available: masterOn,
+                get: { get() > 0 },
+                set: { set($0 ? 1.0 : 0.0) })
+        }
+        return [
+            QuickToggleRow("Audio Reactive", "waveform",
+                get: masterOn,
+                set: { v in
+                    cache.audioReactive.fractalAudioReactiveEnabled = v
+                    cache.push(\.fractalAudioReactiveEnabled, value: v)
+                }),
+            QuickToggleRow("Beat Flash", "bolt",
+                get: { cache.lighting.beatFlashEffect.enabled },
+                set: { cache.lighting.beatFlashEffect.enabled = $0; cache.commitBeatFlashEffect() }),
+            band("Bass", "speaker.wave.1",
+                get: { cache.audioReactive.bassSensitivity },
+                set: { cache.audioReactive.bassSensitivity = $0; cache.push(\.bassSensitivity, value: $0) }),
+            band("Mid", "speaker.wave.2",
+                get: { cache.audioReactive.midSensitivity },
+                set: { cache.audioReactive.midSensitivity = $0; cache.push(\.midSensitivity, value: $0) }),
+            band("Treble", "speaker.wave.3",
+                get: { cache.audioReactive.trebleSensitivity },
+                set: { cache.audioReactive.trebleSensitivity = $0; cache.push(\.trebleSensitivity, value: $0) }),
+            band("Beat", "metronome",
+                get: { cache.audioReactive.beatSensitivity },
+                set: { cache.audioReactive.beatSensitivity = $0; cache.push(\.beatSensitivity, value: $0) }),
+        ]
+    }
+
+    private var quickTogglePerformanceRows: [QuickToggleRow] {
+        [
+            QuickToggleRow("Smart Advance", "bolt",
+                get: { appModel.renderSettings.smartAdvanceEnabled },
+                set: { appModel.renderSettings.smartAdvanceEnabled = $0 }),
+            QuickToggleRow("Coherent Packet", "square.grid.3x3",
+                get: { appModel.renderSettings.coherentPacketEnabled },
+                set: { appModel.renderSettings.coherentPacketEnabled = $0 }),
+            QuickToggleRow("Self-Shadows", "moon",
+                get: { cache.quality.shadowsEnabled },
+                set: { cache.quality.shadowsEnabled = $0; cache.push(\.shadowsEnabled, value: $0) }),
+            QuickToggleRow("Bounding Sphere Skip", "circle.dashed",
+                get: { cache.quality.boundingSphereSkipEnabled },
+                set: { cache.quality.boundingSphereSkipEnabled = $0; cache.push(\.boundingSphereSkipEnabled, value: $0) }),
+        ]
+    }
+
+    /// Formula section — its own view because it may be empty (some fractal
+    /// types expose no formula-specific toggles) and shows a hint instead.
+    private var quickToggleFormulaSection: some View {
+        let rows = quickToggleFormulaRows
+        return VStack(alignment: .leading, spacing: 10) {
+            Label("Formula — \(cache.fractalType.displayName)", systemImage: "function")
+                .font(.headline)
+            if rows.isEmpty {
+                Text("This fractal type has no formula-specific toggles. Switch to Mandelbulb, a Julia, or Quaternion type to reveal polar rotation and Julia drift.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                quickToggleGrid(rows)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// One row of the quick-toggles page. `available` gates whether the toggle
+    /// is interactive for the current fractal (disabled + dimmed when not).
+    struct QuickToggleRow: Identifiable {
+        var id: String { label }
+        let label: String
+        let icon: String
+        let available: @MainActor () -> Bool
+        let get: @MainActor () -> Bool
+        let set: @MainActor (Bool) -> Void
+
+        init(_ label: String, _ icon: String,
+             available: @escaping @MainActor () -> Bool = { true },
+             get: @escaping @MainActor () -> Bool,
+             set: @escaping @MainActor (Bool) -> Void) {
+            self.label = label; self.icon = icon
+            self.available = available; self.get = get; self.set = set
+        }
+    }
+
+    /// A titled section: header + a responsive grid of toggle tiles.
+    private func quickToggleSection(_ title: String, icon: String,
+                                    rows: [QuickToggleRow],
+                                    footnote: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title, systemImage: icon).font(.headline)
+            if let footnote {
+                Text(footnote)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            quickToggleGrid(rows)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Responsive grid of toggle tiles — fills the available width, wrapping
+    /// into as many columns as fit.
+    private func quickToggleGrid(_ rows: [QuickToggleRow]) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 10)], spacing: 10) {
+            ForEach(rows) { quickToggleTile($0) }
+        }
+    }
+
+    /// Rainbow fill used to mark a tile as ON. Diagonal so adjacent tiles read
+    /// as a continuous spectrum block of "live" features.
+    private var quickToggleOnFill: LinearGradient {
+        LinearGradient(
+            colors: [.red, .orange, .yellow, .green, .blue, .purple],
+            startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    /// A single tile: the whole rectangle is both the button and the toggle.
+    /// Lit (rainbow) = on, grey = off; dimmed + non-interactive when the
+    /// feature isn't available for the current fractal / audio state.
+    private func quickToggleTile(_ row: QuickToggleRow) -> some View {
+        let available = row.available()
+        let on = row.get()
+        return Button {
+            row.set(!row.get())
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: row.icon)
+                    .font(.title3)
+                    .symbolRenderingMode(.hierarchical)
+                Text(row.label)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity, minHeight: 72)
+            .padding(8)
+            .foregroundStyle(on ? Color.white : Color.secondary)
+            .background {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(on ? AnyShapeStyle(quickToggleOnFill)
+                             : AnyShapeStyle(Color.gray.opacity(0.16)))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(on ? Color.white.opacity(0.35) : Color.white.opacity(0.08),
+                                  lineWidth: 1)
+            }
+            .shadow(color: on ? .black.opacity(0.18) : .clear, radius: 4, y: 2)
+        }
+        .buttonStyle(.plain)
+        .disabled(!available)
+        .opacity(available ? 1 : 0.3)
+        .animation(.easeInOut(duration: 0.18), value: on)
+        .help(row.label)
+    }
+
     // MARK: - Display sub-view
 
     /// Display-focused settings: Platform (visionOS), handedness, lighting,
@@ -877,7 +1139,7 @@ extension ContentView {
                     }.buttonStyle(.borderedProminent).tint(themeColor).disabled(isProfilerRunning)
                 }
             }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-            
+
             VStack(alignment: .leading, spacing: 8) {
                 HStack { Image(systemName: AppIcons.chartBarFill).foregroundStyle(themeColor); Text("Live Stats").font(.headline) }
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
@@ -912,33 +1174,29 @@ extension ContentView {
                     .foregroundStyle(.secondary)
             }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
 
-#if DEBUG
+            // ── Performance Sweep (per-build Vision Pro perf log) ──
             VStack(alignment: .leading, spacing: 8) {
-                HStack { Image(systemName: AppIcons.timer).foregroundStyle(themeColor); Text("Benchmarking").font(.headline) }
-                HStack {
-                    Button {
-                        isBenchmarking.toggle()
-                        BenchmarkManager.shared.toggleBenchmarking()
-                    } label: {
-                        HStack {
-                            Image(systemName: isBenchmarking ? AppIcons.stopCircleFill : AppIcons.playCircleFill)
-                            Text(isBenchmarking ? "Stop Benchmarking" : "Start Benchmarking")
-                        }
-                    }.buttonStyle(.borderedProminent).tint(isBenchmarking ? .red : themeColor)
-                    
-                    if !isBenchmarking {
-                        Button {
-                            BenchmarkManager.shared.clearStats()
-                        } label: {
-                            Text("Clear Stats")
-                        }.buttonStyle(.bordered)
+                HStack { Image(systemName: AppIcons.timer).foregroundStyle(themeColor); Text("Performance Sweep").font(.headline) }
+                let runner = appModel.perfSweepRunner
+                Button {
+                    if runner.isRunning { runner.cancel() }
+                    else { runner.start(appModel: appModel) }
+                } label: {
+                    HStack {
+                        Image(systemName: runner.isRunning ? AppIcons.stopCircleFill : AppIcons.playCircleFill)
+                        Text(runner.isRunning ? "Cancel Sweep" : "Run Benchmark Sweep")
                     }
+                }.buttonStyle(.borderedProminent).tint(runner.isRunning ? .red : themeColor)
+
+                if runner.isRunning, runner.totalScenes > 0 {
+                    ProgressView(value: Double(runner.currentScene), total: Double(runner.totalScenes))
+                        .tint(themeColor)
                 }
-                Text("Check Xcode console for results.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                Text(runner.progressText)
+                    .font(.caption2).foregroundStyle(.secondary)
+                Text("Loads a curated set of scenes, measures GPU/CPU/FPS on this device, and appends one record to Documents/PerfLog/perf-log.jsonl (+ perf-log.md). Run it with the immersive view up. Pull the files via the Files app and append them to the repo's PERF_LOG.jsonl to track performance across builds.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-#endif
         }
     }
 }

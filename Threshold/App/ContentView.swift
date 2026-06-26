@@ -189,6 +189,8 @@ struct ContentView: View {
     // Developer state
     @State var isProfilerRunning = false
     @State var isTestAnimationPlaying = false
+    @State var isRecompilingShaders = false
+    @State var shaderRecompileStatus: String?
 #if DEBUG
     @State var isBenchmarking = false
 #endif
@@ -661,6 +663,10 @@ struct ContentView: View {
                     }
                 }
 
+                railButton(title: "Quick Toggles", systemImage: SidebarTab.quickToggles.icon, isSelected: selectedTab == .quickToggles) {
+                    selectedTab = .quickToggles
+                }
+
                 railButton(title: "Settings", systemImage: SidebarTab.settings.icon, isSelected: selectedTab == .settings) {
                     selectedTab = .settings
                 }
@@ -1126,7 +1132,7 @@ struct ContentView: View {
         case .transition:
             topDockTab = .visualizations
             visualizationsRailSection = .transition
-        case .gestures, .settings:
+        case .quickToggles, .gestures, .settings:
             break
         }
     }
@@ -1161,6 +1167,7 @@ struct ContentView: View {
                     } else {
                         settingsTabContent
                     }
+                case .quickToggles: quickTogglesTabContent
                 case .settings: settingsTabContent
                 }
             }

@@ -1397,6 +1397,7 @@ FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, Fractal
 struct SceneResult {
     float2 distGlow;    // .x = distance, .y = glow
     OrbitCache cache;   // Cached orbit state from final hit position
+    int steps;          // Fine-march iterations taken to converge (benchmark metric)
 };
 
 // One step of relaxed sphere tracing (Keinert et al.). Returns true when the
@@ -1520,6 +1521,7 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
+    result.steps = 0;
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
     
     float dither = interleavedGradientNoise(fragCoord, time) * 0.015;
@@ -1598,6 +1600,7 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
             MapWithOrbitCacheUnified(p, params, foldingLimit, effIter, type, fp, colorIterations, hitCache);
             result.cache = hitCache;
             result.distGlow = float2(t, saturate(glow * 0.25));
+            result.steps = j;
             return result;
         }
 
@@ -1616,6 +1619,7 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
+    result.steps = 0;
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
     
     float dither = interleavedGradientNoise(fragCoord, time) * 0.01;
@@ -1674,6 +1678,7 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
             MapWithOrbitCacheUnified(p, params, foldingLimit, effIter, type, fp, colorIterations, hitCache);
             result.cache = hitCache;
             result.distGlow = float2(t, saturate(glow * 0.25));
+            result.steps = j;
             return result;
         }
 
@@ -2728,7 +2733,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                                    Uniforms uniforms,
                                    float2 fragCoord,
                                    float time,
-                                   float warmStartT = -1.0f)
+                                   float warmStartT = -1.0f,
+                                   device atomic_uint* benchCounters = nullptr)
 {
     FragmentOutput output;
 
@@ -2772,6 +2778,14 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     }
     ret = sceneResult.distGlow;
     hitCache = sceneResult.cache;
+
+    // Benchmark: accumulate fine-march iterations for converged (hit) rays so the
+    // CPU can read back an average steps-to-converge. No-op unless a sweep armed
+    // the counter (benchCollectSteps) and bound the buffer.
+    if (uniforms.benchCollectSteps != 0 && benchCounters != nullptr && ret.x < kRayMissThreshold) {
+        atomic_fetch_add_explicit(&benchCounters[0], (uint)max(sceneResult.steps, 0), memory_order_relaxed);
+        atomic_fetch_add_explicit(&benchCounters[1], 1u, memory_order_relaxed);
+    }
 
     if (ret.x < kRayMissThreshold)
     {
@@ -2915,6 +2929,7 @@ FORCE_INLINE float computeWarmStartT(
 
 fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
                                constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
+                               device atomic_uint* benchCounters [[buffer(BufferIndexBenchCounters)]],
                                ushort ampId [[amplification_id]],
                                depth2d_array<float, access::sample> prevDepthTex [[texture(TextureIndexPrevDepth), function_constant(FC_WARM_START_ON)]])
 {
@@ -2937,7 +2952,7 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     }
 
     // Render fractal
-    return fragmentMain(in, uniforms, fragCoord, uniforms.time, warmStartT);
+    return fragmentMain(in, uniforms, fragCoord, uniforms.time, warmStartT, benchCounters);
 }
 
 fragment FragmentOutput fragmentShaderMono(ColorInOut in [[stage_in]],

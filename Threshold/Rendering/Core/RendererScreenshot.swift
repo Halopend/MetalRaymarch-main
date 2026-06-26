@@ -99,6 +99,11 @@ extension Renderer {
 
         renderEncoder.setVertexBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
+        // fragmentShader declares the benchmark counter buffer; bind a dummy so
+        // the screenshot pipeline validates (screenshots never benchmark).
+        if let benchBuf = benchCounterBuffers.first {
+            renderEncoder.setFragmentBuffer(benchBuf, offset: 0, index: BufferIndex.benchCounters.rawValue)
+        }
 
         let viewport = MTLViewport(originX: 0, originY: 0,
                                    width: Double(screenshotTexture.width),

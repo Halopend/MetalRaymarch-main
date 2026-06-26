@@ -554,7 +554,11 @@ struct FPSIndicatorView: View {
         }
         .padding(.horizontal, DS.Spacing.sm)
         .padding(.vertical, DS.Spacing.xxs)
-        .dsGlass(in: Capsule())
+        // Solid capsule rather than `.dsGlass` (which blurs its backdrop): this
+        // indicator sits over the live Metal view as an always-on HUD, so a blur
+        // here would be a per-frame cost on the render thread.
+        .background(Color.black.opacity(0.6), in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
     }
 }
 

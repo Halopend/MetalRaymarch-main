@@ -191,6 +191,8 @@ class AppModel {
     
     // Preset management
     let presetManager = PresetManager()
+    /// Drives the on-device performance sweep that writes the per-build perf log.
+    let perfSweepRunner = PerfSweepRunner()
 
     // iCloud Drive backup/restore (presets, scenes, settings)
     let iCloudBackup = ICloudBackupManager()
@@ -273,6 +275,7 @@ class AppModel {
         preparePipelineHandler = nil
         preparePipelineForValuesHandler = nil
         triggerProfilerHandler = nil
+        forceShaderRecompileHandler = nil
         activateEmbeddedFormulaHandler = nil
         rendererStartupWarmupComplete = false
     }
@@ -374,6 +377,19 @@ class AppModel {
     
     // Pipeline profiler trigger (set by Renderer)
     var triggerProfilerHandler: (() -> Void)?
+
+    // Force shader/pipeline recompile (set by the live renderer — the visionOS
+    // `Renderer` actor or the macOS/iOS `ThresholdMacRenderer`). Clears the
+    // specialized pipeline caches and recompiles the active custom `.threshfx`
+    // library from source. Returns a short status summary for the UI.
+    var forceShaderRecompileHandler: (() async -> String)?
+
+    /// Force a full shader/pipeline recompile (debug). Drops cached pipeline
+    /// states so they rebuild fresh, and recompiles any active custom formula
+    /// from source. Returns a human-readable summary of what happened.
+    func forceShaderRecompile() async -> String {
+        await forceShaderRecompileHandler?() ?? "No renderer is active."
+    }
     
     /// Run the pipeline profiler to analyze rendering costs
     func runProfiler() {

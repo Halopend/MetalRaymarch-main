@@ -20,9 +20,10 @@ enum SidebarTab: String, CaseIterable {
     case effects = "Effects"
     case music = "Music"
     case transition = "Transition"
+    case quickToggles = "Quick Toggles"
     case gestures = "Gestures"
     case settings = "Settings"
-    
+
     var icon: String {
         switch self {
         case .fractal:  return "cube.fill"
@@ -31,6 +32,7 @@ enum SidebarTab: String, CaseIterable {
         case .effects:  return "wand.and.stars"
         case .music:    return "music.note"
         case .transition: return "timer"
+        case .quickToggles: return "switch.2"
         case .gestures: return "hand.draw"
         case .settings: return "gearshape.fill"
         }

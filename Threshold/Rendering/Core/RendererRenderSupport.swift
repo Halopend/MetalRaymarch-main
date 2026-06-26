@@ -276,6 +276,7 @@ extension Renderer {
         frameTimeSeconds: Double,
         cpuEncodeMs: Double,
         gpuMs: Double?,
+        iterationsAvg: Double? = nil,
         frameBreakdown: FramePhaseBreakdown = .zero,
         settingsSnapshot: RenderSettingsSnapshot,
         useAdaptiveCompute: Bool,
@@ -288,6 +289,7 @@ extension Renderer {
             frameTimeSeconds: frameTimeSeconds,
             cpuEncodeMs: cpuEncodeMs,
             gpuMs: gpuMs,
+            iterationsAvg: iterationsAvg,
             frameBreakdown: frameBreakdown,
             shouldLogSlowFrame: shouldLogSlowFrame,
             settingsSnapshot: settingsSnapshot,
@@ -366,6 +368,7 @@ extension Renderer {
         frameTimeSeconds: Double,
         cpuEncodeMs: Double,
         gpuMs: Double?,
+        iterationsAvg: Double? = nil,
         frameBreakdown: FramePhaseBreakdown,
         shouldLogSlowFrame: Bool,
         settingsSnapshot: RenderSettingsSnapshot,
@@ -376,17 +379,23 @@ extension Renderer {
     ) {
         let frameMs = frameTimeSeconds * 1000.0
 
-#if DEBUG
-        let benchFractalType: Int = Int(settingsSnapshot.fractalType.rawValue)
-        let benchFractalName: String = settingsSnapshot.fractalType.displayName
-        BenchmarkManager.shared.recordSample(
-            fractalType: benchFractalType,
-            fractalName: benchFractalName,
-            gpuMs: gpuMs,
-            cpuMs: cpuEncodeMs,
-            frameTimeMs: frameMs
-        )
-#endif
+        // Feed the benchmark sweep when one is running. The `isCapturing` gate is
+        // a lock-free bool read, so a normal frame pays almost nothing here.
+        if BenchmarkManager.shared.isCapturing {
+            BenchmarkManager.shared.recordSample(
+                gpuMs: gpuMs,
+                cpuMs: cpuEncodeMs,
+                frameTimeMs: frameMs,
+                iterationsAvg: iterationsAvg,
+                renderPath: useAdaptiveCompute ? "compute 8x8" : "fragment",
+                drawableWidth: drawableWidth,
+                drawableHeight: drawableHeight,
+                tileSize: settingsSnapshot.tileSize,
+                iters: settingsSnapshot.fractalIterations,
+                raySteps: settingsSnapshot.maxRaySteps,
+                views: viewCount
+            )
+        }
 
         guard shouldLogSlowFrame else { return }
 

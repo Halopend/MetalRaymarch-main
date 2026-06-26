@@ -309,6 +309,9 @@ final class MusicReactiveEngine {
         if layerActive {
             pipeline.clearMusicLayers(settings: settings)
         }
+        // Drop any music offsets the playback composer is still layering on the animation
+        // (with the engine off, nothing refreshes them back toward zero each frame).
+        settings.clearAudioPlaybackOffsets()
         layerActive = false
         clearCurveState()
         resetDamping()

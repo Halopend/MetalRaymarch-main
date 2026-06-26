@@ -17,14 +17,25 @@ struct QualityConfig: Codable, Equatable, Sendable {
     /// memory vs 1.0 while staying visually near-native.
     static let visionMaxRenderQuality: Float = 0.8
 
+    /// Lowest compositor Render Quality the slider / adaptive governor may reach.
+    /// Below the old 0.1 floor so the FPS-holding governor (and manual probing) can
+    /// trade more sharpness for headroom on heavy scenes.
+    static let visionMinRenderQuality: Float = 0.05
+
     // User-set base values
     var baseFractalIterations: Int = 9
     var baseMaxRaySteps: Int = 64
 
     // Resolution / tiling
     var resolutionScale: Float = 1.0   // 0.33 - 1.0 (MetalFX spatial upscale input scale)
-    var renderQuality: Float = 0.5     // 0.1 - 1.0 (visionOS compositor drawable scale; 1.0 = native). Default 0.5 favors framerate; 0.1 floor is for probing max framerate.
+    var renderQuality: Float = 0.5     // visionMinRenderQuality - 1.0 (visionOS compositor drawable scale; 1.0 = native). Default 0.5 favors framerate; the floor is for probing max framerate / the adaptive governor.
     var tileSize: Int = 0              // 0=disabled, 2/4/8 adaptive hierarchical
+
+    // Vision Pro: auto-lower Render Quality to hold the frame rate, recovering
+    // toward the slider (treated as a ceiling) when FPS has headroom. The slider
+    // value is the maximum; the governor only renders at or below it. See
+    // `AdaptiveRenderQualityController`.
+    var adaptiveRenderQualityEnabled: Bool = true
 
     // Debug
     var debugHierarchical: Bool = false
@@ -85,7 +96,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         baseFractalIterations = max(2, min(24, baseFractalIterations))
         baseMaxRaySteps = max(16, min(200, baseMaxRaySteps))
         resolutionScale = max(0.33, min(1.0, resolutionScale))
-        renderQuality = max(0.1, min(Self.visionMaxRenderQuality, renderQuality))
+        renderQuality = max(Self.visionMinRenderQuality, min(Self.visionMaxRenderQuality, renderQuality))
         foveationStrength = max(0.0, min(1.0, foveationStrength))
         coneMarchStrength = max(0.0, min(1.0, coneMarchStrength))
         overRelaxationMax = max(1.0, min(1.6, overRelaxationMax))
@@ -106,7 +117,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         case debugHierarchical, coherentPacketEnabled, foveationStrength
         case smartAdvanceEnabled, coneMarchStrength
         case overRelaxationMax, distanceLODStrength, shadowsEnabled, boundingSphereSkipEnabled
-        case renderDistanceScale
+        case renderDistanceScale, adaptiveRenderQualityEnabled
     }
 
     init() {}
@@ -128,5 +139,6 @@ struct QualityConfig: Codable, Equatable, Sendable {
         shadowsEnabled        = try c.decodeIfPresent(Bool.self,  forKey: .shadowsEnabled)        ?? true
         boundingSphereSkipEnabled = try c.decodeIfPresent(Bool.self, forKey: .boundingSphereSkipEnabled) ?? false
         renderDistanceScale   = try c.decodeIfPresent(Float.self, forKey: .renderDistanceScale)   ?? 1.0
+        adaptiveRenderQualityEnabled = try c.decodeIfPresent(Bool.self, forKey: .adaptiveRenderQualityEnabled) ?? true
     }
 }

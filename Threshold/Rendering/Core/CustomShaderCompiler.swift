@@ -166,6 +166,14 @@ actor CustomShaderCompiler {
         libraryCache.removeValue(forKey: sourceHash)
     }
 
+    /// Drop every cached library so the next `library(...)` call recompiles from
+    /// source. Used by the debug "Force Recompile" action — re-activating a
+    /// formula otherwise returns the cached `MTLLibrary` and never re-runs the
+    /// Metal compiler.
+    func evictAll() {
+        libraryCache.removeAll()
+    }
+
     // MARK: - Source synthesis
 
     /// Stitch the user's DE source into the bundled Metal sources to produce a

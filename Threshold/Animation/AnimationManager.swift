@@ -680,6 +680,10 @@ final class AnimationManager {
             return
         }
 
+        // Force the first keyframe to re-assert every effect (the caches gate the
+        // persisting effect setters, so a stale cache would skip the initial write).
+        resetKeyframeEffectCaches()
+
         let isStartingFromBeginning = playhead.state == .stopped ||
             (playhead.currentKeyframeIndex == 0 && playhead.elapsedInSegment <= 0.0001)
         
@@ -1109,6 +1113,27 @@ final class AnimationManager {
         }
     }
 
+    // Last scene-keyframe effect structs actually written through the persisting setters.
+    // The effect setters flip the lighting preset to .custom and persist to disk, so we
+    // only call them when the scene's keyframe value changes — NOT every frame. Music
+    // modulation is layered on afterwards via the non-persisting audioModulate* setters,
+    // so these caches must compare the raw keyframe value, not the live (modulated) value.
+    private var lastKeyframeGlow: GlowEffect?
+    private var lastKeyframeBloom: BloomEffect?
+    private var lastKeyframeFog: FogEffect?
+    private var lastKeyframeHue: HueRotationEffect?
+    private var lastKeyframeSaturation: Float?
+
+    /// Reset the per-effect keyframe caches so the next `applyKeyframe` re-asserts the
+    /// scene's effect values (call when playback starts/stops or the scene changes).
+    private func resetKeyframeEffectCaches() {
+        lastKeyframeGlow = nil
+        lastKeyframeBloom = nil
+        lastKeyframeFog = nil
+        lastKeyframeHue = nil
+        lastKeyframeSaturation = nil
+    }
+
     /// Apply a keyframe's values to render settings
     /// During playback, we set IMMEDIATE values (bypassing smoothing) for responsive animation.
     /// Targets are also updated so hand gestures can blend in when animation stops.
@@ -1121,17 +1146,23 @@ final class AnimationManager {
         settings.animationBaseFractalScale = keyframe.fractalScale
         settings.animationBasePosition = keyframe.position
         
-        let minDistance = keyframe.minDistance + settings.manualOffsetMinDistance
-        let foldingLimit = keyframe.foldingLimit + settings.manualOffsetFoldingLimit
-        let sphereRadius = keyframe.sphereRadius + settings.manualOffsetSphereRadius
+        // Compose gesture (manual) AND music (audio) offsets into the targets so both
+        // survive playback. minDistance/foldingLimit/sphereRadius music arrives via the
+        // mandelbox formula path (audioOffset stays 0 for other types / non-music targets).
+        let minDistance = keyframe.minDistance + settings.manualOffsetMinDistance + settings.audioOffsetMinDistance
+        let foldingLimit = keyframe.foldingLimit + settings.manualOffsetFoldingLimit + settings.audioOffsetFoldingLimit
+        let sphereRadius = keyframe.sphereRadius + settings.manualOffsetSphereRadius + settings.audioOffsetSphereRadius
         let position = keyframe.position + settings.manualOffsetPosition
-        
+
         // Set IMMEDIATE values for responsive animation playback
-        // This bypasses the renderer's interpolateToTargets() smoothing
-        settings.minDistance = keyframe.minDistance
-        settings.foldingLimit = keyframe.foldingLimit
-        settings.sphereRadius = keyframe.sphereRadius
-        settings.fractalScale = keyframe.fractalScale
+        // This bypasses the renderer's interpolateToTargets() smoothing.
+        // The music (audio) offset is folded into the live value here so the beat-driven
+        // wiggle is full-amplitude and snappy; the gesture offset stays out of the live
+        // value (it eases in via the target above) to preserve its smooth blend-in feel.
+        settings.minDistance = keyframe.minDistance + settings.audioOffsetMinDistance
+        settings.foldingLimit = keyframe.foldingLimit + settings.audioOffsetFoldingLimit
+        settings.sphereRadius = keyframe.sphereRadius + settings.audioOffsetSphereRadius
+        settings.fractalScale = keyframe.fractalScale + settings.audioOffsetFractalScale
         // Iteration budget: skip when the user has manually overridden it for
         // this scene. The override is cleared on every scene switch so the
         // scene's saved budget restores on first run.
@@ -1171,34 +1202,69 @@ final class AnimationManager {
               settings.lightingPreset != lightingPreset {
             settings.lightingPreset = lightingPreset
         }
-                    if let hueRotationEffect = keyframe.hueRotationEffect,
-                            settings.hueRotationEffect != hueRotationEffect {
-                        settings.hueRotationEffect = hueRotationEffect
+        if let hueRotationEffect = keyframe.hueRotationEffect {
+            settings.sceneDrivesHueSpeed = true
+            settings.animationBaseHueSpeed = hueRotationEffect.speed
+            if lastKeyframeHue != hueRotationEffect {
+                lastKeyframeHue = hueRotationEffect
+                settings.hueRotationEffect = hueRotationEffect
+            }
+            // Layer music on top of the scene's hue speed every frame (non-persisting).
+            settings.audioModulateHueSpeed(hueRotationEffect.speed + settings.audioOffsetHueSpeed)
+        } else {
+            settings.sceneDrivesHueSpeed = false
+            lastKeyframeHue = nil
         }
           if let pulseEffect = keyframe.pulseEffect,
               settings.pulseEffect != pulseEffect {
             settings.pulseEffect = pulseEffect
         }
-          if let glowEffect = keyframe.glowEffect,
-                            settings.glowEffect != glowEffect {
-                        settings.animationBaseGlowIntensity = glowEffect.intensity
-                        var resolvedEffect = glowEffect
-                        resolvedEffect.intensity = max(0.0, min(1.0, glowEffect.intensity + settings.manualOffsetGlowIntensity))
-                        settings.glowEffect = resolvedEffect
+        // Glow / Bloom / Fog: write the full effect struct (which persists + flips the
+        // lighting preset to .custom) only when the scene's keyframe changes, then layer
+        // gesture + music offsets on top every frame via the non-persisting audioModulate*
+        // setters. Comparing against the cached raw keyframe (not the live, modulated
+        // value) keeps the expensive persisting write from firing once music is active.
+        if let glowEffect = keyframe.glowEffect {
+            settings.sceneDrivesGlow = true
+            settings.animationBaseGlowIntensity = glowEffect.intensity
+            if lastKeyframeGlow != glowEffect {
+                lastKeyframeGlow = glowEffect
+                settings.glowEffect = glowEffect
+            }
+            settings.audioModulateGlowIntensity(glowEffect.intensity
+                + settings.manualOffsetGlowIntensity
+                + settings.audioOffsetGlowIntensity)
+        } else {
+            settings.sceneDrivesGlow = false
+            lastKeyframeGlow = nil
         }
-          if let bloomEffect = keyframe.bloomEffect,
-                            settings.bloomEffect != bloomEffect {
-                        settings.animationBaseBloomStrength = bloomEffect.strength
-                        var resolvedEffect = bloomEffect
-                        resolvedEffect.strength = max(0.0, min(1.0, bloomEffect.strength + settings.manualOffsetBloomStrength))
-                        settings.bloomEffect = resolvedEffect
+        if let bloomEffect = keyframe.bloomEffect {
+            settings.sceneDrivesBloom = true
+            settings.animationBaseBloomStrength = bloomEffect.strength
+            if lastKeyframeBloom != bloomEffect {
+                lastKeyframeBloom = bloomEffect
+                settings.bloomEffect = bloomEffect
+            }
+            settings.audioModulateBloomStrength(bloomEffect.strength
+                + settings.manualOffsetBloomStrength
+                + settings.audioOffsetBloomStrength)
+        } else {
+            settings.sceneDrivesBloom = false
+            lastKeyframeBloom = nil
         }
-          if let fogEffect = keyframe.fogEffect,
-                            settings.fogEffect != fogEffect {
-                        settings.animationBaseFogIntensity = fogEffect.intensity
-                        var resolvedEffect = fogEffect
-                        resolvedEffect.intensity = max(0.0, min(1.0, fogEffect.intensity + settings.manualOffsetFogIntensity))
-                        settings.fogEffect = resolvedEffect
+        if let fogEffect = keyframe.fogEffect {
+            settings.sceneDrivesFog = true
+            settings.animationBaseFogIntensity = fogEffect.intensity
+            if lastKeyframeFog != fogEffect {
+                lastKeyframeFog = fogEffect
+                settings.fogEffect = fogEffect
+            }
+            settings.audioModulateFogIntensity(fogEffect.intensity
+                + settings.manualOffsetFogIntensity
+                + settings.audioOffsetFogIntensity)
+        } else {
+            settings.sceneDrivesFog = false
+            lastKeyframeFog = nil
         }
           if let gradientCycleEffect = keyframe.gradientCycleEffect,
               settings.gradientCycleEffect != gradientCycleEffect {
@@ -1223,8 +1289,18 @@ final class AnimationManager {
             settings.gradientSmoothing = sm
         }
         if let sat = keyframe.colorSchemeSaturation {
+            settings.sceneDrivesSaturation = true
             settings.animationBaseSaturation = sat
-            settings.colorSchemeSaturation = max(0.0, min(3.0, sat + settings.manualOffsetSaturation))
+            if lastKeyframeSaturation != sat {
+                lastKeyframeSaturation = sat
+                settings.colorSchemeSaturation = max(0.0, min(3.0, sat))
+            }
+            settings.audioModulateSaturation(sat
+                + settings.manualOffsetSaturation
+                + settings.audioOffsetSaturation)
+        } else {
+            settings.sceneDrivesSaturation = false
+            lastKeyframeSaturation = nil
         }
         if let con = keyframe.colorSchemeContrast {
             settings.colorSchemeContrast = con
@@ -1258,7 +1334,7 @@ final class AnimationManager {
         settings.targetMinDistance = minDistance
         settings.targetFoldingLimit = foldingLimit
         settings.targetSphereRadius = sphereRadius
-        settings.targetFractalScale = keyframe.fractalScale + settings.manualOffsetFractalScale
+        settings.targetFractalScale = keyframe.fractalScale + settings.manualOffsetFractalScale + settings.audioOffsetFractalScale
         settings.targetPosition = position
     }
 

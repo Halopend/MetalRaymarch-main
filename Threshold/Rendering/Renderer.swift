@@ -158,6 +158,11 @@ actor Renderer {
 
     var uniformBufferIndex = 0
 
+    /// Per-in-flight counter buffers (2 × UInt32 = {stepSum, hitCount}) bound at
+    /// BufferIndexBenchCounters for the benchmark iteration counter. One per slot
+    /// so a frame's GPU writes never collide with the next frame's CPU zero.
+    var benchCounterBuffers: [MTLBuffer] = []
+
     var uniforms: UnsafeMutablePointer<UniformsArray>
 
     let rasterSampleCount: Int = 1
@@ -192,6 +197,11 @@ actor Renderer {
     // FPS tracking
     var lastPresentationTime: LayerRenderer.Clock.Instant?
     var smoothedFPS: Double = 0
+
+    // FPS-holding governor: lowers the applied compositor Render Quality when the
+    // frame rate sags and recovers toward the user's slider (the ceiling) when it
+    // has headroom. Driven once per frame from `smoothedFPS`.
+    var adaptiveRenderQuality = AdaptiveRenderQualityController()
 
     // Last render-quality target pushed to layerRenderer.renderQuality. The
     // compositor smooths transitions, so we only re-set it when the target
@@ -290,6 +300,13 @@ actor Renderer {
         self.dynamicUniformBuffer = uniformBuffer
 
         self.dynamicUniformBuffer.label = "UniformBuffer"
+
+        self.benchCounterBuffers = (0..<maxBuffersInFlight).compactMap { slot in
+            let b = device.makeBuffer(length: MemoryLayout<UInt32>.stride * 2,
+                                      options: [MTLResourceOptions.storageModeShared])
+            b?.label = "BenchCounters[\(slot)]"
+            return b
+        }
 
         uniforms = UnsafeMutableRawPointer(dynamicUniformBuffer.contents()).bindMemory(to:UniformsArray.self, capacity:1)
 
@@ -590,6 +607,11 @@ actor Renderer {
                     renderer.triggerProfiler()
                 }
 
+                // Setup force-recompile handler (debug "Force Recompile" button).
+                appModel.forceShaderRecompileHandler = {
+                    await renderer.forceRecompileShaders()
+                }
+
                 // Setup custom-shader (.threshfx) activation handler.
                 appModel.activateEmbeddedFormulaHandler = { formula in
                     try await renderer.activateEmbeddedFormula(formula)
@@ -740,11 +762,22 @@ actor Renderer {
 
         frame.endUpdate()
 
-        // Drive the compositor's runtime render quality from the dedicated
-        // Render Quality setting before querying the drawable, so the drawable is
-        // sized for the requested quality. This is the visionOS-native (and
-        // foveation-aware) resolution control — see applyRenderQualityIfNeeded.
-        applyRenderQualityIfNeeded(renderQuality: appModel.renderSettings.renderQuality)
+        // Drive the compositor's runtime render quality before querying the
+        // drawable, so the drawable is sized for the requested quality. This is the
+        // visionOS-native (and foveation-aware) resolution control — see
+        // applyRenderQualityIfNeeded. The user's Render Quality slider is the
+        // ceiling; the adaptive governor lowers the applied value to hold FPS and
+        // recovers toward the ceiling when there's headroom (no-op when disabled).
+        // smoothedFPS is the prior frame's value here (updated later this frame),
+        // which is exactly the signal we want for this frame's decision.
+        let renderQualityCeiling = appModel.renderSettings.renderQuality
+        let effectiveRenderQuality = adaptiveRenderQuality.update(
+            smoothedFPS: smoothedFPS,
+            ceiling: renderQualityCeiling,
+            now: CACurrentMediaTime(),
+            enabled: appModel.renderSettings.adaptiveRenderQualityEnabled
+        )
+        applyRenderQualityIfNeeded(renderQuality: effectiveRenderQuality)
 
         guard let timing = frame.predictTiming() else { return }
         let clockWaitStart = CACurrentMediaTime()
@@ -1135,6 +1168,19 @@ actor Renderer {
         // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
 
+        // Benchmark iteration counter (BufferIndexBenchCounters). Always bound —
+        // the fragmentShader pipeline declares the buffer; it's only zeroed (and
+        // later read) while a sweep is collecting. benchPtr is read in the
+        // completion handler once the GPU has finished writing this slot.
+        let benchCollecting = BenchmarkManager.shared.collectIterations
+        let benchBuf: MTLBuffer? = benchCounterBuffers.isEmpty
+            ? nil : benchCounterBuffers[uniformBufferIndex % benchCounterBuffers.count]
+        if let benchBuf {
+            if benchCollecting { memset(benchBuf.contents(), 0, MemoryLayout<UInt32>.stride * 2) }
+            renderEncoder.setFragmentBuffer(benchBuf, offset: 0, index: BufferIndex.benchCounters.rawValue)
+        }
+        let benchPtr: UnsafeMutableRawPointer? = benchCollecting ? benchBuf?.contents() : nil
+
         // Previous-frame depth for the temporal march warm-start. Pipelines built
         // via buildRenderPipelineWithDevice declare this argument (FC_WARM_START);
         // when MetalFX is inactive the dummy satisfies validation and is never
@@ -1197,12 +1243,19 @@ actor Renderer {
         let drawableWidth = drawable.colorTextures[0].width
         let drawableHeight = drawable.colorTextures[0].height
         let frameBreakdownSnapshot = frameBreakdown
-        commandBuffer.addCompletedHandler { [weak self] cb in
+        commandBuffer.addCompletedHandler { [weak self, benchPtr] cb in
             let gpuMs: Double?
             if cb.gpuEndTime > cb.gpuStartTime {
                 gpuMs = (cb.gpuEndTime - cb.gpuStartTime) * 1000.0
             } else {
                 gpuMs = nil
+            }
+            // Average march iterations to converge over this frame's hit rays.
+            var iterationsAvg: Double? = nil
+            if let benchPtr {
+                let p = benchPtr.bindMemory(to: UInt32.self, capacity: 2)
+                let hitCount = p[1]
+                if hitCount > 0 { iterationsAvg = Double(p[0]) / Double(hitCount) }
             }
             guard let self else { return }
             Task {
@@ -1211,6 +1264,7 @@ actor Renderer {
                     frameTimeSeconds: frameTimeSeconds,
                     cpuEncodeMs: cpuEncodeMs,
                     gpuMs: gpuMs,
+                    iterationsAvg: iterationsAvg,
                     frameBreakdown: frameBreakdownSnapshot,
                     settingsSnapshot: settingsSnapshot,
                     useAdaptiveCompute: useAdaptiveCompute,

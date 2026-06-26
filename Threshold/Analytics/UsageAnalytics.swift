@@ -279,9 +279,23 @@ final class UsageAnalytics {
         return String(data: data, encoding: .utf8)
     }
 
-    private func database() -> CKDatabase {
+    /// The CloudKit public database, or `nil` when CloudKit isn't usable.
+    ///
+    /// `CKContainer.default()` throws an *uncaught Objective-C exception* (→ abort)
+    /// when the iCloud entitlement is absent — which happens for local builds
+    /// signed without the team's provisioning (empty team ID). Swift `do/catch`
+    /// can't catch that, so we must avoid the call. `ubiquityIdentityToken` is a
+    /// non-throwing probe that is non-nil only when the iCloud entitlement is
+    /// present AND a user is signed in — both prerequisites for a usable default
+    /// container here (this target's entitlements set the ubiquity + CloudKit
+    /// containers together). When it's nil we degrade analytics to a silent no-op.
+    private func database() -> CKDatabase? {
         if let cachedDatabase {
             return cachedDatabase
+        }
+
+        guard FileManager.default.ubiquityIdentityToken != nil else {
+            return nil
         }
 
         let database = CKContainer.default().publicCloudDatabase
@@ -494,8 +508,9 @@ final class UsageAnalytics {
         record["positionY"] = preset.position.y as NSNumber
         record["positionZ"] = preset.position.z as NSNumber
         
+        guard let database = database() else { return }  // CloudKit unavailable — skip
         do {
-            _ = try await database().save(record)
+            _ = try await database.save(record)
         } catch {
             // Could save for retry, but presets are less critical than session data
         }
@@ -576,8 +591,9 @@ final class UsageAnalytics {
         record["osVersion"] = snapshot.osVersion
         record["appVersion"] = snapshot.appVersion
         
+        guard let database = database() else { return }  // CloudKit unavailable — skip
         do {
-            _ = try await database().save(record)
+            _ = try await database.save(record)
         } catch {
             // Save for retry later
             savePendingSnapshot(snapshot)

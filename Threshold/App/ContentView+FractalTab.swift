@@ -552,6 +552,45 @@ extension ContentView {
         .background(Color.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
     }
 
+    /// Developer "Force Recompile" card for the Performance tab. Clears the
+    /// renderer's specialized pipeline cache (rebuilds lazily on the next frames)
+    /// and recompiles the active custom `.threshfx` formula from source.
+    private var shaderRecompileSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: AppIcons.wrenchAndScrewdriver).foregroundStyle(.cyan)
+                Text("Shaders").font(.headline)
+            }
+            Button {
+                isRecompilingShaders = true; shaderRecompileStatus = nil
+                Task {
+                    let result = await appModel.forceShaderRecompile()
+                    await MainActor.run { shaderRecompileStatus = result; isRecompilingShaders = false }
+                }
+            } label: {
+                HStack {
+                    if isRecompilingShaders {
+                        ProgressView().scaleEffect(0.7).frame(width: 16, height: 16)
+                    } else {
+                        Image(systemName: AppIcons.arrowTriangle2Circlepath)
+                    }
+                    Text(isRecompilingShaders ? "Recompiling..." : "Force Recompile")
+                }
+            }
+            .buttonStyle(.borderedProminent).tint(.cyan).disabled(isRecompilingShaders)
+
+            if let status = shaderRecompileStatus {
+                Text(status).font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Clears the specialized pipeline cache (rebuilds on the next frames) and recompiles the active custom .threshfx formula from source. Built-in fractals have no runtime source, so for them this only rebuilds pipeline states.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding()
+        .background(Color.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+    }
+
     private var fractalQualityContent: some View {
         VStack(spacing: 12) {
             HStack {
@@ -626,6 +665,9 @@ extension ContentView {
 
             // ── Acceleration (the gamut of march speedup techniques) ──
             fractalAccelerationSection
+
+            // ── Force Recompile (developer/debug) ──
+            shaderRecompileSection
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -796,13 +838,7 @@ extension ContentView {
             #if os(visionOS)
             // ── Render Quality (Vision Pro compositor native resolution) ──
             VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Priority")
-                    Spacer()
-                    Text("\(Int((cache.quality.renderQuality * 100).rounded()))%")
-                        .fontWeight(.bold)
-                        .monospacedDigit()
-                }
+                Text("Priority")
 
                 // Custom layout instead of Slider's built-in min/max value labels:
                 // `.lineLimit(1).fixedSize()` guarantees the end labels render at their
@@ -822,7 +858,7 @@ extension ContentView {
                             cache.quality.renderQuality = snapped
                             cache.push(\.renderQuality, value: snapped)
                         }
-                    ), in: 0.1...QualityConfig.visionMaxRenderQuality, step: 0.05)
+                    ), in: QualityConfig.visionMinRenderQuality...QualityConfig.visionMaxRenderQuality, step: 0.05)
                     .accessibilityLabel(Text("Priority"))
                     Text("Sharp")
                         .font(.caption2)
@@ -831,7 +867,14 @@ extension ContentView {
                         .fixedSize()
                 }
 
-                Text("Vision Pro: the compositor's native, gaze-foveated resolution. The top of the range is the configured ceiling (a memory/quality balance) and the sharpest; lower trades crispness for GPU headroom with a smoothed transition. Very low values (10–20%) probe max framerate.")
+                accelToggle("Auto-adjust to hold FPS",
+                            isOn: cache.quality.adaptiveRenderQualityEnabled,
+                            help: "When the frame rate sags, the compositor's render quality steps down to recover headroom, then climbs back toward your slider setting (the ceiling) once FPS is comfortable. Adjustments are infrequent and the compositor tweens between them, so the change reads as a gentle ramp.") { v in
+                    cache.quality.adaptiveRenderQualityEnabled = v
+                    cache.push(\.adaptiveRenderQualityEnabled, value: v)
+                }
+
+                Text("Vision Pro: the compositor's native, gaze-foveated resolution. The slider sets the sharpest quality (the ceiling, a memory/quality balance); lower trades crispness for GPU headroom with a smoothed transition. Very low values probe max framerate.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

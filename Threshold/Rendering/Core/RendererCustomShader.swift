@@ -152,6 +152,46 @@ extension Renderer {
         }
     }
 
+    // MARK: - Force recompile (debug)
+
+    /// Debug "Force Recompile": drop every cached pipeline state (built-in +
+    /// custom) so they rebuild fresh on the next frames, and recompile the
+    /// active custom `.threshfx` library from source. Safe to call mid-render:
+    /// the actor serializes this against frame-time pipeline selection, and a
+    /// cleared cache falls back to the base `pipelineState` while specialized
+    /// variants rebuild lazily (the same path used for cold starts and formula
+    /// switches). Returns a short status summary for the UI.
+    func forceRecompileShaders() async -> String {
+        let renderCount = pipelineCache.count
+        let computeCount = computePipelineCache.count
+
+        // Drop all cached pipeline states; next frames rebuild lazily.
+        pipelineCache.removeAll()
+        computePipelineCache.removeAll()
+        recentCustomFormulaHashes.removeAll()
+        resetPipelineFastPaths()
+        warmStartGate.invalidate()
+
+        // If a custom formula is active, recompile it from source. Evicting the
+        // compiler's library cache and detaching the live library forces
+        // `activateEmbeddedFormula` past its no-op guard and re-runs the Metal
+        // compiler instead of returning the cached `MTLLibrary`.
+        let formula = await MainActor.run { appModel.activeEmbeddedFormula }
+        if let formula {
+            await ensureCompiler().evictAll()
+            customShaderLibrary = nil
+            customShaderHash = nil
+            do {
+                try await activateEmbeddedFormula(formula)
+                return "Recompiled '\(formula.name)' and cleared \(renderCount) render / \(computeCount) compute pipelines."
+            } catch {
+                return "⚠️ Recompile of '\(formula.name)' failed: \(error.localizedDescription)"
+            }
+        }
+
+        return "Cleared \(renderCount) render / \(computeCount) pipelines — rebuilding on next frames."
+    }
+
     // MARK: - Eviction
 
     /// How many recent custom formulas keep their specialized pipelines cached.

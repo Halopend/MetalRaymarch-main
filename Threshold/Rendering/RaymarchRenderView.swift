@@ -77,6 +77,29 @@ final class MacCustomShaderBox: @unchecked Sendable {
         }
         set(library: compiled, hash: newHash)
     }
+
+    /// Debug "Force Recompile": drop every cached specialized pipeline and the
+    /// compiled custom library, then recompile + reinstall `formula` from source
+    /// (`nil` = a built-in fractal, nothing to recompile). The cleared pipelines
+    /// rebuild lazily in `resolveActivePipeline`, so this is safe to call while
+    /// the render thread is live. Returns a short status summary for the UI.
+    func forceRecompile(formula: EmbeddedFormula?,
+                        device: MTLDevice,
+                        cache: MacSpecializedPipelineCache) async -> String {
+        cache.evict(prefix: "")                       // drop ALL specialized pipelines
+        await sharedCompiler(device: device).evictAll()  // force a true source recompile
+        set(library: nil, hash: nil)                  // bypass activate()'s no-op guard
+
+        guard let formula else {
+            return "Cleared the pipeline cache — rebuilding on next frames."
+        }
+        do {
+            try await activate(formula, device: device, cache: cache)
+            return "Recompiled '\(formula.name)' and cleared the pipeline cache."
+        } catch {
+            return "⚠️ Recompile of '\(formula.name)' failed: \(error.localizedDescription)"
+        }
+    }
 }
 
 
@@ -151,6 +174,7 @@ struct ThresholdMacRenderView: NSViewRepresentable {
             // re-activates any formula loaded before the view existed.
             if let renderer {
                 appModel.activateEmbeddedFormulaHandler = renderer.embeddedFormulaActivator()
+                appModel.forceShaderRecompileHandler = renderer.shaderRecompiler(appModel: appModel)
             }
         }
 
@@ -159,6 +183,7 @@ struct ThresholdMacRenderView: NSViewRepresentable {
             renderer = nil
             Task { @MainActor [appModel] in
                 appModel.activateEmbeddedFormulaHandler = nil
+                appModel.forceShaderRecompileHandler = nil
                 appModel.rendererStartupWarmupComplete = false
             }
         }
@@ -878,6 +903,21 @@ private final class ThresholdMacRenderer {
         }
     }
 
+    /// A `@Sendable` recompile closure for `AppModel.forceShaderRecompileHandler`,
+    /// bound to this renderer's custom-shader box + pipeline cache (the debug
+    /// "Force Recompile" button). Reads the active formula from `appModel` on the
+    /// main actor, then clears caches and recompiles. Captures only Sendable
+    /// values (box, cache, device, appModel), never the renderer itself.
+    func shaderRecompiler(appModel: AppModel) -> @Sendable () async -> String {
+        let box = customShaderBox
+        let cache = specializedPipelineCache
+        let device = self.device
+        return {
+            let formula = await MainActor.run { appModel.activeEmbeddedFormula }
+            return await box.forceRecompile(formula: formula, device: device, cache: cache)
+        }
+    }
+
     private func makeRenderPassDescriptor(drawable: CAMetalDrawable) -> MTLRenderPassDescriptor? {
         guard let depthTexture = depthTexture(width: drawable.texture.width, height: drawable.texture.height) else {
             return nil
@@ -1388,6 +1428,7 @@ private final class ThresholdMacRenderer {
                             viewportHeight: Float(drawableSize.height)),
                         shadowsEnabled: settings.shadowsEnabled ? 1 : 0,
                         distanceLODFalloff: settings.distanceLODStrength * 0.5,
+                        benchCollectSteps: 0,  // Mac fragment path not instrumented (Vision Pro focus)
                         springDisplacementX: settings.springDisplacement.x,
                         springDisplacementY: settings.springDisplacement.y,
                         springDisplacementZ: settings.springDisplacement.z,
@@ -1618,6 +1659,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             // re-activates any formula loaded before the view existed.
             if let renderer {
                 appModel.activateEmbeddedFormulaHandler = renderer.embeddedFormulaActivator()
+                appModel.forceShaderRecompileHandler = renderer.shaderRecompiler(appModel: appModel)
             }
         }
 
@@ -1652,6 +1694,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             renderer = nil
             Task { @MainActor [appModel] in
                 appModel.activateEmbeddedFormulaHandler = nil
+                appModel.forceShaderRecompileHandler = nil
                 appModel.rendererStartupWarmupComplete = false
             }
         }

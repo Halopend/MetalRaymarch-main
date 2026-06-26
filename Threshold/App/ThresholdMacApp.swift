@@ -56,7 +56,6 @@ private struct ThresholdMacRootView: View {
     private let minimumVisibleViewportWidth: CGFloat = 360
     private let panelPadding: CGFloat = 14
     private let edgeRevealWidth: CGFloat = 30
-    private let panelMaterialOpacity: Double = 0.68
     private let autoHideDelay: TimeInterval = 0.22
     private let panelAnimation = MenuChrome.panelSpring
 
@@ -143,8 +142,12 @@ private struct ThresholdMacRootView: View {
             .frame(maxHeight: .infinity)
             .background(
                 ZStack {
-                    MacWindowMaterialBackground(material: .sidebar)
-                        .opacity(panelMaterialOpacity)
+                    // Opaque surface instead of an NSVisualEffectView `.withinWindow`
+                    // blur. The blur re-sampled the live Metal fractal view every
+                    // frame on the main thread — that compositing cost was what
+                    // halved the frame rate while the menu was open. A flat dark
+                    // sidebar composites essentially for free.
+                    Color(white: 0.09)
 
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .fill(Color.white.opacity(0.035))

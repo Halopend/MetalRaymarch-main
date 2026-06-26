@@ -129,15 +129,28 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         let read: (RenderSettings) -> Float
         let write: (RenderSettings, Float) -> Void
 
+        /// Playback-relative music routing. During animation playback `applyKeyframe`
+        /// owns this param's backing var every frame, so the plain absolute `write`
+        /// above would be stomped. When present and `isActive` (the scene keyframe drives
+        /// the channel), the dispatcher instead deposits the pure music delta via
+        /// `writeOffset`, which `applyKeyframe` composes on top of the live animation
+        /// base. nil → the param isn't keyframe-driven, so the absolute write survives.
+        let writeAudioOffset: ((RenderSettings, Float) -> Void)?
+        let audioOffsetActiveDuringPlayback: ((RenderSettings) -> Bool)?
+
         /// Source range + motion from the canonical `ControlSpec` (single source
         /// of truth); only the RenderSettings read/write wiring is local here.
         init(spec: ControlSpec,
              read: @escaping (RenderSettings) -> Float,
-             write: @escaping (RenderSettings, Float) -> Void) {
+             write: @escaping (RenderSettings, Float) -> Void,
+             writeAudioOffset: ((RenderSettings, Float) -> Void)? = nil,
+             audioOffsetActiveDuringPlayback: ((RenderSettings) -> Bool)? = nil) {
             self.range = spec.range
             self.motionStrategy = spec.motionStrategy
             self.read = read
             self.write = write
+            self.writeAudioOffset = writeAudioOffset
+            self.audioOffsetActiveDuringPlayback = audioOffsetActiveDuringPlayback
         }
     }
 
@@ -147,7 +160,10 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         ControlCatalog.fractalScale.id: CoreParameterDescriptor(
             spec: ControlCatalog.fractalScale,
             read: { $0.targetFractalScale },
-            write: { settings, value in settings.targetFractalScale = value }
+            write: { settings, value in settings.targetFractalScale = value },
+            // fractalScale is always scene-driven during playback (non-optional keyframe).
+            writeAudioOffset: { settings, offset in settings.audioOffsetFractalScale = offset },
+            audioOffsetActiveDuringPlayback: { _ in true }
         ),
         ControlCatalog.colorMix.id: CoreParameterDescriptor(
             spec: ControlCatalog.colorMix,
@@ -162,27 +178,37 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         ControlCatalog.glow.id: CoreParameterDescriptor(
             spec: ControlCatalog.glow,
             read: { $0.glowEffect.intensity },
-            write: { settings, value in settings.audioModulateGlowIntensity(value) }
+            write: { settings, value in settings.audioModulateGlowIntensity(value) },
+            writeAudioOffset: { settings, offset in settings.audioOffsetGlowIntensity = offset },
+            audioOffsetActiveDuringPlayback: { $0.sceneDrivesGlow }
         ),
         ControlCatalog.fog.id: CoreParameterDescriptor(
             spec: ControlCatalog.fog,
             read: { $0.fogEffect.intensity },
-            write: { settings, value in settings.audioModulateFogIntensity(value) }
+            write: { settings, value in settings.audioModulateFogIntensity(value) },
+            writeAudioOffset: { settings, offset in settings.audioOffsetFogIntensity = offset },
+            audioOffsetActiveDuringPlayback: { $0.sceneDrivesFog }
         ),
         ControlCatalog.bloom.id: CoreParameterDescriptor(
             spec: ControlCatalog.bloom,
             read: { $0.bloomEffect.strength },
-            write: { settings, value in settings.audioModulateBloomStrength(value) }
+            write: { settings, value in settings.audioModulateBloomStrength(value) },
+            writeAudioOffset: { settings, offset in settings.audioOffsetBloomStrength = offset },
+            audioOffsetActiveDuringPlayback: { $0.sceneDrivesBloom }
         ),
         ControlCatalog.hueSpeed.id: CoreParameterDescriptor(
             spec: ControlCatalog.hueSpeed,
             read: { $0.hueRotationEffect.speed },
-            write: { settings, value in settings.audioModulateHueSpeed(value) }
+            write: { settings, value in settings.audioModulateHueSpeed(value) },
+            writeAudioOffset: { settings, offset in settings.audioOffsetHueSpeed = offset },
+            audioOffsetActiveDuringPlayback: { $0.sceneDrivesHueSpeed }
         ),
         ControlCatalog.saturation.id: CoreParameterDescriptor(
             spec: ControlCatalog.saturation,
             read: { $0.colorSchemeSaturation },
-            write: { settings, value in settings.audioModulateSaturation(value) }
+            write: { settings, value in settings.audioModulateSaturation(value) },
+            writeAudioOffset: { settings, offset in settings.audioOffsetSaturation = offset },
+            audioOffsetActiveDuringPlayback: { $0.sceneDrivesSaturation }
         ),
         ControlCatalog.safetyBubbleRadius.id: CoreParameterDescriptor(
             spec: ControlCatalog.safetyBubbleRadius,
@@ -340,17 +366,19 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
             }
             let resolved = outcome.resolved
             recordLiveValue(operation.targetID, base: outcome.base, resolved: resolved)
-            let usesPlaybackRelativeManualOverride: Bool = settings.isAnimationPlaying && {
+
+            if settings.isAnimationPlaying {
+                // During playback the per-frame formula rebuild owns `formulaParams`, so a
+                // direct write is stomped. Route gesture/slider edits into the manual
+                // override and music into the audio offset; the rebuild composes
+                // animationBase + manualOffset + audioOffset. The music op carries a pure
+                // delta, recovered as resolved − anchor (the additive `.music` layer).
                 switch operation.source {
                 case .gesture, .slider:
-                    return true
-                default:
-                    return false
+                    settings.setManualFormulaParamOverride(index: formulaIndex, value: resolved)
+                case .audio:
+                    settings.setAudioFormulaParamOffset(index: formulaIndex, offset: resolved - outcome.base)
                 }
-            }()
-
-            if usesPlaybackRelativeManualOverride {
-                settings.setManualFormulaParamOverride(index: formulaIndex, value: resolved)
             } else {
                 FormulaCatalog.setParam(&params, index: formulaIndex, value: resolved)
                 settings.formulaParams = params
@@ -385,7 +413,20 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         let resolved = outcome.resolved
 
         recordLiveValue(operation.targetID, base: outcome.base, resolved: resolved)
-        descriptor.write(settings, resolved)
+
+        // During animation playback, applyKeyframe owns this param's backing var every
+        // frame, so an absolute music write is stomped. Deposit the pure music delta
+        // (resolved − anchor) into the playback offset slot the keyframe composer reads.
+        // Only `.music` ops reroute; gestures/sliders keep the absolute write so their
+        // existing playback behavior is unchanged.
+        if layer == .music,
+           settings.isAnimationPlaying,
+           let writeAudioOffset = descriptor.writeAudioOffset,
+           descriptor.audioOffsetActiveDuringPlayback?(settings) == true {
+            writeAudioOffset(settings, resolved - outcome.base)
+        } else {
+            descriptor.write(settings, resolved)
+        }
 
         if debugTraceEnabled {
             print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(resolved)")
