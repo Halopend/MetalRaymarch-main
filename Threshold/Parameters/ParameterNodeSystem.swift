@@ -380,118 +380,31 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         self.customBatchDescriptorID = FormulaCatalog.shared.descriptor(for: .custom)?.id
     }
 
-    /// One-time build of engine-level parameter nodes for core geometry and effects.
-    /// IDs and ranges mirror the descriptors in ParameterOperationDispatcher.
-    /// NOTE: minDistance / foldingLimit / sphereRadius are now catalog-driven formula
-    /// params (built per-type in buildFormulaBatch) rather than hard-coded core nodes.
+    /// One-time build of the live (layer-stack) core/effect parameter nodes.
+    /// Each node is constructed FROM its authored `ParameterCatalog` entry: range/
+    /// default/name/icon/motion come from the entry's `ControlSpec`, grouping +
+    /// gesture-mappability + the @MainActor UI read/write come from the entry. The
+    /// off-main settings IO lives on the same entry and feeds the dispatcher, so the
+    /// two halves of the parameter cannot drift.
+    /// NOTE: minDistance / foldingLimit / sphereRadius are catalog-driven *formula*
+    /// params (built per-type in buildFormulaBatch), not engine-level nodes.
     private static func buildCoreAndEffectNodes() -> (core: [String: FloatParameterNode], effect: [String: FloatParameterNode]) {
-        let coreGroup = ParameterGroup(id: "core.geometry", title: "Fractal Geometry")
-        let effectGroup = ParameterGroup(id: "effect.postprocess", title: "Post-Processing")
         var coreNodes: [String: FloatParameterNode] = [:]
         var effectNodes: [String: FloatParameterNode] = [:]
 
-        // --- Core geometry nodes ---
-        // Range/default/name/icon/motion come from ControlCatalog (single source
-        // of truth); only the grouping + read/write wiring is local here.
-
-        coreNodes[ControlCatalog.fractalScale.id] = FloatParameterNode(
-            spec: ControlCatalog.fractalScale,
-            group: coreGroup,
-            isGestureMappable: true,
-            readValue: { $0.fractalScale },
-            writeValue: { cache, v in cache.fractalScale = v; cache.push(\.targetFractalScale, value: v) }
-        )
-
-        coreNodes[ControlCatalog.colorMix.id] = FloatParameterNode(
-            spec: ControlCatalog.colorMix,
-            group: coreGroup,
-            isGestureMappable: true,
-            readValue: { $0.color.colorMix },
-            writeValue: { cache, v in cache.color.colorMix = v; cache.push(\.colorMix, value: v) }
-        )
-
-        coreNodes[ControlCatalog.iterations.id] = FloatParameterNode(
-            spec: ControlCatalog.iterations,
-            group: coreGroup,
-            isGestureMappable: false,
-            readValue: { Float($0.liveFractalIterations) },
-            writeValue: { cache, v in
-                let rounded = max(2, min(24, Int(round(v))))
-                cache.liveFractalIterations = rounded
-                cache.push(\.fractalIterations, value: rounded)
+        for parameter in ParameterCatalog.routed {
+            let node = FloatParameterNode(
+                spec: parameter.spec,
+                group: parameter.group,
+                isGestureMappable: parameter.isGestureMappable,
+                readValue: parameter.ui.read,
+                writeValue: parameter.ui.write
+            )
+            switch parameter.domain {
+            case .core:   coreNodes[parameter.id] = node
+            case .effect: effectNodes[parameter.id] = node
             }
-        )
-
-        // --- Effect nodes ---
-        effectNodes[ControlCatalog.glow.id] = FloatParameterNode(
-            spec: ControlCatalog.glow,
-            group: effectGroup,
-            isGestureMappable: false,
-            readValue: { $0.lighting.glowEffect.intensity },
-            writeValue: { cache, v in cache.lighting.glowEffect.intensity = v; cache.commitGlowEffect() }
-        )
-
-        effectNodes[ControlCatalog.fog.id] = FloatParameterNode(
-            spec: ControlCatalog.fog,
-            group: effectGroup,
-            isGestureMappable: false,
-            readValue: { $0.lighting.fogEffect.intensity },
-            writeValue: { cache, v in cache.lighting.fogEffect.intensity = v; cache.commitFogEffect() }
-        )
-
-        effectNodes[ControlCatalog.bloom.id] = FloatParameterNode(
-            spec: ControlCatalog.bloom,
-            group: effectGroup,
-            isGestureMappable: false,
-            readValue: { $0.lighting.bloomEffect.strength },
-            writeValue: { cache, v in cache.lighting.bloomEffect.strength = v; cache.commitBloomEffect() }
-        )
-
-        effectNodes[ControlCatalog.hueSpeed.id] = FloatParameterNode(
-            spec: ControlCatalog.hueSpeed,
-            group: effectGroup,
-            isGestureMappable: false,
-            readValue: { $0.lighting.hueRotationEffect.speed },
-            writeValue: { cache, v in cache.lighting.hueRotationEffect.speed = v; cache.commitHueRotationEffect() }
-        )
-
-        effectNodes[ControlCatalog.saturation.id] = FloatParameterNode(
-            spec: ControlCatalog.saturation,
-            group: effectGroup,
-            isGestureMappable: false,
-            readValue: { $0.color.colorSchemeSaturation },
-            writeValue: { cache, v in cache.color.colorSchemeSaturation = v; cache.commitColorSchemeSaturation() }
-        )
-
-        effectNodes[ControlCatalog.safetyBubbleRadius.id] = FloatParameterNode(
-            spec: ControlCatalog.safetyBubbleRadius,
-            group: effectGroup,
-            isGestureMappable: false,
-            readValue: { $0.safetyBubble.radius },
-            writeValue: { cache, v in cache.safetyBubble.radius = v; cache.push(\.safetyBubbleRadius, value: v) }
-        )
-
-        // --- Space-transform nodes (cross-fractal sphere projection) ---
-        // Gesture-mappable so they surface in the finger-binding menu via
-        // `gestureBindableCoreParameters`; music-mappable via the dispatcher
-        // descriptors of the same id.
-        let spaceGroup = ParameterGroup(id: "space.transform", title: "Space Transform")
-
-        coreNodes[ControlCatalog.sphereProjectionBlend.id] = FloatParameterNode(
-            spec: ControlCatalog.sphereProjectionBlend,
-            group: spaceGroup,
-            isGestureMappable: true,
-            readValue: { $0.display.sphereProjectionBlend },
-            writeValue: { cache, v in cache.display.sphereProjectionBlend = v; cache.commitSphereProjection() }
-        )
-
-        coreNodes[ControlCatalog.sphereProjectionRadius.id] = FloatParameterNode(
-            spec: ControlCatalog.sphereProjectionRadius,
-            group: spaceGroup,
-            isGestureMappable: true,
-            readValue: { $0.display.sphereProjectionRadius },
-            writeValue: { cache, v in cache.display.sphereProjectionRadius = v; cache.commitSphereProjection() }
-        )
+        }
 
         return (coreNodes, effectNodes)
     }
@@ -588,27 +501,27 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         }
     }
 
-    /// Cross-fractal core/effect scalars that are gesture-mappable but aren't
-    /// formula params (e.g. sphere-projection blend/radius). Surfaced with
-    /// `formulaIndex == nil` so the gesture system treats them as universal —
-    /// they read/write through the dispatcher's core descriptors and survive a
-    /// fractal-type switch. `fractalType` is set to the current type only for
-    /// display context; binding identity is by node id.
+    /// Cross-fractal core/effect scalars surfaced in the finger-binding menu as 1-D
+    /// drag targets — DERIVED from `ParameterCatalog` (entries flagged
+    /// `surfacesAsScalarGesture`, e.g. sphere-projection blend/radius). Surfaced with
+    /// `formulaIndex == nil` so the gesture system treats them as universal: they
+    /// read/write through the dispatcher's core descriptors and survive a fractal-type
+    /// switch. `fractalType` is display context only; binding identity is by node id.
     func gestureBindableCoreParameters(for type: FractalModelType) -> [GestureBindableParameter] {
-        let ids = [ControlCatalog.sphereProjectionBlend.id, ControlCatalog.sphereProjectionRadius.id]
-        return ids.compactMap { id -> GestureBindableParameter? in
-            guard let node = coreNodes[id] ?? effectNodes[id], node.isGestureMappable else { return nil }
-            return GestureBindableParameter(
-                fractalType: type,
-                parameterNodeID: node.id,
-                formulaIndex: nil,
-                display: GestureDisplayMetadata(
-                    title: node.name,
-                    subtitle: node.group?.title,
-                    icon: node.icon
+        ParameterCatalog.routed
+            .filter { $0.surfacesAsScalarGesture && $0.isGestureMappable }
+            .map { parameter in
+                GestureBindableParameter(
+                    fractalType: type,
+                    parameterNodeID: parameter.id,
+                    formulaIndex: nil,
+                    display: GestureDisplayMetadata(
+                        title: parameter.displayName,
+                        subtitle: parameter.group.title,
+                        icon: parameter.icon
+                    )
                 )
-            )
-        }
+            }
     }
 
     func node(for binding: GestureBindableParameter) -> FloatParameterNode? {

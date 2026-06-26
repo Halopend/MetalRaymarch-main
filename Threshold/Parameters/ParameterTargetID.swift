@@ -23,19 +23,12 @@ enum ParameterTargetID {
         static let sphereProjectionRadius = "space.sphereProjectionRadius"
     }
 
-    static let coreAndEffect: [String] = [
-        Core.fractalScale,
-        Core.colorMix,
-        Core.iterations,
-        Effect.glow,
-        Effect.fog,
-        Effect.bloom,
-        Effect.hueSpeed,
-        Effect.saturation,
-        Effect.safetyBubbleRadius,
-        Space.sphereProjectionBlend,
-        Space.sphereProjectionRadius
-    ]
+    /// Canonical routable ids — DERIVED from the single authored `ParameterCatalog`.
+    /// Adding a routed scalar means adding one `ParameterCatalog` entry; this list,
+    /// the dispatcher descriptors, the registry nodes, and the music metadata all
+    /// follow from it. The per-namespace `Core`/`Effect`/`Space` constants above stay
+    /// as the canonical id strings the catalog specs are keyed on.
+    static var coreAndEffect: [String] { ParameterCatalog.ids }
 
     static func formula(fractalType: FractalModelType, formulaIndex: Int, name: String) -> String {
         "formula.\(fractalType.rawValue).\(formulaIndex).\(name)"
@@ -63,6 +56,18 @@ enum ParameterRoutingValidation {
 
         precondition(dispatcherIDs == nodeIDs, "Canonical parameter ID mismatch between dispatcher descriptors and ParameterNodeRegistry nodes.")
         precondition(mappedMusicTargets.isSubset(of: dispatcherIDs), "One or more music-reactive target IDs do not resolve to a canonical descriptor/node.")
+
+        // ParameterCatalog is the authored source that coreAndEffect, the dispatcher
+        // descriptors, the registry nodes, and the music metadata all derive from.
+        // Assert the derivation stayed self-consistent (this is the real, non-
+        // tautological anchor now that coreAndEffect is computed from the catalog).
+        let catalogIDs = ParameterCatalog.ids
+        precondition(Set(catalogIDs).count == catalogIDs.count, "Duplicate id in ParameterCatalog.routed.")
+        precondition(Set(catalogIDs) == nodeIDs, "ParameterCatalog ids must equal the core+effect node ids.")
+        for parameter in ParameterCatalog.routed {
+            precondition(ControlCatalog.all[parameter.id]?.range == parameter.spec.range,
+                         "ParameterCatalog '\(parameter.id)' must use the canonical ControlCatalog spec.")
+        }
 
         for id in dispatcherIDs {
             let descriptorCount = dispatcherIDs.contains(id) ? 1 : 0

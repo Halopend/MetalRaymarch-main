@@ -143,63 +143,15 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
 
     static let routableDescriptorTargetIDs: Set<String> = Set(ParameterTargetID.coreAndEffect)
 
-    private let coreDescriptors: [String: CoreParameterDescriptor] = [
-        ControlCatalog.fractalScale.id: CoreParameterDescriptor(
-            spec: ControlCatalog.fractalScale,
-            read: { $0.targetFractalScale },
-            write: { settings, value in settings.targetFractalScale = value }
-        ),
-        ControlCatalog.colorMix.id: CoreParameterDescriptor(
-            spec: ControlCatalog.colorMix,
-            read: { $0.colorMix },
-            write: { settings, value in settings.colorMix = value }
-        ),
-        ControlCatalog.iterations.id: CoreParameterDescriptor(
-            spec: ControlCatalog.iterations,
-            read: { Float($0.fractalIterations) },
-            write: { settings, value in settings.fractalIterations = max(2, min(24, Int(round(value)))) }
-        ),
-        ControlCatalog.glow.id: CoreParameterDescriptor(
-            spec: ControlCatalog.glow,
-            read: { $0.glowEffect.intensity },
-            write: { settings, value in settings.audioModulateGlowIntensity(value) }
-        ),
-        ControlCatalog.fog.id: CoreParameterDescriptor(
-            spec: ControlCatalog.fog,
-            read: { $0.fogEffect.intensity },
-            write: { settings, value in settings.audioModulateFogIntensity(value) }
-        ),
-        ControlCatalog.bloom.id: CoreParameterDescriptor(
-            spec: ControlCatalog.bloom,
-            read: { $0.bloomEffect.strength },
-            write: { settings, value in settings.audioModulateBloomStrength(value) }
-        ),
-        ControlCatalog.hueSpeed.id: CoreParameterDescriptor(
-            spec: ControlCatalog.hueSpeed,
-            read: { $0.hueRotationEffect.speed },
-            write: { settings, value in settings.audioModulateHueSpeed(value) }
-        ),
-        ControlCatalog.saturation.id: CoreParameterDescriptor(
-            spec: ControlCatalog.saturation,
-            read: { $0.colorSchemeSaturation },
-            write: { settings, value in settings.audioModulateSaturation(value) }
-        ),
-        ControlCatalog.safetyBubbleRadius.id: CoreParameterDescriptor(
-            spec: ControlCatalog.safetyBubbleRadius,
-            read: { $0.safetyBubbleRadius },
-            write: { settings, value in settings.audioModulateSafetyBubbleRadius(value) }
-        ),
-        ControlCatalog.sphereProjectionBlend.id: CoreParameterDescriptor(
-            spec: ControlCatalog.sphereProjectionBlend,
-            read: { $0.sphereProjectionBlend },
-            write: { settings, value in settings.audioModulateSphereProjectionBlend(value) }
-        ),
-        ControlCatalog.sphereProjectionRadius.id: CoreParameterDescriptor(
-            spec: ControlCatalog.sphereProjectionRadius,
-            read: { $0.sphereProjectionRadius },
-            write: { settings, value in settings.audioModulateSphereProjectionRadius(value) }
-        )
-    ]
+    /// Routing table for the off-main (gesture/audio) path — DERIVED from the single
+    /// authored `ParameterCatalog`. Each routed scalar carries its own RenderSettings
+    /// read/write (its `settings` binding); the dispatcher just looks it up by id.
+    private let coreDescriptors: [String: CoreParameterDescriptor] = Dictionary(
+        uniqueKeysWithValues: ParameterCatalog.routed.map { parameter in
+            (parameter.id, CoreParameterDescriptor(spec: parameter.spec,
+                                                   read: parameter.settings.read,
+                                                   write: parameter.settings.write))
+        })
 
     private let sourcePolicy: SourcePolicy
     var debugTraceEnabled = false
