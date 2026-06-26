@@ -21,23 +21,22 @@ import AppKit
 struct ResetAndSaveControls: View {
     let onReset: () -> Void
     let onAdd: () -> Void
-    @Environment(\.thresholdButtonScale) private var buttonScale
 
     var body: some View {
         // Reset and Save are distinct actions, so keep them visually separated:
         // a wider gap plus a neutral *outlined* Reset against a *solid* green "+"
         // so they don't read as one control on the visionOS glass material (where
         // two similarly-tinted adjacent buttons blended together).
-        HStack(spacing: DS.scaled(16, by: buttonScale)) {
+        HStack(spacing: 16) {
             Button(action: onReset) {
-                HStack(spacing: DS.scaled(6, by: buttonScale)) {
+                HStack(spacing: 6) {
                     Image(systemName: AppIcons.arrowCounterclockwise)
-                        .font(.system(size: DS.scaled(IconSize.small, by: buttonScale), weight: .semibold))
+                        .font(.system(size: IconSize.small, weight: .semibold))
                     Text("Reset")
-                        .font(.thresholdButtonLabel(.subheadline, scale: buttonScale))
+                        .font(.subheadline.weight(.semibold))
                 }
-                .padding(.horizontal, DS.scaled(14, by: buttonScale))
-                .frame(height: DS.scaled(34, by: buttonScale))
+                .padding(.horizontal, 14)
+                .frame(height: 34)
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -48,8 +47,8 @@ struct ResetAndSaveControls: View {
 
             Button(action: onAdd) {
                 Image(systemName: AppIcons.plus)
-                    .font(.system(size: DS.scaled(15, by: buttonScale), weight: .bold))
-                    .frame(width: DS.scaled(34, by: buttonScale), height: DS.scaled(34, by: buttonScale))
+                    .font(.system(size: 15, weight: .bold))
+                    .frame(width: 34, height: 34)
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
@@ -69,24 +68,23 @@ struct ActivityLightButton: View {
     let count: Int?
     let action: () -> Void
     @State private var isHovering = false
-    @Environment(\.thresholdButtonScale) private var buttonScale
 
     var body: some View {
         Button(action: action) {
             ZStack(alignment: .topTrailing) {
-                HStack(spacing: DS.scaled(5, by: buttonScale)) {
+                HStack(spacing: 5) {
                     Circle()
                         .fill(isActive ? color : Color.secondary.opacity(0.35))
-                        .frame(width: DS.scaled(8, by: buttonScale), height: DS.scaled(8, by: buttonScale))
+                        .frame(width: 8, height: 8)
                         .shadow(color: isActive ? color.opacity(0.65) : .clear, radius: 4)
 
                     Image(systemName: systemImage)
-                        .font(.system(size: DS.scaled(IconSize.small, by: buttonScale), weight: .semibold))
+                        .font(.system(size: IconSize.small, weight: .semibold))
                         .foregroundStyle(isActive ? color : .secondary)
-                        .frame(width: DS.scaled(14, by: buttonScale), height: DS.scaled(14, by: buttonScale))
+                        .frame(width: 14, height: 14)
                 }
-                .padding(.horizontal, DS.scaled(8, by: buttonScale))
-                .padding(.vertical, DS.scaled(6, by: buttonScale))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
                 .background(
                     Capsule()
                         .fill((isActive ? color : Color.secondary).opacity(isHovering ? 0.2 : (isActive ? 0.14 : 0.08)))
@@ -99,13 +97,13 @@ struct ActivityLightButton: View {
 
                 if let count {
                     Text("\(count)")
-                        .font(.system(size: DS.scaled(8, by: buttonScale), weight: .bold, design: .rounded))
+                        .font(.system(size: 8, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(.white)
-                        .frame(minWidth: DS.scaled(13, by: buttonScale), minHeight: DS.scaled(13, by: buttonScale))
+                        .frame(minWidth: 13, minHeight: 13)
                         .padding(.horizontal, 1)
                         .background(Capsule().fill(color))
-                        .offset(x: DS.scaled(5, by: buttonScale), y: DS.scaled(-5, by: buttonScale))
+                        .offset(x: 5, y: -5)
                 }
             }
         }

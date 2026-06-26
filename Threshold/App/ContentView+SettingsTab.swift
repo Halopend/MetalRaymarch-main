@@ -93,10 +93,12 @@ extension ContentView {
             // controls.
             handednessSection
 
-            // Interface size — scales the menu's chrome buttons so eye/hand
-            // targets can be tuned. Lives in Display because it's a pure visual
-            // preference.
-            interfaceSizeSection
+            // Interface scale — whole-menu zoom. visionOS only: Mac/iPad windows
+            // are freely resizable and pointer-precise, so the knob would be a
+            // no-op there.
+#if os(visionOS)
+            interfaceScaleSection
+#endif
 
             // Touch indicators — only meaningful where fingers touch the
             // render view directly.
@@ -200,44 +202,46 @@ extension ContentView {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.07)))
     }
 
-    /// Interface-size control: scales the menu's chrome buttons (top dock,
-    /// context rail, bottom bar) so eye/hand targets can be tuned to taste.
-    /// Backed by `@AppStorage(DS.buttonScaleStorageKey)` on `ContentView` and
-    /// applied live through the `\.thresholdButtonScale` environment value, so
-    /// the buttons resize as the slider moves.
-    private var interfaceSizeSection: some View {
+    /// Whole-interface zoom (visionOS). Scales the entire menu as one unit so the
+    /// buttons stay in proportion with the panels and text. Backed by
+    /// `@AppStorage(DS.interfaceScaleStorageKey)` on `ContentView` and applied in
+    /// `MetalProjectApp` via `menuInterfaceScaled()`, so the menu resizes live as
+    /// the slider moves.
+#if os(visionOS)
+    private var interfaceScaleSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("Button Size", systemImage: "arrow.up.left.and.arrow.down.right")
+                Label("Interface Scale", systemImage: "arrow.up.left.and.arrow.down.right")
                     .font(.headline)
                 Spacer()
-                Text("\(Int((uiButtonScale * 100).rounded()))%")
+                Text("\(Int((uiInterfaceScale * 100).rounded()))%")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
 
             Slider(
-                value: $uiButtonScale,
-                in: DS.minButtonScale...DS.maxButtonScale,
+                value: $uiInterfaceScale,
+                in: DS.minInterfaceScale...DS.maxInterfaceScale,
                 step: 0.05
             )
             .tint(.indigo)
 
             HStack {
-                Text("Scales the menu's buttons — top dock, side rail, and bottom controls. Larger sizes are easier to target with your eyes and hands.")
+                Text("Zooms the whole menu — buttons, text, and panels together — so it reads comfortably at headset distance. The window resizes to fit.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
-                Button("Reset") { uiButtonScale = DS.defaultButtonScale }
+                Button("Reset") { uiInterfaceScale = DS.defaultInterfaceScale }
                     .buttonStyle(.borderless)
                     .font(.caption.weight(.semibold))
-                    .disabled(abs(uiButtonScale - DS.defaultButtonScale) < 0.001)
+                    .disabled(abs(uiInterfaceScale - DS.defaultInterfaceScale) < 0.001)
             }
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.07)))
     }
+#endif
 
     /// Display-flavored experimental toggles. The custom-shenes enable is
     /// a display-runtime knob (it gates whether the renderer tries to

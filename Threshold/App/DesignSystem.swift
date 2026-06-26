@@ -59,91 +59,6 @@ enum DS {
         /// 20 pt — prominent containers / sheets.
         static let prominent: CGFloat = 20
     }
-
-    // MARK: - Button Scale (user-adjustable)
-
-    /// UserDefaults key backing the "Button Size" slider in Settings ▸ Display.
-    /// Read on the owning views with `@AppStorage(DS.buttonScaleStorageKey)`.
-    static let buttonScaleStorageKey = "uiButtonScale"
-
-    /// Platform default for the chrome-button scale. visionOS ships large
-    /// eye/hand targets (1.6 ≈ 2.56× the *area*); pointer/touch platforms start
-    /// at the design baseline of 1.0. Used as both the `@AppStorage` default and
-    /// the environment fallback.
-    static var defaultButtonScale: Double {
-        #if os(visionOS)
-        return 1.6
-        #else
-        return 1.0
-        #endif
-    }
-
-    /// Slider bounds. `1.0` is the original (Mac/iPad-baseline) button size.
-    static let minButtonScale: Double = 1.0
-    static let maxButtonScale: Double = 2.0
-
-    /// Scales a base point dimension (icon size, padding, frame, radius) by the
-    /// live `scale`, rounded to a whole point so glyphs stay crisp.
-    static func scaled(_ base: CGFloat, by scale: CGFloat) -> CGFloat {
-        (base * scale).rounded()
-    }
-}
-
-// MARK: - Scaled Button Label Fonts
-
-/// Text styles used by chrome button labels. At scale 1.0 these resolve to the
-/// matching semantic `Font` (so Dynamic Type behaviour is preserved at the
-/// baseline); above 1.0 `Font.thresholdButtonLabel` enlarges them.
-enum ThresholdButtonTextStyle {
-    case subheadline   // ≈15 pt
-    case footnote      // ≈13 pt
-    case caption       // ≈12 pt
-
-    var basePointSize: CGFloat {
-        switch self {
-        case .subheadline: return 15
-        case .footnote:    return 13
-        case .caption:     return 12
-        }
-    }
-
-    var semanticFont: Font {
-        switch self {
-        case .subheadline: return .subheadline
-        case .footnote:    return .footnote
-        case .caption:     return .caption
-        }
-    }
-}
-
-extension Font {
-    /// A chrome-button label font scaled by the live `scale`. At the 1.0 baseline
-    /// it returns the matching semantic text style (preserving Dynamic Type);
-    /// above 1.0 it returns a fixed, enlarged system font so the label grows with
-    /// its button.
-    static func thresholdButtonLabel(_ style: ThresholdButtonTextStyle, scale: CGFloat, weight: Font.Weight = .semibold) -> Font {
-        if abs(scale - 1.0) < 0.01 {
-            return style.semanticFont.weight(weight)
-        }
-        return .system(size: DS.scaled(style.basePointSize, by: scale), weight: weight)
-    }
-}
-
-// MARK: - Button Scale Environment
-
-private struct ThresholdButtonScaleKey: EnvironmentKey {
-    static let defaultValue: CGFloat = CGFloat(DS.defaultButtonScale)
-}
-
-extension EnvironmentValues {
-    /// The live interface-button scale (1.0 = baseline). ContentView injects it
-    /// from the `uiButtonScale` AppStorage value; standalone chrome components
-    /// (e.g. `ResetAndSaveControls`, `ActivityLightButton`) read it so they
-    /// re-layout when the slider moves.
-    var thresholdButtonScale: CGFloat {
-        get { self[ThresholdButtonScaleKey.self] }
-        set { self[ThresholdButtonScaleKey.self] = newValue }
-    }
 }
 
 // MARK: - Convenience View Modifiers
@@ -192,5 +107,70 @@ extension DS {
         return glass
     }
     #endif
+}
+
+// MARK: - Interface Scale (whole-UI zoom, visionOS)
+
+extension DS {
+    /// UserDefaults key backing the "Interface Scale" slider in Settings ▸
+    /// Display. Read with `@AppStorage(DS.interfaceScaleStorageKey)`.
+    static let interfaceScaleStorageKey = "uiInterfaceScale"
+
+    /// Default whole-menu zoom. A touch larger on visionOS so the interface reads
+    /// comfortably at headset distance; untouched (1.0) on Mac/iPad.
+    static var defaultInterfaceScale: Double {
+        #if os(visionOS)
+        return 1.1
+        #else
+        return 1.0
+        #endif
+    }
+
+    /// Slider bounds. Below 1.0 fits more on screen; above enlarges everything.
+    static let minInterfaceScale: Double = 0.85
+    static let maxInterfaceScale: Double = 1.6
+
+    /// Clamp a raw stored value into the valid range.
+    static func clampInterfaceScale(_ raw: Double) -> CGFloat {
+        CGFloat(min(max(raw, minInterfaceScale), maxInterfaceScale))
+    }
+}
+
+#if os(visionOS)
+/// Zooms the entire menu window as one unit so every element — buttons, text,
+/// panels, sliders — scales in proportion. The content is laid out on a fixed
+/// design canvas (the menu window's default size) and then `scaleEffect`-ed;
+/// the outer frame reports the scaled footprint so the `.contentSize` window
+/// grows or shrinks to match. This is the deliberate "render-scale" approach:
+/// text is resampled rather than reflowed, so it can soften slightly at large
+/// zoom, in exchange for keeping the whole UI perfectly proportional.
+private struct InterfaceScaleModifier: ViewModifier {
+    @AppStorage(DS.interfaceScaleStorageKey) private var rawScale: Double = DS.defaultInterfaceScale
+
+    /// Must match `MetalProjectApp`'s menu `Window` `.defaultSize`.
+    private static let base = CGSize(width: 1460, height: 820)
+
+    private var scale: CGFloat { DS.clampInterfaceScale(rawScale) }
+
+    func body(content: Content) -> some View {
+        content
+            .frame(width: Self.base.width, height: Self.base.height)
+            .scaleEffect(scale, anchor: .center)
+            .frame(width: Self.base.width * scale, height: Self.base.height * scale)
+    }
+}
+#endif
+
+extension View {
+    /// Applies the user's whole-interface zoom on visionOS; a no-op on Mac/iPad
+    /// (whose windows are freely resizable and pointer-precise already).
+    @ViewBuilder
+    func menuInterfaceScaled() -> some View {
+        #if os(visionOS)
+        modifier(InterfaceScaleModifier())
+        #else
+        self
+        #endif
+    }
 }
 

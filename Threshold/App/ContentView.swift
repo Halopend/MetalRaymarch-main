@@ -57,11 +57,10 @@ struct ContentView: View {
     @State var renamingGradientIndex: Int? = nil
     @State var renamingGradientName: String = ""
     @AppStorage("allowCustomScenes") var allowCustomScenes: Bool = false
-    /// User-adjustable scale for the chrome buttons (top dock, context rail,
-    /// bottom bar). Default is platform-aware (1.6 on visionOS, 1.0 elsewhere);
-    /// the "Button Size" slider in Settings ▸ Display drives it. Applied live via
-    /// the `\.thresholdButtonScale` environment value below.
-    @AppStorage(DS.buttonScaleStorageKey) var uiButtonScale: Double = DS.defaultButtonScale
+    /// Whole-interface zoom for the menu window. Drives `menuInterfaceScaled()`
+    /// in MetalProjectApp; the "Interface Scale" slider in Settings ▸ Display
+    /// writes it. Default is platform-aware (1.1 on visionOS, 1.0 elsewhere).
+    @AppStorage(DS.interfaceScaleStorageKey) var uiInterfaceScale: Double = DS.defaultInterfaceScale
 #if os(iOS)
     @AppStorage(TouchVisualizationSettings.defaultsKey) var showTouchIndicators: Bool = true
 #endif
@@ -77,18 +76,9 @@ struct ContentView: View {
         return f
     }()
 
-    /// Live chrome-button scale, clamped to the valid slider range. ContentView's
-    /// own buttons (top dock, rail) read this directly; standalone components read
-    /// the matching `\.thresholdButtonScale` environment value injected in `body`.
-    var buttonScale: CGFloat {
-        CGFloat(min(max(uiButtonScale, DS.minButtonScale), DS.maxButtonScale))
-    }
-
     private var sectionRailWidth: CGFloat {
     #if os(visionOS)
-        // Track the button scale so larger rail labels keep room; never below the
-        // original 228 baseline.
-        max(228, DS.scaled(188, by: buttonScale))
+        228
     #elseif os(iOS)
         208
     #else
@@ -231,10 +221,6 @@ struct ContentView: View {
             resolve: { [cache] id in cache.liveDerivedValue(for: id) },
             musicActive: cache.isMusicReactiveActive
         ))
-        // Drives the live size of standalone chrome components (bottom-bar
-        // controls, activity lights) from the Settings ▸ Display "Button Size"
-        // slider. ContentView's own buttons read `buttonScale` directly.
-        .environment(\.thresholdButtonScale, buttonScale)
         .animation(motionSensitiveAnimation(.easeInOut(duration: 0.3)), value: appModel.immersiveSpaceState)
         .background(menuSurfaceFill, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
@@ -529,24 +515,24 @@ struct ContentView: View {
 
     private var topDockBar: some View {
         let visibleTabs = TopDockTab.allCases
-        return HStack(spacing: DS.scaled(10, by: buttonScale)) {
+        return HStack(spacing: 10) {
             ForEach(visibleTabs, id: \.self) { tab in
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         activateTopDock(tab)
                     }
                 } label: {
-                    HStack(spacing: DS.scaled(8, by: buttonScale)) {
+                    HStack(spacing: 8) {
                         ZStack(alignment: .topTrailing) {
                             Image(systemName: tab.icon)
-                                .font(.system(size: DS.scaled(IconSize.medium, by: buttonScale), weight: .semibold))
+                                .font(.system(size: IconSize.medium, weight: .semibold))
                             topDockBadge(for: tab)
                         }
                         Text(tab.rawValue)
-                            .font(.thresholdButtonLabel(.subheadline, scale: buttonScale))
+                            .font(.subheadline.weight(.semibold))
                     }
-                    .padding(.horizontal, DS.scaled(14, by: buttonScale))
-                    .padding(.vertical, DS.scaled(10, by: buttonScale))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
                     .background(
                         Capsule()
                             .fill(topDockTab == tab && selectedTab != .gestures && selectedTab != .settings ? Color.blue.opacity(0.18) : Color.clear)
@@ -565,17 +551,17 @@ struct ContentView: View {
 
     private var topDockOrnament: some View {
         topDockBar
-            .padding(.horizontal, DS.scaled(14, by: buttonScale))
-            .padding(.vertical, DS.scaled(10, by: buttonScale))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: DS.scaled(18, by: buttonScale), style: .continuous)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(colorScheme == .dark ? Color.black.opacity(0.82) : Color.white.opacity(0.72))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: DS.scaled(18, by: buttonScale), style: .continuous)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.14), lineWidth: 1)
             )
-            .thresholdGlassBackground(cornerRadius: DS.scaled(18, by: buttonScale))
+            .thresholdGlassBackground(cornerRadius: 18)
     }
 
     // MARK: - Context Rail
@@ -703,26 +689,26 @@ struct ContentView: View {
             }
             action()
         } label: {
-            HStack(spacing: DS.scaled(10, by: buttonScale)) {
+            HStack(spacing: 10) {
                 Image(systemName: systemImage)
-                    .font(.system(size: DS.scaled(IconSize.medium, by: buttonScale), weight: .semibold))
-                    .frame(width: DS.scaled(18, by: buttonScale))
+                    .font(.system(size: IconSize.medium, weight: .semibold))
+                    .frame(width: 18)
 
                 Text(title)
-                    .font(.thresholdButtonLabel(.footnote, scale: buttonScale))
+                    .font(.footnote.weight(.semibold))
                     .lineLimit(1)
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, DS.scaled(10, by: buttonScale))
-            .padding(.vertical, DS.scaled(10, by: buttonScale))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: DS.scaled(12, by: buttonScale))
+                RoundedRectangle(cornerRadius: 12)
                     .fill(isSelected ? Color.blue.opacity(0.18) : Color.clear)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: DS.scaled(12, by: buttonScale))
+                RoundedRectangle(cornerRadius: 12)
                     .strokeBorder(isSelected ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.10), lineWidth: 1)
             )
         }
@@ -752,15 +738,15 @@ struct ContentView: View {
             action()
         } label: {
             Image(systemName: systemImage)
-                .font(.system(size: DS.scaled(IconSize.medium, by: buttonScale), weight: .semibold))
+                .font(.system(size: IconSize.medium, weight: .semibold))
                 .frame(maxWidth: .infinity)
-                .frame(height: DS.scaled(38, by: buttonScale))
+                .frame(height: 38)
                 .background(
-                    RoundedRectangle(cornerRadius: DS.scaled(10, by: buttonScale))
+                    RoundedRectangle(cornerRadius: 10)
                         .fill(isSelected ? Color.blue.opacity(0.18) : Color.clear)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: DS.scaled(10, by: buttonScale))
+                    RoundedRectangle(cornerRadius: 10)
                         .strokeBorder(isSelected ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.10), lineWidth: 1)
                 )
         }
