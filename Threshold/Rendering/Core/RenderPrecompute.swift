@@ -28,6 +28,41 @@ enum RenderPrecompute {
         ))
     }
 
+    /// Largest cone-marching footprint tolerance, in pixels, at `strength == 1`.
+    /// The baseline march threshold (`fma(t, 0.0008, …)` in `Shaders.metal`) is
+    /// already a ~1-pixel cone, so the strength slider has to push the footprint
+    /// past a single pixel to reduce step counts. The cost is that each ray stops
+    /// this many pixels short of the true surface, so the rendered isosurface
+    /// inflates by ~`strength·coneMarchMaxPixels` pixels everywhere ("fattening").
+    /// Kept modest so even full strength stays a gentle puff, not a balloon.
+    static let coneMarchMaxPixels: Float = 6.0
+
+    /// Cone-marching hit-threshold growth per unit ray distance.
+    ///
+    /// Returns the world-space radius of one ray's projected footprint at depth 1,
+    /// widened to `strength · coneMarchMaxPixels` pixels (after Mansour's
+    /// *ConeMarchingPen* stop test). In the march the acceptance threshold becomes
+    /// `max(baseEpsilon, coneMarchScale · t)`, so distant geometry — where a pixel
+    /// already spans many surface units — stops well short while near geometry
+    /// keeps the full fixed-epsilon sharpness. Returns 0 (a no-op) at `strength == 0`
+    /// or for degenerate inputs.
+    ///
+    /// `projection.columns.1.y` is `cot(fovY/2)` (the `yScale` of every perspective
+    /// matrix this app builds, and of `computeProjection` on visionOS — its
+    /// asymmetry shifts only the frustum center, not this per-pixel size), so one
+    /// pixel's angular size is `2·tan(fovY/2) / viewportHeight`.
+    static func coneMarchScale(strength: Float,
+                               projection: matrix_float4x4,
+                               viewportHeight: Float) -> Float {
+        let s = max(0.0, min(1.0, strength))
+        guard s > 0, viewportHeight > 1 else { return 0 }
+        let cotHalfFovY = abs(projection.columns.1.y)   // = 1 / tan(fovY/2)
+        guard cotHalfFovY > 1e-5 else { return 0 }
+        let tanHalfFovY = 1.0 / cotHalfFovY
+        let pixelFootprintPerDist = 2.0 * tanHalfFovY / viewportHeight
+        return pixelFootprintPerDist * s * coneMarchMaxPixels
+    }
+
     /// Precompute fractal parameters (eliminates per-pixel `powr()` and division).
     static func makePrecomputedFractal(from settings: RenderSettingsSnapshot) -> PrecomputedFractalParams {
         let invMinRad = 1.0 / settings.minDistance

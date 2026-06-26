@@ -41,6 +41,11 @@ struct RenderSettingsSnapshot {
     let coherentPacketEnabled: Bool
     let foveationStrength: Float
     let smartAdvanceEnabled: Bool
+    let coneMarchStrength: Float
+    let distanceLODStrength: Float
+    let shadowsEnabled: Bool
+    let boundingSphereSkipEnabled: Bool
+    let renderDistanceScale: Float
     let limitFlash: Float
     let activeGestureIndex: Int
     let safetyBubbleEnabled: Bool
@@ -86,8 +91,13 @@ extension RenderSettingsSnapshot {
         tileSize == 8
     }
 
-    /// Disabled until the bound is calibrated against real scene extents.
+    /// Bounding sphere (model space) used by the empty-space-skip in the march.
+    /// 0 disables it. When the experimental skip is enabled we feed a generous
+    /// fixed radius: the box/bulb fractal families sit within a few model units of
+    /// the origin, so this rarely clips while still letting rays that miss it (or
+    /// approach from outside) skip the march. Sprawling families (Kleinian, large
+    /// folds) may clip — hence experimental + off by default.
     var estimatedBoundingSphereRadius: Float {
-        0.0
+        boundingSphereSkipEnabled ? 6.0 : 0.0
     }
 }

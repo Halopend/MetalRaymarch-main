@@ -513,22 +513,44 @@ struct ExternalFileImportSheet: View {
 struct FPSIndicatorView: View {
     @Environment(AppModel.self) private var appModel
 
-    private var indicatorColor: Color {
-        let fps = appModel.renderMetrics.fps
+    private var fps: Double { appModel.renderMetrics.fps }
+    private var gpuMs: Double { appModel.renderMetrics.gpuFrameMs }
+
+    private var fpsColor: Color {
         if fps >= 85 { return .green }
         else if fps >= 60 { return .yellow }
         else if fps >= 45 { return .orange }
         else { return .red }
     }
 
+    /// GPU-cost color by frame-time budget: green = ample headroom, yellow = fits
+    /// a 60 fps frame, orange = only a 30 fps frame, red = over even that.
+    private var gpuColor: Color {
+        if gpuMs <= 0 { return .secondary }
+        if gpuMs < 8 { return .green }
+        else if gpuMs < 16.6 { return .yellow }
+        else if gpuMs < 33 { return .orange }
+        else { return .red }
+    }
+
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Image(systemName: appModel.isUsingSpecializedPipeline ? AppIcons.boltFill : AppIcons.boltSlash)
                 .font(.caption2)
                 .foregroundStyle(appModel.isUsingSpecializedPipeline ? .green : .orange)
-            Circle().fill(indicatorColor).frame(width: 8, height: 8)
-            Text("\(appModel.renderMetrics.fps, specifier: "%.0f") FPS")
-                .font(.caption.bold()).monospacedDigit()
+            HStack(spacing: 5) {
+                Circle().fill(fpsColor).frame(width: 8, height: 8)
+                Text("\(fps, specifier: "%.0f") FPS")
+                    .font(.caption.bold()).monospacedDigit()
+            }
+            // GPU ms is the signal that actually moves when you tune the
+            // acceleration settings — FPS is quantized by the display refresh.
+            if gpuMs > 0 {
+                Text("\(gpuMs, specifier: "%.1f") ms")
+                    .font(.caption.bold()).monospacedDigit()
+                    .foregroundStyle(gpuColor)
+                    .help("GPU time per frame. Lower = faster; this moves continuously as you tune the acceleration settings even when the FPS number is pinned by vsync. Under ~16.6 ms is needed for 60 fps.")
+            }
         }
         .padding(.horizontal, DS.Spacing.sm)
         .padding(.vertical, DS.Spacing.xxs)

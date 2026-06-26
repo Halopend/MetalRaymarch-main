@@ -19,6 +19,7 @@ final class UIUpdateCoordinator: Sendable {
         var lastAnalyticsScheduleTime: TimeInterval = 0
         var lastHeadHeightScheduleTime: TimeInterval = 0
         var pendingFPSUpdate: Double?
+        var pendingGPUMs: Double?
         var pendingAnalyticsFPS: Double?
         var pendingHeadHeightMeters: Float?
         var hasPendingAnalyticsUpdate = false
@@ -27,6 +28,7 @@ final class UIUpdateCoordinator: Sendable {
 
     private struct PendingUIWork: Sendable {
         let fps: Double?
+        let gpuMs: Double?
         let analyticsFPS: Double?
         let shouldUpdateAnalytics: Bool
         let headHeightMeters: Float?
@@ -46,6 +48,10 @@ final class UIUpdateCoordinator: Sendable {
 
             if let fps = pendingWork.fps {
                 appModel.renderMetrics.fps = fps
+            }
+
+            if let gpuMs = pendingWork.gpuMs {
+                appModel.renderMetrics.gpuFrameMs = gpuMs
             }
 
             if let headHeight = pendingWork.headHeightMeters {
@@ -71,13 +77,14 @@ final class UIUpdateCoordinator: Sendable {
     }
     
     /// Called from render thread — schedules UI updates without blocking.
-    nonisolated func scheduleUIUpdate(fps: Double, headHeightMeters: Float?, currentTime: TimeInterval) {
+    nonisolated func scheduleUIUpdate(fps: Double, gpuMs: Double? = nil, headHeightMeters: Float?, currentTime: TimeInterval) {
         let shouldDispatch = _state.withLock { state -> Bool in
             let shouldUpdateFPS = currentTime - state.lastFPSScheduleTime >= fpsUpdateInterval
             let shouldUpdateAnalytics = currentTime - state.lastAnalyticsScheduleTime >= analyticsInterval
-            
+
             if shouldUpdateFPS {
                 state.pendingFPSUpdate = fps
+                state.pendingGPUMs = gpuMs
                 state.lastFPSScheduleTime = currentTime
             }
 
@@ -113,6 +120,7 @@ final class UIUpdateCoordinator: Sendable {
         let pendingWork = _state.withLock { state -> PendingUIWork in
             defer {
                 state.pendingFPSUpdate = nil
+                state.pendingGPUMs = nil
                 state.pendingAnalyticsFPS = nil
                 state.pendingHeadHeightMeters = nil
                 state.hasPendingAnalyticsUpdate = false
@@ -121,6 +129,7 @@ final class UIUpdateCoordinator: Sendable {
 
             return PendingUIWork(
                 fps: state.pendingFPSUpdate,
+                gpuMs: state.pendingGPUMs,
                 analyticsFPS: state.pendingAnalyticsFPS,
                 shouldUpdateAnalytics: state.hasPendingAnalyticsUpdate,
                 headHeightMeters: state.pendingHeadHeightMeters

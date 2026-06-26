@@ -5,6 +5,7 @@ import ModelIO
 import QuartzCore
 import SwiftUI
 import simd
+import os
 #if os(macOS)
 import AppKit
 #endif
@@ -95,7 +96,7 @@ struct ThresholdMacRenderView: NSViewRepresentable {
         view.depthStencilPixelFormat = .depth32Float
         view.clearColor = MTLClearColor(red: 0.005, green: 0.006, blue: 0.008, alpha: 1.0)
         view.clearDepth = 1.0
-        view.preferredFramesPerSecond = 60
+        view.preferredFramesPerSecond = 120  // allow ProMotion; also gives finer vsync steps under load instead of the 60→30 cliff
         view.enableSetNeedsDisplay = false
         view.isPaused = false
         view.framebufferOnly = true
@@ -345,6 +346,10 @@ private final class ThresholdMacRenderer {
     private var uniformBufferIndex = 0
     private var lastFrameTime = CACurrentMediaTime()
     private var smoothedFPS: Double = 0
+    // GPU time per frame, smoothed. Written on the command-buffer completion
+    // thread, read on the render thread — hence the lock. Surfaces the real,
+    // vsync-independent render cost to the perf HUD.
+    private let gpuFrameMsHolder = OSAllocatedUnfairLock<Double>(initialState: 0)
     private var smoothedScale: Float = 1.0
     private var smoothedMaxViewDistance: Float = RenderSettings.maxViewDistance
     private var drawableSize: CGSize = .zero
@@ -560,10 +565,19 @@ private final class ThresholdMacRenderer {
         // only for frames that actually upscaled — a native-resolution frame's
         // cost would bias the budget for the upscaled path.
         let didUpscale = temporalPass != nil || spatialPass != nil
-        commandBuffer.addCompletedHandler { [inFlightSemaphore, adaptiveResolution] buffer in
+        commandBuffer.addCompletedHandler { [inFlightSemaphore, adaptiveResolution, gpuFrameMsHolder] buffer in
             inFlightSemaphore.signal()
+            let gpuSeconds = buffer.gpuEndTime - buffer.gpuStartTime
+            if gpuSeconds > 0 {
+                // Smooth on every frame (not just upscaled ones) so the HUD has a
+                // GPU-cost reading at native resolution too.
+                let ms = gpuSeconds * 1000.0
+                gpuFrameMsHolder.withLock { smoothed in
+                    smoothed = smoothed <= 0 ? ms : smoothed + (ms - smoothed) * 0.1
+                }
+            }
             if didUpscale {
-                adaptiveResolution.record(gpuTime: buffer.gpuEndTime - buffer.gpuStartTime)
+                adaptiveResolution.record(gpuTime: gpuSeconds)
             }
         }
 
@@ -935,6 +949,7 @@ private final class ThresholdMacRenderer {
 
         updateFPS(deltaTime: deltaTime)
         uiUpdateCoordinator.scheduleUIUpdate(fps: smoothedFPS,
+                                             gpuMs: gpuFrameMsHolder.withLock { $0 },
                                              headHeightMeters: nil,
                                              currentTime: now)
 
@@ -1245,8 +1260,12 @@ private final class ThresholdMacRenderer {
         let isKleinianFamily = settings.fractalType == .kleinian || settings.fractalType == .theliPseudoKleinian
         let traceScaleFloor: Float = isKleinianFamily ? 0.02 : 0.15
         let traceScale = max(effectiveScale, traceScaleFloor)
-        let maxViewDistanceCap: Float = isKleinianFamily ? 420.0 : 80.0
-        let baseViewDistance: Float = isKleinianFamily ? RenderSettings.maxViewDistance * 2.0 : RenderSettings.maxViewDistance
+        // User render-distance multiplier scales the family cap + base horizon.
+        // The absolute ceiling stays below the projection far plane (farZ 500) so
+        // raymarch depth stays valid.
+        let userDistanceScale = settings.renderDistanceScale
+        let maxViewDistanceCap: Float = min(480.0, (isKleinianFamily ? 420.0 : 80.0) * userDistanceScale)
+        let baseViewDistance: Float = (isKleinianFamily ? RenderSettings.maxViewDistance * 2.0 : RenderSettings.maxViewDistance) * userDistanceScale
         // The march runs in MODEL space, where the fractal is a fixed size and
         // detail-scale "zoom" only moves the camera toward the origin. Dividing the
         // view distance by the zoomed scale is correct for zooming OUT (camera
@@ -1355,6 +1374,20 @@ private final class ThresholdMacRenderer {
                         stepMultiplier: settings.stepMultiplier,
                         boundingSphereRadius: settings.estimatedBoundingSphereRadius,
                         smartAdvanceEnabled: settings.smartAdvanceEnabled ? 1 : 0,
+                        // Native drawable height by design: when MetalFX dynamic
+                        // resolution renders the march at a smaller offscreen size,
+                        // using the native height yields a slightly smaller cone
+                        // than ideal — strictly conservative (finer stop, never
+                        // skips visible detail; sharper pre-upscale, just less of
+                        // the speedup). Not worth threading the per-frame input
+                        // height through the resolution branches for an off-by-
+                        // default control. visionOS paths use the true viewport.
+                        coneMarchScale: RenderPrecompute.coneMarchScale(
+                            strength: settings.coneMarchStrength,
+                            projection: projection,
+                            viewportHeight: Float(drawableSize.height)),
+                        shadowsEnabled: settings.shadowsEnabled ? 1 : 0,
+                        distanceLODFalloff: settings.distanceLODStrength * 0.5,
                         springDisplacementX: settings.springDisplacement.x,
                         springDisplacementY: settings.springDisplacement.y,
                         springDisplacementZ: settings.springDisplacement.z,
@@ -1522,7 +1555,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         view.depthStencilPixelFormat = .depth32Float
         view.clearColor = MTLClearColor(red: 0.005, green: 0.006, blue: 0.008, alpha: 1.0)
         view.clearDepth = 1.0
-        view.preferredFramesPerSecond = 60
+        view.preferredFramesPerSecond = 120  // allow ProMotion; also gives finer vsync steps under load instead of the 60→30 cliff
         view.enableSetNeedsDisplay = false
         view.isPaused = false
         view.framebufferOnly = true

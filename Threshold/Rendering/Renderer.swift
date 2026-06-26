@@ -1375,8 +1375,14 @@ actor Renderer {
             spaceWarpParam3: settingsSnapshot.spaceWarpParam3,
             // === GMT-FRACTALS OPTIMIZATIONS ===
             stepMultiplier: settingsSnapshot.stepMultiplier,
-            boundingSphereRadius: 0.0,  // Disabled: Mandelbox extent varies with minDistance/scale; needs dynamic radius
+            boundingSphereRadius: settingsSnapshot.estimatedBoundingSphereRadius,  // >0 only when the experimental empty-space skip is enabled
             smartAdvanceEnabled: settingsSnapshot.smartAdvanceEnabled ? 1 : 0,
+            coneMarchScale: RenderPrecompute.coneMarchScale(
+                strength: settingsSnapshot.coneMarchStrength,
+                projection: projection,
+                viewportHeight: Float(viewportHeight)),
+            shadowsEnabled: settingsSnapshot.shadowsEnabled ? 1 : 0,
+            distanceLODFalloff: settingsSnapshot.distanceLODStrength * 0.5,
             blendFactor: settingsSnapshot.isGeometryGestureActive ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5),
             springDisplacementX: settingsSnapshot.springDisplacement.x,
             springDisplacementY: settingsSnapshot.springDisplacement.y,

@@ -107,10 +107,14 @@ extension Renderer {
         // otherwise they look artificially bounded and fade away too early.
         let traceScaleFloor: Float = isKleinianFamily ? 0.02 : 0.15
         let traceScale = max(effectiveScale, traceScaleFloor)
-        let maxViewDistanceCap: Float = isKleinianFamily ? 420.0 : 80.0
-        let baseViewDistance: Float = isKleinianFamily
+        // User render-distance multiplier scales the family cap + base horizon.
+        // The absolute ceiling stays below the projection far plane (farZ 500) so
+        // raymarch depth stays valid for compositing.
+        let userDistanceScale = settingsSnapshot.renderDistanceScale
+        let maxViewDistanceCap: Float = min(480.0, (isKleinianFamily ? 420.0 : 80.0) * userDistanceScale)
+        let baseViewDistance: Float = (isKleinianFamily
             ? (RenderSettings.maxViewDistance * 2.0)
-            : RenderSettings.maxViewDistance
+            : RenderSettings.maxViewDistance) * userDistanceScale
         let targetMaxViewDistance = min(maxViewDistanceCap, baseViewDistance / traceScale)
         let maxViewDistanceSpeed: Float = (targetMaxViewDistance > smoothedMaxViewDistance) ? 30.0 : 10.0
         let maxViewDistanceBlend = 1.0 - exp(-maxViewDistanceSpeed * cachedDeltaTime)
@@ -264,6 +268,12 @@ extension Renderer {
                             stepMultiplier: settingsSnapshot.stepMultiplier,
                             boundingSphereRadius: boundingSphereRadius,
                             smartAdvanceEnabled: settingsSnapshot.smartAdvanceEnabled ? 1 : 0,
+                            coneMarchScale: RenderPrecompute.coneMarchScale(
+                                strength: settingsSnapshot.coneMarchStrength,
+                                projection: projection,
+                                viewportHeight: Float(view.textureMap.viewport.height)),
+                            shadowsEnabled: settingsSnapshot.shadowsEnabled ? 1 : 0,
+                            distanceLODFalloff: settingsSnapshot.distanceLODStrength * 0.5,
                             springDisplacementX: settingsSnapshot.springDisplacement.x,
                             springDisplacementY: settingsSnapshot.springDisplacement.y,
                             springDisplacementZ: settingsSnapshot.springDisplacement.z,

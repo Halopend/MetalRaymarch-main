@@ -16,6 +16,12 @@ import CoreGraphics
 final class RenderMetrics {
     var fps: Double = 0
 
+    /// Smoothed GPU time per frame in milliseconds (Mac fragment path). Unlike
+    /// `fps`, which is quantized by vsync (60 → 30 → 20…), this is continuous, so
+    /// it reveals whether an acceleration setting actually reduced GPU cost even
+    /// when the frame rate is pinned to a refresh-rate step. 0 = not yet measured.
+    var gpuFrameMs: Double = 0
+
     // In-headset render diagnostics, updated from the render loop only when a
     // value changes. Lets the user confirm the actual drawable resolution and
     // the runtime render quality the compositor granted (see

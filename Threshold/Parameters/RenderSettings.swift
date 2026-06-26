@@ -144,6 +144,12 @@ final class RenderSettings: @unchecked Sendable {
     private var _coherentPacketEnabled: Bool = loadBool("coherentPacketEnabled", default: false)  // Experimental predict-validate raymarch (Stages 0-3)
     private var _foveationStrength: Float = loadFloat("foveationStrength", default: 0.0)  // Peripheral step reduction on the 8x8 compute path (0 = off)
     private var _smartAdvanceEnabled: Bool = loadBool("smartAdvanceEnabled", default: false)  // Grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient)
+    private var _coneMarchStrength: Float = loadFloat("coneMarchStrength", default: 0.0)  // 0 = off; scales the distance-growing hit threshold (projected pixel footprint, ConeMarchingPen)
+    private var _overRelaxationMax: Float = loadFloat("overRelaxationMax", default: 1.4)  // Keinert over-relaxation ceiling the auto-ramp may reach (1.0 = conservative)
+    private var _distanceLODStrength: Float = loadFloat("distanceLODStrength", default: 0.0)  // 0 = off; drops fractal iterations on faraway samples
+    private var _shadowsEnabled: Bool = loadBool("shadowsEnabled", default: true)  // false skips the two per-pixel shadow marches
+    private var _boundingSphereSkipEnabled: Bool = loadBool("boundingSphereSkipEnabled", default: false)  // reject rays that miss the fractal's bounding sphere
+    private var _renderDistanceScale: Float = loadFloat("renderDistanceScale", default: 1.0)  // multiplier on how far rays march before giving up (1 = current ~12-unit horizon)
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
     // HUD display
@@ -993,6 +999,73 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _smartAdvanceEnabled } }
         set {
             withLock { _smartAdvanceEnabled = newValue }
+            persistQuality()
+        }
+    }
+
+    /// Cone marching strength (0...1, 0 = off). Scales how far the march
+    /// acceptance threshold grows with ray distance, so a ray stops once the
+    /// distance field is within ~N projected pixels of footprint (after Mansour's
+    /// ConeMarchingPen). Higher = distant geometry resolves in far fewer steps
+    /// (faster) at the cost of softening far detail; near geometry keeps full
+    /// sharpness. Affects every raymarch path (Mac fragment + visionOS compute).
+    var coneMarchStrength: Float {
+        get { withLock { _coneMarchStrength } }
+        set {
+            withLock { _coneMarchStrength = max(0.0, min(1.0, newValue)) }
+            persistQuality()
+        }
+    }
+
+    /// Over-relaxation ceiling (Keinert enhanced sphere tracing). The largest
+    /// `stepMultiplier` the geometry-settle auto-ramp may reach. 1.0 = plain
+    /// conservative sphere tracing; up to 1.6 takes bigger over-relaxed steps
+    /// (faster, guarded by the in-shader overstep-failure retreat + per-type cap).
+    var overRelaxationMax: Float {
+        get { withLock { _overRelaxationMax } }
+        set {
+            withLock { _overRelaxationMax = max(1.0, min(1.6, newValue)) }
+            persistQuality()
+        }
+    }
+
+    /// Distance-based iteration LOD (0...1, 0 = off). Drops fractal iterations on
+    /// faraway march samples where the lost detail is already sub-pixel.
+    var distanceLODStrength: Float {
+        get { withLock { _distanceLODStrength } }
+        set {
+            withLock { _distanceLODStrength = max(0.0, min(1.0, newValue)) }
+            persistQuality()
+        }
+    }
+
+    /// Self-shadowing. When false the two per-pixel shadow marches are skipped
+    /// for flatter, cheaper lighting.
+    var shadowsEnabled: Bool {
+        get { withLock { _shadowsEnabled } }
+        set {
+            withLock { _shadowsEnabled = newValue }
+            persistQuality()
+        }
+    }
+
+    /// Bounding-sphere empty-space skip. When true the uniform builders feed a
+    /// generous enclosing radius so rays that miss it skip the march entirely.
+    var boundingSphereSkipEnabled: Bool {
+        get { withLock { _boundingSphereSkipEnabled } }
+        set {
+            withLock { _boundingSphereSkipEnabled = newValue }
+            persistQuality()
+        }
+    }
+
+    /// Render-distance multiplier (1...8, 1 = current ~12-unit horizon). Scales the
+    /// per-frame view-distance target/cap so geometry beyond the default horizon
+    /// resolves. Clamped against the projection far plane where it's applied.
+    var renderDistanceScale: Float {
+        get { withLock { _renderDistanceScale } }
+        set {
+            withLock { _renderDistanceScale = max(1.0, min(8.0, newValue)) }
             persistQuality()
         }
     }
@@ -2239,6 +2312,11 @@ final class RenderSettings: @unchecked Sendable {
                 coherentPacketEnabled: _coherentPacketEnabled,
                 foveationStrength: _foveationStrength,
                 smartAdvanceEnabled: _smartAdvanceEnabled,
+                coneMarchStrength: _coneMarchStrength,
+                distanceLODStrength: _distanceLODStrength,
+                shadowsEnabled: _shadowsEnabled,
+                boundingSphereSkipEnabled: _boundingSphereSkipEnabled,
+                renderDistanceScale: _renderDistanceScale,
                 limitFlash: _limitFlash,
                 activeGestureIndex: _activeGestureIndex,
                 safetyBubbleEnabled: _safetyBubbleEnabled,
@@ -2964,7 +3042,7 @@ final class RenderSettings: @unchecked Sendable {
                 // Step multiplier stays high when converged (already settled).
                 // The march loops now run Keinert overstep-failure detection, so
                 // over-relaxation is hit-identical to 1.0 — 1.4 is safe everywhere.
-                let targetStepMultiplier: Float = 1.4
+                let targetStepMultiplier: Float = _overRelaxationMax
                 _stepMultiplier += (targetStepMultiplier - _stepMultiplier) * 0.1
             } else {
             
@@ -3148,7 +3226,8 @@ final class RenderSettings: @unchecked Sendable {
             // Uses allGeometrySettled directly instead of _isGeometryGestureActive,
             // which may not be wired to all gesture sources.
             // ═══════════════════════════════════════════════════════════════════════════
-            let targetStepMultiplier: Float = allGeometrySettled ? 1.4 : 1.2
+            let targetStepMultiplier: Float = allGeometrySettled ? _overRelaxationMax
+                                                                  : max(1.0, _overRelaxationMax - 0.2)
             // Smooth transition to avoid popping
             _stepMultiplier += (targetStepMultiplier - _stepMultiplier) * 0.1
             
@@ -3479,6 +3558,12 @@ final class RenderSettings: @unchecked Sendable {
                 c.coherentPacketEnabled = _coherentPacketEnabled
                 c.foveationStrength = _foveationStrength
                 c.smartAdvanceEnabled = _smartAdvanceEnabled
+                c.coneMarchStrength = _coneMarchStrength
+                c.overRelaxationMax = _overRelaxationMax
+                c.distanceLODStrength = _distanceLODStrength
+                c.shadowsEnabled = _shadowsEnabled
+                c.boundingSphereSkipEnabled = _boundingSphereSkipEnabled
+                c.renderDistanceScale = _renderDistanceScale
                 return c
             }
         }
@@ -3499,6 +3584,12 @@ final class RenderSettings: @unchecked Sendable {
                 _coherentPacketEnabled = newValue.coherentPacketEnabled
                 _foveationStrength = newValue.foveationStrength
                 _smartAdvanceEnabled = newValue.smartAdvanceEnabled
+                _coneMarchStrength = max(0.0, min(1.0, newValue.coneMarchStrength))
+                _overRelaxationMax = max(1.0, min(1.6, newValue.overRelaxationMax))
+                _distanceLODStrength = max(0.0, min(1.0, newValue.distanceLODStrength))
+                _shadowsEnabled = newValue.shadowsEnabled
+                _boundingSphereSkipEnabled = newValue.boundingSphereSkipEnabled
+                _renderDistanceScale = max(1.0, min(8.0, newValue.renderDistanceScale))
             }
         }
     }

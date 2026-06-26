@@ -99,6 +99,16 @@ private struct ThresholdMacRootView: View {
                 floatingToggle
                     .padding(.top, panelPadding)
                     .padding(.trailing, panelPadding)
+
+                // Always-on perf HUD (top-leading, opposite the pin button). Shows
+                // FPS plus the continuous GPU-ms cost so acceleration tuning is
+                // visible even when the frame rate is pinned by the display refresh.
+                FPSIndicatorView()
+                    .environment(appModel)
+                    .padding(.top, panelPadding)
+                    .padding(.leading, panelPadding)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .allowsHitTesting(false)
             }
             .frame(minWidth: minimumWindowSize.width, minHeight: minimumWindowSize.height)
         }
