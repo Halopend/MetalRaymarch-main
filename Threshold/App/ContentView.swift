@@ -57,10 +57,11 @@ struct ContentView: View {
     @State var renamingGradientIndex: Int? = nil
     @State var renamingGradientName: String = ""
     @AppStorage("allowCustomScenes") var allowCustomScenes: Bool = false
-    /// Whole-interface zoom for the menu window. Drives `menuInterfaceScaled()`
-    /// in MetalProjectApp; the "Interface Scale" slider in Settings ▸ Display
-    /// writes it. Default is platform-aware (1.1 on visionOS, 1.0 elsewhere).
-    @AppStorage(DS.interfaceScaleStorageKey) var uiInterfaceScale: Double = DS.defaultInterfaceScale
+    /// Menu text size (Dynamic Type). Index into `DS.textSizeSteps`; the "Text
+    /// Size" slider in Settings ▸ Display writes it and the menu body applies it
+    /// via `.dynamicTypeSize`. Default is platform-aware (one step up on
+    /// visionOS, system default elsewhere).
+    @AppStorage(DS.textSizeStorageKey) var uiMenuTextSizeIndex: Int = DS.defaultTextSizeIndex
 #if os(iOS)
     @AppStorage(TouchVisualizationSettings.defaultsKey) var showTouchIndicators: Bool = true
 #endif
@@ -221,6 +222,12 @@ struct ContentView: View {
             resolve: { [cache] id in cache.liveDerivedValue(for: id) },
             musicActive: cache.isMusicReactiveActive
         ))
+        #if os(visionOS)
+        // Menu text size (Settings ▸ Display ▸ Text Size). Enlarges the menu's
+        // semantic-font text crisply via Dynamic Type and reflows around it,
+        // leaving icons and chrome geometry untouched.
+        .dynamicTypeSize(DS.textSize(forIndex: uiMenuTextSizeIndex))
+        #endif
         .animation(motionSensitiveAnimation(.easeInOut(duration: 0.3)), value: appModel.immersiveSpaceState)
         .background(menuSurfaceFill, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(

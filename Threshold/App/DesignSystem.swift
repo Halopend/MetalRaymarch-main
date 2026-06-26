@@ -109,68 +109,53 @@ extension DS {
     #endif
 }
 
-// MARK: - Interface Scale (whole-UI zoom, visionOS)
+// MARK: - Menu Text Size (Dynamic Type)
 
 extension DS {
-    /// UserDefaults key backing the "Interface Scale" slider in Settings ▸
-    /// Display. Read with `@AppStorage(DS.interfaceScaleStorageKey)`.
-    static let interfaceScaleStorageKey = "uiInterfaceScale"
+    /// UserDefaults key backing the "Text Size" slider in Settings ▸ Display.
+    /// Stores an index into `textSizeSteps`. Read with
+    /// `@AppStorage(DS.textSizeStorageKey)`.
+    static let textSizeStorageKey = "uiMenuTextSizeIndex"
 
-    /// Default whole-menu zoom. A touch larger on visionOS so the interface reads
-    /// comfortably at headset distance; untouched (1.0) on Mac/iPad.
-    static var defaultInterfaceScale: Double {
+    /// Curated Dynamic Type steps for the menu, from the system default upward.
+    /// Larger steps make the *text* bigger (crisp, reflowed) without scaling
+    /// icons or chrome. Capped below the largest accessibility sizes to keep the
+    /// dense control panels from breaking their layout.
+    static let textSizeSteps: [DynamicTypeSize] = [
+        .large,          // system default — no change
+        .xLarge,
+        .xxLarge,
+        .xxxLarge,
+        .accessibility1,
+        .accessibility2,
+    ]
+
+    /// Default step index. One notch up on visionOS so menu text reads
+    /// comfortably at headset distance; system default (no change) on Mac/iPad.
+    static var defaultTextSizeIndex: Int {
         #if os(visionOS)
-        return 1.1
+        return 1
         #else
-        return 1.0
+        return 0
         #endif
     }
 
-    /// Slider bounds. Below 1.0 fits more on screen; above enlarges everything.
-    static let minInterfaceScale: Double = 0.85
-    static let maxInterfaceScale: Double = 1.6
-
-    /// Clamp a raw stored value into the valid range.
-    static func clampInterfaceScale(_ raw: Double) -> CGFloat {
-        CGFloat(min(max(raw, minInterfaceScale), maxInterfaceScale))
+    /// The Dynamic Type size for a stored index (clamped to the valid range).
+    static func textSize(forIndex index: Int) -> DynamicTypeSize {
+        textSizeSteps[min(max(index, 0), textSizeSteps.count - 1)]
     }
-}
 
-#if os(visionOS)
-/// Zooms the entire menu window as one unit so every element — buttons, text,
-/// panels, sliders — scales in proportion. The content is laid out on a fixed
-/// design canvas (the menu window's default size) and then `scaleEffect`-ed;
-/// the outer frame reports the scaled footprint so the `.contentSize` window
-/// grows or shrinks to match. This is the deliberate "render-scale" approach:
-/// text is resampled rather than reflowed, so it can soften slightly at large
-/// zoom, in exchange for keeping the whole UI perfectly proportional.
-private struct InterfaceScaleModifier: ViewModifier {
-    @AppStorage(DS.interfaceScaleStorageKey) private var rawScale: Double = DS.defaultInterfaceScale
-
-    /// Must match `MetalProjectApp`'s menu `Window` `.defaultSize`.
-    private static let base = CGSize(width: 1460, height: 820)
-
-    private var scale: CGFloat { DS.clampInterfaceScale(rawScale) }
-
-    func body(content: Content) -> some View {
-        content
-            .frame(width: Self.base.width, height: Self.base.height)
-            .scaleEffect(scale, anchor: .center)
-            .frame(width: Self.base.width * scale, height: Self.base.height * scale)
-    }
-}
-#endif
-
-extension View {
-    /// Applies the user's whole-interface zoom on visionOS; a no-op on Mac/iPad
-    /// (whose windows are freely resizable and pointer-precise already).
-    @ViewBuilder
-    func menuInterfaceScaled() -> some View {
-        #if os(visionOS)
-        modifier(InterfaceScaleModifier())
-        #else
-        self
-        #endif
+    /// Friendly label for a stored index, shown next to the slider.
+    static func textSizeLabel(forIndex index: Int) -> String {
+        switch textSize(forIndex: index) {
+        case .large:         return "Default"
+        case .xLarge:        return "Large"
+        case .xxLarge:       return "Larger"
+        case .xxxLarge:      return "Largest"
+        case .accessibility1: return "XL"
+        case .accessibility2: return "XXL"
+        default:             return "Custom"
+        }
     }
 }
 

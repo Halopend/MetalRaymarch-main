@@ -93,11 +93,11 @@ extension ContentView {
             // controls.
             handednessSection
 
-            // Interface scale — whole-menu zoom. visionOS only: Mac/iPad windows
-            // are freely resizable and pointer-precise, so the knob would be a
-            // no-op there.
+            // Text size — Dynamic Type for the menu. visionOS only: Mac/iPad
+            // already honor the system text-size setting, so an in-app knob would
+            // be redundant there.
 #if os(visionOS)
-            interfaceScaleSection
+            textSizeSection
 #endif
 
             // Touch indicators — only meaningful where fingers touch the
@@ -202,40 +202,41 @@ extension ContentView {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.07)))
     }
 
-    /// Whole-interface zoom (visionOS). Scales the entire menu as one unit so the
-    /// buttons stay in proportion with the panels and text. Backed by
-    /// `@AppStorage(DS.interfaceScaleStorageKey)` on `ContentView` and applied in
-    /// `MetalProjectApp` via `menuInterfaceScaled()`, so the menu resizes live as
-    /// the slider moves.
+    /// Menu text size (visionOS). Enlarges the menu's text via Dynamic Type so it
+    /// stays crisp and reflows — icons and chrome geometry are left alone. Backed
+    /// by `@AppStorage(DS.textSizeStorageKey)` on `ContentView` and applied on the
+    /// menu body via `.dynamicTypeSize`, so text resizes live as the slider moves.
 #if os(visionOS)
-    private var interfaceScaleSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private var textSizeSection: some View {
+        // Discrete slider over DS.textSizeSteps via a Double proxy binding.
+        let stepBinding = Binding<Double>(
+            get: { Double(uiMenuTextSizeIndex) },
+            set: { uiMenuTextSizeIndex = Int($0.rounded()) }
+        )
+        let lastIndex = DS.textSizeSteps.count - 1
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("Interface Scale", systemImage: "arrow.up.left.and.arrow.down.right")
+                Label("Text Size", systemImage: "textformat.size")
                     .font(.headline)
                 Spacer()
-                Text("\(Int((uiInterfaceScale * 100).rounded()))%")
-                    .font(.caption.monospacedDigit())
+                Text(DS.textSizeLabel(forIndex: uiMenuTextSizeIndex))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            Slider(
-                value: $uiInterfaceScale,
-                in: DS.minInterfaceScale...DS.maxInterfaceScale,
-                step: 0.05
-            )
-            .tint(.indigo)
+            Slider(value: stepBinding, in: 0...Double(lastIndex), step: 1)
+                .tint(.indigo)
 
             HStack {
-                Text("Zooms the whole menu — buttons, text, and panels together — so it reads comfortably at headset distance. The window resizes to fit.")
+                Text("Enlarges the menu's text while keeping it sharp; the panels reflow to fit. Icons and buttons are left at their normal size.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
-                Button("Reset") { uiInterfaceScale = DS.defaultInterfaceScale }
+                Button("Reset") { uiMenuTextSizeIndex = DS.defaultTextSizeIndex }
                     .buttonStyle(.borderless)
                     .font(.caption.weight(.semibold))
-                    .disabled(abs(uiInterfaceScale - DS.defaultInterfaceScale) < 0.001)
+                    .disabled(uiMenuTextSizeIndex == DS.defaultTextSizeIndex)
             }
         }
         .padding(10)

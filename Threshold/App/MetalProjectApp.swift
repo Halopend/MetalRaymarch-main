@@ -87,10 +87,6 @@ struct MetalProjectTestApp: App {
                 .onDisappear {
                     appModel.markMenuWindowDismissed()
                 }
-                // Whole-interface zoom (Settings ▸ Display ▸ Interface Scale).
-                // Scales the entire menu as one unit so buttons stay proportional
-                // to the panels and text; no-op on Mac/iPad.
-                .menuInterfaceScaled()
         }
         .defaultSize(width: 1460, height: 820)
         .windowStyle(.plain)
