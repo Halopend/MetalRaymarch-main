@@ -27,16 +27,16 @@ struct ResetAndSaveControls: View {
         // a wider gap plus a neutral *outlined* Reset against a *solid* green "+"
         // so they don't read as one control on the visionOS glass material (where
         // two similarly-tinted adjacent buttons blended together).
-        HStack(spacing: 16) {
+        HStack(spacing: DS.scaledButton(16)) {
             Button(action: onReset) {
-                HStack(spacing: 6) {
+                HStack(spacing: DS.scaledButton(6)) {
                     Image(systemName: AppIcons.arrowCounterclockwise)
-                        .font(.system(size: IconSize.small, weight: .semibold))
+                        .font(.system(size: DS.scaledButton(IconSize.small), weight: .semibold))
                     Text("Reset")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.thresholdButtonLabel(.subheadline))
                 }
-                .padding(.horizontal, 14)
-                .frame(height: 34)
+                .padding(.horizontal, DS.scaledButton(14))
+                .frame(height: DS.scaledButton(34))
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -47,8 +47,8 @@ struct ResetAndSaveControls: View {
 
             Button(action: onAdd) {
                 Image(systemName: AppIcons.plus)
-                    .font(.system(size: 15, weight: .bold))
-                    .frame(width: 34, height: 34)
+                    .font(.system(size: DS.scaledButton(15), weight: .bold))
+                    .frame(width: DS.scaledButton(34), height: DS.scaledButton(34))
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
@@ -72,19 +72,19 @@ struct ActivityLightButton: View {
     var body: some View {
         Button(action: action) {
             ZStack(alignment: .topTrailing) {
-                HStack(spacing: 5) {
+                HStack(spacing: DS.scaledButton(5)) {
                     Circle()
                         .fill(isActive ? color : Color.secondary.opacity(0.35))
-                        .frame(width: 8, height: 8)
+                        .frame(width: DS.scaledButton(8), height: DS.scaledButton(8))
                         .shadow(color: isActive ? color.opacity(0.65) : .clear, radius: 4)
 
                     Image(systemName: systemImage)
-                        .font(.system(size: IconSize.small, weight: .semibold))
+                        .font(.system(size: DS.scaledButton(IconSize.small), weight: .semibold))
                         .foregroundStyle(isActive ? color : .secondary)
-                        .frame(width: 14, height: 14)
+                        .frame(width: DS.scaledButton(14), height: DS.scaledButton(14))
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+                .padding(.horizontal, DS.scaledButton(8))
+                .padding(.vertical, DS.scaledButton(6))
                 .background(
                     Capsule()
                         .fill((isActive ? color : Color.secondary).opacity(isHovering ? 0.2 : (isActive ? 0.14 : 0.08)))
@@ -97,13 +97,13 @@ struct ActivityLightButton: View {
 
                 if let count {
                     Text("\(count)")
-                        .font(.system(size: 8, weight: .bold, design: .rounded))
+                        .font(.system(size: DS.scaledButton(8), weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(.white)
-                        .frame(minWidth: 13, minHeight: 13)
+                        .frame(minWidth: DS.scaledButton(13), minHeight: DS.scaledButton(13))
                         .padding(.horizontal, 1)
                         .background(Capsule().fill(color))
-                        .offset(x: 5, y: -5)
+                        .offset(x: DS.scaledButton(5), y: DS.scaledButton(-5))
                 }
             }
         }

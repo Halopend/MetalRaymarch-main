@@ -74,7 +74,8 @@ struct ContentView: View {
 
     private var sectionRailWidth: CGFloat {
     #if os(visionOS)
-        228
+        // Widened to fit the larger (DS.buttonScale) rail-button labels.
+        300
     #elseif os(iOS)
         208
     #else
@@ -511,24 +512,24 @@ struct ContentView: View {
 
     private var topDockBar: some View {
         let visibleTabs = TopDockTab.allCases
-        return HStack(spacing: 10) {
+        return HStack(spacing: DS.scaledButton(10)) {
             ForEach(visibleTabs, id: \.self) { tab in
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         activateTopDock(tab)
                     }
                 } label: {
-                    HStack(spacing: 8) {
+                    HStack(spacing: DS.scaledButton(8)) {
                         ZStack(alignment: .topTrailing) {
                             Image(systemName: tab.icon)
-                                .font(.system(size: IconSize.medium, weight: .semibold))
+                                .font(.system(size: DS.scaledButton(IconSize.medium), weight: .semibold))
                             topDockBadge(for: tab)
                         }
                         Text(tab.rawValue)
-                            .font(.subheadline.weight(.semibold))
+                            .font(.thresholdButtonLabel(.subheadline))
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, DS.scaledButton(14))
+                    .padding(.vertical, DS.scaledButton(10))
                     .background(
                         Capsule()
                             .fill(topDockTab == tab && selectedTab != .gestures && selectedTab != .settings ? Color.blue.opacity(0.18) : Color.clear)
@@ -547,17 +548,17 @@ struct ContentView: View {
 
     private var topDockOrnament: some View {
         topDockBar
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.horizontal, DS.scaledButton(14))
+            .padding(.vertical, DS.scaledButton(10))
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: DS.scaledButton(18), style: .continuous)
                     .fill(colorScheme == .dark ? Color.black.opacity(0.82) : Color.white.opacity(0.72))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: DS.scaledButton(18), style: .continuous)
                     .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.14), lineWidth: 1)
             )
-            .thresholdGlassBackground(cornerRadius: 18)
+            .thresholdGlassBackground(cornerRadius: DS.scaledButton(18))
     }
 
     // MARK: - Context Rail
@@ -685,26 +686,26 @@ struct ContentView: View {
             }
             action()
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: DS.scaledButton(10)) {
                 Image(systemName: systemImage)
-                    .font(.system(size: IconSize.medium, weight: .semibold))
-                    .frame(width: 18)
+                    .font(.system(size: DS.scaledButton(IconSize.medium), weight: .semibold))
+                    .frame(width: DS.scaledButton(18))
 
                 Text(title)
-                    .font(.footnote.weight(.semibold))
+                    .font(.thresholdButtonLabel(.footnote))
                     .lineLimit(1)
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 10)
+            .padding(.horizontal, DS.scaledButton(10))
+            .padding(.vertical, DS.scaledButton(10))
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: DS.scaledButton(12))
                     .fill(isSelected ? Color.blue.opacity(0.18) : Color.clear)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: DS.scaledButton(12))
                     .strokeBorder(isSelected ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.10), lineWidth: 1)
             )
         }
@@ -734,15 +735,15 @@ struct ContentView: View {
             action()
         } label: {
             Image(systemName: systemImage)
-                .font(.system(size: IconSize.medium, weight: .semibold))
+                .font(.system(size: DS.scaledButton(IconSize.medium), weight: .semibold))
                 .frame(maxWidth: .infinity)
-                .frame(height: 38)
+                .frame(height: DS.scaledButton(38))
                 .background(
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: DS.scaledButton(10))
                         .fill(isSelected ? Color.blue.opacity(0.18) : Color.clear)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: DS.scaledButton(10))
                         .strokeBorder(isSelected ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.10), lineWidth: 1)
                 )
         }

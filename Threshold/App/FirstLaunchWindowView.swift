@@ -5,7 +5,7 @@ import AVKit
 ///   0. Safety (photosensitive-epilepsy warning, must acknowledge)
 ///   1. Welcome (what Threshold is, what the app does)
 ///   2. Hand controls (movement video + handedness)
-///   3. Fingers (per-finger actions + menu toggle, read-only)
+///   3. Fingers (per-finger actions, read-only) + menu-open gesture picker
 ///   4. Sharing (analytics on by default; user can opt out + username)
 ///
 /// All four navigation dots and back/next buttons update the same
@@ -23,6 +23,7 @@ struct FirstLaunchWindowView: View {
     @State private var currentPage = 0
     @State private var acknowledgedFlash = false
     @State private var leftHanded = false
+    @State private var menuGestureStyle: MenuGestureStarterStyle = .palmer
     @State private var shareAnalytics = UsageAnalytics.shared.analyticsEnabled
     @State private var communityDisplayName = UsageAnalytics.shared.communityDisplayName
 
@@ -66,6 +67,7 @@ struct FirstLaunchWindowView: View {
             shareAnalytics = UsageAnalytics.shared.analyticsEnabled
             communityDisplayName = UsageAnalytics.shared.communityDisplayName
             leftHanded = appModel.renderSettings.leftHandedMode
+            menuGestureStyle = MenuGestureStarterStyle.style(for: appModel.renderSettings.menuToggleGestureMode) ?? .palmer
         }
     }
 
@@ -302,24 +304,24 @@ struct FirstLaunchWindowView: View {
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.06)))
 
-            // Menu toggle — a single prominent row showing the current
-            // mode. This is the gesture the user will use the most, so
-            // it gets its own highlighted card.
+            // Menu toggle — let the user pick how they open the menu from a
+            // curated shortlist. Selecting a card writes the mode straight to
+            // RenderSettings (like the handedness picker), so it sticks even if
+            // the user bails out of onboarding. The full mode list + threshold
+            // tuning still lives in Settings > Gestures.
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    Image(systemName: appModel.renderSettings.menuToggleGestureMode.icon)
-                        .font(.title3)
+                HStack(spacing: 8) {
+                    Image(systemName: "hand.raised.fill")
+                        .font(.headline)
                         .foregroundStyle(.purple)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Menu toggle")
-                            .font(.headline)
-                        Text(appModel.renderSettings.menuToggleGestureMode.displayName)
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.purple)
-                    }
+                    Text("How do you want to open the menu?")
+                        .font(.headline)
                     Spacer()
                 }
-                Text("Use this gesture to show or hide the menu. Customize the gesture, hold duration, and thresholds in Settings > Gestures.")
+                ForEach(MenuGestureStarterStyle.allCases) { style in
+                    menuGestureStyleCard(style)
+                }
+                Text("This is the gesture you'll use most. Change it, plus hold duration and thresholds, anytime in Settings > Gestures.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -372,6 +374,62 @@ struct FirstLaunchWindowView: View {
                                : Color.purple.opacity(0.18))
             )
         }
+    }
+
+    /// One selectable menu-gesture style card on Page 3. Tapping it updates both
+    /// the local highlight and `RenderSettings.menuToggleGestureMode`, which
+    /// persists and is read live by the gesture engine.
+    private func menuGestureStyleCard(_ style: MenuGestureStarterStyle) -> some View {
+        let isSelected = menuGestureStyle == style
+        return Button {
+            menuGestureStyle = style
+            appModel.renderSettings.menuToggleGestureMode = style.mode
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: style.icon)
+                    .font(.title3)
+                    .foregroundStyle(isSelected ? .purple : .secondary)
+                    .frame(width: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(style.title)
+                            .font(.subheadline.weight(.semibold))
+                        if style.mode.requiresBothHands {
+                            Text("Two hands")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                        }
+                    }
+                    Text(style.subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: isSelected ? AppIcons.checkmarkCircleFill : "circle")
+                    .font(.title3)
+                    .foregroundStyle(isSelected ? .purple : .secondary.opacity(0.5))
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isSelected ? Color.purple.opacity(0.16) : Color.secondary.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(isSelected ? Color.purple.opacity(0.45) : Color.secondary.opacity(0.12), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(style.title)
+        .accessibilityHint(style.subtitle)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     // MARK: - Page 4: Sharing (opt-out)
@@ -469,13 +527,15 @@ struct FirstLaunchWindowView: View {
     // MARK: - Completion
 
     private func completeOnboarding() {
-        // Persist the three pieces of state the user just configured:
-        // sharing toggle, username, and handedness. The acknowledgement
-        // checkbox is intentionally not persisted — it's a one-time
-        // consent, not a setting.
+        // Persist the state the user just configured: sharing toggle,
+        // username, handedness, and menu-open gesture. (Handedness and the
+        // gesture are also written live on change, so this is belt-and-braces.)
+        // The acknowledgement checkbox is intentionally not persisted — it's a
+        // one-time consent, not a setting.
         UsageAnalytics.shared.communityDisplayName = communityDisplayName
         UsageAnalytics.shared.analyticsEnabled = shareAnalytics
         appModel.renderSettings.leftHandedMode = leftHanded
+        appModel.renderSettings.menuToggleGestureMode = menuGestureStyle.mode
         hasCompletedIntroOnboarding = true
         openWindow(id: appModel.menuWindowID)
         dismissWindow(id: AppModel.onboardingWindowID)

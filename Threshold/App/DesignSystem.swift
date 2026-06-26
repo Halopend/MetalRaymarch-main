@@ -59,6 +59,67 @@ enum DS {
         /// 20 pt — prominent containers / sheets.
         static let prominent: CGFloat = 20
     }
+
+    // MARK: - Button Scale (visionOS)
+
+    /// Multiplier applied to interactive chrome buttons (top dock, context rail,
+    /// bottom-bar controls) so eye/hand targets are comfortably large in the
+    /// headset. `1.0` on Mac/iPad — pointer and touch targets there are already
+    /// correctly sized — and `1.6` on visionOS, which is ≈2.5× the *area*
+    /// (1.6² ≈ 2.56). Tweak this single value to retune every chrome button.
+    static var buttonScale: CGFloat {
+        #if os(visionOS)
+        return 1.6
+        #else
+        return 1.0
+        #endif
+    }
+
+    /// Scales a base point dimension (icon size, padding, frame, radius) by
+    /// `buttonScale`, rounded to a whole point so glyphs stay crisp.
+    static func scaledButton(_ base: CGFloat) -> CGFloat {
+        (base * buttonScale).rounded()
+    }
+}
+
+// MARK: - Scaled Button Label Fonts
+
+/// Text styles used by chrome button labels. On Mac/iPad these resolve to the
+/// matching semantic `Font` (so Dynamic Type behaviour is unchanged); on
+/// visionOS `Font.thresholdButtonLabel` enlarges them with `DS.buttonScale`.
+enum ThresholdButtonTextStyle {
+    case subheadline   // ≈15 pt
+    case footnote      // ≈13 pt
+    case caption       // ≈12 pt
+
+    var basePointSize: CGFloat {
+        switch self {
+        case .subheadline: return 15
+        case .footnote:    return 13
+        case .caption:     return 12
+        }
+    }
+
+    var semanticFont: Font {
+        switch self {
+        case .subheadline: return .subheadline
+        case .footnote:    return .footnote
+        case .caption:     return .caption
+        }
+    }
+}
+
+extension Font {
+    /// A chrome-button label font. On visionOS it grows with `DS.buttonScale`
+    /// (fixed point size); on Mac/iPad it returns the matching semantic text
+    /// style so nothing about the existing desktop UI changes.
+    static func thresholdButtonLabel(_ style: ThresholdButtonTextStyle, weight: Font.Weight = .semibold) -> Font {
+        #if os(visionOS)
+        return .system(size: DS.scaledButton(style.basePointSize), weight: weight)
+        #else
+        return style.semanticFont.weight(weight)
+        #endif
+    }
 }
 
 // MARK: - Convenience View Modifiers
