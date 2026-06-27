@@ -252,6 +252,16 @@ enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shap
 enum ShapeInnerTab: String, CaseIterable { case parameters = "Parameters", formula = "Formula" }
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
 enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic Color", `static` = "Atmosphere" }
+
+/// Where a Quick Toggles tile's full controls live. Long-pressing a tile
+/// navigates to the matching tab/sub-tab via `ContentView.openQuickToggleHome(_:)`.
+enum QuickToggleHome {
+    case effectsAtmosphere   // Glow, Bloom, Fog
+    case effectsDynamic      // Hue Rotation, Pulse, Gradient Cycle, Linear Rail, Polar Rotation, Julia Drift, Beat Flash
+    case shapeSpace          // Sphere Projection
+    case shapePerformance    // Smart Advance, Coherent Packet, Self-Shadows, Bounding Sphere Skip
+    case audioReactive       // Audio Reactive + bass/mid/treble/beat
+}
 /// Inner tabs of the Settings panel. Drives the segmented picker in
 /// `ContentView.settingsTabContent` and the corresponding switch dispatch.
 enum SettingsSubTab: String, CaseIterable, Identifiable {

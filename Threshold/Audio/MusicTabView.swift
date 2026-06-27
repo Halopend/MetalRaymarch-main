@@ -303,7 +303,7 @@ struct MusicTabContent: View {
 
     private var visualizationAddButton: some View {
         Button {
-            isShowingVisualizationAddPopover = true
+            isShowingVisualizationAddPopover.toggle()
         } label: {
             Label("Add Control", systemImage: AppIcons.plusCircleFill)
                 .font(.caption.weight(.semibold))
@@ -324,6 +324,11 @@ struct MusicTabContent: View {
         .opacity(canAddVisualizationMapping ? 1.0 : 0.72)
         .popover(isPresented: $isShowingVisualizationAddPopover, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
             visualizationAddPopoverContent
+                // Keep the menu open while the user browses categories on desktop —
+                // without this, an interaction inside the window can dismiss the
+                // transient popover before they pick a parameter. It closes on an
+                // explicit pick (sets the flag false) or by re-tapping "Add Control".
+                .interactiveDismissDisabled()
         }
     }
 
@@ -334,16 +339,27 @@ struct MusicTabContent: View {
 
         return AutoExpandingPopover(idealWidth: 300, maxHeight: 460, reservesMaxHeight: true) {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Add Music Control")
-                    .font(.headline)
+                HStack {
+                    Text("Add Music Control")
+                        .font(.title3.bold())
+                    Spacer()
+                    Button {
+                        isShowingVisualizationAddPopover = false
+                    } label: {
+                        Image(systemName: AppIcons.xmarkCircleFill)
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 if available.isEmpty {
                     Text("All targets added")
-                        .font(.caption)
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                 } else {
                     Text("Pick a category, then a parameter to map.")
-                        .font(.caption2)
+                        .font(.callout)
                         .foregroundStyle(.secondary)
 
                     // Plain VStack (no inner ScrollView): AutoExpandingPopover grows
@@ -399,14 +415,14 @@ struct MusicTabContent: View {
             } label: {
                 HStack(spacing: 8) {
                     Label(title, systemImage: systemImage)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.primary)
                     Spacer()
                     Text("\(targets.count)")
-                        .font(.caption2.monospacedDigit())
+                        .font(.caption.monospacedDigit())
                         .foregroundStyle(.tertiary)
                     Image(systemName: AppIcons.chevronRight)
-                        .font(.caption2.weight(.semibold))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 }
@@ -425,6 +441,7 @@ struct MusicTabContent: View {
                             HStack(spacing: 8) {
                                 Label(target.displayName(for: cache.fractalType),
                                       systemImage: target.icon(for: cache.fractalType))
+                                    .font(.callout)
                                     .frame(maxWidth: .infinity, alignment: .leading)
 
                                 if target.hasFlashingRisk {

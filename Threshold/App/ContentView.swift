@@ -1137,8 +1137,27 @@ struct ContentView: View {
         }
     }
     
+    /// Navigate from a Quick Toggles tile (long-press) to where that control's
+    /// full slider/controls live. Setting the sidebar tab + sub-tab is enough;
+    /// the dock chrome re-syncs via the `onChange` hooks. Lives here (not in the
+    /// settings extension) so it can reach the file-private `musicPanelTab`.
+    func openQuickToggleHome(_ home: QuickToggleHome) {
+        switch home {
+        case .effectsAtmosphere:
+            selectedTab = .effects; effectsSubTab = .static
+        case .effectsDynamic:
+            selectedTab = .effects; effectsSubTab = .dynamic
+        case .shapeSpace:
+            selectedTab = .fractal; fractalSubTab = .space
+        case .shapePerformance:
+            selectedTab = .fractal; fractalSubTab = .render
+        case .audioReactive:
+            selectedTab = .music; musicPanelTab = .visualizations
+        }
+    }
+
     // MARK: - Content Panel
-    
+
     private var contentPanel: some View {
         Group {
             if appModel.runtimeViewMode == .buddhabrot {
