@@ -280,3 +280,18 @@ enum ControlCatalog {
     /// (e.g. per-fractal formula params, which live in FormulaCatalog).
     static func spec(_ id: String) -> ControlSpec? { all[id] }
 }
+
+extension Float {
+    /// Clamp into a closed range. Shared replacement for the `max(lo, min(hi, x))`
+    /// idiom that was open-coded ~150× across RenderSettings and the Config types
+    /// (and a `private` copy that used to live in `GestureConfig`).
+    func clamped(to range: ClosedRange<Float>) -> Float {
+        min(range.upperBound, max(range.lowerBound, self))
+    }
+
+    /// Clamp into a control's authoritative range — the single source of truth.
+    /// Prefer this over re-typing the numeric bounds at the setter / config / slider.
+    func clamped(to spec: ControlSpec) -> Float {
+        spec.clamp(self)
+    }
+}

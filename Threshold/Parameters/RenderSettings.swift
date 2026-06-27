@@ -521,7 +521,7 @@ final class RenderSettings: @unchecked Sendable {
     var sphericalInversionRadius: Float {
         get { withLock { _sphericalInversionRadius } }
         set {
-            withLock { _sphericalInversionRadius = max(0.2, min(12.0, newValue)) }
+            withLock { _sphericalInversionRadius = ControlCatalog.sphericalInversionRadius.clamp(newValue) }
             persistDisplay()
         }
     }
@@ -537,7 +537,7 @@ final class RenderSettings: @unchecked Sendable {
     var sphereProjectionBlend: Float {
         get { withLock { _sphereProjectionBlend } }
         set {
-            withLock { _sphereProjectionBlend = max(0.0, min(1.0, newValue)) }
+            withLock { _sphereProjectionBlend = ControlCatalog.sphereProjectionBlend.clamp(newValue) }
             persistDisplay()
         }
     }
@@ -545,7 +545,7 @@ final class RenderSettings: @unchecked Sendable {
     var sphereProjectionRadius: Float {
         get { withLock { _sphereProjectionRadius } }
         set {
-            withLock { _sphereProjectionRadius = max(0.2, min(12.0, newValue)) }
+            withLock { _sphereProjectionRadius = ControlCatalog.sphereProjectionRadius.clamp(newValue) }
             persistDisplay()
         }
     }
@@ -554,7 +554,7 @@ final class RenderSettings: @unchecked Sendable {
     /// a loaded `.threshfx` space-warp effect once that overrides the GPU function.
     var spaceWarpStrength: Float {
         get { withLock { _spaceWarpStrength } }
-        set { withLock { _spaceWarpStrength = max(0.0, min(2.0, newValue)) } }
+        set { withLock { _spaceWarpStrength = ControlCatalog.spaceWarpStrength.clamp(newValue) } }
     }
     var spaceWarpParam1: Float {
         get { withLock { _spaceWarpParam1 } }
@@ -727,7 +727,7 @@ final class RenderSettings: @unchecked Sendable {
     /// Modulate fog intensity (respects user's enabled/disabled toggle)
     func audioModulateFogIntensity(_ value: Float) {
         withLock {
-            _fogEffect.intensity = max(0.0, min(1.0, value))
+            _fogEffect.intensity = ControlCatalog.fog.clamp(value)
         }
     }
     
@@ -741,14 +741,14 @@ final class RenderSettings: @unchecked Sendable {
     /// Modulate hue rotation speed (respects user's enabled/disabled toggle)
     func audioModulateHueSpeed(_ value: Float) {
         withLock {
-            _hueRotationEffect.speed = max(0.0, min(0.5, value))
+            _hueRotationEffect.speed = ControlCatalog.hueSpeed.clamp(value)
         }
     }
     
     /// Modulate color scheme saturation
     func audioModulateSaturation(_ value: Float) {
         withLock {
-            _colorSchemeSaturation = max(0.0, min(3.0, value))
+            _colorSchemeSaturation = ControlCatalog.saturation.clamp(value)
         }
     }
 
@@ -757,7 +757,7 @@ final class RenderSettings: @unchecked Sendable {
     /// without spamming disk, mirroring the other `audioModulate*` effects.
     func audioModulateSafetyBubbleRadius(_ value: Float) {
         withLock {
-            _safetyBubbleRadius = max(0.5, min(2.5, value))
+            _safetyBubbleRadius = ControlCatalog.safetyBubbleRadius.clamp(value)
         }
     }
 
@@ -765,7 +765,7 @@ final class RenderSettings: @unchecked Sendable {
     /// value directly (no persistence), mirroring the other `audioModulate*` setters.
     func audioModulateSphereProjectionBlend(_ value: Float) {
         withLock {
-            _sphereProjectionBlend = max(0.0, min(1.0, value))
+            _sphereProjectionBlend = ControlCatalog.sphereProjectionBlend.clamp(value)
         }
     }
 
@@ -773,14 +773,14 @@ final class RenderSettings: @unchecked Sendable {
     /// value directly (no persistence), mirroring the other `audioModulate*` setters.
     func audioModulateSphereProjectionRadius(_ value: Float) {
         withLock {
-            _sphereProjectionRadius = max(0.2, min(12.0, value))
+            _sphereProjectionRadius = ControlCatalog.sphereProjectionRadius.clamp(value)
         }
     }
 
     /// Modulate built-in Twist strength (gesture/audio path). Clamps 0…2.
     func audioModulateSpaceWarpStrength(_ value: Float) {
         withLock {
-            _spaceWarpStrength = max(0.0, min(2.0, value))
+            _spaceWarpStrength = ControlCatalog.spaceWarpStrength.clamp(value)
         }
     }
 
@@ -814,7 +814,7 @@ final class RenderSettings: @unchecked Sendable {
         // Min 0.33 (33%) for expanded low-resolution budget options
         // Max 1.0 (100%) - no upscaling needed
         // Sweet spot is 0.67-0.75 for best quality/performance balance
-        set { withLock { _resolutionScale = max(0.33, min(1.0, newValue)) } }
+        set { withLock { _resolutionScale = ControlCatalog.resolutionScale.clamp(newValue) } }
     }
 
     /// visionOS-only: drives `layerRenderer.renderQuality`, the compositor's
@@ -3335,7 +3335,7 @@ final class RenderSettings: @unchecked Sendable {
             _minDistance = max(-5.0, min(15.0, _minDistance))
             _foldingLimit = max(-10.0, min(30.0, _foldingLimit))
             _sphereRadius = max(-5.0, min(8.0, _sphereRadius))
-            _fractalScale = max(-5.0, min(8.0, _fractalScale))
+            _fractalScale = ControlCatalog.fractalScale.clamp(_fractalScale)
             
             // Clamp position to prevent drifting to infinity
             let maxPos: Float = 100.0

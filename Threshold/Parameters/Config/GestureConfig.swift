@@ -134,9 +134,3 @@ extension GestureConfig {
         gestureMaxActiveHandDistance = try c.decodeIfPresent(Float.self, forKey: .gestureMaxActiveHandDistance) ?? GestureDefaults.gestureMaxActiveHandDistance
     }
 }
-
-private extension Float {
-    func clamped(to range: ClosedRange<Float>) -> Float {
-        max(range.lowerBound, min(range.upperBound, self))
-    }
-}
