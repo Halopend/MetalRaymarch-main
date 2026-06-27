@@ -111,7 +111,7 @@ class AppModel {
         case raymarch
         case buddhabrot
     }
-    
+
     var immersiveSpaceState = ImmersiveSpaceState.closed
     var rendererStartupWarmupComplete = false
     var runtimeViewMode: RuntimeViewMode = .raymarch {
@@ -119,7 +119,6 @@ class AppModel {
             runtimeViewModeForRenderer = runtimeViewMode
         }
     }
-
     @ObservationIgnored nonisolated(unsafe) var runtimeViewModeForRenderer: RuntimeViewMode = .raymarch
 
     // App activity state (used to avoid submitting GPU work while backgrounded)
@@ -141,10 +140,10 @@ class AppModel {
     
     nonisolated let renderSettings = RenderSettings()
     nonisolated let parameterPipeline = ParameterPipeline()
-    
+
     // Buddhabrot volume renderer settings (shared between UI and render loop)
     nonisolated let buddhabrotSettings = BuddhabrotSettings()
-    
+
     // Audio analyzer for reactive lighting
     let audioAnalyzer = AudioAnalyzer()
 
@@ -232,10 +231,6 @@ class AppModel {
 
     @ObservationIgnored private let menuWindowRetoggleGuardInterval: CFTimeInterval = 0.45
     @ObservationIgnored private var lastMenuWindowOpenedAt: CFTimeInterval = 0
-
-    /// Head height (metres, world-space Y) sampled from the device anchor.
-    /// Updated at ~2 Hz by UIUpdateCoordinator. Zero means no world-tracking fix yet.
-    var headHeightMeters: Float = 0
 
     @ObservationIgnored private var isMenuHovering: Bool = false
     @ObservationIgnored private var menuAdjustmentDepth: Int = 0

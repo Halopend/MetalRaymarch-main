@@ -201,7 +201,6 @@ class FractalTypeDescriptor: @unchecked Sendable {
 enum FractalTypeRegistry {
     private static let allDescriptors: [FractalTypeDescriptor] = [
         MandelboxDescriptor(),
-        MandelboxSphereProjectionDescriptor(),
         MandelbulbDescriptor(),
         MengerDescriptor(),
         MandelbulbJuliaDescriptor(),
@@ -302,26 +301,6 @@ private final class MandelboxDescriptor: FractalTypeDescriptor, @unchecked Senda
     override func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = 0.8; fp.params.1 = 1.0; fp.params.2 = 0.5
-        FormulaCatalog.normalizeRotationFlags(&fp)
-        return fp
-    }
-}
-
-private final class MandelboxSphereProjectionDescriptor: FractalTypeDescriptor, @unchecked Sendable {
-    init() {
-        super.init(rawValue: 21, displayName: "Mandelbox Sphere Projection", icon: "globe.asia.australia",
-                   category: "Box Folds", codableString: "mandelboxSphereProjection", isSelectableInUI: true)
-    }
-    override func primaryEquation() -> String? { "p_{n+1} = scale * projSphere(boxFold(sphereFold(p_n))) + c" }
-    override var defaultColorScheme: ColorScheme? { .rainbow }
-    override func defaultFormulaParams() -> FormulaParams {
-        var fp = Self.baseFormulaParams()
-        fp.params.0 = 0.8   // Min Distance
-        fp.params.1 = 1.0   // Folding Limit
-        fp.params.2 = 0.5   // Sphere Radius
-        fp.params.3 = 2.8   // Scale
-        fp.params.4 = 1.0   // Projection Blend
-        fp.params.5 = 1.0   // Projection Radius
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
     }

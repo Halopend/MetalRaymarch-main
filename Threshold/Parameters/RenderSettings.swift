@@ -1650,20 +1650,11 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    var safetyBubbleFadeEnabled: Bool {
-        get { withLock { _safetyBubbleFadeEnabled } }
-        set { withLock { _safetyBubbleFadeEnabled = newValue } }
-    }
+    var safetyBubbleFadeEnabled: Bool { withLock { _safetyBubbleFadeEnabled } }
 
-    var safetyBubbleFadeWidth: Float {
-        get { withLock { _safetyBubbleFadeWidth } }
-        set { withLock { _safetyBubbleFadeWidth = max(0.0, min(1.0, newValue)) } }
-    }
+    var safetyBubbleFadeWidth: Float { withLock { _safetyBubbleFadeWidth } }
 
-    var safetyBubbleStrength: Float {
-        get { withLock { _safetyBubbleStrength } }
-        set { withLock { _safetyBubbleStrength = max(0.0, min(1.0, newValue)) } }
-    }
+    var safetyBubbleStrength: Float { withLock { _safetyBubbleStrength } }
     
     // === COLOR SCHEME SETTINGS ===
     // Controls the color palette and transitions for fractal coloring

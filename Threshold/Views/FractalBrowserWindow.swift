@@ -1,40 +1,15 @@
 import SwiftUI
 
-struct FractalVariant: Identifiable, Hashable {
+struct FractalVariant: Identifiable {
     let id: String
     let name: String
     let summary: String
     let formulaOverrides: [(Int, Float)]
     var targetFractalScale: Float?
     var externalURL: String?
-
-    static func == (lhs: FractalVariant, rhs: FractalVariant) -> Bool {
-        lhs.id == rhs.id &&
-        lhs.name == rhs.name &&
-        lhs.summary == rhs.summary &&
-        lhs.targetFractalScale == rhs.targetFractalScale &&
-        lhs.externalURL == rhs.externalURL &&
-        lhs.formulaOverrides.count == rhs.formulaOverrides.count &&
-        zip(lhs.formulaOverrides, rhs.formulaOverrides).allSatisfy { left, right in
-            left.0 == right.0 && left.1 == right.1
-        }
-    }
-
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-        hasher.combine(name)
-        hasher.combine(summary)
-        hasher.combine(targetFractalScale)
-        hasher.combine(externalURL)
-        hasher.combine(formulaOverrides.count)
-        for (index, value) in formulaOverrides {
-            hasher.combine(index)
-            hasher.combine(value)
-        }
-    }
 }
 
-struct FractalTypeBrowserInfo: Identifiable, Hashable {
+struct FractalTypeBrowserInfo: Identifiable {
     let id: String
     let type: FractalModelType?
     let title: String
@@ -81,7 +56,7 @@ struct FractalTypeBrowserInfo: Identifiable, Hashable {
     }
 }
 
-struct FractalFamilyInfo: Identifiable, Hashable {
+struct FractalFamilyInfo: Identifiable {
     let id: String
     let name: String
     let summary: String
@@ -252,12 +227,6 @@ enum FractalBrowserCatalog {
                             targetFractalScale: 2.5
                         )
                     ]
-                ),
-                FractalTypeBrowserInfo(
-                    type: .mandelboxSphereProjection,
-                    subtitle: "Mandelbox with post-fold spherical projection",
-                    historicalInfo: "A production accident yielded a compelling sphere-projected Mandelbox silhouette; halopend shaped the behavior into this controllable formula variant.",
-                    variants: []
                 )
             ]
         ),
@@ -320,23 +289,6 @@ enum FractalBrowserCatalog {
                 FractalTypeBrowserInfo(type: .boxSphereFolder, subtitle: "Recursive box/sphere inversion hybrid", historicalInfo: "Sphere inversion techniques connect classical geometry and modern DE fractal workflows.", variants: []),
                 FractalTypeBrowserInfo(type: .theliPseudoKleinian, subtitle: "Fold-based pseudo-Kleinian hybrid", historicalInfo: "Pseudo-Kleinian formulas combine conditional folds and offsets for rich cavity structures.", variants: []),
                 FractalTypeBrowserInfo(type: .kleinian, subtitle: "Classical Kleinian group fold dynamics", historicalInfo: "Kleinian-style systems in raymarched fractals derive from Möbius-transform inspired fold operations.", variants: [])
-            ]
-        ),
-        FractalFamilyInfo(
-            id: "experimental",
-            name: "Experimental",
-            summary: "Alternative rendering techniques and work-in-progress fractal systems.",
-            historicalInfo: "Buddhabrot uses orbit density histograms — an experimental rendering technique with limited feature support.",
-            types: [
-                FractalTypeBrowserInfo(
-                    id: "buddhabrot-3d",
-                    title: "3D Buddhabrot",
-                    icon: "atom",
-                    subtitle: "Orbit density histogram rendering",
-                    historicalInfo: "The Buddhabrot technique, named by Melinda Green (1993), visualizes Mandelbrot escape orbits as density maps. The 3D extension renders orbit density in volumetric space.",
-                    variants: [],
-                    externalReferenceURL: "https://en.wikipedia.org/wiki/Buddhabrot"
-                )
             ]
         ),
         FractalFamilyInfo(
@@ -442,10 +394,6 @@ struct FractalBrowserWindow: View {
         Text(family.historicalInfo)
             .font(.subheadline)
             .foregroundStyle(.secondary)
-
-        if family.id == "experimental" {
-            buddhabrotToolsPanel
-        }
 
         Divider()
 
@@ -567,29 +515,7 @@ struct FractalBrowserWindow: View {
         }
     }
 
-    private var buddhabrotToolsPanel: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("3D Buddhabrot", systemImage: AppIcons.atom)
-                    .font(.headline)
-                Spacer()
-                Button {
-                    appModel.runtimeViewMode = .buddhabrot
-                } label: {
-                    Label("Launch Buddhabrot", systemImage: AppIcons.playFill)
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            Text("Orbit density histogram rendering. Switches to the Buddhabrot renderer — a fundamentally different rendering technique from raymarching.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(.ultraThinMaterial))
-    }
-
     private func loadType(_ type: FractalModelType) {
-        appModel.runtimeViewMode = .raymarch
         appModel.renderSettings.fractalType = type
         appModel.gestureController?.applyFractalDefaults()
         appModel.gestureController?.syncWithSettings()
@@ -598,7 +524,6 @@ struct FractalBrowserWindow: View {
     }
 
     private func loadVariant(type: FractalModelType, variant: FractalVariant) {
-        appModel.runtimeViewMode = .raymarch
         appModel.renderSettings.fractalType = type
         appModel.gestureController?.applyFractalDefaults()
 

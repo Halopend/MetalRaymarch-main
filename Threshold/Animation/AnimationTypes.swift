@@ -733,6 +733,28 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     /// a built-in formula. Older app versions ignore this field.
     var embeddedFormula: EmbeddedFormula?
 
+    /// Transient back-compat flag (NOT persisted — omitted from CodingKeys). True
+    /// when this scene was authored as the folded-away "mandelboxSphereProjection"
+    /// type. On playback, the renderer enables the Space-tab "Sphere Projection"
+    /// and drives its blend/radius from each keyframe's formula params[4]/[5] so the
+    /// legacy look reproduces under base `.mandelbox`.
+    var legacyMandelboxSphereProjection: Bool = false
+
+    /// Persisted keys. Declared explicitly so the transient
+    /// `legacyMandelboxSphereProjection` flag stays out of the on-disk format
+    /// (the synthesized init/encode reference these only).
+    private enum CodingKeys: String, CodingKey {
+        case id, name, keyframes, isLooping, playbackMode, createdAt, modifiedAt
+        case fractalType, gradientPreset, colorMappingMode, gradientRepeat
+        case gradientOffset, gradientSmoothing
+        case colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
+        case colorSchemeVibrance, colorSchemeCurve, colorSchemeShadows, colorSchemeHighlights
+        case lightingSoftness
+        case safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape, safetyBubbleBlend
+        case attachedSong, playbackSpeedOverride, songFadeOutDuration, songFadeOutOffset
+        case embeddedFormula
+    }
+
     /// Total duration of the scene (sum of all keyframe durations)
     var totalDuration: TimeInterval {
         keyframes.reduce(0) { $0 + $1.duration }
@@ -772,6 +794,15 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         playbackMode   = (try? c.decode(AnimationPlaybackMode.self, forKey: .playbackMode)) ?? .forward
         createdAt      = try c.decode(Date.self, forKey: .createdAt)
         modifiedAt     = try c.decode(Date.self, forKey: .modifiedAt)
+        // Peek the raw fractalType marker before it maps through the back-compat
+        // alias, so a legacy "mandelboxSphereProjection" animation can re-enable the
+        // Space-tab Sphere Projection on playback (the type itself decodes to
+        // `.mandelbox`).
+        if let str = try? c.decode(String.self, forKey: .fractalType) {
+            legacyMandelboxSphereProjection = (str == "mandelboxSphereProjection")
+        } else if let raw = try? c.decode(Int32.self, forKey: .fractalType) {
+            legacyMandelboxSphereProjection = (raw == 21)
+        }
         fractalType    = try c.decodeIfPresent(FractalModelType.self, forKey: .fractalType)
         gradientPreset = try c.decodeIfPresent(GradientPreset.self, forKey: .gradientPreset)
         colorMappingMode = try c.decodeIfPresent(ColorMappingMode.self, forKey: .colorMappingMode)

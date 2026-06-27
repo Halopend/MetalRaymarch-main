@@ -48,9 +48,10 @@
 
 // Sphere-projection variants: identical to the basic/half iterations, but after
 // the sphere fold each point is radially blended toward a fixed-radius sphere.
-// This reproduces the "Accidental Sphere Projection" look (see
-// Formulas/MandelboxSphereProjection) as an optional layer on the standard
-// Mandelbox fast path. The blend/radius come from FractalParams so the decision
+// This reproduces the "Accidental Sphere Projection" look (the Space-tab "Sphere
+// Projection" control; formerly a dedicated sphere-projected Mandelbox type) as
+// an optional layer on the standard Mandelbox fast path. The blend/radius come
+// from FractalParams so the decision
 // is hoisted OUTSIDE the loop by the caller — the no-projection path is byte-for
 // -byte identical to before (zero cost when the option is off).
 #define MAP_ITERATION_PROJ(p, p0, foldingLimit, params, invSphereRadiusSq, projBlend, projRadius) \
@@ -269,9 +270,9 @@ FORCE_INLINE float3 sphericalInvertPoint(float3 point, float radius) {
 }
 
 // Radially project a folded point onto a sphere of the given radius. Used by the
-// optional sphere-projection iteration macros (post-sphere-fold). Mirrors
-// projectToSphere() in Formulas/MandelboxSphereProjection.h (named distinctly to
-// avoid clashing with that header's definition).
+// optional sphere-projection iteration macros (post-sphere-fold). This is the
+// canonical projection used by the Space-tab "Sphere Projection" control on the
+// base Mandelbox fast path.
 FORCE_INLINE float3 mapProjectToSphere(float3 p, float radius) {
     float len = length(p);
     if (len <= 1e-6f) { return float3(radius, 0.0f, 0.0f); }
@@ -1469,7 +1470,6 @@ FORCE_INLINE float relaxedOmegaCap(int type) {
     case FractalTypeOctahedron:
     case FractalTypeMengerSphere:
     case FractalTypeBoxSphereFolder:
-    case FractalTypeMandelboxSphereProjection:
         // Box/fold DEs tolerate the most over-relaxation; the overstep-failure
         // retreat keeps it hit-safe, so the user's Over-Relaxation slider may push
         // the auto-ramp up to here (default ramp stops at 1.4).

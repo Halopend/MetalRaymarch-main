@@ -98,7 +98,6 @@ actor CustomShaderCompiler {
             EmbeddedMetalSources.theliPseudoKleinianH,
             EmbeddedMetalSources.kleinianH,
             EmbeddedMetalSources.boxSphereFolderH,
-            EmbeddedMetalSources.mandelboxSphereProjectionH,
         ]
         for body in builtIns {
             pieces.append(stripLocalIncludes(body))

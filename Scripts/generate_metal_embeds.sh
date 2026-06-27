@@ -65,7 +65,6 @@ HEADER
     emit_block "theliPseudoKleinianH"       "Threshold/Formulas/TheliPseudoKleinian/TheliPseudoKleinian.h"
     emit_block "kleinianH"                  "Threshold/Formulas/Kleinian/Kleinian.h"
     emit_block "boxSphereFolderH"           "Threshold/Formulas/BoxSphereFolder/BoxSphereFolder.h"
-    emit_block "mandelboxSphereProjectionH" "Threshold/Formulas/MandelboxSphereProjection/MandelboxSphereProjection.h"
 
     emit_block "shadersMetal"               "Threshold/Rendering/Shaders.metal"
 

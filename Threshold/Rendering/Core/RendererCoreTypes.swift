@@ -113,7 +113,7 @@ struct WarmStartGate {
     private var recordedKey: GeometryKey?
 
     /// The previous frame didn't produce trustworthy fragment depth
-    /// (adaptive compute, Buddhabrot, direct render, MetalFX failure).
+    /// (adaptive compute, direct render, MetalFX failure).
     mutating func invalidate() { recordedKey = nil }
 
     /// A fragment+MetalFX frame just wrote depth under this snapshot.

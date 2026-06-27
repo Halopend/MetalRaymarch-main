@@ -1027,7 +1027,6 @@ private final class ThresholdMacRenderer {
         uiUpdateCoordinator.scheduleUIUpdate(fps: smoothedFPS,
                                              gpuMs: gpuFrameMsHolder.withLock { $0 },
                                              avgStepsPerPixel: avgStepsHolder.withLock { $0 },
-                                             headHeightMeters: nil,
                                              currentTime: now)
 
         let snapshot = settings.snapshot()

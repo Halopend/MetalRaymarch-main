@@ -63,7 +63,6 @@ final class AppleMusicManager {
     var onPlaybackFinished: (() -> Void)?
 
     var isAuthorized: Bool { false }
-    var authorizationDescription: String { "Unavailable" }
     var progressFraction: Float { 0 }
     var currentTimeString: String { "0:00" }
     var totalTimeString: String { "0:00" }

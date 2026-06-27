@@ -19,7 +19,6 @@ enum FractalModelType: Int32, CaseIterable {
     case theliPseudoKleinian = 15
     case kleinian              = 17
     case boxSphereFolder         = 20
-    case mandelboxSphereProjection = 21
     /// Sentinel for runtime-compiled DE shaders (.threshfx). Mirrors
     /// `FractalTypeCustom` in ShaderTypes.h. The single active embedded formula
     /// is registered with `FractalTypeRegistry` and `FormulaCatalog` at load time.
@@ -77,6 +76,21 @@ extension FractalModelType: Codable {
                 self = value
                 return
             }
+        }
+        // Back-compat alias: the dedicated "mandelboxSphereProjection" type
+        // (rawValue 21) was folded into base `.mandelbox` + the Space-tab
+        // "Sphere Projection" control. Old scenes/animations/presets that encoded
+        // it (by string or by Int32 21) must still decode — map both to
+        // `.mandelbox`. FractalPreset/AnimationScene additionally turn the
+        // sphere-projection fields on when they see this legacy marker so the
+        // saved look reproduces (params[4]/[5] → projection blend/radius).
+        if let str = try? container.decode(String.self), str == "mandelboxSphereProjection" {
+            self = .mandelbox
+            return
+        }
+        if let raw = try? container.decode(Int32.self), raw == 21 {
+            self = .mandelbox
+            return
         }
         throw DecodingError.dataCorruptedError(
             in: container, debugDescription: "Invalid FractalModelType value")

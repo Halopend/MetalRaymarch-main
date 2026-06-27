@@ -20,9 +20,6 @@ class AudioAnalyzer {
     /// @ObservationIgnored + nonisolated(unsafe) allows reading from render thread
     @ObservationIgnored nonisolated(unsafe) private(set) var level: Float = 0.0
     
-    /// Peak level with slow decay for "peak hold" effects
-    @ObservationIgnored nonisolated(unsafe) private(set) var peakLevel: Float = 0.0
-    
     /// Bass level (low frequencies 20-250Hz) - good for deep pulses
     @ObservationIgnored nonisolated(unsafe) private(set) var bassLevel: Float = 0.0
     
@@ -91,7 +88,6 @@ class AudioAnalyzer {
     // Frame-rate independent smoothing speeds
     private let attackSpeed: Float = 40.0      // Fast attack for responsiveness
     private let decaySpeed: Float = 12.0       // Moderate decay
-    private let peakDecaySpeed: Float = 2.0    // Slow peak decay
     private let bandAttackSpeed: Float = 35.0  // Band-specific attack
     private let bandDecaySpeed: Float = 10.0   // Band-specific decay
     private let onsetDecaySpeed: Float = 6.0   // Drop envelope fall (~0.17s) — instant attack, fast decay
@@ -488,14 +484,7 @@ class AudioAnalyzer {
         } else {
             level = level + (overall - level) * cachedDecayFactor
         }
-        
-        // Update peak with slow decay
-        if level > peakLevel {
-            peakLevel = level
-        } else {
-            peakLevel = max(0, peakLevel - peakDecaySpeed * clampedDT)
-        }
-        
+
         // Smooth frequency bands with attack/decay
         smoothBand(&bassLevel, target: bass, dt: clampedDT)
         smoothBand(&midLevel, target: mid, dt: clampedDT)
@@ -527,7 +516,6 @@ class AudioAnalyzer {
 
     private func resetLevels() {
         level = 0
-        peakLevel = 0
         bassLevel = 0
         midLevel = 0
         trebleLevel = 0

@@ -185,6 +185,19 @@ struct FractalPreset: Codable, Identifiable {
         colorIterations = try container.decode(Float.self, forKey: .colorIterations)
         position = try container.decode(SIMD3<Float>.self, forKey: .position)
         scale = try container.decode(Float.self, forKey: .scale)
+        // Peek the raw fractalType marker BEFORE it maps through the alias so we
+        // can detect a legacy "mandelboxSphereProjection" scene. The type itself
+        // decodes to `.mandelbox` (FractalModelType back-compat alias); the
+        // sphere-projection fields are filled below from params[4]/[5].
+        let legacyMandelboxSphereProjection: Bool = {
+            if let str = try? container.decode(String.self, forKey: .fractalType) {
+                return str == "mandelboxSphereProjection"
+            }
+            if let raw = try? container.decode(Int32.self, forKey: .fractalType) {
+                return raw == 21
+            }
+            return false
+        }()
         fractalType = try container.decodeIfPresent(FractalModelType.self, forKey: .fractalType) ?? .mandelbox
         colorScheme = try container.decodeIfPresent(ColorScheme.self, forKey: .colorScheme) ?? .classic
         colorSchemeSaturation = try container.decodeIfPresent(Float.self, forKey: .colorSchemeSaturation) ?? 1.7
@@ -217,6 +230,23 @@ struct FractalPreset: Codable, Identifiable {
         sphereProjectionEnabled = try container.decodeIfPresent(Bool.self, forKey: .sphereProjectionEnabled)
         sphereProjectionBlend = try container.decodeIfPresent(Float.self, forKey: .sphereProjectionBlend)
         sphereProjectionRadius = try container.decodeIfPresent(Float.self, forKey: .sphereProjectionRadius)
+
+        // Legacy "mandelboxSphereProjection" migration: the dedicated MSP type read
+        // the projection blend/radius from formula params[4]/[5] and always projected.
+        // Base Mandelbox reproduces the identical look via the Space-tab "Sphere
+        // Projection" control (DisplayConfig.sphereProjection*), so turn it on and
+        // seed blend/radius from params[4]/[5] — but only when the scene didn't
+        // already carry its own sphere-projection values (don't double-apply / stomp
+        // a newer explicit format).
+        if legacyMandelboxSphereProjection,
+           sphereProjectionEnabled == nil,
+           sphereProjectionBlend == nil,
+           sphereProjectionRadius == nil,
+           let vals = formulaParamValues, vals.count > 5 {
+            sphereProjectionEnabled = true
+            sphereProjectionBlend = vals[4]
+            sphereProjectionRadius = vals[5]
+        }
 
         // v2.0 modular lighting effects
         lightingMode = try container.decodeIfPresent(LightingMode.self, forKey: .lightingMode)

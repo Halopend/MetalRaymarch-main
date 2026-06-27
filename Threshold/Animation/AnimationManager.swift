@@ -1162,6 +1162,18 @@ final class AnimationManager {
             settings.setAnimationBaseFormulaParams(vals)
         }
 
+        // Legacy "mandelboxSphereProjection" scenes fold into base `.mandelbox` +
+        // the Space-tab Sphere Projection. The old MSP type read projection
+        // blend/radius from formula params[4]/[5] and always projected; reproduce
+        // that here every frame so animated projection radius/blend tracks the
+        // interpolated keyframe (e.g. Scene 9 / Kaleidoscope animate params[5]).
+        if currentScene?.legacyMandelboxSphereProjection == true,
+           let vals = keyframe.formulaParamValues, vals.count > 5 {
+            settings.sphereProjectionEnabled = true
+            settings.sphereProjectionBlend = vals[4]
+            settings.sphereProjectionRadius = vals[5]
+        }
+
           if let lightingMode = keyframe.lightingMode,
               settings.lightingMode != lightingMode {
             settings.lightingMode = lightingMode

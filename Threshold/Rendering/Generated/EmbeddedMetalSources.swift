@@ -93,7 +93,6 @@ typedef NS_ENUM(EnumBackingType, FractalType)
     FractalTypeTheliPseudoKleinian = 15,
     FractalTypeKleinian              = 17,
     FractalTypeBoxSphereFolder         = 20,
-    FractalTypeMandelboxSphereProjection = 21,
     // Sentinel for runtime-compiled custom DE formulas (.threshfx).
     // The static dispatch in FractalFormulas.h returns far for this value;
     // custom rendering uses a separately-compiled MTLLibrary.
@@ -417,9 +416,6 @@ typedef struct
     uint32_t rateMapLayer;           // rate-map layer for this eye (layered: eyeIndex; dedicated: 0)
 } TileUniforms;
 
-// Include Buddhabrot types so they're visible through the bridging header
-#include "../Formulas/Buddhabrot/BuddhabrotTypes.h"
-
 #endif /* ShaderTypes_h */
 
 """#
@@ -594,7 +590,6 @@ struct OrbitData {
 #include "TheliPseudoKleinian/TheliPseudoKleinian.h"
 #include "Kleinian/Kleinian.h"
 #include "BoxSphereFolder/BoxSphereFolder.h"
-#include "MandelboxSphereProjection/MandelboxSphereProjection.h"
 
 // ============================================================================
 // DISPATCH — distance only
@@ -618,8 +613,6 @@ FORCE_INLINE float FractalDE_Dispatch(float3 pos, int fractalType, FormulaParams
             return DE_Kleinian_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypeBoxSphereFolder:
             return DE_BoxSphereFolder_Dist(pos, fp, fp.rotMatrix1, iterations);
-        case FractalTypeMandelboxSphereProjection:
-            return DE_MandelboxSphereProjection_Dist(pos, fp, fp.rotMatrix1, iterations);
         // __CUSTOM_DISPATCH_DIST__
         default:
             return 1e10f; // Unknown type — far away
@@ -650,8 +643,6 @@ FORCE_INLINE float FractalDE_WithOrbit(float3 pos, int fractalType, FormulaParam
             return DE_Kleinian(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypeBoxSphereFolder:
             return DE_BoxSphereFolder(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
-        case FractalTypeMandelboxSphereProjection:
-            return DE_MandelboxSphereProjection(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         // __CUSTOM_DISPATCH_ORBIT__
         default:
             orbit.trap = 1e20f;
@@ -1693,156 +1684,6 @@ FORCE_INLINE float DE_BoxSphereFolder_Dist(float3 pos, FormulaParams fp, float3x
 
 """#
 
-    static let mandelboxSphereProjectionH: String = #"""
-//
-//  MandelboxSphereProjection.h
-//  Threshold
-//
-//  Mandelbox variant with explicit radial projection after sphere fold.
-//  Inspired by the "Accidental Sphere Projection" behavior from the legacy
-//  shader map path around commit f50fe1f9. Formula variant credited to halopend.
-//
-//  params[0]=MinDistance, [1]=FoldingLimit, [2]=SphereRadius,
-//  [3]=Scale, [4]=ProjectionBlend, [5]=ProjectionRadius
-//
-
-#ifndef DE_MandelboxSphereProjection_h
-#define DE_MandelboxSphereProjection_h
-
-FORCE_INLINE float3 projectToSphere(float3 p, float radius) {
-    float len = length(p);
-    if (len <= 1e-6f) {
-        return float3(radius, 0.0f, 0.0f);
-    }
-    return p * (radius / len);
-}
-
-// ---------------------------------------------------------------------------
-// Full orbit-tracking version (coloring + normals)
-// ---------------------------------------------------------------------------
-FORCE_INLINE float DE_MandelboxSphereProjection(float3 pos, FormulaParams fp, float3x3 rot,
-                                                int iterations, int colorIterations,
-                                                thread OrbitData& orbit) {
-    float minDistance = fp.params[0];
-    if (abs(minDistance) < 1e-6f) {
-        minDistance = (minDistance < 0.0f) ? -1e-6f : 1e-6f;
-    }
-
-    float foldingLimit = fp.params[1];
-    float sphereRadius = max(abs(fp.params[2]), 1e-6f);
-    float scale = fp.params[3];
-    float projectionBlend = clamp(fp.params[4], 0.0f, 1.0f);
-    float projectionRadius = max(fp.params[5], 1e-6f);
-    bool hasRotation = hasRot1Precomputed(fp);
-
-    float sphereRadiusSq = sphereRadius * sphereRadius;
-    float invSphereRadiusSq = 1.0f / sphereRadiusSq;
-
-    float4 scale4 = float4(scale, scale, scale, abs(scale)) / minDistance;
-    float absScalem1 = abs(scale - 1.0f);
-    float absScalePow = powr(max(abs(scale), 1e-6f), float(1 - iterations));
-
-    float4 p = float4(pos, 1.0f);
-    float4 p0 = p;
-
-    float trap = 1e20f;
-    int trapIter = 0;
-    float3 trapPos = pos;
-    int trapIterations = min(max(colorIterations, 0), iterations);
-
-    int i = 0;
-    for (; i < iterations; ++i) {
-        if (hasRotation) {
-            p.xyz = rot * p.xyz;
-        }
-
-        p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0f), -p.xyz);
-
-        float r2 = dot(p.xyz, p.xyz);
-        float t = clamp(1.0f / max(r2, sphereRadiusSq), 1.0f, invSphereRadiusSq);
-        p *= t;
-
-        if (projectionBlend > 0.0f) {
-            float3 projected = projectToSphere(p.xyz, projectionRadius);
-            p.xyz = mix(p.xyz, projected, projectionBlend);
-        }
-
-        p = fma(p, scale4, p0);
-
-        if (i < trapIterations) {
-            float trapR2 = dot(p.xyz, p.xyz);
-            if (trapR2 < trap) {
-                trap = trapR2;
-                trapIter = i;
-                trapPos = p.xyz;
-            }
-        }
-    }
-
-    float de = (length(p.xyz) - absScalem1) / max(abs(p.w), 1e-6f) - absScalePow;
-
-    orbit.trap = trap;
-    orbit.trapIteration = trapIter;
-    orbit.trapPosition = trapPos;
-    orbit.finalP = p.xyz;
-    orbit.iterationsUsed = i;
-
-    return de;
-}
-
-// ---------------------------------------------------------------------------
-// Lean distance-only (shadows, normals via finite differences)
-// ---------------------------------------------------------------------------
-FORCE_INLINE float DE_MandelboxSphereProjection_Dist(float3 pos, FormulaParams fp,
-                                                     float3x3 rot, int iterations) {
-    float minDistance = fp.params[0];
-    if (abs(minDistance) < 1e-6f) {
-        minDistance = (minDistance < 0.0f) ? -1e-6f : 1e-6f;
-    }
-
-    float foldingLimit = fp.params[1];
-    float sphereRadius = max(abs(fp.params[2]), 1e-6f);
-    float scale = fp.params[3];
-    float projectionBlend = clamp(fp.params[4], 0.0f, 1.0f);
-    float projectionRadius = max(fp.params[5], 1e-6f);
-    bool hasRotation = hasRot1Precomputed(fp);
-
-    float sphereRadiusSq = sphereRadius * sphereRadius;
-    float invSphereRadiusSq = 1.0f / sphereRadiusSq;
-
-    float4 scale4 = float4(scale, scale, scale, abs(scale)) / minDistance;
-    float absScalem1 = abs(scale - 1.0f);
-    float absScalePow = powr(max(abs(scale), 1e-6f), float(1 - iterations));
-
-    float4 p = float4(pos, 1.0f);
-    float4 p0 = p;
-
-    for (int i = 0; i < iterations; ++i) {
-        if (hasRotation) {
-            p.xyz = rot * p.xyz;
-        }
-
-        p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0f), -p.xyz);
-
-        float r2 = dot(p.xyz, p.xyz);
-        float t = clamp(1.0f / max(r2, sphereRadiusSq), 1.0f, invSphereRadiusSq);
-        p *= t;
-
-        if (projectionBlend > 0.0f) {
-            float3 projected = projectToSphere(p.xyz, projectionRadius);
-            p.xyz = mix(p.xyz, projected, projectionBlend);
-        }
-
-        p = fma(p, scale4, p0);
-    }
-
-    return (length(p.xyz) - absScalem1) / max(abs(p.w), 1e-6f) - absScalePow;
-}
-
-#endif /* DE_MandelboxSphereProjection_h */
-
-"""#
-
     static let shadersMetal: String = #"""
 //
 //  Shaders.metal
@@ -1894,9 +1735,10 @@ FORCE_INLINE float DE_MandelboxSphereProjection_Dist(float3 pos, FormulaParams f
 
 // Sphere-projection variants: identical to the basic/half iterations, but after
 // the sphere fold each point is radially blended toward a fixed-radius sphere.
-// This reproduces the "Accidental Sphere Projection" look (see
-// Formulas/MandelboxSphereProjection) as an optional layer on the standard
-// Mandelbox fast path. The blend/radius come from FractalParams so the decision
+// This reproduces the "Accidental Sphere Projection" look (the Space-tab "Sphere
+// Projection" control; formerly a dedicated sphere-projected Mandelbox type) as
+// an optional layer on the standard Mandelbox fast path. The blend/radius come
+// from FractalParams so the decision
 // is hoisted OUTSIDE the loop by the caller — the no-projection path is byte-for
 // -byte identical to before (zero cost when the option is off).
 #define MAP_ITERATION_PROJ(p, p0, foldingLimit, params, invSphereRadiusSq, projBlend, projRadius) \
@@ -2115,9 +1957,9 @@ FORCE_INLINE float3 sphericalInvertPoint(float3 point, float radius) {
 }
 
 // Radially project a folded point onto a sphere of the given radius. Used by the
-// optional sphere-projection iteration macros (post-sphere-fold). Mirrors
-// projectToSphere() in Formulas/MandelboxSphereProjection.h (named distinctly to
-// avoid clashing with that header's definition).
+// optional sphere-projection iteration macros (post-sphere-fold). This is the
+// canonical projection used by the Space-tab "Sphere Projection" control on the
+// base Mandelbox fast path.
 FORCE_INLINE float3 mapProjectToSphere(float3 p, float radius) {
     float len = length(p);
     if (len <= 1e-6f) { return float3(radius, 0.0f, 0.0f); }
@@ -3315,7 +3157,6 @@ FORCE_INLINE float relaxedOmegaCap(int type) {
     case FractalTypeOctahedron:
     case FractalTypeMengerSphere:
     case FractalTypeBoxSphereFolder:
-    case FractalTypeMandelboxSphereProjection:
         // Box/fold DEs tolerate the most over-relaxation; the overstep-failure
         // retreat keeps it hit-safe, so the user's Over-Relaxation slider may push
         // the auto-ramp up to here (default ramp stops at 1.4).

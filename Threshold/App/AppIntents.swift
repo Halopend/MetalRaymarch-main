@@ -272,7 +272,6 @@ enum FractalTypeAppEnum: String, AppEnum {
     // `modelType` resolves by lookup (no converter switch). Covers every
     // selectable static type (previously missing 3 → unreachable via Siri).
     case mandelbox
-    case mandelboxSphereProjection
     case mandelbulb
     case mandelbulbJulia
     case menger
@@ -287,7 +286,6 @@ enum FractalTypeAppEnum: String, AppEnum {
 
     static let caseDisplayRepresentations: [FractalTypeAppEnum: DisplayRepresentation] = [
         .mandelbox: "Mandelbox",
-        .mandelboxSphereProjection: "Mandelbox Sphere Projection",
         .mandelbulb: "Mandelbulb",
         .mandelbulbJulia: "Mandelbulb Julia",
         .menger: "Menger Sponge",

@@ -77,7 +77,6 @@ typedef NS_ENUM(EnumBackingType, FractalType)
     FractalTypeTheliPseudoKleinian = 15,
     FractalTypeKleinian              = 17,
     FractalTypeBoxSphereFolder         = 20,
-    FractalTypeMandelboxSphereProjection = 21,
     // Sentinel for runtime-compiled custom DE formulas (.threshfx).
     // The static dispatch in FractalFormulas.h returns far for this value;
     // custom rendering uses a separately-compiled MTLLibrary.
@@ -400,8 +399,5 @@ typedef struct
     int rateMapValid;                // 1 = rateMapData (buffer 1) is a valid rate map to decode
     uint32_t rateMapLayer;           // rate-map layer for this eye (layered: eyeIndex; dedicated: 0)
 } TileUniforms;
-
-// Include Buddhabrot types so they're visible through the bridging header
-#include "../Formulas/Buddhabrot/BuddhabrotTypes.h"
 
 #endif /* ShaderTypes_h */

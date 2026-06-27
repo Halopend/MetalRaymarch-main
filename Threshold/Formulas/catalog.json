@@ -39,64 +39,6 @@
       ]
     },
     {
-      "id": "mandelboxSphereProjection",
-      "name": "Mandelbox Sphere Projection",
-      "fractalType": 21,
-      "category": "Box Folds",
-      "description": "Mandelbox variant with radial projection applied after sphere fold.",
-      "author": "Tom Lowe",
-      "params": [
-        {
-          "index": 0,
-          "name": "Min Distance",
-          "default": 0.8,
-          "min": -5.0,
-          "max": 15.0,
-          "step": 0.01
-        },
-        {
-          "index": 1,
-          "name": "Folding Limit",
-          "default": 1.0,
-          "min": -10.0,
-          "max": 30.0,
-          "step": 0.01
-        },
-        {
-          "index": 2,
-          "name": "Sphere Radius",
-          "default": 0.5,
-          "min": 0.01,
-          "max": 8.0,
-          "step": 0.01
-        },
-        {
-          "index": 3,
-          "name": "Scale",
-          "default": 2.8,
-          "min": -5.0,
-          "max": 5.0,
-          "step": 0.01
-        },
-        {
-          "index": 4,
-          "name": "Projection Blend",
-          "default": 1.0,
-          "min": 0.0,
-          "max": 1.0,
-          "step": 0.01
-        },
-        {
-          "index": 5,
-          "name": "Projection Radius",
-          "default": 1.0,
-          "min": 0.01,
-          "max": 6.0,
-          "step": 0.01
-        }
-      ]
-    },
-    {
       "id": "mandelbulb",
       "name": "Mandelbulb",
       "fractalType": 1,

@@ -147,11 +147,6 @@ actor Renderer {
     // Pipeline profiling trigger
     nonisolated(unsafe) var shouldRunProfiler: Bool = false
 
-    // === BUDDHABROT VOLUME RENDERER ===
-    // Lazy-initialized when the user switches to Buddhabrot mode.
-    // Owns density buffers, 3D volume texture, and stereo ray march pipeline.
-    var buddhabrotRenderer: BuddhabrotRenderer?
-
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
 
     var uniformBufferOffset = 0
@@ -922,9 +917,7 @@ actor Renderer {
             
             // === UI UPDATE COORDINATION ===
             // Use UIUpdateCoordinator to prevent UI blocking during heavy fractal rendering.
-            // Also piggybacks device head height for posture detection (world-space Y, ~2 Hz).
-            let headY = deviceAnchor.map { Float($0.originFromAnchorTransform.columns.3.y) }
-            uiUpdateCoordinator?.scheduleUIUpdate(fps: updatedFPS, headHeightMeters: headY, currentTime: time)
+            uiUpdateCoordinator?.scheduleUIUpdate(fps: updatedFPS, currentTime: time)
             
             // Periodic FPS console logging (every 2 seconds)
             if RENDERER_DEBUG && time - lastFPSConsoleLogTime > 2.0 {
@@ -1057,43 +1050,6 @@ actor Renderer {
 
         let renderEncodeStart = CACurrentMediaTime()
 
-        // ═══════════════════════════════════════════════════════════════════════
-        // BUDDHABROT VOLUME RENDER PATH
-        // When in Buddhabrot mode, skip fractal raymarching entirely and instead
-        // run the 3D volume accumulation + render pipeline.
-        // ═══════════════════════════════════════════════════════════════════════
-        if appModel.runtimeViewModeForRenderer == .buddhabrot {
-            // Lazy-init the Buddhabrot renderer on first use
-            if buddhabrotRenderer == nil {
-                buddhabrotRenderer = BuddhabrotRenderer(
-                    device: device,
-                    layerRenderer: layerRenderer,
-                    settings: appModel.buddhabrotSettings
-                )
-            }
-            
-            if let bbrot = buddhabrotRenderer {
-                let bbrotTime = framePreparation.frameTime
-                let rendered = bbrot.renderFrame(
-                    commandBuffer: commandBuffer,
-                    drawable: drawable,
-                    time: bbrotTime,
-                    settingsSnapshot: settingsSnapshot
-                )
-                
-                if rendered {
-                    // Buddhabrot frames don't write fragment depth — next
-                    // fragment frame must not warm-start from stale history.
-                    warmStartGate.invalidate()
-                    drawable.encodePresent(commandBuffer: commandBuffer)
-                    shouldSignalInFlightSemaphore = false
-                    commandBuffer.commit()
-                    return
-                }
-            }
-            // Fall through to normal rendering if Buddhabrot failed
-        }
-
         let framePath = selectFramePath(settingsSnapshot: settingsSnapshot)
         let useAdaptiveCompute: Bool
 
@@ -1127,10 +1083,8 @@ actor Renderer {
         // pass into MetalFX's private low-res input texture, then spatially
         // upscale into the drawable. MetalFX on visionOS supports spatial
         // upscaling only (temporal is unsupported), so this is the only MetalFX
-        // codepath we need. Adaptive-compute and Buddhabrot paths intentionally
-        // skip MetalFX — they either have their own quality controls (compute
-        // tile cascade) or don't benefit from spatial upscaling of a volume
-        // integration result (Buddhabrot).
+        // codepath we need. The adaptive-compute path intentionally skips MetalFX
+        // — it has its own quality controls (compute tile cascade).
         // ═══════════════════════════════════════════════════════════════════════
         let fragmentPassPlan = prepareFragmentPassPlan(
             drawable: drawable,

@@ -60,21 +60,6 @@ final class AppleMusicManager {
         authorizationStatus == .authorized
     }
 
-    var authorizationDescription: String {
-        switch authorizationStatus {
-        case .authorized:
-            return "Authorized"
-        case .denied:
-            return "Denied"
-        case .restricted:
-            return "Restricted"
-        case .notDetermined:
-            return "Not Requested"
-        @unknown default:
-            return "Unknown"
-        }
-    }
-
     var progressFraction: Float {
         guard durationSeconds > 0 else { return 0 }
         return Float(max(0, min(1, playbackTimeSeconds / durationSeconds)))

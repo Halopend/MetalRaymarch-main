@@ -418,7 +418,7 @@ extension Renderer {
     ///
     /// On visionOS MetalFX provides **spatial** upscaling only (temporal is
     /// unsupported), so this path only applies to the fragment render path.
-    /// The compute/Buddhabrot paths are deliberately excluded for now — they can
+    /// The compute path is deliberately excluded for now — it can
     /// be routed through MetalFX in a future phase once depth ownership and
     /// tile-shared history semantics are designed.
     /// Minimum scale is clamped to 0.33 by `RenderSettings.resolutionScale`.

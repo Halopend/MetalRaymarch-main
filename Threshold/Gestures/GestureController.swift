@@ -33,7 +33,6 @@ final class GestureController {
     private var operationFrameCounter: UInt64 = 0
     private let menuToggleEngine = MenuToggleGestureEngine()
     private let perFingerTapEngine = PerFingerTapGestureEngine()
-    private let arbitrationEngine = GestureArbitrationEngine()
     private let twoHandScalarEngine = TwoHandScalarGestureEngine()
     private let twoPointGrabEngine = TwoPointGrabEngine()
     private let singleHandDragEngine = SingleHandDragEngine()
@@ -429,21 +428,6 @@ final class GestureController {
 
             // Runtime conflict guard: skip if any single-hand drag is active for this digit
             guard FingerDigit(rawValue: digit) != nil else { continue }
-            let decision = arbitrationEngine.decide(
-                GestureArbitrationInput(
-                    twoHandCandidate: true,
-                    twoHandCurrentlyActive: twoHandStateByDigit[digit]?.isActive == true,
-                    grabActive: grabState.isActive,
-                    grabEndCooldown: grabState.endCooldown
-                )
-            )
-            if !decision.allowTwoHand {
-                if twoHandStateByDigit[digit]?.isActive == true {
-                    twoHandStateByDigit[digit]?.isActive = false
-                }
-                continue
-            }
-
             if case .parameter(let descriptor) = binding,
                let node = ParameterNodeRegistry.shared.node(for: descriptor) {
                 guard var digitState = twoHandStateByDigit[digit] else { continue }
