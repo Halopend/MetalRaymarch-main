@@ -48,8 +48,6 @@ private enum FractalSceneSelection: Equatable {
 }
 
 struct FractalGridView: View {
-    var cache: UISettingsCache
-    let gestureController: GestureController?
     let animationManager: AnimationManager?
     let presetManager: PresetManager?
     var onEditScene: ((AnimationScene) -> Void)? = nil
@@ -61,8 +59,6 @@ struct FractalGridView: View {
     private let sceneColumns = Array(repeating: GridItem(.flexible(minimum: 150), spacing: 12), count: 4)
 
     init(
-        cache: UISettingsCache,
-        gestureController: GestureController?,
         animationManager: AnimationManager?,
         presetManager: PresetManager?,
         tabSelection: Binding<FractalBrowseTab>? = nil,
@@ -70,8 +66,6 @@ struct FractalGridView: View {
         onLoadAnimationScene: ((AnimationScene) -> Void)? = nil,
         onLoadStaticScene: ((FractalPreset) -> Void)? = nil
     ) {
-        self.cache = cache
-        self.gestureController = gestureController
         self.animationManager = animationManager
         self.presetManager = presetManager
         self.tabSelection = tabSelection

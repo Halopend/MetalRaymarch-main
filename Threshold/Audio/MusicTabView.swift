@@ -41,8 +41,6 @@ struct MusicTabContent: View {
     #endif
     @State private var isShowingVisualizationAddPopover = false
     @State private var isHoldingVisualizationAddAdjustment = false
-    /// Which "Add Control" categories are currently expanded (keyed by section title).
-    @State private var expandedAddSections: Set<String> = []
 
     private var effectiveTabSelection: Binding<MusicPanelTab> {
         Binding(
@@ -179,8 +177,8 @@ struct MusicTabContent: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .onChange(of: isShowingVisualizationAddPopover) { _, isPresented in
             updateVisualizationAddPopoverAdjustment(isPresented: isPresented)
-            // Reset to all-collapsed each time the menu closes so it reopens compact.
-            if !isPresented { expandedAddSections.removeAll() }
+            // Expand/collapse state now lives inside VisualizationAddPopover, so it
+            // resets to compact automatically each time the popover is re-presented.
         }
         #if os(macOS)
         .onChange(of: scenePhase) { _, newPhase in
@@ -323,142 +321,23 @@ struct MusicTabContent: View {
         .disabled(!canAddVisualizationMapping)
         .opacity(canAddVisualizationMapping ? 1.0 : 0.72)
         .popover(isPresented: $isShowingVisualizationAddPopover, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
-            visualizationAddPopoverContent
-                // Keep the menu open while the user browses categories on desktop —
-                // without this, an interaction inside the window can dismiss the
-                // transient popover before they pick a parameter. It closes on an
-                // explicit pick (sets the flag false) or by re-tapping "Add Control".
-                .interactiveDismissDisabled()
+            // The popover owns its expand/collapse state internally (see
+            // VisualizationAddPopover). Critically, toggling a category must NOT
+            // mutate state on *this* view — doing so re-renders the anchor button
+            // and macOS dismisses the popover mid-interaction (the bug this fixes).
+            VisualizationAddPopover(
+                available: availableMappingTargetsToAdd,
+                fractalType: cache.fractalType,
+                onPick: { target in
+                    addMapping(target)
+                    isShowingVisualizationAddPopover = false
+                },
+                onClose: { isShowingVisualizationAddPopover = false }
+            )
+            .interactiveDismissDisabled()
         }
     }
 
-    private var visualizationAddPopoverContent: some View {
-        let available = availableMappingTargetsToAdd
-        let formulaTargets = available.filter { $0.isFormulaParam }
-        let universalTargets = available.filter { !$0.isFormulaParam }
-
-        return AutoExpandingPopover(idealWidth: 300, maxHeight: 460, reservesMaxHeight: true) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("Add Music Control")
-                        .font(.title3.bold())
-                    Spacer()
-                    Button {
-                        isShowingVisualizationAddPopover = false
-                    } label: {
-                        Image(systemName: AppIcons.xmarkCircleFill)
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                if available.isEmpty {
-                    Text("All targets added")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("Pick a category, then a parameter to map.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-
-                    // Plain VStack (no inner ScrollView): AutoExpandingPopover grows
-                    // the whole popover as categories expand, so revealed rows become
-                    // fully visible, and only caps + scrolls past maxHeight.
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(MusicReactiveTargetCategory.universalOrder, id: \.self) { category in
-                            let targets = universalTargets.filter { $0.category == category }
-                            if !targets.isEmpty {
-                                addTargetDisclosure(
-                                    title: category.rawValue,
-                                    systemImage: category.icon,
-                                    targets: targets
-                                )
-                            }
-                        }
-
-                        if !formulaTargets.isEmpty {
-                            addTargetDisclosure(
-                                title: "\(cache.fractalType.displayName) Params",
-                                systemImage: AppIcons.function,
-                                targets: formulaTargets
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// One collapsible category in the "Add Control" menu. Collapsed by default so
-    /// the popover stays short instead of presenting one long flat list.
-    ///
-    /// Custom disclosure (not `DisclosureGroup`) so the *entire* header row — label,
-    /// count, and chevron — toggles expansion, not just the chevron.
-    @ViewBuilder
-    private func addTargetDisclosure(
-        title: String,
-        systemImage: String,
-        targets: [MusicReactiveTarget]
-    ) -> some View {
-        let isExpanded = expandedAddSections.contains(title)
-
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    if isExpanded {
-                        expandedAddSections.remove(title)
-                    } else {
-                        expandedAddSections.insert(title)
-                    }
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Label(title, systemImage: systemImage)
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Text("\(targets.count)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.tertiary)
-                    Image(systemName: AppIcons.chevronRight)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                }
-                .padding(.vertical, 4)
-                .contentShape(Rectangle())   // whole row is the tap target
-            }
-            .buttonStyle(.plain)
-
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(targets, id: \.self) { target in
-                        Button {
-                            addMapping(target)
-                            isShowingVisualizationAddPopover = false
-                        } label: {
-                            HStack(spacing: 8) {
-                                Label(target.displayName(for: cache.fractalType),
-                                      systemImage: target.icon(for: cache.fractalType))
-                                    .font(.callout)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                                if target.hasFlashingRisk {
-                                    FlashingLightIndicator()
-                                }
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.top, 2)
-            }
-        }
-    }
 
     private var visualizationHeaderSection: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1865,3 +1744,126 @@ private struct MusicTabPreviewHarness: View {
     )
 }
 #endif
+
+/// Body of the "Add Music Control" popover.
+///
+/// Extracted into its own view so that expanding/collapsing a category mutates
+/// *this* view's local `@State`, not the presenting `MusicTabView`. That matters
+/// on macOS: when the disclosure state lived on the parent, every tap re-rendered
+/// the popover's anchor button and AppKit dismissed the popover before the user
+/// could pick a parameter. Owning the state here keeps the anchor stable, so the
+/// popover stays open while the user browses. It also resets to all-collapsed
+/// automatically on each present (fresh `@State` per instance).
+private struct VisualizationAddPopover: View {
+    let available: [MusicReactiveTarget]
+    let fractalType: FractalModelType
+    let onPick: (MusicReactiveTarget) -> Void
+    let onClose: () -> Void
+
+    @State private var expandedSections: Set<String> = []
+
+    var body: some View {
+        let formulaTargets = available.filter { $0.isFormulaParam }
+        let universalTargets = available.filter { !$0.isFormulaParam }
+
+        return AutoExpandingPopover(idealWidth: 300, maxHeight: 460, reservesMaxHeight: true) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Add Music Control")
+                        .font(.title3.bold())
+                    Spacer()
+                    Button(action: onClose) {
+                        Image(systemName: AppIcons.xmarkCircleFill)
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if available.isEmpty {
+                    Text("All targets added")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Pick a category, then a parameter to map.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+
+                    // Plain VStack (no inner ScrollView): AutoExpandingPopover grows
+                    // the whole popover as categories expand, so revealed rows become
+                    // fully visible, and only caps + scrolls past maxHeight.
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(MusicReactiveTargetCategory.universalOrder, id: \.self) { category in
+                            let targets = universalTargets.filter { $0.category == category }
+                            if !targets.isEmpty {
+                                disclosure(title: category.rawValue, systemImage: category.icon, targets: targets)
+                            }
+                        }
+
+                        if !formulaTargets.isEmpty {
+                            disclosure(title: "\(fractalType.displayName) Params",
+                                       systemImage: AppIcons.function,
+                                       targets: formulaTargets)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// One collapsible category. Custom disclosure (not `DisclosureGroup`) so the
+    /// entire header row — label, count, chevron — toggles expansion.
+    @ViewBuilder
+    private func disclosure(title: String, systemImage: String, targets: [MusicReactiveTarget]) -> some View {
+        let isExpanded = expandedSections.contains(title)
+
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    if isExpanded { expandedSections.remove(title) } else { expandedSections.insert(title) }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Label(title, systemImage: systemImage)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text("\(targets.count)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                    Image(systemName: AppIcons.chevronRight)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())   // whole row is the tap target
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(targets, id: \.self) { target in
+                        Button { onPick(target) } label: {
+                            HStack(spacing: 8) {
+                                Label(target.displayName(for: fractalType),
+                                      systemImage: target.icon(for: fractalType))
+                                    .font(.callout)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                if target.hasFlashingRisk {
+                                    FlashingLightIndicator()
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+    }
+}

@@ -16,7 +16,6 @@ final class MusicTabViewModel {
     }
 
     var connectedProviders: [MusicServiceProvider] { musicService.connectedProviders }
-    var providers: [MusicServiceProvider] { musicService.providers }
     var activeProvider: MusicServiceProvider? { musicService.activeProvider }
     var hasMultipleConnectedProviders: Bool { connectedProviders.count > 1 }
     var hasConnectedProvider: Bool { activeProvider?.isConnected == true }

@@ -1491,7 +1491,14 @@ actor Renderer {
             springVisible: (settingsSnapshot.springActive || simd_length(settingsSnapshot.springDisplacement) > 0.001) ? 1 : 0,
             springRestRadius: 0.06,
             jitterOffset: .zero,
-            temporalReprojectionEnabled: temporalFrameCount > 0 ? 1 : 0,
+            // Temporal reprojection (and the coherent-packet warm-start it feeds)
+            // reconstruct the march start from the WORLD-space camera ray. When
+            // spherical inversion is active the actual march ray is inverted into a
+            // different scale, so a world-space startT lands past all geometry and
+            // the frame goes black. Gate it off — same hard cut the Mac warm-start
+            // path already applies via warmStartGate.allowsWarmStart.
+            temporalReprojectionEnabled: (temporalFrameCount > 0
+                && settingsSnapshot.sphericalInversionMode.rawValue == 0) ? 1 : 0,
             coherentPacketEnabled: settingsSnapshot.coherentPacketEnabled ? 1 : 0,
             foveationStrength: settingsSnapshot.foveationStrength,
             floorPlane: framePreparation.perEye[viewIndex].floorPlane,

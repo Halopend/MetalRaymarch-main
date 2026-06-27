@@ -593,7 +593,8 @@ struct ContentView: View {
                             }
                         }
                     case .shape:
-                        ForEach(ShapeRailSection.allCases, id: \.self) { section in
+                        // Performance moved out to its own top-dock tab; drop it here.
+                        ForEach(ShapeRailSection.allCases.filter { $0 != .performance }, id: \.self) { section in
                             railButton(
                                 title: section.rawValue,
                                 systemImage: section.icon,
@@ -624,6 +625,16 @@ struct ContentView: View {
                             ) {
                                 activateMusicSection(section)
                             }
+                        }
+                    case .performance:
+                        // Single panel (the Performance content). One rail entry so
+                        // the tab reads consistently with the others.
+                        railButton(
+                            title: "Acceleration",
+                            systemImage: "speedometer",
+                            isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .performance
+                        ) {
+                            activatePerformanceSection()
                         }
                     }
                 }
@@ -869,6 +880,8 @@ struct ContentView: View {
             activateVisualizationsSection(visualizationsRailSection)
         case .music:
             activateMusicSection(musicRailSection)
+        case .performance:
+            activatePerformanceSection()
         }
     }
 
@@ -925,6 +938,12 @@ struct ContentView: View {
         }
     }
 
+    private func activatePerformanceSection() {
+        topDockTab = .performance
+        selectedTab = .fractal
+        fractalSubTab = .render
+    }
+
     private func activateMusicSection(_ section: MusicRailSection) {
         topDockTab = .music
         let resolvedSection: MusicRailSection
@@ -965,7 +984,7 @@ struct ContentView: View {
         case .shapeSpace:
             return topDockTab == .shape && shapeRailSection == .space && selectedTab != .gestures && selectedTab != .settings
         case .shapePerformance:
-            return topDockTab == .shape && shapeRailSection == .performance && selectedTab != .gestures && selectedTab != .settings
+            return topDockTab == .performance && selectedTab != .gestures && selectedTab != .settings
         case .visualizationsColor:
             return topDockTab == .visualizations && visualizationsRailSection == .color && selectedTab != .gestures && selectedTab != .settings
         case .visualizationsMapping:
@@ -1009,7 +1028,7 @@ struct ContentView: View {
             case .shapeSpace:
                 activateShapeSection(.space)
             case .shapePerformance:
-                activateShapeSection(.performance)
+                activatePerformanceSection()
             case .visualizationsColor:
                 activateVisualizationsSection(.color)
             case .visualizationsMapping:
@@ -1089,8 +1108,8 @@ struct ContentView: View {
                 topDockTab = .shape
                 shapeRailSection = .space
             case .render:
-                topDockTab = .shape
-                shapeRailSection = .performance
+                // Performance is now its own top-dock tab, not a Shape rail entry.
+                topDockTab = .performance
             }
         case .animate:
             topDockTab = .explore

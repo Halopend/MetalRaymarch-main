@@ -19,8 +19,6 @@ extension ContentView {
             switch fractalSubTab {
             case .browse:
                 FractalGridView(
-                    cache: cache,
-                    gestureController: appModel.gestureController,
                     animationManager: appModel.animationManager,
                     presetManager: appModel.presetManager,
                     tabSelection: $fractalBrowseTab,
@@ -445,107 +443,121 @@ extension ContentView {
     // Defaults reproduce the renderer's prior behavior, so an untouched panel is
     // a no-op.
 
-    private func accelSlider(_ title: String,
-                             value: Float,
-                             range: ClosedRange<Float>,
-                             display: String,
-                             help: String,
-                             onChange: @escaping (Float) -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                Spacer()
-                Text(display).fontWeight(.bold).monospacedDigit()
+    /// Compact slider for the 2-column Acceleration grid: title + value on one
+    /// line, slider below. The longer explanation moves to a hover/gaze tooltip
+    /// so the panel stays short.
+    private func accelSliderCompact(_ title: String,
+                                    value: Float,
+                                    range: ClosedRange<Float>,
+                                    display: String,
+                                    help: String,
+                                    onChange: @escaping (Float) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Text(title).font(.caption).lineLimit(1).minimumScaleFactor(0.85)
+                Spacer(minLength: 4)
+                Text(display).font(.caption.weight(.bold)).monospacedDigit()
                     .foregroundStyle(display == "Off" ? Color.secondary : Color.cyan)
             }
-            Slider(value: Binding(get: { value }, set: onChange), in: range).tint(.cyan)
-            Text(help).font(.caption2).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            Slider(value: Binding(get: { value }, set: onChange), in: range)
+                .tint(.cyan)
+                .controlSize(.small)
         }
+        .help(help)
     }
 
-    private func accelToggle(_ title: String,
-                             isOn: Bool,
-                             help: String,
-                             onChange: @escaping (Bool) -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Toggle(isOn: Binding(get: { isOn }, set: onChange)) { Text(title) }.tint(.cyan)
-            Text(help).font(.caption2).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+    /// Compact toggle for the horizontal toggle grid. Explanation in a tooltip.
+    private func accelToggleCompact(_ title: String,
+                                    isOn: Bool,
+                                    help: String,
+                                    onChange: @escaping (Bool) -> Void) -> some View {
+        Toggle(isOn: Binding(get: { isOn }, set: onChange)) {
+            Text(title).font(.caption).lineLimit(1).minimumScaleFactor(0.85)
         }
+        .toggleStyle(.switch)
+        .controlSize(.mini)
+        .tint(.cyan)
+        .help(help)
     }
 
     private var fractalAccelerationSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
+        // Two equal columns drive both the slider grid and the toggle ("checkmark")
+        // grid so the whole panel reads side-by-side instead of one tall stack.
+        let twoCol = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
+        let isCompute = cache.quality.tileSize == 8
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
                 Image(systemName: AppIcons.boltFill).foregroundStyle(.cyan)
                 Text("Acceleration").font(.headline)
-            }
-            Text("Speedup techniques for the distance-field march. Each trades a little quality for frame rate in a different way — safe to flip live. Defaults match the renderer's previous behavior.")
-                .font(.caption2).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Divider().opacity(0.4)
-
-            accelSlider("Over-Relaxation",
-                        value: cache.quality.overRelaxationMax, range: 1.0...1.6,
-                        display: String(format: "%.2f×", cache.quality.overRelaxationMax),
-                        help: "How big a step the march takes in open space (Keinert enhanced sphere tracing). Higher = faster; lower = sharper on thin features. 1.0 = plain conservative tracing.") { v in
-                cache.quality.overRelaxationMax = v; cache.push(\.overRelaxationMax, value: v)
+                Spacer()
+                if !isCompute {
+                    Text("Some need Adaptive Compute")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
             }
 
-            accelSlider("Cone Marching",
-                        value: cache.quality.coneMarchStrength, range: 0...1,
-                        display: cache.quality.coneMarchStrength < 0.01 ? "Off" : "\(Int((cache.quality.coneMarchStrength * 100).rounded()))%",
-                        help: "Stops each ray within its on-screen pixel footprint, so distant geometry needs far fewer steps. Higher = faster, but inflates distant silhouettes.") { v in
-                cache.quality.coneMarchStrength = v; cache.push(\.coneMarchStrength, value: v)
-            }
+            // ── Sliders, two per row. Foveation is Adaptive-Compute-only. ──
+            LazyVGrid(columns: twoCol, alignment: .leading, spacing: 10) {
+                accelSliderCompact("Over-Relaxation",
+                            value: cache.quality.overRelaxationMax, range: 1.0...1.6,
+                            display: String(format: "%.2f×", cache.quality.overRelaxationMax),
+                            help: "How big a step the march takes in open space (Keinert enhanced sphere tracing). Higher = faster; lower = sharper on thin features. 1.0 = plain conservative tracing.") { v in
+                    cache.quality.overRelaxationMax = v; cache.push(\.overRelaxationMax, value: v)
+                }
 
-            accelSlider("Distance Detail Falloff",
-                        value: cache.quality.distanceLODStrength, range: 0...1,
-                        display: cache.quality.distanceLODStrength < 0.01 ? "Off" : "\(Int((cache.quality.distanceLODStrength * 100).rounded()))%",
-                        help: "Faraway geometry uses fewer fractal iterations, where the lost detail is already sub-pixel. Speeds up deep scenes without inflating silhouettes the way cone marching does.") { v in
-                cache.quality.distanceLODStrength = v; cache.push(\.distanceLODStrength, value: v)
-            }
+                accelSliderCompact("Cone Marching",
+                            value: cache.quality.coneMarchStrength, range: 0...1,
+                            display: cache.quality.coneMarchStrength < 0.01 ? "Off" : "\(Int((cache.quality.coneMarchStrength * 100).rounded()))%",
+                            help: "Stops each ray within its on-screen pixel footprint, so distant geometry needs far fewer steps. Higher = faster, but inflates distant silhouettes.") { v in
+                    cache.quality.coneMarchStrength = v; cache.push(\.coneMarchStrength, value: v)
+                }
 
-            Divider().opacity(0.4)
+                accelSliderCompact("Distance Falloff",
+                            value: cache.quality.distanceLODStrength, range: 0...1,
+                            display: cache.quality.distanceLODStrength < 0.01 ? "Off" : "\(Int((cache.quality.distanceLODStrength * 100).rounded()))%",
+                            help: "Faraway geometry uses fewer fractal iterations, where the lost detail is already sub-pixel. Speeds up deep scenes without inflating silhouettes the way cone marching does.") { v in
+                    cache.quality.distanceLODStrength = v; cache.push(\.distanceLODStrength, value: v)
+                }
 
-            accelToggle("Smart Advance",
-                        isOn: cache.quality.smartAdvanceEnabled,
-                        help: "Leads ahead with larger steps through grazing/receding regions where plain tracing creeps. Faster on open and grazing angles; can soften fine silhouettes.") { v in
-                cache.quality.smartAdvanceEnabled = v; cache.push(\.smartAdvanceEnabled, value: v)
-            }
-
-            accelToggle("Self-Shadows",
-                        isOn: cache.quality.shadowsEnabled,
-                        help: "Soft self-shadowing from the spotlight and sun. Turning it off skips two extra marches on every lit pixel — a large saving — for flatter, faster lighting.") { v in
-                cache.quality.shadowsEnabled = v; cache.push(\.shadowsEnabled, value: v)
+                accelSliderCompact("Foveation",
+                            value: cache.quality.foveationStrength, range: 0...1,
+                            display: cache.quality.foveationStrength < 0.01 ? "Off" : "\(Int((cache.quality.foveationStrength * 100).rounded()))%",
+                            help: "Peripheral tiles march fewer steps, ramping from the center outward. Adaptive Compute renderer mode only.") { v in
+                    cache.quality.foveationStrength = v; cache.push(\.foveationStrength, value: v)
+                }
+                .disabled(!isCompute)
+                .opacity(isCompute ? 1 : 0.45)
             }
 
             Divider().opacity(0.4)
-            Text("Compute & experimental").font(.caption).foregroundStyle(.secondary)
 
-            accelSlider("Foveation",
-                        value: cache.quality.foveationStrength, range: 0...1,
-                        display: cache.quality.foveationStrength < 0.01 ? "Off" : "\(Int((cache.quality.foveationStrength * 100).rounded()))%",
-                        help: "Peripheral tiles march fewer steps, ramping from the center outward. Takes effect in the Adaptive Compute renderer mode.") { v in
-                cache.quality.foveationStrength = v; cache.push(\.foveationStrength, value: v)
-            }
-            .disabled(cache.quality.tileSize != 8)
-            .opacity(cache.quality.tileSize != 8 ? 0.45 : 1)
+            // ── Toggles ("checkmarks"), arranged horizontally two per row. ──
+            LazyVGrid(columns: twoCol, alignment: .leading, spacing: 8) {
+                accelToggleCompact("Smart Advance",
+                            isOn: cache.quality.smartAdvanceEnabled,
+                            help: "Leads ahead with larger steps through grazing/receding regions where plain tracing creeps. Faster on open and grazing angles; can soften fine silhouettes.") { v in
+                    cache.quality.smartAdvanceEnabled = v; cache.push(\.smartAdvanceEnabled, value: v)
+                }
 
-            accelToggle("Coherent Packet",
-                        isOn: cache.quality.coherentPacketEnabled,
-                        help: "Predict-validate warm-start probe with a normal-coherence shadow gate; shows a debug overlay while on. Adaptive Compute renderer mode only.") { v in
-                cache.quality.coherentPacketEnabled = v; cache.push(\.coherentPacketEnabled, value: v)
-            }
-            .disabled(cache.quality.tileSize != 8)
-            .opacity(cache.quality.tileSize != 8 ? 0.45 : 1)
+                accelToggleCompact("Self-Shadows",
+                            isOn: cache.quality.shadowsEnabled,
+                            help: "Soft self-shadowing from the spotlight and sun. Turning it off skips two extra marches on every lit pixel — a large saving — for flatter, faster lighting.") { v in
+                    cache.quality.shadowsEnabled = v; cache.push(\.shadowsEnabled, value: v)
+                }
 
-            accelToggle("Bounding-Sphere Skip",
-                        isOn: cache.quality.boundingSphereSkipEnabled,
-                        help: "Rays that miss a sphere enclosing the fractal skip the march entirely. Uses a generous bound, so it mainly culls background; sprawling fractals (Kleinian, large folds) may clip — experimental.") { v in
-                cache.quality.boundingSphereSkipEnabled = v; cache.push(\.boundingSphereSkipEnabled, value: v)
+                accelToggleCompact("Coherent Packet",
+                            isOn: cache.quality.coherentPacketEnabled,
+                            help: "Predict-validate warm-start probe with a normal-coherence shadow gate; shows a debug overlay while on. Adaptive Compute renderer mode only.") { v in
+                    cache.quality.coherentPacketEnabled = v; cache.push(\.coherentPacketEnabled, value: v)
+                }
+                .disabled(!isCompute)
+                .opacity(isCompute ? 1 : 0.45)
+
+                accelToggleCompact("Bounding Skip",
+                            isOn: cache.quality.boundingSphereSkipEnabled,
+                            help: "Rays that miss a sphere enclosing the fractal skip the march entirely. Uses a generous bound, so it mainly culls background; sprawling fractals (Kleinian, large folds) may clip — experimental.") { v in
+                    cache.quality.boundingSphereSkipEnabled = v; cache.push(\.boundingSphereSkipEnabled, value: v)
+                }
             }
         }
         .padding()

@@ -13,10 +13,10 @@
 //  CAPABILITY-FILTERED against the active fractal before they are applied.
 //
 //  The domains themselves are class-based `Module` objects (see Module.swift):
-//  each module owns its identity, UI route, params, capability gates, and apply
-//  wiring. This file holds the scene-side value types (ModuleKey / ParamValue /
-//  ModuleParamBlock / ModuleRoute) and a thin `ModuleRegistry` facade that builds
-//  the module instances once and delegates apply/capability to them.
+//  each module owns its params, capability gates, and apply wiring. This file
+//  holds the scene-side value types (ModuleKey / ParamValue / ModuleParamBlock)
+//  and a thin `ModuleRegistry` facade that builds the module instances once and
+//  delegates apply/capability to them.
 //
 //  See FractalPreset.modules for the scene-side hook and apply(to:) for where
 //  module blocks are applied (after the flat fields, so a module refines them).
@@ -119,16 +119,6 @@ struct ModuleParamBlock: Codable, Equatable, Sendable {
     }
 }
 
-// MARK: - Routing metadata
-
-/// Where a module surfaces in the UI: which tab + section. Owned by `Module.route`
-/// and consumed by the data-driven tabs that render each module's controls at its
-/// declared home.
-struct ModuleRoute: Equatable, Sendable {
-    let tab: String
-    let section: String
-}
-
 // MARK: - Registry facade
 
 /// The registry of class-based modules. A thin facade that builds the module
@@ -145,15 +135,6 @@ enum ModuleRegistry {
         for module in all { map[module.key] = module }
         return map
     }()
-
-    /// The module owning a domain key, if any.
-    static func module(for key: ModuleKey) -> Module? { byKey[key] }
-
-    /// Modules whose route targets a given UI tab (consumed by the data-driven
-    /// tabs that render module controls at their routes).
-    static func modules(forTab tab: String) -> [Module] {
-        all.filter { $0.route.tab == tab }
-    }
 
     /// Apply a scene's module block to live settings, capability-filtered against
     /// the active fractal. No-op for domains without a registered module.

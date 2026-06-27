@@ -45,8 +45,8 @@ enum CustomShaderCompilerError: Error, CustomStringConvertible {
 ///
 /// Thread safety: this is an `actor`, so all cache access is serialized on the
 /// compiler's executor. The owning `Renderer` actor obtains libraries via
-/// `library(for:)` and forwards them to `RendererPipelineCache` on the main
-/// renderer queue.
+/// `library(forFractal:spaceWarp:)` and forwards them to `RendererPipelineCache`
+/// on the main renderer queue.
 actor CustomShaderCompiler {
 
     private static let shaderFormulaIncludeMarker = "#include \"../Formulas/FractalFormulas.h\""
@@ -129,11 +129,6 @@ actor CustomShaderCompiler {
         "f\(fractal?.shortHash ?? "0")w\(spaceWarp?.shortHash ?? "0")"
     }
 
-    /// Back-compat wrapper: a single fractal effect, no space warp.
-    func library(for formula: EmbeddedFormula) throws -> MTLLibrary {
-        try library(forFractal: formula, spaceWarp: nil)
-    }
-
     /// Compile (or return cached) the combined library for an effect set.
     func library(forFractal fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?) throws -> MTLLibrary {
         let key = Self.combinedHash(fractal: fractal, spaceWarp: spaceWarp)
@@ -161,11 +156,6 @@ actor CustomShaderCompiler {
         }
     }
 
-    /// Drop the cached library for a single source hash, if one is present.
-    func evict(sourceHash: String) {
-        libraryCache.removeValue(forKey: sourceHash)
-    }
-
     /// Drop every cached library so the next `library(...)` call recompiles from
     /// source. Used by the debug "Force Recompile" action — re-activating a
     /// formula otherwise returns the cached `MTLLibrary` and never re-runs the
@@ -178,11 +168,6 @@ actor CustomShaderCompiler {
 
     /// Stitch the user's DE source into the bundled Metal sources to produce a
     /// self-contained string suitable for `device.makeLibrary(source:)`.
-    /// Back-compat wrapper: a single fractal effect, no space warp.
-    static func synthesizeSource(for formula: EmbeddedFormula) throws -> String {
-        try synthesizeSource(fractal: formula, spaceWarp: nil)
-    }
-
     /// Stitch the active effect SET into one self-contained Metal source. A custom
     /// fractal DE is injected at the dispatch markers; a custom space warp is
     /// injected at `// __CUSTOM_SPACE_WARP__`. Either may be nil (the corresponding

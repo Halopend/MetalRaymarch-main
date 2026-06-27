@@ -56,7 +56,6 @@ final class MusicReactiveEngine {
     private var dampedBass: Float = 0
     private var dampedMid: Float = 0
     private var dampedTreble: Float = 0
-    private var dampedBeat: Float = 0
     private var dampedOverall: Float = 0
     private var dampedComposite: Float = 0
 
@@ -335,7 +334,6 @@ final class MusicReactiveEngine {
         dampedBass = 0
         dampedMid = 0
         dampedTreble = 0
-        dampedBeat = 0
         dampedOverall = 0
         dampedComposite = 0
     }

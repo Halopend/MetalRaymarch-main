@@ -7,8 +7,6 @@ enum ParameterLayer: String, Codable, Sendable {
     case ui
     case gesture
     case music
-    case precompute
-    case system
 }
 
 enum ParameterMotionStrategy: String, Codable, Sendable {
@@ -18,7 +16,6 @@ enum ParameterMotionStrategy: String, Codable, Sendable {
 }
 
 struct ParameterGroup: Hashable, Codable, Sendable {
-    let id: String
     let title: String
 }
 
@@ -191,9 +188,7 @@ struct ParameterLayerStack: Sendable {
     static let defaultSmoothingTime: Float = 0.08
 
     private var ui: ParameterLayerEntry?
-    private var precompute: ParameterLayerEntry?
     private var gesture: ParameterLayerEntry?
-    private var system: ParameterLayerEntry?
     private var music: ParameterLayerEntry?
 
     private(set) var defaultValue: Float
@@ -265,23 +260,13 @@ struct ParameterLayerStack: Sendable {
     mutating func resolvedValue(at timestamp: TimeInterval) -> Float {
         // Copy layer entries to locals to avoid overlapping access on self
         var uiEntry = ui
-        var precomputeEntry = precompute
         var gestureEntry = gesture
-        var systemEntry = system
         var musicEntry = music
 
         var value = Self.resolve(entry: &uiEntry, at: timestamp) ?? defaultValue
 
-        if let p = Self.resolve(entry: &precomputeEntry, at: timestamp) {
-            value = p
-        }
-
         if let g = Self.resolve(entry: &gestureEntry, at: timestamp) {
             value = g
-        }
-
-        if let s = Self.resolve(entry: &systemEntry, at: timestamp) {
-            value = s
         }
 
         if let m = Self.resolve(entry: &musicEntry, at: timestamp) {
@@ -290,9 +275,7 @@ struct ParameterLayerStack: Sendable {
 
         // Write back smoothed state
         ui = uiEntry
-        precompute = precomputeEntry
         gesture = gestureEntry
-        system = systemEntry
         music = musicEntry
 
         return min(range.upperBound, max(range.lowerBound, value))
@@ -303,9 +286,7 @@ struct ParameterLayerStack: Sendable {
     private func get(for layer: ParameterLayer) -> ParameterLayerEntry? {
         switch layer {
         case .ui: return ui
-        case .precompute: return precompute
         case .gesture: return gesture
-        case .system: return system
         case .music: return music
         }
     }
@@ -320,9 +301,7 @@ struct ParameterLayerStack: Sendable {
     private mutating func set(entry: ParameterLayerEntry?, for layer: ParameterLayer) {
         switch layer {
         case .ui: ui = entry
-        case .precompute: precompute = entry
         case .gesture: gesture = entry
-        case .system: system = entry
         case .music: music = entry
         }
     }
@@ -385,8 +364,8 @@ final class ParameterNodeRegistry: @unchecked Sendable {
     /// NOTE: minDistance / foldingLimit / sphereRadius are now catalog-driven formula
     /// params (built per-type in buildFormulaBatch) rather than hard-coded core nodes.
     private static func buildCoreAndEffectNodes() -> (core: [String: FloatParameterNode], effect: [String: FloatParameterNode]) {
-        let coreGroup = ParameterGroup(id: "core.geometry", title: "Fractal Geometry")
-        let effectGroup = ParameterGroup(id: "effect.postprocess", title: "Post-Processing")
+        let coreGroup = ParameterGroup(title: "Fractal Geometry")
+        let effectGroup = ParameterGroup(title: "Post-Processing")
         var coreNodes: [String: FloatParameterNode] = [:]
         var effectNodes: [String: FloatParameterNode] = [:]
 
@@ -475,7 +454,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         // Gesture-mappable so they surface in the finger-binding menu via
         // `gestureBindableCoreParameters`; music-mappable via the dispatcher
         // descriptors of the same id.
-        let spaceGroup = ParameterGroup(id: "space.transform", title: "Space Transform")
+        let spaceGroup = ParameterGroup(title: "Space Transform")
 
         coreNodes[ControlCatalog.sphereProjectionBlend.id] = FloatParameterNode(
             spec: ControlCatalog.sphereProjectionBlend,
@@ -625,7 +604,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             return ParameterNodeBatch(fractalType: type)
         }
 
-        let group = ParameterGroup(id: descriptor.id, title: descriptor.name)
+        let group = ParameterGroup(title: descriptor.name)
         var seenFormulaIndices: Set<Int> = []
         var floatNodes: [FloatParameterNode] = []
         var boolNodes: [BoolParameterNode] = []

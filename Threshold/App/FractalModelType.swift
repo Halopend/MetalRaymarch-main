@@ -33,8 +33,6 @@ enum FractalModelType: Int32, CaseIterable {
     var supportedCoreGestureActions: [FingerGestureAction] { descriptor.supportedCoreGestureActions }
     var icon: String { descriptor.icon }
     var category: String { descriptor.category }
-    var supportedEffectTags: Set<EffectTag> { descriptor.supportedEffectTags }
-    var supportedSpaceTransforms: Set<SpaceTransform> { descriptor.supportedSpaceTransforms }
 
     /// Quick check whether a given effect tag is meaningful for this fractal.
     func supports(_ tag: EffectTag) -> Bool { descriptor.supportedEffectTags.contains(tag) }

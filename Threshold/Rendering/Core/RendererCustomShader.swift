@@ -74,9 +74,8 @@ extension Renderer {
     }
 
     /// Cache-key prefix to apply when looking up pipelines for the active
-    /// embedded formula (returns "" when no custom library is active or when
-    /// the supplied fractal type isn't `.custom`).
-    func customCacheKeyPrefix(for fractalType: FractalModelType) -> String {
+    /// embedded formula (returns "" when no custom library is active).
+    func customCacheKeyPrefix() -> String {
         // Namespace whenever ANY custom library is active — a custom fractal OR a
         // custom space warp riding a built-in — so warp-on-built-in pipelines do
         // not collide with the default-library built-in pipelines.
@@ -84,10 +83,10 @@ extension Renderer {
         return "CX\(h)_"
     }
 
-    /// Returns the library that should resolve fragment / compute functions for
-    /// the supplied fractal type. Built-in fractals continue to render through
-    /// the bundled default library so their cache stays hot.
-    func renderingLibrary(for fractalType: FractalModelType) -> MTLLibrary? {
+    /// Returns the library that should resolve fragment / compute functions.
+    /// Built-in fractals continue to render through the bundled default library
+    /// so their cache stays hot.
+    func renderingLibrary() -> MTLLibrary? {
         // Return the active custom library for ANY fractal type: a custom fractal
         // renders its own DE; a built-in with an active space warp renders the
         // built-in DE (present in the superset library) with the warp injected.

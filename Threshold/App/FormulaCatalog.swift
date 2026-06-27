@@ -57,12 +57,7 @@ final class FormulaCatalog: @unchecked Sendable {
     private var byType: [Int32: FormulaDescriptor] = [:]
     
     /// Lookup by string id (e.g. "mandelbulb").
-    private var byId: [String: FormulaDescriptor] = [:]    
-    /// Lookup by category (prebuilt index for O(1) access).
-    private var byCategory: [String: [FormulaDescriptor]] = [:]
-    
-    /// Ordered unique category names.
-    private(set) var categories: [String] = []    
+    private var byId: [String: FormulaDescriptor] = [:]
     private init() {
         load()
     }
@@ -79,15 +74,10 @@ final class FormulaCatalog: @unchecked Sendable {
             let data = try Data(contentsOf: url)
             let root = try JSONDecoder().decode(CatalogRoot.self, from: data)
             self.formulas = root.formulas
-            var catOrder: [String] = []
-            var catSeen = Set<String>()
             for f in root.formulas {
                 byType[f.fractalType] = f
                 byId[f.id] = f
-                byCategory[f.category, default: []].append(f)
-                if catSeen.insert(f.category).inserted { catOrder.append(f.category) }
             }
-            self.categories = catOrder
         } catch {
             print("[FormulaCatalog] Failed to decode catalog.json: \(error)")
         }
@@ -99,8 +89,6 @@ final class FormulaCatalog: @unchecked Sendable {
     func descriptor(for type: FractalModelType) -> FormulaDescriptor? {
         byType[type.rawValue]
     }
-    
-    /// Unique category names in declaration order (prebuilt at load time).
 
     // MARK: - FormulaParams Builder
     
@@ -207,10 +195,6 @@ final class FormulaCatalog: @unchecked Sendable {
         formulas.append(descriptor)
         byType[descriptor.fractalType] = descriptor
         byId[descriptor.id] = descriptor
-        byCategory[descriptor.category, default: []].append(descriptor)
-        if !categories.contains(descriptor.category) {
-            categories.append(descriptor.category)
-        }
         ephemeralCustomId = descriptor.id
         ephemeralCategory = descriptor.category
     }
@@ -224,13 +208,6 @@ final class FormulaCatalog: @unchecked Sendable {
 
     private func unregisterEphemeralLocked() {
         guard let id = ephemeralCustomId else { return }
-        if let cat = ephemeralCategory {
-            byCategory[cat]?.removeAll { $0.id == id }
-            if byCategory[cat]?.isEmpty == true {
-                byCategory.removeValue(forKey: cat)
-                categories.removeAll { $0 == cat }
-            }
-        }
         formulas.removeAll { $0.id == id }
         byId.removeValue(forKey: id)
         byType.removeValue(forKey: FractalModelType.custom.rawValue)

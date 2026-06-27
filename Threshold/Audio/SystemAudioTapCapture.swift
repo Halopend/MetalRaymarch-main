@@ -63,12 +63,6 @@ final class SystemAudioTapCapture {
     /// Settings and we must stop hammering `SCShareableContent`.
     private(set) var permissionDenied: Bool = false
 
-    /// Whole-system output source.
-    private(set) var availableSources: [SystemAudioSource] = []
-
-    /// Currently selected capture target id. Only whole-system output is used.
-    private(set) var selectedSourceID: String = SystemAudioSource.systemID
-
     // MARK: - Dependencies
 
     private let analyzer: AudioAnalyzer
@@ -122,8 +116,6 @@ final class SystemAudioTapCapture {
             return
         }
 
-        availableSources = [SystemAudioSource(id: SystemAudioSource.systemID, name: "System output")]
-        selectedSourceID = SystemAudioSource.systemID
         permissionDenied = false
         errorMessage = nil
     }
@@ -132,15 +124,11 @@ final class SystemAudioTapCapture {
     /// clear message, and the `permissionDenied` flag set so callers stop
     /// retrying.
     private func applyPermissionDeniedState() {
-        availableSources = [SystemAudioSource(id: SystemAudioSource.systemID, name: "System output")]
-        selectedSourceID = SystemAudioSource.systemID
         permissionDenied = true
         errorMessage = permissionErrorMessage(needsRelaunch: false)
     }
 
     private func applyPermissionGrantedNeedsRelaunchState() {
-        availableSources = [SystemAudioSource(id: SystemAudioSource.systemID, name: "System output")]
-        selectedSourceID = SystemAudioSource.systemID
         permissionDenied = false
         errorMessage = permissionErrorMessage(needsRelaunch: true)
     }

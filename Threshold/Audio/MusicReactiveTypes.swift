@@ -56,24 +56,6 @@ enum LFOShape: String, CaseIterable, Codable, Sendable {
     case square
     case sawtooth
 
-    var displayName: String {
-        switch self {
-        case .sine: return "Sine"
-        case .triangle: return "Triangle"
-        case .square: return "Square"
-        case .sawtooth: return "Sawtooth"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .sine: return "waveform.path"
-        case .triangle: return "triangle"
-        case .square: return "square"
-        case .sawtooth: return "chart.line.uptrend.xyaxis"
-        }
-    }
-
     func evaluate(phase: Float) -> Float {
         let p = phase - floor(phase)
         switch self {

@@ -582,9 +582,6 @@ enum SongSource: String, Codable, Equatable {
         default:           return nil
         }
     }
-
-    /// The corresponding MusicServiceProvider.serviceID.
-    var serviceID: String { rawValue }
 }
 
 /// Persistable song reference attached to an animation scene.
@@ -744,17 +741,6 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     /// Create a new empty scene
     init(name: String = "New Scene") {
         self.id = UUID()
-        self.name = name
-        self.keyframes = []
-        self.isLooping = true
-        self.playbackMode = .forward
-        self.createdAt = Date()
-        self.modifiedAt = Date()
-    }
-    
-    /// Create a new empty scene with a specific ID (used for built-in defaults)
-    init(id: UUID, name: String) {
-        self.id = id
         self.name = name
         self.keyframes = []
         self.isLooping = true
@@ -952,11 +938,7 @@ enum EasingFunction: String, Codable, CaseIterable {
 /// Unlike standard easing which slows to a stop at each keyframe, Catmull-Rom
 /// uses the surrounding keyframes to compute tangents, maintaining velocity continuity.
 struct CatmullRomSpline {
-    
-    /// Tension parameter: 0.0 = Catmull-Rom, 0.5 = more relaxed curves
-    /// Lower values = sharper turns, higher values = smoother curves
-    static let tension: Float = 0.0
-    
+
     /// Interpolate a single float value using Catmull-Rom spline
     /// - Parameters:
     ///   - p0: Value before the start point
@@ -1186,10 +1168,6 @@ struct CatmullRomSpline {
 enum DefaultScenes {
     
     /// Stable UUID so we can always identify the built-in scene across launches.
-    static let ambientBlurID = UUID(uuidString: "57C9BF90-9C33-44FB-A81F-6811FDE1746A")!
-    static let boxSphereFolderID = UUID(uuidString: "00000000-0004-0000-0000-000000000004")!
-    static let shadesID = UUID(uuidString: "00000000-000C-0000-0000-00000000000C")!
-    
     /// All default scene IDs for easy lookup.
     /// Built from the bundled scene files so new defaults don't get dropped.
     static let allIDs: Set<UUID> = Set(cachedScenes.map(\.id))

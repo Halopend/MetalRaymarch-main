@@ -217,9 +217,9 @@ extension Renderer {
     /// Gets or builds a specialized pipeline for a given preset.
     /// Uses the unified pipelineCache to avoid redundant compilation.
     func getPipeline(forPreset preset: FractalPreset, useQuadShared: Bool = false) -> MTLRenderPipelineState {
-        let prefix = customCacheKeyPrefix(for: preset.fractalType)
+        let prefix = customCacheKeyPrefix()
         let cacheKey = prefix + preset.pipelineCacheKey + (useQuadShared ? "_QS" : "")
-        let library = renderingLibrary(for: preset.fractalType)
+        let library = renderingLibrary()
 
         if preset.fractalType == .custom {
             customSceneDiagnostic("🔬 [CSDiag] getPipeline(forPreset) FT=custom name='\(preset.name)' libraryPresent=\(library != nil) hash=\(customShaderHash ?? "nil") key=\(cacheKey) cacheHit=\(pipelineCache[cacheKey] != nil)")
@@ -265,7 +265,7 @@ extension Renderer {
         // Build cache key matching the preset format
         let colorIterations = Int32(appModel.renderSettings.colorIterations)  // Direct read (own lock) — avoids full snapshot
         let fractalType = appModel.renderSettings.fractalType
-        let library = renderingLibrary(for: fractalType)
+        let library = renderingLibrary()
 
         if fractalType == .custom, library == nil {
             return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
@@ -280,7 +280,7 @@ extension Renderer {
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
         let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
         let keyContext = RenderPipelineKeyContext(
-            prefix: customCacheKeyPrefix(for: fractalType),
+            prefix: customCacheKeyPrefix(),
             fractalTypeRawValue: Int(fractalType.rawValue),
             iterations: iterations,
             raySteps: raySteps,
@@ -383,7 +383,7 @@ extension Renderer {
             let functionConstants = preset.deriveFunctionConstants()
             let powerKey = functionConstants.mandelbulbPower.map { "P\($0)" } ?? ""
             let computeKey = ComputePipelineKeyContext(
-                prefix: customCacheKeyPrefix(for: preset.fractalType),
+                prefix: customCacheKeyPrefix(),
                 fractalTypeRawValue: Int(preset.fractalType.rawValue),
                 fractalIterations: Int(functionConstants.fractalIterations),
                 maxRaySteps: Int(functionConstants.maxRaySteps),
@@ -466,7 +466,7 @@ extension Renderer {
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
         let keyContext = RenderPipelineKeyContext(
-            prefix: customCacheKeyPrefix(for: fractalType),
+            prefix: customCacheKeyPrefix(),
             fractalTypeRawValue: Int(fractalType.rawValue),
             iterations: iterations,
             raySteps: raySteps,
@@ -523,8 +523,8 @@ extension Renderer {
             )
 
             if fractalType == .custom {
-                customSceneDiagnostic("🔬 [CSDiag] selectPipeline FT=custom CACHE MISS — hash=\(activeCustomHash ?? "nil") libraryPresent=\(renderingLibrary(for: fractalType) != nil) key=\(cacheKey)")
-                guard let library = renderingLibrary(for: fractalType) else {
+                customSceneDiagnostic("🔬 [CSDiag] selectPipeline FT=custom CACHE MISS — hash=\(activeCustomHash ?? "nil") libraryPresent=\(renderingLibrary() != nil) key=\(cacheKey)")
+                guard let library = renderingLibrary() else {
                     recordPipelineTelemetry(renderSource: "custom-missing-library")
                     print("⚠️ [CustomScene] Missing active custom shader library for render pipeline build")
                     customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectPipeline FT=custom → returning DEFAULT pipelineState (library == nil) — this WILL render as fog/sky only because FractalDE_Dispatch lacks FractalTypeCustom arm in default library")
@@ -722,7 +722,7 @@ extension Renderer {
     /// Prewarms the exact adaptive-compute pipeline for a preset without using
     /// the bundled generic fallback as the selected frame-time pipeline.
     func prewarmComputePipeline(forPreset preset: FractalPreset) {
-        let library = renderingLibrary(for: preset.fractalType)
+        let library = renderingLibrary()
 
         if preset.fractalType == .custom, library == nil {
             return
@@ -733,7 +733,7 @@ extension Renderer {
         let bubbleEnabled = effectiveSafetyBubbleEnabled(for: preset.fractalType)
         let packetEnabled = appModel.renderSettings.coherentPacketEnabled
         let keyContext = ComputePipelineKeyContext(
-            prefix: customCacheKeyPrefix(for: preset.fractalType),
+            prefix: customCacheKeyPrefix(),
             fractalTypeRawValue: Int(preset.fractalType.rawValue),
             fractalIterations: Int(functionConstants.fractalIterations),
             maxRaySteps: Int(functionConstants.maxRaySteps),
@@ -864,7 +864,7 @@ extension Renderer {
         let powerKey = mbPowerInt.map { "P\($0)" } ?? ""
         let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
         let packetEnabled = appModel.renderSettings.coherentPacketEnabled
-        let cacheKeyPrefix = customCacheKeyPrefix(for: fractalType)
+        let cacheKeyPrefix = customCacheKeyPrefix()
         let keyContext = ComputePipelineKeyContext(
             prefix: cacheKeyPrefix,
             fractalTypeRawValue: Int(fractalType.rawValue),
@@ -928,8 +928,8 @@ extension Renderer {
         //    exists only in the runtime-compiled library. For custom misses,
         //    decline adaptive compute for this frame so the fragment path can run.
         if fractalType == .custom {
-            customSceneDiagnostic("🔬 [CSDiag] selectComputePipeline FT=custom miss — libraryPresent=\(renderingLibrary(for: fractalType) != nil) hash=\(activeCustomHash ?? "nil") key=\(exactKey)")
-            if renderingLibrary(for: fractalType) != nil {
+            customSceneDiagnostic("🔬 [CSDiag] selectComputePipeline FT=custom miss — libraryPresent=\(renderingLibrary() != nil) hash=\(activeCustomHash ?? "nil") key=\(exactKey)")
+            if renderingLibrary() != nil {
                 enqueueBackgroundComputePipelineBuild(
                     cacheKey: exactKey,
                     fractalType: Int32(fractalType.rawValue),

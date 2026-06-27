@@ -30,7 +30,6 @@ struct SingleHandDragPerSlotState {
     var prevPalm: SIMD3<Float> = .zero
     var startValues: SIMD3<Float> = .zero
     var startValue: Float = 0
-    var accumulatedPosition: SIMD3<Float> = .zero
 }
 
 struct SingleHandDragEngineState {

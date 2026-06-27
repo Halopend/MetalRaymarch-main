@@ -204,7 +204,7 @@ final class GestureController {
         processGestures(menuAndMovementOnly: menuAndMovementOnly)
         
         // Process special gestures
-        let context = GestureContext(leftHand: leftHand, rightHand: rightHand, leftHandStable: leftHandStable, suppressParameterGestures: suppressParameterGestures, deltaTime: deltaTime, ranges: currentRanges(), frameIndex: operationFrameCounter)
+        let context = GestureContext(leftHand: leftHand, rightHand: rightHand, deltaTime: deltaTime)
 
         // Sync per-finger tap engine config from settings each frame
         if let settings = renderSettings {
@@ -425,21 +425,11 @@ final class GestureController {
             }
 
             // Runtime conflict guard: skip if any single-hand drag is active for this digit
-            guard let finger = FingerDigit(rawValue: digit) else { continue }
-            // Check all directional sub-slots (vertical + horizontal) for each hand.
-            let leftActive = GestureDirection.allCases.contains {
-                singleHandState.perSlot[GestureSlot(hand: .left, finger: finger, direction: $0).persistenceKey]?.isActive == true
-            }
-            let rightActive = GestureDirection.allCases.contains {
-                singleHandState.perSlot[GestureSlot(hand: .right, finger: finger, direction: $0).persistenceKey]?.isActive == true
-            }
+            guard FingerDigit(rawValue: digit) != nil else { continue }
             let decision = arbitrationEngine.decide(
                 GestureArbitrationInput(
-                    digit: digit,
                     twoHandCandidate: true,
                     twoHandCurrentlyActive: twoHandStateByDigit[digit]?.isActive == true,
-                    leftSingleActive: leftActive,
-                    rightSingleActive: rightActive,
                     grabActive: grabState.isActive,
                     grabEndCooldown: grabState.endCooldown
                 )
@@ -1052,7 +1042,6 @@ final class GestureController {
             // Position XYZ pinch-drag
             if active && !state.isActive {
                 state.isActive = true
-                state.accumulatedPosition = settings.effectiveTargetPosition
                 singleHandDragEngine.state.accumulatedPosition = settings.effectiveTargetPosition
                 state.prevPos = hand.pinchPosition(digit: digit)
                 state.prevPalm = hand.palmPosition

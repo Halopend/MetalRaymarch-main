@@ -1,18 +1,14 @@
 import Foundation
 
 struct GestureArbitrationInput {
-    var digit: Int
     var twoHandCandidate: Bool
     var twoHandCurrentlyActive: Bool
-    var leftSingleActive: Bool
-    var rightSingleActive: Bool
     var grabActive: Bool
     var grabEndCooldown: Float
 }
 
 struct GestureArbitrationDecision: Equatable {
     var allowTwoHand: Bool
-    var suppressSingleHand: Bool
 }
 
 final class GestureArbitrationEngine {
@@ -25,7 +21,6 @@ final class GestureArbitrationEngine {
         // started (i.e., the single-hand has been running long enough to be
         // intentional, not a transient pinch-overlap).
         let allowTwoHand = input.twoHandCandidate
-        let suppressSingleHand = input.grabActive || input.grabEndCooldown > 0 || (input.twoHandCurrentlyActive && allowTwoHand)
-        return GestureArbitrationDecision(allowTwoHand: allowTwoHand, suppressSingleHand: suppressSingleHand)
+        return GestureArbitrationDecision(allowTwoHand: allowTwoHand)
     }
 }

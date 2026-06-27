@@ -44,6 +44,7 @@ enum TopDockTab: String, CaseIterable {
     case shape = "Shape"
     case visualizations = "Visualizations"
     case music = "Music"
+    case performance = "Performance"
 
     var icon: String {
         switch self {
@@ -51,6 +52,7 @@ enum TopDockTab: String, CaseIterable {
         case .shape: return "cube.transparent"
         case .visualizations: return "paintbrush.pointed.fill"
         case .music: return "music.note"
+        case .performance: return "speedometer"
         }
     }
 }

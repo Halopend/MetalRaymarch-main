@@ -3,7 +3,7 @@
 //  Threshold
 //
 //  Class-based module hierarchy. A `Module` is a self-contained unit that owns:
-//    • its domain key + identity + UI route ("target a specific place in the UI")
+//    • its domain key (the key a scene attaches to its param block)
 //    • the typed params it routes (name + capability gate + apply wiring)
 //  and knows how to apply a scene's param block and answer capability questions.
 //
@@ -13,63 +13,34 @@
 //  param is adding one `ModuleParam`, and adding a domain is adding one subclass —
 //  no central switch to edit.
 //
-//  Stage 2 scope: identity, route, capability, and apply. The per-control UI
-//  metadata (`ModuleParam.control`) is wired in Stage 4, when the tabs are made
-//  to render each module's controls at its declared route. Until then it is nil
-//  and the existing hand-written sections keep rendering.
-//
 
 import Foundation
-
-// MARK: - Per-param UI control metadata (populated in Stage 4)
-
-/// Optional metadata describing how a param should surface in the UI. Left nil
-/// during Stage 2; the data-driven tabs (Stage 4) read it to render each module's
-/// controls at its route instead of hand-written SwiftUI.
-enum ModuleControl: Sendable {
-    /// A float slider sourcing its range/default/label/icon from a ControlSpec.
-    case slider(ControlSpec)
-    /// An on/off toggle.
-    case toggle(label: String, icon: String)
-    /// A segmented/menu picker over enum-string options.
-    case picker(label: String, icon: String, options: [ModulePickerOption])
-}
-
-struct ModulePickerOption: Sendable, Equatable {
-    let value: String
-    let label: String
-    init(_ value: String, _ label: String) { self.value = value; self.label = label }
-}
 
 // MARK: - A single routed param
 
 /// One typed parameter a module owns: its scene key, an optional capability gate,
-/// optional UI control metadata, and the writer that applies a `ParamValue` to
-/// live `RenderSettings`. The writer coerces the loosely-typed value itself.
+/// and the writer that applies a `ParamValue` to live `RenderSettings`. The
+/// writer coerces the loosely-typed value itself.
 struct ModuleParam {
     let name: String
     /// nil = universal (always applies). Otherwise the param is gated on the
     /// active fractal advertising the relevant capability (e.g. sphere projection,
     /// polar rotation).
     let requires: ((FractalModelType) -> Bool)?
-    /// UI rendering metadata; nil until Stage 4 surfaces this param data-driven.
-    let control: ModuleControl?
     let apply: (RenderSettings, ParamValue) -> Void
 
     init(_ name: String,
          requires: ((FractalModelType) -> Bool)? = nil,
-         control: ModuleControl? = nil,
          apply: @escaping (RenderSettings, ParamValue) -> Void) {
         self.name = name
         self.requires = requires
-        self.control = control
         self.apply = apply
     }
 }
 
 // MARK: - Module base class
 
-/// Base class for a UI-targeted module. Concrete domains (Space, Lighting, …)
+/// Base class for a module domain. Concrete domains (Space, Lighting, …)
 /// subclass it and supply their params. The base owns the apply + capability
 /// logic so subclasses are pure declarations.
 ///
@@ -79,34 +50,17 @@ struct ModuleParam {
 class Module: @unchecked Sendable {
     /// Scene-block domain bucket (the key a scene attaches to its param block).
     let key: ModuleKey
-    /// Stable module identifier (e.g. "space", "lighting").
-    let id: String
-    let displayName: String
-    let icon: String
-    /// Where this module surfaces in the UI — the "specific place" it targets.
-    let route: ModuleRoute
     let params: [ModuleParam]
     private let index: [String: ModuleParam]
 
     init(key: ModuleKey,
-         id: String,
-         displayName: String,
-         icon: String,
-         route: ModuleRoute,
          params: [ModuleParam]) {
         self.key = key
-        self.id = id
-        self.displayName = displayName
-        self.icon = icon
-        self.route = route
         self.params = params
         var idx: [String: ModuleParam] = [:]
         for p in params { idx[p.name] = p }
         self.index = idx
     }
-
-    /// Canonical param names this module owns.
-    var paramNames: [String] { params.map(\.name) }
 
     /// Whether a specific param applies to the active fractal. Unknown params
     /// (not owned by this module) are not applicable; universal params always
@@ -149,10 +103,6 @@ final class SpaceModule: Module, @unchecked Sendable {
     init() {
         super.init(
             key: .space,
-            id: "space",
-            displayName: "Space",
-            icon: "globe.asia.australia",
-            route: ModuleRoute(tab: "Shape", section: "Space"),
             params: SpaceModule.makeParams())
     }
 
@@ -200,10 +150,6 @@ final class LightingModule: Module, @unchecked Sendable {
     init() {
         super.init(
             key: .lighting,
-            id: "lighting",
-            displayName: "Lighting",
-            icon: "lightbulb",
-            route: ModuleRoute(tab: "Visualizations", section: "Lighting"),
             params: LightingModule.makeParams())
     }
 
