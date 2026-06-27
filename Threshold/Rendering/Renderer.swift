@@ -249,6 +249,13 @@ actor Renderer {
     // At most one hand-tracking dispatch task is in flight due to handTrackingDispatchState.
     nonisolated(unsafe) var handTrackingDispatchTask: Task<Void, Never>?
 
+    /// Cross-launch cache of compiled compute pipeline binaries. Optional: nil if
+    /// Application Support is unavailable, in which case every launch recompiles.
+    let pipelineArchive: PipelineBinaryArchive?
+    /// Coalesces archive serialization after bursts of lazy compute-pipeline
+    /// builds — rescheduled on each build, fires once the burst settles.
+    nonisolated(unsafe) var archiveSerializeTask: Task<Void, Never>?
+
     var smoothedScale: Float = 1.0
     
     var lastImmersiveSpaceState: AppModel.ImmersiveSpaceState?
@@ -289,6 +296,10 @@ actor Renderer {
         self.cachedRotationMatrix = matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
 
         let device = self.device
+
+        // Cross-launch pipeline-binary cache (compute path). Built before the
+        // startup compute batch below so those first PSOs are captured + reused.
+        self.pipelineArchive = PipelineBinaryArchive(device: device, purpose: "compute")
 
         let uniformBufferSize = alignedUniformsSize * maxBuffersInFlight
 
@@ -492,7 +503,8 @@ actor Renderer {
                 let key = "FI\(fi)_RS\(rs)"
                 
                 if let pipeline = Renderer.buildComputePipeline(device: device, library: library, kernelName: "adaptiveHierarchical8x8",
-                                                       fractalIterations: fi, shadowIterations: si, maxRaySteps: rs) {
+                                                       fractalIterations: fi, shadowIterations: si, maxRaySteps: rs,
+                                                       archive: self.pipelineArchive) {
                     computePipelineCache[key] = pipeline
                     computeBuilt += 1
                     if RENDERER_DEBUG { print("  ✓ Compute \(preset.rawValue): FI=\(fi), RS=\(rs) [\(key)]") }
@@ -508,7 +520,17 @@ actor Renderer {
             // undefined, so is_function_constant_defined() returns false in the shader.
             let emptyConstants = MTLFunctionConstantValues()
             if let kernel8x8 = try? library.makeFunction(name: "adaptiveHierarchical8x8", constantValues: emptyConstants) {
-                adaptiveHierarchicalPipeline8x8 = try device.makeComputePipelineState(function: kernel8x8)
+                let genericDesc = MTLComputePipelineDescriptor()
+                genericDesc.computeFunction = kernel8x8
+                genericDesc.label = "Compute_adaptiveHierarchical8x8_generic"
+                if let archive = self.pipelineArchive {
+                    adaptiveHierarchicalPipeline8x8 = try archive.makeComputePipeline(device: device,
+                                                                                     descriptor: genericDesc)
+                } else {
+                    adaptiveHierarchicalPipeline8x8 = try device.makeComputePipelineState(descriptor: genericDesc,
+                                                                                          options: [],
+                                                                                          reflection: nil)
+                }
             }
             if RENDERER_DEBUG { print("✓ Built \(computeBuilt) specialized compute pipelines + 1 generic fallback") }
             
@@ -546,6 +568,12 @@ actor Renderer {
             await self.precompilePresetPipelines()
             guard !Task.isCancelled else { return }
 
+            // Persist the compute pipeline binaries compiled during startup so the
+            // next cold launch loads them instead of re-running the GPU back-end
+            // compiler. Off-actor, low priority — never blocks a frame.
+            let archiveRef = self.pipelineArchive
+            Task.detached(priority: .background) { archiveRef?.serializeIfDirty() }
+
             await MainActor.run {
                 self.appModel.rendererStartupWarmupComplete = true
             }
@@ -554,6 +582,7 @@ actor Renderer {
 
     deinit {
         setupTask?.cancel()
+        archiveSerializeTask?.cancel()
         handTrackingDispatchTask?.cancel()
         for task in backgroundRenderPipelineBuildTasks.values {
             task.cancel()
