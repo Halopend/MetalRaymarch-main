@@ -602,3 +602,76 @@ struct RenderDiagnosticsView: View {
         }
     }
 }
+
+/// Live performance dashboard for the Performance ▸ Metrics sub-tab. Reads
+/// `renderMetrics` + `cache.live*` directly (like RenderDiagnosticsView) so only
+/// this view re-renders each frame — the surrounding controls stay static.
+struct PerformanceMetricsView: View {
+    @Environment(AppModel.self) private var appModel
+    var cache: UISettingsCache
+
+    private func fpsColor(_ fps: Double) -> Color {
+        if fps >= 85 { return .green }
+        if fps >= 60 { return .yellow }
+        return .orange
+    }
+
+    var body: some View {
+        let m = appModel.renderMetrics
+        let mode = RendererModeOption.from(tileSize: cache.quality.tileSize)
+        VStack(alignment: .leading, spacing: 12) {
+            // Hero: big FPS + the headline frame numbers beside it.
+            HStack(alignment: .center, spacing: 14) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(m.fps > 0 ? String(format: "%.0f", m.fps) : "—")
+                        .font(.system(size: 44, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(fpsColor(m.fps))
+                    Text("FPS")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Divider().frame(height: 44)
+                VStack(alignment: .leading, spacing: 3) {
+                    metricLine("GPU frame", m.gpuFrameMs > 0 ? String(format: "%.1f ms", m.gpuFrameMs) : "—")
+                    metricLine("Mode", mode.rawValue)
+                    metricLine("Path", m.renderPath)
+                }
+                .font(.caption.monospacedDigit())
+                Spacer(minLength: 0)
+            }
+
+            // Tiles — the marching/shape numbers people tune against.
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+                StatBox(label: "Iterations", value: "\(cache.liveFractalIterations)", color: .cyan)
+                StatBox(label: "Ray Steps", value: "\(cache.liveMaxRaySteps)", color: .cyan)
+                StatBox(label: "Scale", value: String(format: "%.2f", cache.liveFractalScale), color: .teal)
+                StatBox(label: "Detail", value: String(format: "%.1f×", cache.liveDetailScale), color: .teal)
+                StatBox(label: "Quality",
+                        value: m.renderQuality > 0 ? "\(Int((m.renderQuality * 100).rounded()))%" : "—",
+                        color: .blue)
+                StatBox(label: "Foveation",
+                        value: m.foveationEnabled ? "On" : "Off",
+                        color: m.foveationEnabled ? .green : .gray)
+            }
+
+            // Drawable resolution — the actual per-eye/window render-target size.
+            HStack {
+                Text("Drawable").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Text(m.drawableWidth > 0 ? "\(m.drawableWidth) × \(m.drawableHeight) px" : "—")
+                    .font(.caption.monospacedDigit())
+            }
+        }
+        .padding()
+        .background(Color.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func metricLine(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 6) {
+            Text(label).foregroundStyle(.secondary)
+            Spacer(minLength: 10)
+            Text(value).fontWeight(.semibold).lineLimit(1)
+        }
+    }
+}

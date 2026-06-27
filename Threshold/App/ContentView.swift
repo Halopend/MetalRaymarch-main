@@ -32,6 +32,7 @@ struct ContentView: View {
     @AppStorage("ContentView.shapeRailSection") private var shapeRailSection: ShapeRailSection = .parameters
     @AppStorage("ContentView.visualizationsRailSection") private var visualizationsRailSection: VisualizationsRailSection = .color
     @AppStorage("ContentView.musicRailSection") private var musicRailSection: MusicRailSection = .playback
+    @AppStorage("ContentView.performanceRailSection") var performanceRailSection: PerformanceRailSection = .metrics
     @AppStorage("ContentView.skipOuterNavigationSync") private var skipOuterNavigationSync = false
     // Persist last-selected tab and sub-tabs across launches.
     @AppStorage("ContentView.selectedTab") var selectedTab: SidebarTab = .fractal
@@ -627,14 +628,14 @@ struct ContentView: View {
                             }
                         }
                     case .performance:
-                        // Single panel (the Performance content). One rail entry so
-                        // the tab reads consistently with the others.
-                        railButton(
-                            title: "Acceleration",
-                            systemImage: "speedometer",
-                            isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .performance
-                        ) {
-                            activatePerformanceSection()
+                        ForEach(PerformanceRailSection.allCases, id: \.self) { section in
+                            railButton(
+                                title: section.rawValue,
+                                systemImage: section.icon,
+                                isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .performance && performanceRailSection == section
+                            ) {
+                                activatePerformanceSection(section)
+                            }
                         }
                     }
                 }
@@ -881,7 +882,7 @@ struct ContentView: View {
         case .music:
             activateMusicSection(musicRailSection)
         case .performance:
-            activatePerformanceSection()
+            activatePerformanceSection(performanceRailSection)
         }
     }
 
@@ -938,8 +939,9 @@ struct ContentView: View {
         }
     }
 
-    private func activatePerformanceSection() {
+    private func activatePerformanceSection(_ section: PerformanceRailSection) {
         topDockTab = .performance
+        performanceRailSection = section
         selectedTab = .fractal
         fractalSubTab = .render
     }
@@ -1028,7 +1030,7 @@ struct ContentView: View {
             case .shapeSpace:
                 activateShapeSection(.space)
             case .shapePerformance:
-                activatePerformanceSection()
+                activatePerformanceSection(.acceleration)
             case .visualizationsColor:
                 activateVisualizationsSection(.color)
             case .visualizationsMapping:

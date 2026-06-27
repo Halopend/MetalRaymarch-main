@@ -98,6 +98,20 @@ enum ShapeRailSection: String, CaseIterable {
     }
 }
 
+enum PerformanceRailSection: String, CaseIterable {
+    case metrics = "Metrics"
+    case acceleration = "Acceleration"
+    case budget = "Budget"
+
+    var icon: String {
+        switch self {
+        case .metrics: return "gauge.with.dots.needle.67percent"
+        case .acceleration: return "bolt.fill"
+        case .budget: return "slider.horizontal.3"
+        }
+    }
+}
+
 enum VisualizationsRailSection: String, CaseIterable {
     case color = "Color"
     case mapping = "Mapping"

@@ -56,7 +56,7 @@ extension ContentView {
 
             case .render:
                 ScrollView(.vertical, showsIndicators: true) {
-                    fractalQualityContent
+                    performanceTabContent
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                 }
@@ -603,14 +603,39 @@ extension ContentView {
         .background(Color.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    private var fractalQualityContent: some View {
+    // MARK: - Performance tab (rail sub-tabs: Metrics / Acceleration / Budget)
+
+    /// Dispatches the Performance tab's content based on the selected rail
+    /// sub-section, so each panel is short instead of one long dense scroll.
+    @ViewBuilder
+    var performanceTabContent: some View {
+        switch performanceRailSection {
+        case .metrics:      performanceMetricsContent
+        case .acceleration: performanceAccelerationContent
+        case .budget:       performanceBudgetContent
+        }
+    }
+
+    /// Shared header for the Performance sub-tabs. Keeps the live FPS pill visible
+    /// on every sub-tab so the headline metric is always one glance away.
+    private func performanceSectionHeader(_ title: String, systemImage: String) -> some View {
+        HStack {
+            Label(title, systemImage: systemImage).font(.headline)
+            Spacer()
+            FPSIndicatorView()
+        }
+    }
+
+    private var performanceMetricsContent: some View {
         VStack(spacing: 12) {
-            HStack {
-                Label("Performance", systemImage: AppIcons.gauge)
-                    .font(.headline)
-                Spacer()
-                FPSIndicatorView()
-            }
+            performanceSectionHeader("Metrics", systemImage: AppIcons.gauge)
+            PerformanceMetricsView(cache: cache)
+        }
+    }
+
+    private var performanceAccelerationContent: some View {
+        VStack(spacing: 12) {
+            performanceSectionHeader("Acceleration", systemImage: AppIcons.boltFill)
 
             // ── Renderer Mode ──
             VStack(alignment: .leading, spacing: 8) {
@@ -677,9 +702,12 @@ extension ContentView {
 
             // ── Acceleration (the gamut of march speedup techniques) ──
             fractalAccelerationSection
+        }
+    }
 
-            // ── Force Recompile (developer/debug) ──
-            shaderRecompileSection
+    private var performanceBudgetContent: some View {
+        VStack(spacing: 12) {
+            performanceSectionHeader("Budget", systemImage: "slider.horizontal.3")
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -879,12 +907,15 @@ extension ContentView {
                         .fixedSize()
                 }
 
-                accelToggle("Auto-adjust to hold FPS",
-                            isOn: cache.quality.adaptiveRenderQualityEnabled,
-                            help: "When the frame rate sags, the compositor's render quality steps down to recover headroom, then climbs back toward your slider setting (the ceiling) once FPS is comfortable. Adjustments are infrequent and the compositor tweens between them, so the change reads as a gentle ramp.") { v in
-                    cache.quality.adaptiveRenderQualityEnabled = v
-                    cache.push(\.adaptiveRenderQualityEnabled, value: v)
-                }
+                Toggle("Auto-adjust to hold FPS", isOn: Binding(
+                    get: { cache.quality.adaptiveRenderQualityEnabled },
+                    set: { v in
+                        cache.quality.adaptiveRenderQualityEnabled = v
+                        cache.push(\.adaptiveRenderQualityEnabled, value: v)
+                    }
+                ))
+                .tint(.cyan)
+                .help("When the frame rate sags, the compositor's render quality steps down to recover headroom, then climbs back toward your slider setting (the ceiling) once FPS is comfortable. Adjustments are infrequent and the compositor tweens between them, so the change reads as a gentle ramp.")
 
                 Text("Vision Pro: the compositor's native, gaze-foveated resolution. The slider sets the sharpest quality (the ceiling, a memory/quality balance); lower trades crispness for GPU headroom with a smoothed transition. Very low values probe max framerate.")
                     .font(.caption2)
@@ -892,7 +923,8 @@ extension ContentView {
             }
             #endif
 
-            Divider()
+            // ── Force Recompile (developer/debug) ──
+            shaderRecompileSection
         }
     }
     
