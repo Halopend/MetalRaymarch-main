@@ -416,6 +416,9 @@ typedef struct
     uint32_t rateMapLayer;           // rate-map layer for this eye (layered: eyeIndex; dedicated: 0)
 } TileUniforms;
 
+// Include Buddhabrot types so they're visible through the bridging header
+#include "../Formulas/Buddhabrot/BuddhabrotTypes.h"
+
 #endif /* ShaderTypes_h */
 
 """#
