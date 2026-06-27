@@ -295,6 +295,8 @@ extension ContentView {
 
             spaceWarpSection
 
+            TwistShapingSection(renderSettings: appModel.renderSettings)
+
             // ── Detail (Grab Gesture Transform) ──────────────────────────────
             VStack(spacing: 8) {
                 HStack {

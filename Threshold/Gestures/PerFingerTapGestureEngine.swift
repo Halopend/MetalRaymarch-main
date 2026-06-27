@@ -177,6 +177,7 @@ enum PerFingerTapAction: Int32, CaseIterable, Codable, Hashable, Sendable {
     case toggleAnimationPlayer = 2
     case openShapeMenu = 3
     case openRenderMenu = 4
+    case openQuickToggles = 5
 
     var displayName: String {
         switch self {
@@ -185,6 +186,7 @@ enum PerFingerTapAction: Int32, CaseIterable, Codable, Hashable, Sendable {
         case .toggleAnimationPlayer: return "Toggle Video Playback"
         case .openShapeMenu: return "Open Shape Menu"
         case .openRenderMenu: return "Open Render Menu"
+        case .openQuickToggles: return "Open Quick Toggles"
         }
     }
 
@@ -195,6 +197,7 @@ enum PerFingerTapAction: Int32, CaseIterable, Codable, Hashable, Sendable {
         case .toggleAnimationPlayer: return "film.stack"
         case .openShapeMenu: return "square.grid.2x2"
         case .openRenderMenu: return "camera.aperture"
+        case .openQuickToggles: return "switch.2"
         }
     }
 
@@ -205,6 +208,7 @@ enum PerFingerTapAction: Int32, CaseIterable, Codable, Hashable, Sendable {
         case .toggleAnimationPlayer: return .toggleAnimationPlayer
         case .openShapeMenu: return .openShapeMenu
         case .openRenderMenu: return .openRenderMenu
+        case .openQuickToggles: return .openQuickToggles
         }
     }
 }

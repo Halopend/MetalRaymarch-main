@@ -265,6 +265,7 @@ extension Renderer {
                             spaceWarpParam1: settingsSnapshot.spaceWarpParam1,
                             spaceWarpParam2: settingsSnapshot.spaceWarpParam2,
                             spaceWarpParam3: settingsSnapshot.spaceWarpParam3,
+                            spaceWarpAxis: settingsSnapshot.spaceWarpAxis,
                             stepMultiplier: settingsSnapshot.stepMultiplier,
                             boundingSphereRadius: boundingSphereRadius,
                             smartAdvanceEnabled: settingsSnapshot.smartAdvanceEnabled ? 1 : 0,

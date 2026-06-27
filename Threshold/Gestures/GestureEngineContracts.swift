@@ -12,5 +12,6 @@ enum GestureOperation {
     case toggleAnimationPlayer
     case openShapeMenu
     case openRenderMenu
+    case openQuickToggles
     case trackGestureUsage
 }

@@ -60,66 +60,6 @@ struct ResetAndSaveControls: View {
     }
 }
 
-struct ActivityLightButton: View {
-    let title: String
-    let systemImage: String
-    let color: Color
-    let isActive: Bool
-    let count: Int?
-    let action: () -> Void
-    @State private var isHovering = false
-
-    var body: some View {
-        Button(action: action) {
-            ZStack(alignment: .topTrailing) {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(isActive ? color : Color.secondary.opacity(0.35))
-                        .frame(width: 8, height: 8)
-                        .shadow(color: isActive ? color.opacity(0.65) : .clear, radius: 4)
-
-                    Image(systemName: systemImage)
-                        .font(.system(size: IconSize.small, weight: .semibold))
-                        .foregroundStyle(isActive ? color : .secondary)
-                        .frame(width: 14, height: 14)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(
-                    Capsule()
-                        .fill((isActive ? color : Color.secondary).opacity(isHovering ? 0.2 : (isActive ? 0.14 : 0.08)))
-                )
-                .overlay(
-                    Capsule()
-                        .strokeBorder((isActive ? color : Color.secondary).opacity(isHovering ? 0.55 : (isActive ? 0.34 : 0.12)), lineWidth: 1)
-                )
-                .scaleEffect(isHovering ? 1.06 : 1.0)
-
-                if let count {
-                    Text("\(count)")
-                        .font(.system(size: 8, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(.white)
-                        .frame(minWidth: 13, minHeight: 13)
-                        .padding(.horizontal, 1)
-                        .background(Capsule().fill(color))
-                        .offset(x: 5, y: -5)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .thresholdHoverEffect()
-        .onHover { hovering in
-            withAnimation(.snappy(duration: 0.18, extraBounce: 0.05)) {
-                isHovering = hovering
-            }
-        }
-        .help("\(title): \(isActive ? "On" : "Off")")
-        .accessibilityLabel(title)
-        .accessibilityValue(isActive ? "On" : "Off")
-    }
-}
-
 enum PresetPreviewGenerator {
     @MainActor
     static func makePNGData(
@@ -616,6 +556,19 @@ struct PerformanceMetricsView: View {
         return .orange
     }
 
+    /// Drives `BenchmarkManager.liveStepMeasurement` (arms the in-kernel counter)
+    /// alongside the observable UI flag. Clears the stale reading when turned off.
+    private var stepProfilingBinding: Binding<Bool> {
+        Binding(
+            get: { appModel.renderMetrics.stepProfilingEnabled },
+            set: { on in
+                appModel.renderMetrics.stepProfilingEnabled = on
+                BenchmarkManager.shared.liveStepMeasurement = on
+                if !on { appModel.renderMetrics.avgStepsPerPixel = 0 }
+            }
+        )
+    }
+
     var body: some View {
         let m = appModel.renderMetrics
         let mode = RendererModeOption.from(tileSize: cache.quality.tileSize)
@@ -654,6 +607,42 @@ struct PerformanceMetricsView: View {
                         value: m.foveationEnabled ? "On" : "Off",
                         color: m.foveationEnabled ? .green : .gray)
             }
+
+            // Measured cost — the headline benchmark: how many march steps a
+            // converged pixel actually took to reach the surface, averaged over
+            // the frame's hit rays. This is what you weigh against visual quality;
+            // "Ray Steps" above is only the budget/ceiling, not what happened.
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Avg steps to converge")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Toggle("Profile", isOn: stepProfilingBinding)
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .labelsHidden()
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(m.stepProfilingEnabled
+                         ? (m.avgStepsPerPixel > 0 ? String(format: "%.1f", m.avgStepsPerPixel) : "…")
+                         : "—")
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.orange)
+                    Text("/ \(cache.liveMaxRaySteps) budget")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                Text(m.stepProfilingEnabled
+                     ? "Live GPU step count — adds per-ray atomic overhead, so the frame-time above is inflated while profiling is on."
+                     : "Off. Enable to measure the real march steps per converged pixel.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(10)
+            .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
 
             // Drawable resolution — the actual per-eye/window render-target size.
             HStack {

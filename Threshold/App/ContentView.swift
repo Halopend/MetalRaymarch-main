@@ -32,7 +32,10 @@ struct ContentView: View {
     @AppStorage("ContentView.shapeRailSection") private var shapeRailSection: ShapeRailSection = .parameters
     @AppStorage("ContentView.visualizationsRailSection") private var visualizationsRailSection: VisualizationsRailSection = .color
     @AppStorage("ContentView.musicRailSection") private var musicRailSection: MusicRailSection = .playback
-    @AppStorage("ContentView.performanceRailSection") var performanceRailSection: PerformanceRailSection = .metrics
+    // Default to Budget. Key bumped to ".v2" so the new default actually lands
+    // for anyone who already has the old default (.metrics) persisted — the tab
+    // writes this on every open, so a plain default change wouldn't take effect.
+    @AppStorage("ContentView.performanceRailSection.v2") var performanceRailSection: PerformanceRailSection = .budget
     @AppStorage("ContentView.skipOuterNavigationSync") private var skipOuterNavigationSync = false
     // Persist last-selected tab and sub-tabs across launches.
     @AppStorage("ContentView.selectedTab") var selectedTab: SidebarTab = .fractal
@@ -48,7 +51,6 @@ struct ContentView: View {
     @State var showStopsPopover = false
     @State private var showSaveDestinationSheet = false
     @State private var didLongPressPinnedRailControl: PinnedRailControl?
-    @State private var animationKillSwitchTask: Task<Void, Never>?
 
     // Tab-local UI state (kept here because stored properties cannot live in
     // the per-tab `extension ContentView` files).
@@ -67,8 +69,6 @@ struct ContentView: View {
     @AppStorage(TouchVisualizationSettings.defaultsKey) var showTouchIndicators: Bool = true
 #endif
     @State var exportShareItem: ExportShareItem?
-
-    private let animationKillSwitchDuration: TimeInterval = 0.7
 
     private static let presetDateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -112,10 +112,6 @@ struct ContentView: View {
             || (cache.display.sphereProjectionEnabled && cache.fractalType == .mandelbox)
     }
 
-    private var isAnimationPlaying: Bool {
-        appModel.animationManager?.isPlaying ?? appModel.renderSettings.isAnimationPlaying
-    }
-
     private var activeDynamicEffectCount: Int {
         var count = 0
         if cache.lighting.gradientCycleEffect.enabled { count += 1 }
@@ -127,10 +123,6 @@ struct ContentView: View {
         if cache.fractalType.supports(.polarRotation), cache.lighting.polarRotationEffect.enabled { count += 1 }
         if cache.fractalType.supports(.juliaDrift), cache.lighting.juliaDriftEffect.enabled { count += 1 }
         return count
-    }
-
-    private var hasActiveAnimationSystems: Bool {
-        isAnimationPlaying || activeMusicPermutationCount > 0 || activeDynamicEffectCount > 0 || animationKillSwitchTask != nil
     }
 
     var hasShapeMusicMapping: Bool {
@@ -266,6 +258,14 @@ struct ContentView: View {
             appModel.isRenderMenuActiveHandler = {
                 selectedTab == .fractal && fractalSubTab == .render
             }
+            appModel.openQuickTogglesHandler = {
+                withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) {
+                    selectedTab = .quickToggles
+                }
+            }
+            appModel.isQuickTogglesActiveHandler = {
+                selectedTab == .quickToggles
+            }
             appModel.openSavePresetMenuHandler = {
                 showSaveDestinationSheet = true
             }
@@ -276,8 +276,6 @@ struct ContentView: View {
         .onDisappear {
             cache.stopSync()
             appModel.openSavePresetMenuHandler = nil
-            animationKillSwitchTask?.cancel()
-            animationKillSwitchTask = nil
         }
         .onReceive(NotificationCenter.default.publisher(for: AppModel.fractalSettingsDidChangeNotification)) { _ in
             cache.loadFromSettings()
@@ -1224,15 +1222,13 @@ struct ContentView: View {
     
     private var bottomBar: some View {
         HStack(spacing: 12) {
-            activityTrafficLights
-
-            ToggleImmersiveSpaceButton()
-                .frame(minWidth: 260, alignment: .leading)
-
             if let animationManager = appModel.animationManager {
                 LiveSessionRecordingControl(animationManager: animationManager, compact: true)
                     .disabled(animationManager.isPlaying)
             }
+
+            ToggleImmersiveSpaceButton()
+                .frame(minWidth: 260, alignment: .center)
 
             Spacer(minLength: 12)
 
@@ -1250,170 +1246,6 @@ struct ContentView: View {
         .padding(.vertical, 8)
     }
 
-    private var activityTrafficLights: some View {
-        HStack(spacing: 6) {
-            ActivityLightButton(
-                title: "Music permutations",
-                systemImage: AppIcons.waveform,
-                color: .blue,
-                isActive: activeMusicPermutationCount > 0,
-                count: activeMusicPermutationCount > 0 ? activeMusicPermutationCount : nil,
-                action: toggleMusicPermutationsActive
-            )
-            ActivityLightButton(
-                title: "Dynamic color",
-                systemImage: AppIcons.sparkles,
-                color: .pink,
-                isActive: activeDynamicEffectCount > 0,
-                count: activeDynamicEffectCount > 0 ? activeDynamicEffectCount : nil,
-                action: toggleDynamicEffectsActive
-            )
-            ActivityLightButton(
-                title: "Playback",
-                systemImage: isAnimationPlaying ? AppIcons.pauseFill : AppIcons.playFill,
-                color: .orange,
-                isActive: isAnimationPlaying,
-                count: nil,
-                action: toggleAnimationPlaybackActive
-            )
-            ActivityLightButton(
-                title: "Kill switch",
-                systemImage: animationKillSwitchTask == nil ? AppIcons.stopCircle : AppIcons.stopCircleFill,
-                color: .red,
-                isActive: hasActiveAnimationSystems,
-                count: nil,
-                action: engageAnimationKillSwitch
-            )
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(Capsule().fill(Color.secondary.opacity(0.08)))
-        .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.14), lineWidth: 1))
-        .help("Quick toggles for music permutations, dynamic color, playback, and the global kill switch")
-    }
-
-    private func toggleMusicPermutationsActive() {
-        let shouldEnable = activeMusicPermutationCount == 0
-        setMusicPermutationsEnabled(shouldEnable)
-    }
-
-    private func setMusicPermutationsEnabled(_ enabled: Bool) {
-        cache.audioReactive.fractalAudioReactiveEnabled = enabled
-        cache.push(\.fractalAudioReactiveEnabled, value: enabled)
-
-        if enabled {
-            cache.display.lightingMode = .audioReactive
-            cache.push(\.lightingMode, value: .audioReactive)
-            if cache.audioReactive.musicReactiveMappings.isEmpty {
-                applyAudioReactivityPreset(.ambient)
-            }
-        }
-    }
-
-    private func applyAudioReactivityPreset(_ preset: ReactivityPreset) {
-        let settings = preset.settings
-        cache.audioReactive.fractalAudioAmount = settings.audioAmount
-        cache.audioReactive.fractalBeatPunch = settings.beatPunch
-        cache.audioReactive.fractalAudioDamping = settings.audioDamping
-        cache.audioReactive.bassSensitivity = settings.bassSensitivity
-        cache.audioReactive.midSensitivity = settings.midSensitivity
-        cache.audioReactive.trebleSensitivity = settings.trebleSensitivity
-        cache.audioReactive.beatSensitivity = settings.beatSensitivity
-        cache.push(\.fractalAudioAmount, value: settings.audioAmount)
-        cache.push(\.fractalBeatPunch, value: settings.beatPunch)
-        cache.push(\.fractalAudioDamping, value: settings.audioDamping)
-        cache.push(\.bassSensitivity, value: settings.bassSensitivity)
-        cache.push(\.midSensitivity, value: settings.midSensitivity)
-        cache.push(\.trebleSensitivity, value: settings.trebleSensitivity)
-        cache.push(\.beatSensitivity, value: settings.beatSensitivity)
-
-        let mappings = preset.defaultMappings(for: cache.fractalType)
-        cache.audioReactive.musicReactiveMappings = mappings
-        cache.push(\.musicReactiveMappings, value: mappings)
-    }
-
-    private func toggleAnimationPlaybackActive() {
-        guard let animationManager = appModel.animationManager else { return }
-        if isAnimationPlaying {
-            animationManager.stop()
-            return
-        }
-
-        if animationManager.currentScene?.keyframes.count ?? 0 < 2 {
-            animationManager.currentScene = animationManager.scenes.first { $0.keyframes.count >= 2 }
-        }
-        animationManager.play()
-    }
-
-    private func toggleDynamicEffectsActive() {
-        if activeDynamicEffectCount > 0 {
-            disableDynamicEffects()
-        } else {
-            enableDefaultDynamicEffects()
-        }
-
-        cache.lighting.lightingPreset = .custom
-        cache.push(\.lightingPreset, value: .custom)
-    }
-
-    private func engageAnimationKillSwitch() {
-        guard hasActiveAnimationSystems, animationKillSwitchTask == nil else { return }
-
-        appModel.renderSettings.beginAnimationKillSwitch(duration: animationKillSwitchDuration)
-        animationKillSwitchTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: UInt64(animationKillSwitchDuration * 1_000_000_000))
-            finalizeAnimationKillSwitch()
-        }
-    }
-
-    private func finalizeAnimationKillSwitch() {
-        animationKillSwitchTask?.cancel()
-        animationKillSwitchTask = nil
-
-        appModel.animationManager?.stop()
-        setMusicPermutationsEnabled(false)
-        disableDynamicEffects()
-        appModel.parameterPipeline.clearMusicLayers(settings: appModel.renderSettings)
-        appModel.renderSettings.cancelAnimationKillSwitch()
-    }
-
-    private func disableDynamicEffects() {
-        cache.lighting.gradientCycleEffect.enabled = false
-        cache.commitGradientCycleEffect()
-
-        cache.lighting.hueRotationEffect.enabled = false
-        cache.commitHueRotationEffect()
-
-        cache.lighting.pulseEffect.enabled = false
-        cache.commitPulseEffect()
-
-        cache.lighting.beatFlashEffect.enabled = false
-        cache.commitBeatFlashEffect()
-
-        cache.lighting.polarRotationEffect.direction = .off
-        cache.push(\.polarRotationEffect, value: cache.lighting.polarRotationEffect)
-
-        cache.lighting.juliaDriftEffect.enabled = false
-        cache.commitJuliaDriftEffect()
-
-        cache.lighting.lightingPreset = .custom
-        cache.push(\.lightingPreset, value: .custom)
-    }
-
-    private func enableDefaultDynamicEffects() {
-        cache.lighting.gradientCycleEffect = .slow
-        cache.commitGradientCycleEffect()
-
-        cache.lighting.hueRotationEffect = .subtle
-        cache.commitHueRotationEffect()
-
-        cache.lighting.pulseEffect = .subtle
-        cache.commitPulseEffect()
-
-        cache.lighting.lightingPreset = .custom
-        cache.push(\.lightingPreset, value: .custom)
-    }
-    
     // ═══════════════════════════════════════════════════════════════════════════
     // MARK: - Fractal Tab
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1443,7 +1275,7 @@ struct ContentView: View {
 
 // MARK: - Extracted Components
 //
-// ResetAndSaveControls, ActivityLightButton, PresetPreviewGenerator,
+// ResetAndSaveControls, PresetPreviewGenerator,
 // PresetPreviewCard, SaveDestinationSheet, ExternalFileImportSheet, and
 // FPSIndicatorView moved to ContentViewComponents.swift (Phase 3 refactor).
 // The platform-gated View helpers (thresholdGlassBackground, etc.) moved to

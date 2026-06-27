@@ -472,6 +472,39 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             writeValue: { cache, v in cache.display.sphereProjectionRadius = v; cache.commitSphereProjection() }
         )
 
+        // Built-in Twist: strength + origin point components. Gesture-mappable so
+        // they surface as single-axis dials; the dispatcher's core descriptors of
+        // the same ids carry the gesture/audio writes. Backed directly by
+        // RenderSettings (no DisplayConfig mirror).
+        coreNodes[ControlCatalog.spaceWarpStrength.id] = FloatParameterNode(
+            spec: ControlCatalog.spaceWarpStrength,
+            group: spaceGroup,
+            isGestureMappable: true,
+            readValue: { $0.renderSettings?.spaceWarpStrength ?? 0 },
+            writeValue: { cache, v in cache.renderSettings?.spaceWarpStrength = v }
+        )
+        coreNodes[ControlCatalog.spaceWarpOriginX.id] = FloatParameterNode(
+            spec: ControlCatalog.spaceWarpOriginX,
+            group: spaceGroup,
+            isGestureMappable: true,
+            readValue: { $0.renderSettings?.spaceWarpParam1 ?? 0 },
+            writeValue: { cache, v in cache.renderSettings?.spaceWarpParam1 = v }
+        )
+        coreNodes[ControlCatalog.spaceWarpOriginY.id] = FloatParameterNode(
+            spec: ControlCatalog.spaceWarpOriginY,
+            group: spaceGroup,
+            isGestureMappable: true,
+            readValue: { $0.renderSettings?.spaceWarpParam2 ?? 0 },
+            writeValue: { cache, v in cache.renderSettings?.spaceWarpParam2 = v }
+        )
+        coreNodes[ControlCatalog.spaceWarpOriginZ.id] = FloatParameterNode(
+            spec: ControlCatalog.spaceWarpOriginZ,
+            group: spaceGroup,
+            isGestureMappable: true,
+            readValue: { $0.renderSettings?.spaceWarpParam3 ?? 0 },
+            writeValue: { cache, v in cache.renderSettings?.spaceWarpParam3 = v }
+        )
+
         return (coreNodes, effectNodes)
     }
 
@@ -574,7 +607,9 @@ final class ParameterNodeRegistry: @unchecked Sendable {
     /// fractal-type switch. `fractalType` is set to the current type only for
     /// display context; binding identity is by node id.
     func gestureBindableCoreParameters(for type: FractalModelType) -> [GestureBindableParameter] {
-        let ids = [ControlCatalog.sphereProjectionBlend.id, ControlCatalog.sphereProjectionRadius.id]
+        let ids = [ControlCatalog.sphereProjectionBlend.id, ControlCatalog.sphereProjectionRadius.id,
+                   ControlCatalog.spaceWarpStrength.id,
+                   ControlCatalog.spaceWarpOriginX.id, ControlCatalog.spaceWarpOriginY.id, ControlCatalog.spaceWarpOriginZ.id]
         return ids.compactMap { id -> GestureBindableParameter? in
             guard let node = coreNodes[id] ?? effectNodes[id], node.isGestureMappable else { return nil }
             return GestureBindableParameter(

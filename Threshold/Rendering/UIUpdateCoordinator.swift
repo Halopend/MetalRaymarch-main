@@ -20,6 +20,7 @@ final class UIUpdateCoordinator: Sendable {
         var lastHeadHeightScheduleTime: TimeInterval = 0
         var pendingFPSUpdate: Double?
         var pendingGPUMs: Double?
+        var pendingAvgSteps: Double?
         var pendingAnalyticsFPS: Double?
         var pendingHeadHeightMeters: Float?
         var hasPendingAnalyticsUpdate = false
@@ -29,6 +30,7 @@ final class UIUpdateCoordinator: Sendable {
     private struct PendingUIWork: Sendable {
         let fps: Double?
         let gpuMs: Double?
+        let avgStepsPerPixel: Double?
         let analyticsFPS: Double?
         let shouldUpdateAnalytics: Bool
         let headHeightMeters: Float?
@@ -54,6 +56,12 @@ final class UIUpdateCoordinator: Sendable {
                 appModel.renderMetrics.gpuFrameMs = gpuMs
             }
 
+            // Publish even 0 so turning profiling off clears the stale reading
+            // (the render thread writes 0 to the holder when not measuring).
+            if let steps = pendingWork.avgStepsPerPixel {
+                appModel.renderMetrics.avgStepsPerPixel = steps
+            }
+
             if let headHeight = pendingWork.headHeightMeters {
                 appModel.headHeightMeters = headHeight
             }
@@ -77,7 +85,7 @@ final class UIUpdateCoordinator: Sendable {
     }
     
     /// Called from render thread — schedules UI updates without blocking.
-    nonisolated func scheduleUIUpdate(fps: Double, gpuMs: Double? = nil, headHeightMeters: Float?, currentTime: TimeInterval) {
+    nonisolated func scheduleUIUpdate(fps: Double, gpuMs: Double? = nil, avgStepsPerPixel: Double? = nil, headHeightMeters: Float?, currentTime: TimeInterval) {
         let shouldDispatch = _state.withLock { state -> Bool in
             let shouldUpdateFPS = currentTime - state.lastFPSScheduleTime >= fpsUpdateInterval
             let shouldUpdateAnalytics = currentTime - state.lastAnalyticsScheduleTime >= analyticsInterval
@@ -85,6 +93,7 @@ final class UIUpdateCoordinator: Sendable {
             if shouldUpdateFPS {
                 state.pendingFPSUpdate = fps
                 state.pendingGPUMs = gpuMs
+                state.pendingAvgSteps = avgStepsPerPixel
                 state.lastFPSScheduleTime = currentTime
             }
 
@@ -121,6 +130,7 @@ final class UIUpdateCoordinator: Sendable {
             defer {
                 state.pendingFPSUpdate = nil
                 state.pendingGPUMs = nil
+                state.pendingAvgSteps = nil
                 state.pendingAnalyticsFPS = nil
                 state.pendingHeadHeightMeters = nil
                 state.hasPendingAnalyticsUpdate = false
@@ -130,6 +140,7 @@ final class UIUpdateCoordinator: Sendable {
             return PendingUIWork(
                 fps: state.pendingFPSUpdate,
                 gpuMs: state.pendingGPUMs,
+                avgStepsPerPixel: state.pendingAvgSteps,
                 analyticsFPS: state.pendingAnalyticsFPS,
                 shouldUpdateAnalytics: state.hasPendingAnalyticsUpdate,
                 headHeightMeters: state.pendingHeadHeightMeters

@@ -65,10 +65,16 @@ struct ToggleImmersiveSpaceButton: View {
         .animation(.none, value: 0)
         .fontWeight(.semibold)
 #else
-        Button("Desktop Window") {}
-            .disabled(true)
-            .animation(.none, value: 0)
-            .fontWeight(.semibold)
+        Button {
+        } label: {
+            Text("Breakout Control Window")
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .disabled(true)
+        .animation(.none, value: 0)
+        .fontWeight(.semibold)
 #endif
     }
 }

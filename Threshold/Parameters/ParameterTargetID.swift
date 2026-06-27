@@ -21,6 +21,10 @@ enum ParameterTargetID {
     enum Space {
         static let sphereProjectionBlend = "space.sphereProjectionBlend"
         static let sphereProjectionRadius = "space.sphereProjectionRadius"
+        static let spaceWarpStrength = "space.spaceWarpStrength"
+        static let spaceWarpOriginX = "space.spaceWarpOriginX"
+        static let spaceWarpOriginY = "space.spaceWarpOriginY"
+        static let spaceWarpOriginZ = "space.spaceWarpOriginZ"
     }
 
     static let coreAndEffect: [String] = [
@@ -34,7 +38,11 @@ enum ParameterTargetID {
         Effect.saturation,
         Effect.safetyBubbleRadius,
         Space.sphereProjectionBlend,
-        Space.sphereProjectionRadius
+        Space.sphereProjectionRadius,
+        Space.spaceWarpStrength,
+        Space.spaceWarpOriginX,
+        Space.spaceWarpOriginY,
+        Space.spaceWarpOriginZ
     ]
 
     static func formula(fractalType: FractalModelType, formulaIndex: Int, name: String) -> String {

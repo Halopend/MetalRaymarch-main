@@ -26,6 +26,18 @@ final class BenchmarkManager: @unchecked Sendable {
     /// render thread; that's fine for a measurement toggle.
     nonisolated(unsafe) var collectIterations = false
 
+    /// Continuous "steps to converge" profiling driven by the Performance ▸ Metrics
+    /// dashboard toggle, independent of a benchmark sweep. Arms the same in-kernel
+    /// counter so the average is surfaced live to RenderMetrics.avgStepsPerPixel.
+    /// Default off: the per-hit-ray atomics add GPU cost that would distort the
+    /// frame-time reading shown beside it, so the user opts in to measure. Racy
+    /// gate — set on the main actor, read on the render thread.
+    nonisolated(unsafe) var liveStepMeasurement = false
+
+    /// The renderer arms the iteration counter (binds the buffer + sets
+    /// `benchCollectSteps`) whenever a sweep OR the live dashboard wants it.
+    var shouldCollectSteps: Bool { collectIterations || liveStepMeasurement }
+
     private var lock = os_unfair_lock()
     private var accum: SceneAccum?
 

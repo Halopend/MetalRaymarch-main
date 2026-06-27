@@ -1217,6 +1217,8 @@ actor Renderer {
         // the fragmentShader pipeline declares the buffer; it's only zeroed (and
         // later read) while a sweep is collecting. benchPtr is read in the
         // completion handler once the GPU has finished writing this slot.
+        // (Live dashboard step profiling is wired through the Mac path only; the
+        // visionOS compute kernel isn't step-instrumented yet.)
         let benchCollecting = BenchmarkManager.shared.collectIterations
         let benchBuf: MTLBuffer? = benchCounterBuffers.isEmpty
             ? nil : benchCounterBuffers[uniformBufferIndex % benchCounterBuffers.count]
@@ -1472,6 +1474,7 @@ actor Renderer {
             spaceWarpParam1: settingsSnapshot.spaceWarpParam1,
             spaceWarpParam2: settingsSnapshot.spaceWarpParam2,
             spaceWarpParam3: settingsSnapshot.spaceWarpParam3,
+            spaceWarpAxis: settingsSnapshot.spaceWarpAxis,
             // === GMT-FRACTALS OPTIMIZATIONS ===
             stepMultiplier: settingsSnapshot.stepMultiplier,
             boundingSphereRadius: settingsSnapshot.estimatedBoundingSphereRadius,  // >0 only when the experimental empty-space skip is enabled

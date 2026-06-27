@@ -165,6 +165,34 @@ enum ControlCatalog {
         range: 0.2...12.0,
         defaultValue: 1.0)
 
+    /// Built-in Twist strength. 0 = off. Setter clamps 0…2.
+    static let spaceWarpStrength = ControlSpec(
+        id: ParameterTargetID.Space.spaceWarpStrength,
+        name: "Twist",
+        icon: "tornado",
+        range: 0.0...2.0,
+        defaultValue: 0.0)
+
+    /// Built-in Twist origin point components (x, y, z).
+    static let spaceWarpOriginX = ControlSpec(
+        id: ParameterTargetID.Space.spaceWarpOriginX,
+        name: "Twist Origin X",
+        icon: "arrow.left.and.right",
+        range: -4.0...4.0,
+        defaultValue: 0.0)
+    static let spaceWarpOriginY = ControlSpec(
+        id: ParameterTargetID.Space.spaceWarpOriginY,
+        name: "Twist Origin Y",
+        icon: "arrow.up.and.down",
+        range: -4.0...4.0,
+        defaultValue: 0.0)
+    static let spaceWarpOriginZ = ControlSpec(
+        id: ParameterTargetID.Space.spaceWarpOriginZ,
+        name: "Twist Origin Z",
+        icon: "arrow.up.left.and.arrow.down.right",
+        range: -4.0...4.0,
+        defaultValue: 0.0)
+
     // MARK: Long-tail controls
     //
     // Controls consumed by the property setter + config clamp + UI slider but NOT
@@ -237,7 +265,8 @@ enum ControlCatalog {
     static let allSpecs: [ControlSpec] = [
         fractalScale, colorMix, iterations,
         glow, fog, bloom, hueSpeed, saturation, safetyBubbleRadius,
-        sphereProjectionBlend, sphereProjectionRadius
+        sphereProjectionBlend, sphereProjectionRadius,
+        spaceWarpStrength, spaceWarpOriginX, spaceWarpOriginY, spaceWarpOriginZ
     ]
 
     /// Canonical specs keyed by id.

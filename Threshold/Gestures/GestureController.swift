@@ -123,6 +123,7 @@ final class GestureController {
     var onAnimationPlayerToggle: (() -> Void)?
     var onOpenShapeMenu: (() -> Void)?
     var onOpenRenderMenu: (() -> Void)?
+    var onOpenQuickToggles: (() -> Void)?
     var onMenuWindowPullTowardUser: (() -> Void)?
     
     // Reference to render settings
@@ -231,6 +232,8 @@ final class GestureController {
                 onOpenShapeMenu?()
             case .openRenderMenu:
                 onOpenRenderMenu?()
+            case .openQuickToggles:
+                onOpenQuickToggles?()
             default:
                 break
             }

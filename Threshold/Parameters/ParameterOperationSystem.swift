@@ -224,6 +224,26 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
             spec: ControlCatalog.sphereProjectionRadius,
             read: { $0.sphereProjectionRadius },
             write: { settings, value in settings.audioModulateSphereProjectionRadius(value) }
+        ),
+        ControlCatalog.spaceWarpStrength.id: CoreParameterDescriptor(
+            spec: ControlCatalog.spaceWarpStrength,
+            read: { $0.spaceWarpStrength },
+            write: { settings, value in settings.audioModulateSpaceWarpStrength(value) }
+        ),
+        ControlCatalog.spaceWarpOriginX.id: CoreParameterDescriptor(
+            spec: ControlCatalog.spaceWarpOriginX,
+            read: { $0.spaceWarpParam1 },
+            write: { settings, value in settings.audioModulateSpaceWarpOriginX(value) }
+        ),
+        ControlCatalog.spaceWarpOriginY.id: CoreParameterDescriptor(
+            spec: ControlCatalog.spaceWarpOriginY,
+            read: { $0.spaceWarpParam2 },
+            write: { settings, value in settings.audioModulateSpaceWarpOriginY(value) }
+        ),
+        ControlCatalog.spaceWarpOriginZ.id: CoreParameterDescriptor(
+            spec: ControlCatalog.spaceWarpOriginZ,
+            read: { $0.spaceWarpParam3 },
+            write: { settings, value in settings.audioModulateSpaceWarpOriginZ(value) }
         )
     ]
 

@@ -364,6 +364,11 @@ private final class ThresholdMacRenderer {
     private let mesh: MTKMesh
     private let meshBindings: [CachedMeshBinding]
     private let uniformBuffers: [MTLBuffer]
+    /// Per-frame GPU atomic counters [stepSum, hitCount] for live step profiling,
+    /// ringed alongside `uniformBuffers` so the completion handler can read a slot
+    /// the GPU has finished with. Bound every frame; only written by the shader
+    /// when profiling is armed (see fragmentShaderMono / benchCollectSteps).
+    private let benchCounterBuffers: [MTLBuffer]
     private let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
     private let baseRotationMatrix = matrix4x4_rotation(radians: -.pi / 2, axis: [0, 1, 0])
     private let startTime = CACurrentMediaTime()
@@ -375,6 +380,10 @@ private final class ThresholdMacRenderer {
     // thread, read on the render thread — hence the lock. Surfaces the real,
     // vsync-independent render cost to the perf HUD.
     private let gpuFrameMsHolder = OSAllocatedUnfairLock<Double>(initialState: 0)
+    // Latest measured average march steps to converge (per hit pixel). Written on
+    // the completion thread when step profiling is armed, read on the render
+    // thread to feed the perf dashboard. 0 = not measuring.
+    private let avgStepsHolder = OSAllocatedUnfairLock<Double>(initialState: 0)
     private var smoothedScale: Float = 1.0
     private var smoothedMaxViewDistance: Float = RenderSettings.maxViewDistance
     private var drawableSize: CGSize = .zero
@@ -454,12 +463,17 @@ private final class ThresholdMacRenderer {
         self.depthState = depthState
 
         var buffers: [MTLBuffer] = []
+        var benchBuffers: [MTLBuffer] = []
         for index in 0..<Self.maxBuffersInFlight {
             guard let buffer = device.makeBuffer(length: Self.alignedUniformsSize, options: .storageModeShared) else { return nil }
             buffer.label = "ThresholdMac Uniforms \(index)"
             buffers.append(buffer)
+            guard let benchBuffer = device.makeBuffer(length: MemoryLayout<UInt32>.stride * 2, options: .storageModeShared) else { return nil }
+            benchBuffer.label = "ThresholdMac BenchCounters \(index)"
+            benchBuffers.append(benchBuffer)
         }
         uniformBuffers = buffers
+        benchCounterBuffers = benchBuffers
 
         meshBindings = builtMesh.vertexDescriptor.layouts.enumerated().compactMap { index, layout in
             guard let layout = layout as? MDLVertexBufferLayout, layout.stride != 0 else { return nil }
@@ -606,9 +620,27 @@ private final class ThresholdMacRenderer {
             }
         }
 
-        let uniformBuffer = uniformBuffers[uniformBufferIndex]
+        let frameSlot = uniformBufferIndex
+        let uniformBuffer = uniformBuffers[frameSlot]
         uniformBufferIndex = (uniformBufferIndex + 1) % uniformBuffers.count
         writeUniforms(to: uniformBuffer, appModel: appModel)
+
+        // Step profiling: zero this slot's counters before the GPU accumulates
+        // into them, then read back the converged-ray average once the frame
+        // completes. When off we still bind the buffer (the shader argument is
+        // declared) but pay only one bool read, and push 0 so the HUD clears.
+        let benchBuffer = benchCounterBuffers[frameSlot]
+        let collectSteps = BenchmarkManager.shared.shouldCollectSteps
+        if collectSteps {
+            memset(benchBuffer.contents(), 0, MemoryLayout<UInt32>.stride * 2)
+        }
+        commandBuffer.addCompletedHandler { [avgStepsHolder, benchBuffer, collectSteps] _ in
+            guard collectSteps else { avgStepsHolder.withLock { $0 = 0 }; return }
+            let counters = benchBuffer.contents().bindMemory(to: UInt32.self, capacity: 2)
+            let hitCount = counters[1]
+            let avg = hitCount > 0 ? Double(counters[0]) / Double(hitCount) : 0
+            avgStepsHolder.withLock { $0 = avg }
+        }
 
         let activePipeline = resolveActivePipeline(appModel: appModel)
 
@@ -622,7 +654,7 @@ private final class ThresholdMacRenderer {
                 commandBuffer.commit()
                 return
             }
-            encodeRaymarch(into: encoder, pipeline: activePipeline, uniformBuffer: uniformBuffer)
+            encodeRaymarch(into: encoder, pipeline: activePipeline, uniformBuffer: uniformBuffer, benchBuffer: benchBuffer)
             encoder.endEncoding()
 
             // 2. Motion-vector pass: reconstruct world position from depth and
@@ -675,7 +707,7 @@ private final class ThresholdMacRenderer {
                 commandBuffer.commit()
                 return
             }
-            encodeRaymarch(into: encoder, pipeline: activePipeline, uniformBuffer: uniformBuffer)
+            encodeRaymarch(into: encoder, pipeline: activePipeline, uniformBuffer: uniformBuffer, benchBuffer: benchBuffer)
             encoder.endEncoding()
 
             // 2. MetalFX spatial upscale → full-resolution output.
@@ -701,7 +733,7 @@ private final class ThresholdMacRenderer {
                 commandBuffer.commit()
                 return
             }
-            encodeRaymarch(into: encoder, pipeline: activePipeline, uniformBuffer: uniformBuffer)
+            encodeRaymarch(into: encoder, pipeline: activePipeline, uniformBuffer: uniformBuffer, benchBuffer: benchBuffer)
             encoder.endEncoding()
 
             wasTemporalActive = false
@@ -715,7 +747,8 @@ private final class ThresholdMacRenderer {
     /// direct (native) and offscreen (upscaled) render passes.
     private func encodeRaymarch(into encoder: MTLRenderCommandEncoder,
                                 pipeline: MTLRenderPipelineState,
-                                uniformBuffer: MTLBuffer) {
+                                uniformBuffer: MTLBuffer,
+                                benchBuffer: MTLBuffer) {
         encoder.setRenderPipelineState(pipeline)
         encoder.setDepthStencilState(depthState)
         // The raymarch proxy is a radius-100 ellipsoid drawn from the inside; the
@@ -732,6 +765,9 @@ private final class ThresholdMacRenderer {
         }
         encoder.setVertexBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
         encoder.setFragmentBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
+        // fragmentShaderMono declares benchCounters at this index; bind every
+        // frame so the argument is satisfied even when profiling is off.
+        encoder.setFragmentBuffer(benchBuffer, offset: 0, index: BufferIndex.benchCounters.rawValue)
 
         for submesh in mesh.submeshes {
             encoder.drawIndexedPrimitives(type: submesh.primitiveType,
@@ -990,6 +1026,7 @@ private final class ThresholdMacRenderer {
         updateFPS(deltaTime: deltaTime)
         uiUpdateCoordinator.scheduleUIUpdate(fps: smoothedFPS,
                                              gpuMs: gpuFrameMsHolder.withLock { $0 },
+                                             avgStepsPerPixel: avgStepsHolder.withLock { $0 },
                                              headHeightMeters: nil,
                                              currentTime: now)
 
@@ -1411,6 +1448,7 @@ private final class ThresholdMacRenderer {
                         spaceWarpParam1: settings.spaceWarpParam1,
                         spaceWarpParam2: settings.spaceWarpParam2,
                         spaceWarpParam3: settings.spaceWarpParam3,
+                        spaceWarpAxis: settings.spaceWarpAxis,
                         stepMultiplier: settings.stepMultiplier,
                         boundingSphereRadius: settings.estimatedBoundingSphereRadius,
                         smartAdvanceEnabled: settings.smartAdvanceEnabled ? 1 : 0,
@@ -1428,7 +1466,7 @@ private final class ThresholdMacRenderer {
                             viewportHeight: Float(drawableSize.height)),
                         shadowsEnabled: settings.shadowsEnabled ? 1 : 0,
                         distanceLODFalloff: settings.distanceLODStrength * 0.5,
-                        benchCollectSteps: 0,  // Mac fragment path not instrumented (Vision Pro focus)
+                        benchCollectSteps: BenchmarkManager.shared.shouldCollectSteps ? 1 : 0,
                         springDisplacementX: settings.springDisplacement.x,
                         springDisplacementY: settings.springDisplacement.y,
                         springDisplacementZ: settings.springDisplacement.z,

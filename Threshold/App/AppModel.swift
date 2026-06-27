@@ -31,6 +31,18 @@ final class RenderMetrics {
     var renderQuality: Float = 0      // current target, driven by the resolution slider
     var foveationEnabled: Bool = false
     var renderPath: String = "—"
+
+    /// Measured average raymarch steps taken to converge, per converged (hit)
+    /// pixel — the headline cost metric the Performance dashboard tunes against
+    /// (config "Ray Steps" is only the *budget*; this is what actually happened).
+    /// Read back from a GPU atomic counter at ~2 Hz while step profiling is on.
+    /// 0 = not currently measuring (UI shows "—").
+    var avgStepsPerPixel: Double = 0
+
+    /// User toggle for live step profiling. Mirrored to
+    /// `BenchmarkManager.shared.liveStepMeasurement`, which arms the in-kernel
+    /// counter. Off by default because the per-ray atomics add GPU cost.
+    var stepProfilingEnabled: Bool = false
 }
 
 /// High-frequency hand tracking UI state isolated from AppModel so that
@@ -481,6 +493,9 @@ class AppModel {
         gestureController?.onOpenRenderMenu = { [weak self] in
             self?.openRenderMenuFromGesture()
         }
+        gestureController?.onOpenQuickToggles = { [weak self] in
+            self?.openQuickTogglesFromGesture()
+        }
         gestureController?.onMenuWindowPullTowardUser = { [weak self] in
             self?.pullMenuWindowTowardUser()
         }
@@ -792,6 +807,12 @@ class AppModel {
     /// Returns true when the Fractal > Render tab is already active.
     var isRenderMenuActiveHandler: (() -> Bool)?
 
+    /// Callback to navigate directly to the Quick Toggles tab.
+    var openQuickTogglesHandler: (() -> Void)?
+
+    /// Returns true when the Quick Toggles tab is already active.
+    var isQuickTogglesActiveHandler: (() -> Bool)?
+
     /// Callback to present the save preset sheet from the active content view.
     var openSavePresetMenuHandler: (() -> Void)?
     
@@ -830,6 +851,14 @@ class AppModel {
             isRequestedTabAlreadyOpen: isRenderMenuActiveHandler?() ?? false,
             openRequestedTab: openRenderMenuHandler,
             label: "Render"
+        )
+    }
+
+    func openQuickTogglesFromGesture() {
+        toggleFractalMenuFromGesture(
+            isRequestedTabAlreadyOpen: isQuickTogglesActiveHandler?() ?? false,
+            openRequestedTab: openQuickTogglesHandler,
+            label: "Quick Toggles"
         )
     }
 
@@ -1323,7 +1352,7 @@ class AppModel {
     /// One-time migration to keep menu opening easy with either finger and
     /// normalize older menu sensitivity defaults to a faster/easier-open setup.
     private func migrateDistinctWindowGestureDefaultsIfNeeded() {
-        let migrationKey = "gestureDistinctWindowMapping.v7"
+        let migrationKey = "gestureDistinctWindowMapping.v8"
         guard UserDefaults.standard.bool(forKey: migrationKey) == false else { return }
 
         // Ensure gesture toggle is enabled so menu recovery remains possible.
@@ -1342,6 +1371,15 @@ class AppModel {
             || renderSettings.perFingerTapLeftActions == priorLeftDefault {
             renderSettings.perFingerTapLeftActions = GestureDefaults.perFingerTapLeftActions
             GestureDefaults.savePerFingerTapActions(renderSettings.perFingerTapLeftActions, keyPrefix: "perFingerTapLeft")
+        }
+
+        // Adopt the Open Quick Toggles gesture on the right ring finger for installs
+        // that predate it, as long as that slot is still unassigned.
+        var rightActions = renderSettings.perFingerTapRightActions
+        if rightActions.count == 5, rightActions[3] == .none {
+            rightActions[3] = .openQuickToggles
+            renderSettings.perFingerTapRightActions = rightActions
+            GestureDefaults.savePerFingerTapActions(rightActions, keyPrefix: "perFingerTapRight")
         }
 
         UserDefaults.standard.set(true, forKey: migrationKey)

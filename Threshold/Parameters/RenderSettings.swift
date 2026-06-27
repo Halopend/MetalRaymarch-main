@@ -110,9 +110,13 @@ final class RenderSettings: @unchecked Sendable {
     // Custom space warp (built-in "Twist" by default; a loaded .threshfx warp can
     // override the GPU function). Strength 0 = off (dead-code-eliminated).
     private var _spaceWarpStrength: Float = 0.0
+    // Built-in Twist origin point (x, y, z). Origin defaults to the world center.
     private var _spaceWarpParam1: Float = 0.0
     private var _spaceWarpParam2: Float = 0.0
     private var _spaceWarpParam3: Float = 0.0
+    // Built-in Twist orientation: the axis the twist rotates about (normalized in
+    // the shader). Default = vertical (+Y), matching the original Y-axis twist.
+    private var _spaceWarpAxis: SIMD3<Float> = SIMD3<Float>(0, 1, 0)
     private var _platformRadius: Float = 1.888
     private var _platformEnabled: Bool = true
     private var _audioLevel: Float = 0.0            // Current audio level (0-1) for reactive lighting
@@ -565,6 +569,20 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _spaceWarpParam3 = newValue } }
     }
 
+    /// The built-in Twist's rotation axis (orientation). Normalized on the GPU;
+    /// `(0, 1, 0)` reproduces the original vertical twist. The origin point is
+    /// carried by `spaceWarpParam1/2/3`.
+    var spaceWarpAxis: SIMD3<Float> {
+        get { withLock { _spaceWarpAxis } }
+        set { withLock { _spaceWarpAxis = newValue } }
+    }
+
+    /// Twist origin point (x, y, z), backed by the generic warp params.
+    var spaceWarpOrigin: SIMD3<Float> {
+        get { withLock { SIMD3<Float>(_spaceWarpParam1, _spaceWarpParam2, _spaceWarpParam3) } }
+        set { withLock { _spaceWarpParam1 = newValue.x; _spaceWarpParam2 = newValue.y; _spaceWarpParam3 = newValue.z } }
+    }
+
     var platformRadius: Float {
         get { withLock { _platformRadius } }
         set {
@@ -758,6 +776,18 @@ final class RenderSettings: @unchecked Sendable {
             _sphereProjectionRadius = max(0.2, min(12.0, value))
         }
     }
+
+    /// Modulate built-in Twist strength (gesture/audio path). Clamps 0…2.
+    func audioModulateSpaceWarpStrength(_ value: Float) {
+        withLock {
+            _spaceWarpStrength = max(0.0, min(2.0, value))
+        }
+    }
+
+    /// Modulate built-in Twist origin components (gesture/audio path).
+    func audioModulateSpaceWarpOriginX(_ value: Float) { withLock { _spaceWarpParam1 = value } }
+    func audioModulateSpaceWarpOriginY(_ value: Float) { withLock { _spaceWarpParam2 = value } }
+    func audioModulateSpaceWarpOriginZ(_ value: Float) { withLock { _spaceWarpParam3 = value } }
     
     var foldingLimit: Float {
         get { withLock { _foldingLimit } }
@@ -2334,6 +2364,7 @@ final class RenderSettings: @unchecked Sendable {
                 spaceWarpParam1: _spaceWarpParam1,
                 spaceWarpParam2: _spaceWarpParam2,
                 spaceWarpParam3: _spaceWarpParam3,
+                spaceWarpAxis: _spaceWarpAxis,
                 platformRadius: _platformRadius,
                 platformEnabled: _platformEnabled,
                 audioLevel: _audioLevel,

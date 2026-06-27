@@ -309,20 +309,6 @@ private struct ParameterNodeRow: View {
                     .help(currentGestureSlot.map { "\($0.hand.displayName) \($0.finger.displayName)" } ?? "Assign hand gesture")
                 }
 
-                // Assign to music reactive
-                if let musicTarget = musicReactiveTarget {
-                    Button {
-                        toggleMusicMapping(musicTarget)
-                    } label: {
-                        Image(systemName: hasMusicMapping(musicTarget) ? AppIcons.waveformCircleFill : AppIcons.waveformCircle)
-                            .font(.caption)
-                            .foregroundStyle(hasMusicMapping(musicTarget) ? AnyShapeStyle(.pink) : AnyShapeStyle(.tertiary))
-                            .frame(width: 20)
-                    }
-                    .buttonStyle(.borderless)
-                    .help(hasMusicMapping(musicTarget) ? "Remove music reactivity" : "Assign to music")
-                }
-
                 // Flip to sensitivity
                 if supportsGestureShortcuts {
                     Button {
@@ -391,108 +377,6 @@ private struct ParameterNodeRow: View {
                 }
                 .buttonStyle(.borderless)
             }
-
-            // ── Row 2+: Music shortcuts (when enabled and param has a music target) ──
-            if cache.display.showMusicShortcuts, let target = musicReactiveTarget {
-                let mappingIndex = musicMappingIndex(for: target)
-
-                Divider()
-
-                // Source picker
-                HStack(spacing: 4) {
-                    Image(systemName: AppIcons.waveformCircle)
-                        .font(.caption)
-                        .foregroundStyle(.pink)
-                        .frame(width: 16)
-
-                    if let idx = mappingIndex, idx < cache.audioReactive.musicReactiveMappings.count {
-                        Picker("", selection: Binding(
-                            get: { idx < cache.audioReactive.musicReactiveMappings.count ? cache.audioReactive.musicReactiveMappings[idx].source : .composite },
-                            set: { src in updateMusicMapping(target) { $0.source = src } }
-                        )) {
-                            ForEach(MusicReactiveSource.pickerCases, id: \.self) { s in
-                                Text(s.displayName).tag(s)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .controlSize(.small)
-                    } else {
-                        Text("Not mapped")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                        Spacer()
-                        Button("Add") { toggleMusicMapping(target) }
-                            .font(.caption2)
-                            .buttonStyle(.bordered)
-                            .controlSize(.mini)
-                            .tint(.pink)
-                    }
-                }
-
-                if mappingIndex != nil {
-                    // Response curve
-                    HStack(spacing: 4) {
-                        Image(systemName: AppIcons.waveform)
-                            .font(.caption2)
-                            .foregroundStyle(.pink)
-                            .frame(width: 16)
-                        Picker("", selection: Binding(
-                            get: {
-                                guard let idx = musicMappingIndex(for: target),
-                                      idx < cache.audioReactive.musicReactiveMappings.count else { return ResponseCurve.sinusoidal }
-                                return cache.audioReactive.musicReactiveMappings[idx].responseCurve
-                            },
-                            set: { curve in updateMusicMapping(target) { $0.responseCurve = curve } }
-                        )) {
-                            ForEach(ResponseCurve.pickerCases, id: \.self) { c in
-                                Image(systemName: c.icon).tag(c)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .controlSize(.mini)
-                    }
-
-                    // Intensity
-                    HStack(spacing: 4) {
-                        Text("Intensity")
-                            .font(.caption2)
-                            .foregroundStyle(.pink)
-                            .frame(width: 52, alignment: .leading)
-                        Slider(
-                            value: Binding(
-                                get: { musicMappingValue(for: target, \.amount) ?? 1.0 },
-                                set: { v in updateMusicMapping(target) { $0.amount = v; $0.sanitizeInPlace() } }
-                            ),
-                            in: 0...3
-                        )
-                        .tint(.pink)
-                        Text(String(format: "%.1f", musicMappingValue(for: target, \.amount) ?? 1.0))
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 28)
-                    }
-
-                    // Smooth
-                    HStack(spacing: 4) {
-                        Text("Smooth")
-                            .font(.caption2)
-                            .foregroundStyle(.pink)
-                            .frame(width: 52, alignment: .leading)
-                        Slider(
-                            value: Binding(
-                                get: { musicMappingValue(for: target, \.smoothingWindow) ?? 0.0 },
-                                set: { v in updateMusicMapping(target) { $0.smoothingWindow = v; $0.sanitizeInPlace() } }
-                            ),
-                            in: 0...2
-                        )
-                        .tint(.pink)
-                        Text(String(format: "%.1f", musicMappingValue(for: target, \.smoothingWindow) ?? 0.0))
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 28)
-                    }
-                }
-            }
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 3)
@@ -500,26 +384,6 @@ private struct ParameterNodeRow: View {
             RoundedRectangle(cornerRadius: 6)
                 .fill(Color.orange.opacity(0.06))
         )
-    }
-
-    // MARK: - Music Mapping Inline Helpers
-
-    private func musicMappingIndex(for target: MusicReactiveTarget) -> Int? {
-        cache.audioReactive.musicReactiveMappings.firstIndex(where: { $0.target == target })
-    }
-
-    private func musicMappingValue(for target: MusicReactiveTarget, _ keyPath: KeyPath<MusicReactiveMapping, Float>) -> Float? {
-        guard let idx = musicMappingIndex(for: target) else { return nil }
-        return cache.audioReactive.musicReactiveMappings[idx][keyPath: keyPath]
-    }
-
-    private func updateMusicMapping(_ target: MusicReactiveTarget, _ mutate: (inout MusicReactiveMapping) -> Void) {
-        var mappings = cache.audioReactive.musicReactiveMappings
-        if let idx = mappings.firstIndex(where: { $0.target == target }) {
-            mutate(&mappings[idx])
-            cache.audioReactive.musicReactiveMappings = mappings
-            cache.push(\.musicReactiveMappings, value: mappings)
-        }
     }
 
     // MARK: - Helpers
@@ -551,32 +415,6 @@ private struct ParameterNodeRow: View {
         cache.setGestureBinding(.core(.none), for: slot)
     }
 
-    // MARK: - Music Reactive Helpers
-
-    private var musicReactiveTarget: MusicReactiveTarget? {
-        guard let floatNode = node as? FloatParameterNode else { return nil }
-        let pieces = floatNode.id.split(separator: ".")
-        guard pieces.count >= 3, let formulaIndex = Int(pieces[2]) else { return nil }
-        let floatParams = MusicReactiveTarget.floatFormulaParams(for: cache.fractalType)
-        guard let slotIndex = floatParams.firstIndex(where: { $0.index == formulaIndex }) else { return nil }
-        guard slotIndex < MusicReactiveTarget.allFormulaParamCases.count else { return nil }
-        return MusicReactiveTarget.allFormulaParamCases[slotIndex]
-    }
-
-    private func hasMusicMapping(_ target: MusicReactiveTarget) -> Bool {
-        cache.audioReactive.musicReactiveMappings.contains { $0.target == target && $0.isEnabled }
-    }
-
-    private func toggleMusicMapping(_ target: MusicReactiveTarget) {
-        var mappings = cache.audioReactive.musicReactiveMappings
-        if let idx = mappings.firstIndex(where: { $0.target == target }) {
-            mappings.remove(at: idx)
-        } else {
-            mappings.append(target.defaultMapping(for: cache.fractalType, enabled: true))
-        }
-        cache.audioReactive.musicReactiveMappings = mappings
-        cache.push(\.musicReactiveMappings, value: mappings)
-    }
 }
 
 // MARK: - Power Quick Picker (Mandelbulb)
