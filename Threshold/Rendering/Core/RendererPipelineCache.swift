@@ -769,7 +769,8 @@ extension Renderer {
                                      fractalIterations: Int32, shadowIterations: Int32, maxRaySteps: Int32,
                                      mandelbulbPower: Int32? = nil,
                                      safetyBubbleEnabled: Bool? = nil,
-                                     coherentPacketEnabled: Bool? = nil) -> MTLComputePipelineState? {
+                                     coherentPacketEnabled: Bool? = nil,
+                                     archive: PipelineBinaryArchive? = nil) -> MTLComputePipelineState? {
         let constants = MTLFunctionConstantValues()
         var fi = fractalIterations
         var si = shadowIterations
@@ -800,8 +801,22 @@ extension Renderer {
             return nil
         }
 
+        // Descriptor form (not makeComputePipelineState(function:)) so a persisted
+        // MTLBinaryArchive can supply this PSO's binary on a hit, and capture it on
+        // a miss. Lookup + build + capture run together under the archive lock (see
+        // PipelineBinaryArchive.makeComputePipeline) so the in-Metal archive read
+        // can't race a concurrent capture. Archive absent/miss → Metal compiles
+        // exactly as before.
+        let pipelineDescriptor = MTLComputePipelineDescriptor()
+        pipelineDescriptor.computeFunction = function
+        pipelineDescriptor.label = "Compute_\(kernelName)_FI\(fi)_RS\(rs)"
         do {
-            return try device.makeComputePipelineState(function: function)
+            if let archive {
+                return try archive.makeComputePipeline(device: device, descriptor: pipelineDescriptor)
+            }
+            return try device.makeComputePipelineState(descriptor: pipelineDescriptor,
+                                                       options: [],
+                                                       reflection: nil)
         } catch {
             if RENDERER_DEBUG { print("⚠️ [ComputeCache] Failed to build compute pipeline: \(error)") }
             return nil
@@ -846,8 +861,9 @@ extension Renderer {
         let powerKey = mbPowerInt.map { "P\($0)" } ?? ""
         let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
         let packetEnabled = appModel.renderSettings.coherentPacketEnabled
+        let cacheKeyPrefix = customCacheKeyPrefix(for: fractalType)
         let keyContext = ComputePipelineKeyContext(
-            prefix: customCacheKeyPrefix(for: fractalType),
+            prefix: cacheKeyPrefix,
             fractalTypeRawValue: Int(fractalType.rawValue),
             fractalIterations: fractalIterations,
             maxRaySteps: maxRaySteps,
@@ -950,7 +966,58 @@ extension Renderer {
             coherentPacketEnabled: packetEnabled
         )
 
-        // 4. Ultimate fallback — generic pipeline with NO function constants.
+        // 4. Powerless shared fallback — serve the FI/RS-specialized startup
+        //    pipeline THIS frame while the exact build (enqueued above) runs.
+        //    A baked Mandelbulb power makes `sharedKey` carry "P{n}", but the
+        //    startup shared tier is keyed plain "FI{fi}_RS{rs}" with power /
+        //    bubble / packet left as *undefined* function constants (built with
+        //    an empty MTLFunctionConstantValues — Renderer.init ~:492/:509, read
+        //    from uniforms at runtime). So the shared lookup at step 2 is dead for
+        //    every common integer power, and without this we'd drop straight to
+        //    the fully-generic kernel during interaction with the heaviest
+        //    fractal. Stripping `powerKey` reproduces exactly the startup key;
+        //    serving it is correct for any power/bubble/packet because the shader
+        //    reads those from uniforms. The exact (power-baked) pipeline still
+        //    builds in the background and takes over in steady state.
+        //
+        //    DEFAULT-LIBRARY ONLY. The startup shared tier is keyed plain
+        //    "FI{fi}_RS{rs}" with NO custom prefix, so it can only ever serve a
+        //    built-in with no active custom library. A custom space warp riding a
+        //    built-in carries a non-empty "CX{hash}_" prefix (and Mandelbulb is
+        //    exactly when powerKey is non-empty) — serving the default pipeline
+        //    there would silently drop the warp, so that case must wait for its
+        //    exact custom-library build. Gating on cacheKeyPrefix.isEmpty also
+        //    keeps the dropLast suffix-strip honest: with no prefix, sharedKey is
+        //    "FI{fi}_RS{rs}" + powerKey, so dropLast(powerKey.count) is exact.
+        //
+        //    VALID ONLY while the shared tier leaves power/bubble/packet undefined.
+        //    If a future edit bakes any of them into the startup pipelines, this
+        //    probe would serve a wrong-scene pipeline — the debug assert guards
+        //    the key grammar this assumption depends on.
+        if !powerKey.isEmpty, cacheKeyPrefix.isEmpty {
+            let powerlessSharedKey = String(sharedKey.dropLast(powerKey.count))
+            assert(powerlessSharedKey == "FI\(fractalIterations)_RS\(maxRaySteps)",
+                   "Powerless shared probe drifted from the startup compute key format (Renderer.init ~:492); re-check that the shared tier still omits power/scene bakes before trusting this fallback.")
+            if let shared = computePipelineCache[powerlessSharedKey] {
+                recordPipelineTelemetry(computeHit: false, computeMissKey: exactKey, computeSource: "shared-powerless")
+                if RENDERER_DEBUG && lastComputePipelineKey != powerlessSharedKey {
+                    print("🎯 [ComputeCache] Powerless shared fallback: \(powerlessSharedKey) (exact \(exactKey) building)")
+                    lastComputePipelineKey = powerlessSharedKey
+                }
+                return cacheSelectedComputePipeline(
+                    shared,
+                    fractalTypeRawValue: fractalType.rawValue,
+                    fractalIterations: fractalIterations,
+                    maxRaySteps: maxRaySteps,
+                    mandelbulbPower: mbPowerInt,
+                    activeCustomHash: activeCustomHash,
+                    bubbleEnabled: bubbleEnabled,
+                    packetEnabled: packetEnabled
+                )
+            }
+        }
+
+        // 5. Ultimate fallback — generic pipeline with NO function constants.
         //    Shader reads iterations from uniforms at runtime, matching absScalePow.
         if RENDERER_DEBUG && lastComputePipelineKey != "fallback" {
             print("⚠️ [ComputeCache] Using fallback generic compute pipeline")
@@ -1030,6 +1097,27 @@ extension Renderer {
         computePipelineCache[key] = pipeline
         lastSelectedComputePipeline = nil
         if RENDERER_DEBUG { print("✅ [Compute] Async-built and cached: \(key)") }
+        // The just-built PSO was added to the archive inside buildComputePipeline;
+        // persist it once this burst of interaction-driven builds settles.
+        scheduleArchiveSerialize()
+    }
+
+    /// Coalesce archive writes: reschedule a single background serialize a few
+    /// seconds after the most recent lazy build, so a burst of pipeline builds
+    /// during interaction produces one disk write, off the render loop.
+    func scheduleArchiveSerialize() {
+        guard pipelineArchive != nil else { return }
+        archiveSerializeTask?.cancel()
+        let archiveRef = pipelineArchive
+        archiveSerializeTask = Task.detached(priority: .background) {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            // A cancelled sleep throws, which `try?` swallows — so without this
+            // guard a superseded (cancelled) task would still serialize, firing a
+            // disk write per build instead of one after the burst settles. Skip
+            // when cancelled; only the final, un-cancelled task persists.
+            guard !Task.isCancelled else { return }
+            archiveRef?.serializeIfDirty()
+        }
     }
 
     func markComputePipelineBuildFailed(forKey key: String) {
@@ -1137,7 +1225,8 @@ extension Renderer {
                 maxRaySteps: maxRaySteps,
                 mandelbulbPower: mandelbulbPower,
                 safetyBubbleEnabled: safetyBubbleEnabled,
-                coherentPacketEnabled: coherentPacketEnabled
+                coherentPacketEnabled: coherentPacketEnabled,
+                archive: self.pipelineArchive
             ) {
                 await self.insertBuiltComputePipeline(pipeline, forKey: cacheKey)
             } else {
