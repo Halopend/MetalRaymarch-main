@@ -19,7 +19,8 @@ extension Renderer {
                                               fragmentFunctionName: String = "fragmentShader",
                                               usesVertexAmplification: Bool = true,
                                               functionConstants: MTLFunctionConstantValues? = nil,
-                                              library: MTLLibrary? = nil) throws -> MTLRenderPipelineState {
+                                              library: MTLLibrary? = nil,
+                                              archive: PipelineBinaryArchive? = nil) throws -> MTLRenderPipelineState {
         /// Build a render state pipeline object. When `library` is non-nil, all
         /// `makeFunction` calls target it (used for runtime-compiled `.threshfx`
         /// formulas). Otherwise the bundled `default.metallib` is used and cached.
@@ -69,6 +70,12 @@ extension Renderer {
 
         pipelineDescriptor.maxVertexAmplificationCount = usesVertexAmplification ? layerRenderer.properties.viewCount : 1
 
+        // Route through the binary archive (lookup + capture under one lock) when
+        // present, so this PSO's GPU compile is loaded from / saved to disk across
+        // launches. Archive absent/miss → Metal compiles exactly as before.
+        if let archive {
+            return try archive.makeRenderPipeline(device: device, descriptor: pipelineDescriptor)
+        }
         return try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
     }
 
@@ -204,7 +211,8 @@ extension Renderer {
                                          mtlVertexDescriptor: MTLVertexDescriptor,
                                          config: FunctionConstantConfig,
                                          fragmentFunctionName: String = "fragmentShader",
-                                         library: MTLLibrary? = nil) throws -> MTLRenderPipelineState {
+                                         library: MTLLibrary? = nil,
+                                         archive: PipelineBinaryArchive? = nil) throws -> MTLRenderPipelineState {
         return try buildRenderPipelineWithDevice(
             device: device,
             layerRenderer: layerRenderer,
@@ -212,7 +220,8 @@ extension Renderer {
             mtlVertexDescriptor: mtlVertexDescriptor,
             fragmentFunctionName: fragmentFunctionName,
             functionConstants: config.toMTLConstants(),
-            library: library
+            library: library,
+            archive: archive
         )
     }
 }

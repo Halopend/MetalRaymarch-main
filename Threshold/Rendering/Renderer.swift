@@ -252,6 +252,9 @@ actor Renderer {
     /// Cross-launch cache of compiled compute pipeline binaries. Optional: nil if
     /// Application Support is unavailable, in which case every launch recompiles.
     let pipelineArchive: PipelineBinaryArchive?
+    /// Cross-launch cache of compiled *render* pipeline binaries (separate file so
+    /// compute/render invalidate independently). Same additive, try?-guarded model.
+    let renderPipelineArchive: PipelineBinaryArchive?
     /// Coalesces archive serialization after bursts of lazy compute-pipeline
     /// builds — rescheduled on each build, fires once the burst settles.
     nonisolated(unsafe) var archiveSerializeTask: Task<Void, Never>?
@@ -297,9 +300,11 @@ actor Renderer {
 
         let device = self.device
 
-        // Cross-launch pipeline-binary cache (compute path). Built before the
-        // startup compute batch below so those first PSOs are captured + reused.
+        // Cross-launch pipeline-binary caches. Built before the startup batches
+        // below so those first PSOs are captured + reused next launch. Separate
+        // files for the compute (raymarch) and render (raster) paths.
         self.pipelineArchive = PipelineBinaryArchive(device: device, purpose: "compute")
+        self.renderPipelineArchive = PipelineBinaryArchive(device: device, purpose: "render")
 
         let uniformBufferSize = alignedUniformsSize * maxBuffersInFlight
 
@@ -328,7 +333,8 @@ actor Renderer {
             pipelineState = try Renderer.buildRenderPipelineWithDevice(device: device,
                                                                        layerRenderer: layerRenderer,
                                                                        rasterSampleCount: rasterSampleCount,
-                                                                       mtlVertexDescriptor: mtlVertexDescriptor)
+                                                                       mtlVertexDescriptor: mtlVertexDescriptor,
+                                                                       archive: self.renderPipelineArchive)
         } catch {
             if RENDERER_DEBUG { print("❌ Unable to compile render pipeline state: \(error)") }
             return nil
@@ -341,7 +347,8 @@ actor Renderer {
                                                                                  rasterSampleCount: rasterSampleCount,
                                                                                  mtlVertexDescriptor: mtlVertexDescriptor,
                                                                                  vertexFunctionName: "vertexShader",
-                                                                                 fragmentFunctionName: "fragmentShaderQuadShared")
+                                                                                 fragmentFunctionName: "fragmentShaderQuadShared",
+                                                                                 archive: self.renderPipelineArchive)
             if RENDERER_DEBUG { print("✓ Quad-shared pipeline ready (2x2 SIMD grouping)") }
         } catch {
             if RENDERER_DEBUG { print("⚠️ Quad-shared pipeline failed: \(error)") }
@@ -358,7 +365,8 @@ actor Renderer {
                 mtlVertexDescriptor: postProcessVertexDescriptor,
                 depthFormat: .invalid,
                 vertexFunctionName: "formatConversionVertexStereo",
-                fragmentFunctionName: "formatConversionFragmentStereo"
+                fragmentFunctionName: "formatConversionFragmentStereo",
+                archive: self.renderPipelineArchive
             )
             metalFXDepthResolvePipeline = try Renderer.buildRenderPipelineWithDevice(
                 device: device,
@@ -367,7 +375,8 @@ actor Renderer {
                 mtlVertexDescriptor: postProcessVertexDescriptor,
                 colorFormat: .invalid,
                 vertexFunctionName: "formatConversionVertexStereo",
-                fragmentFunctionName: "depthUpscaleFragmentStereo"
+                fragmentFunctionName: "depthUpscaleFragmentStereo",
+                archive: self.renderPipelineArchive
             )
             // Phase 2.7: Merged single-encoder resolve. Optional — if it fails to
             // build (e.g. driver mismatch) we fall back to the two-encoder path.
@@ -377,7 +386,8 @@ actor Renderer {
                 rasterSampleCount: rasterSampleCount,
                 mtlVertexDescriptor: postProcessVertexDescriptor,
                 vertexFunctionName: "formatConversionVertexStereo",
-                fragmentFunctionName: "formatConversionFragmentStereoMerged"
+                fragmentFunctionName: "formatConversionFragmentStereoMerged",
+                archive: self.renderPipelineArchive
             )
             if RENDERER_DEBUG { print("✓ MetalFX resolve pipelines ready (color=bgra8Unorm_srgb/depth=invalid, depth=invalid/depth=depth32Float, merged=\(metalFXMergedResolvePipeline != nil ? "ok" : "unavailable"))") }
         } catch {
@@ -438,7 +448,8 @@ actor Renderer {
                 layerRenderer: layerRenderer,
                 rasterSampleCount: rasterSampleCount,
                 mtlVertexDescriptor: mtlVertexDescriptor,
-                functionConstants: constants
+                functionConstants: constants,
+                archive: self.renderPipelineArchive
             ) {
                 pipelineCache[unifiedKey] = pipeline
                 pipelineCount += 1
@@ -452,7 +463,8 @@ actor Renderer {
                 rasterSampleCount: rasterSampleCount,
                 mtlVertexDescriptor: mtlVertexDescriptor,
                 fragmentFunctionName: "fragmentShaderQuadShared",
-                functionConstants: constants
+                functionConstants: constants,
+                archive: self.renderPipelineArchive
             ) {
                 pipelineCache[unifiedKey + "_QS"] = pipeline
             }
@@ -568,11 +580,15 @@ actor Renderer {
             await self.precompilePresetPipelines()
             guard !Task.isCancelled else { return }
 
-            // Persist the compute pipeline binaries compiled during startup so the
-            // next cold launch loads them instead of re-running the GPU back-end
-            // compiler. Off-actor, low priority — never blocks a frame.
-            let archiveRef = self.pipelineArchive
-            Task.detached(priority: .background) { archiveRef?.serializeIfDirty() }
+            // Persist the pipeline binaries compiled during startup (compute +
+            // render) so the next cold launch loads them instead of re-running the
+            // GPU back-end compiler. Off-actor, low priority — never blocks a frame.
+            let computeArchive = self.pipelineArchive
+            let renderArchive = self.renderPipelineArchive
+            Task.detached(priority: .background) {
+                computeArchive?.serializeIfDirty()
+                renderArchive?.serializeIfDirty()
+            }
 
             await MainActor.run {
                 self.appModel.rendererStartupWarmupComplete = true

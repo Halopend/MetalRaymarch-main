@@ -35,10 +35,12 @@
 //
 //  WHY IT IS SAFE
 //  --------------
-//  Every interaction with the archive is wrapped in `try?` and an archive miss
-//  is transparent (no `MTLPipelineOption.failOnBinaryArchiveMiss`), so a missing,
-//  corrupt, stale, or wrong-GPU file simply falls back to today's compile path.
-//  A regression is therefore impossible — the cache can only ever save work.
+//  An archive miss is transparent: the make* helpers probe with
+//  `.failOnBinaryArchiveMiss` ONLY to detect a hit (so a warm launch skips the
+//  recompile and the re-serialize), and on a miss fall back to a normal compile
+//  and capture the result. A missing, corrupt, stale, or wrong-GPU file therefore
+//  simply recompiles as today — a regression is impossible; the cache can only
+//  ever save work.
 //
 //  INVALIDATION
 //  ------------
@@ -115,8 +117,17 @@ final class PipelineBinaryArchive: @unchecked Sendable {
         }
         lock.lock(); defer { lock.unlock() }
         descriptor.binaryArchives = [archive]
+        // Hit: load the persisted binary — no recompile, and crucially no dirtying,
+        // so a warm launch where everything is already archived performs no
+        // needless re-serialize of identical content.
+        if let cached = try? device.makeComputePipelineState(descriptor: descriptor,
+                                                             options: .failOnBinaryArchiveMiss,
+                                                             reflection: nil) {
+            return cached
+        }
+        // Miss: compile, capture for the next launch, and mark dirty so the
+        // coalesced serialize persists the genuinely-new binary.
         let pipeline = try device.makeComputePipelineState(descriptor: descriptor, options: [], reflection: nil)
-        // Capture for the next launch. Idempotent on an archive hit.
         do {
             try archive.addComputePipelineFunctions(descriptor: descriptor)
             dirty = true
@@ -126,26 +137,34 @@ final class PipelineBinaryArchive: @unchecked Sendable {
         return pipeline
     }
 
-    /// Attach the archive to a render descriptor (lookup only). Render-path
-    /// adoption is not wired yet; before using it, route the build through a
-    /// lock-safe `makeRenderPipeline` mirroring `makeComputePipeline` so the
-    /// in-Metal archive read is serialized against capture/serialize.
-    func attach(to descriptor: MTLRenderPipelineDescriptor) {
-        guard let archive else { return }
-        descriptor.binaryArchives = [archive]
-    }
-
-    /// Record a freshly-built render pipeline's functions (render-path adoption,
-    /// not yet wired — see `attach(to:)` above).
-    func record(_ descriptor: MTLRenderPipelineDescriptor) {
-        guard let archive else { return }
+    /// Render-pipeline analogue of `makeComputePipeline`: build with the archive
+    /// attached for binary lookup, then capture the freshly-built functions — all
+    /// under `lock`, so the archive read inside `makeRenderPipelineState` cannot
+    /// race a concurrent capture/serialize on another build task. When the on-disk
+    /// archive failed to load (`archive == nil`) this degrades to a plain build.
+    func makeRenderPipeline(device: MTLDevice,
+                            descriptor: MTLRenderPipelineDescriptor) throws -> MTLRenderPipelineState {
+        guard let archive else {
+            return try device.makeRenderPipelineState(descriptor: descriptor)
+        }
         lock.lock(); defer { lock.unlock() }
+        descriptor.binaryArchives = [archive]
+        // Hit: load the persisted binary — no recompile, no dirtying (see
+        // makeComputePipeline) so a warm launch doesn't re-serialize unchanged.
+        if let cached = try? device.makeRenderPipelineState(descriptor: descriptor,
+                                                            options: .failOnBinaryArchiveMiss,
+                                                            reflection: nil) {
+            return cached
+        }
+        // Miss: compile, capture for the next launch, and mark dirty.
+        let pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
         do {
             try archive.addRenderPipelineFunctions(descriptor: descriptor)
             dirty = true
         } catch {
             Self.log.debug("addRenderPipelineFunctions failed: \(error.localizedDescription, privacy: .public)")
         }
+        return pipeline
     }
 
     // MARK: - Persistence

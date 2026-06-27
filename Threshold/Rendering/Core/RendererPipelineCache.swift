@@ -247,7 +247,8 @@ extension Renderer {
                 mtlVertexDescriptor: mtlVertexDescriptor,
                 config: config,
                 fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader",
-                library: library
+                library: library,
+                archive: renderPipelineArchive
             )
             pipelineCache[cacheKey] = pipeline  // Store in unified cache
             if RENDERER_DEBUG { print("✅ [ShaderCompilation] SUCCESS: Built pipeline [\(cacheKey)]") }
@@ -320,7 +321,8 @@ extension Renderer {
                 mtlVertexDescriptor: mtlVertexDescriptor,
                 config: config,
                 fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader",
-                library: library
+                library: library,
+                archive: renderPipelineArchive
             )
             pipelineCache[cacheKey] = pipeline
             if RENDERER_DEBUG { print("✅ [ShaderCompilation] Ready: FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps)") }
@@ -608,7 +610,8 @@ extension Renderer {
                         mtlVertexDescriptor: mtlVertexDescriptor,
                         config: exactConfig,
                         fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader",
-                        library: library
+                        library: library,
+                        archive: renderPipelineArchive
                     )
                     pipelineCache[cacheKey] = pipeline
                     lastLoggedPipelineKey = cacheKey
@@ -1071,6 +1074,9 @@ extension Renderer {
         // immediately instead of remembering the previous fallback.
         lastSelectedPipeline = nil
         if RENDERER_DEBUG { print("✅ [Pipeline] Async-built and cached: \(key)") }
+        // The render PSO was captured into the archive inside buildSpecializedPipeline;
+        // persist it once this burst of interaction-driven builds settles.
+        scheduleArchiveSerialize()
     }
 
     /// Marks a background build as failed so the pending set doesn't leak.
@@ -1106,9 +1112,10 @@ extension Renderer {
     /// seconds after the most recent lazy build, so a burst of pipeline builds
     /// during interaction produces one disk write, off the render loop.
     func scheduleArchiveSerialize() {
-        guard pipelineArchive != nil else { return }
+        let compute = pipelineArchive
+        let render = renderPipelineArchive
+        guard compute != nil || render != nil else { return }
         archiveSerializeTask?.cancel()
-        let archiveRef = pipelineArchive
         archiveSerializeTask = Task.detached(priority: .background) {
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             // A cancelled sleep throws, which `try?` swallows — so without this
@@ -1116,7 +1123,8 @@ extension Renderer {
             // disk write per build instead of one after the burst settles. Skip
             // when cancelled; only the final, un-cancelled task persists.
             guard !Task.isCancelled else { return }
-            archiveRef?.serializeIfDirty()
+            compute?.serializeIfDirty()   // each is a no-op unless its own dirty flag is set
+            render?.serializeIfDirty()
         }
     }
 
@@ -1158,6 +1166,9 @@ extension Renderer {
         // build matches the cache key prefix. `MTLLibrary` is thread-safe.
         let customLibrary: MTLLibrary? =
             cacheKey.hasPrefix("CX") ? customShaderLibrary : nil
+        // PipelineBinaryArchive is Sendable + internally locked, so it crosses
+        // safely into the detached build.
+        let archiveRef = renderPipelineArchive
 
         let buildTask = Task.detached(priority: .utility) { [weak self] in
             do {
@@ -1168,7 +1179,8 @@ extension Renderer {
                     mtlVertexDescriptor: vertexDescriptor,
                     config: config,
                     fragmentFunctionName: fragmentName,
-                    library: customLibrary
+                    library: customLibrary,
+                    archive: archiveRef
                 )
                 await self?.insertBuiltRenderPipeline(pipeline, forKey: cacheKey)
             } catch {
