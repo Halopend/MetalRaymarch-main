@@ -281,14 +281,17 @@ enum ControlCatalog {
     static func spec(_ id: String) -> ControlSpec? { all[id] }
 }
 
-extension Float {
+extension Comparable {
     /// Clamp into a closed range. Shared replacement for the `max(lo, min(hi, x))`
     /// idiom that was open-coded ~150× across RenderSettings and the Config types
-    /// (and a `private` copy that used to live in `GestureConfig`).
-    func clamped(to range: ClosedRange<Float>) -> Float {
+    /// (and a `private` copy that used to live in `GestureConfig`). Generic over
+    /// `Comparable` so it also covers the `Int` quality knobs.
+    func clamped(to range: ClosedRange<Self>) -> Self {
         min(range.upperBound, max(range.lowerBound, self))
     }
+}
 
+extension Float {
     /// Clamp into a control's authoritative range — the single source of truth.
     /// Prefer this over re-typing the numeric bounds at the setter / config / slider.
     func clamped(to spec: ControlSpec) -> Float {

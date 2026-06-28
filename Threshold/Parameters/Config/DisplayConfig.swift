@@ -47,7 +47,7 @@ struct DisplayConfig: Codable, Equatable, Sendable {
         sphereProjectionRadius = try container.decodeIfPresent(Float.self, forKey: .sphereProjectionRadius) ?? 1.0
         // Clamp on decode so previously-saved larger radii (old max was 3.0) snap into
         // the new 0.5…2.5 m range and stay consistent with the slider bounds.
-        platformRadius = min(2.5, max(0.5, try container.decodeIfPresent(Float.self, forKey: .platformRadius) ?? 1.888))
+        platformRadius = (try container.decodeIfPresent(Float.self, forKey: .platformRadius) ?? 1.888).clamped(to: 0.5...2.5)
         platformEnabled = try container.decodeIfPresent(Bool.self, forKey: .platformEnabled) ?? true
     }
 }

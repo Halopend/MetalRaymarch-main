@@ -35,18 +35,18 @@ struct ColorConfig: Codable, Equatable, Sendable {
     // MARK: - Validation
 
     mutating func clamp() {
-        colorMix = max(0.0, min(1.0, colorMix))
+        colorMix = colorMix.clamped(to: ControlCatalog.colorMix)
         colorIterations = ControlCatalog.colorIterations.clamp(colorIterations)
-        colorSchemeSaturation = max(0.0, min(3.0, colorSchemeSaturation))
+        colorSchemeSaturation = colorSchemeSaturation.clamped(to: ControlCatalog.saturation)
         colorSchemeContrast = ControlCatalog.colorSchemeContrast.clamp(colorSchemeContrast)
-        colorSchemeGamma = max(0.2, min(1.0, colorSchemeGamma))
+        colorSchemeGamma = colorSchemeGamma.clamped(to: 0.2...1.0)
         colorSchemeVibrance = ControlCatalog.colorSchemeVibrance.clamp(colorSchemeVibrance)
         colorSchemeCurve = ControlCatalog.colorSchemeCurve.clamp(colorSchemeCurve)
         colorSchemeShadows = ControlCatalog.colorSchemeShadows.clamp(colorSchemeShadows)
         colorSchemeHighlights = ControlCatalog.colorSchemeHighlights.clamp(colorSchemeHighlights)
-        lightingSoftness = max(0.0, min(1.0, lightingSoftness))
-        cellShadingLevels = max(2.0, min(8.0, cellShadingLevels))
-        colorSchemeAutoInterval = max(5.0, min(120.0, colorSchemeAutoInterval))
-        colorSchemeTransitionDuration = max(0.1, min(10.0, colorSchemeTransitionDuration))
+        lightingSoftness = lightingSoftness.clamped(to: 0.0...1.0)
+        cellShadingLevels = cellShadingLevels.clamped(to: 2.0...8.0)
+        colorSchemeAutoInterval = colorSchemeAutoInterval.clamped(to: 5.0...120.0)
+        colorSchemeTransitionDuration = colorSchemeTransitionDuration.clamped(to: 0.1...10.0)
     }
 }

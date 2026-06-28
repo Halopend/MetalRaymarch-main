@@ -49,12 +49,12 @@ struct AudioReactiveConfig: Codable, Equatable, Sendable {
     // custom only to supply defaults for missing keys in older saved data.
 
     mutating func clamp() {
-        fractalAudioAmount = max(0.0, min(1.0, fractalAudioAmount))
-        fractalBeatPunch = max(0.0, min(1.0, fractalBeatPunch))
-        fractalAudioDamping = max(0.0, min(3.0, fractalAudioDamping))
-        bassSensitivity = max(0.0, min(2.0, bassSensitivity))
-        midSensitivity = max(0.0, min(2.0, midSensitivity))
-        trebleSensitivity = max(0.0, min(2.0, trebleSensitivity))
-        beatSensitivity = max(0.0, min(2.0, beatSensitivity))
+        fractalAudioAmount = fractalAudioAmount.clamped(to: 0.0...1.0)
+        fractalBeatPunch = fractalBeatPunch.clamped(to: 0.0...1.0)
+        fractalAudioDamping = fractalAudioDamping.clamped(to: 0.0...3.0)
+        bassSensitivity = bassSensitivity.clamped(to: 0.0...2.0)
+        midSensitivity = midSensitivity.clamped(to: 0.0...2.0)
+        trebleSensitivity = trebleSensitivity.clamped(to: 0.0...2.0)
+        beatSensitivity = beatSensitivity.clamped(to: 0.0...2.0)
     }
 }

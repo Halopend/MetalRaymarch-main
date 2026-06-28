@@ -93,15 +93,15 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // MARK: - Validation
 
     mutating func clamp() {
-        baseFractalIterations = max(2, min(24, baseFractalIterations))
-        baseMaxRaySteps = max(16, min(200, baseMaxRaySteps))
-        resolutionScale = max(0.33, min(1.0, resolutionScale))
-        renderQuality = max(Self.visionMinRenderQuality, min(Self.visionMaxRenderQuality, renderQuality))
-        foveationStrength = max(0.0, min(1.0, foveationStrength))
-        coneMarchStrength = max(0.0, min(1.0, coneMarchStrength))
-        overRelaxationMax = max(1.0, min(1.6, overRelaxationMax))
-        distanceLODStrength = max(0.0, min(1.0, distanceLODStrength))
-        renderDistanceScale = max(1.0, min(8.0, renderDistanceScale))
+        baseFractalIterations = baseFractalIterations.clamped(to: 2...24)
+        baseMaxRaySteps = baseMaxRaySteps.clamped(to: 16...200)
+        resolutionScale = resolutionScale.clamped(to: ControlCatalog.resolutionScale)
+        renderQuality = renderQuality.clamped(to: Self.visionMinRenderQuality...Self.visionMaxRenderQuality)
+        foveationStrength = foveationStrength.clamped(to: 0.0...1.0)
+        coneMarchStrength = coneMarchStrength.clamped(to: 0.0...1.0)
+        overRelaxationMax = overRelaxationMax.clamped(to: 1.0...1.6)
+        distanceLODStrength = distanceLODStrength.clamped(to: 0.0...1.0)
+        renderDistanceScale = renderDistanceScale.clamped(to: 1.0...8.0)
     }
 
     // MARK: - Codable
