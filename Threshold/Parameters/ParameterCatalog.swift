@@ -39,6 +39,17 @@ struct MusicFacet: Sendable {
 struct GestureFacet: Sendable {
     let isMappable: Bool
     let tripletGroupKey: String?
+    /// True when this scalar should appear in the finger-binding menu as a 1-D drag
+    /// target. False for gesture-mappable scalars already reachable via a dedicated
+    /// core gesture (fractalScale via orbit/zoom, colorMix), to avoid a duplicate
+    /// entry. (Grafted from the class-branch design; drives gestureBindableCoreParameters.)
+    let surfacesAsScalarGesture: Bool
+
+    init(isMappable: Bool, tripletGroupKey: String? = nil, surfacesAsScalarGesture: Bool = false) {
+        self.isMappable = isMappable
+        self.tripletGroupKey = tripletGroupKey
+        self.surfacesAsScalarGesture = surfacesAsScalarGesture
+    }
 }
 
 /// Feature-enablement gate. Reuses the `FractalTypeDescriptor.supports` shape.
@@ -267,7 +278,7 @@ enum ParameterCatalog {
             spec: ControlCatalog.sphereProjectionBlend,
             route: nil,
             capability: .universal,
-            gesture: GestureFacet(isMappable: true, tripletGroupKey: nil),
+            gesture: GestureFacet(isMappable: true, surfacesAsScalarGesture: true),
             music: MusicFacet(category: .geometry, defaultSource: .composite, defaultResponseCurve: .drift, hasFlashingRisk: false),
             ui: UIBinding(
                 read: { $0.display.sphereProjectionBlend },
@@ -283,7 +294,7 @@ enum ParameterCatalog {
             spec: ControlCatalog.sphereProjectionRadius,
             route: nil,
             capability: .universal,
-            gesture: GestureFacet(isMappable: true, tripletGroupKey: nil),
+            gesture: GestureFacet(isMappable: true, surfacesAsScalarGesture: true),
             music: MusicFacet(category: .geometry, defaultSource: .bass, defaultResponseCurve: .drift, hasFlashingRisk: false),
             ui: UIBinding(
                 read: { $0.display.sphereProjectionRadius },
@@ -301,7 +312,7 @@ enum ParameterCatalog {
             spec: ControlCatalog.spaceWarpStrength,
             route: nil,
             capability: .universal,
-            gesture: GestureFacet(isMappable: true, tripletGroupKey: nil),
+            gesture: GestureFacet(isMappable: true, surfacesAsScalarGesture: true),
             music: nil,
             ui: UIBinding(
                 read: { $0.renderSettings?.spaceWarpStrength ?? 0 },
@@ -317,7 +328,7 @@ enum ParameterCatalog {
             spec: ControlCatalog.spaceWarpOriginX,
             route: nil,
             capability: .universal,
-            gesture: GestureFacet(isMappable: true, tripletGroupKey: "space.spaceWarpOrigin"),
+            gesture: GestureFacet(isMappable: true, tripletGroupKey: "space.spaceWarpOrigin", surfacesAsScalarGesture: true),
             music: nil,
             ui: UIBinding(
                 read: { $0.renderSettings?.spaceWarpParam1 ?? 0 },
@@ -333,7 +344,7 @@ enum ParameterCatalog {
             spec: ControlCatalog.spaceWarpOriginY,
             route: nil,
             capability: .universal,
-            gesture: GestureFacet(isMappable: true, tripletGroupKey: "space.spaceWarpOrigin"),
+            gesture: GestureFacet(isMappable: true, tripletGroupKey: "space.spaceWarpOrigin", surfacesAsScalarGesture: true),
             music: nil,
             ui: UIBinding(
                 read: { $0.renderSettings?.spaceWarpParam2 ?? 0 },
@@ -349,7 +360,7 @@ enum ParameterCatalog {
             spec: ControlCatalog.spaceWarpOriginZ,
             route: nil,
             capability: .universal,
-            gesture: GestureFacet(isMappable: true, tripletGroupKey: "space.spaceWarpOrigin"),
+            gesture: GestureFacet(isMappable: true, tripletGroupKey: "space.spaceWarpOrigin", surfacesAsScalarGesture: true),
             music: nil,
             ui: UIBinding(
                 read: { $0.renderSettings?.spaceWarpParam3 ?? 0 },

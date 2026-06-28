@@ -500,22 +500,25 @@ final class ParameterNodeRegistry: @unchecked Sendable {
     /// fractal-type switch. `fractalType` is set to the current type only for
     /// display context; binding identity is by node id.
     func gestureBindableCoreParameters(for type: FractalModelType) -> [GestureBindableParameter] {
-        let ids = [ControlCatalog.sphereProjectionBlend.id, ControlCatalog.sphereProjectionRadius.id,
-                   ControlCatalog.spaceWarpStrength.id,
-                   ControlCatalog.spaceWarpOriginX.id, ControlCatalog.spaceWarpOriginY.id, ControlCatalog.spaceWarpOriginZ.id]
-        return ids.compactMap { id -> GestureBindableParameter? in
-            guard let node = coreNodes[id] ?? effectNodes[id], node.isGestureMappable else { return nil }
-            return GestureBindableParameter(
-                fractalType: type,
-                parameterNodeID: node.id,
-                formulaIndex: nil,
-                display: GestureDisplayMetadata(
-                    title: node.name,
-                    subtitle: node.group?.title,
-                    icon: node.icon
+        // Slice 6: derive from the catalog (was a hardcoded id list) — routed
+        // descriptors flagged `surfacesAsScalarGesture`. Declaration order matches the
+        // former hardcoded order, so the finger-binding menu is unchanged.
+        ParameterCatalog.routedDescriptors
+            .filter { $0.gesture?.surfacesAsScalarGesture == true }
+            .compactMap { descriptor -> GestureBindableParameter? in
+                guard let node = coreNodes[descriptor.id] ?? effectNodes[descriptor.id],
+                      node.isGestureMappable else { return nil }
+                return GestureBindableParameter(
+                    fractalType: type,
+                    parameterNodeID: node.id,
+                    formulaIndex: nil,
+                    display: GestureDisplayMetadata(
+                        title: node.name,
+                        subtitle: node.group?.title,
+                        icon: node.icon
+                    )
                 )
-            )
-        }
+            }
     }
 
     func node(for binding: GestureBindableParameter) -> FloatParameterNode? {
