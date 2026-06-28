@@ -138,7 +138,17 @@ final class RenderSettings: @unchecked Sendable {
     private var _foldingLimit: Float = 1.0
     private var _sphereRadius: Float = 0.5
     private var _colorIterations: Float = 8.0       // Lower = faster (was 10)
+    #if os(macOS)
+    // Mac renders into a full native Retina drawable; at 1.0 the MetalFX upscale
+    // path is bypassed entirely (`resolutionScale < 0.985` gate in the renderer),
+    // so the raymarch pays for every backing-store pixel and the GPU is pixel-bound.
+    // Default to a 0.75 input scale (~56% of the pixels) and let MetalFX reconstruct
+    // to native. The adaptive-resolution controller treats this as a *ceiling*: it
+    // renders at or below it under load and recovers up to 0.75 when there's headroom.
+    private var _resolutionScale: Float = 0.75      // Mac: MetalFX upscale on by default
+    #else
     private var _resolutionScale: Float = 1.0       // Render scale for MetalFX (1.0 = native)
+    #endif
     private var _renderQuality: Float = 0.5         // visionOS compositor drawable scale (default 0.5; 1.0 = native)
 
     private var _fractalType: FractalModelType = .mandelbox  // Current fractal type

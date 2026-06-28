@@ -163,13 +163,34 @@ enum SettingsPersistence {
     /// if a domain has never been saved, preserving the hard-coded defaults).
     static func restoreAll(into settings: RenderSettings) {
         if let c = load(GeometryConfig.self,      domain: .geometry)      { settings.geometryConfig = c }
-        if let c = load(QualityConfig.self,       domain: .quality)       { settings.qualityConfig = c }
+        if let c = load(QualityConfig.self,       domain: .quality)       { settings.qualityConfig = migrateMacResolutionScale(c) }
         if let c = load(ColorConfig.self,         domain: .color)         { settings.colorConfig = c }
         if let c = load(LightingConfig.self,      domain: .lighting)      { settings.lightingConfig = c }
         if let c = load(AudioReactiveConfig.self, domain: .audioReactive) { settings.audioReactiveConfig = c }
         if let c = load(GestureConfig.self,       domain: .gesture)       { settings.gestureConfig = c }
         if let c = load(SafetyBubbleConfig.self,  domain: .safetyBubble)  { settings.safetyBubbleConfig = c }
         if let c = load(DisplayConfig.self,       domain: .display)       { settings.displayConfig = c }
+    }
+
+    /// One-time macOS migration: installs that ran before the Mac MetalFX default
+    /// existed persisted `resolutionScale` at the old native 1.0, which bypasses the
+    /// upscale path and makes the raymarch pay for every Retina pixel. Nudge a
+    /// still-native value down to the new 0.75 Mac default exactly once. The flag
+    /// makes it idempotent and one-directional, so a user who deliberately returns to
+    /// native afterward is never re-stomped; an already sub-native value is left alone.
+    private static func migrateMacResolutionScale(_ config: QualityConfig) -> QualityConfig {
+        #if os(macOS)
+        let flagKey = "didMigrateMacResolutionScaleToMetalFX"
+        guard !defaults.bool(forKey: flagKey) else { return config }
+        defaults.set(true, forKey: flagKey)
+        guard config.resolutionScale >= 0.985 else { return config }
+        var migrated = config
+        migrated.resolutionScale = 0.75
+        save(migrated, domain: .quality)
+        return migrated
+        #else
+        return config
+        #endif
     }
 
     // MARK: - Music (Typed Section)
