@@ -29,19 +29,6 @@ struct GeometryConfig: Codable, Sendable {
     var detailScale: Float = 1.0
 
 
-    // MARK: - Validation
-
-    mutating func clamp() {
-        minDistance = max(-5.0, min(15.0, minDistance))
-        fractalScale = max(-5.0, min(8.0, fractalScale))
-        foldingLimit = max(-10.0, min(30.0, foldingLimit))
-        sphereRadius = max(-5.0, min(8.0, sphereRadius))
-        let maxPos: Float = 100.0
-        position.x = max(-maxPos, min(maxPos, position.x))
-        position.y = max(-maxPos, min(maxPos, position.y))
-        position.z = max(-maxPos, min(maxPos, position.z))
-    }
-
     // MARK: - Codable
 
     // FormulaParams is a C struct (not automatically Codable).

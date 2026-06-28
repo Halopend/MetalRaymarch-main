@@ -720,7 +720,11 @@ final class RenderSettings: @unchecked Sendable {
     /// Modulate glow intensity (respects user's enabled/disabled toggle)
     func audioModulateGlowIntensity(_ value: Float) {
         withLock {
-            _glowEffect.intensity = max(0.0, min(1.0, value))
+            // Clamp to the control's authoritative 0…2 range (was 0…1 here, which
+            // capped audio/animation playback below the manual slider's reach — a
+            // value of e.g. 1.8 set by hand or stored in a keyframe was silently
+            // clamped to 1.0 on the audio path).
+            _glowEffect.intensity = ControlCatalog.glow.clamp(value)
         }
     }
     
@@ -734,7 +738,9 @@ final class RenderSettings: @unchecked Sendable {
     /// Modulate bloom strength (respects user's enabled/disabled toggle)
     func audioModulateBloomStrength(_ value: Float) {
         withLock {
-            _bloomEffect.strength = max(0.0, min(1.0, value))
+            // Clamp to the control's authoritative 0…2 range (was 0…1, same
+            // audio/animation under-reach bug as glow above).
+            _bloomEffect.strength = ControlCatalog.bloom.clamp(value)
         }
     }
     
