@@ -569,26 +569,13 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                 continue
             }
 
-            let node = FloatParameterNode(
-                id: id,
-                name: label,
-                group: group,
-                icon: icon,
-                defaultValue: param.default,
-                range: param.min...param.max,
-                isGestureMappable: true,
-                motionStrategy: Self.formulaMotionStrategy(for: type, index: param.index),
-                readValue: { cache in FormulaCatalog.getParam(cache.formulaParams, index: param.index) },
-                writeValue: { cache, value in
-                    if let settings = cache.renderSettings, settings.isAnimationPlaying {
-                        settings.setManualFormulaParamOverride(index: param.index, value: value)
-                        cache.formulaParams = settings.formulaParams
-                    } else {
-                        FormulaCatalog.setParam(&cache.formulaParams, index: param.index, value: value)
-                        cache.renderSettings?.formulaParams = cache.formulaParams
-                    }
-                }
-            )
+            // Slice 7: build through the unified descriptor path (the same convenience
+            // init core/effect use since Slice 4). The node is byte-identical to the
+            // prior inline build; the assert documents the spec→node range invariant.
+            let descriptor = Self.makeFormulaDescriptor(for: type, param: param)
+            let node = FloatParameterNode(descriptor: descriptor, group: group)
+            assert(node.range == descriptor.spec.range,
+                   "Formula node range drift: \(id) on \(type.rawValue)")
 
             floatNodes.append(node)
             floatNodeByFormulaIndex[param.index] = node
@@ -640,6 +627,55 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         default:
             return .layerLerp
         }
+    }
+
+    /// Slice 7: generate a `ParameterDescriptor` for a formula param so formula nodes
+    /// build through the SAME `FloatParameterNode(descriptor:)` path as core/effect,
+    /// unifying construction. The produced node is byte-identical to the prior inline
+    /// build (id/name/icon/range/default/motion + the cache.formulaParams read/write
+    /// pair reproduced exactly), so there is no behavior change.
+    ///
+    /// `route`/`capability`/`music` are inert on the formula node path — the dispatcher
+    /// resolves formula range/motion from the LIVE node, not the catalog (byID is empty
+    /// for formula ids), and triplet grouping is re-derived in `gestureBindableTriplets`.
+    /// `settings` carries the real FormulaCatalog get/set pair for completeness.
+    private static func makeFormulaDescriptor(for type: FractalModelType,
+                                              param: FormulaParamDescriptor) -> ParameterDescriptor {
+        let index = param.index
+        let spec = ControlSpec(
+            id: ParameterTargetID.formula(fractalType: type, formulaIndex: index, name: param.name),
+            name: Self.displayLabel(for: param.name),
+            icon: Self.icon(for: param.name),
+            range: param.min...param.max,
+            defaultValue: param.default,
+            motionStrategy: Self.formulaMotionStrategy(for: type, index: index))
+        return ParameterDescriptor(
+            spec: spec,
+            route: nil,
+            capability: .universal,
+            gesture: GestureFacet(isMappable: true),
+            music: nil,
+            ui: UIBinding(
+                read: { cache in FormulaCatalog.getParam(cache.formulaParams, index: index) },
+                write: { cache, value in
+                    if let settings = cache.renderSettings, settings.isAnimationPlaying {
+                        settings.setManualFormulaParamOverride(index: index, value: value)
+                        cache.formulaParams = settings.formulaParams
+                    } else {
+                        FormulaCatalog.setParam(&cache.formulaParams, index: index, value: value)
+                        cache.renderSettings?.formulaParams = cache.formulaParams
+                    }
+                },
+                persists: true),
+            settings: SettingsBinding(
+                read: { settings in FormulaCatalog.getParam(settings.formulaParams, index: index) },
+                write: { settings, value in
+                    var fp = settings.formulaParams
+                    FormulaCatalog.setParam(&fp, index: index, value: value)
+                    settings.formulaParams = fp
+                },
+                writeAudioOffset: nil,
+                audioOffsetActiveDuringPlayback: nil))
     }
 
 }
