@@ -236,55 +236,13 @@ class AppModel {
     // Screenshot capture (set by Renderer)
     var captureScreenshotHandler: (() async -> Data?)?
 
-    @ObservationIgnored private var activeRenderLoopTask: Task<Void, Never>?
-    @ObservationIgnored private var activeRenderLoopID: UUID?
+    @ObservationIgnored var activeRenderLoopTask: Task<Void, Never>?
+    @ObservationIgnored var activeRenderLoopID: UUID?
     @ObservationIgnored nonisolated(unsafe) private var cloudFolderObserver: NSObjectProtocol?
 
-    @discardableResult
-    func beginRenderLoopRegistration() -> UUID {
-        activeRenderLoopTask?.cancel()
-        clearRendererHandlers()
+    // Render-loop lifecycle (begin/registration, active-task set/cancel,
+    // renderer-handler clearing) lives in AppModel+RendererActivation.swift.
 
-        let id = UUID()
-        activeRenderLoopID = id
-        rendererStartupWarmupComplete = false
-        return id
-    }
-
-    func setActiveRenderLoopTask(_ task: Task<Void, Never>, id: UUID) {
-        guard activeRenderLoopID == id else {
-            task.cancel()
-            return
-        }
-
-        activeRenderLoopTask = task
-    }
-
-    func cancelActiveRenderLoop() {
-        activeRenderLoopTask?.cancel()
-        activeRenderLoopTask = nil
-        activeRenderLoopID = nil
-        clearRendererHandlers()
-    }
-
-    func clearRendererHandlers(renderLoopID: UUID) {
-        guard activeRenderLoopID == renderLoopID else { return }
-
-        activeRenderLoopTask = nil
-        activeRenderLoopID = nil
-        clearRendererHandlers()
-    }
-
-    private func clearRendererHandlers() {
-        captureScreenshotHandler = nil
-        preparePipelineHandler = nil
-        preparePipelineForValuesHandler = nil
-        triggerProfilerHandler = nil
-        forceShaderRecompileHandler = nil
-        activateEmbeddedFormulaHandler = nil
-        rendererStartupWarmupComplete = false
-    }
-    
     // Pipeline preparation handler (set by Renderer)
     // Called when a preset is about to be loaded to ensure the pipeline is ready
     var preparePipelineHandler: ((FractalPreset) async -> Void)?
