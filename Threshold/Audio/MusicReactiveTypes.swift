@@ -256,21 +256,11 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     /// slots are surfaced under their own fractal-named section by the UI, so they
     /// fall through to `.geometry` here and are never read via this property.
     var category: MusicReactiveTargetCategory {
-        switch self {
-        case .fractalScale, .iterations, .safetyBubbleRadius,
-             .sphereProjectionBlend, .sphereProjectionRadius:
-            return .geometry
-        case .colorMix, .hueSpeed, .saturation:
-            return .color
-        case .glow, .fog, .bloom:
-            return .light
-        case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
-             .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
-             .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
-             .formulaParam12, .formulaParam13, .formulaParam14, .formulaParam15,
-             .foldingLimit, .sphereRadius:
-            return .geometry
-        }
+        // Routed core/effect/space targets project their category from the authored
+        // ParameterCatalog facet (Slice 5). Formula param slots + legacy Mandelbox
+        // aliases (no catalog facet) all group as .geometry.
+        if let id = parameterTargetID, let facet = ParameterCatalog.byID[id]?.music { return facet.category }
+        return .geometry
     }
 
     var displayName: String {
@@ -322,77 +312,34 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     }
 
     var defaultSource: MusicReactiveSource {
+        // Routed targets project from the catalog facet (Slice 5). The remaining
+        // formula param slots + legacy Mandelbox aliases keep their per-slot defaults.
+        if let id = parameterTargetID, let facet = ParameterCatalog.byID[id]?.music { return facet.defaultSource }
         switch self {
-        case .fractalScale: return .composite
-        case .colorMix: return .composite
-        case .iterations: return .mid
-        case .glow: return .beat
-        case .fog: return .composite
-        case .bloom: return .beat
-        case .hueSpeed: return .treble
-        case .saturation: return .mid
-        case .safetyBubbleRadius: return .composite
-        case .sphereProjectionBlend: return .composite
-        case .sphereProjectionRadius: return .bass
-        case .formulaParam0: return .bass
-        case .formulaParam1: return .mid
-        case .formulaParam2: return .treble
-        case .formulaParam3: return .mid
-        case .formulaParam4: return .bass
-        case .formulaParam5: return .mid
-        case .formulaParam6: return .treble
-        case .formulaParam7: return .mid
-        case .formulaParam8: return .bass
-        case .formulaParam9: return .mid
-        case .formulaParam10: return .treble
-        case .formulaParam11: return .mid
-        case .formulaParam12: return .bass
-        case .formulaParam13: return .mid
-        case .formulaParam14: return .treble
-        case .formulaParam15: return .mid
-        case .foldingLimit: return .bass
-        case .sphereRadius: return .mid
+        case .formulaParam0, .formulaParam4, .formulaParam8, .formulaParam12, .foldingLimit:
+            return .bass
+        case .formulaParam2, .formulaParam6, .formulaParam10, .formulaParam14:
+            return .treble
+        default:
+            return .mid   // formulaParam1/3/5/7/9/11/13/15, sphereRadius (routed handled above)
         }
     }
 
     /// Default response curve for this target type.
     var defaultResponseCurve: ResponseCurve {
-        switch self {
-        case .fractalScale:  return .sinusoidal
-        case .colorMix:      return .drift
-        case .iterations:   return .sinusoidal
-        case .glow:          return .pulse
-        case .fog:           return .drift
-        case .bloom:         return .pulse
-        case .hueSpeed:      return .drift
-        case .saturation:    return .drift
-        case .safetyBubbleRadius: return .drift
-        case .sphereProjectionBlend:  return .drift
-        case .sphereProjectionRadius: return .drift
-        case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
-             .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
-             .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
-             .formulaParam12, .formulaParam13, .formulaParam14, .formulaParam15:
-            return .sinusoidal
-        case .foldingLimit:  return .sinusoidal
-        case .sphereRadius:  return .sinusoidal
-        }
+        // Routed targets project from the catalog facet (Slice 5); formula slots +
+        // legacy Mandelbox aliases all default to .sinusoidal.
+        if let id = parameterTargetID, let facet = ParameterCatalog.byID[id]?.music { return facet.defaultResponseCurve }
+        return .sinusoidal
     }
 
     var hasFlashingRisk: Bool {
-        switch self.migrated {
-        case .glow, .bloom, .hueSpeed, .saturation:
-            return true
-        case .fractalScale, .colorMix, .iterations,
-             .fog, .safetyBubbleRadius,
-             .sphereProjectionBlend, .sphereProjectionRadius,
-             .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
-             .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
-             .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
-             .formulaParam12, .formulaParam13, .formulaParam14, .formulaParam15,
-             .foldingLimit, .sphereRadius:
-            return false
-        }
+        // Routed targets project from the catalog facet (Slice 5); formula slots +
+        // legacy Mandelbox aliases carry no flashing risk. (Legacy foldingLimit/
+        // sphereRadius resolve to a non-catalog formula id, so they fall through to
+        // false — matching the prior `self.migrated` mapping to formulaParam1/2.)
+        if let id = parameterTargetID, let facet = ParameterCatalog.byID[id]?.music { return facet.hasFlashingRisk }
+        return false
     }
 
     // MARK: - Parameter Target ID (fractal-type-aware)
