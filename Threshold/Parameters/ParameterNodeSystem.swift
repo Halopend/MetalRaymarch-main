@@ -120,6 +120,17 @@ extension FloatParameterNode {
                   readValue: readValue,
                   writeValue: writeValue)
     }
+
+    /// Build a live node straight from an authored `ParameterDescriptor`: spec, gesture
+    /// flag, and the @MainActor UI read/write pair all come from one place. Only the
+    /// display `group` is supplied by the caller (Slice 4).
+    convenience init(descriptor: ParameterDescriptor, group: ParameterGroup?) {
+        self.init(spec: descriptor.spec,
+                  group: group,
+                  isGestureMappable: descriptor.gesture?.isMappable ?? false,
+                  readValue: descriptor.ui.read,
+                  writeValue: descriptor.ui.write)
+    }
 }
 
 /// @unchecked Sendable justification: stores immutable metadata plus MainActor-only closures.
@@ -364,146 +375,28 @@ final class ParameterNodeRegistry: @unchecked Sendable {
     /// NOTE: minDistance / foldingLimit / sphereRadius are now catalog-driven formula
     /// params (built per-type in buildFormulaBatch) rather than hard-coded core nodes.
     private static func buildCoreAndEffectNodes() -> (core: [String: FloatParameterNode], effect: [String: FloatParameterNode]) {
+        // Range/default/name/icon/motion + the @MainActor UI read/write pair + the
+        // gesture flag all come from the authored ParameterCatalog (single source).
+        // Only the display grouping is decided here, keyed off the id namespace
+        // (`core.` → geometry, `effect.` → post-processing, `space.` → space transform);
+        // core + space ids share the `coreNodes` dict, effects get `effectNodes`.
         let coreGroup = ParameterGroup(title: "Fractal Geometry")
         let effectGroup = ParameterGroup(title: "Post-Processing")
+        let spaceGroup = ParameterGroup(title: "Space Transform")
+
         var coreNodes: [String: FloatParameterNode] = [:]
         var effectNodes: [String: FloatParameterNode] = [:]
 
-        // --- Core geometry nodes ---
-        // Range/default/name/icon/motion come from ControlCatalog (single source
-        // of truth); only the grouping + read/write wiring is local here.
-
-        coreNodes[ControlCatalog.fractalScale.id] = FloatParameterNode(
-            spec: ControlCatalog.fractalScale,
-            group: coreGroup,
-            isGestureMappable: true,
-            readValue: { $0.fractalScale },
-            writeValue: { cache, v in cache.fractalScale = v; cache.push(\.targetFractalScale, value: v) }
-        )
-
-        coreNodes[ControlCatalog.colorMix.id] = FloatParameterNode(
-            spec: ControlCatalog.colorMix,
-            group: coreGroup,
-            isGestureMappable: true,
-            readValue: { $0.color.colorMix },
-            writeValue: { cache, v in cache.color.colorMix = v; cache.push(\.colorMix, value: v) }
-        )
-
-        coreNodes[ControlCatalog.iterations.id] = FloatParameterNode(
-            spec: ControlCatalog.iterations,
-            group: coreGroup,
-            isGestureMappable: false,
-            readValue: { Float($0.liveFractalIterations) },
-            writeValue: { cache, v in
-                let rounded = max(2, min(24, Int(round(v))))
-                cache.liveFractalIterations = rounded
-                cache.push(\.fractalIterations, value: rounded)
+        for descriptor in ParameterCatalog.routedDescriptors {
+            let id = descriptor.id
+            if id.hasPrefix("effect.") {
+                effectNodes[id] = FloatParameterNode(descriptor: descriptor, group: effectGroup)
+            } else if id.hasPrefix("space.") {
+                coreNodes[id] = FloatParameterNode(descriptor: descriptor, group: spaceGroup)
+            } else {
+                coreNodes[id] = FloatParameterNode(descriptor: descriptor, group: coreGroup)
             }
-        )
-
-        // --- Effect nodes ---
-        effectNodes[ControlCatalog.glow.id] = FloatParameterNode(
-            spec: ControlCatalog.glow,
-            group: effectGroup,
-            isGestureMappable: false,
-            readValue: { $0.lighting.glowEffect.intensity },
-            writeValue: { cache, v in cache.lighting.glowEffect.intensity = v; cache.commitGlowEffect() }
-        )
-
-        effectNodes[ControlCatalog.fog.id] = FloatParameterNode(
-            spec: ControlCatalog.fog,
-            group: effectGroup,
-            isGestureMappable: false,
-            readValue: { $0.lighting.fogEffect.intensity },
-            writeValue: { cache, v in cache.lighting.fogEffect.intensity = v; cache.commitFogEffect() }
-        )
-
-        effectNodes[ControlCatalog.bloom.id] = FloatParameterNode(
-            spec: ControlCatalog.bloom,
-            group: effectGroup,
-            isGestureMappable: false,
-            readValue: { $0.lighting.bloomEffect.strength },
-            writeValue: { cache, v in cache.lighting.bloomEffect.strength = v; cache.commitBloomEffect() }
-        )
-
-        effectNodes[ControlCatalog.hueSpeed.id] = FloatParameterNode(
-            spec: ControlCatalog.hueSpeed,
-            group: effectGroup,
-            isGestureMappable: false,
-            readValue: { $0.lighting.hueRotationEffect.speed },
-            writeValue: { cache, v in cache.lighting.hueRotationEffect.speed = v; cache.commitHueRotationEffect() }
-        )
-
-        effectNodes[ControlCatalog.saturation.id] = FloatParameterNode(
-            spec: ControlCatalog.saturation,
-            group: effectGroup,
-            isGestureMappable: false,
-            readValue: { $0.color.colorSchemeSaturation },
-            writeValue: { cache, v in cache.color.colorSchemeSaturation = v; cache.commitColorSchemeSaturation() }
-        )
-
-        effectNodes[ControlCatalog.safetyBubbleRadius.id] = FloatParameterNode(
-            spec: ControlCatalog.safetyBubbleRadius,
-            group: effectGroup,
-            isGestureMappable: false,
-            readValue: { $0.safetyBubble.radius },
-            writeValue: { cache, v in cache.safetyBubble.radius = v; cache.push(\.safetyBubbleRadius, value: v) }
-        )
-
-        // --- Space-transform nodes (cross-fractal sphere projection) ---
-        // Gesture-mappable so they surface in the finger-binding menu via
-        // `gestureBindableCoreParameters`; music-mappable via the dispatcher
-        // descriptors of the same id.
-        let spaceGroup = ParameterGroup(title: "Space Transform")
-
-        coreNodes[ControlCatalog.sphereProjectionBlend.id] = FloatParameterNode(
-            spec: ControlCatalog.sphereProjectionBlend,
-            group: spaceGroup,
-            isGestureMappable: true,
-            readValue: { $0.display.sphereProjectionBlend },
-            writeValue: { cache, v in cache.display.sphereProjectionBlend = v; cache.commitSphereProjection() }
-        )
-
-        coreNodes[ControlCatalog.sphereProjectionRadius.id] = FloatParameterNode(
-            spec: ControlCatalog.sphereProjectionRadius,
-            group: spaceGroup,
-            isGestureMappable: true,
-            readValue: { $0.display.sphereProjectionRadius },
-            writeValue: { cache, v in cache.display.sphereProjectionRadius = v; cache.commitSphereProjection() }
-        )
-
-        // Built-in Twist: strength + origin point components. Gesture-mappable so
-        // they surface as single-axis dials; the dispatcher's core descriptors of
-        // the same ids carry the gesture/audio writes. Backed directly by
-        // RenderSettings (no DisplayConfig mirror).
-        coreNodes[ControlCatalog.spaceWarpStrength.id] = FloatParameterNode(
-            spec: ControlCatalog.spaceWarpStrength,
-            group: spaceGroup,
-            isGestureMappable: true,
-            readValue: { $0.renderSettings?.spaceWarpStrength ?? 0 },
-            writeValue: { cache, v in cache.renderSettings?.spaceWarpStrength = v }
-        )
-        coreNodes[ControlCatalog.spaceWarpOriginX.id] = FloatParameterNode(
-            spec: ControlCatalog.spaceWarpOriginX,
-            group: spaceGroup,
-            isGestureMappable: true,
-            readValue: { $0.renderSettings?.spaceWarpParam1 ?? 0 },
-            writeValue: { cache, v in cache.renderSettings?.spaceWarpParam1 = v }
-        )
-        coreNodes[ControlCatalog.spaceWarpOriginY.id] = FloatParameterNode(
-            spec: ControlCatalog.spaceWarpOriginY,
-            group: spaceGroup,
-            isGestureMappable: true,
-            readValue: { $0.renderSettings?.spaceWarpParam2 ?? 0 },
-            writeValue: { cache, v in cache.renderSettings?.spaceWarpParam2 = v }
-        )
-        coreNodes[ControlCatalog.spaceWarpOriginZ.id] = FloatParameterNode(
-            spec: ControlCatalog.spaceWarpOriginZ,
-            group: spaceGroup,
-            isGestureMappable: true,
-            readValue: { $0.renderSettings?.spaceWarpParam3 ?? 0 },
-            writeValue: { cache, v in cache.renderSettings?.spaceWarpParam3 = v }
-        )
+        }
 
         return (coreNodes, effectNodes)
     }
