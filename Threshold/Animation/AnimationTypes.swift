@@ -756,6 +756,23 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         } else if let raw = try? c.decode(Int32.self, forKey: .fractalType) {
             legacyMandelboxSphereProjection = (raw == 21)
         }
+        // The dedicated MSP type drove its Mandelbox SHAPE from each keyframe's
+        // formula params[0..3] (MinDistance/FoldingLimit/SphereRadius/Scale); the
+        // keyframe's top-level shape fields stayed at catalog defaults. Base
+        // Mandelbox reads shape from those top-level fields, so copy params[0..3]
+        // across here — otherwise the animation plays back a default box with
+        // projection instead of the authored form. Done at decode time so keyframe
+        // interpolation and applyKeyframe use the corrected shape automatically.
+        // (See FractalPreset.init for the matching still-scene migration.)
+        if legacyMandelboxSphereProjection {
+            for i in keyframes.indices {
+                guard let v = keyframes[i].formulaParamValues, v.count > 3 else { continue }
+                keyframes[i].minDistance = v[0]
+                keyframes[i].foldingLimit = v[1]
+                keyframes[i].sphereRadius = v[2]
+                keyframes[i].fractalScale = v[3]
+            }
+        }
         fractalType    = try c.decodeIfPresent(FractalModelType.self, forKey: .fractalType)
         gradientPreset = try c.decodeIfPresent(GradientPreset.self, forKey: .gradientPreset)
         colorMappingMode = try c.decodeIfPresent(ColorMappingMode.self, forKey: .colorMappingMode)

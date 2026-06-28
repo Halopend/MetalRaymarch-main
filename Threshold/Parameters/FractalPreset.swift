@@ -246,6 +246,19 @@ struct FractalPreset: Codable, Identifiable {
             sphereProjectionEnabled = true
             sphereProjectionBlend = vals[4]
             sphereProjectionRadius = vals[5]
+            // CRITICAL: the dedicated MSP type read its Mandelbox SHAPE from formula
+            // params[0..3] (MinDistance/FoldingLimit/SphereRadius/Scale); the
+            // top-level minDistance/foldingLimit/sphereRadius/fractalScale stayed at
+            // catalog defaults (0.8/1/0.5/2.8) and were never the real shape. Base
+            // Mandelbox reads its shape from those top-level fields, so without this
+            // copy a migrated scene renders a DEFAULT box with projection instead of
+            // the saved form. (Faithful only when MinDistance ≥ 0 — base Mandelbox
+            // forces the DE denominator positive, so negative-MinDistance scenes
+            // can't be reproduced without the old formula.)
+            minDistance = vals[0]
+            foldingLimit = vals[1]
+            sphereRadius = vals[2]
+            fractalScale = vals[3]
         }
 
         // v2.0 modular lighting effects
@@ -642,15 +655,14 @@ struct FractalPreset: Codable, Identifiable {
         if let sphericalInversionRadius = sphericalInversionRadius {
             settings.sphericalInversionRadius = sphericalInversionRadius
         }
-        if let sphereProjectionEnabled = sphereProjectionEnabled {
-            settings.sphereProjectionEnabled = sphereProjectionEnabled
-        }
-        if let sphereProjectionBlend = sphereProjectionBlend {
-            settings.sphereProjectionBlend = sphereProjectionBlend
-        }
-        if let sphereProjectionRadius = sphereProjectionRadius {
-            settings.sphereProjectionRadius = sphereProjectionRadius
-        }
+        // Sphere projection must be RESET (not left untouched) when the incoming
+        // scene doesn't carry it — otherwise the previous scene's enabled state
+        // leaks forward. Legacy MSP scenes now turn this ON via the migration above,
+        // so a plain `if let` would persist projection into the next non-projection
+        // scene. Treat a missing value as the DisplayConfig default (off, 1.0/1.0).
+        settings.sphereProjectionEnabled = sphereProjectionEnabled ?? false
+        settings.sphereProjectionBlend = sphereProjectionBlend ?? 1.0
+        settings.sphereProjectionRadius = sphereProjectionRadius ?? 1.0
 
         // v2.0 modular lighting effects
         if let lightingMode = lightingMode {
