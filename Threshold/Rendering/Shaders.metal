@@ -2400,39 +2400,18 @@ kernel void adaptiveHierarchical8x8(
             ranCoarseMarch = true;
 
             if (coarseTCenter >= kRayMissThreshold) {
-                // Coarse-center missed — probe FIVE rays (4 corners + center) to confirm
-                // the tile is truly empty. Single-center probing was the source of
-                // 8x8 dropouts on thin off-axis fractal features.
-                const float2 cornerOffsets[5] = {
-                    float2(0.5f, 0.5f),                                     // center
-                    float2(0.0f, 0.0f),                                     // TL
-                    float2(float(ADAPTIVE_TILE_SIZE), 0.0f),                // TR
-                    float2(0.0f, float(ADAPTIVE_TILE_SIZE)),                // BL
-                    float2(float(ADAPTIVE_TILE_SIZE), float(ADAPTIVE_TILE_SIZE)) // BR
-                };
-                float probeIters = float(lodIterations) * 0.6;
-                float tileAngularSize1 = ADAPTIVE_TILE_SIZE / min(uniforms.resolution.x, uniforms.resolution.y) * 2.0 * 2.0;
-                float tileAngularSize2 = ADAPTIVE_TILE_SIZE / min(uniforms.resolution.x, uniforms.resolution.y) * 2.0 * 6.0;
-                int cornerEmpty = 0;
-                for (int c = 0; c < 5; ++c) {
-                    float2 cornerPx = float2(tileId * ADAPTIVE_TILE_SIZE) + cornerOffsets[c];
-                    float3 cModelPoint = reconstructModelPoint(cornerPx, uniforms, rateMapData);
-                    float3 cOrigin = uniforms.cameraPos;
-                    float3 cRd = normalize(cModelPoint - cOrigin);
-                    applySphericalInversionRay(cOrigin, cRd, uniforms.sphericalInversionMode, uniforms.sphericalInversionRadius);
-
-                    float3 probe1 = cOrigin + cRd * 2.0;
-                    float3 probe2 = cOrigin + cRd * 6.0;
-                    float d1 = MapContinuousUnified(probe1, fractalParams, uniforms.foldingLimit, probeIters, fractalType, uniforms.formulaParams);
-                    float d2 = MapContinuousUnified(probe2, fractalParams, uniforms.foldingLimit, probeIters, fractalType, uniforms.formulaParams);
-                    if (d1 > tileAngularSize1 && d2 > tileAngularSize2) {
-                        cornerEmpty++;
-                    }
-                }
-                // Require ALL 5 probes to declare empty — conservative.
-                if (cornerEmpty >= 5) {
-                    tileIsEmpty = 1;
-                }
+                // EMPTY-TILE SKIP DISABLED (was the "black square holes"). The old
+                // 5-point probe sampled 4 corners + a point mislabeled "center" that
+                // was actually at (0.5,0.5) — so all 5 probes CLUSTERED at the corners
+                // and the tile centre + every edge-midpoint were unprobed. A thin
+                // feature clipping a tile edge/interior between probes was missed by all
+                // 5 → cornerEmpty==5 → the whole 8x8 tile was painted background (a
+                // solid black square at the silhouette). No cheap finite probe set is
+                // safe for thin fractal features, and the skip's perf benefit is
+                // unmeasured — so march EVERY tile: start the fine march at the near
+                // plane. Pixels that miss render background; pixels on the clipped
+                // feature render correctly. (A correct empty-skip would need a true
+                // conservative bound, e.g. the bounding-sphere path, not a point probe.)
                 tileStartT = 0.05;
             } else {
                 tileStartT = coarseTCenter;
@@ -2476,16 +2455,19 @@ kernel void adaptiveHierarchical8x8(
         return;
     }
 
-    // === FINE RAYMARCH WITH TEMPORAL REPROJECTION ===
-    // Use the best available startT:
-    // - reprojectedStartT from previous frame depth (95% of pixels when camera moves slowly)
-    // - tileStartT from coarse pass (fallback for disocclusion/first frame)
-    // The temporal start is per-pixel while tileStartT is per-tile, so temporal
-    // is strictly better when valid — it places startT within ~10% of the surface.
-    float fineStartT = tileStartT;
+    // === FINE RAYMARCH START SELECTION ===
+    // CORRECTNESS: tileStartT is a TILE-SHARED start seeded from thread 0's single
+    // coarse ray (the tile's top-left corner pixel). It is NOT conservative for the
+    // other 63 lanes — an edge lane whose true near surface is closer than tileStartT
+    // would have its fine march begin PAST that surface, skipping the near object so
+    // the far surface/background bleeds through (the near/far tile-edge cutoffs). Only
+    // a PER-PIXEL reprojected start is safe to warm-start from. So we default to the
+    // near plane (0.0 → the SceneWithCache full march below, identical to the fragment
+    // reference path that has no cutoff) and ONLY warm-start when this lane has its own
+    // valid temporal reprojection (off by default; conservative when on).
+    float fineStartT = 0.0f;
     if (reprojectionValid && reprojectedStartT > tileStartT) {
-        // Temporal reprojection gives us a much tighter start — often within
-        // a few steps of the surface. Use it when it's ahead of the coarse result.
+        // Per-pixel reprojected start — tight AND safe for this specific lane.
         fineStartT = reprojectedStartT;
     }
 
