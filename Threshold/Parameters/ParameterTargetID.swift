@@ -27,23 +27,10 @@ enum ParameterTargetID {
         static let spaceWarpOriginZ = "space.spaceWarpOriginZ"
     }
 
-    static let coreAndEffect: [String] = [
-        Core.fractalScale,
-        Core.colorMix,
-        Core.iterations,
-        Effect.glow,
-        Effect.fog,
-        Effect.bloom,
-        Effect.hueSpeed,
-        Effect.saturation,
-        Effect.safetyBubbleRadius,
-        Space.sphereProjectionBlend,
-        Space.sphereProjectionRadius,
-        Space.spaceWarpStrength,
-        Space.spaceWarpOriginX,
-        Space.spaceWarpOriginY,
-        Space.spaceWarpOriginZ
-    ]
+    /// Routed core/effect/space ids — DERIVED from the authored `ParameterCatalog`
+    /// (Slice 2). Order matches `routedDescriptors` declaration order, which matches
+    /// the former hand-listed order. Only ever consumed as a `Set`, so order is moot.
+    static var coreAndEffect: [String] { ParameterCatalog.routedDescriptors.map(\.id) }
 
     static func formula(fractalType: FractalModelType, formulaIndex: Int, name: String) -> String {
         "formula.\(fractalType.rawValue).\(formulaIndex).\(name)"
@@ -65,18 +52,20 @@ enum ParameterTargetID {
 enum ParameterRoutingValidation {
     static func validateStartupRouting() {
         let registry = ParameterNodeRegistry.shared
-        let dispatcherIDs = ParameterOperationDispatcher.routableDescriptorTargetIDs
         let nodeIDs = Set(registry.coreNodes.keys).union(registry.effectNodes.keys)
+        let specIDs = Set(ControlCatalog.allSpecs.map(\.id))
         let mappedMusicTargets = Set(MusicReactiveTarget.availableCases.compactMap(\.parameterTargetID))
 
-        precondition(dispatcherIDs == nodeIDs, "Canonical parameter ID mismatch between dispatcher descriptors and ParameterNodeRegistry nodes.")
-        precondition(mappedMusicTargets.isSubset(of: dispatcherIDs), "One or more music-reactive target IDs do not resolve to a canonical descriptor/node.")
-
-        for id in dispatcherIDs {
-            let descriptorCount = dispatcherIDs.contains(id) ? 1 : 0
-            let nodeCount = (registry.coreNodes[id] != nil ? 1 : 0) + (registry.effectNodes[id] != nil ? 1 : 0)
-            precondition(descriptorCount == 1 && nodeCount == 1, "Routable target ID '\(id)' must resolve to exactly one descriptor and one node.")
-        }
+        // Slice 2: `coreAndEffect` / `routableDescriptorTargetIDs` now DERIVE from
+        // ParameterCatalog, so the former dispatcher==nodes and per-id-count checks
+        // would be tautological. Anchor the tripwire on `ControlCatalog.allSpecs` —
+        // the hand-authored range source, which is NOT derived from the node list —
+        // with BIDIRECTIONAL equality, catching a spec without a node AND a node
+        // without a spec.
+        precondition(specIDs == nodeIDs,
+                     "Routed spec/node set mismatch: specs \(specIDs.sorted()) != nodes \(nodeIDs.sorted()).")
+        precondition(mappedMusicTargets.isSubset(of: nodeIDs),
+                     "One or more music-reactive target IDs do not resolve to a routed node.")
 
         // ControlCatalog is the single source of truth for range/default/name/icon.
         // Guard that the live consumers haven't re-hardcoded a divergent range —
@@ -99,9 +88,10 @@ enum ParameterRoutingValidation {
         // Prove the new `ParameterCatalog` mirrors the live registries before any
         // later slice makes a registry DERIVE from it. Nothing consumes the catalog
         // yet; these asserts only confirm equality, so the migration stays reversible.
+        // (The `catalogIDs == coreAndEffect` check is gone — coreAndEffect now derives
+        // from the catalog, so it would be tautological. Validate the catalog directly
+        // against the independently-built nodes instead.)
         let catalogIDs = Set(ParameterCatalog.routedDescriptors.map(\.id))
-        precondition(catalogIDs == Set(ParameterTargetID.coreAndEffect),
-                     "ParameterCatalog/coreAndEffect id set mismatch.")
         precondition(catalogIDs == nodeIDs,
                      "ParameterCatalog/node id set mismatch.")
         for descriptor in ParameterCatalog.routedDescriptors {

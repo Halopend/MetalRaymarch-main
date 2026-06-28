@@ -154,7 +154,9 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         }
     }
 
-    static let routableDescriptorTargetIDs: Set<String> = Set(ParameterTargetID.coreAndEffect)
+    // Slice 2: derive directly from the authored catalog (was Set(coreAndEffect),
+    // which now derives from the same source).
+    static let routableDescriptorTargetIDs: Set<String> = Set(ParameterCatalog.routedDescriptors.map(\.id))
 
     private let coreDescriptors: [String: CoreParameterDescriptor] = [
         ControlCatalog.fractalScale.id: CoreParameterDescriptor(
