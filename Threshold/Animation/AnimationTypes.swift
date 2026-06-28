@@ -353,53 +353,10 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
             clampedT < 0.5 ? a : b
         }
 
-        func lerpHue(_ a: HueRotationEffect?, _ b: HueRotationEffect?) -> HueRotationEffect? {
-            guard let a, let b else { return pickDiscrete(a, b) }
-            return HueRotationEffect(enabled: clampedT < 0.5 ? a.enabled : b.enabled,
-                                     speed: lerp(a.speed, b.speed),
-                                     intensity: lerp(a.intensity, b.intensity))
-        }
+        // Effect/optional lerps delegate to the single static implementations below
+        // (KeyframeLerp.lerpHue/Pulse/Glow/Bloom/Fog/GradientCycle/FormulaParams/Opt) so the
+        // two-point and Catmull-Rom paths can never drift apart.
 
-        func lerpPulse(_ a: PulseEffect?, _ b: PulseEffect?) -> PulseEffect? {
-            guard let a, let b else { return pickDiscrete(a, b) }
-            return PulseEffect(enabled: clampedT < 0.5 ? a.enabled : b.enabled,
-                               speed: lerp(a.speed, b.speed),
-                               amount: lerp(a.amount, b.amount))
-        }
-
-        func lerpGlow(_ a: GlowEffect?, _ b: GlowEffect?) -> GlowEffect? {
-            guard let a, let b else { return pickDiscrete(a, b) }
-            return GlowEffect(enabled: clampedT < 0.5 ? a.enabled : b.enabled,
-                              intensity: lerp(a.intensity, b.intensity))
-        }
-
-        func lerpBloom(_ a: BloomEffect?, _ b: BloomEffect?) -> BloomEffect? {
-            guard let a, let b else { return pickDiscrete(a, b) }
-            return BloomEffect(enabled: clampedT < 0.5 ? a.enabled : b.enabled,
-                               strength: lerp(a.strength, b.strength))
-        }
-
-        func lerpFog(_ a: FogEffect?, _ b: FogEffect?) -> FogEffect? {
-            guard let a, let b else { return pickDiscrete(a, b) }
-            return FogEffect(enabled: clampedT < 0.5 ? a.enabled : b.enabled,
-                             intensity: lerp(a.intensity, b.intensity),
-                             color: a.color + (b.color - a.color) * clampedT,
-                             hueRotateEnabled: clampedT < 0.5 ? a.hueRotateEnabled : b.hueRotateEnabled,
-                             hueRotateSpeed: lerp(a.hueRotateSpeed, b.hueRotateSpeed))
-        }
-
-        func lerpGradientCycle(_ a: GradientCycleEffect?, _ b: GradientCycleEffect?) -> GradientCycleEffect? {
-            guard let a, let b else { return pickDiscrete(a, b) }
-            return GradientCycleEffect(enabled: clampedT < 0.5 ? a.enabled : b.enabled,
-                                       speed: lerp(a.speed, b.speed),
-                                       mirrorLoop: clampedT < 0.5 ? a.mirrorLoop : b.mirrorLoop)
-        }
-        
-        func lerpFormulaParams(_ a: [Float]?, _ b: [Float]?) -> [Float]? {
-            guard let a, let b, a.count == b.count else { return clampedT < 0.5 ? a : b }
-            return zip(a, b).map { lerp($0, $1) }
-        }
-        
         var result = AnimationKeyframe(
             id: self.id,
             name: self.name,
@@ -415,32 +372,28 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
             worldRotation: simd_slerp(self.worldRotation, other.worldRotation, clampedT).normalized,
             lightingMode: clampedT < 0.5 ? self.lightingMode : other.lightingMode,
             lightingPreset: clampedT < 0.5 ? self.lightingPreset : other.lightingPreset,
-            hueRotationEffect: lerpHue(self.hueRotationEffect, other.hueRotationEffect),
-            pulseEffect: lerpPulse(self.pulseEffect, other.pulseEffect),
-            glowEffect: lerpGlow(self.glowEffect, other.glowEffect),
-            bloomEffect: lerpBloom(self.bloomEffect, other.bloomEffect),
-            fogEffect: lerpFog(self.fogEffect, other.fogEffect),
-            gradientCycleEffect: lerpGradientCycle(self.gradientCycleEffect, other.gradientCycleEffect)
+            hueRotationEffect: KeyframeLerp.lerpHue(self.hueRotationEffect, other.hueRotationEffect, t: clampedT),
+            pulseEffect: KeyframeLerp.lerpPulse(self.pulseEffect, other.pulseEffect, t: clampedT),
+            glowEffect: KeyframeLerp.lerpGlow(self.glowEffect, other.glowEffect, t: clampedT),
+            bloomEffect: KeyframeLerp.lerpBloom(self.bloomEffect, other.bloomEffect, t: clampedT),
+            fogEffect: KeyframeLerp.lerpFog(self.fogEffect, other.fogEffect, t: clampedT),
+            gradientCycleEffect: KeyframeLerp.lerpGradientCycle(self.gradientCycleEffect, other.gradientCycleEffect, t: clampedT)
         )
-        result.formulaParamValues = lerpFormulaParams(self.formulaParamValues, other.formulaParamValues)
+        result.formulaParamValues = KeyframeLerp.lerpFormulaParams(self.formulaParamValues, other.formulaParamValues, t: clampedT)
         
-        // Lerp per-keyframe color overrides (Float? fields)
-        func lerpOpt(_ a: Float?, _ b: Float?) -> Float? {
-            guard let a, let b else { return pickDiscrete(a, b) }
-            return lerp(a, b)
-        }
+        // Lerp per-keyframe color overrides (Float? fields) via the shared static helper.
         result.colorMappingMode = pickDiscrete(self.colorMappingMode, other.colorMappingMode)
-        result.gradientRepeat = lerpOpt(self.gradientRepeat, other.gradientRepeat)
-        result.gradientOffset = lerpOpt(self.gradientOffset, other.gradientOffset)
-        result.gradientSmoothing = lerpOpt(self.gradientSmoothing, other.gradientSmoothing)
-        result.colorSchemeSaturation = lerpOpt(self.colorSchemeSaturation, other.colorSchemeSaturation)
-        result.colorSchemeContrast = lerpOpt(self.colorSchemeContrast, other.colorSchemeContrast)
-        result.colorSchemeGamma = lerpOpt(self.colorSchemeGamma, other.colorSchemeGamma)
-        result.colorSchemeVibrance = lerpOpt(self.colorSchemeVibrance, other.colorSchemeVibrance)
-        result.colorSchemeCurve = lerpOpt(self.colorSchemeCurve, other.colorSchemeCurve)
-        result.colorSchemeShadows = lerpOpt(self.colorSchemeShadows, other.colorSchemeShadows)
-        result.colorSchemeHighlights = lerpOpt(self.colorSchemeHighlights, other.colorSchemeHighlights)
-        result.lightingSoftness = lerpOpt(self.lightingSoftness, other.lightingSoftness)
+        result.gradientRepeat = KeyframeLerp.lerpOpt(self.gradientRepeat, other.gradientRepeat, t: clampedT)
+        result.gradientOffset = KeyframeLerp.lerpOpt(self.gradientOffset, other.gradientOffset, t: clampedT)
+        result.gradientSmoothing = KeyframeLerp.lerpOpt(self.gradientSmoothing, other.gradientSmoothing, t: clampedT)
+        result.colorSchemeSaturation = KeyframeLerp.lerpOpt(self.colorSchemeSaturation, other.colorSchemeSaturation, t: clampedT)
+        result.colorSchemeContrast = KeyframeLerp.lerpOpt(self.colorSchemeContrast, other.colorSchemeContrast, t: clampedT)
+        result.colorSchemeGamma = KeyframeLerp.lerpOpt(self.colorSchemeGamma, other.colorSchemeGamma, t: clampedT)
+        result.colorSchemeVibrance = KeyframeLerp.lerpOpt(self.colorSchemeVibrance, other.colorSchemeVibrance, t: clampedT)
+        result.colorSchemeCurve = KeyframeLerp.lerpOpt(self.colorSchemeCurve, other.colorSchemeCurve, t: clampedT)
+        result.colorSchemeShadows = KeyframeLerp.lerpOpt(self.colorSchemeShadows, other.colorSchemeShadows, t: clampedT)
+        result.colorSchemeHighlights = KeyframeLerp.lerpOpt(self.colorSchemeHighlights, other.colorSchemeHighlights, t: clampedT)
+        result.lightingSoftness = KeyframeLerp.lerpOpt(self.lightingSoftness, other.lightingSoftness, t: clampedT)
         result.gradientPreset = pickDiscrete(self.gradientPreset, other.gradientPreset)
         result.musicReactiveConfig = pickDiscrete(self.musicReactiveConfig, other.musicReactiveConfig)
         return result
@@ -968,6 +921,63 @@ enum EasingFunction: String, Codable, CaseIterable {
 /// Catmull-Rom spline interpolation for smooth continuous motion through keyframes.
 /// Unlike standard easing which slows to a stop at each keyframe, Catmull-Rom
 /// uses the surrounding keyframes to compute tangents, maintaining velocity continuity.
+/// Shared keyframe-field interpolation primitives, used by both
+/// `AnimationKeyframe.interpolated(to:)` (linear) and `CatmullRomSpline` (spline)
+/// so the two interpolation paths can never drift apart.
+private enum KeyframeLerp {
+    static func lerpOpt(_ a: Float?, _ b: Float?, t: Float) -> Float? {
+        guard let a, let b else { return t < 0.5 ? a : b }
+        return a + (b - a) * t
+    }
+
+    static func lerpFormulaParams(_ a: [Float]?, _ b: [Float]?, t: Float) -> [Float]? {
+        guard let a, let b, a.count == b.count else { return t < 0.5 ? a : b }
+        return zip(a, b).map { $0 + ($1 - $0) * t }
+    }
+
+    static func lerpHue(_ a: HueRotationEffect?, _ b: HueRotationEffect?, t: Float) -> HueRotationEffect? {
+        guard let a, let b else { return t < 0.5 ? a : b }
+        return HueRotationEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
+                                 speed: a.speed + (b.speed - a.speed) * t,
+                                 intensity: a.intensity + (b.intensity - a.intensity) * t)
+    }
+
+    static func lerpPulse(_ a: PulseEffect?, _ b: PulseEffect?, t: Float) -> PulseEffect? {
+        guard let a, let b else { return t < 0.5 ? a : b }
+        return PulseEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
+                           speed: a.speed + (b.speed - a.speed) * t,
+                           amount: a.amount + (b.amount - a.amount) * t)
+    }
+
+    static func lerpGlow(_ a: GlowEffect?, _ b: GlowEffect?, t: Float) -> GlowEffect? {
+        guard let a, let b else { return t < 0.5 ? a : b }
+        return GlowEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
+                          intensity: a.intensity + (b.intensity - a.intensity) * t)
+    }
+
+    static func lerpBloom(_ a: BloomEffect?, _ b: BloomEffect?, t: Float) -> BloomEffect? {
+        guard let a, let b else { return t < 0.5 ? a : b }
+        return BloomEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
+                           strength: a.strength + (b.strength - a.strength) * t)
+    }
+
+    static func lerpFog(_ a: FogEffect?, _ b: FogEffect?, t: Float) -> FogEffect? {
+        guard let a, let b else { return t < 0.5 ? a : b }
+        return FogEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
+                         intensity: a.intensity + (b.intensity - a.intensity) * t,
+                         color: a.color + (b.color - a.color) * t,
+                         hueRotateEnabled: t < 0.5 ? a.hueRotateEnabled : b.hueRotateEnabled,
+                         hueRotateSpeed: a.hueRotateSpeed + (b.hueRotateSpeed - a.hueRotateSpeed) * t)
+    }
+
+    static func lerpGradientCycle(_ a: GradientCycleEffect?, _ b: GradientCycleEffect?, t: Float) -> GradientCycleEffect? {
+        guard let a, let b else { return t < 0.5 ? a : b }
+        return GradientCycleEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
+                                   speed: a.speed + (b.speed - a.speed) * t,
+                                   mirrorLoop: t < 0.5 ? a.mirrorLoop : b.mirrorLoop)
+    }
+}
+
 struct CatmullRomSpline {
 
     /// Interpolate a single float value using Catmull-Rom spline
@@ -1061,89 +1071,38 @@ struct CatmullRomSpline {
             worldRotation: simd_slerp(p1.worldRotation, p2.worldRotation, simd_clamp(t, 0, 1)).normalized,
             lightingMode: t < 0.5 ? p1.lightingMode : p2.lightingMode,
             lightingPreset: t < 0.5 ? p1.lightingPreset : p2.lightingPreset,
-            hueRotationEffect: lerpHue(p1.hueRotationEffect, p2.hueRotationEffect, t: t),
-            pulseEffect: lerpPulse(p1.pulseEffect, p2.pulseEffect, t: t),
-            glowEffect: lerpGlow(p1.glowEffect, p2.glowEffect, t: t),
-            bloomEffect: lerpBloom(p1.bloomEffect, p2.bloomEffect, t: t),
-            fogEffect: lerpFog(p1.fogEffect, p2.fogEffect, t: t),
-            gradientCycleEffect: lerpGradientCycle(p1.gradientCycleEffect, p2.gradientCycleEffect, t: t),
+            hueRotationEffect: KeyframeLerp.lerpHue(p1.hueRotationEffect, p2.hueRotationEffect, t: t),
+            pulseEffect: KeyframeLerp.lerpPulse(p1.pulseEffect, p2.pulseEffect, t: t),
+            glowEffect: KeyframeLerp.lerpGlow(p1.glowEffect, p2.glowEffect, t: t),
+            bloomEffect: KeyframeLerp.lerpBloom(p1.bloomEffect, p2.bloomEffect, t: t),
+            fogEffect: KeyframeLerp.lerpFog(p1.fogEffect, p2.fogEffect, t: t),
+            gradientCycleEffect: KeyframeLerp.lerpGradientCycle(p1.gradientCycleEffect, p2.gradientCycleEffect, t: t),
             musicReactiveConfig: t < 0.5 ? p1.musicReactiveConfig : p2.musicReactiveConfig
         )
         
         // Formula parameters: linear interpolation between p1 and p2
-        result.formulaParamValues = lerpFormulaParams(p1.formulaParamValues, p2.formulaParamValues, t: t)
-        
+        result.formulaParamValues = KeyframeLerp.lerpFormulaParams(p1.formulaParamValues, p2.formulaParamValues, t: t)
+
         // Per-keyframe color overrides: linear interpolation for continuous, discrete for enums
         result.colorMappingMode = t < 0.5 ? p1.colorMappingMode : p2.colorMappingMode
-        result.gradientRepeat = lerpOpt(p1.gradientRepeat, p2.gradientRepeat, t: t)
-        result.gradientOffset = lerpOpt(p1.gradientOffset, p2.gradientOffset, t: t)
-        result.gradientSmoothing = lerpOpt(p1.gradientSmoothing, p2.gradientSmoothing, t: t)
-        result.colorSchemeSaturation = lerpOpt(p1.colorSchemeSaturation, p2.colorSchemeSaturation, t: t)
-        result.colorSchemeContrast = lerpOpt(p1.colorSchemeContrast, p2.colorSchemeContrast, t: t)
-        result.colorSchemeGamma = lerpOpt(p1.colorSchemeGamma, p2.colorSchemeGamma, t: t)
-        result.colorSchemeVibrance = lerpOpt(p1.colorSchemeVibrance, p2.colorSchemeVibrance, t: t)
-        result.colorSchemeCurve = lerpOpt(p1.colorSchemeCurve, p2.colorSchemeCurve, t: t)
-        result.colorSchemeShadows = lerpOpt(p1.colorSchemeShadows, p2.colorSchemeShadows, t: t)
-        result.colorSchemeHighlights = lerpOpt(p1.colorSchemeHighlights, p2.colorSchemeHighlights, t: t)
-        result.lightingSoftness = lerpOpt(p1.lightingSoftness, p2.lightingSoftness, t: t)
+        result.gradientRepeat = KeyframeLerp.lerpOpt(p1.gradientRepeat, p2.gradientRepeat, t: t)
+        result.gradientOffset = KeyframeLerp.lerpOpt(p1.gradientOffset, p2.gradientOffset, t: t)
+        result.gradientSmoothing = KeyframeLerp.lerpOpt(p1.gradientSmoothing, p2.gradientSmoothing, t: t)
+        result.colorSchemeSaturation = KeyframeLerp.lerpOpt(p1.colorSchemeSaturation, p2.colorSchemeSaturation, t: t)
+        result.colorSchemeContrast = KeyframeLerp.lerpOpt(p1.colorSchemeContrast, p2.colorSchemeContrast, t: t)
+        result.colorSchemeGamma = KeyframeLerp.lerpOpt(p1.colorSchemeGamma, p2.colorSchemeGamma, t: t)
+        result.colorSchemeVibrance = KeyframeLerp.lerpOpt(p1.colorSchemeVibrance, p2.colorSchemeVibrance, t: t)
+        result.colorSchemeCurve = KeyframeLerp.lerpOpt(p1.colorSchemeCurve, p2.colorSchemeCurve, t: t)
+        result.colorSchemeShadows = KeyframeLerp.lerpOpt(p1.colorSchemeShadows, p2.colorSchemeShadows, t: t)
+        result.colorSchemeHighlights = KeyframeLerp.lerpOpt(p1.colorSchemeHighlights, p2.colorSchemeHighlights, t: t)
+        result.lightingSoftness = KeyframeLerp.lerpOpt(p1.lightingSoftness, p2.lightingSoftness, t: t)
         result.gradientPreset = t < 0.5 ? p1.gradientPreset : p2.gradientPreset
         result.musicReactiveConfig = t < 0.5 ? p1.musicReactiveConfig : p2.musicReactiveConfig
         return result
     }
     
-    // MARK: - Helpers for optional property interpolation
-    
-    private static func lerpOpt(_ a: Float?, _ b: Float?, t: Float) -> Float? {
-        guard let a, let b else { return t < 0.5 ? a : b }
-        return a + (b - a) * t
-    }
-    
-    private static func lerpFormulaParams(_ a: [Float]?, _ b: [Float]?, t: Float) -> [Float]? {
-        guard let a, let b, a.count == b.count else { return t < 0.5 ? a : b }
-        return zip(a, b).map { $0 + ($1 - $0) * t }
-    }
-    
-    private static func lerpHue(_ a: HueRotationEffect?, _ b: HueRotationEffect?, t: Float) -> HueRotationEffect? {
-        guard let a, let b else { return t < 0.5 ? a : b }
-        return HueRotationEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
-                                 speed: a.speed + (b.speed - a.speed) * t,
-                                 intensity: a.intensity + (b.intensity - a.intensity) * t)
-    }
-    
-    private static func lerpPulse(_ a: PulseEffect?, _ b: PulseEffect?, t: Float) -> PulseEffect? {
-        guard let a, let b else { return t < 0.5 ? a : b }
-        return PulseEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
-                           speed: a.speed + (b.speed - a.speed) * t,
-                           amount: a.amount + (b.amount - a.amount) * t)
-    }
-    
-    private static func lerpGlow(_ a: GlowEffect?, _ b: GlowEffect?, t: Float) -> GlowEffect? {
-        guard let a, let b else { return t < 0.5 ? a : b }
-        return GlowEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
-                          intensity: a.intensity + (b.intensity - a.intensity) * t)
-    }
-    
-    private static func lerpBloom(_ a: BloomEffect?, _ b: BloomEffect?, t: Float) -> BloomEffect? {
-        guard let a, let b else { return t < 0.5 ? a : b }
-        return BloomEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
-                           strength: a.strength + (b.strength - a.strength) * t)
-    }
-    
-    private static func lerpFog(_ a: FogEffect?, _ b: FogEffect?, t: Float) -> FogEffect? {
-        guard let a, let b else { return t < 0.5 ? a : b }
-        return FogEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
-                         intensity: a.intensity + (b.intensity - a.intensity) * t,
-                         color: a.color + (b.color - a.color) * t,
-                         hueRotateEnabled: t < 0.5 ? a.hueRotateEnabled : b.hueRotateEnabled,
-                         hueRotateSpeed: a.hueRotateSpeed + (b.hueRotateSpeed - a.hueRotateSpeed) * t)
-    }
-    
-    private static func lerpGradientCycle(_ a: GradientCycleEffect?, _ b: GradientCycleEffect?, t: Float) -> GradientCycleEffect? {
-        guard let a, let b else { return t < 0.5 ? a : b }
-        return GradientCycleEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
-                                   speed: a.speed + (b.speed - a.speed) * t,
-                                   mirrorLoop: t < 0.5 ? a.mirrorLoop : b.mirrorLoop)
-    }
+    // Field lerps now live in the file-scope `KeyframeLerp` enum (shared with
+    // AnimationKeyframe.interpolated) so the spline and linear paths can't drift.
     
     /// Create an extrapolated keyframe for smooth endpoints
     /// Reflects `away` keyframe around `anchor` to create a phantom point
