@@ -19,6 +19,11 @@ let RENDERER_DEBUG = false
 actor Renderer {
     let device: MTLDevice
     let commandQueue: MTLCommandQueue
+    /// Wall-clock anchor for ambient time-motion (light-orbit drift, dither, spring
+    /// vibration). Replaces the removed AppClock; mirrors the Mac/iOS path's
+    /// `CACurrentMediaTime`-based elapsed clock in RaymarchRenderView so visionOS
+    /// animates identically.
+    let renderStartTime: CFTimeInterval = CACurrentMediaTime()
     var dynamicUniformBuffer: MTLBuffer
     var pipelineState: MTLRenderPipelineState
     var quadSharedPipelineState: MTLRenderPipelineState?  // Quad-shared raymarch (2x2 sharing)

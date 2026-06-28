@@ -197,9 +197,7 @@ class AppModel {
     
     // Gesture controller for mapping hand gestures to parameters
     var gestureController: GestureController?
-    
-    nonisolated let clock = AppClock()
-    
+
     // Preset management
     let presetManager = PresetManager()
     /// Drives the on-device performance sweep that writes the per-build perf log.

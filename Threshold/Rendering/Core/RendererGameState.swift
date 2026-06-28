@@ -1,5 +1,6 @@
 @preconcurrency import CompositorServices
 import Foundation
+import QuartzCore
 import simd
 
 struct RendererPreparedEyeState {
@@ -152,7 +153,10 @@ extension Renderer {
         // === PRECOMPUTE FRAME-UNIFORM VALUES ===
         // These are computed once per frame on CPU, shared by all pixels
         // Eliminates expensive per-pixel calculations like powr() and CameraPath()
-        let frameTime = Float(appModel.clock.time)  // Cache once — used in uniforms + precomputed
+        // Live elapsed-time clock (replaces the removed frozen AppClock) so the
+        // visionOS path animates ambient time-motion — dither, spring vibration,
+        // light-orbit drift — matching the Mac/iOS path (RaymarchRenderView).
+        let frameTime = Float(CACurrentMediaTime() - renderStartTime)
         let precomputedFractal = Self.makePrecomputedFractal(from: settingsSnapshot)
         let precomputedLighting = Self.makePrecomputedLighting(
             time: frameTime,
