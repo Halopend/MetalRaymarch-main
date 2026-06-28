@@ -116,138 +116,16 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
     /// scalar drag for core params (which, unlike formula params, aren't read via
     /// `settings.formulaParams`).
     func coreValue(for targetID: String, settings: RenderSettings) -> Float? {
-        coreDescriptors[targetID].map { $0.read(settings) }
+        ParameterCatalog.settingsBinding(for: targetID).map { $0.read(settings) }
     }
 
     private func recordLiveValue(_ targetID: String, base: Float, resolved: Float) {
         _liveValues.withLock { $0[targetID] = LiveValue(base: base, resolved: resolved) }
     }
 
-    private struct CoreParameterDescriptor {
-        let range: ClosedRange<Float>
-        let motionStrategy: ParameterMotionStrategy
-        let read: (RenderSettings) -> Float
-        let write: (RenderSettings, Float) -> Void
-
-        /// Playback-relative music routing. During animation playback `applyKeyframe`
-        /// owns this param's backing var every frame, so the plain absolute `write`
-        /// above would be stomped. When present and `isActive` (the scene keyframe drives
-        /// the channel), the dispatcher instead deposits the pure music delta via
-        /// `writeOffset`, which `applyKeyframe` composes on top of the live animation
-        /// base. nil → the param isn't keyframe-driven, so the absolute write survives.
-        let writeAudioOffset: ((RenderSettings, Float) -> Void)?
-        let audioOffsetActiveDuringPlayback: ((RenderSettings) -> Bool)?
-
-        /// Source range + motion from the canonical `ControlSpec` (single source
-        /// of truth); only the RenderSettings read/write wiring is local here.
-        init(spec: ControlSpec,
-             read: @escaping (RenderSettings) -> Float,
-             write: @escaping (RenderSettings, Float) -> Void,
-             writeAudioOffset: ((RenderSettings, Float) -> Void)? = nil,
-             audioOffsetActiveDuringPlayback: ((RenderSettings) -> Bool)? = nil) {
-            self.range = spec.range
-            self.motionStrategy = spec.motionStrategy
-            self.read = read
-            self.write = write
-            self.writeAudioOffset = writeAudioOffset
-            self.audioOffsetActiveDuringPlayback = audioOffsetActiveDuringPlayback
-        }
-    }
-
     // Slice 2: derive directly from the authored catalog (was Set(coreAndEffect),
     // which now derives from the same source).
     static let routableDescriptorTargetIDs: Set<String> = Set(ParameterCatalog.routedDescriptors.map(\.id))
-
-    private let coreDescriptors: [String: CoreParameterDescriptor] = [
-        ControlCatalog.fractalScale.id: CoreParameterDescriptor(
-            spec: ControlCatalog.fractalScale,
-            read: { $0.targetFractalScale },
-            write: { settings, value in settings.targetFractalScale = value },
-            // fractalScale is always scene-driven during playback (non-optional keyframe).
-            writeAudioOffset: { settings, offset in settings.audioOffsetFractalScale = offset },
-            audioOffsetActiveDuringPlayback: { _ in true }
-        ),
-        ControlCatalog.colorMix.id: CoreParameterDescriptor(
-            spec: ControlCatalog.colorMix,
-            read: { $0.colorMix },
-            write: { settings, value in settings.colorMix = value }
-        ),
-        ControlCatalog.iterations.id: CoreParameterDescriptor(
-            spec: ControlCatalog.iterations,
-            read: { Float($0.fractalIterations) },
-            write: { settings, value in settings.fractalIterations = max(2, min(24, Int(round(value)))) }
-        ),
-        ControlCatalog.glow.id: CoreParameterDescriptor(
-            spec: ControlCatalog.glow,
-            read: { $0.glowEffect.intensity },
-            write: { settings, value in settings.audioModulateGlowIntensity(value) },
-            writeAudioOffset: { settings, offset in settings.audioOffsetGlowIntensity = offset },
-            audioOffsetActiveDuringPlayback: { $0.sceneDrivesGlow }
-        ),
-        ControlCatalog.fog.id: CoreParameterDescriptor(
-            spec: ControlCatalog.fog,
-            read: { $0.fogEffect.intensity },
-            write: { settings, value in settings.audioModulateFogIntensity(value) },
-            writeAudioOffset: { settings, offset in settings.audioOffsetFogIntensity = offset },
-            audioOffsetActiveDuringPlayback: { $0.sceneDrivesFog }
-        ),
-        ControlCatalog.bloom.id: CoreParameterDescriptor(
-            spec: ControlCatalog.bloom,
-            read: { $0.bloomEffect.strength },
-            write: { settings, value in settings.audioModulateBloomStrength(value) },
-            writeAudioOffset: { settings, offset in settings.audioOffsetBloomStrength = offset },
-            audioOffsetActiveDuringPlayback: { $0.sceneDrivesBloom }
-        ),
-        ControlCatalog.hueSpeed.id: CoreParameterDescriptor(
-            spec: ControlCatalog.hueSpeed,
-            read: { $0.hueRotationEffect.speed },
-            write: { settings, value in settings.audioModulateHueSpeed(value) },
-            writeAudioOffset: { settings, offset in settings.audioOffsetHueSpeed = offset },
-            audioOffsetActiveDuringPlayback: { $0.sceneDrivesHueSpeed }
-        ),
-        ControlCatalog.saturation.id: CoreParameterDescriptor(
-            spec: ControlCatalog.saturation,
-            read: { $0.colorSchemeSaturation },
-            write: { settings, value in settings.audioModulateSaturation(value) },
-            writeAudioOffset: { settings, offset in settings.audioOffsetSaturation = offset },
-            audioOffsetActiveDuringPlayback: { $0.sceneDrivesSaturation }
-        ),
-        ControlCatalog.safetyBubbleRadius.id: CoreParameterDescriptor(
-            spec: ControlCatalog.safetyBubbleRadius,
-            read: { $0.safetyBubbleRadius },
-            write: { settings, value in settings.audioModulateSafetyBubbleRadius(value) }
-        ),
-        ControlCatalog.sphereProjectionBlend.id: CoreParameterDescriptor(
-            spec: ControlCatalog.sphereProjectionBlend,
-            read: { $0.sphereProjectionBlend },
-            write: { settings, value in settings.audioModulateSphereProjectionBlend(value) }
-        ),
-        ControlCatalog.sphereProjectionRadius.id: CoreParameterDescriptor(
-            spec: ControlCatalog.sphereProjectionRadius,
-            read: { $0.sphereProjectionRadius },
-            write: { settings, value in settings.audioModulateSphereProjectionRadius(value) }
-        ),
-        ControlCatalog.spaceWarpStrength.id: CoreParameterDescriptor(
-            spec: ControlCatalog.spaceWarpStrength,
-            read: { $0.spaceWarpStrength },
-            write: { settings, value in settings.audioModulateSpaceWarpStrength(value) }
-        ),
-        ControlCatalog.spaceWarpOriginX.id: CoreParameterDescriptor(
-            spec: ControlCatalog.spaceWarpOriginX,
-            read: { $0.spaceWarpParam1 },
-            write: { settings, value in settings.audioModulateSpaceWarpOriginX(value) }
-        ),
-        ControlCatalog.spaceWarpOriginY.id: CoreParameterDescriptor(
-            spec: ControlCatalog.spaceWarpOriginY,
-            read: { $0.spaceWarpParam2 },
-            write: { settings, value in settings.audioModulateSpaceWarpOriginY(value) }
-        ),
-        ControlCatalog.spaceWarpOriginZ.id: CoreParameterDescriptor(
-            spec: ControlCatalog.spaceWarpOriginZ,
-            read: { $0.spaceWarpParam3 },
-            write: { settings, value in settings.audioModulateSpaceWarpOriginZ(value) }
-        )
-    ]
 
     private let sourcePolicy: SourcePolicy
     var debugTraceEnabled = false
@@ -416,21 +294,26 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
 
     private func applyCore(_ operation: ParameterOperation, settings: RenderSettings?, layer: ParameterLayer) {
         guard let settings else { return }
-        guard let descriptor = coreDescriptors[operation.targetID] else { return }
+        // Slice 3: source the off-main read/write + playback-offset closures from the
+        // authored catalog (narrowed `settingsBinding` — never the @MainActor ui pair),
+        // and range/motion from the canonical spec, instead of the deleted local
+        // `coreDescriptors` literal. Behavior-identical to the prior CoreParameterDescriptor.
+        guard let binding = ParameterCatalog.settingsBinding(for: operation.targetID),
+              let spec = ControlCatalog.spec(operation.targetID) else { return }
 
-        let base = descriptor.read(settings)
+        let base = binding.read(settings)
         let outcome = _state.withLock { state -> (resolved: Float, base: Float) in
-            var stack = state.coreStacks[operation.targetID] ?? ParameterLayerStack(defaultValue: base, range: descriptor.range, timestamp: operation.timestamp)
+            var stack = state.coreStacks[operation.targetID] ?? ParameterLayerStack(defaultValue: base, range: spec.range, timestamp: operation.timestamp)
             stack.setBaseIfNeeded(base, timestamp: operation.timestamp)
 
             let current = stack.resolvedValue(at: operation.timestamp)
             let incoming = operation.value.resolved(from: current)
-            let effectiveSmoothTime = smoothingTime(for: descriptor.motionStrategy, requested: operation.smoothing.smoothingTime)
+            let effectiveSmoothTime = smoothingTime(for: spec.motionStrategy, requested: operation.smoothing.smoothingTime)
             let resolved = stack.apply(layer: layer, value: incoming, smoothingTime: effectiveSmoothTime, timestamp: operation.timestamp)
             let anchor = stack.baseRawValue ?? base
 
             state.coreStacks[operation.targetID] = stack
-            return (min(descriptor.range.upperBound, max(descriptor.range.lowerBound, resolved)), anchor)
+            return (min(spec.range.upperBound, max(spec.range.lowerBound, resolved)), anchor)
         }
         let resolved = outcome.resolved
 
@@ -443,11 +326,11 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         // existing playback behavior is unchanged.
         if layer == .music,
            settings.isAnimationPlaying,
-           let writeAudioOffset = descriptor.writeAudioOffset,
-           descriptor.audioOffsetActiveDuringPlayback?(settings) == true {
+           let writeAudioOffset = binding.writeAudioOffset,
+           binding.audioOffsetActiveDuringPlayback?(settings) == true {
             writeAudioOffset(settings, resolved - outcome.base)
         } else {
-            descriptor.write(settings, resolved)
+            binding.write(settings, resolved)
         }
 
         if debugTraceEnabled {
@@ -523,9 +406,7 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         }
 
         for (id, resolved) in cleared.core {
-            if let descriptor = coreDescriptors[id] {
-                descriptor.write(settings, resolved)
-            }
+            ParameterCatalog.settingsBinding(for: id)?.write(settings, resolved)
         }
 
         var params = settings.formulaParams
