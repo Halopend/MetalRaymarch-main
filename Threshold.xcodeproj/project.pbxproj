@@ -121,6 +121,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D8A0000D2D00000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -218,6 +225,8 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = D8A0000B2D00000000000001 /* Build configuration list for PBXNativeTarget "ThresholdTests" */;
 			buildPhases = (
+				D8A0000C2D00000000000001 /* Sources */,
+				D8A0000D2D00000000000001 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -343,6 +352,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		D7E0000C2E00000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D8A0000C2D00000000000001 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -746,7 +762,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.ThresholdTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -772,7 +788,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.ThresholdTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";

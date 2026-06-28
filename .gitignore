@@ -10,6 +10,7 @@ Traces
 .agents
 .agent
 .windsurf
+.claude/
 build/*
 .build/*
 Threshold/uml-generated/Animation.err
