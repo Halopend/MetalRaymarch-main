@@ -2,40 +2,8 @@
 import Foundation
 import Metal
 
-enum RenderFramePath {
-    case adaptiveCompute
-    case fragment(useQuadShared: Bool)
-}
-
-#if canImport(MetalFX)
-struct RendererMetalFXBundle {
-    let manager: MetalFXManager
-    let inputWidth: Int
-    let inputHeight: Int
-}
-#endif
-
-struct RendererFragmentPassPlan {
-    let renderPassDescriptor: MTLRenderPassDescriptor
-    let viewports: [MTLViewport]
-    let resolutionScale: Float
-#if canImport(MetalFX)
-    let metalFXBundle: RendererMetalFXBundle?
-#endif
-}
-
-struct FramePhaseBreakdown {
-    var backgroundCpuMs: Double = 0
-    var clockWaitMs: Double = 0
-    var inFlightWaitMs: Double = 0
-    var handTrackingMs: Double = 0
-    var settingsUpdateMs: Double = 0
-    var snapshotMs: Double = 0
-    var updateGameStateMs: Double = 0
-    var renderPathEncodeMs: Double = 0
-
-    static let zero = FramePhaseBreakdown()
-}
+// RenderFramePath / RendererMetalFXBundle / RendererFragmentPassPlan /
+// FramePhaseBreakdown now live in Rendering/Core/FramePath.swift.
 
 extension Renderer {
     func applyVertexAmplificationIfNeeded(
