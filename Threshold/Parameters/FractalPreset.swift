@@ -118,6 +118,25 @@ struct FractalPreset: Codable, Identifiable {
     /// blocks apply with per-fractal capability filtering. Absent in older scenes.
     var modules: [String: ModuleParamBlock]?
 
+    // === ADDITIONAL SCENE STATE (previously dropped on save) ===
+    // Visual scene state that lives in the domain configs but was never captured
+    // into the preset, so authoring it then saving silently lost it on reload
+    // (same class of bug as the sphere transforms above). All optional for
+    // backward compatibility — older files decode to nil and `apply` leaves the
+    // live value untouched. Device-local performance/acceleration settings
+    // (QualityConfig) are intentionally NOT included: a scene must not force
+    // foveation/cone-march/etc. onto another device.
+    var platformEnabled: Bool?            // DisplayConfig — glass-floor on/off
+    var platformRadius: Float?            // DisplayConfig — glass-floor size
+    var cellShadingEnabled: Bool?         // ColorConfig — toon shading on/off
+    var cellShadingLevels: Float?         // ColorConfig — toon banding levels
+    var lightVariationRate: Float?        // LightingConfig — master time-variation speed
+    var beatFlashEffect: BeatFlashEffect?       // LightingConfig — beat-driven flash
+    var polarRotationEffect: PolarRotationEffect? // LightingConfig — polar-angle drift
+    var juliaDriftEffect: JuliaDriftEffect?       // LightingConfig — Julia-C orbit
+    var safetyBubbleFadeEnabled: Bool?    // SafetyBubbleConfig — edge fade on/off
+    var safetyBubbleFadeWidth: Float?     // SafetyBubbleConfig — edge fade width
+
     enum CodingKeys: String, CodingKey {
         case id, name, createdAt, thumbnailData, rating
         case fractalIterations, maxRaySteps, colorMix, colorIterations, position, scale
@@ -139,6 +158,11 @@ struct FractalPreset: Codable, Identifiable {
         case audioReactiveConfig    // canonical — full config
         case embeddedFormula        // optional self-contained DE shader payload
         case schemaVersion, modules // module layer (typed/keyed params)
+        // Additional scene state (previously dropped on save)
+        case platformEnabled, platformRadius
+        case cellShadingEnabled, cellShadingLevels
+        case lightVariationRate, beatFlashEffect, polarRotationEffect, juliaDriftEffect
+        case safetyBubbleFadeEnabled, safetyBubbleFadeWidth
     }
     
     init(id: UUID = UUID(), name: String, createdAt: Date = Date(), thumbnailData: Data? = nil) {
@@ -314,6 +338,18 @@ struct FractalPreset: Codable, Identifiable {
         // Module layer (typed/keyed params). Optional — older scenes have none.
         schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
         modules = try container.decodeIfPresent([String: ModuleParamBlock].self, forKey: .modules)
+
+        // Additional scene state (previously dropped) — all optional/backward-compatible.
+        platformEnabled = try container.decodeIfPresent(Bool.self, forKey: .platformEnabled)
+        platformRadius = try container.decodeIfPresent(Float.self, forKey: .platformRadius)
+        cellShadingEnabled = try container.decodeIfPresent(Bool.self, forKey: .cellShadingEnabled)
+        cellShadingLevels = try container.decodeIfPresent(Float.self, forKey: .cellShadingLevels)
+        lightVariationRate = try container.decodeIfPresent(Float.self, forKey: .lightVariationRate)
+        beatFlashEffect = try container.decodeIfPresent(BeatFlashEffect.self, forKey: .beatFlashEffect)
+        polarRotationEffect = try container.decodeIfPresent(PolarRotationEffect.self, forKey: .polarRotationEffect)
+        juliaDriftEffect = try container.decodeIfPresent(JuliaDriftEffect.self, forKey: .juliaDriftEffect)
+        safetyBubbleFadeEnabled = try container.decodeIfPresent(Bool.self, forKey: .safetyBubbleFadeEnabled)
+        safetyBubbleFadeWidth = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleFadeWidth)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -390,6 +426,18 @@ struct FractalPreset: Codable, Identifiable {
         // Module layer (typed/keyed params)
         try container.encodeIfPresent(schemaVersion, forKey: .schemaVersion)
         try container.encodeIfPresent(modules, forKey: .modules)
+
+        // Additional scene state (previously dropped on save)
+        try container.encodeIfPresent(platformEnabled, forKey: .platformEnabled)
+        try container.encodeIfPresent(platformRadius, forKey: .platformRadius)
+        try container.encodeIfPresent(cellShadingEnabled, forKey: .cellShadingEnabled)
+        try container.encodeIfPresent(cellShadingLevels, forKey: .cellShadingLevels)
+        try container.encodeIfPresent(lightVariationRate, forKey: .lightVariationRate)
+        try container.encodeIfPresent(beatFlashEffect, forKey: .beatFlashEffect)
+        try container.encodeIfPresent(polarRotationEffect, forKey: .polarRotationEffect)
+        try container.encodeIfPresent(juliaDriftEffect, forKey: .juliaDriftEffect)
+        try container.encodeIfPresent(safetyBubbleFadeEnabled, forKey: .safetyBubbleFadeEnabled)
+        try container.encodeIfPresent(safetyBubbleFadeWidth, forKey: .safetyBubbleFadeWidth)
     }
     
     // MARK: - Function Constant Derivation
@@ -522,6 +570,9 @@ struct FractalPreset: Codable, Identifiable {
         preset.colorSchemeAutoInterval = col.colorSchemeAutoInterval
         preset.colorSchemeTransitionDuration = col.colorSchemeTransitionDuration
         preset.gradientState = col.gradientState
+        // Cell (toon) shading (previously dropped).
+        preset.cellShadingEnabled = col.cellShadingEnabled
+        preset.cellShadingLevels = col.cellShadingLevels
 
         // ── Lighting domain (1 lock acquisition) ──
         let lit = settings.lightingConfig
@@ -533,6 +584,11 @@ struct FractalPreset: Codable, Identifiable {
         preset.fogEffect = lit.fogEffect
         preset.gradientCycleEffect = lit.gradientCycleEffect
         preset.linearRailEffect = lit.linearRailEffect
+        // Remaining lighting state (previously dropped).
+        preset.lightVariationRate = lit.lightVariationRate
+        preset.beatFlashEffect = lit.beatFlashEffect
+        preset.polarRotationEffect = lit.polarRotationEffect
+        preset.juliaDriftEffect = lit.juliaDriftEffect
 
         // ── Display domain (1 lock acquisition) ──
         let disp = settings.displayConfig
@@ -544,6 +600,9 @@ struct FractalPreset: Codable, Identifiable {
         preset.sphereProjectionEnabled = disp.sphereProjectionEnabled
         preset.sphereProjectionBlend = disp.sphereProjectionBlend
         preset.sphereProjectionRadius = disp.sphereProjectionRadius
+        // Glass-floor platform (previously dropped).
+        preset.platformEnabled = disp.platformEnabled
+        preset.platformRadius = disp.platformRadius
 
         // ── Safety bubble domain (1 lock acquisition) ──
         let sb = settings.safetyBubbleConfig
@@ -551,6 +610,9 @@ struct FractalPreset: Codable, Identifiable {
         preset.safetyBubbleRadius = sb.radius
         preset.safetyBubbleShape = sb.shape
         preset.safetyBubbleBlend = sb.strength
+        // Bubble edge fade (previously dropped).
+        preset.safetyBubbleFadeEnabled = sb.fadeEnabled
+        preset.safetyBubbleFadeWidth = sb.fadeWidth
 
         // ── Audio reactive domain (1 lock acquisition) ──
         let arc = settings.audioReactiveConfig
@@ -648,6 +710,18 @@ struct FractalPreset: Codable, Identifiable {
         if let safetyBubbleBlend = safetyBubbleBlend {
             settings.safetyBubbleBlend = safetyBubbleBlend
         }
+        // Bubble edge fade — get-only on RenderSettings, so restore through the
+        // whole-config setter (reads current values set just above, mutates fade).
+        if safetyBubbleFadeEnabled != nil || safetyBubbleFadeWidth != nil {
+            var sb = settings.safetyBubbleConfig
+            if let safetyBubbleFadeEnabled = safetyBubbleFadeEnabled {
+                sb.fadeEnabled = safetyBubbleFadeEnabled
+            }
+            if let safetyBubbleFadeWidth = safetyBubbleFadeWidth {
+                sb.fadeWidth = safetyBubbleFadeWidth
+            }
+            settings.safetyBubbleConfig = sb
+        }
 
         // Space module (domain transforms) — restore when present.
         if let sphericalInversionMode = sphericalInversionMode {
@@ -664,6 +738,14 @@ struct FractalPreset: Codable, Identifiable {
         settings.sphereProjectionEnabled = sphereProjectionEnabled ?? false
         settings.sphereProjectionBlend = sphereProjectionBlend ?? 1.0
         settings.sphereProjectionRadius = sphereProjectionRadius ?? 1.0
+
+        // Glass-floor platform — restore when present (older scenes leave it as-is).
+        if let platformEnabled = platformEnabled {
+            settings.platformEnabled = platformEnabled
+        }
+        if let platformRadius = platformRadius {
+            settings.platformRadius = platformRadius
+        }
 
         // v2.0 modular lighting effects
         if let lightingMode = lightingMode {
@@ -693,7 +775,22 @@ struct FractalPreset: Codable, Identifiable {
         if let linearRailEffect = linearRailEffect {
             settings.linearRailEffect = linearRailEffect
         }
-        
+        // Remaining lighting state (previously dropped). The effect setters force
+        // lightingPreset = .custom, exactly like the effects above, so this is
+        // consistent with the existing restore behavior.
+        if let lightVariationRate = lightVariationRate {
+            settings.lightVariationRate = lightVariationRate
+        }
+        if let beatFlashEffect = beatFlashEffect {
+            settings.beatFlashEffect = beatFlashEffect
+        }
+        if let polarRotationEffect = polarRotationEffect {
+            settings.polarRotationEffect = polarRotationEffect
+        }
+        if let juliaDriftEffect = juliaDriftEffect {
+            settings.juliaDriftEffect = juliaDriftEffect
+        }
+
         // Color scheme auto-transition
         if let colorSchemeAutoTransition = colorSchemeAutoTransition {
             settings.colorSchemeAutoTransition = colorSchemeAutoTransition
@@ -711,6 +808,13 @@ struct FractalPreset: Codable, Identifiable {
         }
         if let lightingSoftness = lightingSoftness {
             settings.lightingSoftness = lightingSoftness
+        }
+        // Cell (toon) shading — restore when present.
+        if let cellShadingEnabled = cellShadingEnabled {
+            settings.cellShadingEnabled = cellShadingEnabled
+        }
+        if let cellShadingLevels = cellShadingLevels {
+            settings.cellShadingLevels = cellShadingLevels
         }
         if let arc = audioReactiveConfig {
             // Full config present (files saved by current builds): restore everything.

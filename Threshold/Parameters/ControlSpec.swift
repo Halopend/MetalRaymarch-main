@@ -253,6 +253,30 @@ enum ControlCatalog {
         id: "color.highlights", name: "Highlights", icon: "sun.max.fill",
         range: -0.5...1.0, defaultValue: 0.02)
 
+    // More color/lighting controls whose range was open-coded in BOTH the
+    // RenderSettings setter AND ColorConfig.clamp() (and the UI slider) — folded
+    // onto specs so the bound lives in ONE place and the consumers can't diverge.
+
+    static let colorSchemeGamma = ControlSpec(
+        id: "color.gamma", name: "Gamma", icon: "circle.lefthalf.filled",
+        range: 0.2...1.0, defaultValue: 0.85)
+
+    static let lightingSoftness = ControlSpec(
+        id: "color.lightingSoftness", name: "Lighting Softness", icon: "sun.max",
+        range: 0.0...1.0, defaultValue: 0.5)
+
+    static let cellShadingLevels = ControlSpec(
+        id: "color.cellShadingLevels", name: "Cell Shading Levels", icon: "square.stack.3d.up",
+        range: 2.0...8.0, defaultValue: 4.0)
+
+    static let colorSchemeAutoInterval = ControlSpec(
+        id: "color.autoInterval", name: "Auto Transition Interval", icon: "timer",
+        range: 5.0...120.0, defaultValue: 30.0)
+
+    static let colorSchemeTransitionDuration = ControlSpec(
+        id: "color.transitionDuration", name: "Transition Duration", icon: "clock",
+        range: 0.1...10.0, defaultValue: 2.0)
+
     /// Every canonical spec in declaration order.
     static let allSpecs: [ControlSpec] = [
         fractalScale, colorMix, iterations,
@@ -260,6 +284,25 @@ enum ControlCatalog {
         sphereProjectionBlend, sphereProjectionRadius,
         spaceWarpStrength, spaceWarpOriginX, spaceWarpOriginY, spaceWarpOriginZ
     ]
+
+    /// Long-tail controls: each has a ControlSpec (so its range lives in ONE place,
+    /// read by the property setter + the domain `Config.clamp()` + any slider) but is
+    /// NOT routed through the node/dispatcher/music layers — hence deliberately
+    /// excluded from `allSpecs` and from `validateStartupRouting`'s node-agreement
+    /// check (PARAMETER_NODE_HIERARCHY_DESIGN §3.1 / §8). Enumerated here so they are
+    /// (a) the basis for promoting them into `allDescriptors` later, and (b) covered
+    /// by the id-uniqueness invariant below — a duplicate/typo'd id is the exact drift
+    /// the spec system exists to prevent.
+    static let longTailSpecs: [ControlSpec] = [
+        sphericalInversionRadius, colorIterations, resolutionScale,
+        colorSchemeContrast, colorSchemeVibrance, colorSchemeCurve,
+        colorSchemeShadows, colorSchemeHighlights,
+        colorSchemeGamma, lightingSoftness, cellShadingLevels,
+        colorSchemeAutoInterval, colorSchemeTransitionDuration
+    ]
+
+    /// Routed + long-tail. Every spec the catalog declares.
+    static let everySpec: [ControlSpec] = allSpecs + longTailSpecs
 
     /// Canonical specs keyed by id.
     static let all: [String: ControlSpec] = {

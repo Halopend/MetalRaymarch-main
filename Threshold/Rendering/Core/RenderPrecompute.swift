@@ -154,7 +154,7 @@ enum RenderPrecompute {
         // computeBlendedLighting in Shaders.metal) ===
         // Current system: vibrance drives sun direction + intensity; classic
         // system: fixed direction/diffuse. lightingSoftness blends between.
-        let clampedSoftness = min(max(lightingSoftness, 0), 1)
+        let clampedSoftness = ControlCatalog.lightingSoftness.clamp(lightingSoftness)
         let sunDirNew = Self.sunDirSoft + (Self.sunDirSharp - Self.sunDirSoft) * vibrance
         let intensityScaleNew: Float = 0.7 + (1.2 - 0.7) * vibrance
         let sunDir = sunDirNew + (Self.sunDirSoft - sunDirNew) * clampedSoftness

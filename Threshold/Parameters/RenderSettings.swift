@@ -1497,7 +1497,7 @@ final class RenderSettings: @unchecked Sendable {
     /// Duration of color scheme transitions in seconds
     var colorSchemeTransitionDuration: Float {
         get { withLock { _colorSchemeTransitionDuration } }
-        set { withLock { _colorSchemeTransitionDuration = max(0.1, min(10.0, newValue)) } }
+        set { withLock { _colorSchemeTransitionDuration = ControlCatalog.colorSchemeTransitionDuration.clamp(newValue) } }
     }
     
     /// Enable auto-cycling through color schemes
@@ -1509,7 +1509,7 @@ final class RenderSettings: @unchecked Sendable {
     /// Seconds between auto-transitions
     var colorSchemeAutoInterval: Float {
         get { withLock { _colorSchemeAutoInterval } }
-        set { withLock { _colorSchemeAutoInterval = max(5.0, min(120.0, newValue)) } }
+        set { withLock { _colorSchemeAutoInterval = ControlCatalog.colorSchemeAutoInterval.clamp(newValue) } }
     }
     
     /// Saturation override (independent of scheme default)
@@ -1534,7 +1534,7 @@ final class RenderSettings: @unchecked Sendable {
     var colorSchemeGamma: Float {
         get { withLock { _colorSchemeGamma } }
         set {
-            withLock { _colorSchemeGamma = max(0.2, min(1.0, newValue)) }
+            withLock { _colorSchemeGamma = ControlCatalog.colorSchemeGamma.clamp(newValue) }
             persistColor()
         }
     }
@@ -1552,7 +1552,7 @@ final class RenderSettings: @unchecked Sendable {
     var lightingSoftness: Float {
         get { withLock { _lightingSoftness } }
         set {
-            withLock { _lightingSoftness = max(0.0, min(1.0, newValue)) }
+            withLock { _lightingSoftness = ControlCatalog.lightingSoftness.clamp(newValue) }
             persistColor()
         }
     }
@@ -1568,7 +1568,7 @@ final class RenderSettings: @unchecked Sendable {
     var cellShadingLevels: Float {
         get { withLock { _cellShadingLevels } }
         set {
-            withLock { _cellShadingLevels = max(2.0, min(8.0, newValue)) }
+            withLock { _cellShadingLevels = ControlCatalog.cellShadingLevels.clamp(newValue) }
             persistColor()
         }
     }
@@ -3559,7 +3559,7 @@ final class RenderSettings: @unchecked Sendable {
                 _colorSchemeHighlights = newValue.colorSchemeHighlights
                 _lightingSoftness = newValue.lightingSoftness
                 _cellShadingEnabled = newValue.cellShadingEnabled
-                _cellShadingLevels = max(2.0, min(8.0, newValue.cellShadingLevels))
+                _cellShadingLevels = ControlCatalog.cellShadingLevels.clamp(newValue.cellShadingLevels)
                 _colorSchemeAutoTransition = newValue.colorSchemeAutoTransition
                 _colorSchemeAutoInterval = newValue.colorSchemeAutoInterval
                 _colorSchemeTransitionDuration = newValue.colorSchemeTransitionDuration

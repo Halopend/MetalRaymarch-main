@@ -82,3 +82,19 @@ build self-contained `.threshfx` formulas; it must mirror the static build.
 - Performance-sensitive changes (the per-frame render/audio paths) must be
   validated on Vision Pro — the device is GPU-bound and the simulator/Mac will not
   surface frame-time regressions.
+
+## Performance claims
+
+Do **not** cite a performance number (an `N×` speedup, a `<1 ms`, an fps, a
+"saves N evaluations") unless it came from a real on-device measurement.
+
+- The **only** citable source of perf numbers is [`PERF_LOG.md`](PERF_LOG.md) /
+  `PERF_LOG.jsonl`, captured by the in-app Vision Pro benchmark sweep.
+- The magnitudes in `Threshold/Rendering/PERF_TECHNIQUES.md` are **unverified
+  estimates inferred from reading the code** — useful for locating *where* cost
+  lives, never as proof of *how much* a change saves. That document's `STATUS:`
+  markers and `file:line` references are code-grounded and fine to rely on; its
+  numbers are not.
+- When a PR or commit message needs to justify a perf change, measure it on
+  device and quote the `PERF_LOG` figure. "Should be faster" with no number is
+  better than an invented one.

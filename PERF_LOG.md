@@ -3,6 +3,12 @@
 Per-build performance history, measured **on the actual Vision Pro** (GPU/CPU
 numbers from the Simulator are meaningless — it runs on the Mac's GPU).
 
+> **This file is the project's only citable source of performance numbers.** The
+> magnitude claims in `Threshold/Rendering/PERF_TECHNIQUES.md` are unverified
+> code-reading estimates, not measurements — do not quote them as evidence. A
+> perf number is only quotable once it appears here, captured from a real device
+> sweep.
+
 ## How it works
 
 1. Build & deploy to the Vision Pro.
