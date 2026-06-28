@@ -42,8 +42,8 @@ class AudioAnalyzer {
     @ObservationIgnored nonisolated(unsafe) private(set) var isMicrophoneCapturing: Bool = false
 
     /// Whether an external PCM source (whole-system output minus this process,
-    /// captured via ScreenCaptureKit) is active.
-    @ObservationIgnored nonisolated(unsafe) private(set) var isExternalCapturing: Bool = false
+    /// captured via ScreenCaptureKit) is active. Read only within AudioAnalyzer.
+    @ObservationIgnored nonisolated(unsafe) private var isExternalCapturing: Bool = false
     
     // Pending MainActor dispatch batching — avoids creating ~86 Tasks/sec
     @ObservationIgnored nonisolated(unsafe) private var pendingLevelDispatch = false
