@@ -608,6 +608,21 @@ struct PerformanceMetricsView: View {
                         color: m.foveationEnabled ? .green : .gray)
             }
 
+            // Foveation decode dims — the coordinate spaces the compute ray
+            // reconstruction works in. Always shown (no console needed) to diagnose
+            // the compute distortion / black-square holes. Most relevant in Adaptive
+            // Compute mode; in Fragment it just reports the current drawable state.
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Foveation decode (eye 0)")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Text(m.foveationDecode)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(m.foveationDecode.contains("MISMATCH") ? .orange : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             // Measured cost — the headline benchmark: how many march steps a
             // converged pixel actually took to reach the surface, averaged over
             // the frame's hit rays. This is what you weigh against visual quality;

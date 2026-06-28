@@ -33,8 +33,10 @@ struct ContentView: View {
     @AppStorage("ContentView.visualizationsRailSection") private var visualizationsRailSection: VisualizationsRailSection = .color
     @AppStorage("ContentView.musicRailSection") private var musicRailSection: MusicRailSection = .playback
     // Default to Budget. Key bumped to ".v2" so the new default actually lands
-    // for anyone who already has the old default (.metrics) persisted — the tab
-    // writes this on every open, so a plain default change wouldn't take effect.
+    // for anyone who already had a different section persisted — the tab writes
+    // this on every open, so a plain default change wouldn't take effect. The old
+    // Metrics section was merged into Acceleration; a stale "Metrics" raw value no
+    // longer decodes to a case, so AppStorage falls back to this default.
     @AppStorage("ContentView.performanceRailSection.v2") var performanceRailSection: PerformanceRailSection = .budget
     @AppStorage("ContentView.skipOuterNavigationSync") private var skipOuterNavigationSync = false
     // Persist last-selected tab and sub-tabs across launches.
@@ -176,7 +178,7 @@ struct ContentView: View {
     var effectiveDirectBudgetLabel: String { "Detail Budget" }
 
     var effectiveDirectBudgetUnavailableText: String {
-        "Detail Budget is unavailable in Adaptive Compute mode. Switch Renderer Mode to Fragment or Quad Shared to enable MetalFX spatial upscaling."
+        "Detail Budget is unavailable in Adaptive Compute mode. Switch Renderer Mode to Fragment to enable MetalFX spatial upscaling."
     }
 
     // Developer state

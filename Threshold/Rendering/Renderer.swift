@@ -26,12 +26,11 @@ actor Renderer {
     let renderStartTime: CFTimeInterval = CACurrentMediaTime()
     var dynamicUniformBuffer: MTLBuffer
     var pipelineState: MTLRenderPipelineState
-    var quadSharedPipelineState: MTLRenderPipelineState?  // Quad-shared raymarch (2x2 sharing)
     var depthState: MTLDepthStencilState
-    
+
     // === UNIFIED PIPELINE CACHE ===
     // All specialized pipelines stored in a single cache with consistent key format.
-    // Key format: "FI{iterations}_RS{raySteps}_N{0|1}_Q{0|1|2}[_QS]"
+    // Key format: "FI{iterations}_RS{raySteps}_N{0|1}_Q{0|1|2}"
     // This allows preset pipelines and quality preset pipelines to be looked up uniformly.
     //
     // Pipeline specialization strategy:
@@ -339,21 +338,6 @@ actor Renderer {
             if RENDERER_DEBUG { print("❌ Unable to compile render pipeline state: \(error)") }
             return nil
         }
-        
-        // Build quad-shared pipeline (uses SIMD quad operations for 2x2 pixel grouping)
-        do {
-            quadSharedPipelineState = try Renderer.buildRenderPipelineWithDevice(device: device,
-                                                                                 layerRenderer: layerRenderer,
-                                                                                 rasterSampleCount: rasterSampleCount,
-                                                                                 mtlVertexDescriptor: mtlVertexDescriptor,
-                                                                                 vertexFunctionName: "vertexShader",
-                                                                                 fragmentFunctionName: "fragmentShaderQuadShared",
-                                                                                 archive: self.renderPipelineArchive)
-            if RENDERER_DEBUG { print("✓ Quad-shared pipeline ready (2x2 SIMD grouping)") }
-        } catch {
-            if RENDERER_DEBUG { print("⚠️ Quad-shared pipeline failed: \(error)") }
-            quadSharedPipelineState = nil
-        }
 
         #if canImport(MetalFX)
         do {
@@ -455,21 +439,8 @@ actor Renderer {
                 pipelineCount += 1
                 if RENDERER_DEBUG { print("  ✓ \(preset.rawValue): FI=\(iterCount), RS=\(raySteps) [\(unifiedKey)]") }
             }
-            
-            // Quad-shared pipeline
-            if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
-                device: device,
-                layerRenderer: layerRenderer,
-                rasterSampleCount: rasterSampleCount,
-                mtlVertexDescriptor: mtlVertexDescriptor,
-                fragmentFunctionName: "fragmentShaderQuadShared",
-                functionConstants: constants,
-                archive: self.renderPipelineArchive
-            ) {
-                pipelineCache[unifiedKey + "_QS"] = pipeline
-            }
         }
-        if RENDERER_DEBUG { print("✓ Built \(pipelineCount) specialized pipelines (\(pipelineCache.count) total with quad-shared)") }
+        if RENDERER_DEBUG { print("✓ Built \(pipelineCount) specialized pipelines (\(pipelineCache.count) total)") }
 
         let depthStateDescriptor = MTLDepthStencilDescriptor()
         depthStateDescriptor.depthCompareFunction = MTLCompareFunction.less
@@ -631,18 +602,15 @@ actor Renderer {
                 // Setup pipeline preparation handler
                 // Called before loading a preset to ensure the specialized pipeline is ready
                 appModel.preparePipelineHandler = { preset in
-                    // Build both standard and quad-shared variants
-                    _ = await renderer.getPipeline(forPreset: preset, useQuadShared: false)
-                    _ = await renderer.getPipeline(forPreset: preset, useQuadShared: true)
+                    _ = await renderer.getPipeline(forPreset: preset)
                     await renderer.prewarmComputePipeline(forPreset: preset)
                 }
                 
                 // Setup pipeline preparation for specific iteration/ray step values
                 // Called when sliders change to pre-compile the needed pipeline
                 appModel.preparePipelineForValuesHandler = { iterations, raySteps in
-                    // Pre-build render pipelines
-                    _ = await renderer.getPipeline(forIterations: iterations, raySteps: raySteps, useQuadShared: false)
-                    _ = await renderer.getPipeline(forIterations: iterations, raySteps: raySteps, useQuadShared: true)
+                    // Pre-build render pipeline
+                    _ = await renderer.getPipeline(forIterations: iterations, raySteps: raySteps)
                     // Pre-build matching compute pipeline so tileSize=8 path is ready
                     _ = await renderer.selectComputePipeline(fractalIterations: iterations, maxRaySteps: raySteps)
                 }
@@ -752,7 +720,6 @@ actor Renderer {
     // selectPipeline() is called every frame; caching the last result short-circuits the common case.
     var lastSelectIter: Int = -1
     var lastSelectRS: Int = -1
-    var lastSelectQS: Bool = false
     var lastSelectNeon: Bool = false
     var lastSelectColorIterations: Int32 = -1
     var lastSelectFT: Int32 = -1
@@ -1134,15 +1101,6 @@ actor Renderer {
 
         renderEncoder.setFrontFacing(.counterClockwise)
 
-        // Select pipeline based on deterministic frame path selection
-        let useQuadShared: Bool
-        switch framePath {
-        case .adaptiveCompute:
-            useQuadShared = false
-        case .fragment(let quad):
-            useQuadShared = quad
-        }
-        
         // Get current iteration count for specialized pipeline selection
         let currentIterations = settingsSnapshot.fractalIterations
         let currentRaySteps = settingsSnapshot.maxRaySteps
@@ -1155,7 +1113,6 @@ actor Renderer {
         let selectedPipeline = selectPipeline(
             forIterations: currentIterations,
             raySteps: currentRaySteps,
-            useQuadShared: useQuadShared,
             neonMode: isNeonMode,
             request: RenderPipelineRequest(
                 fractalType: settingsSnapshot.fractalType,
@@ -1355,18 +1312,30 @@ actor Renderer {
             let map = perEye ? rateMaps[viewIndex] : rateMaps[0]
             let layer = perEye ? 0 : viewIndex
             let phys = map.physicalSize(layer: layer)
-            if phys.width == outputTexture.width && phys.height == outputTexture.height {
+            // The compute output texture is allocated at full native physical size,
+            // but the rate map's physical region SHRINKS as renderQuality drops. The
+            // old gate required phys == tex exactly, so it was only satisfied at MAX
+            // quality — every quality below fell to the distorted linear path. Accept
+            // any map whose physical writes FIT the texture on both axes (Apple: the
+            // render target must be "at least as large as the physical size"); we then
+            // render in that physical region (see renderWidth/Height below).
+            if phys.width <= outputTexture.width && phys.height <= outputTexture.height {
                 selectedRateMap = map
                 rateMapLayer = layer
                 rateMapValid = true
                 screenResolution = SIMD2<Float>(Float(map.screenSize.width), Float(map.screenSize.height))
             }
-            if !loggedFoveationDecodeOnce && RENDERER_DEBUG {
+            // One-time diagnostic (fires regardless of RENDERER_DEBUG): the compute
+            // path's foveation distortion is pinned by the relationship between the
+            // physical texture, the rate map's screen size, and the per-eye viewport
+            // (origin + size). Logged once per launch so it can be read off-device.
+            if !loggedFoveationDecodeOnce {
                 loggedFoveationDecodeOnce = true
-                print("🔬 Foveation decode: maps=\(rateMaps.count) perEye=\(perEye) layer=\(layer) " +
+                print("🔬 Foveation decode eye\(viewIndex): maps=\(rateMaps.count) perEye=\(perEye) layer=\(layer) " +
                       "physical=\(phys.width)x\(phys.height) screen=\(map.screenSize.width)x\(map.screenSize.height) " +
-                      "output=\(outputTexture.width)x\(outputTexture.height) viewport=\(viewportWidth)x\(viewportHeight) " +
-                      "valid=\(rateMapValid)")
+                      "output=\(outputTexture.width)x\(outputTexture.height) " +
+                      "viewportOrigin=\(viewportOriginX),\(viewportOriginY) viewport=\(viewportWidth)x\(viewportHeight) " +
+                      "rawVP=\(viewport.width)x\(viewport.height)@\(viewport.originX),\(viewport.originY) valid=\(rateMapValid)")
             }
         }
 
@@ -1394,12 +1363,28 @@ actor Renderer {
             rateMapParamBuffer = rateMapDummyBuffer
         }
 
+        // Render in the rate map's PHYSICAL space when a usable map exists: the
+        // dispatch grid and uniforms.resolution must match `phys`, not the full
+        // texture, so the kernel writes exactly the foveated region the compositor
+        // un-foveates. (Keeping the legacy texture-sized dispatch is what squished the
+        // image + produced the black probe-tiles below MAX quality.) Origin is left
+        // as the existing per-eye viewportOrigin — the MAX path already renders
+        // correctly with it; only the SIZE was wrong. Without a rate map (Simulator /
+        // foveation off) we keep the legacy clamped screen-viewport size.
+        var renderWidth = viewportWidth
+        var renderHeight = viewportHeight
+        if rateMapValid, let map = selectedRateMap {
+            let phys = map.physicalSize(layer: rateMapLayer)
+            renderWidth = max(1, min(phys.width - viewportOriginX, outputTexture.width - viewportOriginX))
+            renderHeight = max(1, min(phys.height - viewportOriginY, outputTexture.height - viewportOriginY))
+        }
+
         var tileUniforms = TileUniforms(
             invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
             invProjMatrix: projection.inverse,
             cameraPos: cameraPos,
             time: framePreparation.frameTime,
-            resolution: SIMD2<Float>(Float(viewportWidth), Float(viewportHeight)),
+            resolution: SIMD2<Float>(Float(renderWidth), Float(renderHeight)),
             viewportOrigin: SIMD2<Float>(Float(viewportOriginX), Float(viewportOriginY)),
             minDistance: settingsSnapshot.minDistance,
             fractalScale: settingsSnapshot.fractalScale,
@@ -1441,7 +1426,7 @@ actor Renderer {
             coneMarchScale: RenderPrecompute.coneMarchScale(
                 strength: settingsSnapshot.coneMarchStrength,
                 projection: projection,
-                viewportHeight: Float(viewportHeight)),
+                viewportHeight: Float(renderHeight)),
             shadowsEnabled: settingsSnapshot.shadowsEnabled ? 1 : 0,
             distanceLODFalloff: settingsSnapshot.distanceLODStrength * 0.5,
             blendFactor: settingsSnapshot.isGeometryGestureActive ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5),
@@ -1460,7 +1445,8 @@ actor Renderer {
             // the frame goes black. Gate it off — same hard cut the Mac warm-start
             // path already applies via warmStartGate.allowsWarmStart.
             temporalReprojectionEnabled: (temporalFrameCount > 0
-                && settingsSnapshot.sphericalInversionMode.rawValue == 0) ? 1 : 0,
+                && settingsSnapshot.sphericalInversionMode.rawValue == 0
+                && settingsSnapshot.computeTemporalReprojectionEnabled) ? 1 : 0,
             coherentPacketEnabled: settingsSnapshot.coherentPacketEnabled ? 1 : 0,
             foveationStrength: settingsSnapshot.foveationStrength,
             floorPlane: framePreparation.perEye[viewIndex].floorPlane,
@@ -1509,8 +1495,8 @@ actor Renderer {
         let tileSize = 8
         let threadgroupSize = MTLSize(width: tileSize, height: tileSize, depth: 1)
         let threadgroupsPerGrid = MTLSize(
-            width: (viewportWidth + tileSize - 1) / tileSize,
-            height: (viewportHeight + tileSize - 1) / tileSize,
+            width: (renderWidth + tileSize - 1) / tileSize,
+            height: (renderHeight + tileSize - 1) / tileSize,
             depth: 1
         )
         
@@ -1626,9 +1612,22 @@ actor Renderer {
                 destinationSlice = eye
             }
 
-            // Safety: Metal validation asserts if we copy outside destination.
-            let copyWidth = min(sourceTexture.width, destinationTexture.width)
-            let copyHeight = min(sourceTexture.height, destinationTexture.height)
+            // Copy only the foveated physical region the compositor un-foveates
+            // ([0,phys)). The kernel only writes that region; pixels beyond it are
+            // unwritten and never read, so copying the full texture just ships garbage
+            // and wastes ~2.6× blit bandwidth at low quality. Fall back to the full
+            // texture when no rate map applies (Simulator / foveation off).
+            var copyWidth = min(sourceTexture.width, destinationTexture.width)
+            var copyHeight = min(sourceTexture.height, destinationTexture.height)
+            let rateMaps = drawable.rasterizationRateMaps
+            if !rateMaps.isEmpty {
+                let perEye = rateMaps.count == viewCount
+                let map = perEye ? rateMaps[eye] : rateMaps[0]
+                let layer = perEye ? 0 : eye
+                let phys = map.physicalSize(layer: layer)
+                copyWidth = min(copyWidth, phys.width)
+                copyHeight = min(copyHeight, phys.height)
+            }
             
             blitEncoder.copy(
                 from: sourceTexture,

@@ -24,14 +24,13 @@ private struct RenderPipelineKeyContext {
          qualityMode: Int,
          colorIterations: Int32,
          powerKey: String,
-         useQuadShared: Bool,
          sceneKey: String = "") {
         // sceneKey carries scene-stable feature bakes (e.g. "_B0" safety bubble).
         // Exact-only: shared/startup pipelines leave those FCs undefined so the
         // shader falls back to runtime uniforms, keeping fallbacks correct.
         exactStem = prefix + "FT\(fractalTypeRawValue)_FI\(iterations)_RS\(raySteps)\(sceneKey)_N"
         sharedStem = prefix + "FI\(iterations)_RS\(raySteps)_N"
-        suffix = "_Q\(qualityMode)_CI\(colorIterations)\(powerKey)" + (useQuadShared ? "_QS" : "")
+        suffix = "_Q\(qualityMode)_CI\(colorIterations)\(powerKey)"
     }
 
     @inline(__always)
@@ -166,7 +165,6 @@ extension Renderer {
         _ pipeline: MTLRenderPipelineState,
         iterations: Int,
         raySteps: Int,
-        useQuadShared: Bool,
         neonMode: Bool,
         colorIterations: Int32,
         fractalTypeRawValue: Int32,
@@ -178,7 +176,6 @@ extension Renderer {
         lastSelectBubble = bubbleEnabled
         lastSelectIter = iterations
         lastSelectRS = raySteps
-        lastSelectQS = useQuadShared
         lastSelectNeon = neonMode
         lastSelectColorIterations = colorIterations
         lastSelectFT = fractalTypeRawValue
@@ -216,9 +213,9 @@ extension Renderer {
 
     /// Gets or builds a specialized pipeline for a given preset.
     /// Uses the unified pipelineCache to avoid redundant compilation.
-    func getPipeline(forPreset preset: FractalPreset, useQuadShared: Bool = false) -> MTLRenderPipelineState {
+    func getPipeline(forPreset preset: FractalPreset) -> MTLRenderPipelineState {
         let prefix = customCacheKeyPrefix()
-        let cacheKey = prefix + preset.pipelineCacheKey + (useQuadShared ? "_QS" : "")
+        let cacheKey = prefix + preset.pipelineCacheKey
         let library = renderingLibrary()
 
         if preset.fractalType == .custom {
@@ -227,7 +224,7 @@ extension Renderer {
 
         if preset.fractalType == .custom, library == nil {
             customSceneDiagnostic("🔬 [CSDiag] ⚠️ getPipeline(forPreset) returning DEFAULT pipelineState — custom library missing — key=\(cacheKey)")
-            return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+            return pipelineState
         }
 
         // Check unified cache first
@@ -246,7 +243,7 @@ extension Renderer {
                 rasterSampleCount: rasterSampleCount,
                 mtlVertexDescriptor: mtlVertexDescriptor,
                 config: config,
-                fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader",
+                fragmentFunctionName: "fragmentShader",
                 library: library,
                 archive: renderPipelineArchive
             )
@@ -255,20 +252,20 @@ extension Renderer {
             return pipeline
         } catch {
             if RENDERER_DEBUG { print("❌ [ShaderCompilation] FAILED to build preset pipeline [\(cacheKey)]: \(error)") }
-            return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+            return pipelineState
         }
     }
 
     /// Gets or builds a specialized pipeline for specific iteration/ray step values.
     /// Call this when slider values change to pre-compile the needed pipeline.
-    func getPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool = false) -> MTLRenderPipelineState {
+    func getPipeline(forIterations iterations: Int, raySteps: Int) -> MTLRenderPipelineState {
         // Build cache key matching the preset format
         let colorIterations = Int32(appModel.renderSettings.colorIterations)  // Direct read (own lock) — avoids full snapshot
         let fractalType = appModel.renderSettings.fractalType
         let library = renderingLibrary()
 
         if fractalType == .custom, library == nil {
-            return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+            return pipelineState
         }
 
         let mandelbulbPower = FunctionConstantConfig.specializedMandelbulbPower(
@@ -287,7 +284,6 @@ extension Renderer {
             qualityMode: Int(qualityMode),
             colorIterations: colorIterations,
             powerKey: powerKey,
-            useQuadShared: useQuadShared,
             sceneKey: "_B\(bubbleEnabled ? 1 : 0)"
         )
         let cacheKey = keyContext.exactKey(neonEnabled: neon == 1)
@@ -320,7 +316,7 @@ extension Renderer {
                 rasterSampleCount: rasterSampleCount,
                 mtlVertexDescriptor: mtlVertexDescriptor,
                 config: config,
-                fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader",
+                fragmentFunctionName: "fragmentShader",
                 library: library,
                 archive: renderPipelineArchive
             )
@@ -329,7 +325,7 @@ extension Renderer {
             return pipeline
         } catch {
             if RENDERER_DEBUG { print("❌ [ShaderCompilation] FAILED for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps): \(error)") }
-            return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+            return pipelineState
         }
     }
 
@@ -376,9 +372,7 @@ extension Renderer {
                 print("      Neon=\(fc.neonModeEnabled), Quality=\(fc.qualityMode)")
             }
 
-            // Build both standard and quad-shared variants
-            _ = getPipeline(forPreset: preset, useQuadShared: false)
-            _ = getPipeline(forPreset: preset, useQuadShared: true)
+            _ = getPipeline(forPreset: preset)
 
             let functionConstants = preset.deriveFunctionConstants()
             let powerKey = functionConstants.mandelbulbPower.map { "P\($0)" } ?? ""
@@ -425,7 +419,7 @@ extension Renderer {
     /// 3. FT-specific neon-off fallback
     /// 4. Shared quality key fallback (startup-prebuilt, no FC_FRACTAL_TYPE)
     /// 5. Generic pipeline fallback
-    func selectPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool,
+    func selectPipeline(forIterations iterations: Int, raySteps: Int,
                         neonMode: Bool = false,
                         request: RenderPipelineRequest? = nil) -> MTLRenderPipelineState {
         let fractalType = request?.fractalType ?? appModel.renderSettings.fractalType
@@ -447,7 +441,6 @@ extension Renderer {
 
         // Fast-path: parameters unchanged since last call — skip string alloc + dict lookup
         if iterations == lastSelectIter && raySteps == lastSelectRS &&
-           useQuadShared == lastSelectQS &&
            neonMode == lastSelectNeon &&
               colorIterations == lastSelectColorIterations &&
            fractalType.rawValue == lastSelectFT &&
@@ -473,7 +466,6 @@ extension Renderer {
             qualityMode: qualityMode,
             colorIterations: colorIterations,
             powerKey: powerKey,
-            useQuadShared: useQuadShared,
             sceneKey: "_B\(bubbleEnabled ? 1 : 0)"
         )
         let cacheKey = keyContext.exactKey(neonEnabled: neonMode)
@@ -533,12 +525,11 @@ extension Renderer {
                     // race between preset apply and activation lands here).
                     scheduleCustomLibrarySelfHeal()
                     isSpecialized = false
-                    result = useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+                    result = pipelineState
                     return cacheSelectedRenderPipeline(
                         result,
                         iterations: iterations,
                         raySteps: raySteps,
-                        useQuadShared: useQuadShared,
                         neonMode: neonMode,
                         colorIterations: colorIterations,
                         fractalTypeRawValue: fractalType.rawValue,
@@ -548,27 +539,23 @@ extension Renderer {
                         isSpecialized: false
                     )
                 }
-                // A pipeline already cached for THIS formula (same hash + same
-                // useQuadShared variant, possibly different FI/RS) is a near-perfect
-                // visual match — same fractal, just a slightly different
-                // iteration/step count. When one exists, build the exact
-                // specialization OFF the render thread and serve the near-match this
-                // frame: no 50–500 ms render-thread stall, and — unlike the
-                // default-library fallback chain below, which renders sky-only for
-                // custom because it lacks the FractalTypeCustom arm — the fractal
-                // stays correct on screen. `insertBuiltRenderPipeline` clears the
-                // fast-path when the async build lands, so the exact pipeline is
-                // picked up within a frame of completion.
+                // A pipeline already cached for THIS formula (same hash, possibly
+                // different FI/RS) is a near-perfect visual match — same fractal,
+                // just a slightly different iteration/step count. When one exists,
+                // build the exact specialization OFF the render thread and serve the
+                // near-match this frame: no 50–500 ms render-thread stall, and —
+                // unlike the default-library fallback chain below, which renders
+                // sky-only for custom because it lacks the FractalTypeCustom arm —
+                // the fractal stays correct on screen. `insertBuiltRenderPipeline`
+                // clears the fast-path when the async build lands, so the exact
+                // pipeline is picked up within a frame of completion.
                 //
-                // The `_QS` suffix filter is required: the suffix encodes
-                // useQuadShared (key build site ~line 34), and serving the wrong
-                // variant would bind a mismatched vertex function / mesh layout.
                 // Hashes are fixed-length, so the "CX<hash>_" prefix can't
                 // cross-match a different formula.
                 let nearMatchCustomPipeline: MTLRenderPipelineState? = customShaderHash.flatMap { hash in
                     let prefix = "CX\(hash)_"
                     guard let key = pipelineCache.keys.first(where: {
-                        $0.hasPrefix(prefix) && $0.hasSuffix("_QS") == useQuadShared
+                        $0.hasPrefix(prefix)
                     }) else {
                         return nil
                     }
@@ -578,8 +565,7 @@ extension Renderer {
                 if let nearMatch = nearMatchCustomPipeline {
                     enqueueBackgroundPipelineBuild(
                         cacheKey: cacheKey,
-                        config: exactConfig,
-                        useQuadShared: useQuadShared
+                        config: exactConfig
                     )
                     recordPipelineTelemetry(renderSource: "custom-async-near-match")
                     lastLoggedPipelineKey = cacheKey
@@ -588,7 +574,6 @@ extension Renderer {
                         nearMatch,
                         iterations: iterations,
                         raySteps: raySteps,
-                        useQuadShared: useQuadShared,
                         neonMode: neonMode,
                         colorIterations: colorIterations,
                         fractalTypeRawValue: fractalType.rawValue,
@@ -609,7 +594,7 @@ extension Renderer {
                         rasterSampleCount: rasterSampleCount,
                         mtlVertexDescriptor: mtlVertexDescriptor,
                         config: exactConfig,
-                        fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader",
+                        fragmentFunctionName: "fragmentShader",
                         library: library,
                         archive: renderPipelineArchive
                     )
@@ -622,7 +607,6 @@ extension Renderer {
                         result,
                         iterations: iterations,
                         raySteps: raySteps,
-                        useQuadShared: useQuadShared,
                         neonMode: neonMode,
                         colorIterations: colorIterations,
                         fractalTypeRawValue: fractalType.rawValue,
@@ -638,8 +622,7 @@ extension Renderer {
             } else {
                 enqueueBackgroundPipelineBuild(
                     cacheKey: cacheKey,
-                    config: exactConfig,
-                    useQuadShared: useQuadShared
+                    config: exactConfig
                 )
             }
 
@@ -695,7 +678,7 @@ extension Renderer {
                             customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectPipeline FT=custom served via generic-fallback — DEFAULT pipelineState (fog/sky only)")
                         }
                         isSpecialized = false
-                        result = useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+                        result = pipelineState
                     }
                 }
             }
@@ -706,7 +689,6 @@ extension Renderer {
             result,
             iterations: iterations,
             raySteps: raySteps,
-            useQuadShared: useQuadShared,
             neonMode: neonMode,
             colorIterations: colorIterations,
             fractalTypeRawValue: fractalType.rawValue,
@@ -1145,8 +1127,7 @@ extension Renderer {
     /// never preempts the render loop.
     fileprivate func enqueueBackgroundPipelineBuild(
         cacheKey: String,
-        config: FunctionConstantConfig,
-        useQuadShared: Bool
+        config: FunctionConstantConfig
     ) {
         if pendingPipelineBuildKeys.contains(cacheKey) { return }
         if shouldDelayRenderPipelineBuild(forKey: cacheKey) { return }
@@ -1161,7 +1142,7 @@ extension Renderer {
         nonisolated(unsafe) let layerRenderer = self.layerRenderer
         let rasterSampleCount = self.rasterSampleCount
         nonisolated(unsafe) let vertexDescriptor = self.mtlVertexDescriptor
-        let fragmentName = useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader"
+        let fragmentName = "fragmentShader"
         // Snapshot the active custom library at enqueue time so the eventual
         // build matches the cache key prefix. `MTLLibrary` is thread-safe.
         let customLibrary: MTLLibrary? =

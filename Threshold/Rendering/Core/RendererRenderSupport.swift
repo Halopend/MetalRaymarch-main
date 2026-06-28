@@ -150,7 +150,7 @@ extension Renderer {
            adaptiveHierarchicalPipeline8x8 != nil {
             return .adaptiveCompute
         }
-        return .fragment(useQuadShared: settingsSnapshot.tileSize == 2)
+        return .fragment
     }
 
     /// visionOS 26+ runtime render-quality control. The compositor sizes the
@@ -188,7 +188,30 @@ extension Renderer {
         let quality = lastAppliedRenderQuality
         let tile = appModel.renderSettings.tileSize
         let path = (tile == 8 && adaptiveHierarchicalPipeline8x8 != nil) ? "compute 8×8" : "fragment"
-        let key = "\(w)x\(h)|\(String(format: "%.2f", quality))|\(foveation)|\(path)"
+
+        // Foveation rate-map decode dims (eye 0) — the exact coordinate spaces the
+        // compute path's ray reconstruction works in. Computed straight from the
+        // drawable each frame (independent of the kernel's rate-map branch), so it
+        // reports the truth even when the rate map is absent (→ linear path) or the
+        // one-time console log already fired. This is what disambiguates whether the
+        // distortion is the rate-map decode or a plain resolution mismatch.
+        let rateMaps = drawable.rasterizationRateMaps
+        let vp = drawable.views.first?.textureMap.viewport
+        let vpW = Int((vp?.width ?? 0).rounded())
+        let vpH = Int((vp?.height ?? 0).rounded())
+        let vpOX = Int((vp?.originX ?? 0).rounded())
+        let vpOY = Int((vp?.originY ?? 0).rounded())
+        let decode: String
+        if let map = rateMaps.first {
+            let phys = map.physicalSize(layer: 0)
+            let screen = map.screenSize
+            let valid = (phys.width == w && phys.height == h)
+            decode = "maps \(rateMaps.count)  phys \(phys.width)×\(phys.height)  screen \(screen.width)×\(screen.height)  vp \(vpW)×\(vpH)@\(vpOX),\(vpOY)  tex \(w)×\(h)  \(valid ? "valid" : "MISMATCH→linear")"
+        } else {
+            decode = "no rate map (linear path)  vp \(vpW)×\(vpH)@\(vpOX),\(vpOY)  tex \(w)×\(h)"
+        }
+
+        let key = "\(w)x\(h)|\(String(format: "%.2f", quality))|\(foveation)|\(path)|\(decode)"
         guard key != lastPublishedDiagnosticsKey else { return }
         lastPublishedDiagnosticsKey = key
 
@@ -200,6 +223,7 @@ extension Renderer {
             metrics.renderQuality = quality
             metrics.foveationEnabled = foveation
             metrics.renderPath = path
+            metrics.foveationDecode = decode
         }
     }
 

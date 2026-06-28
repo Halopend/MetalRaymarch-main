@@ -555,6 +555,14 @@ extension ContentView {
                 .disabled(!isCompute)
                 .opacity(isCompute ? 1 : 0.45)
 
+                accelToggleCompact("Temporal Reproject",
+                            isOn: cache.quality.computeTemporalReprojectionEnabled,
+                            help: "Reuses last frame's depth to skip most of the march — the path's main speedup. Currently can blank disoccluded 8×8/32×32 tiles, so it's off by default for a correct, comparable image. Adaptive Compute renderer mode only.") { v in
+                    cache.quality.computeTemporalReprojectionEnabled = v; cache.push(\.computeTemporalReprojectionEnabled, value: v)
+                }
+                .disabled(!isCompute)
+                .opacity(isCompute ? 1 : 0.45)
+
                 accelToggleCompact("Bounding Skip",
                             isOn: cache.quality.boundingSphereSkipEnabled,
                             help: "Rays that miss a sphere enclosing the fractal skip the march entirely. Uses a generous bound, so it mainly culls background; sprawling fractals (Kleinian, large folds) may clip — experimental.") { v in
@@ -605,14 +613,14 @@ extension ContentView {
         .background(Color.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    // MARK: - Performance tab (rail sub-tabs: Metrics / Acceleration / Budget)
+    // MARK: - Performance tab (rail sub-tabs: Budget / Acceleration — Acceleration
+    // also hosts the live metrics readout and the render-quality controls)
 
     /// Dispatches the Performance tab's content based on the selected rail
     /// sub-section, so each panel is short instead of one long dense scroll.
     @ViewBuilder
     var performanceTabContent: some View {
         switch performanceRailSection {
-        case .metrics:      performanceMetricsContent
         case .acceleration: performanceAccelerationContent
         case .budget:       performanceBudgetContent
         }
@@ -628,16 +636,12 @@ extension ContentView {
         }
     }
 
-    private var performanceMetricsContent: some View {
-        VStack(spacing: 12) {
-            performanceSectionHeader("Metrics", systemImage: AppIcons.gauge)
-            PerformanceMetricsView(cache: cache)
-        }
-    }
-
     private var performanceAccelerationContent: some View {
         VStack(spacing: 12) {
             performanceSectionHeader("Acceleration", systemImage: AppIcons.boltFill)
+
+            // ── Live metrics (merged in from the former Metrics sub-tab) ──
+            PerformanceMetricsView(cache: cache)
 
             // ── Renderer Mode ──
             VStack(alignment: .leading, spacing: 8) {
@@ -675,6 +679,9 @@ extension ContentView {
                     .foregroundStyle(.secondary)
             }
 
+            // ── Render Quality (resolution / framerate headroom) ──
+            performanceQualityControls
+
             // ── Render Distance ──
             // How far rays march before giving up. Costs steps, so pair higher
             // values with the iteration budget / acceleration levers.
@@ -705,6 +712,135 @@ extension ContentView {
             // ── Acceleration (the gamut of march speedup techniques) ──
             fractalAccelerationSection
         }
+    }
+
+    /// Render-quality controls — the quality slider plus the auto-adjust-to-hold-FPS
+    /// toggle. Lives in the Acceleration sub-tab (these are framerate-headroom levers,
+    /// not detail-budget choices). Per-platform: Mac/iOS = MetalFX detail budget,
+    /// visionOS = the compositor's native Render Quality.
+    @ViewBuilder
+    private var performanceQualityControls: some View {
+        // ── Detail/Framerate Budget ──
+        // visionOS uses the compositor's Render Quality (below) for resolution;
+        // the MetalFX-driven detail budget only applies on Mac/iOS.
+        #if os(macOS) || os(iOS)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(effectiveDirectBudgetLabel)
+                Spacer()
+                Text("\(Int(cache.quality.resolutionScale * 100))%")
+                    .fontWeight(.bold)
+                    .monospacedDigit()
+            }
+
+            if qualityGoalPreference != .advanced {
+                HStack(spacing: 8) {
+                    // Shared labels (must match Iteration Budget wording): Low / Medium / High / Full.
+                    // Dashed screen outline + inner grid conveys pixel density; increasing detail
+                    // left-to-right. Low is 0.34 (not 0.33) so it stays under MetalFX temporal's 3× cap.
+                    let presets: [(label: String, scale: Float, icon: String)] = [
+                        ("Low", 0.34, "circle.grid.2x2"),
+                        ("Medium", 0.50, "circle.grid.3x3"),
+                        ("High", 0.75, "circle.grid.3x3.fill"),
+                        ("Full", 1.0, "circle.grid.3x3.circle.fill")
+                    ]
+
+                    ForEach(presets, id: \.label) { preset in
+                        Button {
+                            cache.quality.resolutionScale = preset.scale
+                            cache.push(\.resolutionScale, value: preset.scale)
+                        } label: {
+                            VStack(spacing: 2) {
+                                ZStack {
+                                    Image(systemName: AppIcons.rectangleDashed)
+                                        .font(.caption)
+                                    Image(systemName: preset.icon)
+                                        .font(.caption2)
+                                }
+                                Text(preset.label).font(.caption2)
+                                Text("\(Int(preset.scale * 100))%").font(.caption.monospacedDigit())
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(abs(cache.quality.resolutionScale - preset.scale) < 0.01 ? .blue : .secondary)
+                        .disabled(cache.quality.tileSize == 8)
+                    }
+                }
+            }
+
+            if qualityGoalPreference == .advanced {
+                Slider(value: Binding(
+                    get: { cache.quality.resolutionScale },
+                    set: { newValue in
+                        let snapped = (newValue * 100).rounded() / 100
+                        cache.quality.resolutionScale = snapped
+                        cache.push(\.resolutionScale, value: snapped)
+                    }
+                ), in: ControlCatalog.resolutionScale.range, step: 0.01)
+                .disabled(cache.quality.tileSize == 8)
+            }
+
+            if cache.quality.tileSize == 8 {
+                Text(effectiveDirectBudgetUnavailableText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("MetalFX uses temporal upscaling when available. 50% to 75% is the usual quality/performance sweet spot.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        #endif
+
+        #if os(visionOS)
+        // ── Render Quality (Vision Pro compositor native resolution) ──
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Priority")
+
+            // Custom layout instead of Slider's built-in min/max value labels:
+            // `.lineLimit(1).fixedSize()` guarantees the end labels render at their
+            // full intrinsic width with no wrap or truncation — so longer localized
+            // words ("Lisse"/"Net", "なめらか"/"くっきり", …) always show in full — and the
+            // slider bar takes whatever space is left between them.
+            HStack(spacing: 10) {
+                Text("Smooth")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
+                Slider(value: Binding(
+                    get: { cache.quality.renderQuality },
+                    set: { newValue in
+                        let snapped = (newValue * 20).rounded() / 20   // 5% steps
+                        cache.quality.renderQuality = snapped
+                        cache.push(\.renderQuality, value: snapped)
+                    }
+                ), in: QualityConfig.visionMinRenderQuality...QualityConfig.visionMaxRenderQuality, step: 0.05)
+                .accessibilityLabel(Text("Priority"))
+                Text("Sharp")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+
+            Toggle("Auto-adjust to hold FPS", isOn: Binding(
+                get: { cache.quality.adaptiveRenderQualityEnabled },
+                set: { v in
+                    cache.quality.adaptiveRenderQualityEnabled = v
+                    cache.push(\.adaptiveRenderQualityEnabled, value: v)
+                }
+            ))
+            .tint(.cyan)
+            .help("When the frame rate sags, the compositor's render quality steps down to recover headroom, then climbs back toward your slider setting (the ceiling) once FPS is comfortable. Adjustments are infrequent and the compositor tweens between them, so the change reads as a gentle ramp.")
+
+            Text("Vision Pro: the compositor's native, gaze-foveated resolution. The slider sets the sharpest quality (the ceiling, a memory/quality balance); lower trades crispness for GPU headroom with a smoothed transition. Very low values probe max framerate.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        #endif
     }
 
     private var performanceBudgetContent: some View {
@@ -802,128 +938,6 @@ extension ContentView {
                     }
                 }
             }
-
-            // ── Detail/Framerate Budget ──
-            // visionOS uses the compositor's Render Quality (below) for resolution;
-            // the MetalFX-driven detail budget only applies on Mac/iOS.
-            #if os(macOS) || os(iOS)
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(effectiveDirectBudgetLabel)
-                    Spacer()
-                    Text("\(Int(cache.quality.resolutionScale * 100))%")
-                        .fontWeight(.bold)
-                        .monospacedDigit()
-                }
-
-                if qualityGoalPreference != .advanced {
-                    HStack(spacing: 8) {
-                        // Shared labels (must match Iteration Budget wording): Low / Medium / High / Full.
-                        // Dashed screen outline + inner grid conveys pixel density; increasing detail
-                        // left-to-right. Low is 0.34 (not 0.33) so it stays under MetalFX temporal's 3× cap.
-                        let presets: [(label: String, scale: Float, icon: String)] = [
-                            ("Low", 0.34, "circle.grid.2x2"),
-                            ("Medium", 0.50, "circle.grid.3x3"),
-                            ("High", 0.75, "circle.grid.3x3.fill"),
-                            ("Full", 1.0, "circle.grid.3x3.circle.fill")
-                        ]
-
-                        ForEach(presets, id: \.label) { preset in
-                            Button {
-                                cache.quality.resolutionScale = preset.scale
-                                cache.push(\.resolutionScale, value: preset.scale)
-                            } label: {
-                                VStack(spacing: 2) {
-                                    ZStack {
-                                        Image(systemName: AppIcons.rectangleDashed)
-                                            .font(.caption)
-                                        Image(systemName: preset.icon)
-                                            .font(.caption2)
-                                    }
-                                    Text(preset.label).font(.caption2)
-                                    Text("\(Int(preset.scale * 100))%").font(.caption.monospacedDigit())
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 6)
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(abs(cache.quality.resolutionScale - preset.scale) < 0.01 ? .blue : .secondary)
-                            .disabled(cache.quality.tileSize == 8)
-                        }
-                    }
-                }
-
-                if qualityGoalPreference == .advanced {
-                    Slider(value: Binding(
-                        get: { cache.quality.resolutionScale },
-                        set: { newValue in
-                            let snapped = (newValue * 100).rounded() / 100
-                            cache.quality.resolutionScale = snapped
-                            cache.push(\.resolutionScale, value: snapped)
-                        }
-                    ), in: ControlCatalog.resolutionScale.range, step: 0.01)
-                    .disabled(cache.quality.tileSize == 8)
-                }
-
-                if cache.quality.tileSize == 8 {
-                    Text(effectiveDirectBudgetUnavailableText)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("MetalFX uses temporal upscaling when available. 50% to 75% is the usual quality/performance sweet spot.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            #endif
-
-            #if os(visionOS)
-            // ── Render Quality (Vision Pro compositor native resolution) ──
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Priority")
-
-                // Custom layout instead of Slider's built-in min/max value labels:
-                // `.lineLimit(1).fixedSize()` guarantees the end labels render at their
-                // full intrinsic width with no wrap or truncation — so longer localized
-                // words ("Lisse"/"Net", "なめらか"/"くっきり", …) always show in full — and the
-                // slider bar takes whatever space is left between them.
-                HStack(spacing: 10) {
-                    Text("Smooth")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .fixedSize()
-                    Slider(value: Binding(
-                        get: { cache.quality.renderQuality },
-                        set: { newValue in
-                            let snapped = (newValue * 20).rounded() / 20   // 5% steps
-                            cache.quality.renderQuality = snapped
-                            cache.push(\.renderQuality, value: snapped)
-                        }
-                    ), in: QualityConfig.visionMinRenderQuality...QualityConfig.visionMaxRenderQuality, step: 0.05)
-                    .accessibilityLabel(Text("Priority"))
-                    Text("Sharp")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .fixedSize()
-                }
-
-                Toggle("Auto-adjust to hold FPS", isOn: Binding(
-                    get: { cache.quality.adaptiveRenderQualityEnabled },
-                    set: { v in
-                        cache.quality.adaptiveRenderQualityEnabled = v
-                        cache.push(\.adaptiveRenderQualityEnabled, value: v)
-                    }
-                ))
-                .tint(.cyan)
-                .help("When the frame rate sags, the compositor's render quality steps down to recover headroom, then climbs back toward your slider setting (the ceiling) once FPS is comfortable. Adjustments are infrequent and the compositor tweens between them, so the change reads as a gentle ramp.")
-
-                Text("Vision Pro: the compositor's native, gaze-foveated resolution. The slider sets the sharpest quality (the ceiling, a memory/quality balance); lower trades crispness for GPU headroom with a smoothed transition. Very low values probe max framerate.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            #endif
 
             // ── Force Recompile (developer/debug) ──
             shaderRecompileSection

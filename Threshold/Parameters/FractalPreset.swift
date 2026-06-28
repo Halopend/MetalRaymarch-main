@@ -213,7 +213,8 @@ struct FractalPreset: Codable, Identifiable {
         sphereRadius = try container.decodeIfPresent(Float.self, forKey: .sphereRadius) ?? 0.5
         formulaParamValues = try container.decodeIfPresent([Float].self, forKey: .formulaParamValues)
         resolutionScale = try container.decodeIfPresent(Float.self, forKey: .resolutionScale)
-        tileSize = try container.decodeIfPresent(Int.self, forKey: .tileSize)
+        let decodedTileSize = try container.decodeIfPresent(Int.self, forKey: .tileSize)
+        tileSize = decodedTileSize == 2 ? nil : decodedTileSize  // Old "Quad Shared" mode removed → degrade to fragment
         worldRotationX = try container.decodeIfPresent(Float.self, forKey: .worldRotationX)
         worldRotationY = try container.decodeIfPresent(Float.self, forKey: .worldRotationY)
         worldRotationZ = try container.decodeIfPresent(Float.self, forKey: .worldRotationZ)

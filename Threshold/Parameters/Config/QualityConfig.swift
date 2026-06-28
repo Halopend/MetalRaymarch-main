@@ -29,7 +29,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // Resolution / tiling
     var resolutionScale: Float = 1.0   // 0.33 - 1.0 (MetalFX spatial upscale input scale)
     var renderQuality: Float = 0.5     // visionMinRenderQuality - 1.0 (visionOS compositor drawable scale; 1.0 = native). Default 0.5 favors framerate; the floor is for probing max framerate / the adaptive governor.
-    var tileSize: Int = 0              // 0=disabled, 2/4/8 adaptive hierarchical
+    var tileSize: Int = 0              // 0=disabled (fragment), 8=adaptive hierarchical compute
 
     // Vision Pro: auto-lower Render Quality to hold the frame rate, recovering
     // toward the slider (treated as a ceiling) when FPS has headroom. The slider
@@ -42,6 +42,11 @@ struct QualityConfig: Codable, Equatable, Sendable {
 
     // Experimental: coherent packet predict-validate raymarch path (Stages 0-3)
     var coherentPacketEnabled: Bool = false
+
+    // Compute path (tileSize == 8): temporal reprojection + tile/supertile depth
+    // seeding. The path's main speedup, but can blank disoccluded tiles — off by
+    // default for a correct baseline.
+    var computeTemporalReprojectionEnabled: Bool = false
 
     // Foveated raymarching strength (0...1); peripheral 8x8 tiles march fewer steps.
     var foveationStrength: Float = 0.0
@@ -114,7 +119,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case baseFractalIterations, baseMaxRaySteps
         case resolutionScale, renderQuality, tileSize
-        case debugHierarchical, coherentPacketEnabled, foveationStrength
+        case debugHierarchical, coherentPacketEnabled, computeTemporalReprojectionEnabled, foveationStrength
         case smartAdvanceEnabled, coneMarchStrength
         case overRelaxationMax, distanceLODStrength, shadowsEnabled, boundingSphereSkipEnabled
         case renderDistanceScale, adaptiveRenderQualityEnabled
@@ -128,9 +133,11 @@ struct QualityConfig: Codable, Equatable, Sendable {
         baseMaxRaySteps       = try c.decodeIfPresent(Int.self,   forKey: .baseMaxRaySteps)       ?? 64
         resolutionScale       = try c.decodeIfPresent(Float.self, forKey: .resolutionScale)       ?? 1.0
         renderQuality         = try c.decodeIfPresent(Float.self, forKey: .renderQuality)         ?? 0.5
-        tileSize              = try c.decodeIfPresent(Int.self,   forKey: .tileSize)              ?? 0
+        let decodedTileSize   = try c.decodeIfPresent(Int.self,   forKey: .tileSize)              ?? 0
+        tileSize              = decodedTileSize == 2 ? 0 : decodedTileSize  // Old "Quad Shared" mode removed → degrade to fragment
         debugHierarchical     = try c.decodeIfPresent(Bool.self,  forKey: .debugHierarchical)     ?? false
         coherentPacketEnabled = try c.decodeIfPresent(Bool.self,  forKey: .coherentPacketEnabled) ?? false
+        computeTemporalReprojectionEnabled = try c.decodeIfPresent(Bool.self, forKey: .computeTemporalReprojectionEnabled) ?? false
         foveationStrength     = try c.decodeIfPresent(Float.self, forKey: .foveationStrength)     ?? 0.0
         smartAdvanceEnabled   = try c.decodeIfPresent(Bool.self,  forKey: .smartAdvanceEnabled)   ?? false
         coneMarchStrength     = try c.decodeIfPresent(Float.self, forKey: .coneMarchStrength)     ?? 0.0

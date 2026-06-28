@@ -143,9 +143,10 @@ final class RenderSettings: @unchecked Sendable {
 
     private var _fractalType: FractalModelType = .mandelbox  // Current fractal type
     private var _formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()  // Generic formula params
-    private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical
+    private var _tileSize: Int = 0                   // 0=disabled (fragment), 8=8x8 adaptive hierarchical compute
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
     private var _coherentPacketEnabled: Bool = loadBool("coherentPacketEnabled", default: false)  // Experimental predict-validate raymarch (Stages 0-3)
+    private var _computeTemporalReprojectionEnabled: Bool = loadBool("computeTemporalReprojectionEnabled", default: false)  // Compute path: temporal reproject + tile/supertile depth seeding. Off = full coarse+fine march every frame (correct baseline; the seeding can blank disoccluded tiles)
     private var _foveationStrength: Float = loadFloat("foveationStrength", default: 0.0)  // Peripheral step reduction on the 8x8 compute path (0 = off)
     private var _smartAdvanceEnabled: Bool = loadBool("smartAdvanceEnabled", default: false)  // Grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient)
     private var _adaptiveRenderQualityEnabled: Bool = loadBool("adaptiveRenderQualityEnabled", default: true)  // visionOS: auto-lower compositor Render Quality to hold FPS (slider = ceiling)
@@ -1029,6 +1030,19 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _coherentPacketEnabled } }
         set {
             withLock { _coherentPacketEnabled = newValue }
+            persistQuality()
+        }
+    }
+
+    /// Compute path (tileSize == 8): enable temporal reprojection and the
+    /// tile/supertile previous-frame depth seeding that skips the per-tile coarse
+    /// march. This is the path's main speedup, but the seed can start the fine
+    /// march past disocclusion-exposed geometry, leaving whole 8x8/32x32 tiles
+    /// blank. Off = full coarse+fine march every frame (correct, slower baseline).
+    var computeTemporalReprojectionEnabled: Bool {
+        get { withLock { _computeTemporalReprojectionEnabled } }
+        set {
+            withLock { _computeTemporalReprojectionEnabled = newValue }
             persistQuality()
         }
     }
@@ -2173,6 +2187,7 @@ final class RenderSettings: @unchecked Sendable {
                 tileSize: _tileSize,
                 debugHierarchical: _debugHierarchical,
                 coherentPacketEnabled: _coherentPacketEnabled,
+                computeTemporalReprojectionEnabled: _computeTemporalReprojectionEnabled,
                 foveationStrength: _foveationStrength,
                 smartAdvanceEnabled: _smartAdvanceEnabled,
                 coneMarchStrength: _coneMarchStrength,
@@ -3456,6 +3471,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.tileSize = _tileSize
                 c.debugHierarchical = _debugHierarchical
                 c.coherentPacketEnabled = _coherentPacketEnabled
+                c.computeTemporalReprojectionEnabled = _computeTemporalReprojectionEnabled
                 c.foveationStrength = _foveationStrength
                 c.smartAdvanceEnabled = _smartAdvanceEnabled
                 c.adaptiveRenderQualityEnabled = _adaptiveRenderQualityEnabled
@@ -3483,6 +3499,7 @@ final class RenderSettings: @unchecked Sendable {
                 _tileSize = newValue.tileSize
                 _debugHierarchical = newValue.debugHierarchical
                 _coherentPacketEnabled = newValue.coherentPacketEnabled
+                _computeTemporalReprojectionEnabled = newValue.computeTemporalReprojectionEnabled
                 _foveationStrength = newValue.foveationStrength
                 _smartAdvanceEnabled = newValue.smartAdvanceEnabled
                 _adaptiveRenderQualityEnabled = newValue.adaptiveRenderQualityEnabled

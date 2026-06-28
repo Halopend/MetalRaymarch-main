@@ -4202,60 +4202,86 @@ kernel void adaptiveHierarchical8x8(
     float depthToWrite = (adjustedDist < kRayMissThreshold) ? adjustedDist : (kRayMissThreshold + 100.0);
     curDepthTexture.write(float4(depthToWrite, 0, 0, 0), pixelCoord, uniforms.eyeIndex);
     
-    if (sceneResult.distGlow.x < kRayMissThreshold) {
-        float3 p = marchOrigin + adjustedDist * marchDir;
+    // === PER-LANE HIT STATE (computed for EVERY lane before the shared-shadow barrier) ===
+    // Hit/miss is a per-pixel property of this lane's march. We must NOT branch on it
+    // before the threadgroup_barrier below, or lanes whose ray missed would skip a
+    // barrier the hit lanes execute — threadgroup_barrier under thread-divergent
+    // control flow is Metal UB (GPU hang / corrupted threadgroup memory on every
+    // tile that straddles a silhouette, which is most tiles).
+    bool didHit = (sceneResult.distGlow.x < kRayMissThreshold);
 
-        // GetNormal now uses analytic Jacobian from cache — zero extra Map() calls!
-        float3 nor = GetNormal(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, uniforms.formulaParams, hitCache);
-        
-        // Use precomputed lighting from CPU with helper function
-        float4 spotData = computeSpotlight(p, uniforms.precomputedLighting.spotLightPosition);
-        float3 spot = spotData.xyz;
-        float atten = spotData.w;
-        
-        // Blended lighting (precomputed on CPU — frame-uniform)
-        float3 sunDir = uniforms.precomputedLighting.sunDir;
-        float sunDiffuseScale = uniforms.precomputedLighting.sunDiffuseScale;
-        float lightIntensity = uniforms.precomputedLighting.lightIntensity;
-        
-        const bool shareShadows = is_function_constant_defined(FC_SHARE_SHADOWS)
-            ? FC_SHARE_SHADOWS
-            : (uniforms.lightingSoftness < 0.9f);
-        int shadowIterations = ReducedSecondaryIterations(lodIterations, fractalType, true);
-        half shaSpot = 1.0h;
-        half shaSun = 1.0h;
-        if (shareShadows) {
-            // Only thread 0 computes shadows, then broadcasts to all 64 threads
-            // via threadgroup memory. Shadow varies slowly over 8x8 pixel tiles,
-            // so sharing is visually imperceptible. Saves 63 Shadow() evaluations
-            // per tile (~2600+ fewer fractal iteration loops per tile).
-            if (localIndex == 0) {
+    // Surface point + normal. GetNormal is expensive, so only the hit lanes pay it;
+    // miss lanes get harmless placeholders (their shading block never runs).
+    float3 p = didHit ? (marchOrigin + adjustedDist * marchDir) : float3(0.0f);
+    float3 nor = didHit
+        ? GetNormal(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, uniforms.formulaParams, hitCache)
+        : float3(0.0f, 1.0f, 0.0f);
+
+    // Lighting basis (precomputed on CPU — frame-uniform) + this lane's spotlight.
+    // computeSpotlight is cheap; computing it for miss lanes too keeps thread 0's
+    // shared-shadow producer (below) able to read `spot` without a hit-test.
+    float4 spotData = computeSpotlight(p, uniforms.precomputedLighting.spotLightPosition);
+    float3 spot = spotData.xyz;
+    float atten = spotData.w;
+    float3 sunDir = uniforms.precomputedLighting.sunDir;
+    float sunDiffuseScale = uniforms.precomputedLighting.sunDiffuseScale;
+    float lightIntensity = uniforms.precomputedLighting.lightIntensity;
+
+    // shareShadows is threadgroup-UNIFORM (function constant, or the frame-uniform
+    // softness heuristic) — so the barrier it guards is reached by all-or-none.
+    const bool shareShadows = is_function_constant_defined(FC_SHARE_SHADOWS)
+        ? FC_SHARE_SHADOWS
+        : (uniforms.lightingSoftness < 0.9f);
+    int shadowIterations = ReducedSecondaryIterations(lodIterations, fractalType, true);
+
+    // === SHARED-SHADOW PRODUCER (thread 0) + BARRIER — in UNIFORM control flow ===
+    // Thread 0 computes ONE shadow for the whole 8x8 tile (shadow varies slowly over
+    // a tile, so sharing is visually imperceptible and saves ~63 Shadow() evals).
+    // It ALWAYS publishes a DEFINED value — a real shadow when its own ray hit, else
+    // a lit sentinel with the anchor cleared — so the other 63 lanes never read
+    // uninitialized threadgroup memory. (The old code wrote tg_* only inside thread
+    // 0's per-lane hit branch, so any tile whose top-left pixel was background left
+    // every other pixel reading garbage → black/banded blocks.)
+    if (shareShadows) {
+        if (localIndex == 0) {
+            if (didHit) {
                 FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                     uniforms.precomputedFractal,
                     uniforms.minDistance,
                     marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis);
-                
                 tg_shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
                 tg_shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
                 // Publish anchor surface frame for the coherent-packet normal gate.
                 tg_anchorPos = p;
                 tg_anchorNormal = nor;
                 tg_anchorHasHit = 1;
+            } else {
+                // Thread 0's ray missed: no representative surface to sample. Lit
+                // sentinels + cleared anchor make the hit lanes fall back to their
+                // own per-lane shadow below instead of inheriting a bogus broadcast.
+                tg_shaSpot = 1.0h;
+                tg_shaSun = 1.0h;
+                tg_anchorHasHit = 0;
             }
-            threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+
+    // === PER-LANE SHADING (the per-pixel hit branch — contains NO barrier) ===
+    if (didHit) {
+        half shaSpot = 1.0h;
+        half shaSun = 1.0h;
+        if (shareShadows && tg_anchorHasHit != 0) {
+            // Accept thread 0's broadcast shadow for the tile.
             shaSpot = tg_shaSpot;
             shaSun = tg_shaSun;
 
             // === COHERENT-PACKET SHADOW NORMAL-COHERENCE GATE (Stage 3) ===
-            // The legacy share blindly broadcasts thread 0's shadow to all 63 other
-            // pixels in the tile, which produces blocky terminator banding on the
-            // crinkled fractal surface (normals can flip between adjacent pixels
-            // even when depth is similar). Replacement: lanes accept the broadcast
-            // ONLY if their (n_i, p_i) is locally coherent with the anchor; otherwise
-            // they fall back to a per-pixel Shadow() call. Coherent regions still
-            // get the full sharing speedup; silhouettes pay the per-pixel cost they
-            // would have paid anyway under !shareShadows.
-            if (coherentPacketOn && localIndex != 0 && tg_anchorHasHit != 0) {
+            // Lanes accept the broadcast ONLY if their (n_i, p_i) is locally coherent
+            // with the anchor; otherwise they fall back to a per-pixel Shadow() call,
+            // avoiding blocky terminator banding where normals flip between adjacent
+            // pixels. Coherent regions keep the full sharing speedup.
+            if (coherentPacketOn && localIndex != 0) {
                 float normalDot = dot(nor, tg_anchorNormal);
                 float dpDist = length(p - tg_anchorPos);
                 // Tile diagonal at unit depth ≈ 8 * 1.41 / min(res). Use adjustedDist
@@ -4274,6 +4300,8 @@ kernel void adaptiveHierarchical8x8(
                 }
             }
         } else {
+            // Shadows not shared (soft lighting), OR this tile's thread 0 missed →
+            // pay the per-lane Shadow so silhouette tiles aren't flatly lit.
             FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
@@ -4690,171 +4718,6 @@ fragment FragmentOutput fragmentShaderMono(ColorInOut in [[stage_in]],
     // it when uniforms.benchCollectSteps != 0 (step-profiling armed), so normal
     // frames pay nothing. No warm start on the mono path → warmStartT = -1.
     return fragmentMain(in, uniforms, fragCoord, uniforms.time, -1.0f, benchCounters);
-}
-
-// === HIERARCHICAL QUAD-SHARED RAYMARCHING ===
-// Two-level approach:
-// 1. Lane 0 does COARSE raymarch (few steps) to find approximate distance
-// 2. All lanes do FINE raymarch from that starting point (far fewer steps needed)
-// Combined with per-pixel normals for smooth shading
-// ~8-16x reduction in total DE evaluations
-
-fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
-                               constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
-                               ushort ampId [[amplification_id]],
-                               uint quadLaneId [[thread_index_in_quadgroup]])
-{
-    FragmentOutput output;
-    Uniforms uniforms = uniformsArray.uniforms[ampId];
-    float2 fragCoord = in.position.xy;
-    
-    // === GMT-FRACTALS: Halton Sub-Pixel Jitter for quad-shared path ===
-    fragCoord += uniforms.jitterOffset;
-    
-    float time = uniforms.time;
-
-    float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
-    float3 rd = normalize(in.modelPos - cameraPos);
-    
-    int fractalType = uniforms.fractalType;
-    int lodIterations = max(int(uniforms.fractalIterations), 2);
-    int maxSteps = uniforms.maxRaySteps;
-
-    float3 marchOrigin = cameraPos;
-    float3 marchDir = rd;
-    applySphericalInversionRay(marchOrigin, marchDir, uniforms.sphericalInversionMode, uniforms.sphericalInversionRadius);
-
-    // Use precomputed fractal params (powr() and divisions done on CPU)
-    FractalParams fractalParams = makeFractalParamsFromPrecomputed(
-        uniforms.precomputedFractal,
-        uniforms.minDistance,
-        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis);
-
-    // === QUAD-SHARED COARSE PASS: Leader finds approximate start distance ===
-    // Lane 0 does a cheap coarse raymarch, then broadcasts the result.
-    // All 4 lanes then do a shorter fine march from that starting point,
-    // significantly reducing total Map() evaluations.
-    float coarseStartT = 0.05;
-    {
-        float leaderCoarseT = 0.05;
-        if (quadLaneId == 0) {
-            leaderCoarseT = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, fractalParams, lodIterations, fractalType, uniforms.formulaParams, uniforms.maxViewDistance, uniforms.marchEpsilonScale);
-        }
-        coarseStartT = quad_broadcast(leaderCoarseT, 0);
-    }
-    
-    SceneResult sceneResult;
-    if (coarseStartT < kRayMissThreshold) {
-        // Coarse pass found something — start fine march from nearby
-        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, coarseStartT, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff);
-    } else {
-        // Coarse pass missed — full march needed
-        sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff);
-    }
-    float2 ret = sceneResult.distGlow;
-    OrbitCache hitCache = sceneResult.cache;
-    
-    float adjustedDist = ret.x;
-    float glow = ret.y;
-    
-    half3 col = half3(0.0h);
-    
-    if (ret.x < kRayMissThreshold)
-    {
-        float3 p = marchOrigin + adjustedDist * marchDir;
-        
-        float3 nor = GetNormal(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, uniforms.formulaParams, hitCache);
-        
-        // Quad-shared shadows with optional per-pixel fallback
-        const bool shareShadows = is_function_constant_defined(FC_SHARE_SHADOWS)
-            ? FC_SHARE_SHADOWS
-            : (uniforms.lightingSoftness < 0.9f);
-        half shaSpot = 1.0h;
-        half shaSun = 1.0h;
-        
-        int shadowIterations = ReducedSecondaryIterations(lodIterations, fractalType, true);
-        FractalParams shadowParams = makeFractalParamsFromPrecomputed(
-            uniforms.precomputedFractal,
-            uniforms.minDistance,
-            marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis);
-        
-        // Use precomputed lighting from CPU with helper function
-        float4 spotData = computeSpotlight(p, uniforms.precomputedLighting.spotLightPosition);
-        float3 spot = spotData.xyz;
-        float atten = spotData.w;
-        
-        // Blended lighting (precomputed on CPU — frame-uniform)
-        float3 sunDir = uniforms.precomputedLighting.sunDir;
-        float sunDiffuseScale = uniforms.precomputedLighting.sunDiffuseScale;
-        float lightIntensity = uniforms.precomputedLighting.lightIntensity;
-
-        if (shareShadows) {
-            if (quadLaneId == 0) {
-                shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
-                shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
-            }
-            shaSpot = quad_broadcast(shaSpot, 0);
-            shaSun = quad_broadcast(shaSun, 0);
-        } else {
-            shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
-            shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
-        }
-        
-        // Per-pixel lighting with shared shadows
-        float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
-        half bri = quantizeCelLight(half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity), uniforms.colorScheme);
-        half briSun = quantizeCelLight(half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale), uniforms.colorScheme);
-        
-        col = ColourWithScheme(p, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2), uniforms.colorScheme, hitCache);
-        
-        // Add ambient term to prevent harsh shadows
-        half hemisphereAO = half(nor.y * 0.5 + 0.5);
-        half ambient = 0.15h + hemisphereAO * 0.1h;
-        col = (col * bri * shaSpot) + (col * briSun * shaSun) + (col * ambient);
-        
-        // Specular
-        if (uniforms.colorScheme.cellShadingEnabled == 0) {
-            float3 ref = reflect(marchDir, nor);
-            float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity * lightIntensity;
-            float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
-            col += half3(specSpot) * shaSpot * bri;
-            col += half3(specSun) * shaSun * briSun;
-        }
-        
-
-
-        // Compute clip-space depth and write it out for async timewarp
-        float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
-        output.depth = encodeDepthFromClip(clipPos);
-    }
-    else
-    {
-        // No hit - far plane (tiny depth so compositor treats as far away)
-        output.depth = 1e-7;
-    }
-    
-    // Apply fog, glow, and clamp using helper functions
-    half glowH = half(glow);
-    col = applyFog(col, adjustedDist, uniforms.precomputedFog);
-    col = applyGlow(col, glowH);
-    col = clampColor(col);
-    
-    col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), glowH);
-    FloorCircleHit floorHit = evaluateFloorCircle(cameraPos, rd, adjustedDist, uniforms.floorPlane, uniforms.floorCenterRadius);
-    col = compositeFloorCircle(col, floorHit);
-    if (floorHit.alpha > 0.0f) {
-        float3 floorPoint = cameraPos + rd * floorHit.distance;
-        float4 floorClipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(floorPoint, 1.0);
-        output.depth = encodeDepthFromClip(floorClipPos);
-    }
-    
-    // Spring blob navigation widget (screen-space overlay)
-    float2 blobUV = in.texCoord * 2.0f - 1.0f;
-    col = compositeSpringBlob(col, blobUV, uniforms);
-    
-    output.color = float4(float3(col), 1.0);
-    
-    return output;
 }
 
 // === Format Conversion Shaders for MetalFX ===

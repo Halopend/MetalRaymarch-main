@@ -14,7 +14,7 @@ import Metal
 
 enum RenderFramePath {
     case adaptiveCompute
-    case fragment(useQuadShared: Bool)
+    case fragment
 }
 
 #if canImport(MetalFX)

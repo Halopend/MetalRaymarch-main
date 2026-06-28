@@ -32,6 +32,13 @@ final class RenderMetrics {
     var foveationEnabled: Bool = false
     var renderPath: String = "—"
 
+    /// Compute-path foveation rate-map decode dimensions (eye 0): physical texture
+    /// size, rate-map screen size, and the per-eye viewport (size@origin), plus
+    /// whether physical == drawable (the rateMapValid gate). Surfaced in-app so the
+    /// decode that drives the compute ray reconstruction can be read on-device
+    /// (console print() isn't visible untethered). "—" until a compute frame runs.
+    var foveationDecode: String = "—"
+
     /// Measured average raymarch steps taken to converge, per converged (hit)
     /// pixel — the headline cost metric the Performance dashboard tunes against
     /// (config "Ray Steps" is only the *budget*; this is what actually happened).

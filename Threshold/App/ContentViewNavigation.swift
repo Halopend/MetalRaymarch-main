@@ -103,13 +103,11 @@ enum PerformanceRailSection: String, CaseIterable {
     // (the rail renders allCases in this order, so the default-selected section
     // also sits at the top).
     case budget = "Budget"
-    case metrics = "Metrics"
     case acceleration = "Acceleration"
 
     var icon: String {
         switch self {
         case .budget: return "slider.horizontal.3"
-        case .metrics: return "gauge.with.dots.needle.67percent"
         case .acceleration: return "bolt.fill"
         }
     }
@@ -315,13 +313,11 @@ enum SaveChoice {
 
 enum RendererModeOption: String, CaseIterable {
     case fragment = "Fragment"
-    case quadShared = "Quad Shared"
     case adaptiveCompute = "Adaptive Compute"
 
     var tileSize: Int {
         switch self {
         case .fragment: return 0
-        case .quadShared: return 2
         case .adaptiveCompute: return 8
         }
     }
@@ -330,8 +326,6 @@ enum RendererModeOption: String, CaseIterable {
         switch tileSize {
         case 8:
             return .adaptiveCompute
-        case 2:
-            return .quadShared
         default:
             return .fragment
         }
@@ -341,8 +335,6 @@ enum RendererModeOption: String, CaseIterable {
         switch self {
         case .fragment:
             return "Default path with full shading. Supports MetalFX spatial upscaling."
-        case .quadShared:
-            return "Fragment path with quad-shared traversal. Supports MetalFX spatial upscaling."
         case .adaptiveCompute:
             return "8x8 adaptive compute path. Best for raw performance; MetalFX is disabled in this mode."
         }
