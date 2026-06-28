@@ -933,7 +933,60 @@ final class AnimationManager {
     // ═══════════════════════════════════════════════════════════════════════════
     // ANIMATION UPDATE (called every frame)
     // ═══════════════════════════════════════════════════════════════════════════
-    
+
+    /// Outcome of advancing the playhead from one keyframe segment to the next.
+    private enum SegmentAdvance {
+        case next(toIndex: Int, goingForward: Bool)
+        case stop
+    }
+
+    /// Pure direction/boundary logic shared by the initial segment resolve and the
+    /// carry-over loop in `update(deltaTime:)`: given the current segment origin and
+    /// direction it returns the next target keyframe (handling loop / ping-pong
+    /// bounce) or `.stop` when a non-looping animation runs off the end. Extracted so
+    /// the two call sites can never drift apart.
+    private enum SegmentAdvancer {
+        static func advance(fromIndex: Int,
+                            goingForward: Bool,
+                            mode: AnimationPlaybackMode,
+                            isLooping: Bool,
+                            keyframeCount: Int) -> SegmentAdvance {
+            if goingForward {
+                var toIndex = fromIndex + 1
+                if toIndex >= keyframeCount {
+                    switch mode {
+                    case .forward:
+                        if isLooping { toIndex = 0 } else { return .stop }
+                    case .pingPong:
+                        // Bounce: reverse direction, go back one step.
+                        toIndex = fromIndex - 1
+                        if toIndex < 0 { return .stop }   // only the 2-keyframe edge case
+                        return .next(toIndex: toIndex, goingForward: false)
+                    case .reverse:
+                        break  // unreachable: reverse mode never goes forward
+                    }
+                }
+                return .next(toIndex: toIndex, goingForward: true)
+            } else {
+                var toIndex = fromIndex - 1
+                if toIndex < 0 {
+                    switch mode {
+                    case .reverse:
+                        if isLooping { toIndex = keyframeCount - 1 } else { return .stop }
+                    case .pingPong:
+                        // Bounce: forward again.
+                        toIndex = fromIndex + 1
+                        if toIndex >= keyframeCount { return .stop }
+                        return .next(toIndex: toIndex, goingForward: true)
+                    case .forward:
+                        break  // unreachable: forward mode never goes backward
+                    }
+                }
+                return .next(toIndex: toIndex, goingForward: false)
+            }
+        }
+    }
+
     /// Update animation state. Call this every frame with delta time.
     /// - Parameter deltaTime: Time since last frame in seconds
     func update(deltaTime: TimeInterval) {
@@ -956,40 +1009,14 @@ final class AnimationManager {
         var toIndex: Int
         var goingForward = mode == .forward ? true : (mode == .reverse ? false : playhead.isGoingForward)
 
-        if goingForward {
-            toIndex = fromIndex + 1
-            if toIndex >= keyframeCount {
-                switch mode {
-                case .forward:
-                    if scene.isLooping { toIndex = 0 } else { stop(); return }
-                case .pingPong:
-                    // Bounce: reverse direction, go back one step
-                    playhead.isGoingForward = false
-                    goingForward = false
-                    toIndex = fromIndex - 1
-                    if toIndex < 0 { stop(); return }  // only 2 KF edge case
-                case .reverse:
-                    break  // unreachable
-                }
-            }
-        } else {
-            toIndex = fromIndex - 1
-            if toIndex < 0 {
-                switch mode {
-                case .reverse:
-                    if scene.isLooping {
-                        toIndex = keyframeCount - 1
-                    } else { stop(); return }
-                case .pingPong:
-                    // Bounce: forward again
-                    playhead.isGoingForward = true
-                    goingForward = true
-                    toIndex = fromIndex + 1
-                    if toIndex >= keyframeCount { stop(); return }
-                case .forward:
-                    break  // unreachable
-                }
-            }
+        switch SegmentAdvancer.advance(fromIndex: fromIndex, goingForward: goingForward,
+                                       mode: mode, isLooping: scene.isLooping, keyframeCount: keyframeCount) {
+        case .stop:
+            stop(); return
+        case .next(let nextTo, let nextForward):
+            toIndex = nextTo
+            goingForward = nextForward
+            playhead.isGoingForward = nextForward
         }
 
         // The segment duration is keyed to the destination keyframe (same as forward mode).
@@ -1006,36 +1033,14 @@ final class AnimationManager {
             playhead.currentKeyframeIndex = toIndex
             fromIndex = toIndex
 
-            if goingForward {
-                toIndex = fromIndex + 1
-                if toIndex >= keyframeCount {
-                    switch mode {
-                    case .forward:
-                        if scene.isLooping { toIndex = 0 } else { stop(); return }
-                    case .pingPong:
-                        playhead.isGoingForward = false
-                        goingForward = false
-                        toIndex = fromIndex - 1
-                        if toIndex < 0 { stop(); return }
-                    case .reverse:
-                        break
-                    }
-                }
-            } else {
-                toIndex = fromIndex - 1
-                if toIndex < 0 {
-                    switch mode {
-                    case .reverse:
-                        if scene.isLooping { toIndex = keyframeCount - 1 } else { stop(); return }
-                    case .pingPong:
-                        playhead.isGoingForward = true
-                        goingForward = true
-                        toIndex = fromIndex + 1
-                        if toIndex >= keyframeCount { stop(); return }
-                    case .forward:
-                        break
-                    }
-                }
+            switch SegmentAdvancer.advance(fromIndex: fromIndex, goingForward: goingForward,
+                                           mode: mode, isLooping: scene.isLooping, keyframeCount: keyframeCount) {
+            case .stop:
+                stop(); return
+            case .next(let nextTo, let nextForward):
+                toIndex = nextTo
+                goingForward = nextForward
+                playhead.isGoingForward = nextForward
             }
 
             fromKeyframe  = keyframes[fromIndex]
