@@ -1089,8 +1089,8 @@ private final class ThresholdMacRenderer {
         var orbited = false
         var zoomed = false
 
-        let gestureSensitivity = max(settings.gestureSensitivity / 10.0, 0.1)
-        let translationSensitivity = settings.translationSensitivity
+        let gestureSensitivity = max(GestureDefaults.gestureSensitivity / 10.0, 0.1)
+        let translationSensitivity = GestureDefaults.translationSensitivity
 
         if simd_length_squared(input.orbitDelta) > 0 {
             let yawAngle = -input.orbitDelta.x * Self.mouseRotationSpeed * gestureSensitivity

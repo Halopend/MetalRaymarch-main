@@ -45,7 +45,6 @@ final class GestureController {
     private var cachedFractalType: FractalModelType?
     private var cachedScaleClamp: ClosedRange<Float> = 0.001...500.0
     private var cachedRanges: GestureParamRanges = .standard
-    private var cachedRangesExtended: GestureParamRanges = .extended
 
     /// Refresh cached descriptor values when the fractal type changes.
     /// Call once per frame (or after preset load) — skips the registry
@@ -57,14 +56,12 @@ final class GestureController {
         let desc = FractalTypeRegistry.descriptor(for: current)
         cachedScaleClamp = desc.grabScaleClamp
         cachedRanges = desc.gestureRanges
-        cachedRangesExtended = desc.gestureRangesExtended
         cachedFractalType = current
     }
 
     /// Get parameter ranges for current fractal type (from cache).
     private func currentRanges() -> GestureParamRanges {
-        guard let settings = renderSettings else { return .standard }
-        return settings.extendedGestureRange ? cachedRangesExtended : cachedRanges
+        cachedRanges
     }
 
     @discardableResult
@@ -198,10 +195,8 @@ final class GestureController {
             twoPointGrabEngine.state.endCooldown = max(0, twoPointGrabEngine.state.endCooldown - deltaTime)
         }
         
-        let menuAndMovementOnly = renderSettings?.menuAndMovementOnly ?? false
-
         // Process all gesture mappings (sets targets on RenderSettings)
-        processGestures(menuAndMovementOnly: menuAndMovementOnly)
+        processGestures()
         
         // Process special gestures
         let context = GestureContext(leftHand: leftHand, rightHand: rightHand, deltaTime: deltaTime)
@@ -209,8 +204,8 @@ final class GestureController {
         // Sync per-finger tap engine config from settings each frame
         if let settings = renderSettings {
             perFingerTapEngine.isEnabled = settings.perFingerTapGestureEnabled
-            perFingerTapEngine.leftHandActions = filteredPerFingerTapActions(settings.perFingerTapLeftActions, menuAndMovementOnly: menuAndMovementOnly)
-            perFingerTapEngine.rightHandActions = filteredPerFingerTapActions(settings.perFingerTapRightActions, menuAndMovementOnly: menuAndMovementOnly)
+            perFingerTapEngine.leftHandActions = settings.perFingerTapLeftActions
+            perFingerTapEngine.rightHandActions = settings.perFingerTapRightActions
             perFingerTapEngine.activateThreshold = settings.perFingerTapActivateThreshold
             perFingerTapEngine.releaseThreshold = settings.perFingerTapReleaseThreshold
             perFingerTapEngine.holdDuration = settings.perFingerTapHoldDuration
@@ -250,11 +245,6 @@ final class GestureController {
     }
 #endif
 
-    private func filteredPerFingerTapActions(_ actions: [PerFingerTapAction], menuAndMovementOnly: Bool) -> [PerFingerTapAction] {
-        guard menuAndMovementOnly else { return actions }
-        return actions.map { $0.isMenuEssentialAction ? $0 : .none }
-    }
-    
 #if os(visionOS)
     @available(visionOS 2.0, *)
     private func buildHandData(from anchor: HandAnchor?) -> HandData {
@@ -358,8 +348,8 @@ final class GestureController {
         }
 
         let poseStrength = min(rightHand.middleFingerTouchingPalm(), rightHand.ringFingerTouchingPalm())
-        let activateThreshold = max(0.55, settings.menuToggleActivateThreshold)
-        let releaseThreshold = max(0.20, min(settings.menuToggleReleaseThreshold, activateThreshold - 0.10))
+        let activateThreshold = max(0.55, GestureDefaults.menuToggleActivateThreshold)
+        let releaseThreshold = max(0.20, min(GestureDefaults.menuToggleReleaseThreshold, activateThreshold - 0.10))
         let poseActive = windowPullState.isActive
             ? poseStrength >= releaseThreshold
             : poseStrength >= activateThreshold
@@ -393,7 +383,7 @@ final class GestureController {
     
     // MARK: - Gesture Processing
     
-    private func processGestures(menuAndMovementOnly: Bool) {
+    private func processGestures() {
         guard let settings = renderSettings else { return }
         
         // ── Suppress parameter gestures while the user is interacting with the menu window ──
@@ -414,17 +404,6 @@ final class GestureController {
         // ── 1. BOTH-HAND GESTURE DISPATCH (two-hand pull-apart) ─────────
         for digit in 1...3 {
             let binding = settings.binding(forHand: .both, digit: digit)
-
-            if menuAndMovementOnly && !binding.isMovementBinding {
-                if twoHandStateByDigit[digit]?.isActive == true {
-                    twoHandStateByDigit[digit]?.isActive = false
-                }
-                if digit == 1, grabState.isActive {
-                    grabState.isActive = false
-                    grabState.mapping = nil
-                }
-                continue
-            }
 
             // Runtime conflict guard: skip if any single-hand drag is active for this digit
             guard FingerDigit(rawValue: digit) != nil else { continue }
@@ -449,7 +428,7 @@ final class GestureController {
                         source: .gesture,
                         value: .absolute(newValue),
                         frameIndex: self.operationFrameCounter,
-                        smoothing: ParameterOperationSmoothing(smoothingTime: settings.gestureSmoothing)
+                        smoothing: ParameterOperationSmoothing(smoothingTime: GestureDefaults.gestureSmoothing)
                     )
                     self.parameterPipeline.dispatchGesture([op], settings: settings)
                     UsageAnalytics.shared.trackHandGestureUsed()
@@ -511,7 +490,6 @@ final class GestureController {
                     let binding = settings.binding(for: slot)
                     processSingleHandDrag(slot: slot, hand: handData, binding: binding,
                                          lockedFinger: lockedFinger,
-                                         menuAndMovementOnly: menuAndMovementOnly,
                                          settings: settings, activeDigit: &activeDigit)
                 }
             }
@@ -593,7 +571,7 @@ final class GestureController {
                 source: .gesture,
                 value: .absolute(newValue),
                 frameIndex: operationFrameCounter,
-                smoothing: ParameterOperationSmoothing(smoothingTime: settings.gestureSmoothing)
+                smoothing: ParameterOperationSmoothing(smoothingTime: GestureDefaults.gestureSmoothing)
             )
             parameterPipeline.dispatchGesture([op], settings: settings)
             UsageAnalytics.shared.trackHandGestureUsed()
@@ -656,8 +634,8 @@ final class GestureController {
         let leftPinch = leftHand.pinchStrength(digit: digit)
         let rightPinch = rightHand.pinchStrength(digit: digit)
         
-        let activateThresh = settings.twoHandPinchActivateThreshold
-        let releaseThresh = settings.twoHandPinchReleaseThreshold
+        let activateThresh = GestureDefaults.twoHandPinchActivateThreshold
+        let releaseThresh = GestureDefaults.twoHandPinchReleaseThreshold
         
         let leftPos = leftHand.pinchPosition(digit: digit)
         let rightPos = rightHand.pinchPosition(digit: digit)
@@ -666,8 +644,8 @@ final class GestureController {
         let rightPosValid = simd_length_squared(rightPos) > 1e-6
         
         let currentDistance = simd_length(leftPos - rightPos)
-        let maxStartHandDistance = settings.gestureMaxStartHandDistance
-        let maxActiveHandDistance = max(settings.gestureMaxActiveHandDistance, maxStartHandDistance)
+        let maxStartHandDistance = GestureDefaults.gestureMaxStartHandDistance
+        let maxActiveHandDistance = max(GestureDefaults.gestureMaxActiveHandDistance, maxStartHandDistance)
         
         // Check if both hands are pinching
         let bothActive: Bool
@@ -700,51 +678,16 @@ final class GestureController {
                 rotation: settings.worldRotation,
                 detailScale: settings.detailScale
             )
-            grabState.originalAxis = grabState.mapping!.startAxis
-            grabState.rotationBrokenAway = !settings.rotationAutoSnap  // If snap disabled, act as if already broken away
         }
-        
+
         // === GESTURE ACTIVE ===
-        if bothActive && grabState.isActive, var mapping = grabState.mapping {
-            
-            // ── Rotation breakaway gate ──────────────────────────────────
-            // Rotation is suppressed until the hand axis diverges enough from
-            // the original start axis. On breakaway, rebase the entire mapping
-            // to the current state so scale+position+rotation all continue
-            // smoothly from here with no jump.
-            if !grabState.rotationBrokenAway {
-                let currentAxis = rightPos - leftPos
-                let currentAxisLen = simd_length(currentAxis)
-                let currentAxisNorm = currentAxisLen > 1e-4 ? currentAxis / currentAxisLen : grabState.originalAxis
-                let dot = simd_clamp(simd_dot(grabState.originalAxis, currentAxisNorm), -1.0, 1.0)
-                let breakawayAngleRad = acos(dot)
-                let breakawayThresholdRad = settings.rotationBreakawayDegrees * (.pi / 180.0)
-                
-                if breakawayAngleRad >= breakawayThresholdRad {
-                    grabState.rotationBrokenAway = true
-                    // Rebase: snapshot current state as the new baseline for
-                    // the mapping so rotation, scale, and position all start
-                    // from the current values — no jump.
-                    mapping.rebase(
-                        leftPos: leftPos, rightPos: rightPos,
-                        position: settings.position,
-                        rotation: settings.worldRotation,
-                        detailScale: settings.detailScale
-                    )
-                    grabState.mapping = mapping
-                }
-            }
-            
+        if bothActive && grabState.isActive, let mapping = grabState.mapping {
+
             // ── Per-fractal scale clamp (cached from descriptor) ─────────
             let scaleClamp = cachedScaleClamp
 
-            // ── Evaluate the mapping ─────────────────────────────────────
-            let result: (position: SIMD3<Float>, rotation: simd_quatf, detailScale: Float)
-            if grabState.rotationBrokenAway {
-                result = mapping.evaluate(leftPos: leftPos, rightPos: rightPos, scaleClamp: scaleClamp)
-            } else {
-                result = mapping.evaluateScaleOnly(leftPos: leftPos, rightPos: rightPos, scaleClamp: scaleClamp)
-            }
+            // ── Evaluate the mapping (rotation + scale + position track 1:1) ──
+            let result = mapping.evaluate(leftPos: leftPos, rightPos: rightPos, scaleClamp: scaleClamp)
             
             // ── Apply to render settings ─────────────────────────────────
             // Direct application (intentional dispatcher bypass):
@@ -780,9 +723,6 @@ final class GestureController {
             grabState.isActive = false
             grabState.mapping = nil
             grabState.endCooldown = 0.15  // 150ms cooldown prevents drag from stealing
-
-            // Apply rotation auto-snap on release
-            settings.applyRotationSnap()
         }
     }
     
@@ -810,8 +750,8 @@ final class GestureController {
         let rightPinch = rightHand.pinchStrength(digit: digit)
         
         // Use lower thresholds for ring finger (harder to pinch)
-        let activateThresh = (digit == 3) ? settings.ringPinchActivateThreshold : settings.twoHandPinchActivateThreshold
-        let releaseThresh = (digit == 3) ? settings.ringPinchReleaseThreshold : settings.twoHandPinchReleaseThreshold
+        let activateThresh = (digit == 3) ? GestureDefaults.ringPinchActivateThreshold : GestureDefaults.twoHandPinchActivateThreshold
+        let releaseThresh = (digit == 3) ? GestureDefaults.ringPinchReleaseThreshold : GestureDefaults.twoHandPinchReleaseThreshold
         
         // Measure hand separation (only meaningful if both tracked)
         let leftPos = leftHand.pinchPosition(digit: digit)
@@ -821,10 +761,10 @@ final class GestureController {
         let leftPosValid = simd_length_squared(leftPos) > 1e-6
         let rightPosValid = simd_length_squared(rightPos) > 1e-6
 
-        let minHandDistance = settings.gestureMinHandDistance
-        let maxHandDistance = max(minHandDistance + 0.05, settings.gestureMaxHandDistance)
-        let maxStartHandDistance = settings.gestureMaxStartHandDistance
-        let maxActiveHandDistance = max(settings.gestureMaxActiveHandDistance, maxStartHandDistance)
+        let minHandDistance = GestureDefaults.gestureMinHandDistance
+        let maxHandDistance = max(minHandDistance + 0.05, GestureDefaults.gestureMaxHandDistance)
+        let maxStartHandDistance = GestureDefaults.gestureMaxStartHandDistance
+        let maxActiveHandDistance = max(GestureDefaults.gestureMaxActiveHandDistance, maxStartHandDistance)
         
         let currentDistance = simd_length(leftPos - rightPos)
 
@@ -864,7 +804,7 @@ final class GestureController {
             if settings.useRelativeGestures {
                 // RELATIVE: Change based on delta from start distance
                 // Sensitivity: 1 = 10x slower (0.1x), 10 = normal (1.0x)
-                let baseSensitivityMultiplier = settings.gestureSensitivity / 10.0
+                let baseSensitivityMultiplier = GestureDefaults.gestureSensitivity / 10.0
                 
                 // VERTICAL SENSITIVITY SCALING:
                 // Lowering hands while spreading decreases sensitivity logarithmically.
@@ -933,22 +873,16 @@ final class GestureController {
         hand: HandData,
         binding: GestureActionBinding,
         lockedFinger: Int?,
-        menuAndMovementOnly: Bool,
         settings: RenderSettings,
         activeDigit: inout Int
     ) {
         let key = slot.persistenceKey
         let digit = slot.finger.rawValue
-        let activateThresh = settings.twoHandPinchActivateThreshold
-        let releaseThresh = settings.twoHandPinchReleaseThreshold
+        let activateThresh = GestureDefaults.twoHandPinchActivateThreshold
+        let releaseThresh = GestureDefaults.twoHandPinchReleaseThreshold
 
         // Skip unassigned slots
         if case .core(.none) = binding { 
-            singleHandState.perSlot[key]?.isActive = false
-            return
-        }
-
-        if menuAndMovementOnly && !binding.isMovementBinding {
             singleHandState.perSlot[key]?.isActive = false
             return
         }
@@ -1032,9 +966,6 @@ final class GestureController {
                 singleHandDragEngine.state.accumulatedPosition = settings.effectiveTargetPosition
                 state.prevPos = hand.pinchPosition(digit: digit)
                 state.prevPalm = hand.palmPosition
-                if settings.useSpringBlob {
-                    settings.springActive = true
-                }
             }
             if active && state.isActive {
                 var currentPos = hand.palmPosition
@@ -1055,20 +986,13 @@ final class GestureController {
 
                 let maxZoomCompensation: Float = (settings.fractalType == .mandelbulb) ? 1.5 : 2.0
                 let zoomCompensation = simd_clamp(1.0 / pow(max(settings.detailScale, 0.01), 0.3), 0.5, maxZoomCompensation)
-                let inputDelta = scaledDelta * settings.translationSensitivity * zoomCompensation
+                let inputDelta = scaledDelta * GestureDefaults.translationSensitivity * zoomCompensation
 
-                if settings.useSpringBlob {
-                    // Drive spring displacement (accumulates stretch while held)
-                    settings.springDisplacement = settings.springDisplacement + inputDelta
-                    // Store velocity for fling on release
-                    settings.springVelocity = inputDelta * 90.0  // ~1/90s per hand tracking update
+                // Apply position immediately
+                if settings.isAnimationPlaying {
+                    settings.manualOffsetPosition = settings.manualOffsetPosition + inputDelta
                 } else {
-                    // Direct mode: apply position immediately
-                    if settings.isAnimationPlaying {
-                        settings.manualOffsetPosition = settings.manualOffsetPosition + inputDelta
-                    } else {
-                        settings.targetPosition = settings.targetPosition + inputDelta
-                    }
+                    settings.targetPosition = settings.targetPosition + inputDelta
                 }
 
                 state.prevPos = currentPos
@@ -1077,9 +1001,6 @@ final class GestureController {
             }
             if !active && state.isActive {
                 state.isActive = false
-                if settings.useSpringBlob {
-                    settings.springActive = false  // Release: spring flings
-                }
             }
 
         case .parameterTriplet(let triplet):
@@ -1099,7 +1020,7 @@ final class GestureController {
                 let rawDelta = currentPos - state.prevPos
                 let deltaLength = simd_length(rawDelta)
                 let maxStep: Float = 0.15
-                let sensitivity = settings.gestureSensitivity
+                let sensitivity = GestureDefaults.gestureSensitivity
                 let rangeSpan = triplet.range.upperBound - triplet.range.lowerBound
 
                 // Zoom compensation: dampen sensitivity when zoomed in.
@@ -1114,7 +1035,7 @@ final class GestureController {
                     state.startValues.y = simd_clamp(state.startValues.y + scaledDelta.y, triplet.range.lowerBound, triplet.range.upperBound)
                     state.startValues.z = simd_clamp(state.startValues.z + scaledDelta.z, triplet.range.lowerBound, triplet.range.upperBound)
 
-                    let tripletSmoothing = ParameterOperationSmoothing(smoothingTime: settings.gestureSmoothing)
+                    let tripletSmoothing = ParameterOperationSmoothing(smoothingTime: GestureDefaults.gestureSmoothing)
                     let ops = [
                         ParameterOperation(targetID: triplet.xNodeID, source: .gesture, value: .absolute(state.startValues.x), frameIndex: operationFrameCounter, smoothing: tripletSmoothing),
                         ParameterOperation(targetID: triplet.yNodeID, source: .gesture, value: .absolute(state.startValues.y), frameIndex: operationFrameCounter, smoothing: tripletSmoothing),
@@ -1156,7 +1077,7 @@ final class GestureController {
                 case .depth:      axisDelta = currentPos.z - state.prevPos.z
                 default:          axisDelta = currentPos.y - state.prevPos.y
                 }
-                let sensitivity = settings.gestureSensitivity
+                let sensitivity = GestureDefaults.gestureSensitivity
                 let rangeSpan = node.range.upperBound - node.range.lowerBound
                 let maxStep: Float = 0.15
 
@@ -1171,7 +1092,7 @@ final class GestureController {
                     source: .gesture,
                     value: .absolute(state.startValue),
                     frameIndex: operationFrameCounter,
-                    smoothing: ParameterOperationSmoothing(smoothingTime: settings.gestureSmoothing)
+                    smoothing: ParameterOperationSmoothing(smoothingTime: GestureDefaults.gestureSmoothing)
                 )
                 parameterPipeline.dispatchGesture([op], settings: settings)
                 UsageAnalytics.shared.trackHandGestureUsed()

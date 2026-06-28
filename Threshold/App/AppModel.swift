@@ -1123,10 +1123,6 @@ class AppModel {
         // harder-to-perform mode before the current default existed.
         renderSettings.menuToggleGestureMode = .middleOrRingToPalm
 
-        renderSettings.menuToggleHoldDuration = min(renderSettings.menuToggleHoldDuration, GestureDefaults.menuToggleHoldDuration)
-        renderSettings.menuToggleActivateThreshold = min(renderSettings.menuToggleActivateThreshold, GestureDefaults.menuToggleActivateThreshold)
-        renderSettings.menuToggleReleaseThreshold = min(renderSettings.menuToggleReleaseThreshold, GestureDefaults.menuToggleReleaseThreshold)
-
         let priorLeftDefault: [PerFingerTapAction] = [.none, .none, .none, .openShapeMenu, .none]
         if renderSettings.perFingerTapLeftActions == [.none, .none, .none, .none, .none]
             || renderSettings.perFingerTapLeftActions == priorLeftDefault {

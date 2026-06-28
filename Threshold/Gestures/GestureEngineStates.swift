@@ -12,8 +12,6 @@ struct TwoPointGrabGestureState {
     var isActive: Bool = false
     var endCooldown: Float = 0
     var mapping: GrabZoomMapping?
-    var originalAxis: SIMD3<Float> = .zero
-    var rotationBrokenAway: Bool = false
 }
 
 struct TwoHandScalarEngineState {

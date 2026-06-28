@@ -304,11 +304,11 @@ struct FirstLaunchWindowView: View {
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.06)))
 
-            // Menu toggle — let the user pick how they open the menu from a
-            // curated shortlist. Selecting a card writes the mode straight to
+            // Menu toggle — let the user pick how they open the menu from the
+            // supported set. Selecting a card writes the mode straight to
             // RenderSettings (like the handedness picker), so it sticks even if
-            // the user bails out of onboarding. The full mode list + threshold
-            // tuning still lives in Settings > Gestures.
+            // the user bails out of onboarding. The same picker lives in
+            // Settings > Gestures.
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Image(systemName: "hand.raised.fill")
@@ -321,7 +321,7 @@ struct FirstLaunchWindowView: View {
                 ForEach(MenuGestureStarterStyle.allCases) { style in
                     menuGestureStyleCard(style)
                 }
-                Text("This is the gesture you'll use most. Change it, plus hold duration and thresholds, anytime in Settings > Gestures.")
+                Text("This is the gesture you'll use most. Change it anytime in Settings > Gestures.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -1,34 +1,26 @@
 import Foundation
 
+/// The menu-opening gestures Threshold supports. Deliberately limited to the
+/// three styles surfaced at first launch (`MenuGestureStarterStyle`) — the
+/// raw values are kept stable (1/3/6) so configs written by builds that had
+/// the wider list still decode the kept modes correctly.
 enum MenuToggleGestureMode: Int32, CaseIterable, Codable {
-    case middleToPalm = 0
     case middleAndRingToPalm = 1
-    case fist = 2
     case wristTap = 3
-    case thumbToIndexPalmUp = 4
-    case ringToPalm = 5
     case middleOrRingToPalm = 6
 
     var displayName: String {
         switch self {
-        case .middleToPalm: return "Middle to Palm"
         case .middleAndRingToPalm: return "Middle + Ring to Palm"
-        case .fist: return "Fist"
         case .wristTap: return "Wrist Tap"
-        case .thumbToIndexPalmUp: return "Thumb-Index (Palm Up)"
-        case .ringToPalm: return "Ring to Palm"
         case .middleOrRingToPalm: return "Middle or Ring to Palm"
         }
     }
 
     var icon: String {
         switch self {
-        case .middleToPalm: return "hand.point.up.left.fill"
         case .middleAndRingToPalm: return "hand.raised.fingers.spread"
-        case .fist: return "hand.rays.fill"  // no fist glyph exists on visionOS; "hand.closed.fill" renders blank
         case .wristTap: return "hand.tap.fill"
-        case .thumbToIndexPalmUp: return "hand.thumbsup.fill"
-        case .ringToPalm: return "hand.point.up.fill"
         case .middleOrRingToPalm: return "hand.raised.fill"
         }
     }
@@ -40,12 +32,19 @@ enum MenuToggleGestureMode: Int32, CaseIterable, Codable {
         default: return false
         }
     }
+
+    /// Robust decode: configs written by an older build may carry a now-removed
+    /// mode's raw value (e.g. the retired `fist` = 2). Fall back to the default
+    /// instead of throwing and discarding the user's whole gesture config.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(Int32.self)
+        self = MenuToggleGestureMode(rawValue: raw) ?? .middleOrRingToPalm
+    }
 }
 
-/// A small, friendly-named subset of `MenuToggleGestureMode` surfaced at first
-/// launch so new users can pick how they open the menu without wading through
-/// the full seven-mode list. Settings > Gestures still exposes every mode; this
-/// is just the curated onboarding shortlist.
+/// Friendly-named presentation of the supported `MenuToggleGestureMode`s,
+/// surfaced at first launch so new users can pick how they open the menu.
+/// Settings > Gestures exposes the same set.
 ///
 /// Background: some people naturally rest their hand with the index finger
 /// curled (as if mid-tap), which can fight an index-based menu gesture — so all

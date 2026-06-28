@@ -221,14 +221,6 @@ enum ControlCatalog {
         range: 4.0...16.0,
         defaultValue: 8.0)
 
-    /// Setter clamped 1…30 but the slider floored at 2.
-    static let rotationSnapWindowDegrees = ControlSpec(
-        id: "gesture.rotationSnapWindowDegrees",
-        name: "Snap Window",
-        icon: "rotate.3d",
-        range: 1.0...30.0,
-        defaultValue: 6.0)
-
     /// Setter clamped 0.33…1 but the slider floored at 0.34 (dead sliver).
     static let resolutionScale = ControlSpec(
         id: "quality.resolutionScale",

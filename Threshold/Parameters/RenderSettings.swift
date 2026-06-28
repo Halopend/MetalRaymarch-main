@@ -162,13 +162,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _isMenuInteractionActive: Bool = false // True while interacting with menu UI (hover/drag)
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
     private var _useRelativeGestures: Bool = loadBool("useRelativeGestures", default: GestureDefaults.useRelativeGestures)
-    private var _extendedGestureRange: Bool = loadBool("extendedGestureRange", default: GestureDefaults.extendedGestureRange)
-    private var _rotationAutoSnap: Bool = loadBool("rotationAutoSnap", default: GestureDefaults.rotationAutoSnap)
-    private var _rotationSnapWindowDegrees: Float = loadFloat("rotationSnapWindowDegrees", default: GestureDefaults.rotationSnapWindowDegrees)
-    private var _rotationBreakawayDegrees: Float = loadFloat("rotationBreakawayDegrees", default: GestureDefaults.rotationBreakawayDegrees)
-    private var _gestureSensitivity: Float = loadFloat("gestureSensitivity", default: GestureDefaults.gestureSensitivity)
-    private var _gestureSmoothing: Float = loadFloat("gestureSmoothing", default: GestureDefaults.gestureSmoothing)
-    private var _menuAndMovementOnly: Bool = loadBool("menuAndMovementOnly", default: GestureDefaults.menuAndMovementOnly)
     private var _menuToggleGestureEnabled: Bool = loadBool("menuToggleGestureEnabled", default: GestureDefaults.menuToggleGestureEnabled)
     private var _menuToggleGestureMode: MenuToggleGestureMode = {
         let key = "menuToggleGestureMode"
@@ -195,19 +188,6 @@ final class RenderSettings: @unchecked Sendable {
 
         return bindings
     }()
-    private var _menuToggleHoldDuration: Float = loadFloat("menuToggleHoldDuration", default: GestureDefaults.menuToggleHoldDuration)
-    private var _menuToggleCooldown: Float = loadFloat("menuToggleCooldown", default: GestureDefaults.menuToggleCooldown)
-    private var _menuToggleActivateThreshold: Float = loadFloat("menuToggleActivateThreshold", default: GestureDefaults.menuToggleActivateThreshold)
-    private var _menuToggleReleaseThreshold: Float = loadFloat("menuToggleReleaseThreshold", default: GestureDefaults.menuToggleReleaseThreshold)
-    private var _twoHandPinchActivateThreshold: Float = loadFloat("twoHandPinchActivateThreshold", default: GestureDefaults.twoHandPinchActivateThreshold)
-    private var _twoHandPinchReleaseThreshold: Float = loadFloat("twoHandPinchReleaseThreshold", default: GestureDefaults.twoHandPinchReleaseThreshold)
-    private var _ringPinchActivateThreshold: Float = loadFloat("ringPinchActivateThreshold", default: GestureDefaults.ringPinchActivateThreshold)
-    private var _ringPinchReleaseThreshold: Float = loadFloat("ringPinchReleaseThreshold", default: GestureDefaults.ringPinchReleaseThreshold)
-    private var _gestureMinHandDistance: Float = loadFloat("gestureMinHandDistance", default: GestureDefaults.gestureMinHandDistance)
-    private var _gestureMaxHandDistance: Float = loadFloat("gestureMaxHandDistance", default: GestureDefaults.gestureMaxHandDistance)
-    private var _gestureMaxStartHandDistance: Float = loadFloat("gestureMaxStartHandDistance", default: GestureDefaults.gestureMaxStartHandDistance)
-    private var _gestureMaxActiveHandDistance: Float = loadFloat("gestureMaxActiveHandDistance", default: GestureDefaults.gestureMaxActiveHandDistance)
-    private var _translationSensitivity: Float = loadFloat("translationSensitivity", default: GestureDefaults.translationSensitivity)
 
     // Per-finger tap-to-palm gesture layer
     private var _perFingerTapGestureEnabled: Bool = loadBool("perFingerTapGestureEnabled", default: GestureDefaults.perFingerTapGestureEnabled)
@@ -223,8 +203,7 @@ final class RenderSettings: @unchecked Sendable {
     // macOS-only: orbit the fractal by tilting the laptop (Sudden Motion Sensor).
     private var _macTiltControlEnabled: Bool = UserDefaults.standard.bool(forKey: "macTiltControlEnabled")
 
-    // === SPRING BLOB NAVIGATION ===
-    private var _useSpringBlob: Bool = loadBool("useSpringBlob", default: GestureDefaults.useSpringBlob)
+    // === SPRING BLOB NAVIGATION (retained renderer subsystem; currently never activated) ===
     // Spring physics state — driven by translate gesture, ticked in Renderer
     private var _springDisplacement: SIMD3<Float> = .zero  // Current displacement from rest
     private var _springVelocity: SIMD3<Float> = .zero      // Current velocity
@@ -1193,71 +1172,11 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _useRelativeGestures = newValue } }
     }
 
-    /// Allow extended parameter ranges for gestures (wider min/max values)
-    var extendedGestureRange: Bool {
-        get { withLock { _extendedGestureRange } }
-        set { withLock { _extendedGestureRange = newValue } }
-    }
-
-    /// Snap world rotation to nearest 45° multiple on each Euler axis when grab gesture ends
-    var rotationAutoSnap: Bool {
-        get { withLock { _rotationAutoSnap } }
-        set { withLock { _rotationAutoSnap = newValue } }
-    }
-
-    /// Half-angle snap window in degrees (±this value). Default 6° → snaps within ±3° of target.
-    var rotationSnapWindowDegrees: Float {
-        get { withLock { _rotationSnapWindowDegrees } }
-        set { withLock { _rotationSnapWindowDegrees = max(1.0, min(30.0, newValue)) } }
-    }
-
-    var rotationBreakawayDegrees: Float {
-        get { withLock { _rotationBreakawayDegrees } }
-        set {
-            let clamped = max(0.0, min(45.0, newValue))
-            withLock { _rotationBreakawayDegrees = clamped }
-            persistGesture()
-        }
-    }
-
-    /// Gesture sensitivity (1-10, where 1 = 10x slower, 10 = normal speed)
-    var gestureSensitivity: Float {
-        get { withLock { _gestureSensitivity } }
-        set {
-            let clamped = max(1.0, min(10.0, newValue))
-            withLock { _gestureSensitivity = clamped }
-            persistGesture()
-        }
-    }
-
-    /// Gesture smoothing time (seconds). Drives the critically-damped spring that
-    /// eases gesture-driven parameter changes toward their targets, so motions
-    /// "play out" over time instead of snapping. Higher = smoother/slower.
-    var gestureSmoothing: Float {
-        get { withLock { _gestureSmoothing } }
-        set {
-            let r = GestureDefaults.gestureSmoothingRange
-            let clamped = max(r.lowerBound, min(r.upperBound, newValue))
-            withLock { _gestureSmoothing = clamped }
-            persistGesture()
-        }
-    }
-
-
     /// Enable/disable the menu toggle gesture without disabling parameter gestures.
     var menuToggleGestureEnabled: Bool {
         get { withLock { _menuToggleGestureEnabled } }
         set {
             withLock { _menuToggleGestureEnabled = newValue }
-            persistGesture()
-        }
-    }
-
-    /// Reduce per-frame gesture work to menu trigger and movement-only bindings.
-    var menuAndMovementOnly: Bool {
-        get { withLock { _menuAndMovementOnly } }
-        set {
-            withLock { _menuAndMovementOnly = newValue }
             persistGesture()
         }
     }
@@ -1344,125 +1263,6 @@ final class RenderSettings: @unchecked Sendable {
     func binding(forHand hand: GestureHandMode, digit: Int) -> GestureActionBinding {
         guard let finger = FingerDigit(rawValue: digit) else { return .core(.none) }
         return binding(for: GestureSlot(hand: hand, finger: finger))
-    }
-
-    /// How long the menu gesture must be held before toggling (seconds).
-    var menuToggleHoldDuration: Float {
-        get { withLock { _menuToggleHoldDuration } }
-        set {
-            let clamped = max(0.05, min(0.6, newValue))
-            withLock { _menuToggleHoldDuration = clamped }
-            persistGesture()
-        }
-    }
-
-    /// Cooldown between menu toggle triggers (seconds).
-    var menuToggleCooldown: Float {
-        get { withLock { _menuToggleCooldown } }
-        set {
-            let clamped = max(0.1, min(2.5, newValue))
-            withLock { _menuToggleCooldown = clamped }
-            persistGesture()
-        }
-    }
-
-    var menuToggleActivateThreshold: Float {
-        get { withLock { _menuToggleActivateThreshold } }
-        set {
-            let clamped = max(0.2, min(0.95, newValue))
-            withLock { _menuToggleActivateThreshold = clamped }
-            persistGesture()
-        }
-    }
-
-    var menuToggleReleaseThreshold: Float {
-        get { withLock { _menuToggleReleaseThreshold } }
-        set {
-            let clamped = max(0.1, min(0.9, newValue))
-            withLock { _menuToggleReleaseThreshold = clamped }
-            persistGesture()
-        }
-    }
-
-    var twoHandPinchActivateThreshold: Float {
-        get { withLock { _twoHandPinchActivateThreshold } }
-        set {
-            let clamped = max(0.2, min(0.98, newValue))
-            withLock { _twoHandPinchActivateThreshold = clamped }
-            persistGesture()
-        }
-    }
-
-    var twoHandPinchReleaseThreshold: Float {
-        get { withLock { _twoHandPinchReleaseThreshold } }
-        set {
-            let clamped = max(0.1, min(0.95, newValue))
-            withLock { _twoHandPinchReleaseThreshold = clamped }
-            persistGesture()
-        }
-    }
-
-    var ringPinchActivateThreshold: Float {
-        get { withLock { _ringPinchActivateThreshold } }
-        set {
-            let clamped = max(0.1, min(0.95, newValue))
-            withLock { _ringPinchActivateThreshold = clamped }
-            persistGesture()
-        }
-    }
-
-    var ringPinchReleaseThreshold: Float {
-        get { withLock { _ringPinchReleaseThreshold } }
-        set {
-            let clamped = max(0.05, min(0.9, newValue))
-            withLock { _ringPinchReleaseThreshold = clamped }
-            persistGesture()
-        }
-    }
-
-    var gestureMinHandDistance: Float {
-        get { withLock { _gestureMinHandDistance } }
-        set {
-            let clamped = max(0.02, min(0.25, newValue))
-            withLock { _gestureMinHandDistance = clamped }
-            persistGesture()
-        }
-    }
-
-    var gestureMaxHandDistance: Float {
-        get { withLock { _gestureMaxHandDistance } }
-        set {
-            let clamped = max(0.2, min(1.2, newValue))
-            withLock { _gestureMaxHandDistance = max(clamped, _gestureMinHandDistance + 0.05) }
-            persistGesture()
-        }
-    }
-
-    var gestureMaxStartHandDistance: Float {
-        get { withLock { _gestureMaxStartHandDistance } }
-        set {
-            let clamped = max(0.08, min(1.0, newValue))
-            withLock { _gestureMaxStartHandDistance = clamped }
-            persistGesture()
-        }
-    }
-
-    var gestureMaxActiveHandDistance: Float {
-        get { withLock { _gestureMaxActiveHandDistance } }
-        set {
-            let clamped = max(0.1, min(1.5, newValue))
-            withLock { _gestureMaxActiveHandDistance = max(clamped, _gestureMaxStartHandDistance) }
-            persistGesture()
-        }
-    }
-
-    var translationSensitivity: Float {
-        get { withLock { _translationSensitivity } }
-        set {
-            let clamped = max(0.2, min(3.0, newValue))
-            withLock { _translationSensitivity = clamped }
-            persistGesture()
-        }
     }
 
     // MARK: - Per-Finger Tap Gesture Layer
@@ -1554,12 +1354,7 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    // MARK: - Spring Blob State
-
-    var useSpringBlob: Bool {
-        get { withLock { _useSpringBlob } }
-        set { withLock { _useSpringBlob = newValue } }
-    }
+    // MARK: - Spring Blob State (retained renderer subsystem; no longer gesture-activated)
 
     var springDisplacement: SIMD3<Float> {
         get { withLock { _springDisplacement } }
@@ -2906,8 +2701,8 @@ final class RenderSettings: @unchecked Sendable {
     // Critically-damped spring with velocity/acceleration limits for buttery smooth motion
     
     /// Smooth time - how long (in seconds) to reach the target. Higher = smoother but more latency.
-    /// User-adjustable via the "Gesture Smoothing" control (see `gestureSmoothing` / `_gestureSmoothing`).
-    private var smoothTime: Float { _gestureSmoothing }
+    /// Fixed at the gesture-smoothing default (no longer user-adjustable).
+    private var smoothTime: Float { GestureDefaults.gestureSmoothing }
 
     /// Maximum speed the parameter can travel (units per second). Prevents jarring fast motion.
     private let maxSpeed: Float = 8.0
@@ -3559,94 +3354,7 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    // MARK: - Rotation Auto-Snap
-
-    /// Snap the world rotation target to the nearest 45° multiple on each Euler axis
-    /// if the current angle is within the snap window. The current rotation is NOT changed,
-    /// so `interpolateToTargets()` will slerp smoothly toward the snapped orientation.
-    func applyRotationSnap() {
-        withLock {
-            guard _rotationAutoSnap else { return }
-            if _isAnimationPlaying {
-                // Snap the EFFECTIVE orientation (base ∘ offset) and fold the snapped
-                // result back into the override; writing _targetWorldRotation directly
-                // would be stomped by the next applyKeyframe. snapQuaternion may return
-                // −q of the same rotation — harmless, every consumer is double-cover safe.
-                let effective = (_manualRotationOffset * _animationBaseWorldRotation).normalized
-                let snapped = Self.snapQuaternion(effective, windowDegrees: _rotationSnapWindowDegrees)
-                _manualRotationOffset = (snapped * _animationBaseWorldRotation.inverse).normalized
-            } else {
-                let snapped = Self.snapQuaternion(_targetWorldRotation, windowDegrees: _rotationSnapWindowDegrees)
-                _targetWorldRotation = snapped
-            }
-        }
-    }
-
-    /// Pure function: decompose a quaternion to ZYX Euler angles, snap each to the nearest
-    /// 45° multiple if within ±halfWindow, and reconstruct.
-    /// Snap targets per axis: 0°, 45°, 90°, 135°, 180°, 225°, 270°, 315° (equivalently −180…180).
-    static func snapQuaternion(_ q: simd_quatf, windowDegrees: Float) -> simd_quatf {
-        let halfWindow = windowDegrees * 0.5 * (.pi / 180.0)   // convert half-window to radians
-        let snapInterval: Float = .pi / 4.0                     // 45° in radians
-
-        // Extract ZYX Euler angles (returns radians in −π…π range)
-        var (roll, pitch, yaw) = quaternionToEulerZYX(q)
-
-        roll  = snapAngle(roll,  interval: snapInterval, halfWindow: halfWindow)
-        pitch = snapAngle(pitch, interval: snapInterval, halfWindow: halfWindow)
-        yaw   = snapAngle(yaw,   interval: snapInterval, halfWindow: halfWindow)
-
-        return eulerZYXToQuaternion(roll: roll, pitch: pitch, yaw: yaw)
-    }
-
-    /// Snap a single angle (radians, any range) to the nearest multiple of `interval`
-    /// if the residual is within ±halfWindow. Otherwise return the original angle.
-    private static func snapAngle(_ angle: Float, interval: Float, halfWindow: Float) -> Float {
-        let nearest = (angle / interval).rounded() * interval
-        let delta = abs(angle - nearest)
-        return delta <= halfWindow ? nearest : angle
-    }
-
-    /// Decompose a unit quaternion into ZYX intrinsic Euler angles (roll, pitch, yaw)
-    /// in radians, each in −π…π (pitch clamped to −π/2…π/2 to avoid gimbal ambiguity).
-    private static func quaternionToEulerZYX(_ q: simd_quatf) -> (roll: Float, pitch: Float, yaw: Float) {
-        let x = q.imag.x, y = q.imag.y, z = q.imag.z, w = q.real
-
-        // Roll (X-axis rotation)
-        let sinr_cosp = 2.0 * (w * x + y * z)
-        let cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
-        let roll = atan2(sinr_cosp, cosr_cosp)
-
-        // Pitch (Y-axis rotation) — clamped for stability near ±90°
-        let sinp = 2.0 * (w * y - z * x)
-        let pitch: Float
-        if abs(sinp) >= 1.0 {
-            pitch = copysign(.pi / 2.0, sinp)
-        } else {
-            pitch = asin(sinp)
-        }
-
-        // Yaw (Z-axis rotation)
-        let siny_cosp = 2.0 * (w * z + x * y)
-        let cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
-        let yaw = atan2(siny_cosp, cosy_cosp)
-
-        return (roll, pitch, yaw)
-    }
-
-    /// Reconstruct a unit quaternion from ZYX intrinsic Euler angles (radians).
-    private static func eulerZYXToQuaternion(roll: Float, pitch: Float, yaw: Float) -> simd_quatf {
-        let cr = cos(roll  * 0.5), sr = sin(roll  * 0.5)
-        let cp = cos(pitch * 0.5), sp = sin(pitch * 0.5)
-        let cy = cos(yaw   * 0.5), sy = sin(yaw   * 0.5)
-
-        return simd_quatf(
-            ix: sr * cp * cy - cr * sp * sy,
-            iy: cr * sp * cy + sr * cp * sy,
-            iz: cr * cp * sy - sr * sp * cy,
-            r:  cr * cp * cy + sr * sp * sy
-        ).normalized
-    }
+    // (Rotation auto-snap removed — grab rotation now engages immediately with no snap-on-release.)
 
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -3920,29 +3628,9 @@ final class RenderSettings: @unchecked Sendable {
             withLock {
                 var c = GestureConfig()
                 c.gestureBindings = _gestureBindings
-                c.gestureSensitivity = _gestureSensitivity
-                c.gestureSmoothing = _gestureSmoothing
-                c.menuAndMovementOnly = _menuAndMovementOnly
                 c.useRelativeGestures = _useRelativeGestures
-                c.extendedGestureRange = _extendedGestureRange
-                c.translationSensitivity = _translationSensitivity
-                c.rotationAutoSnap = _rotationAutoSnap
-                c.rotationSnapWindowDegrees = _rotationSnapWindowDegrees
-                c.rotationBreakawayDegrees = _rotationBreakawayDegrees
                 c.menuToggleGestureEnabled = _menuToggleGestureEnabled
                 c.menuToggleGestureMode = _menuToggleGestureMode
-                c.menuToggleHoldDuration = _menuToggleHoldDuration
-                c.menuToggleCooldown = _menuToggleCooldown
-                c.menuToggleActivateThreshold = _menuToggleActivateThreshold
-                c.menuToggleReleaseThreshold = _menuToggleReleaseThreshold
-                c.twoHandPinchActivateThreshold = _twoHandPinchActivateThreshold
-                c.twoHandPinchReleaseThreshold = _twoHandPinchReleaseThreshold
-                c.ringPinchActivateThreshold = _ringPinchActivateThreshold
-                c.ringPinchReleaseThreshold = _ringPinchReleaseThreshold
-                c.gestureMinHandDistance = _gestureMinHandDistance
-                c.gestureMaxHandDistance = _gestureMaxHandDistance
-                c.gestureMaxStartHandDistance = _gestureMaxStartHandDistance
-                c.gestureMaxActiveHandDistance = _gestureMaxActiveHandDistance
                 c.perFingerTapGestureEnabled = _perFingerTapGestureEnabled
                 c.perFingerTapLeftActions = _perFingerTapLeftActions
                 c.perFingerTapRightActions = _perFingerTapRightActions
@@ -3959,29 +3647,9 @@ final class RenderSettings: @unchecked Sendable {
             newValue.clamp()
             withLock {
                 _gestureBindings = newValue.gestureBindings
-                _gestureSensitivity = newValue.gestureSensitivity
-                _gestureSmoothing = max(GestureDefaults.gestureSmoothingRange.lowerBound, min(GestureDefaults.gestureSmoothingRange.upperBound, newValue.gestureSmoothing))
-                _menuAndMovementOnly = newValue.menuAndMovementOnly
                 _useRelativeGestures = newValue.useRelativeGestures
-                _extendedGestureRange = newValue.extendedGestureRange
-                _translationSensitivity = newValue.translationSensitivity
-                _rotationAutoSnap = newValue.rotationAutoSnap
-                _rotationSnapWindowDegrees = ControlCatalog.rotationSnapWindowDegrees.clamp(newValue.rotationSnapWindowDegrees)
-                _rotationBreakawayDegrees = newValue.rotationBreakawayDegrees
                 _menuToggleGestureEnabled = newValue.menuToggleGestureEnabled
                 _menuToggleGestureMode = newValue.menuToggleGestureMode
-                _menuToggleHoldDuration = newValue.menuToggleHoldDuration
-                _menuToggleCooldown = newValue.menuToggleCooldown
-                _menuToggleActivateThreshold = newValue.menuToggleActivateThreshold
-                _menuToggleReleaseThreshold = newValue.menuToggleReleaseThreshold
-                _twoHandPinchActivateThreshold = newValue.twoHandPinchActivateThreshold
-                _twoHandPinchReleaseThreshold = newValue.twoHandPinchReleaseThreshold
-                _ringPinchActivateThreshold = newValue.ringPinchActivateThreshold
-                _ringPinchReleaseThreshold = newValue.ringPinchReleaseThreshold
-                _gestureMinHandDistance = newValue.gestureMinHandDistance
-                _gestureMaxHandDistance = newValue.gestureMaxHandDistance
-                _gestureMaxStartHandDistance = newValue.gestureMaxStartHandDistance
-                _gestureMaxActiveHandDistance = newValue.gestureMaxActiveHandDistance
                 _perFingerTapGestureEnabled = newValue.perFingerTapGestureEnabled
                 _perFingerTapLeftActions = newValue.perFingerTapLeftActions
                 _perFingerTapRightActions = newValue.perFingerTapRightActions
