@@ -93,5 +93,36 @@ enum ParameterRoutingValidation {
                              "Range drift: music target for '\(spec.id)' \(target.allowedRange) != ControlCatalog \(spec.range).")
             }
         }
+
+#if DEBUG
+        // ── Parameter-hierarchy Slice 1 golden net ─────────────────────────────
+        // Prove the new `ParameterCatalog` mirrors the live registries before any
+        // later slice makes a registry DERIVE from it. Nothing consumes the catalog
+        // yet; these asserts only confirm equality, so the migration stays reversible.
+        let catalogIDs = Set(ParameterCatalog.routedDescriptors.map(\.id))
+        precondition(catalogIDs == Set(ParameterTargetID.coreAndEffect),
+                     "ParameterCatalog/coreAndEffect id set mismatch.")
+        precondition(catalogIDs == nodeIDs,
+                     "ParameterCatalog/node id set mismatch.")
+        for descriptor in ParameterCatalog.routedDescriptors {
+            guard let spec = ControlCatalog.spec(descriptor.id) else {
+                preconditionFailure("ParameterCatalog descriptor '\(descriptor.id)' has no ControlCatalog spec.")
+            }
+            precondition(descriptor.spec.range == spec.range
+                         && descriptor.spec.motionStrategy == spec.motionStrategy,
+                         "ParameterCatalog spec drift on '\(descriptor.id)'.")
+        }
+        // Music facets must equal the MusicReactiveTarget switch results, so the
+        // §3.5 switch-body deletion in a later slice is provably byte-stable.
+        for target in MusicReactiveTarget.availableCases {
+            guard let id = target.parameterTargetID,
+                  let facet = ParameterCatalog.byID[id]?.music else { continue }
+            precondition(facet.category == target.category
+                         && facet.defaultSource == target.defaultSource
+                         && facet.defaultResponseCurve == target.defaultResponseCurve
+                         && facet.hasFlashingRisk == target.hasFlashingRisk,
+                         "ParameterCatalog music facet drift on '\(id)'.")
+        }
+#endif
     }
 }
