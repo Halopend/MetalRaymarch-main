@@ -129,7 +129,22 @@ actor CustomShaderCompiler {
     }
 
     /// Compile (or return cached) the combined library for an effect set.
-    func library(forFractal fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?) throws -> MTLLibrary {
+    ///
+    /// Compilation goes through Metal's **async** completion-handler API rather
+    /// than the synchronous `makeLibrary(source:)`. The synchronous variant
+    /// blocks the calling thread for the entire front-end + back-end compile,
+    /// which for the large combined source (full Shaders.metal scaffolding + the
+    /// embedded DE) can run for seconds on Apple Silicon. Inside this `actor`
+    /// that thread is a Swift cooperative-pool thread; starving the pool on
+    /// visionOS makes the app miss the compositor's frame deadline and the
+    /// system kills it with no Swift trace. This bites precisely on a *fresh*
+    /// custom-shader activation — e.g. opening a `.threshscene`/`.threshfx` from
+    /// Finder — because an already-active formula is a cache hit that never
+    /// recompiles (which is why the currently-loaded scene appears to "work"
+    /// while every other custom scene crashes on external load). The async API
+    /// hands the work to Metal's own compile queue and suspends the actor,
+    /// freeing the cooperative thread so frames keep flowing.
+    func library(forFractal fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?) async throws -> MTLLibrary {
         let key = Self.combinedHash(fractal: fractal, spaceWarp: spaceWarp)
         if let cached = libraryCache[key] {
             return cached
@@ -142,15 +157,32 @@ actor CustomShaderCompiler {
             options.fastMathEnabled = true
         }
 
+        let device = self.device
+        let formulaName = fractal?.name ?? spaceWarp?.name ?? "effect"
         do {
-            let lib = try device.makeLibrary(source: source, options: options)
+            let lib: MTLLibrary = try await withCheckedThrowingContinuation { continuation in
+                // The completion handler runs on a Metal-owned thread, not this
+                // actor's executor; it only resumes the continuation, so it
+                // touches no actor-isolated state.
+                device.makeLibrary(source: source, options: options) { library, error in
+                    if let library {
+                        continuation.resume(returning: library)
+                    } else {
+                        continuation.resume(throwing: error ?? CustomShaderCompilerError.metalCompileFailed(
+                            formula: formulaName,
+                            detail: "Metal returned no library and no error."
+                        ))
+                    }
+                }
+            }
             libraryCache[key] = lib
             return lib
+        } catch let error as CustomShaderCompilerError {
+            throw error
         } catch {
-            let detail = (error as NSError).localizedDescription
             throw CustomShaderCompilerError.metalCompileFailed(
-                formula: fractal?.name ?? spaceWarp?.name ?? "effect",
-                detail: detail
+                formula: formulaName,
+                detail: (error as NSError).localizedDescription
             )
         }
     }

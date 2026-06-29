@@ -328,6 +328,15 @@ class AppModel {
     /// Queue an animation-scene apply behind formula activation and nudge the
     /// immersive space open (same UX as the queued-preset path).
     func queueSceneApplyAfterFormulaActivation(formulaHash: String, apply: @escaping @MainActor () -> Void) {
+        // If the activation handler is already bound, the handler's didSet has
+        // already fired and will NOT fire again — a closure stored now would
+        // never drain. This happens on the narrow path where the renderer came
+        // up (handler bound) but the formula activation threw during the wait.
+        // Apply immediately instead of queuing into a slot nothing will read.
+        if activateEmbeddedFormulaHandler != nil {
+            apply()
+            return
+        }
         pendingSceneApplyAfterActivation = (formulaHash, apply)
         if immersiveSpaceState != .open {
             NotificationCenter.default.post(

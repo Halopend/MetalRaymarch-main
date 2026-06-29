@@ -60,6 +60,11 @@ extension AppModel {
                     // it directly rather than routing through the custom-fractal
                     // preset/preview path (which would force fractalType = .custom).
                     installSpaceWarp(container.formula)
+                    // Persist immediately so the warp survives relaunch. The other
+                    // external-import paths persist via loadStaticScene's
+                    // .persistLastState option; the direct space-warp install
+                    // bypasses that, so save here to match their guarantee.
+                    saveLastState()
                     ensureWindowContentVisible()
                     return
                 }
@@ -123,6 +128,18 @@ extension AppModel {
                 animationManager?.currentScene = scene
                 return
             }
+            if formula.effectKind == .spaceWarp {
+                // A space warp rides the active fractal — install it directly,
+                // exactly as the preset path (loadStaticScene) and the standalone
+                // .threshfx path do, instead of registering it as a .custom
+                // fractal via activateEmbeddedFormulaForSceneLoad (which would
+                // force fractalType = .custom and bind the wrong Metal entry
+                // points). installSpaceWarp handles the renderer-not-up case
+                // itself (re-activates on handler bind), so no deferred queue.
+                installSpaceWarp(formula)
+                animationManager?.currentScene = scene
+                return
+            }
             Task { @MainActor in
                 let installResult = await activateEmbeddedFormulaForSceneLoad(formula)
                 let ready: Bool
@@ -166,6 +183,17 @@ extension AppModel {
         case .animation(let scene):
             guard let formula = scene.embeddedFormula else {
                 uninstallEmbeddedFormula()
+                let importedScene = animationManager?.importScene(scene)
+                animationManager?.currentScene = importedScene
+                clearExternalPreview(restorePreviewedState: false)
+                pendingExternalImport = nil
+                ensureWindowContentVisible()
+                return
+            }
+            if formula.effectKind == .spaceWarp {
+                // Space warp: install directly (see the preview branch + the
+                // .threshfx path) rather than registering a .custom fractal.
+                installSpaceWarp(formula)
                 let importedScene = animationManager?.importScene(scene)
                 animationManager?.currentScene = importedScene
                 clearExternalPreview(restorePreviewedState: false)
@@ -244,5 +272,12 @@ extension AppModel {
         externalPreviewCapturedScene = false
         externalPreviewCapturedEmbeddedFormula = false
         activeExternalPreviewID = nil
+        // Drop any animation-scene apply queued behind a deferred formula
+        // activation. Without this, a queued closure from an abandoned preview
+        // (cancel) or a superseded import (opening a new file) could fire later
+        // when an unrelated formula with a colliding shortHash activates,
+        // applying the wrong scene. Every code path that queues a scene does so
+        // *after* its clearExternalPreview call, so this never drops a live queue.
+        pendingSceneApplyAfterActivation = nil
     }
 }

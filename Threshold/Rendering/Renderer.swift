@@ -666,18 +666,33 @@ actor Renderer {
                 }
             }
 
-            // If an embedded formula was already registered (e.g. via
-            // __lastState__ restore that ran before the handler was
-            // installed), activate it now so the renderer compiles the
-            // custom MTLLibrary instead of falling back to the default
-            // pipeline and rendering fog/sky only.
+            // If an embedded formula was already registered (e.g. opening a
+            // custom .threshscene/.threshfx from Finder, which opens the
+            // immersive space with `activeEmbeddedFormula` already set), activate
+            // it so the renderer compiles the custom MTLLibrary instead of
+            // rendering fog/sky only.
+            //
+            // CRITICAL: this must NOT be awaited before `renderLoop()`. A fresh
+            // custom-shader compile takes ~0.5-5s, and on visionOS the compositor
+            // kills the app (no Swift trace) if the first frame doesn't arrive
+            // shortly after the immersive space opens. Awaiting the compile here
+            // delayed first-frame past that deadline — which is exactly why every
+            // custom scene opened externally crashed EXCEPT the active/default one
+            // (a `libraryCache` hit that returns instantly). Activate
+            // concurrently instead: the render loop starts immediately and
+            // submits frames (the frame path renders a safe fallback and
+            // `scheduleCustomLibrarySelfHeal` swaps the custom DE in once the
+            // library is ready). The compile itself is also off-thread now
+            // (CustomShaderCompiler.library uses the async makeLibrary API).
             let pendingFormula = await MainActor.run { appModel.activeEmbeddedFormula }
             if let pending = pendingFormula {
-                customSceneDiagnostic("🔬 [CSDiag] Handler ready — running deferred activation for '\(pending.name)' hash=\(pending.shortHash)")
-                do {
-                    try await renderer.activateEmbeddedFormula(pending)
-                } catch {
-                    customSceneDiagnostic("🔬 [CSDiag] ❌ Deferred activation failed: \(error)")
+                customSceneDiagnostic("🔬 [CSDiag] Handler ready — scheduling deferred activation for '\(pending.name)' hash=\(pending.shortHash) (concurrent; does NOT block first frame)")
+                Task {
+                    do {
+                        try await renderer.activateEmbeddedFormula(pending)
+                    } catch {
+                        customSceneDiagnostic("🔬 [CSDiag] ❌ Deferred activation failed: \(error)")
+                    }
                 }
             }
 

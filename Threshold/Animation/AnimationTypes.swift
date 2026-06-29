@@ -745,8 +745,18 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         keyframes      = try c.decode([AnimationKeyframe].self, forKey: .keyframes)
         isLooping      = try c.decode(Bool.self, forKey: .isLooping)
         playbackMode   = (try? c.decode(AnimationPlaybackMode.self, forKey: .playbackMode)) ?? .forward
-        createdAt      = try c.decode(Date.self, forKey: .createdAt)
-        modifiedAt     = try c.decode(Date.self, forKey: .modifiedAt)
+        // Decode the timestamps resiliently: `modifiedAt` postdates the original
+        // format, and some older exports (e.g. Ambient_Blur.threshanim) omit it
+        // entirely. Requiring it here threw `keyNotFound` on the EXTERNAL open
+        // path (AppModel.openExternalFile -> AnimationManager.decodeScene), so a
+        // user opening such a file from Finder/Files saw "Could not read …".
+        // The bundled-default loader already patches this inline before decoding
+        // (see AnimationScene.cachedScenes); doing it at the model level fixes
+        // every decode path at once. Fall back across the two dates, then to now.
+        let decodedCreatedAt  = try c.decodeIfPresent(Date.self, forKey: .createdAt)
+        let decodedModifiedAt = try c.decodeIfPresent(Date.self, forKey: .modifiedAt)
+        createdAt      = decodedCreatedAt ?? decodedModifiedAt ?? Date()
+        modifiedAt     = decodedModifiedAt ?? decodedCreatedAt ?? Date()
         // Peek the raw fractalType marker before it maps through the back-compat
         // alias, so a legacy "mandelboxSphereProjection" animation can re-enable the
         // Space-tab Sphere Projection on playback (the type itself decodes to

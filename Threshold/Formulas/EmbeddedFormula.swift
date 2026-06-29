@@ -323,7 +323,12 @@ extension EmbeddedFormulaContainer {
     /// Decodes a `.threshfx` container from disk, validating the formula payload.
     static func decode(fromContainerAt url: URL) throws -> EmbeddedFormulaContainer {
         let data = try Data(contentsOf: url)
-        let container = try JSONDecoder().decode(EmbeddedFormulaContainer.self, from: data)
+        let decoder = JSONDecoder()
+        // Defensive: matches PresetManager.decodePreset / AnimationManager so a
+        // future Date field on the formula wouldn't silently break .threshfx
+        // imports. Harmless today (the container has no Date fields).
+        decoder.dateDecodingStrategy = .iso8601
+        let container = try decoder.decode(EmbeddedFormulaContainer.self, from: data)
         try container.formula.validate()
         return container
     }
