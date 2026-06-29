@@ -266,6 +266,15 @@ extension Renderer {
                             shadowsEnabled: settingsSnapshot.shadowsEnabled ? 1 : 0,
                             distanceLODFalloff: settingsSnapshot.distanceLODStrength * 0.5,
                             benchCollectSteps: BenchmarkManager.shared.collectIterations ? 1 : 0,
+                            // Conservative cone coarse-prepass: raw per-pixel footprint
+                            // (no LOD widening). coarseRateMagMax defaults to 1.0 here;
+                            // the cone kernel (which reads TileUniforms) over-bounds it
+                            // under foveation. The fragment shader only reads the coarse
+                            // texture, not these fields, in Increment 1.
+                            pixelFootprintPerDist: RenderPrecompute.pixelFootprintPerDist(
+                                projection: projection,
+                                viewportHeight: Float(view.textureMap.viewport.height)),
+                            coarseRateMagMax: 1.0,
                             springDisplacementX: settingsSnapshot.springDisplacement.x,
                             springDisplacementY: settingsSnapshot.springDisplacement.y,
                             springDisplacementZ: settingsSnapshot.springDisplacement.z,

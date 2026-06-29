@@ -104,6 +104,25 @@ actor Renderer {
     // ═══════════════════════════════════════════════════════════════════════════
     private var temporalDepthTextures: [MTLTexture?] = [nil, nil]  // ping-pong
     private var temporalDepthIndex: Int = 0                         // which is "current write"
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CONSERVATIVE CONE COARSE-PREPASS WARM-START (fragment path, opt-in)
+    // A low-res compute pass (coneCoarsePrepass8x8) marches one cone per 8x8 block
+    // and writes a provable LOWER BOUND on the nearest-surface entry distance into
+    // this r32Float array texture (physical/8 sized, one layer per eye). The
+    // fragment shader raises its full-march start t to that bound. Defaults OFF —
+    // when off the pass is never dispatched, the fragment FC stays undefined, and a
+    // 1x1 dummy keeps the texture slot bound so validation never faults.
+    // ═══════════════════════════════════════════════════════════════════════════
+    private var coarseStartTexture: MTLTexture?
+    var coneCoarsePrepassPipeline: MTLComputePipelineState?
+    private var coarseStartDummyTexture: MTLTexture?
+    // Lazily-built, separately-cached cone-enabled fragment pipelines (FC_COARSE_
+    // WARM_START=true). Keyed by the same exact signature selectPipeline uses, so a
+    // variant is built per (iterations, raySteps, fractalType, …) the first time
+    // the user turns the toggle on for that config. Keeps the main pipeline cache
+    // (always FC off) byte-identical.
+    var coarseWarmStartPipelineCache: [String: MTLRenderPipelineState] = [:]
     var previousViewProjMatrices: [matrix_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]  // per eye
     private var temporalFrameCount: Int = 0                         // 0 = first frame, no reprojection
 
@@ -516,7 +535,23 @@ actor Renderer {
                 }
             }
             if RENDERER_DEBUG { print("✓ Built \(computeBuilt) specialized compute pipelines + 1 generic fallback") }
-            
+
+            // Conservative cone coarse-prepass kernel. A single generic pipeline
+            // (empty constants — reads iterations/type from TileUniforms at
+            // runtime) is sufficient for Increment 1; it's only ever dispatched
+            // when the opt-in toggle is on AND the fractal is box/fold + un-warped.
+            if let coneKernel = try? library.makeFunction(name: "coneCoarsePrepass8x8", constantValues: emptyConstants) {
+                let coneDesc = MTLComputePipelineDescriptor()
+                coneDesc.computeFunction = coneKernel
+                coneDesc.label = "Compute_coneCoarsePrepass8x8_generic"
+                if let archive = self.pipelineArchive {
+                    coneCoarsePrepassPipeline = try? archive.makeComputePipeline(device: device, descriptor: coneDesc)
+                } else {
+                    coneCoarsePrepassPipeline = try? device.makeComputePipelineState(descriptor: coneDesc, options: [], reflection: nil)
+                }
+                if RENDERER_DEBUG { print("✓ Cone coarse-prepass pipeline ready: \(coneCoarsePrepassPipeline != nil)") }
+            }
+
             // Uniform buffer for tile compute (one per eye)
             let tileUniformSize = MemoryLayout<TileUniforms>.stride * 2
             tileUniformBuffer = device.makeBuffer(length: tileUniformSize, options: .storageModeShared)
@@ -1085,6 +1120,55 @@ actor Renderer {
         }
         #endif
 
+        // ═══════════════════════════════════════════════════════════════════════
+        // CONSERVATIVE CONE COARSE-PREPASS WARM-START (opt-in, default OFF)
+        // ═══════════════════════════════════════════════════════════════════════
+        // Gate: feature toggle ON, fractal is box/fold family, and the domain is
+        // UN-WARPED. Only then is the analytic lower-bound cone trusted. When false,
+        // the cone pass is never dispatched, a 1×1 dummy keeps the fragment texture
+        // slot bound, and the fragment pipeline keeps FC_COARSE_WARM_START undefined
+        // → the consumer code is dead-code-eliminated (byte-identical to before).
+        let coneAllowed = settingsSnapshot.coarsePrepassWarmStartEnabled
+            && isBoxFoldFamily(settingsSnapshot.fractalType)
+            && settingsSnapshot.sphericalInversionMode.rawValue == 0
+            && !(settingsSnapshot.sphereProjectionEnabled && settingsSnapshot.sphereProjectionBlend > 0)
+            && settingsSnapshot.spaceWarpStrength <= 0
+
+        // Render-target dimensions the fragment pass writes into (MetalFX input, or
+        // the drawable color texture for the direct path).
+        var fragmentRenderWidth = drawable.colorTextures[0].width
+        var fragmentRenderHeight = drawable.colorTextures[0].height
+        #if canImport(MetalFX)
+        if let bundle = fragmentPassPlan.metalFXBundle {
+            fragmentRenderWidth = bundle.inputWidth
+            fragmentRenderHeight = bundle.inputHeight
+        }
+        #endif
+
+        var coneCoarseTexture: MTLTexture? = nil
+        if coneAllowed {
+            coneCoarseTexture = ensureCoarseStartTexture(
+                renderWidth: fragmentRenderWidth,
+                renderHeight: fragmentRenderHeight,
+                viewCount: drawable.views.count
+            )
+            if let coarseTex = coneCoarseTexture {
+                encodeConeCoarsePrepass(
+                    commandBuffer: commandBuffer,
+                    coarseTex: coarseTex,
+                    drawable: drawable,
+                    settingsSnapshot: settingsSnapshot,
+                    framePreparation: framePreparation,
+                    renderWidth: fragmentRenderWidth,
+                    renderHeight: fragmentRenderHeight,
+                    viewports: fragmentPassPlan.viewports
+                )
+            }
+        }
+        // When the cone pass didn't run (or texture alloc failed), fall back to the
+        // dummy so the fragment slot is always populated.
+        let coneActive = coneAllowed && coneCoarseTexture != nil
+
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: fragmentPassPlan.renderPassDescriptor) else {
             if RENDERER_DEBUG { print("⚠️ Failed to create render encoder; skipping frame") }
             drawable.encodePresent(commandBuffer: commandBuffer)
@@ -1110,7 +1194,7 @@ actor Renderer {
         
         // Use specialized pipeline with fixed iteration count
         // This enables Map() loop auto-unrolling via function constants
-        let selectedPipeline = selectPipeline(
+        let baseSelectedPipeline = selectPipeline(
             forIterations: currentIterations,
             raySteps: currentRaySteps,
             neonMode: isNeonMode,
@@ -1120,6 +1204,26 @@ actor Renderer {
                 colorIterations: settingsSnapshot.colorIterations
             )
         )
+        // When the cone pass ran this frame, swap in a fragment pipeline variant
+        // that bakes FC_COARSE_WARM_START=true (so the min-over-2x2 read + warm
+        // start seed are compiled in). Falls back to the base pipeline if the
+        // cone-enabled variant can't be built — the cone texture is still bound but
+        // never sampled (FC undefined), so behavior is identical to off.
+        var selectedPipeline = baseSelectedPipeline
+        if coneActive {
+            if let conePipeline = selectCoarseWarmStartPipeline(
+                forIterations: currentIterations,
+                raySteps: currentRaySteps,
+                neonMode: isNeonMode,
+                request: RenderPipelineRequest(
+                    fractalType: settingsSnapshot.fractalType,
+                    formulaParams: settingsSnapshot.formulaParams,
+                    colorIterations: settingsSnapshot.colorIterations
+                )
+            ) {
+                selectedPipeline = conePipeline
+            }
+        }
         renderEncoder.setRenderPipelineState(selectedPipeline)
 
         renderEncoder.setDepthStencilState(depthState)
@@ -1155,6 +1259,18 @@ actor Renderer {
         #endif
         if let warmStartDepth {
             renderEncoder.setFragmentTexture(warmStartDepth, index: FragmentTextureIndex.prevDepth.rawValue)
+        }
+
+        // Conservative cone coarse-prepass warmT. When the cone-enabled pipeline is
+        // active the fragment shader declares this argument (FC_COARSE_WARM_START)
+        // and reads it; otherwise a 1×1 dummy keeps the slot populated and the
+        // argument is compiled out, so it's never sampled (mirrors the warm-start
+        // dummy depth pattern).
+        let coarseBound: MTLTexture? = coneActive
+            ? coneCoarseTexture
+            : ensureCoarseStartDummyTexture(viewCount: drawable.views.count)
+        if let coarseBound {
+            renderEncoder.setFragmentTexture(coarseBound, index: FragmentTextureIndex.coarseWarmStart.rawValue)
         }
 
         let viewports = fragmentPassPlan.viewports
@@ -1429,6 +1545,13 @@ actor Renderer {
                 viewportHeight: Float(renderHeight)),
             shadowsEnabled: settingsSnapshot.shadowsEnabled ? 1 : 0,
             distanceLODFalloff: settingsSnapshot.distanceLODStrength * 0.5,
+            // Conservative cone coarse-prepass fields. This adaptive-compute path
+            // doesn't run the cone kernel, but the shared TileUniforms initializer
+            // requires them; the cone-pass encoder fills real values per eye.
+            pixelFootprintPerDist: RenderPrecompute.pixelFootprintPerDist(
+                projection: projection,
+                viewportHeight: Float(renderHeight)),
+            coarseRateMagMax: 1.0,
             blendFactor: settingsSnapshot.isGeometryGestureActive ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5),
             springDisplacementX: settingsSnapshot.springDisplacement.x,
             springDisplacementY: settingsSnapshot.springDisplacement.y,
@@ -1588,6 +1711,77 @@ actor Renderer {
         return (read: tex0, write: tex0)  // First frame: read=write (will be marked invalid)
     }
 
+    /// Creates or resizes the coarse warm-start texture (conservative cone
+    /// coarse-prepass). Sized to the FOVEATED PHYSICAL render-target size / 8
+    /// (width = ceil(renderWidth/8), height = ceil(renderHeight/8)) so its texels
+    /// line up 1:1 with the fragment shader's floor(fragCoord/8). r32Float, one
+    /// layer per eye, .private with shaderWrite|shaderRead — cloned from
+    /// ensureTemporalDepthTextures.
+    private func ensureCoarseStartTexture(renderWidth: Int, renderHeight: Int, viewCount: Int) -> MTLTexture? {
+        let cw = max(1, (renderWidth + 7) / 8)
+        let ch = max(1, (renderHeight + 7) / 8)
+
+        if let existing = coarseStartTexture,
+           existing.width == cw,
+           existing.height == ch,
+           existing.arrayLength == viewCount {
+            return existing
+        }
+
+        let descriptor = MTLTextureDescriptor()
+        descriptor.textureType = .type2DArray
+        descriptor.pixelFormat = .r32Float
+        descriptor.width = cw
+        descriptor.height = ch
+        descriptor.arrayLength = viewCount
+        descriptor.storageMode = .private
+        descriptor.usage = [.shaderWrite, .shaderRead]
+
+        guard let texture = device.makeTexture(descriptor: descriptor) else {
+            if RENDERER_DEBUG { print("⚠️ Failed to create coarse warm-start texture") }
+            return nil
+        }
+        texture.label = "Cone Coarse Warm-Start"
+        coarseStartTexture = texture
+        updateResidencySetForComputeTextures([texture])
+        if RENDERER_DEBUG { print("📐 Created coarse warm-start texture: \(cw)×\(ch) × \(viewCount) layers") }
+        return texture
+    }
+
+    /// 1×1 r32Float array dummy bound to the fragment coarse-texture slot when the
+    /// cone pass is disabled, so the slot is always populated (mirrors the
+    /// warm-start dummy depth pattern). Never sampled (FC_COARSE_WARM_START off).
+    private func ensureCoarseStartDummyTexture(viewCount: Int) -> MTLTexture? {
+        if let existing = coarseStartDummyTexture, existing.arrayLength == viewCount {
+            return existing
+        }
+        let descriptor = MTLTextureDescriptor()
+        descriptor.textureType = .type2DArray
+        descriptor.pixelFormat = .r32Float
+        descriptor.width = 1
+        descriptor.height = 1
+        descriptor.arrayLength = max(1, viewCount)
+        descriptor.storageMode = .private
+        descriptor.usage = [.shaderRead]
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
+        texture.label = "Cone Coarse Warm-Start (dummy)"
+        coarseStartDummyTexture = texture
+        updateResidencySetForComputeTextures([texture])
+        return texture
+    }
+
+    /// True only for the box/fold fractal family whose analytic DE is a
+    /// conservative (Lipschitz-1) lower bound, so the cone-bounding warm start is
+    /// provably safe. Matches coneSafetyForFamily in Shaders.metal.
+    func isBoxFoldFamily(_ type: FractalModelType) -> Bool {
+        switch type {
+        case .mandelbox, .menger, .octahedron, .mengerSphere, .boxSphereFolder:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Copies compute output texture to drawable using blit encoder
     private func blitComputeOutputToDrawable(
         commandBuffer: MTLCommandBuffer,
@@ -1644,7 +1838,210 @@ actor Renderer {
         
         blitEncoder.endEncoding()
     }
-    
+
+    // MARK: - Conservative Cone Coarse-Prepass Warm-Start
+
+    /// Encodes the cone coarse-prepass for every eye on `commandBuffer`, writing a
+    /// conservative warmT (provable LOWER BOUND on the nearest-surface entry
+    /// distance) into `coarseTex` (sized to renderWidth/8 × renderHeight/8). The
+    /// fragment pass that follows on the same command buffer reads it; Metal's
+    /// automatic hazard tracking provides the read-after-write barrier (the texture
+    /// is .private and tracked). Caller must have verified `coneAllowed`.
+    ///
+    /// `renderWidth/renderHeight` are the fragment pass's render-target dimensions
+    /// (MetalFX input size, or the drawable size). `viewports` are the per-eye
+    /// viewports the fragment pass uses (origin 0 under MetalFX; drawable viewport
+    /// origins on the direct path) — the cone reconstructs rays in the SAME space.
+    private func encodeConeCoarsePrepass(
+        commandBuffer: MTLCommandBuffer,
+        coarseTex: MTLTexture,
+        drawable: LayerRenderer.Drawable,
+        settingsSnapshot: RenderSettingsSnapshot,
+        framePreparation: RendererFramePreparation,
+        renderWidth: Int,
+        renderHeight: Int,
+        viewports: [MTLViewport]
+    ) {
+        guard let pipeline = coneCoarsePrepassPipeline else { return }
+        guard let uniformBuffer = tileUniformBuffer else { return }
+        let bufferContents = uniformBuffer.contents()
+
+        guard let computeEncoder = commandBuffer.makeComputeCommandEncoder() else { return }
+        computeEncoder.label = "Cone Coarse-Prepass"
+        computeEncoder.setComputePipelineState(pipeline)
+
+        // Dispatch over the FULL render target / 8 (so coarse texels line up with
+        // the fragment's floor(fragCoord/8)). One thread per coarse texel.
+        let coarseW = max(1, (renderWidth + 7) / 8)
+        let coarseH = max(1, (renderHeight + 7) / 8)
+        let tg = MTLSize(width: 16, height: 16, depth: 1)
+        let grid = MTLSize(
+            width: (coarseW + tg.width - 1) / tg.width,
+            height: (coarseH + tg.height - 1) / tg.height,
+            depth: 1
+        )
+
+        let viewCount = drawable.views.count
+        for viewIndex in 0..<viewCount {
+            let eyePreparation = framePreparation.perEye[viewIndex]
+            let modelView = eyePreparation.modelView
+            let inverseModelView = eyePreparation.inverseModelView
+            let projection = eyePreparation.projection
+            let cameraPos = SIMD3<Float>(inverseModelView.columns.3.x, inverseModelView.columns.3.y, inverseModelView.columns.3.z)
+
+            // Per-eye viewport (origin + size) the fragment pass renders into.
+            let vp = viewIndex < viewports.count ? viewports[viewIndex] : (drawable.views[viewIndex].textureMap.viewport)
+            let viewportOriginX = max(0, Int(vp.originX.rounded(.down)))
+            let viewportOriginY = max(0, Int(vp.originY.rounded(.down)))
+            let viewportW = max(1, Int(vp.width.rounded(.up)))
+            let viewportH = max(1, Int(vp.height.rounded(.up)))
+
+            // Foveation rate-map decode setup (mirror encodeAdaptiveCompute). With a
+            // valid map the fragment geometry is in physical space and decoded
+            // through the rate map; the cone must decode the same way. We bound the
+            // physical→screen magnification conservatively (over-bounding only
+            // shortens the skip, which is always safe).
+            let rateMaps = drawable.rasterizationRateMaps
+            var rateMapValid = false
+            var rateMapLayer = 0
+            var screenResolution = SIMD2<Float>(Float(viewportW), Float(viewportH))
+            var selectedRateMap: MTLRasterizationRateMap? = nil
+            if !rateMaps.isEmpty {
+                let perEye = rateMaps.count == viewCount
+                let map = perEye ? rateMaps[viewIndex] : rateMaps[0]
+                let layer = perEye ? 0 : viewIndex
+                let phys = map.physicalSize(layer: layer)
+                if phys.width <= renderWidth && phys.height <= renderHeight {
+                    selectedRateMap = map
+                    rateMapLayer = layer
+                    rateMapValid = true
+                    screenResolution = SIMD2<Float>(Float(map.screenSize.width), Float(map.screenSize.height))
+                }
+            }
+            var rateMapParamBuffer: MTLBuffer?
+            if let map = selectedRateMap {
+                let need = map.parameterDataSizeAndAlign.size
+                if rateMapParamBuffers[viewIndex] == nil || rateMapParamBuffers[viewIndex]!.length < need {
+                    rateMapParamBuffers[viewIndex] = device.makeBuffer(length: max(need, 16), options: .storageModeShared)
+                    rateMapParamBuffers[viewIndex]?.label = "RateMapParams(cone) eye\(viewIndex)"
+                }
+                if let buf = rateMapParamBuffers[viewIndex] {
+                    map.copyParameterData(buffer: buf, offset: 0)
+                    rateMapParamBuffer = buf
+                }
+            }
+            if rateMapParamBuffer == nil {
+                rateMapValid = false
+                if rateMapDummyBuffer == nil {
+                    rateMapDummyBuffer = device.makeBuffer(length: 256, options: .storageModeShared)
+                    rateMapDummyBuffer?.label = "RateMapParams (dummy)"
+                }
+                rateMapParamBuffer = rateMapDummyBuffer
+            }
+
+            // Over-bound on physical→screen magnification under foveation. 4.0 is a
+            // safe upper bound for the gaze-tracked rate map's peripheral
+            // compression; 1.0 (no magnification) when no map applies. Over-bounding
+            // only shortens the warm-start skip — never unsafe.
+            let coarseRateMagMax: Float = rateMapValid ? 4.0 : 1.0
+
+            let scaleCorrectedBubbleRadius = settingsSnapshot.safetyBubbleRadius / max(framePreparation.effectiveScale, 0.001)
+            let scaleCorrectedFadeWidth = settingsSnapshot.safetyBubbleFadeWidth / max(framePreparation.effectiveScale, 0.001)
+
+            var tileUniforms = TileUniforms(
+                invViewMatrix: inverseModelView,
+                invProjMatrix: projection.inverse,
+                cameraPos: cameraPos,
+                time: framePreparation.frameTime,
+                resolution: SIMD2<Float>(Float(viewportW), Float(viewportH)),
+                viewportOrigin: SIMD2<Float>(Float(viewportOriginX), Float(viewportOriginY)),
+                minDistance: settingsSnapshot.minDistance,
+                fractalScale: settingsSnapshot.fractalScale,
+                sphereRadius: settingsSnapshot.sphereRadius,
+                safetyBubbleRadius: scaleCorrectedBubbleRadius,
+                safetyBubbleEnabled: (settingsSnapshot.fractalType == .mandelbulb) ? 0 : (settingsSnapshot.safetyBubbleEnabled ? 1 : 0),
+                safetyBubbleShape: settingsSnapshot.safetyBubbleShape,
+                safetyBubbleFadeEnabled: settingsSnapshot.safetyBubbleFadeEnabled ? 1 : 0,
+                safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
+                safetyBubbleStrength: (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength,
+                foldingLimit: settingsSnapshot.foldingLimit,
+                glowIntensity: framePreparation.animatedGlow,
+                colorMix: framePreparation.animatedColorMix,
+                fractalIterations: Int32(settingsSnapshot.fractalIterations),
+                colorIterations: Int32(settingsSnapshot.colorIterations),
+                maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
+                maxViewDistance: framePreparation.maxViewDistance,
+                marchEpsilonScale: 1.0 / max(framePreparation.effectiveScale, 1.0),
+                eyeIndex: UInt32(viewIndex),
+                debugHierarchical: 0,
+                limitFlash: settingsSnapshot.limitFlash,
+                fractalType: settingsSnapshot.fractalType.rawValue,
+                lightingSoftness: settingsSnapshot.lightingSoftness,
+                sphericalInversionMode: settingsSnapshot.sphericalInversionMode.rawValue,
+                sphericalInversionRadius: settingsSnapshot.sphericalInversionRadius,
+                sphereProjectionBlend: settingsSnapshot.sphereProjectionEnabled ? settingsSnapshot.sphereProjectionBlend : 0,
+                sphereProjectionRadius: settingsSnapshot.sphereProjectionRadius,
+                spaceWarpStrength: settingsSnapshot.spaceWarpStrength,
+                spaceWarpParam1: settingsSnapshot.spaceWarpParam1,
+                spaceWarpParam2: settingsSnapshot.spaceWarpParam2,
+                spaceWarpParam3: settingsSnapshot.spaceWarpParam3,
+                spaceWarpAxis: settingsSnapshot.spaceWarpAxis,
+                stepMultiplier: settingsSnapshot.stepMultiplier,
+                boundingSphereRadius: settingsSnapshot.estimatedBoundingSphereRadius,
+                smartAdvanceEnabled: settingsSnapshot.smartAdvanceEnabled ? 1 : 0,
+                coneMarchScale: RenderPrecompute.coneMarchScale(
+                    strength: settingsSnapshot.coneMarchStrength,
+                    projection: projection,
+                    viewportHeight: Float(viewportH)),
+                shadowsEnabled: settingsSnapshot.shadowsEnabled ? 1 : 0,
+                distanceLODFalloff: settingsSnapshot.distanceLODStrength * 0.5,
+                pixelFootprintPerDist: RenderPrecompute.pixelFootprintPerDist(
+                    projection: projection,
+                    viewportHeight: Float(viewportH)),
+                coarseRateMagMax: coarseRateMagMax,
+                blendFactor: 1.0,
+                springDisplacementX: 0,
+                springDisplacementY: 0,
+                springDisplacementZ: 0,
+                springStretch: 0,
+                springAnchorNDC: SIMD2<Float>(0.7, -0.7),
+                springVisible: 0,
+                springRestRadius: 0.06,
+                jitterOffset: .zero,
+                temporalReprojectionEnabled: 0,
+                coherentPacketEnabled: 0,
+                foveationStrength: settingsSnapshot.foveationStrength,
+                floorPlane: framePreparation.perEye[viewIndex].floorPlane,
+                floorCenterRadius: framePreparation.perEye[viewIndex].floorCenterRadius,
+                formulaParams: settingsSnapshot.formulaParams,
+                currentViewProjMatrix: projection * modelView,
+                previousViewProjMatrix: previousViewProjMatrices[viewIndex],
+                currentInvViewProjMatrix: (projection * modelView).inverse,
+                precomputedFractal: framePreparation.precomputedFractal,
+                precomputedLighting: framePreparation.precomputedLighting,
+                precomputedAudio: framePreparation.precomputedAudio,
+                precomputedFog: framePreparation.precomputedFog,
+                colorScheme: settingsSnapshot.colorSchemeParams,
+                screenResolution: screenResolution,
+                rateMapValid: rateMapValid ? 1 : 0,
+                rateMapLayer: UInt32(rateMapLayer)
+            )
+
+            let uniformOffset = MemoryLayout<TileUniforms>.stride * viewIndex
+            memcpy(bufferContents.advanced(by: uniformOffset), &tileUniforms, MemoryLayout<TileUniforms>.size)
+
+            computeEncoder.setBuffer(uniformBuffer, offset: uniformOffset, index: 0)
+            if let rateMapParamBuffer {
+                computeEncoder.setBuffer(rateMapParamBuffer, offset: 0, index: 1)
+                computeEncoder.useResource(rateMapParamBuffer, usage: .read)
+            }
+            computeEncoder.setTexture(coarseTex, index: 0)
+            computeEncoder.dispatchThreadgroups(grid, threadsPerThreadgroup: tg)
+        }
+
+        computeEncoder.endEncoding()
+    }
+
     /// Renders using the adaptive 8x8 compute pipeline instead of fragment shaders
     /// Returns true if compute rendering was used
     private func renderWithAdaptiveCompute(

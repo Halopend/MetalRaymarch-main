@@ -41,6 +41,7 @@ struct RenderSettingsSnapshot {
     let debugHierarchical: Bool
     let coherentPacketEnabled: Bool
     let computeTemporalReprojectionEnabled: Bool
+    let coarsePrepassWarmStartEnabled: Bool
     let foveationStrength: Float
     let smartAdvanceEnabled: Bool
     let coneMarchStrength: Float

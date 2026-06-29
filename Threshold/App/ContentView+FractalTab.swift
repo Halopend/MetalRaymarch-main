@@ -563,6 +563,12 @@ extension ContentView {
                 .disabled(!isCompute)
                 .opacity(isCompute ? 1 : 0.45)
 
+                accelToggleCompact("Cone Warm-Start",
+                            isOn: cache.quality.coarsePrepassWarmStartEnabled,
+                            help: "A low-res cone pre-pass marches one cone per 8×8 block and writes a provable lower bound on the nearest surface distance; the full march starts there, skipping empty space without ever skipping a surface. Conservative and exact (box/fold fractals, un-warped domain only). Fragment renderer path; off by default.") { v in
+                    cache.quality.coarsePrepassWarmStartEnabled = v; cache.push(\.coarsePrepassWarmStartEnabled, value: v)
+                }
+
                 accelToggleCompact("Bounding Skip",
                             isOn: cache.quality.boundingSphereSkipEnabled,
                             help: "Rays that miss a sphere enclosing the fractal skip the march entirely. Uses a generous bound, so it mainly culls background; sprawling fractals (Kleinian, large folds) may clip — experimental.") { v in

@@ -81,6 +81,68 @@ extension Renderer {
         fractalType != .mandelbulb && appModel.renderSettings.safetyBubbleEnabled
     }
 
+    /// Selects a fragment pipeline that bakes FC_COARSE_WARM_START=true (the
+    /// conservative cone coarse-prepass consumer). Mirrors selectPipeline's exact
+    /// specialization for the current config, but lives in its OWN cache so the
+    /// main pipeline cache stays byte-identical (always FC_COARSE_WARM_START off).
+    /// Built synchronously on a cache miss — this is an opt-in feature, so the
+    /// one-time compile per config only happens while the user has the toggle on.
+    /// Returns nil on build failure; the caller then keeps the base (FC-off)
+    /// pipeline and the cone texture is simply never sampled.
+    func selectCoarseWarmStartPipeline(forIterations iterations: Int, raySteps: Int,
+                                       neonMode: Bool = false,
+                                       request: RenderPipelineRequest? = nil) -> MTLRenderPipelineState? {
+        let fractalType = request?.fractalType ?? appModel.renderSettings.fractalType
+        // Custom formulas need a separately-compiled library + the FractalTypeCustom
+        // dispatch arm; the cone family gate excludes them anyway. Keep it simple.
+        guard fractalType != .custom else { return nil }
+        let formulaParams = request?.formulaParams ?? appModel.renderSettings.formulaParams
+        let mandelbulbPower = FunctionConstantConfig.specializedMandelbulbPower(
+            fractalType: fractalType,
+            formulaParams: formulaParams
+        )
+        let colorIterations = Int32(request?.colorIterations ?? appModel.renderSettings.colorIterations)
+        let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
+        let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
+        let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
+
+        let cacheKey = "CWS_FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_Q\(qualityMode)_CI\(colorIterations)\(powerKey)_N\(neonMode ? 1 : 0)_B\(bubbleEnabled ? 1 : 0)"
+        if let cached = coarseWarmStartPipelineCache[cacheKey] {
+            return cached
+        }
+
+        let config = FunctionConstantConfig(
+            fractalIterations: Int32(iterations),
+            shadowIterations: Int32(max(iterations - 2, 2)),
+            safetyBubbleEnabled: bubbleEnabled,
+            qualityMode: Int32(qualityMode),
+            debugHierarchical: false,
+            maxRaySteps: Int32(raySteps),
+            fractalType: fractalType.rawValue,
+            neonModeEnabled: neonMode,
+            colorIterations: colorIterations,
+            mandelbulbPower: mandelbulbPower
+        )
+        do {
+            let pipeline = try Renderer.buildSpecializedPipeline(
+                device: device,
+                layerRenderer: layerRenderer,
+                rasterSampleCount: rasterSampleCount,
+                mtlVertexDescriptor: mtlVertexDescriptor,
+                config: config,
+                fragmentFunctionName: "fragmentShader",
+                coarseWarmStart: true,
+                library: nil,
+                archive: renderPipelineArchive
+            )
+            coarseWarmStartPipelineCache[cacheKey] = pipeline
+            return pipeline
+        } catch {
+            if RENDERER_DEBUG { print("⚠️ [ConeWarmStart] pipeline build failed: \(error)") }
+            return nil
+        }
+    }
+
     /// Scene-stable feature bakes for exact compute-pipeline keys
     /// (safety bubble + coherent-packet experiment), read from live settings.
     @inline(__always)

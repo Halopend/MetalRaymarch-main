@@ -1466,6 +1466,13 @@ private final class ThresholdMacRenderer {
                         shadowsEnabled: settings.shadowsEnabled ? 1 : 0,
                         distanceLODFalloff: settings.distanceLODStrength * 0.5,
                         benchCollectSteps: BenchmarkManager.shared.shouldCollectSteps ? 1 : 0,
+                        // Conservative cone coarse-prepass: Mac uses fragmentShaderMono,
+                        // which never reads the coarse texture (FC off), so these only
+                        // keep the shared Uniforms initializer well-formed.
+                        pixelFootprintPerDist: RenderPrecompute.pixelFootprintPerDist(
+                            projection: projection,
+                            viewportHeight: Float(drawableSize.height)),
+                        coarseRateMagMax: 1.0,
                         springDisplacementX: settings.springDisplacement.x,
                         springDisplacementY: settings.springDisplacement.y,
                         springDisplacementZ: settings.springDisplacement.z,

@@ -157,6 +157,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
     private var _coherentPacketEnabled: Bool = loadBool("coherentPacketEnabled", default: false)  // Experimental predict-validate raymarch (Stages 0-3)
     private var _computeTemporalReprojectionEnabled: Bool = loadBool("computeTemporalReprojectionEnabled", default: false)  // Compute path: temporal reproject + tile/supertile depth seeding. Off = full coarse+fine march every frame (correct baseline; the seeding can blank disoccluded tiles)
+    private var _coarsePrepassWarmStartEnabled: Bool = loadBool("coarsePrepassWarmStartEnabled", default: false)  // visionOS fragment path: conservative cone coarse-prepass warm-start. A low-res cone pass writes a provable LOWER BOUND on each 8x8 block's nearest-surface entry distance; the full march raises its start t to it (skip-to-then-full-march). Off = no cone pass, byte-identical to before. Box/fold + un-warped domain only.
     private var _foveationStrength: Float = loadFloat("foveationStrength", default: 0.0)  // Peripheral step reduction on the 8x8 compute path (0 = off)
     private var _smartAdvanceEnabled: Bool = loadBool("smartAdvanceEnabled", default: false)  // Grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient)
     private var _adaptiveRenderQualityEnabled: Bool = loadBool("adaptiveRenderQualityEnabled", default: true)  // visionOS: auto-lower compositor Render Quality to hold FPS (slider = ceiling)
@@ -1053,6 +1054,23 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _computeTemporalReprojectionEnabled } }
         set {
             withLock { _computeTemporalReprojectionEnabled = newValue }
+            persistQuality()
+        }
+    }
+
+    /// visionOS fragment path: conservative cone coarse-prepass warm-start. A
+    /// low-res compute pass marches a CONE per 8x8 block and writes a provable
+    /// LOWER BOUND on the entry distance of the nearest surface for every full-res
+    /// ray in that block. The fragment march then raises its start `t` to that
+    /// bound (skip-to-then-full-march), skipping provably-empty space without ever
+    /// skipping a surface. Defaults OFF — when off the cone pass is never
+    /// dispatched, the function constant stays undefined, and the code path is
+    /// byte-for-byte identical to before. Only engages for box/fold fractals on an
+    /// un-warped domain (the conservative analytic lower bound holds there).
+    var coarsePrepassWarmStartEnabled: Bool {
+        get { withLock { _coarsePrepassWarmStartEnabled } }
+        set {
+            withLock { _coarsePrepassWarmStartEnabled = newValue }
             persistQuality()
         }
     }
@@ -2198,6 +2216,7 @@ final class RenderSettings: @unchecked Sendable {
                 debugHierarchical: _debugHierarchical,
                 coherentPacketEnabled: _coherentPacketEnabled,
                 computeTemporalReprojectionEnabled: _computeTemporalReprojectionEnabled,
+                coarsePrepassWarmStartEnabled: _coarsePrepassWarmStartEnabled,
                 foveationStrength: _foveationStrength,
                 smartAdvanceEnabled: _smartAdvanceEnabled,
                 coneMarchStrength: _coneMarchStrength,
@@ -3482,6 +3501,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.debugHierarchical = _debugHierarchical
                 c.coherentPacketEnabled = _coherentPacketEnabled
                 c.computeTemporalReprojectionEnabled = _computeTemporalReprojectionEnabled
+                c.coarsePrepassWarmStartEnabled = _coarsePrepassWarmStartEnabled
                 c.foveationStrength = _foveationStrength
                 c.smartAdvanceEnabled = _smartAdvanceEnabled
                 c.adaptiveRenderQualityEnabled = _adaptiveRenderQualityEnabled
@@ -3510,6 +3530,7 @@ final class RenderSettings: @unchecked Sendable {
                 _debugHierarchical = newValue.debugHierarchical
                 _coherentPacketEnabled = newValue.coherentPacketEnabled
                 _computeTemporalReprojectionEnabled = newValue.computeTemporalReprojectionEnabled
+                _coarsePrepassWarmStartEnabled = newValue.coarsePrepassWarmStartEnabled
                 _foveationStrength = newValue.foveationStrength
                 _smartAdvanceEnabled = newValue.smartAdvanceEnabled
                 _adaptiveRenderQualityEnabled = newValue.adaptiveRenderQualityEnabled

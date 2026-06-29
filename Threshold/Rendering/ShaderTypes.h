@@ -41,7 +41,8 @@ typedef NS_ENUM(EnumBackingType, VertexAttribute)
 typedef NS_ENUM(EnumBackingType, TextureIndex)
 {
     TextureIndexColor    = 0,
-    TextureIndexPrevDepth = 1   // Previous-frame depth for temporal march warm-start
+    TextureIndexPrevDepth = 1,  // Previous-frame depth for temporal march warm-start
+    TextureIndexCoarseWarmStart = 2  // Conservative cone coarse-prepass warmT (LOWER BOUND on entry distance per 8x8 block)
 };
 
 // Function constant indices for shader specialization
@@ -62,6 +63,8 @@ typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
     FCIndexShadowsEnabled      = 11, // bool: Toggle shadow computation
     FCIndexMandelbulbPower     = 12, // int: Bake Mandelbulb power for fastPowR optimization
     FCIndexWarmStart           = 13, // bool: Compile in temporal-depth march warm-start (visionOS fragment path)
+    // index 14 = FC_COHERENT_PACKET (compute kernel only; see Shaders.metal)
+    FCIndexCoarseWarmStart     = 15, // bool: Compile in the conservative cone coarse-prepass warm-start (fragment path + cone kernel). Index 14 is taken by FC_COHERENT_PACKET, so this uses the next free slot.
 };
 
 // Fractal type selection
@@ -266,6 +269,16 @@ typedef struct
     float distanceLODFalloff;// Distance iteration LOD: fractal iterations dropped per unit ray distance. 0 = off
     int benchCollectSteps;   // 1 = accumulate per-ray march step counts into BufferIndexBenchCounters (benchmark only)
 
+    // === CONSERVATIVE CONE COARSE-PREPASS WARM-START ===
+    // Raw per-pixel lateral footprint at depth 1: 2·tan(fovY/2)/viewportHeight
+    // (= coneMarchScale WITHOUT the LOD-widening s·coneMarchMaxPixels factor).
+    // Used by the cone kernel to bound the 8x8 block footprint; the fragment path
+    // also carries it so it can be read alongside the coarse texture if needed.
+    float pixelFootprintPerDist;
+    // Conservative UPPER BOUND on physical→screen magnification under foveation.
+    // Over-bounding only shortens the warm-start skip (always safe). 1.0 = none.
+    float coarseRateMagMax;
+
     // === SPRING BLOB NAVIGATION WIDGET ===
     float springDisplacementX;        // Spring displacement X (NDC-ish space)
     float springDisplacementY;        // Spring displacement Y
@@ -345,6 +358,11 @@ typedef struct
     float coneMarchScale;        // Cone marching: per-distance growth of the march hit threshold (= projected pixel footprint × stop margin). 0 = off
     int shadowsEnabled;          // 0 = skip the per-pixel shadow marches (flat, cheaper lighting); 1 = full soft shadows
     float distanceLODFalloff;    // Distance iteration LOD: fractal iterations dropped per unit ray distance. 0 = off
+    // === CONSERVATIVE CONE COARSE-PREPASS WARM-START ===
+    // Raw per-pixel lateral footprint at depth 1 (no LOD widening); see Uniforms.
+    float pixelFootprintPerDist;
+    // Conservative UPPER BOUND on physical→screen magnification under foveation (>=1).
+    float coarseRateMagMax;
     float blendFactor;           // Temporal reuse factor: 1.0 = moving, lower = stable enough to trust depth history
     // === SPRING BLOB NAVIGATION WIDGET ===
     // Packed as scalars to avoid float3 alignment issues between Swift and Metal

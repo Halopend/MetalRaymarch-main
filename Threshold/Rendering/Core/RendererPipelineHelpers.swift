@@ -19,6 +19,7 @@ extension Renderer {
                                               fragmentFunctionName: String = "fragmentShader",
                                               usesVertexAmplification: Bool = true,
                                               functionConstants: MTLFunctionConstantValues? = nil,
+                                              coarseWarmStart: Bool = false,
                                               library: MTLLibrary? = nil,
                                               archive: PipelineBinaryArchive? = nil) throws -> MTLRenderPipelineState {
         /// Build a render state pipeline object. When `library` is non-nil, all
@@ -47,6 +48,12 @@ extension Renderer {
             // Screenshot and Mac pipelines bypass this helper and compile it out.
             var warmStart = true
             constants.setConstantValue(&warmStart, type: .bool, index: FunctionConstantIndex.warmStart.rawValue)
+            // FC_COARSE_WARM_START (index 15): compile in the conservative cone
+            // coarse-prepass warm-start (coarse texture argument + min-over-2x2 read
+            // + full-march seed). Default false → dead-code-eliminated; only the
+            // dedicated cone-enabled pipeline variant sets it true.
+            var coarse = coarseWarmStart
+            constants.setConstantValue(&coarse, type: .bool, index: FunctionConstantIndex.coarseWarmStart.rawValue)
         }
         fragmentFunction = try library?.makeFunction(name: fragmentFunctionName, constantValues: constants)
 
@@ -203,6 +210,7 @@ extension Renderer {
                                          mtlVertexDescriptor: MTLVertexDescriptor,
                                          config: FunctionConstantConfig,
                                          fragmentFunctionName: String = "fragmentShader",
+                                         coarseWarmStart: Bool = false,
                                          library: MTLLibrary? = nil,
                                          archive: PipelineBinaryArchive? = nil) throws -> MTLRenderPipelineState {
         return try buildRenderPipelineWithDevice(
@@ -212,6 +220,7 @@ extension Renderer {
             mtlVertexDescriptor: mtlVertexDescriptor,
             fragmentFunctionName: fragmentFunctionName,
             functionConstants: config.toMTLConstants(),
+            coarseWarmStart: coarseWarmStart,
             library: library,
             archive: archive
         )

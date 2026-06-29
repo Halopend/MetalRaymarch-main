@@ -63,6 +63,26 @@ enum RenderPrecompute {
         return pixelFootprintPerDist * s * coneMarchMaxPixels
     }
 
+    /// Raw per-pixel lateral footprint at depth 1: `2·tan(fovY/2) / viewportHeight`.
+    ///
+    /// This is `coneMarchScale` WITHOUT the LOD-widening `s · coneMarchMaxPixels`
+    /// factor — the bare angular size of a single pixel, independent of the cone
+    /// marching strength slider. The conservative cone coarse-prepass uses it to
+    /// bound an 8×8 block's footprint at every march `t` (an exact lower bound on
+    /// the nearest-surface entry distance). Returns 0 for degenerate inputs.
+    ///
+    /// `projection.columns.1.y` is `cot(fovY/2)` (the `yScale` of every perspective
+    /// matrix this app builds), so one pixel's angular size is
+    /// `2·tan(fovY/2) / viewportHeight`.
+    static func pixelFootprintPerDist(projection: matrix_float4x4,
+                                      viewportHeight: Float) -> Float {
+        guard viewportHeight > 1 else { return 0 }
+        let cotHalfFovY = abs(projection.columns.1.y)   // = 1 / tan(fovY/2)
+        guard cotHalfFovY > 1e-5 else { return 0 }
+        let tanHalfFovY = 1.0 / cotHalfFovY
+        return 2.0 * tanHalfFovY / viewportHeight
+    }
+
     /// Precompute fractal parameters (eliminates per-pixel `powr()` and division).
     static func makePrecomputedFractal(from settings: RenderSettingsSnapshot) -> PrecomputedFractalParams {
         let invMinRad = 1.0 / settings.minDistance

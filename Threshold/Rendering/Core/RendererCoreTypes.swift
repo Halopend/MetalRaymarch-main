@@ -28,11 +28,13 @@ enum FunctionConstantIndex: Int {
     case mandelbulbPower = 12  // Bakes integer power for fastPowR dead-code elimination
     case warmStart = 13  // Compiles in the temporal-depth march warm-start (FC_WARM_START)
     case coherentPacketEnabled = 14  // Compiles out the coherent-packet experiment when false (compute kernel)
+    case coarseWarmStart = 15  // Compiles in the conservative cone coarse-prepass warm-start (FC_COARSE_WARM_START). Index 14 is taken, so this uses index 15.
 }
 
 // Fragment texture binding slots - must match [[texture(n)]] in Shaders.metal
 enum FragmentTextureIndex: Int {
     case prevDepth = 1  // Previous-frame depth for the temporal march warm-start
+    case coarseWarmStart = 2  // Conservative cone coarse-prepass warmT (lower bound on entry distance)
 }
 
 enum RendererError: Error {

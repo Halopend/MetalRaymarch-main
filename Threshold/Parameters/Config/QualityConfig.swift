@@ -48,6 +48,12 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // default for a correct baseline.
     var computeTemporalReprojectionEnabled: Bool = false
 
+    // visionOS fragment path: conservative cone coarse-prepass warm-start. A
+    // low-res cone pass writes a provable LOWER BOUND on each 8x8 block's
+    // nearest-surface entry distance; the full march raises its start t to it.
+    // Off by default — when off, the code path is byte-identical to before.
+    var coarsePrepassWarmStartEnabled: Bool = false
+
     // Foveated raymarching strength (0...1); peripheral 8x8 tiles march fewer steps.
     var foveationStrength: Float = 0.0
 
@@ -119,7 +125,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case baseFractalIterations, baseMaxRaySteps
         case resolutionScale, renderQuality, tileSize
-        case debugHierarchical, coherentPacketEnabled, computeTemporalReprojectionEnabled, foveationStrength
+        case debugHierarchical, coherentPacketEnabled, computeTemporalReprojectionEnabled, coarsePrepassWarmStartEnabled, foveationStrength
         case smartAdvanceEnabled, coneMarchStrength
         case overRelaxationMax, distanceLODStrength, shadowsEnabled, boundingSphereSkipEnabled
         case renderDistanceScale, adaptiveRenderQualityEnabled
@@ -138,6 +144,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         debugHierarchical     = try c.decodeIfPresent(Bool.self,  forKey: .debugHierarchical)     ?? false
         coherentPacketEnabled = try c.decodeIfPresent(Bool.self,  forKey: .coherentPacketEnabled) ?? false
         computeTemporalReprojectionEnabled = try c.decodeIfPresent(Bool.self, forKey: .computeTemporalReprojectionEnabled) ?? false
+        coarsePrepassWarmStartEnabled = try c.decodeIfPresent(Bool.self, forKey: .coarsePrepassWarmStartEnabled) ?? false
         foveationStrength     = try c.decodeIfPresent(Float.self, forKey: .foveationStrength)     ?? 0.0
         smartAdvanceEnabled   = try c.decodeIfPresent(Bool.self,  forKey: .smartAdvanceEnabled)   ?? false
         coneMarchStrength     = try c.decodeIfPresent(Float.self, forKey: .coneMarchStrength)     ?? 0.0
