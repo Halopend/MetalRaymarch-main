@@ -1550,6 +1550,7 @@ actor Renderer {
             spaceWarpParam2: settingsSnapshot.spaceWarpParam2,
             spaceWarpParam3: settingsSnapshot.spaceWarpParam3,
             spaceWarpAxis: settingsSnapshot.spaceWarpAxis,
+            spaceWarpType: settingsSnapshot.spaceWarpType,
             // === GMT-FRACTALS OPTIMIZATIONS ===
             stepMultiplier: settingsSnapshot.stepMultiplier,
             boundingSphereRadius: settingsSnapshot.estimatedBoundingSphereRadius,  // >0 only when the experimental empty-space skip is enabled
@@ -2001,6 +2002,7 @@ actor Renderer {
                 spaceWarpParam2: settingsSnapshot.spaceWarpParam2,
                 spaceWarpParam3: settingsSnapshot.spaceWarpParam3,
                 spaceWarpAxis: settingsSnapshot.spaceWarpAxis,
+                spaceWarpType: settingsSnapshot.spaceWarpType,
                 stepMultiplier: settingsSnapshot.stepMultiplier,
                 boundingSphereRadius: settingsSnapshot.estimatedBoundingSphereRadius,
                 smartAdvanceEnabled: settingsSnapshot.smartAdvanceEnabled ? 1 : 0,

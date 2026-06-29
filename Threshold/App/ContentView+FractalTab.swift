@@ -293,7 +293,10 @@ extension ContentView {
 
             sphereProjectionSection
 
-            spaceWarpSection
+            // Composable domain transforms (Twist / Bend / folds / inversion /
+            // kaleidoscope / ripple). Supersedes the standalone space-warp strength
+            // slider; the legacy `spaceWarpSection` is kept defined but unused.
+            TransformationsSection(renderSettings: appModel.renderSettings)
 
             TwistShapingSection(renderSettings: appModel.renderSettings)
 

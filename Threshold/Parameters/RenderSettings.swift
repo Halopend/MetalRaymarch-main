@@ -117,6 +117,9 @@ final class RenderSettings: @unchecked Sendable {
     // Built-in Twist orientation: the axis the twist rotates about (normalized in
     // the shader). Default = vertical (+Y), matching the original Y-axis twist.
     private var _spaceWarpAxis: SIMD3<Float> = SIMD3<Float>(0, 1, 0)
+    // Built-in warp catalog selector (0=Twist by default, so legacy scenes that
+    // only set strength still twist). See SpaceWarpKind / TransformationsSection.
+    private var _spaceWarpType: Int32 = 0
     private var _platformRadius: Float = 1.888
     private var _platformEnabled: Bool = true
     private var _audioLevel: Float = 0.0            // Current audio level (0-1) for reactive lighting
@@ -572,6 +575,14 @@ final class RenderSettings: @unchecked Sendable {
     var spaceWarpOrigin: SIMD3<Float> {
         get { withLock { SIMD3<Float>(_spaceWarpParam1, _spaceWarpParam2, _spaceWarpParam3) } }
         set { withLock { _spaceWarpParam1 = newValue.x; _spaceWarpParam2 = newValue.y; _spaceWarpParam3 = newValue.z } }
+    }
+
+    /// Selects which built-in domain transform `spaceWarpStrength` drives.
+    /// 0 = Twist (legacy default). The meaning of spaceWarpParam1/2/3 is
+    /// per-type (see TransformationsSection / the GPU `applySpaceWarp` switch).
+    var spaceWarpType: Int32 {
+        get { withLock { _spaceWarpType } }
+        set { withLock { _spaceWarpType = newValue } }
     }
 
     var platformRadius: Float {
@@ -2199,6 +2210,7 @@ final class RenderSettings: @unchecked Sendable {
                 spaceWarpParam2: _spaceWarpParam2,
                 spaceWarpParam3: _spaceWarpParam3,
                 spaceWarpAxis: _spaceWarpAxis,
+                spaceWarpType: _spaceWarpType,
                 platformRadius: _platformRadius,
                 platformEnabled: _platformEnabled,
                 audioLevel: _audioLevel,

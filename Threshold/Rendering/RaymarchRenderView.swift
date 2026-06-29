@@ -1448,6 +1448,7 @@ private final class ThresholdMacRenderer {
                         spaceWarpParam2: settings.spaceWarpParam2,
                         spaceWarpParam3: settings.spaceWarpParam3,
                         spaceWarpAxis: settings.spaceWarpAxis,
+                        spaceWarpType: settings.spaceWarpType,
                         stepMultiplier: settings.stepMultiplier,
                         boundingSphereRadius: settings.estimatedBoundingSphereRadius,
                         smartAdvanceEnabled: settings.smartAdvanceEnabled ? 1 : 0,

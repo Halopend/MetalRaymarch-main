@@ -260,6 +260,7 @@ typedef struct
     float spaceWarpParam2;
     float spaceWarpParam3;
     vector_float3 spaceWarpAxis;    // Built-in Twist rotation axis (orientation); normalized on GPU. Origin = spaceWarpParam1/2/3
+    int spaceWarpType;              // Built-in warp catalog selector (0=Twist,1=Bend,2=Mirror,3=BoxFold,4=SphereFold,5=Inversion,6=Kaleido,7=Ripple)
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;    // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius; // Bounding sphere for early ray rejection (0 = disabled)
@@ -351,6 +352,7 @@ typedef struct
     float spaceWarpParam2;
     float spaceWarpParam3;
     vector_float3 spaceWarpAxis;    // Built-in Twist rotation axis (orientation); normalized on GPU. Origin = spaceWarpParam1/2/3
+    int spaceWarpType;              // Built-in warp catalog selector (0=Twist,1=Bend,2=Mirror,3=BoxFold,4=SphereFold,5=Inversion,6=Kaleido,7=Ripple)
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;        // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius;  // Bounding sphere for early ray rejection (0 = disabled)

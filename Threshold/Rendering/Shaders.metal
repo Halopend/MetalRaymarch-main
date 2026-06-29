@@ -417,6 +417,7 @@ struct FractalParams {
     float spaceWarpParam2;
     float spaceWarpParam3;
     float3 spaceWarpAxis;    // built-in Twist rotation axis (orientation); normalized on use
+    int spaceWarpType;       // built-in warp catalog selector (0=Twist,1=Bend,2=Mirror,3=BoxFold,4=SphereFold,5=Inversion,6=Kaleido,7=Ripple)
 };
 
 // Configured space warp: wraps the customSpaceWarp ABI with the built-in Twist's
@@ -424,6 +425,15 @@ struct FractalParams {
 // one is active the origin/axis are ignored and the call delegates verbatim.
 // With the default axis (0,1,0) and origin (0,0,0) this is byte-identical to the
 // original vertical twist.
+// Built-in domain-warp catalog selected by params.spaceWarpType. Each case is a
+// transform applied ONCE to the sample point before the fractal DE — a reusable
+// "transformation" the user composes ad hoc with any fractal. type 0 = Twist is
+// byte-identical to the original built-in, so existing scenes are unaffected.
+//   0 Twist  1 Bend  2 Mirror Fold  3 Box Fold  4 Sphere Fold
+//   5 Spherical Inversion  6 Kaleidoscope  7 Ripple
+// `strength` gates the whole thing (0 = off → dead-code eliminated). Fold types
+// (2/3/4/5/6) treat strength in [0,1] as a blend between identity and the fold so
+// the dial is smooth; Twist/Bend/Ripple use it as a magnitude.
 FORCE_INLINE float3 applySpaceWarp(float3 p, FractalParams params) {
     float strength = params.spaceWarpStrength;
     if (strength <= 0.0f) { return p; }
@@ -434,19 +444,104 @@ FORCE_INLINE float3 applySpaceWarp(float3 p, FractalParams params) {
     float3 axis = params.spaceWarpAxis;
     float axisLen = length(axis);
     axis = (axisLen > 1e-6f) ? axis / axisLen : float3(0.0f, 1.0f, 0.0f);
-    float3 d = p - origin;
-    float angle = strength * dot(d, axis) * 1.5f;   // twist grows along the axis
-    float c = cos(angle), s = sin(angle);
-    // Rodrigues rotation of d about `axis` by `angle`.
-    float3 rot = d * c + cross(axis, d) * s + axis * dot(axis, d) * (1.0f - c);
-    return origin + rot;
+    float t = clamp(strength, 0.0f, 1.0f);   // blend amount for fold types
+
+    switch (params.spaceWarpType) {
+        default:
+        case 0: {   // Twist — Rodrigues rotation, angle grows along the axis
+            float3 d = p - origin;
+            float angle = strength * dot(d, axis) * 1.5f;
+            float c = cos(angle), s = sin(angle);
+            float3 rot = d * c + cross(axis, d) * s + axis * dot(axis, d) * (1.0f - c);
+            return origin + rot;
+        }
+        case 1: {   // Bend — rotate the plane perpendicular to the axis by an
+                    // angle proportional to the coordinate along the axis.
+            float3 d = p - origin;
+            float along = dot(d, axis);
+            float3 perp = d - along * axis;
+            float angle = strength * length(perp) * 1.5f;
+            float c = cos(angle), s = sin(angle);
+            // rotate `along*axis` toward perp direction (a simple bow/bend)
+            float3 perpDir = (length(perp) > 1e-6f) ? normalize(perp) : float3(0.0f);
+            float3 bent = perp + axis * (along * c) + perpDir * (along * s);
+            return origin + bent;
+        }
+        // Fold / radial / kaleido / ripple warps act about the WORLD CENTER and
+        // reuse param1/param2 as their own scalars (NOT the Twist origin), so the
+        // generic params never alias. Origin/axis above belong to Twist & Bend.
+        case 2: {   // Mirror Fold — reflect into the all-positive octant
+            float3 folded = abs(p);
+            return mix(p, folded, t);
+        }
+        case 3: {   // Box Fold (Tglad) — fold coordinates back inside ±limit
+            float L = max(params.spaceWarpParam1, 0.01f);
+            float3 folded = clamp(p, -L, L) * 2.0f - p;
+            return mix(p, folded, t);
+        }
+        case 4: {   // Sphere Fold — radial inflation of the inner region
+            float minR = max(params.spaceWarpParam1, 0.01f);
+            float maxR = max(params.spaceWarpParam2, minR + 0.01f);
+            float r2 = dot(p, p);
+            float minR2 = minR * minR, maxR2 = maxR * maxR;
+            float factor = 1.0f;
+            if (r2 < minR2)      factor = maxR2 / minR2;
+            else if (r2 < maxR2) factor = maxR2 / max(r2, 1e-6f);
+            return mix(p, p * factor, t);
+        }
+        case 5: {   // Spherical Inversion through a sphere of radius param1
+            float R = max(params.spaceWarpParam1, 0.05f);
+            float r2 = max(dot(p, p), 1e-6f);
+            float factor = clamp((R * R) / r2, 0.05f, 20.0f);
+            return mix(p, p * factor, t);
+        }
+        case 6: {   // Kaleidoscope — fold the angle into a 2π/N wedge (XZ plane)
+            float N = max(round(params.spaceWarpParam1), 2.0f);
+            float seg = M_PI_F / N;
+            float ang = atan2(p.z, p.x);
+            float len = length(p.xz);
+            float a = fmod(fabs(ang) + seg, 2.0f * seg) - seg;
+            float3 folded = float3(cos(a) * len, p.y, sin(a) * len);
+            return mix(p, folded, t);
+        }
+        case 7: {   // Ripple — accordion displacement along the axis
+            float freq = max(params.spaceWarpParam1, 0.01f);
+            float phase = dot(p, axis) * freq;
+            return p + axis * (strength * sin(phase));
+        }
+    }
 #endif
 }
 FORCE_INLINE float applySpaceWarpDEScale(float3 p, FractalParams params) {
 #ifdef THRESHOLD_CUSTOM_SPACE_WARP
     return customSpaceWarpDEScale(p, params.spaceWarpStrength, params.spaceWarpParam1, params.spaceWarpParam2, params.spaceWarpParam3);
 #else
-    return 1.0f;   // rigid rotation about an arbitrary axis → no DE correction
+    float strength = params.spaceWarpStrength;
+    if (strength <= 0.0f) { return 1.0f; }
+    // Only the radial warps (Sphere Fold, Inversion) stretch distance enough to
+    // need a DE divisor; the folds are isometric and Twist/Bend/Ripple are mild
+    // shears the march tolerates (matching the original Twist's deScale=1 policy).
+    float t = clamp(strength, 0.0f, 1.0f);
+    switch (params.spaceWarpType) {
+        case 4: {   // Sphere Fold
+            float minR = max(params.spaceWarpParam1, 0.01f);
+            float maxR = max(params.spaceWarpParam2, minR + 0.01f);
+            float r2 = dot(p, p);
+            float minR2 = minR * minR, maxR2 = maxR * maxR;
+            float factor = 1.0f;
+            if (r2 < minR2)      factor = maxR2 / minR2;
+            else if (r2 < maxR2) factor = maxR2 / max(r2, 1e-6f);
+            return max(mix(1.0f, factor, t), 1e-3f);
+        }
+        case 5: {   // Spherical Inversion
+            float R = max(params.spaceWarpParam1, 0.05f);
+            float r2 = max(dot(p, p), 1e-6f);
+            float factor = clamp((R * R) / r2, 0.05f, 20.0f);
+            return max(mix(1.0f, factor, t), 1e-3f);
+        }
+        default:
+            return 1.0f;
+    }
 #endif
 }
 
@@ -587,7 +682,8 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
     float sphereProjBlend = 0.0f, float sphereProjRadius = 1.0f,
     float spaceWarpStrength = 0.0f, float spaceWarpParam1 = 0.0f,
     float spaceWarpParam2 = 0.0f, float spaceWarpParam3 = 0.0f,
-    float3 spaceWarpAxis = float3(0.0f, 1.0f, 0.0f))
+    float3 spaceWarpAxis = float3(0.0f, 1.0f, 0.0f),
+    int spaceWarpType = 0)
 {
     FractalParams params;
     // Use precomputed values (expensive powr() and divisions done on CPU)
@@ -609,6 +705,7 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
     params.spaceWarpParam2 = spaceWarpParam2;
     params.spaceWarpParam3 = spaceWarpParam3;
     params.spaceWarpAxis = spaceWarpAxis;
+    params.spaceWarpType = spaceWarpType;
     return params;
 }
 
@@ -1379,8 +1476,24 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
         // when both warps are off.
         float blend = params.sphereProjBlend;
         float prad = params.sphereProjRadius;
-        float d0 = cache.distance * sphereProjectionDEScale(pos, blend, prad)
-                   * applySpaceWarpDEScale(applySphereProjectionDomain(pos, blend, prad), params);
+        float d0;
+        if (type == FractalTypeCustom) {
+            // Custom embedded DEs often run at low iteration counts (e.g. ported
+            // Fragmentarium fractals) and may not have converged at `normalIters`.
+            // Using the FULL-iteration cached center (cache.distance) as d0 while
+            // the probes run at the reduced count injects a roughly
+            // position-constant offset Δ = DE(reduced) − DE(full) into all three
+            // finite-difference components equally, collapsing the normal toward a
+            // constant direction → flat / "plastic" shading with no depth.
+            // Evaluate the center at the SAME reduced count as the probes so Δ
+            // cancels and the gradient reflects the true surface normal. (Built-in
+            // formulas converge by `normalIters`, so they keep the cheaper cached
+            // d0 path below — no behavior change and no extra DE eval for them.)
+            d0 = FractalDE_Dispatch(applySpaceWarp(applySphereProjectionDomain(pos, blend, prad), params), type, fp, normalIters);
+        } else {
+            d0 = cache.distance * sphereProjectionDEScale(pos, blend, prad)
+                 * applySpaceWarpDEScale(applySphereProjectionDomain(pos, blend, prad), params);
+        }
         float3 gradient = float3(
             FractalDE_Dispatch(applySpaceWarp(applySphereProjectionDomain(pos + float3(e,0,0), blend, prad), params), type, fp, normalIters) - d0,
             FractalDE_Dispatch(applySpaceWarp(applySphereProjectionDomain(pos + float3(0,e,0), blend, prad), params), type, fp, normalIters) - d0,
@@ -2154,7 +2267,7 @@ kernel void adaptiveHierarchical8x8(
     FractalParams fractalParams = makeFractalParamsFromPrecomputed(
         uniforms.precomputedFractal,
         uniforms.minDistance,
-        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis);
+        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpType);
 
     // === TEMPORAL REPROJECTION: PER-PIXEL ===
     // Reproject this pixel to previous frame, sample previous depth,
@@ -2413,7 +2526,7 @@ kernel void adaptiveHierarchical8x8(
             FractalParams coarseParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
-                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis);
+                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpType);
             coarseTCenter = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, coarseParams, lodIterations, fractalType, uniforms.formulaParams, uniforms.maxViewDistance, uniforms.marchEpsilonScale);
             ranCoarseMarch = true;
 
@@ -2558,7 +2671,7 @@ kernel void adaptiveHierarchical8x8(
                 FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                     uniforms.precomputedFractal,
                     uniforms.minDistance,
-                    marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis);
+                    marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpType);
                 tg_shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
                 tg_shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
                 // Publish anchor surface frame for the coherent-packet normal gate.
@@ -2602,7 +2715,7 @@ kernel void adaptiveHierarchical8x8(
                     FractalParams shadowParamsLocal = makeFractalParamsFromPrecomputed(
                         uniforms.precomputedFractal,
                         uniforms.minDistance,
-                        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis);
+                        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpType);
                     shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParamsLocal, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
                     shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParamsLocal, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
                     // Tag debug overlay layer for shadow fallback (only when not already tagged by warm-start).
@@ -2615,7 +2728,7 @@ kernel void adaptiveHierarchical8x8(
             FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
-                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis);
+                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpType);
             shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
             shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
         }
@@ -2782,7 +2895,7 @@ kernel void coneCoarsePrepass8x8(uint2 texel [[thread_position_in_grid]],
     FractalParams fp = makeFractalParamsFromPrecomputed(
         uniforms.precomputedFractal,
         uniforms.minDistance,
-        mO, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis);
+        mO, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpType);
 
     float hitThreshold = 0.02f * epsilonScale;
     float t = 0.05f;
@@ -2923,7 +3036,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     FractalParams fractalParams = makeFractalParamsFromPrecomputed(
         uniforms.precomputedFractal,
         uniforms.minDistance,
-        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis);
+        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpType);
 
     half3 col = half3(0.0h);
     float2 ret;
@@ -2985,7 +3098,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
-                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis);
+                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpType);
 
             half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
             half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));

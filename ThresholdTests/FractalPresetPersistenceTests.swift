@@ -88,6 +88,41 @@ struct FractalPresetPersistenceTests {
         #expect(abs(fresh.safetyBubbleFadeWidth - 0.4) < 1e-5)
     }
 
+    @Test("Composable Transformations (spaceWarp type/strength/params/axis) survive round-trip")
+    func transformationsRoundTrip() throws {
+        let settings = RenderSettings()
+        settings.fractalType = .mandelbulb
+        settings.spaceWarpType = SpaceWarpKind.kaleidoscope.rawValue   // 6
+        settings.spaceWarpStrength = 0.8
+        settings.spaceWarpParam1 = 5.0    // segments
+        settings.spaceWarpParam2 = 1.5
+        settings.spaceWarpParam3 = -0.25
+        settings.spaceWarpAxis = SIMD3<Float>(0.3, 0.6, -0.7)
+
+        let preset = FractalPreset.fromSettings(settings, name: "Warp")
+        #expect(preset.spaceWarpType == 6)
+        #expect(abs((preset.spaceWarpStrength ?? -1) - 0.8) < 1e-5)
+
+        let data = try JSONEncoder().encode(preset)
+        let decoded = try JSONDecoder().decode(FractalPreset.self, from: data)
+
+        #expect(decoded.spaceWarpType == 6)
+        #expect(abs((decoded.spaceWarpStrength ?? -1) - 0.8) < 1e-5)
+        #expect(abs((decoded.spaceWarpParam1 ?? -1) - 5.0) < 1e-5)
+        #expect(abs((decoded.spaceWarpParam2 ?? -1) - 1.5) < 1e-5)
+        #expect(decoded.spaceWarpAxis?.count == 3)
+
+        let fresh = RenderSettings()
+        fresh.fractalType = .mandelbulb
+        decoded.apply(to: fresh)
+        #expect(fresh.spaceWarpType == 6)
+        #expect(abs(fresh.spaceWarpStrength - 0.8) < 1e-5)
+        #expect(abs(fresh.spaceWarpParam1 - 5.0) < 1e-5)
+        #expect(abs(fresh.spaceWarpParam2 - 1.5) < 1e-5)
+        #expect(abs(fresh.spaceWarpAxis.x - 0.3) < 1e-5)
+        #expect(abs(fresh.spaceWarpAxis.z - (-0.7)) < 1e-5)
+    }
+
     @Test("Older scenes without the new keys decode to nil and leave live values untouched on apply")
     func legacySceneLeavesFieldsUntouched() throws {
         // A minimal flat scene with none of the newly-added keys (an older file).
