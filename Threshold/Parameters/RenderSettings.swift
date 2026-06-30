@@ -117,9 +117,15 @@ final class RenderSettings: @unchecked Sendable {
     // Built-in Twist orientation: the axis the twist rotates about (normalized in
     // the shader). Default = vertical (+Y), matching the original Y-axis twist.
     private var _spaceWarpAxis: SIMD3<Float> = SIMD3<Float>(0, 1, 0)
-    // Built-in warp catalog selector (0=Twist by default, so legacy scenes that
-    // only set strength still twist). See SpaceWarpKind / TransformationsSection.
-    private var _spaceWarpType: Int32 = 0
+    // Composable domain-transform stack (Transformations UI). Order = order of
+    // application; empty = off. See SpaceWarpOpValue / TransformationsSection.
+    private var _spaceWarpStack: [SpaceWarpOpValue] = []
+    // Latest generated codegen for the stack's STRUCTURE (unrolled MSL + signature),
+    // produced by AppModel.refreshWarpStackCompilation on structural changes and read
+    // by both render backends to compile a specialized library. nil source → use the
+    // bundled runtime-loop fallback. Thread-safe so the renderer can read off-main.
+    private var _warpStackCodegenSource: String? = nil
+    private var _warpStackCodegenSignature: String = "s0"
     private var _platformRadius: Float = 1.888
     private var _platformEnabled: Bool = true
     private var _audioLevel: Float = 0.0            // Current audio level (0-1) for reactive lighting
@@ -577,12 +583,20 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _spaceWarpParam1 = newValue.x; _spaceWarpParam2 = newValue.y; _spaceWarpParam3 = newValue.z } }
     }
 
-    /// Selects which built-in domain transform `spaceWarpStrength` drives.
-    /// 0 = Twist (legacy default). The meaning of spaceWarpParam1/2/3 is
-    /// per-type (see TransformationsSection / the GPU `applySpaceWarp` switch).
-    var spaceWarpType: Int32 {
-        get { withLock { _spaceWarpType } }
-        set { withLock { _spaceWarpType = newValue } }
+    /// The composable domain-transform stack (Transformations UI). Order is the
+    /// order of application; an empty stack means no transforms.
+    var spaceWarpStack: [SpaceWarpOpValue] {
+        get { withLock { _spaceWarpStack } }
+        set { withLock { _spaceWarpStack = newValue } }
+    }
+
+    /// Generated specialized MSL for the current stack structure (nil → runtime-loop
+    /// fallback). Read by both render backends to compile a fast library variant.
+    var warpStackCodegenSource: String? { withLock { _warpStackCodegenSource } }
+    var warpStackCodegenSignature: String { withLock { _warpStackCodegenSignature } }
+    /// Publish a freshly generated codegen (source + structure signature) atomically.
+    func setWarpStackCodegen(source: String?, signature: String) {
+        withLock { _warpStackCodegenSource = source; _warpStackCodegenSignature = signature }
     }
 
     var platformRadius: Float {
@@ -2210,7 +2224,7 @@ final class RenderSettings: @unchecked Sendable {
                 spaceWarpParam2: _spaceWarpParam2,
                 spaceWarpParam3: _spaceWarpParam3,
                 spaceWarpAxis: _spaceWarpAxis,
-                spaceWarpType: _spaceWarpType,
+                spaceWarpStack: cSpaceWarpStack(from: _spaceWarpStack),
                 platformRadius: _platformRadius,
                 platformEnabled: _platformEnabled,
                 audioLevel: _audioLevel,

@@ -124,8 +124,12 @@ actor CustomShaderCompiler {
     /// continues to work via `library.makeFunction(name:constantValues:)`.
     /// Stable cache key for an effect set (fractal + space warp). Distinct from a
     /// single formula's `sourceHash`, so old and combined entries never collide.
-    static func combinedHash(fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?) -> String {
-        "f\(fractal?.shortHash ?? "0")w\(spaceWarp?.shortHash ?? "0")"
+    /// `warpStackSignature` (from `SpaceWarpStackCodegen.generate`) captures the
+    /// composable transform stack's STRUCTURE (op types in order), so two different
+    /// stacks compile + cache distinct specialized libraries. "s0" = empty stack.
+    static func combinedHash(fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?,
+                             warpStackSignature: String = "s0") -> String {
+        "f\(fractal?.shortHash ?? "0")w\(spaceWarp?.shortHash ?? "0")\(warpStackSignature)"
     }
 
     /// Compile (or return cached) the combined library for an effect set.
@@ -144,12 +148,13 @@ actor CustomShaderCompiler {
     /// while every other custom scene crashes on external load). The async API
     /// hands the work to Metal's own compile queue and suspends the actor,
     /// freeing the cooperative thread so frames keep flowing.
-    func library(forFractal fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?) async throws -> MTLLibrary {
-        let key = Self.combinedHash(fractal: fractal, spaceWarp: spaceWarp)
+    func library(forFractal fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?,
+                 warpStackSource: String? = nil, warpStackSignature: String = "s0") async throws -> MTLLibrary {
+        let key = Self.combinedHash(fractal: fractal, spaceWarp: spaceWarp, warpStackSignature: warpStackSignature)
         if let cached = libraryCache[key] {
             return cached
         }
-        let source = try Self.synthesizeSource(fractal: fractal, spaceWarp: spaceWarp)
+        let source = try Self.synthesizeSource(fractal: fractal, spaceWarp: spaceWarp, warpStackSource: warpStackSource)
         let options = MTLCompileOptions()
         if #available(visionOS 2.0, *) {
             options.mathMode = .fast
@@ -203,7 +208,8 @@ actor CustomShaderCompiler {
     /// fractal DE is injected at the dispatch markers; a custom space warp is
     /// injected at `// __CUSTOM_SPACE_WARP__`. Either may be nil (the corresponding
     /// markers keep their built-in defaults).
-    static func synthesizeSource(fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?) throws -> String {
+    static func synthesizeSource(fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?,
+                                 warpStackSource: String? = nil) throws -> String {
         var pieces: [String] = []
         pieces.reserveCapacity(9)
 
@@ -235,9 +241,30 @@ actor CustomShaderCompiler {
         if let spaceWarp {
             suffix = try injectCustomSpaceWarp(suffix, warpSource: spaceWarp.metalSource)
         }
+        // Composable transform stack codegen — unrolled, type-dispatched
+        // spaceWarpStackApply/DEScale. A custom .threshfx warp (above) takes
+        // precedence (it #defines THRESHOLD_CUSTOM_SPACE_WARP so applySpaceWarp
+        // never calls the stack), so injecting both is harmless.
+        if let warpStackSource {
+            suffix = try injectSpaceWarpStack(suffix, generated: warpStackSource)
+        }
         pieces.append(suffix)
 
         return pieces.joined(separator: "\n\n")
+    }
+
+    /// Replace the `// __SPACEWARP_STACK_CODEGEN__` marker with the generated
+    /// unrolled stack (which begins with `#define THRESHOLD_CODEGEN_SPACEWARP_STACK`
+    /// to suppress the bundled runtime-loop defaults guarded by the matching
+    /// `#ifndef`).
+    static func injectSpaceWarpStack(_ src: String, generated: String) throws -> String {
+        let marker = "// __SPACEWARP_STACK_CODEGEN__"
+        guard src.contains(marker) else { throw CustomShaderCompilerError.missingDispatchMarker(marker) }
+        let replacement = """
+        // __SPACEWARP_STACK_CODEGEN__ (codegen stack injected)
+        \(generated)
+        """
+        return src.replacingOccurrences(of: marker, with: replacement)
     }
 
     /// Replace the `// __CUSTOM_SPACE_WARP__` marker with the plugin's warp source,

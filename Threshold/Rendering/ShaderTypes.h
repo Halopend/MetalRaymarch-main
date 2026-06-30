@@ -217,6 +217,33 @@ typedef struct
     vector_float4 color; // xyz=fog tint, w=unused
 } PrecomputedFog;
 
+// === COMPOSABLE DOMAIN-TRANSFORM STACK ===
+// A user-ordered list of domain warps applied to the sample point before the
+// fractal DE (Twist / Bend / folds / inversion / kaleidoscope / ripple). The
+// stack is FRAME-UNIFORM, so the GPU loop + per-op switch are wavefront-coherent.
+// An empty stack (count == 0) early-outs to identity. Scalars are packed (no
+// vector_float3) to keep the array's Swift<->Metal layout tuple-free & 4-aligned.
+#define kMaxSpaceWarpOps 8
+typedef struct
+{
+    // p1/p2/axis are GPU-READY (precomputed by cSpaceWarpStack each frame so the
+    // per-step Metal warp fns never redo normalize / log / π÷N / squares / clamps).
+    int   type;       // SpaceWarpKind raw (0=Twist,1=Bend,2=Mirror,3=BoxFold,4=SphereFold,5=Inversion,6=Kaleido,7=Ripple)
+    float strength;   // per-op amount (folds treat as 0..1 blend; Twist/Bend/Ripple as magnitude). 0 = this op is a no-op.
+    float p1;         // PRECOMPUTED: boxFold L · sphere/circle minR² · inversion R² · kaleido seg(π/N) · ripple freq · shells spacing · scaleRepeat log(scale)
+    float p2;         // PRECOMPUTED: sphere/circle maxR²
+    float axisX;      // PRE-NORMALIZED axis (Twist/Bend/Ripple)
+    float axisY;
+    float axisZ;
+    float _pad;       // 32-byte stride
+} SpaceWarpOp;
+typedef struct
+{
+    SpaceWarpOp ops[kMaxSpaceWarpOps];
+    int count;        // number of active ops (0 = stack off → identity)
+    int _pad0; int _pad1; int _pad2;  // 16-byte tail alignment
+} SpaceWarpStack;
+
 typedef struct
 {
     matrix_float4x4 projectionMatrix;
@@ -260,7 +287,7 @@ typedef struct
     float spaceWarpParam2;
     float spaceWarpParam3;
     vector_float3 spaceWarpAxis;    // Built-in Twist rotation axis (orientation); normalized on GPU. Origin = spaceWarpParam1/2/3
-    int spaceWarpType;              // Built-in warp catalog selector (0=Twist,1=Bend,2=Mirror,3=BoxFold,4=SphereFold,5=Inversion,6=Kaleido,7=Ripple)
+    SpaceWarpStack spaceWarpStack;  // Composable domain-transform stack (Transformations UI). count==0 = off.
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;    // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius; // Bounding sphere for early ray rejection (0 = disabled)
@@ -352,7 +379,7 @@ typedef struct
     float spaceWarpParam2;
     float spaceWarpParam3;
     vector_float3 spaceWarpAxis;    // Built-in Twist rotation axis (orientation); normalized on GPU. Origin = spaceWarpParam1/2/3
-    int spaceWarpType;              // Built-in warp catalog selector (0=Twist,1=Bend,2=Mirror,3=BoxFold,4=SphereFold,5=Inversion,6=Kaleido,7=Ripple)
+    SpaceWarpStack spaceWarpStack;  // Composable domain-transform stack (Transformations UI). count==0 = off.
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;        // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius;  // Bounding sphere for early ray rejection (0 = disabled)

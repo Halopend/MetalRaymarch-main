@@ -12,7 +12,8 @@
 #   Scripts/build.sh mac       # build ThresholdMac (all Swift + Metal) — fastest full compile check
 #   Scripts/build.sh vision    # build the visionOS Threshold scheme (generic device)
 #   Scripts/build.sh ios       # build the iOS scheme (generic device)
-#   Scripts/build.sh test      # run the ThresholdTests unit suite on macOS
+#   Scripts/build.sh test      # TRUSTWORTHY unit run: clean + serial (a green here is real)
+#   Scripts/build.sh testfast  # fast incremental tests — ⚠️ can run STALE, don't trust a pass
 #   Scripts/build.sh embeds    # regenerate EmbeddedMetalSources.swift after any shader/header edit
 #   Scripts/build.sh all       # embeds + mac + vision + test
 #
@@ -41,18 +42,33 @@ echo "Using DEVELOPER_DIR=$DEVELOPER_DIR"
 
 COMMON_FLAGS=(-project "$PROJECT" -configuration Debug CODE_SIGNING_ALLOWED=NO)
 
-build_mac()    { xcodebuild build "${COMMON_FLAGS[@]}" -scheme ThresholdMac  -destination 'platform=macOS'; }
-build_vision() { xcodebuild build "${COMMON_FLAGS[@]}" -scheme Threshold     -destination 'generic/platform=visionOS'; }
-build_ios()    { xcodebuild build "${COMMON_FLAGS[@]}" -scheme ThresholdiOS  -destination 'generic/platform=iOS'; }
-run_tests()    { xcodebuild test  "${COMMON_FLAGS[@]}" -scheme ThresholdMac  -destination 'platform=macOS'; }
-regen_embeds() { "$REPO_ROOT/Scripts/generate_metal_embeds.sh"; }
+# Why `test` is clean + serial (learned the hard way 2026-06-29):
+#  • clean — the incremental builder has been observed to link ThresholdTests
+#    against a STALE Threshold .swiftmodule (missing newly-added symbols, or an
+#    outdated struct layout after a ShaderTypes.h / model field change). The test
+#    bundle then runs old code and reports a false "TEST SUCCEEDED". `clean test`
+#    forces the test target to recompile against the CURRENT module, so a pass
+#    actually means the current code passed.
+#  • -parallel-testing-enabled NO — the default spins up several MTLDevice test
+#    hosts in parallel; under load they crash and sweep unrelated tests up as
+#    phantom 0.000s "failures". Serial = one host = deterministic.
+# Use `testfast` (incremental) only for tight iteration; re-confirm with `test`.
+TEST_FLAGS=(-parallel-testing-enabled NO)
+
+build_mac()      { xcodebuild build "${COMMON_FLAGS[@]}" -scheme ThresholdMac  -destination 'platform=macOS'; }
+build_vision()   { xcodebuild build "${COMMON_FLAGS[@]}" -scheme Threshold     -destination 'generic/platform=visionOS'; }
+build_ios()      { xcodebuild build "${COMMON_FLAGS[@]}" -scheme ThresholdiOS  -destination 'generic/platform=iOS'; }
+run_tests()      { xcodebuild clean test "${COMMON_FLAGS[@]}" "${TEST_FLAGS[@]}" -scheme ThresholdMac -destination 'platform=macOS'; }
+run_tests_fast() { xcodebuild test       "${COMMON_FLAGS[@]}" "${TEST_FLAGS[@]}" -scheme ThresholdMac -destination 'platform=macOS'; }
+regen_embeds()   { "$REPO_ROOT/Scripts/generate_metal_embeds.sh"; }
 
 case "${1:-mac}" in
-    mac)    build_mac ;;
-    vision) build_vision ;;
-    ios)    build_ios ;;
-    test)   run_tests ;;
-    embeds) regen_embeds ;;
-    all)    regen_embeds && build_mac && build_vision && run_tests ;;
-    *) echo "Unknown command: $1 (expected: mac | vision | ios | test | embeds | all)" >&2; exit 2 ;;
+    mac)      build_mac ;;
+    vision)   build_vision ;;
+    ios)      build_ios ;;
+    test)     run_tests ;;
+    testfast) run_tests_fast ;;
+    embeds)   regen_embeds ;;
+    all)      regen_embeds && build_mac && build_vision && run_tests ;;
+    *) echo "Unknown command: $1 (expected: mac | vision | ios | test | testfast | embeds | all)" >&2; exit 2 ;;
 esac

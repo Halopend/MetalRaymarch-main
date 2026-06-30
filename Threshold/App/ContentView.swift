@@ -907,6 +907,8 @@ struct ContentView: View {
             shapeInnerTab = .formula
         case .space:
             fractalSubTab = .space
+        case .transformations:
+            fractalSubTab = .transform
         case .performance:
             fractalSubTab = .render
         }
@@ -985,6 +987,8 @@ struct ContentView: View {
             return topDockTab == .shape && shapeRailSection == .formula && selectedTab != .gestures && selectedTab != .settings
         case .shapeSpace:
             return topDockTab == .shape && shapeRailSection == .space && selectedTab != .gestures && selectedTab != .settings
+        case .shapeTransformations:
+            return topDockTab == .shape && shapeRailSection == .transformations && selectedTab != .gestures && selectedTab != .settings
         case .shapePerformance:
             return topDockTab == .performance && selectedTab != .gestures && selectedTab != .settings
         case .visualizationsColor:
@@ -1029,6 +1033,8 @@ struct ContentView: View {
                 activateShapeSection(.formula)
             case .shapeSpace:
                 activateShapeSection(.space)
+            case .shapeTransformations:
+                activateShapeSection(.transformations)
             case .shapePerformance:
                 activatePerformanceSection(.acceleration)
             case .visualizationsColor:
@@ -1071,6 +1077,7 @@ struct ContentView: View {
         case .parameters: return .shapeParameters
         case .formula: return .shapeFormula
         case .space: return .shapeSpace
+        case .transformations: return .shapeTransformations
         case .performance: return .shapePerformance
         }
     }
@@ -1109,6 +1116,9 @@ struct ContentView: View {
             case .space:
                 topDockTab = .shape
                 shapeRailSection = .space
+            case .transform:
+                topDockTab = .shape
+                shapeRailSection = .transformations
             case .render:
                 // Performance is now its own top-dock tab, not a Shape rail entry.
                 topDockTab = .performance

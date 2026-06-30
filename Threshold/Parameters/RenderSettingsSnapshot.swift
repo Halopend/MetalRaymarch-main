@@ -24,7 +24,7 @@ struct RenderSettingsSnapshot {
     let spaceWarpParam2: Float
     let spaceWarpParam3: Float
     let spaceWarpAxis: SIMD3<Float>
-    let spaceWarpType: Int32
+    let spaceWarpStack: SpaceWarpStack
     let platformRadius: Float
     let platformEnabled: Bool
     let audioLevel: Float

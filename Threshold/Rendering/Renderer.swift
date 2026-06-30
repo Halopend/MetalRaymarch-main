@@ -660,9 +660,14 @@ actor Renderer {
                     await renderer.forceRecompileShaders()
                 }
 
-                // Setup custom-shader (.threshfx) activation handler.
-                appModel.activateEmbeddedFormulaHandler = { formula in
-                    try await renderer.activateEmbeddedFormula(formula)
+                // Setup custom-shader (.threshfx) activation handler. Also carries
+                // the composable transform-stack codegen (read from RenderSettings)
+                // so a built-in fractal + stack compiles a specialized library.
+                appModel.activateEmbeddedFormulaHandler = { [renderSettings = appModel.renderSettings] formula in
+                    try await renderer.activateEmbeddedFormula(
+                        formula,
+                        warpStackSource: renderSettings.warpStackCodegenSource,
+                        warpStackSignature: renderSettings.warpStackCodegenSignature)
                 }
             }
 
@@ -1550,7 +1555,7 @@ actor Renderer {
             spaceWarpParam2: settingsSnapshot.spaceWarpParam2,
             spaceWarpParam3: settingsSnapshot.spaceWarpParam3,
             spaceWarpAxis: settingsSnapshot.spaceWarpAxis,
-            spaceWarpType: settingsSnapshot.spaceWarpType,
+            spaceWarpStack: settingsSnapshot.spaceWarpStack,
             // === GMT-FRACTALS OPTIMIZATIONS ===
             stepMultiplier: settingsSnapshot.stepMultiplier,
             boundingSphereRadius: settingsSnapshot.estimatedBoundingSphereRadius,  // >0 only when the experimental empty-space skip is enabled
@@ -2002,7 +2007,7 @@ actor Renderer {
                 spaceWarpParam2: settingsSnapshot.spaceWarpParam2,
                 spaceWarpParam3: settingsSnapshot.spaceWarpParam3,
                 spaceWarpAxis: settingsSnapshot.spaceWarpAxis,
-                spaceWarpType: settingsSnapshot.spaceWarpType,
+                spaceWarpStack: settingsSnapshot.spaceWarpStack,
                 stepMultiplier: settingsSnapshot.stepMultiplier,
                 boundingSphereRadius: settingsSnapshot.estimatedBoundingSphereRadius,
                 smartAdvanceEnabled: settingsSnapshot.smartAdvanceEnabled ? 1 : 0,

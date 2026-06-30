@@ -76,14 +76,9 @@ struct FractalPreset: Codable, Identifiable {
     var sphereProjectionEnabled: Bool?
     var sphereProjectionBlend: Float?
     var sphereProjectionRadius: Float?
-    // Composable domain transforms (Transformations section). Optional for
+    // Composable domain-transform stack (Transformations section). Optional for
     // backward compatibility — older files decode to nil and keep live values.
-    var spaceWarpType: Int?
-    var spaceWarpStrength: Float?
-    var spaceWarpParam1: Float?
-    var spaceWarpParam2: Float?
-    var spaceWarpParam3: Float?
-    var spaceWarpAxis: [Float]?   // [x, y, z]
+    var spaceWarpOps: [SpaceWarpOpValue]?
 
     // === MODULAR LIGHTING EFFECTS (v2.0) ===
     // Card-based lighting system with presets
@@ -156,7 +151,7 @@ struct FractalPreset: Codable, Identifiable {
         // Space module (domain transforms)
         case sphericalInversionMode, sphericalInversionRadius
         case sphereProjectionEnabled, sphereProjectionBlend, sphereProjectionRadius
-        case spaceWarpType, spaceWarpStrength, spaceWarpParam1, spaceWarpParam2, spaceWarpParam3, spaceWarpAxis
+        case spaceWarpOps
         // v2.0 modular lighting effects
         case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect, linearRailEffect
         // Color scheme auto-transition
@@ -264,12 +259,7 @@ struct FractalPreset: Codable, Identifiable {
         sphereProjectionEnabled = try container.decodeIfPresent(Bool.self, forKey: .sphereProjectionEnabled)
         sphereProjectionBlend = try container.decodeIfPresent(Float.self, forKey: .sphereProjectionBlend)
         sphereProjectionRadius = try container.decodeIfPresent(Float.self, forKey: .sphereProjectionRadius)
-        spaceWarpType = try container.decodeIfPresent(Int.self, forKey: .spaceWarpType)
-        spaceWarpStrength = try container.decodeIfPresent(Float.self, forKey: .spaceWarpStrength)
-        spaceWarpParam1 = try container.decodeIfPresent(Float.self, forKey: .spaceWarpParam1)
-        spaceWarpParam2 = try container.decodeIfPresent(Float.self, forKey: .spaceWarpParam2)
-        spaceWarpParam3 = try container.decodeIfPresent(Float.self, forKey: .spaceWarpParam3)
-        spaceWarpAxis = try container.decodeIfPresent([Float].self, forKey: .spaceWarpAxis)
+        spaceWarpOps = try container.decodeIfPresent([SpaceWarpOpValue].self, forKey: .spaceWarpOps)
 
         // Legacy "mandelboxSphereProjection" migration: the dedicated MSP type read
         // the projection blend/radius from formula params[4]/[5] and always projected.
@@ -412,12 +402,7 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(sphereProjectionEnabled, forKey: .sphereProjectionEnabled)
         try container.encodeIfPresent(sphereProjectionBlend, forKey: .sphereProjectionBlend)
         try container.encodeIfPresent(sphereProjectionRadius, forKey: .sphereProjectionRadius)
-        try container.encodeIfPresent(spaceWarpType, forKey: .spaceWarpType)
-        try container.encodeIfPresent(spaceWarpStrength, forKey: .spaceWarpStrength)
-        try container.encodeIfPresent(spaceWarpParam1, forKey: .spaceWarpParam1)
-        try container.encodeIfPresent(spaceWarpParam2, forKey: .spaceWarpParam2)
-        try container.encodeIfPresent(spaceWarpParam3, forKey: .spaceWarpParam3)
-        try container.encodeIfPresent(spaceWarpAxis, forKey: .spaceWarpAxis)
+        try container.encodeIfPresent(spaceWarpOps, forKey: .spaceWarpOps)
 
         // v2.0 modular lighting effects
         try container.encodeIfPresent(lightingMode, forKey: .lightingMode)
@@ -624,15 +609,11 @@ struct FractalPreset: Codable, Identifiable {
         // Glass-floor platform (previously dropped).
         preset.platformEnabled = disp.platformEnabled
         preset.platformRadius = disp.platformRadius
-        // Composable domain transforms (Transformations section). These live as
-        // direct RenderSettings properties, not in DisplayConfig.
-        preset.spaceWarpType = Int(settings.spaceWarpType)
-        preset.spaceWarpStrength = settings.spaceWarpStrength
-        preset.spaceWarpParam1 = settings.spaceWarpParam1
-        preset.spaceWarpParam2 = settings.spaceWarpParam2
-        preset.spaceWarpParam3 = settings.spaceWarpParam3
-        let swAxis = settings.spaceWarpAxis
-        preset.spaceWarpAxis = [swAxis.x, swAxis.y, swAxis.z]
+        // Composable domain-transform stack (Transformations section). Direct
+        // RenderSettings property, not in DisplayConfig. Empty array → nil so older
+        // readers and round-trips stay clean.
+        let warpOps = settings.spaceWarpStack
+        preset.spaceWarpOps = warpOps.isEmpty ? nil : warpOps
 
         // ── Safety bubble domain (1 lock acquisition) ──
         let sb = settings.safetyBubbleConfig
@@ -769,17 +750,9 @@ struct FractalPreset: Codable, Identifiable {
         settings.sphereProjectionBlend = sphereProjectionBlend ?? 1.0
         settings.sphereProjectionRadius = sphereProjectionRadius ?? 1.0
 
-        // Composable domain transforms (Transformations section). Restore when the
-        // scene carries them; older scenes leave the live values untouched (the
-        // built-in warp is also driven by .threshfx effects / AppModel elsewhere).
-        if let t = spaceWarpType { settings.spaceWarpType = Int32(t) }
-        if let s = spaceWarpStrength { settings.spaceWarpStrength = s }
-        if let p1 = spaceWarpParam1 { settings.spaceWarpParam1 = p1 }
-        if let p2 = spaceWarpParam2 { settings.spaceWarpParam2 = p2 }
-        if let p3 = spaceWarpParam3 { settings.spaceWarpParam3 = p3 }
-        if let ax = spaceWarpAxis, ax.count == 3 {
-            settings.spaceWarpAxis = SIMD3<Float>(ax[0], ax[1], ax[2])
-        }
+        // Composable domain-transform stack (Transformations section). Restore when
+        // the scene carries it; older scenes (nil) leave the live stack untouched.
+        if let ops = spaceWarpOps { settings.spaceWarpStack = ops }
 
         // Glass-floor platform — restore when present (older scenes leave it as-is).
         if let platformEnabled = platformEnabled {

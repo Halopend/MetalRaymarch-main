@@ -40,13 +40,17 @@ extension Renderer {
 
         Task { [weak self] in
             guard let self else { return }
-            let formula = await MainActor.run { self.appModel.activeEmbeddedFormula }
-            if let formula {
+            let (formula, stackSrc, stackSig) = await MainActor.run {
+                (self.appModel.activeEmbeddedFormula,
+                 self.appModel.renderSettings.warpStackCodegenSource,
+                 self.appModel.renderSettings.warpStackCodegenSignature)
+            }
+            if formula != nil || stackSrc != nil {
                 do {
-                    try await self.activateEmbeddedFormula(formula)
-                    print("🔧 [CustomScene] Self-heal: recompiled '\(formula.name)' after a frame requested it with no library installed")
+                    try await self.activateEmbeddedFormula(formula, warpStackSource: stackSrc, warpStackSignature: stackSig)
+                    print("🔧 [CustomScene] Self-heal: recompiled effect set after a frame requested it with no library installed")
                 } catch {
-                    print("❌ [CustomScene] Self-heal activation failed for '\(formula.name)': \(error)")
+                    print("❌ [CustomScene] Self-heal activation failed: \(error)")
                 }
             }
             await self.finishCustomLibrarySelfHeal()
@@ -101,12 +105,25 @@ extension Renderer {
     ///
     /// Throws if Metal compilation fails. The renderer continues to function
     /// (built-in fractal types unaffected).
-    func activateEmbeddedFormula(_ formula: EmbeddedFormula?) async throws {
-        customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula ENTRY formula=\(formula?.name ?? "nil") newHash=\(formula?.shortHash ?? "nil") currentHash=\(customShaderHash ?? "nil") libraryPresent=\(customShaderLibrary != nil)")
-        guard let formula else {
-            // Deactivate. Pipelines stay cached (keys are hash-namespaced and
-            // inert while inactive) — preview/restore flows often bring the
-            // same formula straight back.
+    /// Activate the current EFFECT SET = (custom fractal/warp formula) + (composable
+    /// transform stack codegen). Any of the three may be absent. The stack codegen
+    /// (`warpStackSource`/`warpStackSignature`) is read from `RenderSettings` by the
+    /// caller and baked into the combined hash so distinct stacks compile + cache
+    /// distinct libraries. A built-in fractal with a non-empty stack rides a custom
+    /// library exactly as a `.threshfx` warp on a built-in does.
+    func activateEmbeddedFormula(_ formula: EmbeddedFormula?,
+                                 warpStackSource: String? = nil,
+                                 warpStackSignature: String = "s0") async throws {
+        customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula ENTRY formula=\(formula?.name ?? "nil") stackSig=\(warpStackSignature) currentHash=\(customShaderHash ?? "nil") libraryPresent=\(customShaderLibrary != nil)")
+
+        let isWarp = (formula?.effectKind == .spaceWarp)
+        let fractalEffect = isWarp ? nil : formula
+        let warpEffect = isWarp ? formula : nil
+        let hasEffect = (formula != nil) || (warpStackSource != nil)
+
+        guard hasEffect else {
+            // Nothing active (no formula, empty stack) → detach, fall back to the
+            // bundled default library. Pipelines stay cached (hash-namespaced, inert).
             if customShaderLibrary != nil {
                 customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula DEACTIVATE — library detached, pipelines retained")
                 warmStartGate.invalidate()
@@ -117,15 +134,10 @@ extension Renderer {
             return
         }
 
-        // Resolve the effect into the (fractal, spaceWarp) set for this single
-        // active slot, and key the library + pipelines by the combined hash.
-        let isWarp = (formula.effectKind == .spaceWarp)
-        let fractalEffect = isWarp ? nil : formula
-        let warpEffect = isWarp ? formula : nil
-        let newHash = CustomShaderCompiler.combinedHash(fractal: fractalEffect, spaceWarp: warpEffect)
+        let newHash = CustomShaderCompiler.combinedHash(fractal: fractalEffect, spaceWarp: warpEffect, warpStackSignature: warpStackSignature)
 
-        // Already active and unchanged — no work (self-heal retries and startup
-        // re-activations land here).
+        // Already active and unchanged — no work (self-heal retries, startup
+        // re-activations, and stack slider tweaks that didn't change structure).
         if customShaderHash == newHash, customShaderLibrary != nil {
             customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula NO-OP (hash unchanged + library present)")
             return
@@ -136,18 +148,20 @@ extension Renderer {
         // outgoing effect must never seed the incoming one's marches.
         warmStartGate.invalidate()
 
-        // Compile (cached internally by combined hash).
-        customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula compiling library… kind=\(formula.effectKind.rawValue)")
+        // Compile (cached internally by combined hash). While this runs the default
+        // library's runtime-loop fallback keeps rendering the current stack.
+        customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula compiling library… stackSig=\(warpStackSignature)")
         let compiler = ensureCompiler()
-        let library = try await compiler.library(forFractal: fractalEffect, spaceWarp: warpEffect)
+        let library = try await compiler.library(forFractal: fractalEffect, spaceWarp: warpEffect,
+                                                 warpStackSource: warpStackSource, warpStackSignature: warpStackSignature)
 
         customShaderLibrary = library
         customShaderHash = newHash
         retainCustomShaderPipelines(mostRecentHash: newHash)
 
-        customSceneDiagnostic("🔬 [CSDiag] ✅ activateEmbeddedFormula INSTALLED '\(formula.name)' hash=\(formula.shortHash) — library now present")
+        customSceneDiagnostic("🔬 [CSDiag] ✅ activateEmbeddedFormula INSTALLED hash=\(newHash) — library now present")
         if RENDERER_DEBUG {
-            print("🧪 [CustomShader] Activated '\(formula.name)' (hash=\(formula.shortHash))")
+            print("🧪 [CustomShader] Activated effect set hash=\(newHash)")
         }
     }
 

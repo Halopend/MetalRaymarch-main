@@ -57,21 +57,27 @@ final class MacCustomShaderBox: @unchecked Sendable {
     /// render and main threads. Library + hash are published together under one
     /// lock so a frame never sees library-A with hash-B.
     func activate(_ formula: EmbeddedFormula?,
+                  warpStackSource: String? = nil,
+                  warpStackSignature: String = "s0",
                   device: MTLDevice,
                   cache: MacSpecializedPipelineCache) async throws {
-        guard let formula else {
-            set(library: nil, hash: nil)
-            cache.evict(prefix: "CX")   // drop every custom pipeline
-            return
-        }
-        // Single active slot: a .threshfx is EITHER a fractal DE or a space warp.
-        // Key the library + pipelines by the combined hash so the two never alias.
-        let isWarp = (formula.effectKind == .spaceWarp)
+        // Effect set = optional .threshfx (fractal DE OR space warp) + the composable
+        // transform-stack codegen. Key the library + pipelines by the combined hash so
+        // distinct effect sets never alias. A built-in fractal + non-empty stack rides
+        // a custom library exactly as a .threshfx warp on a built-in does.
+        let isWarp = (formula?.effectKind == .spaceWarp)
         let fractalEffect = isWarp ? nil : formula
         let warpEffect = isWarp ? formula : nil
-        let newHash = CustomShaderCompiler.combinedHash(fractal: fractalEffect, spaceWarp: warpEffect)
+        let hasEffect = (formula != nil) || (warpStackSource != nil)
+        guard hasEffect else {
+            set(library: nil, hash: nil)
+            cache.evict(prefix: "CX")   // drop every custom pipeline → back to default library
+            return
+        }
+        let newHash = CustomShaderCompiler.combinedHash(fractal: fractalEffect, spaceWarp: warpEffect, warpStackSignature: warpStackSignature)
         if hash == newHash, library != nil { return }   // unchanged → no-op
-        let compiled = try await sharedCompiler(device: device).library(forFractal: fractalEffect, spaceWarp: warpEffect)
+        let compiled = try await sharedCompiler(device: device).library(forFractal: fractalEffect, spaceWarp: warpEffect,
+                                                                        warpStackSource: warpStackSource, warpStackSignature: warpStackSignature)
         if let old = hash, old != newHash {
             cache.evict(prefix: "CX\(old)_")   // retire the previous effect's pipelines
         }
@@ -173,7 +179,7 @@ struct ThresholdMacRenderView: NSViewRepresentable {
             // visionOS-only). Binding here triggers the handler's didSet, which
             // re-activates any formula loaded before the view existed.
             if let renderer {
-                appModel.activateEmbeddedFormulaHandler = renderer.embeddedFormulaActivator()
+                appModel.activateEmbeddedFormulaHandler = renderer.embeddedFormulaActivator(renderSettings: appModel.renderSettings)
                 appModel.forceShaderRecompileHandler = renderer.shaderRecompiler(appModel: appModel)
             }
         }
@@ -930,12 +936,18 @@ private final class ThresholdMacRenderer {
     /// compiled library is a drop-in for `default.metallib`, so the existing
     /// function-constant specialization renders the custom DE. Captures only
     /// Sendable values (box, cache, device), never the renderer itself.
-    func embeddedFormulaActivator() -> @Sendable (EmbeddedFormula?) async throws -> Void {
+    func embeddedFormulaActivator(renderSettings: RenderSettings) -> @Sendable (EmbeddedFormula?) async throws -> Void {
         let box = customShaderBox
         let cache = specializedPipelineCache
         let device = self.device
+        // RenderSettings is @unchecked Sendable; it carries the composable
+        // transform-stack codegen (regenerated on structural change) that we bake
+        // into the compiled library so a built-in fractal + stack runs unrolled.
         return { formula in
-            try await box.activate(formula, device: device, cache: cache)
+            try await box.activate(formula,
+                                   warpStackSource: renderSettings.warpStackCodegenSource,
+                                   warpStackSignature: renderSettings.warpStackCodegenSignature,
+                                   device: device, cache: cache)
         }
     }
 
@@ -1448,7 +1460,7 @@ private final class ThresholdMacRenderer {
                         spaceWarpParam2: settings.spaceWarpParam2,
                         spaceWarpParam3: settings.spaceWarpParam3,
                         spaceWarpAxis: settings.spaceWarpAxis,
-                        spaceWarpType: settings.spaceWarpType,
+                        spaceWarpStack: settings.spaceWarpStack,
                         stepMultiplier: settings.stepMultiplier,
                         boundingSphereRadius: settings.estimatedBoundingSphereRadius,
                         smartAdvanceEnabled: settings.smartAdvanceEnabled ? 1 : 0,
@@ -1703,7 +1715,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             // visionOS-only). Binding here triggers the handler's didSet, which
             // re-activates any formula loaded before the view existed.
             if let renderer {
-                appModel.activateEmbeddedFormulaHandler = renderer.embeddedFormulaActivator()
+                appModel.activateEmbeddedFormulaHandler = renderer.embeddedFormulaActivator(renderSettings: appModel.renderSettings)
                 appModel.forceShaderRecompileHandler = renderer.shaderRecompiler(appModel: appModel)
             }
         }

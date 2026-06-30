@@ -54,6 +54,13 @@ extension ContentView {
                         .padding(.vertical, 8)
                 }
 
+            case .transform:
+                ScrollView(.vertical, showsIndicators: true) {
+                    fractalTransformContent
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                }
+
             case .render:
                 ScrollView(.vertical, showsIndicators: true) {
                     performanceTabContent
@@ -146,10 +153,19 @@ extension ContentView {
     }
 
     @ViewBuilder
+    // Composable domain-transform stack (Twist / Bend / folds / inversion / kaleido /
+    // ripple / Coxeter), reorderable + stackable — its own "Transform" rail section.
+    private var fractalTransformContent: some View {
+        VStack(spacing: 12) {
+            TransformationsSection(renderSettings: appModel.renderSettings,
+                                   onStructureChanged: { appModel.refreshWarpStackCompilation() })
+        }
+    }
+
     private var fractalSpaceContent: some View {
         let rotationEuler = eulerAngles(from: cache.liveWorldRotation)
 
-        VStack(spacing: 12) {
+        return VStack(spacing: 12) {
             // ── Safety Bubble ────────────────────────────────────────────────
             VStack(spacing: 8) {
                 HStack {
@@ -293,12 +309,7 @@ extension ContentView {
 
             sphereProjectionSection
 
-            // Composable domain transforms (Twist / Bend / folds / inversion /
-            // kaleidoscope / ripple). Supersedes the standalone space-warp strength
-            // slider; the legacy `spaceWarpSection` is kept defined but unused.
-            TransformationsSection(renderSettings: appModel.renderSettings)
-
-            TwistShapingSection(renderSettings: appModel.renderSettings)
+            // (Transformations stack moved to its own rail section → fractalTransformContent.)
 
             // ── Detail (Grab Gesture Transform) ──────────────────────────────
             VStack(spacing: 8) {

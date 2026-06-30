@@ -2,179 +2,56 @@
 //  TransformationsSection.swift
 //  Threshold
 //
-//  Composable domain transforms ("Transformations") applied to ANY fractal before
-//  the distance-estimator runs. A single selector (`RenderSettings.spaceWarpType`)
-//  picks one operator from a catalog ported from Mandelbulber's transf_* vocabulary
-//  (twist, bend, folds, spherical inversion, kaleidoscope, ripple). The master
-//  amount is `spaceWarpStrength` (0 = off → the whole feature is dead-code
-//  eliminated on the GPU). Each operator reads the generic warp params
-//  (`spaceWarpParam1/2/3`) with its own meaning — see the GPU `applySpaceWarp`
-//  switch in Shaders.metal. Twist & Bend additionally use the axis/origin from
-//  `TwistShapingSection`.
+//  Editor for the composable domain-transform STACK (`RenderSettings.spaceWarpStack`).
+//  Add any number of transforms (Twist / Bend / folds / inversion / kaleidoscope /
+//  ripple), reorder them (order = order of application), enable/disable, and tune
+//  each instance's own parameters. Multiple of the SAME kind can be stacked
+//  (e.g. two box folds, three sphere folds). All edits are live uniform writes —
+//  no shader recompile — and the GPU early-outs to zero cost when the stack is
+//  empty. The catalog + model live in SpaceWarpStackModel.swift.
 //
 
 import SwiftUI
 import simd
 
-/// The built-in domain-warp catalog. Raw values MUST match the GPU
-/// `applySpaceWarp` / `applySpaceWarpDEScale` switch in Shaders.metal.
-enum SpaceWarpKind: Int32, CaseIterable, Identifiable {
-    case twist = 0
-    case bend = 1
-    case mirror = 2
-    case boxFold = 3
-    case sphereFold = 4
-    case inversion = 5
-    case kaleidoscope = 6
-    case ripple = 7
-
-    var id: Int32 { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .twist:        return "Twist"
-        case .bend:         return "Bend"
-        case .mirror:       return "Mirror Fold"
-        case .boxFold:      return "Box Fold"
-        case .sphereFold:   return "Sphere Fold"
-        case .inversion:    return "Spherical Inversion"
-        case .kaleidoscope: return "Kaleidoscope"
-        case .ripple:       return "Ripple"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .twist:        return "tornado"
-        case .bend:         return "wind"
-        case .mirror:       return "square.on.square"
-        case .boxFold:      return "cube"
-        case .sphereFold:   return "circle.circle"
-        case .inversion:    return "globe"
-        case .kaleidoscope: return "snowflake"
-        case .ripple:       return "waveform.path"
-        }
-    }
-
-    /// Label for the master strength slider (verb fits the operator).
-    var amountLabel: String {
-        switch self {
-        case .twist:        return "Twist"
-        case .bend:         return "Bend"
-        case .ripple:       return "Ripple"
-        default:            return "Amount"
-        }
-    }
-
-    /// One-line hint shown under the picker.
-    var blurb: String {
-        switch self {
-        case .twist:        return "Rotate space progressively along an axis. Aim it with Twist Shaping below."
-        case .bend:         return "Bow space around an axis. Aim it with Twist Shaping below."
-        case .mirror:       return "Reflect space into mirror-symmetric copies."
-        case .boxFold:      return "Fold coordinates back inside a box — the iconic Mandelbox fold, applied once."
-        case .sphereFold:   return "Inflate the inner region radially (Mandelbox sphere fold)."
-        case .inversion:    return "Turn space inside-out through a sphere."
-        case .kaleidoscope: return "Fold the view into N rotational wedges."
-        case .ripple:       return "Accordion-displace space along an axis."
-        }
-    }
-
-    /// A default master strength when the user first activates this transform.
-    var defaultStrength: Float {
-        switch self {
-        case .twist, .bend, .ripple: return 0.6
-        default:                     return 1.0   // folds blend 0…1
-        }
-    }
-
-    /// Per-operator scalar sliders bound to spaceWarpParam1/2/3.
-    var params: [ParamSpec] {
-        switch self {
-        case .twist, .bend, .mirror:
-            return []
-        case .boxFold:
-            return [ParamSpec(index: 1, label: "Fold Limit", icon: "cube", range: 0.1...3.0, defaultValue: 1.0)]
-        case .sphereFold:
-            return [
-                ParamSpec(index: 1, label: "Min Radius", icon: "smallcircle.filled.circle", range: 0.05...2.0, defaultValue: 0.5),
-                ParamSpec(index: 2, label: "Max Radius", icon: "circle.circle", range: 0.1...4.0, defaultValue: 1.0),
-            ]
-        case .inversion:
-            return [ParamSpec(index: 1, label: "Radius", icon: "globe", range: 0.1...3.0, defaultValue: 1.0)]
-        case .kaleidoscope:
-            return [ParamSpec(index: 1, label: "Segments", icon: "snowflake", range: 2.0...16.0, defaultValue: 6.0)]
-        case .ripple:
-            return [ParamSpec(index: 1, label: "Frequency", icon: "waveform.path", range: 0.1...8.0, defaultValue: 2.0)]
-        }
-    }
-
-    struct ParamSpec: Identifiable {
-        let index: Int             // 1, 2, or 3 → spaceWarpParam{N}
-        let label: String
-        let icon: String
-        let range: ClosedRange<Float>
-        let defaultValue: Float
-        var id: Int { index }
-    }
-}
-
 struct TransformationsSection: View {
     let renderSettings: RenderSettings
+    /// Called after any STRUCTURAL edit (add / delete / reorder / enable / type) so
+    /// the host can regenerate + recompile the specialized stack shader. NOT called
+    /// on slider drags (their values flow live through the uniforms).
+    var onStructureChanged: () -> Void = {}
 
-    // RenderSettings is not Observable; bump this to force the rows to re-read
-    // after an external / programmatic mutation (e.g. seeding defaults on switch).
+    // RenderSettings is not Observable; bump to force a re-read after structural
+    // edits (add / delete / reorder / enable). Slider drags mutate in place and
+    // don't need it (mirrors TwistShapingSection).
     @State private var refresh: Int = 0
 
-    private var kind: SpaceWarpKind {
-        SpaceWarpKind(rawValue: renderSettings.spaceWarpType) ?? .twist
-    }
+    private var ops: [SpaceWarpOpValue] { renderSettings.spaceWarpStack }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Transformations", systemImage: "circle.hexagongrid")
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Transformations", systemImage: "circle.hexagongrid")
+                    .font(.headline)
+                Spacer()
+                addMenu
+            }
 
-            Text("Reshape space before the fractal is drawn. Works with any fractal; stack with Twist Shaping, Sphere Projection, and Spherical Inversion.")
+            Text("Stack domain transforms applied (top → bottom) before the fractal is drawn. Reorder to change the result; add multiples of the same kind to compound them.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Picker("Transform", selection: kindBinding) {
-                ForEach(SpaceWarpKind.allCases) { k in
-                    Label(k.displayName, systemImage: k.icon).tag(k)
+            if ops.isEmpty {
+                Text("No transformations yet. Use ✚ to add one.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 10)
+            } else {
+                ForEach(Array(ops.enumerated()), id: \.element.id) { index, op in
+                    opCard(op, index: index, isFirst: index == 0, isLast: index == ops.count - 1)
                 }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-
-            Text(kind.blurb)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            // Master amount.
-            EffectSliderRow(
-                icon: kind.icon, label: kind.amountLabel,
-                value: Binding(
-                    get: { renderSettings.spaceWarpStrength },
-                    set: { renderSettings.spaceWarpStrength = $0 }),
-                range: ControlCatalog.spaceWarpStrength.range,
-                enabled: .constant(true),
-                onChanged: {},
-                showToggle: false)
-
-            // Per-operator scalars.
-            ForEach(kind.params) { spec in
-                EffectSliderRow(
-                    icon: spec.icon, label: spec.label,
-                    value: Binding(
-                        get: { paramValue(spec.index) },
-                        set: { setParam(spec.index, $0) }),
-                    range: spec.range,
-                    enabled: .constant(true),
-                    onChanged: {},
-                    showToggle: false)
             }
         }
         .id(refresh)
@@ -182,35 +59,184 @@ struct TransformationsSection: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.mint.opacity(0.07)))
     }
 
-    private var kindBinding: Binding<SpaceWarpKind> {
-        Binding(
-            get: { kind },
-            set: { newKind in
-                renderSettings.spaceWarpType = newKind.rawValue
-                // Seed sensible defaults for the new operator so the generic params
-                // don't carry a stale meaning from the previous transform, and make
-                // the effect immediately visible if it was off.
-                for spec in newKind.params { setParam(spec.index, spec.defaultValue) }
-                if renderSettings.spaceWarpStrength <= 0 {
-                    renderSettings.spaceWarpStrength = newKind.defaultStrength
+    // MARK: - Add menu
+
+    private var addMenu: some View {
+        Menu {
+            ForEach(SpaceWarpKind.allCases) { kind in
+                Button { add(kind) } label: { Label(kind.displayName, systemImage: kind.icon) }
+            }
+        } label: {
+            Label("Add", systemImage: "plus.circle.fill")
+                .font(.caption.weight(.semibold))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    // MARK: - One op card
+
+    @ViewBuilder
+    private func opCard(_ op: SpaceWarpOpValue, index: Int, isFirst: Bool, isLast: Bool) -> some View {
+        let kind = op.kind
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("\(index + 1)")
+                    .font(.caption2.monospacedDigit().weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                Label(kind.displayName, systemImage: kind.icon)
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { op.isEnabled },
+                    set: { v in update(op.id) { $0.isEnabled = v }; refresh &+= 1; onStructureChanged() }))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                Button { move(op.id, by: -1) } label: { Image(systemName: "chevron.up") }
+                    .buttonStyle(.borderless).disabled(isFirst)
+                Button { move(op.id, by: 1) } label: { Image(systemName: "chevron.down") }
+                    .buttonStyle(.borderless).disabled(isLast)
+                Button(role: .destructive) { delete(op.id) } label: { Image(systemName: "trash") }
+                    .buttonStyle(.borderless)
+            }
+            .font(.caption)
+
+            Group {
+                if kind == .coxeter {
+                    coxeterEditor(op)
+                } else {
+                // Master amount.
+                EffectSliderRow(
+                    icon: kind.icon, label: kind.amountLabel,
+                    value: Binding(get: { op.strength }, set: { v in update(op.id) { $0.strength = v } }),
+                    range: kind.strengthRange,
+                    enabled: .constant(true), onChanged: {}, showToggle: false)
+
+                // Per-operator scalars.
+                ForEach(kind.params) { spec in
+                    EffectSliderRow(
+                        icon: spec.icon, label: spec.label,
+                        value: Binding(
+                            get: { spec.slot == 1 ? op.p1 : op.p2 },
+                            set: { v in update(op.id) { if spec.slot == 1 { $0.p1 = v } else { $0.p2 = v } } }),
+                        range: spec.range,
+                        enabled: .constant(true), onChanged: {}, showToggle: false)
                 }
-                refresh &+= 1
-            })
+
+                // Per-transform boolean option (e.g. Box Fold "Hall of Mirrors"),
+                // stored in op.p2 — a live uniform value, no recompile.
+                if let toggle = kind.toggle {
+                    HStack(spacing: 8) {
+                        Label(toggle.label, systemImage: toggle.icon)
+                            .font(.caption)
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { op.p2 > 0.5 },
+                            set: { v in update(op.id) { $0.p2 = v ? 1 : 0 }; refresh &+= 1 }))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                    }
+                }
+
+                // Direction axis (Twist / Bend / Ripple).
+                if kind.usesAxis {
+                    axisRow(op, "Axis X", "arrow.left.and.right", \.x)
+                    axisRow(op, "Axis Y", "arrow.up.and.down", \.y)
+                    axisRow(op, "Axis Z", "arrow.up.left.and.arrow.down.right", \.z)
+                }
+                }
+            }
+            .opacity(op.isEnabled ? 1.0 : 0.4)
+            .disabled(!op.isEnabled)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
     }
 
-    private func paramValue(_ index: Int) -> Float {
-        switch index {
-        case 1:  return renderSettings.spaceWarpParam1
-        case 2:  return renderSettings.spaceWarpParam2
-        default: return renderSettings.spaceWarpParam3
+    private func axisRow(_ op: SpaceWarpOpValue, _ label: String, _ icon: String,
+                         _ comp: WritableKeyPath<SIMD3<Float>, Float>) -> some View {
+        EffectSliderRow(
+            icon: icon, label: label,
+            value: Binding(
+                get: { op.axis[keyPath: comp] },
+                set: { v in update(op.id) { $0.axis[keyPath: comp] = v } }),
+            range: -1.0...1.0,
+            enabled: .constant(true), onChanged: {}, showToggle: false)
+    }
+
+    /// Dedicated editor for the Coxeter [p,q] reflection group: traditional Schläfli
+    /// notation + Coxeter diagram + integer p/q steppers. No blend "amount" — a
+    /// reflection group is discrete (enable/disable is the on/off), and p, q are
+    /// integers (mirror angles π/p, π/q), not continuous sliders.
+    @ViewBuilder
+    private func coxeterEditor(_ op: SpaceWarpOpValue) -> some View {
+        let p = max(Int(op.p1.rounded()), 2)
+        let q = max(Int(op.p2.rounded()), 2)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text("{\(p),\(q)}")
+                    .font(.title3.monospacedDigit().weight(.semibold))
+                Text("○—\(p)—○—\(q)—○")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(coxeterSymmetryName(p: p, q: q))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.tint)
+            }
+            Stepper(value: Binding(
+                get: { max(Int(op.p1.rounded()), 2) },
+                set: { v in update(op.id) { $0.p1 = Float(v) }; refresh &+= 1 }), in: 2...8) {
+                HStack { Text("p"); Spacer(); Text("\(p)").foregroundStyle(.secondary).monospacedDigit() }
+                    .font(.caption)
+            }
+            Stepper(value: Binding(
+                get: { max(Int(op.p2.rounded()), 2) },
+                set: { v in update(op.id) { $0.p2 = Float(v) }; refresh &+= 1 }), in: 2...8) {
+                HStack { Text("q"); Spacer(); Text("\(q)").foregroundStyle(.secondary).monospacedDigit() }
+                    .font(.caption)
+            }
         }
     }
 
-    private func setParam(_ index: Int, _ value: Float) {
-        switch index {
-        case 1:  renderSettings.spaceWarpParam1 = value
-        case 2:  renderSettings.spaceWarpParam2 = value
-        default: renderSettings.spaceWarpParam3 = value
-        }
+    // MARK: - Mutations
+
+    private func add(_ kind: SpaceWarpKind) {
+        var arr = renderSettings.spaceWarpStack
+        guard arr.count < Int(kMaxSpaceWarpOps) else { return }
+        arr.append(SpaceWarpOpValue(kind: kind))
+        renderSettings.spaceWarpStack = arr
+        refresh &+= 1
+        onStructureChanged()
+    }
+
+    private func delete(_ id: UUID) {
+        var arr = renderSettings.spaceWarpStack
+        arr.removeAll { $0.id == id }
+        renderSettings.spaceWarpStack = arr
+        refresh &+= 1
+        onStructureChanged()
+    }
+
+    private func move(_ id: UUID, by delta: Int) {
+        var arr = renderSettings.spaceWarpStack
+        guard let i = arr.firstIndex(where: { $0.id == id }) else { return }
+        let j = i + delta
+        guard j >= 0, j < arr.count else { return }
+        arr.swapAt(i, j)
+        renderSettings.spaceWarpStack = arr
+        refresh &+= 1
+        onStructureChanged()
+    }
+
+    /// Read-modify-write one op by id (slider drags). No `refresh` bump so the
+    /// drag stays smooth — the binding reads the stored value back directly.
+    private func update(_ id: UUID, _ mutate: (inout SpaceWarpOpValue) -> Void) {
+        var arr = renderSettings.spaceWarpStack
+        guard let i = arr.firstIndex(where: { $0.id == id }) else { return }
+        mutate(&arr[i])
+        renderSettings.spaceWarpStack = arr
     }
 }
