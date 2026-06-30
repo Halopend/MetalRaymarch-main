@@ -118,33 +118,6 @@ struct FractalPresetPersistenceTests {
         #expect(abs(fresh.spaceWarpStack[2].axis.z - (-0.8)) < 1e-5)
     }
 
-    @Test("SpaceWarpStackCodegen emits unrolled type-dispatched MSL + a structure signature")
-    func warpStackCodegen() throws {
-        // Empty → no codegen (keep the bundled runtime loop).
-        let empty = SpaceWarpStackCodegen.generate([])
-        #expect(empty.source == nil)
-        #expect(empty.signature == "s0")
-
-        var sphere = SpaceWarpOpValue(kind: .sphereFold)
-        var disabled = SpaceWarpOpValue(kind: .twist); disabled.isEnabled = false
-        let gen = SpaceWarpStackCodegen.generate([SpaceWarpOpValue(kind: .boxFold), sphere, disabled])
-
-        #expect(gen.signature == "s3.4")   // boxFold=3, sphereFold=4; disabled twist dropped
-        let src = try #require(gen.source)
-        #expect(src.contains("#define THRESHOLD_CODEGEN_SPACEWARP_STACK"))
-        // Unrolled, type-dispatched, fixed indices, live uniform reads.
-        #expect(src.contains("warpBoxFold(p, params.spaceWarpOps[0])"))
-        #expect(src.contains("warpSphereFold(p, params.spaceWarpOps[1])"))
-        // Sphere fold contributes a DE divisor; box fold does not.
-        #expect(src.contains("warpSphereFoldDEScale(q, params.spaceWarpOps[1])"))
-        #expect(!src.contains("warpTwist"))   // disabled op absent
-        // Fused hot-path sweep is emitted too: point + DE divisor in one pass.
-        #expect(src.contains("FORCE_INLINE SpaceTransform spaceWarpStackTransform"))
-        #expect(src.contains("r.point = warpBoxFold(r.point, params.spaceWarpOps[0])"))
-        #expect(src.contains("r.deScale *= warpSphereFoldDEScale(r.point, params.spaceWarpOps[1])"))
-        _ = sphere
-    }
-
     @Test("WarpCatalog is the single source of truth: one descriptor per kind, valid GPU bridge")
     func warpCatalogCoverage() throws {
         // Every kind resolves to a descriptor with a non-empty GPU apply fn.
@@ -162,20 +135,6 @@ struct FractalPresetPersistenceTests {
         #expect(SpaceWarpKind.shells.descriptor.gpuDEScaleFn == nil)  // isometric fold → deScale 1
     }
 
-    @Test("Codegen drives the new radial kinds straight from the catalog")
-    func warpStackCodegenRadial() throws {
-        let gen = SpaceWarpStackCodegen.generate([
-            SpaceWarpOpValue(kind: .shells), SpaceWarpOpValue(kind: .scaleRepeat),
-        ])
-        #expect(gen.signature == "s9.10")
-        let src = try #require(gen.source)
-        #expect(src.contains("warpShells(p, params.spaceWarpOps[0])"))
-        #expect(src.contains("warpScaleRepeat(p, params.spaceWarpOps[1])"))
-        #expect(src.contains("warpScaleRepeatDEScale(q, params.spaceWarpOps[1])"))
-        // Shells is isometric → no deScale multiply emitted for it.
-        #expect(!src.contains("warpShellsDEScale"))
-    }
-
     @Test("cSpaceWarpStack packs enabled ops in order, drops disabled, caps at kMaxSpaceWarpOps")
     func spaceWarpStackPacking() throws {
         var disabled = SpaceWarpOpValue(kind: .twist); disabled.isEnabled = false
@@ -188,8 +147,9 @@ struct FractalPresetPersistenceTests {
                 #expect(abs(base[0].p1 - 1.25) < 1e-5)
             }
         }
-        // Overfilling caps at kMaxSpaceWarpOps.
-        let many = (0..<(Int(kMaxSpaceWarpOps) + 4)).map { _ in SpaceWarpOpValue(kind: .mirror) }
+        // Overfilling caps at kMaxSpaceWarpOps. (Use inversion: identical inversions
+        // are NOT fusable, so the simplifier can't collapse them out from under the cap.)
+        let many = (0..<(Int(kMaxSpaceWarpOps) + 4)).map { _ in SpaceWarpOpValue(kind: .inversion) }
         #expect(cSpaceWarpStack(from: many).count == kMaxSpaceWarpOps)
     }
 
@@ -235,6 +195,87 @@ struct FractalPresetPersistenceTests {
         #expect(abs(pbf.p1 - 1.0) < 1e-5)   // fold limit precomputed (max(1,0.01))
         #expect(abs(pbf.p2 - 1.0) < 1e-5)   // toggle flag passes through
         #expect(SpaceWarpKind.boxFold.toggle != nil)
+    }
+
+    @Test("SpaceWarpStackSimplifier collapses only EXACT-equivalent adjacent ops")
+    func spaceWarpSimplify() throws {
+        func types(_ ops: [SpaceWarpOpValue]) -> [Int32] {
+            SpaceWarpStackSimplifier.simplify(ops).map { $0.type }
+        }
+        func full(_ kind: SpaceWarpKind, p1: Float? = nil) -> SpaceWarpOpValue {
+            var op = SpaceWarpOpValue(kind: kind); op.strength = 1.0
+            if let p1 { op.p1 = p1 }
+            return op
+        }
+
+        // R1 — identity ops (strength ≤ 0) are dropped.
+        var dead = SpaceWarpOpValue(kind: .mirror); dead.strength = 0
+        #expect(SpaceWarpStackSimplifier.simplify([dead, full(.twist)]).count == 1)
+
+        // R2 — idempotent folds collapse at full strength with identical params…
+        #expect(SpaceWarpStackSimplifier.simplify([full(.mirror), full(.mirror)]).count == 1)
+        #expect(SpaceWarpStackSimplifier.simplify([full(.mirror), full(.mirror), full(.mirror)]).count == 1)
+        #expect(SpaceWarpStackSimplifier.simplify([full(.shells), full(.shells)]).count == 1)
+        #expect(SpaceWarpStackSimplifier.simplify([full(.scaleRepeat, p1: 2), full(.scaleRepeat, p1: 2)]).count == 1)
+        // …but NOT when blended (mix at t<1 is not idempotent)…
+        var half1 = SpaceWarpOpValue(kind: .mirror); half1.strength = 0.5
+        var half2 = SpaceWarpOpValue(kind: .mirror); half2.strength = 0.5
+        #expect(SpaceWarpStackSimplifier.simplify([half1, half2]).count == 2)
+        // …and NOT when params differ (different self-similar octave size).
+        #expect(SpaceWarpStackSimplifier.simplify([full(.scaleRepeat, p1: 2), full(.scaleRepeat, p1: 3)]).count == 2)
+
+        // GUARD: kaleido and boxFold LOOK idempotent but are not — must stay separate.
+        #expect(SpaceWarpStackSimplifier.simplify([full(.kaleidoscope), full(.kaleidoscope)]).count == 2)
+        #expect(SpaceWarpStackSimplifier.simplify([full(.boxFold), full(.boxFold)]).count == 2)
+        // GUARD: Coxeter's iterative fold isn't exactly idempotent — stays separate.
+        #expect(SpaceWarpStackSimplifier.simplify([full(.coxeter), full(.coxeter)]).count == 2)
+
+        // R3 — parallel twists add; non-parallel and cross-kind do not fuse.
+        var tA = SpaceWarpOpValue(kind: .twist); tA.strength = 0.6; tA.axis = SIMD3(0, 1, 0)
+        var tB = SpaceWarpOpValue(kind: .twist); tB.strength = 0.6; tB.axis = SIMD3(0, 2, 0)  // same dir, longer
+        let fused = SpaceWarpStackSimplifier.simplify([tA, tB])
+        #expect(fused.count == 1)
+        #expect(abs(fused[0].strength - 1.2) < 1e-4)   // θ₁+θ₂
+        var tC = SpaceWarpOpValue(kind: .twist); tC.axis = SIMD3(1, 0, 0)
+        #expect(SpaceWarpStackSimplifier.simplify([tA, tC]).count == 2)   // different axis
+        #expect(types([full(.mirror), full(.twist)]).count == 2)          // different kind
+
+        // Order is preserved (warps don't commute) — only neighbours fuse.
+        #expect(types([full(.mirror), full(.twist), full(.mirror)]) ==
+                [SpaceWarpKind.mirror.rawValue, SpaceWarpKind.twist.rawValue, SpaceWarpKind.mirror.rawValue])
+
+        // Idempotent: simplify∘simplify == simplify.
+        let once = SpaceWarpStackSimplifier.simplify([full(.mirror), full(.mirror), tA, tB, dead])
+        #expect(SpaceWarpStackSimplifier.simplify(once).map { $0.type } == once.map { $0.type })
+
+        // End-to-end: the packed GPU buffer reflects the collapse (count + summed twist).
+        let packedTwist = cSpaceWarpStack(from: [tA, tB])
+        #expect(packedTwist.count == 1)
+        withUnsafePointer(to: packedTwist.ops) { tuplePtr in
+            tuplePtr.withMemoryRebound(to: SpaceWarpOp.self, capacity: Int(kMaxSpaceWarpOps)) { base in
+                #expect(base[0].type == SpaceWarpKind.twist.rawValue)
+                #expect(abs(base[0].strength - 1.2) < 1e-4)
+            }
+        }
+        #expect(cSpaceWarpStack(from: [full(.mirror), full(.mirror)]).count == 1)
+    }
+
+    @Test("Coxeter diagram naming: {p,q} → spherical / Euclidean / hyperbolic")
+    func coxeterDiagramNaming() throws {
+        // Spherical (1/p + 1/q > 1/2) — the polyhedral families.
+        #expect(coxeterSymmetryName(p: 3, q: 3) == "Tetrahedral")
+        #expect(coxeterSymmetryName(p: 4, q: 3) == "Octahedral")
+        #expect(coxeterSymmetryName(p: 3, q: 4) == "Octahedral")   // dual reads the same
+        #expect(coxeterSymmetryName(p: 5, q: 3) == "Icosahedral")
+        #expect(coxeterSymmetryName(p: 3, q: 5) == "Icosahedral")
+        #expect(coxeterSymmetryName(p: 2, q: 6) == "Dihedral")
+        // Euclidean (1/p + 1/q == 1/2) — the three flat tilings.
+        #expect(coxeterSymmetryName(p: 4, q: 4) == "Euclidean")
+        #expect(coxeterSymmetryName(p: 3, q: 6) == "Euclidean")
+        #expect(coxeterSymmetryName(p: 6, q: 3) == "Euclidean")
+        // Hyperbolic (1/p + 1/q < 1/2).
+        #expect(coxeterSymmetryName(p: 7, q: 3) == "Hyperbolic")
+        #expect(coxeterSymmetryName(p: 5, q: 4) == "Hyperbolic")
     }
 
     @Test("Affine Coxeter parser: named groups → rank, renderability, aliases")

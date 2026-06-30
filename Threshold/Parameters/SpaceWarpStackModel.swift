@@ -4,8 +4,8 @@
 //
 //  The composable domain-transform ("Transformations") stack and its SINGLE SOURCE
 //  OF TRUTH. Every transform is declared exactly once in `WarpCatalog` as a
-//  `WarpDescriptor`; the UI, parameter seeding, codegen, and the CPU↔GPU bridge
-//  (Metal function names) all derive from that one table. To add a transform you
+//  `WarpDescriptor`; the UI, parameter seeding, and the CPU↔GPU bridge (Metal
+//  function names) all derive from that one table. To add a transform you
 //  touch four obvious spots and nothing else:
 //    1. add a `SpaceWarpKind` case (raw value MUST match the GPU),
 //    2. add its `WarpDescriptor` to `WarpCatalog.all`,
@@ -112,8 +112,8 @@ enum WarpCatalog {
         WarpDescriptor(.boxFold, "Box Fold", icon: "cube",
                        params: [WarpParamSpec(slot: 1, label: "Fold Limit", icon: "cube", range: 0.1...3.0, defaultValue: 1.0)],
                        toggle: WarpToggleSpec(label: "Hall of Mirrors", icon: "square.split.2x2"),
-                       gpuApplyFn: "warpBoxFold",
-                       blurb: "Fold coordinates back inside a box (the Mandelbox fold), once — or infinitely with Hall of Mirrors (mirror-tiled copies in every direction)."),
+                       gpuApplyFn: "warpBoxFold", gpuDEScaleFn: "warpBoxFoldDEScale",  // divisor is 1 unless Hall of Mirrors is on
+                       blurb: "Fold coordinates back inside a box (the Mandelbox fold), once — or with Hall of Mirrors into nested mirror cells, each one 2× larger and flipped, infinitely."),
         WarpDescriptor(.sphereFold, "Sphere Fold", icon: "circle.circle",
                        params: [WarpParamSpec(slot: 1, label: "Min Radius", icon: "smallcircle.filled.circle", range: 0.05...2.0, defaultValue: 0.5),
                                 WarpParamSpec(slot: 2, label: "Max Radius", icon: "circle.circle", range: 0.1...4.0, defaultValue: 1.0)],
@@ -194,55 +194,19 @@ struct SpaceWarpOpValue: Codable, Identifiable, Hashable {
     }
 }
 
-/// Generates the specialized (unrolled, type-dispatched) Metal source for a stack
-/// so `CustomShaderCompiler` can compile a fast variant where the per-op loop +
-/// switch are resolved at compile time. Param VALUES still come from the uniforms
-/// (`params.spaceWarpOps[k]`), so only STRUCTURE changes (count/order/types)
-/// require a recompile — slider tweaks stay live. The CPU↔GPU function names come
-/// straight from `WarpCatalog`, so this never drifts from the runtime path.
-enum SpaceWarpStackCodegen {
-    static func generate(_ ops: [SpaceWarpOpValue]) -> (source: String?, signature: String) {
-        let active = Array(ops.filter { $0.isEnabled }.prefix(Int(kMaxSpaceWarpOps)))
-        guard !active.isEmpty else { return (nil, "s0") }
-
-        let signature = "s" + active.map { String($0.type) }.joined(separator: ".")
-
-        var applyBody = ""
-        var deScaleBody = ""
-        var transformBody = ""   // fused: warped point + DE divisor in one sweep (hot march path)
-        for (k, op) in active.enumerated() {
-            let d = op.kind.descriptor
-            applyBody += "    p = \(d.gpuApplyFn)(p, params.spaceWarpOps[\(k)]);\n"
-            if let de = d.gpuDEScaleFn {
-                deScaleBody += "    scale *= \(de)(q, params.spaceWarpOps[\(k)]);\n"
-                transformBody += "    r.deScale *= \(de)(r.point, params.spaceWarpOps[\(k)]);\n"
-            }
-            deScaleBody += "    q = \(d.gpuApplyFn)(q, params.spaceWarpOps[\(k)]);\n"
-            transformBody += "    r.point = \(d.gpuApplyFn)(r.point, params.spaceWarpOps[\(k)]);\n"
-        }
-
-        let source = """
-        #define THRESHOLD_CODEGEN_SPACEWARP_STACK
-        // === Codegen space-warp stack (\(active.count) op\(active.count == 1 ? "" : "s")) ===
-        FORCE_INLINE float3 spaceWarpStackApply(float3 p, FractalParams params) {
-        \(applyBody)    return p;
-        }
-        FORCE_INLINE float spaceWarpStackDEScale(float3 p, FractalParams params) {
-            float scale = 1.0f;
-            float3 q = p;
-        \(deScaleBody)    return scale;
-        }
-        FORCE_INLINE SpaceTransform spaceWarpStackTransform(float3 p, FractalParams params) {
-            SpaceTransform r;
-            r.point = p;
-            r.deScale = 1.0f;
-        \(transformBody)    return r;
-        }
-        // === End codegen space-warp stack ===
-        """
-        return (source, signature)
-    }
-}
+// The warp stack renders via the bundled, count-driven runtime loop
+// (`spaceWarpStackTransform` in Shaders.metal), driven entirely by the per-frame
+// `cSpaceWarpStack` pack below — so EVERY edit (structural or slider) is a live
+// uniform write and nothing recompiles a shader.
+//
+// A former `SpaceWarpStackCodegen` emitted an UNROLLED, type-specialized variant
+// compiled into a swapped-in library on each structural edit. It was removed: that
+// unroll FROZE the op count at edit time, while the live per-frame pack's count
+// depends on slider values (the simplifier drops strength≤0 ops and coalesces
+// full-strength folds). The two desynced, so slider drags fed array slots the
+// frozen shader never read — the sliders went dead. Uniform-driven removes the
+// freeze (and the per-edit recompile hitch). If a specialized variant is ever
+// reintroduced for speed, its op count must NOT depend on live-edited values.
 
 /// Convert a model op into a GPU-READY op. All frame-uniform math that the Metal
 /// warp functions used to redo every march step — axis normalization, the `max()`
@@ -307,7 +271,9 @@ private func precomputedGPUOp(from v: SpaceWarpOpValue) -> SpaceWarpOp {
 func cSpaceWarpStack(from ops: [SpaceWarpOpValue]) -> SpaceWarpStack {
     var stack = SpaceWarpStack()
     let maxN = Int(kMaxSpaceWarpOps)
-    let active = ops.filter { $0.isEnabled }.prefix(maxN)
+    // Same collapse the codegen path applies, so the packed buffer and the unrolled
+    // shader index identical ops (SpaceWarpStackSimplifier is pure → both agree).
+    let active = SpaceWarpStackSimplifier.simplify(ops.filter { $0.isEnabled }).prefix(maxN)
     withUnsafeMutablePointer(to: &stack.ops) { tuplePtr in
         tuplePtr.withMemoryRebound(to: SpaceWarpOp.self, capacity: maxN) { base in
             for (i, v) in active.enumerated() {

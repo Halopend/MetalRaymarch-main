@@ -147,27 +147,6 @@ extension AppModel {
         }
     }
 
-    /// Regenerate the composable-transform stack's specialized shader and ask the
-    /// active render backend to compile + swap it in. Call this ONLY on STRUCTURAL
-    /// changes (add / remove / reorder / enable-toggle / type change) — never on
-    /// slider drags, whose values flow live through the uniforms. The generated
-    /// library swaps in asynchronously; until then the bundled runtime-loop
-    /// fallback renders the current stack correctly, so this never hitches and a
-    /// failed compile simply degrades to "no speedup".
-    func refreshWarpStackCompilation() {
-        let (source, signature) = SpaceWarpStackCodegen.generate(renderSettings.spaceWarpStack)
-        renderSettings.setWarpStackCodegen(source: source, signature: signature)
-        guard let handler = activateEmbeddedFormulaHandler else { return }
-        // Re-run activation for the CURRENT formula; the backend re-reads the stack
-        // codegen and recompiles because the combined hash changed. With no formula
-        // and a non-empty stack this compiles a stack-only library on a built-in
-        // fractal (the same "built-in riding a custom library" path .threshfx warps use).
-        Task { @MainActor in
-            do { try await handler(activeEmbeddedFormula) }
-            catch { customSceneDiagnostic("🔬 [CSDiag] refreshWarpStackCompilation failed: \(error)") }
-        }
-    }
-
     /// Build a default `FractalPreset` for a freshly imported `.threshfx` so the
     /// existing import-preview flow can render it without mutating live formula
     /// registration before the user previews or imports it.

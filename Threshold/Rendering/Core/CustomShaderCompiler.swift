@@ -124,9 +124,9 @@ actor CustomShaderCompiler {
     /// continues to work via `library.makeFunction(name:constantValues:)`.
     /// Stable cache key for an effect set (fractal + space warp). Distinct from a
     /// single formula's `sourceHash`, so old and combined entries never collide.
-    /// `warpStackSignature` (from `SpaceWarpStackCodegen.generate`) captures the
-    /// composable transform stack's STRUCTURE (op types in order), so two different
-    /// stacks compile + cache distinct specialized libraries. "s0" = empty stack.
+    /// `warpStackSignature` is RETIRED (warp codegen was removed; the stack renders
+    /// via the bundled count-driven runtime loop). It is now always "s0", kept only
+    /// so the cache key shape is unchanged for the custom-FORMULA path.
     static func combinedHash(fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?,
                              warpStackSignature: String = "s0") -> String {
         "f\(fractal?.shortHash ?? "0")w\(spaceWarp?.shortHash ?? "0")\(warpStackSignature)"

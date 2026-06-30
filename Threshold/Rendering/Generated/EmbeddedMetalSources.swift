@@ -2194,21 +2194,48 @@ FORCE_INLINE float3 warpBend(float3 p, SpaceWarpOp op) {        // 1
 FORCE_INLINE float3 warpMirror(float3 p, SpaceWarpOp op) {      // 2
     return mix(p, abs(p), clamp(op.strength, 0.0f, 1.0f));
 }
+// Hall-of-Mirrors per-axis fold: identity inside [−L, L]; outside, NESTED mirror
+// cells each one octave (2×) WIDER than the last, flipped — "reflection of the
+// reflections at a larger scale, infinitely". Octave k spans |c|∈[L·2ᵏ, L·2ᵏ⁺¹] and
+// maps uniformly back into the base half-cell [0, L] (reversed on even octaves so
+// neighbours mirror, and continuous with the identity region at |c|=L). Each octave
+// is a uniform 2⁻ᵏ contraction → `scaleOut` carries that factor for the DE divisor.
+FORCE_INLINE float boxMirrorAxis(float c, float L, thread float& scaleOut) {
+    float a = fabs(c);
+    if (a <= L) { scaleOut = 1.0f; return c; }      // base cell — identity
+    float k = floor(log2(a / L));                   // octave index (0 = [L, 2L])
+    float invCell = exp2(-k) / L;                   // 1/(L·2ᵏ) — the only exp2 needed
+    float pos = a * invCell - 1.0f;                 // (a − cellInner)/cellInner, in [0, 1)
+    float frac = (fmod(k, 2.0f) < 0.5f) ? (1.0f - pos) : pos;   // even octave reversed
+    scaleOut = L * invCell;                         // = 2⁻ᵏ (contraction) — no second exp2
+    return (c < 0.0f ? -1.0f : 1.0f) * (L * frac);
+}
 FORCE_INLINE float3 warpBoxFold(float3 p, SpaceWarpOp op) {     // 3
     float t = clamp(op.strength, 0.0f, 1.0f);
     float L = op.p1;   // precomputed max(L, 0.01)
     float3 folded;
     if (op.p2 > 0.5f) {
-        // Hall of Mirrors: infinite mirror tiling. Triangle wave (period 4L) —
-        // identity inside the [−L, L] cell, mirror-reflected copies in every
-        // direction. Slope is ±1 everywhere → still isometric (deScale stays 1).
-        float P = 4.0f * L;
-        float3 u = (p - L) - P * floor((p - L) / P);   // floored mod into [0, P)
-        folded = abs(u - 2.0f * L) - L;
+        // Hall of Mirrors (growing nested box cells, per axis).
+        float sx, sy, sz;
+        folded = float3(boxMirrorAxis(p.x, L, sx),
+                        boxMirrorAxis(p.y, L, sy),
+                        boxMirrorAxis(p.z, L, sz));
     } else {
-        folded = clamp(p, -L, L) * 2.0f - p;            // single Tglad box fold
+        folded = clamp(p, -L, L) * 2.0f - p;            // single Tglad box fold (isometric)
     }
     return mix(p, folded, t);
+}
+// Box fold is isometric (deScale 1) UNLESS Hall of Mirrors is on — then each axis
+// contracts by 2⁻ᵏ; the conservative divisor is the largest (least-contracted) axis.
+FORCE_INLINE float warpBoxFoldDEScale(float3 p, SpaceWarpOp op) {
+    if (op.p2 <= 0.5f) return 1.0f;
+    float t = clamp(op.strength, 0.0f, 1.0f);
+    float L = op.p1;
+    float sx, sy, sz;
+    boxMirrorAxis(p.x, L, sx);
+    boxMirrorAxis(p.y, L, sy);
+    boxMirrorAxis(p.z, L, sz);
+    return max(mix(1.0f, max(sx, max(sy, sz)), t), 1e-3f);
 }
 FORCE_INLINE float3 warpSphereFold(float3 p, SpaceWarpOp op) {  // 4
     float t = clamp(op.strength, 0.0f, 1.0f);
@@ -2355,6 +2382,7 @@ FORCE_INLINE float3 applyWarpOp(float3 p, SpaceWarpOp op) {
 // Conservative DE divisor for one op (only radial warps stretch distance).
 FORCE_INLINE float warpOpDEScale(float3 p, SpaceWarpOp op) {
     switch (op.type) {
+        case 3:  return warpBoxFoldDEScale(p, op);   // 1.0 unless Hall of Mirrors is on
         case 4:  return warpSphereFoldDEScale(p, op);
         case 5:  return warpInversionDEScale(p, op);
         case 8:  return warpCircleDEScale(p, op);

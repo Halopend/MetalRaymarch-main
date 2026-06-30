@@ -120,10 +120,11 @@ final class RenderSettings: @unchecked Sendable {
     // Composable domain-transform stack (Transformations UI). Order = order of
     // application; empty = off. See SpaceWarpOpValue / TransformationsSection.
     private var _spaceWarpStack: [SpaceWarpOpValue] = []
-    // Latest generated codegen for the stack's STRUCTURE (unrolled MSL + signature),
-    // produced by AppModel.refreshWarpStackCompilation on structural changes and read
-    // by both render backends to compile a specialized library. nil source → use the
-    // bundled runtime-loop fallback. Thread-safe so the renderer can read off-main.
+    // RETIRED warp-stack codegen state. The transform stack now renders via the
+    // bundled count-driven runtime loop (uniform-driven), so these stay at their
+    // "no injected warp library" defaults forever. The render backends still read
+    // them while compiling a custom FORMULA library; nil/"s0" keeps that library's
+    // runtime warp loop. (See SpaceWarpStackModel.swift for why codegen was removed.)
     private var _warpStackCodegenSource: String? = nil
     private var _warpStackCodegenSignature: String = "s0"
     private var _platformRadius: Float = 1.888
@@ -590,14 +591,15 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _spaceWarpStack = newValue } }
     }
 
-    /// Generated specialized MSL for the current stack structure (nil → runtime-loop
-    /// fallback). Read by both render backends to compile a fast library variant.
+    /// RETIRED warp-stack codegen hooks. The transform stack now renders via the
+    /// bundled count-driven runtime loop (uniform-driven, no specialization), so
+    /// these always return their `nil` / `"s0"` defaults — i.e. "no injected warp
+    /// library". The render backends still read them while compiling a custom
+    /// FORMULA library; `nil`/`"s0"` simply means the formula library keeps the
+    /// runtime warp loop. (Kept as defaulted reads to avoid touching the custom-
+    /// formula compile path; safe to delete once that threading is removed.)
     var warpStackCodegenSource: String? { withLock { _warpStackCodegenSource } }
     var warpStackCodegenSignature: String { withLock { _warpStackCodegenSignature } }
-    /// Publish a freshly generated codegen (source + structure signature) atomically.
-    func setWarpStackCodegen(source: String?, signature: String) {
-        withLock { _warpStackCodegenSource = source; _warpStackCodegenSignature = signature }
-    }
 
     var platformRadius: Float {
         get { withLock { _platformRadius } }

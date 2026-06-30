@@ -6,9 +6,11 @@
 //  Add any number of transforms (Twist / Bend / folds / inversion / kaleidoscope /
 //  ripple), reorder them (order = order of application), enable/disable, and tune
 //  each instance's own parameters. Multiple of the SAME kind can be stacked
-//  (e.g. two box folds, three sphere folds). All edits are live uniform writes —
-//  no shader recompile — and the GPU early-outs to zero cost when the stack is
-//  empty. The catalog + model live in SpaceWarpStackModel.swift.
+//  (e.g. two box folds, three sphere folds). EVERY edit — structural or slider —
+//  is a live uniform write: the GPU renders the stack via a count-driven runtime
+//  loop (`spaceWarpStackTransform` in Shaders.metal) repacked each frame by
+//  `cSpaceWarpStack`, so nothing ever recompiles a shader. The GPU early-outs to
+//  zero cost when the stack is empty. Catalog + model live in SpaceWarpStackModel.swift.
 //
 
 import SwiftUI
@@ -16,14 +18,11 @@ import simd
 
 struct TransformationsSection: View {
     let renderSettings: RenderSettings
-    /// Called after any STRUCTURAL edit (add / delete / reorder / enable / type) so
-    /// the host can regenerate + recompile the specialized stack shader. NOT called
-    /// on slider drags (their values flow live through the uniforms).
-    var onStructureChanged: () -> Void = {}
 
-    // RenderSettings is not Observable; bump to force a re-read after structural
-    // edits (add / delete / reorder / enable). Slider drags mutate in place and
-    // don't need it (mirrors TwistShapingSection).
+    // RenderSettings is not Observable; bump to force a re-read of the op LIST after
+    // structural edits (add / delete / reorder / enable). Slider drags mutate in
+    // place and don't need it (mirrors TwistShapingSection). No edit recompiles a
+    // shader — the runtime loop reads the per-frame-repacked uniforms (count + ops).
     @State private var refresh: Int = 0
 
     private var ops: [SpaceWarpOpValue] { renderSettings.spaceWarpStack }
@@ -90,7 +89,7 @@ struct TransformationsSection: View {
                 Spacer()
                 Toggle("", isOn: Binding(
                     get: { op.isEnabled },
-                    set: { v in update(op.id) { $0.isEnabled = v }; refresh &+= 1; onStructureChanged() }))
+                    set: { v in update(op.id) { $0.isEnabled = v }; refresh &+= 1 }))
                     .labelsHidden()
                     .toggleStyle(.switch)
                 Button { move(op.id, by: -1) } label: { Image(systemName: "chevron.up") }
@@ -209,7 +208,6 @@ struct TransformationsSection: View {
         arr.append(SpaceWarpOpValue(kind: kind))
         renderSettings.spaceWarpStack = arr
         refresh &+= 1
-        onStructureChanged()
     }
 
     private func delete(_ id: UUID) {
@@ -217,7 +215,6 @@ struct TransformationsSection: View {
         arr.removeAll { $0.id == id }
         renderSettings.spaceWarpStack = arr
         refresh &+= 1
-        onStructureChanged()
     }
 
     private func move(_ id: UUID, by delta: Int) {
@@ -228,7 +225,6 @@ struct TransformationsSection: View {
         arr.swapAt(i, j)
         renderSettings.spaceWarpStack = arr
         refresh &+= 1
-        onStructureChanged()
     }
 
     /// Read-modify-write one op by id (slider drags). No `refresh` bump so the
