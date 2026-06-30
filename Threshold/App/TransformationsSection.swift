@@ -88,7 +88,7 @@ struct TransformationsSection: View {
                     .font(.subheadline.weight(.medium))
                 Spacer()
                 Toggle("", isOn: Binding(
-                    get: { op.isEnabled },
+                    get: { liveOp(op.id)?.isEnabled ?? op.isEnabled },
                     set: { v in update(op.id) { $0.isEnabled = v }; refresh &+= 1 }))
                     .labelsHidden()
                     .toggleStyle(.switch)
@@ -108,7 +108,8 @@ struct TransformationsSection: View {
                 // Master amount.
                 EffectSliderRow(
                     icon: kind.icon, label: kind.amountLabel,
-                    value: Binding(get: { op.strength }, set: { v in update(op.id) { $0.strength = v } }),
+                    value: Binding(get: { liveOp(op.id)?.strength ?? op.strength },
+                                   set: { v in update(op.id) { $0.strength = v } }),
                     range: kind.strengthRange,
                     enabled: .constant(true), onChanged: {}, showToggle: false)
 
@@ -117,7 +118,7 @@ struct TransformationsSection: View {
                     EffectSliderRow(
                         icon: spec.icon, label: spec.label,
                         value: Binding(
-                            get: { spec.slot == 1 ? op.p1 : op.p2 },
+                            get: { let o = liveOp(op.id) ?? op; return spec.slot == 1 ? o.p1 : o.p2 },
                             set: { v in update(op.id) { if spec.slot == 1 { $0.p1 = v } else { $0.p2 = v } } }),
                         range: spec.range,
                         enabled: .constant(true), onChanged: {}, showToggle: false)
@@ -131,7 +132,7 @@ struct TransformationsSection: View {
                             .font(.caption)
                         Spacer()
                         Toggle("", isOn: Binding(
-                            get: { op.p2 > 0.5 },
+                            get: { (liveOp(op.id) ?? op).p2 > 0.5 },
                             set: { v in update(op.id) { $0.p2 = v ? 1 : 0 }; refresh &+= 1 }))
                             .labelsHidden()
                             .toggleStyle(.switch)
@@ -159,7 +160,7 @@ struct TransformationsSection: View {
         EffectSliderRow(
             icon: icon, label: label,
             value: Binding(
-                get: { op.axis[keyPath: comp] },
+                get: { (liveOp(op.id) ?? op).axis[keyPath: comp] },
                 set: { v in update(op.id) { $0.axis[keyPath: comp] = v } }),
             range: -1.0...1.0,
             enabled: .constant(true), onChanged: {}, showToggle: false)
@@ -171,31 +172,45 @@ struct TransformationsSection: View {
     /// integers (mirror angles π/p, π/q), not continuous sliders.
     @ViewBuilder
     private func coxeterEditor(_ op: SpaceWarpOpValue) -> some View {
-        let p = max(Int(op.p1.rounded()), 2)
-        let q = max(Int(op.p2.rounded()), 2)
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Text("{\(p),\(q)}")
-                    .font(.title3.monospacedDigit().weight(.semibold))
-                Text("○—\(p)—○—\(q)—○")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
+        let live = liveOp(op.id) ?? op
+        let p = max(Int(live.p1.rounded()), 2)
+        let q = max(Int(live.p2.rounded()), 2)
+        VStack(alignment: .leading, spacing: 10) {
+            // Schläfli symbol + the symmetry it names.
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("{\(p), \(q)}")
+                    .font(.title2.monospacedDigit().weight(.semibold))
                 Spacer()
                 Text(coxeterSymmetryName(p: p, q: q))
-                    .font(.caption.weight(.medium))
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Capsule().fill(.tint.opacity(0.16)))
                     .foregroundStyle(.tint)
             }
-            Stepper(value: Binding(
-                get: { max(Int(op.p1.rounded()), 2) },
-                set: { v in update(op.id) { $0.p1 = Float(v) }; refresh &+= 1 }), in: 2...8) {
-                HStack { Text("p"); Spacer(); Text("\(p)").foregroundStyle(.secondary).monospacedDigit() }
-                    .font(.caption)
-            }
-            Stepper(value: Binding(
-                get: { max(Int(op.p2.rounded()), 2) },
-                set: { v in update(op.id) { $0.p2 = Float(v) }; refresh &+= 1 }), in: 2...8) {
-                HStack { Text("q"); Spacer(); Text("\(q)").foregroundStyle(.secondary).monospacedDigit() }
-                    .font(.caption)
+            // Coxeter–Dynkin diagram (rank-3 linear: three mirrors, two labelled edges).
+            Text("○—\(p)—○—\(q)—○")
+                .font(.callout.monospaced())
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+            // Integer mirror orders. Steppers read LIVE (so they actually move) and
+            // bump `refresh` so the symbol/diagram above redraw on each tap.
+            coxeterStepper(op, label: "p", slot1: true, value: p)
+            coxeterStepper(op, label: "q", slot1: false, value: q)
+        }
+    }
+
+    /// One p/q stepper for the Coxeter editor. Reads the live op so the control
+    /// tracks; writes the chosen slot and refreshes the card's symbol + diagram.
+    private func coxeterStepper(_ op: SpaceWarpOpValue, label: String, slot1: Bool, value: Int) -> some View {
+        Stepper(value: Binding(
+            get: { let o = liveOp(op.id) ?? op; return max(Int((slot1 ? o.p1 : o.p2).rounded()), 2) },
+            set: { v in update(op.id) { if slot1 { $0.p1 = Float(v) } else { $0.p2 = Float(v) } }; refresh &+= 1 }),
+            in: 2...8) {
+            HStack {
+                Text(label).font(.subheadline.weight(.medium))
+                Spacer()
+                Text("\(value)").font(.subheadline.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.tint)
             }
         }
     }
@@ -234,5 +249,14 @@ struct TransformationsSection: View {
         guard let i = arr.firstIndex(where: { $0.id == id }) else { return }
         mutate(&arr[i])
         renderSettings.spaceWarpStack = arr
+    }
+
+    /// LIVE lookup of an op by id. Every slider/stepper binding's `get` MUST read
+    /// through this, not the captured ForEach snapshot — otherwise the control
+    /// freezes at the snapshot value (RenderSettings isn't Observable, so a `set`
+    /// never re-snapshots the closure). A captured `strength` default of 1.0 in a
+    /// 0…2 range is exactly mid-track, which read as a thumb "stuck in the centre".
+    private func liveOp(_ id: UUID) -> SpaceWarpOpValue? {
+        renderSettings.spaceWarpStack.first { $0.id == id }
     }
 }
