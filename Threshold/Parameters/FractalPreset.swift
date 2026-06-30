@@ -750,9 +750,11 @@ struct FractalPreset: Codable, Identifiable {
         settings.sphereProjectionBlend = sphereProjectionBlend ?? 1.0
         settings.sphereProjectionRadius = sphereProjectionRadius ?? 1.0
 
-        // Composable domain-transform stack (Transformations section). Restore when
-        // the scene carries it; older scenes (nil) leave the live stack untouched.
-        if let ops = spaceWarpOps { settings.spaceWarpStack = ops }
+        // Composable domain-transform stack (Transformations section). A scene fully
+        // defines its transforms, so apply AUTHORITATIVELY: nil/absent (an empty stack
+        // or an older pre-transform scene) clears any transforms the previous scene
+        // left live, instead of leaking them into this one.
+        settings.spaceWarpStack = spaceWarpOps ?? []
 
         // Glass-floor platform — restore when present (older scenes leave it as-is).
         if let platformEnabled = platformEnabled {

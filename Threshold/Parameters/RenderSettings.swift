@@ -120,6 +120,10 @@ final class RenderSettings: @unchecked Sendable {
     // Composable domain-transform stack (Transformations UI). Order = order of
     // application; empty = off. See SpaceWarpOpValue / TransformationsSection.
     private var _spaceWarpStack: [SpaceWarpOpValue] = []
+    // Transient per-slot music offsets (slot → additive strength delta), written by
+    // the music engine each frame and folded into each op's strength at snapshot time.
+    // NOT persisted (it's live modulation, not authored state); empty = no modulation.
+    private var _spaceWarpAudioOffsets: [Int: Float] = [:]
     // RETIRED warp-stack codegen state. The transform stack now renders via the
     // bundled count-driven runtime loop (uniform-driven), so these stay at their
     // "no injected warp library" defaults forever. The render backends still read
@@ -589,6 +593,25 @@ final class RenderSettings: @unchecked Sendable {
     var spaceWarpStack: [SpaceWarpOpValue] {
         get { withLock { _spaceWarpStack } }
         set { withLock { _spaceWarpStack = newValue } }
+    }
+
+    /// Replace the music-driven per-slot strength offsets atomically (slot → delta).
+    /// Called once per audio frame by the music engine; pass `[:]` to clear (mapping
+    /// removed / music off). Folded into op strengths at snapshot time.
+    func setSpaceWarpAudioOffsets(_ offsets: [Int: Float]) {
+        withLock { _spaceWarpAudioOffsets = offsets }
+    }
+
+    /// Apply the live music offsets to a copy of the stack, clamped to each op's
+    /// own strength range. Lock-free — call only from inside `withLock`.
+    private func spaceWarpStackWithAudioOffsetsLocked() -> [SpaceWarpOpValue] {
+        guard !_spaceWarpAudioOffsets.isEmpty else { return _spaceWarpStack }
+        var ops = _spaceWarpStack
+        for (slot, delta) in _spaceWarpAudioOffsets where slot >= 0 && slot < ops.count {
+            let r = ops[slot].kind.strengthRange
+            ops[slot].strength = min(r.upperBound, max(r.lowerBound, ops[slot].strength + delta))
+        }
+        return ops
     }
 
     /// RETIRED warp-stack codegen hooks. The transform stack now renders via the
@@ -2226,7 +2249,7 @@ final class RenderSettings: @unchecked Sendable {
                 spaceWarpParam2: _spaceWarpParam2,
                 spaceWarpParam3: _spaceWarpParam3,
                 spaceWarpAxis: _spaceWarpAxis,
-                spaceWarpStack: cSpaceWarpStack(from: _spaceWarpStack),
+                spaceWarpStack: cSpaceWarpStack(from: spaceWarpStackWithAudioOffsetsLocked()),
                 platformRadius: _platformRadius,
                 platformEnabled: _platformEnabled,
                 audioLevel: _audioLevel,

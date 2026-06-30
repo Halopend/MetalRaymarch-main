@@ -97,14 +97,18 @@ struct FractalPresetPersistenceTests {
         sphere.strength = 0.8; sphere.p1 = 0.4; sphere.p2 = 1.7
         var twist = SpaceWarpOpValue(kind: .twist)
         twist.axis = SIMD3<Float>(0.2, 0.5, -0.8)
-        settings.spaceWarpStack = [SpaceWarpOpValue(kind: .boxFold), sphere, twist]   // multiple kinds, ordered
+        var box = SpaceWarpOpValue(kind: .boxFold); box.p2 = 1   // Hall of Mirrors toggle on
+        var cox = SpaceWarpOpValue(kind: .coxeter); cox.p1 = 5; cox.p2 = 3
+        var plane = SpaceWarpOpValue(kind: .planeFold); plane.p1 = 0.5; plane.axis = SIMD3<Float>(1, -1, 0)
+        plane.isEnabled = false   // disabled-state must survive too
+        settings.spaceWarpStack = [box, sphere, twist, cox, plane]   // every recent kind, ordered
 
         let preset = FractalPreset.fromSettings(settings, name: "Stack")
-        #expect(preset.spaceWarpOps?.count == 3)
+        #expect(preset.spaceWarpOps?.count == 5)
 
         let data = try JSONEncoder().encode(preset)
         let decoded = try JSONDecoder().decode(FractalPreset.self, from: data)
-        #expect(decoded.spaceWarpOps?.count == 3)
+        #expect(decoded.spaceWarpOps?.count == 5)
         #expect(decoded.spaceWarpOps?[0].type == SpaceWarpKind.boxFold.rawValue)   // order preserved
         #expect(decoded.spaceWarpOps?[1].type == SpaceWarpKind.sphereFold.rawValue)
         #expect(abs((decoded.spaceWarpOps?[1].strength ?? -1) - 0.8) < 1e-5)
@@ -112,10 +116,21 @@ struct FractalPresetPersistenceTests {
         let fresh = RenderSettings()
         fresh.fractalType = .mandelbulb
         decoded.apply(to: fresh)
-        #expect(fresh.spaceWarpStack.count == 3)
+        #expect(fresh.spaceWarpStack.count == 5)
         #expect(fresh.spaceWarpStack[1].type == SpaceWarpKind.sphereFold.rawValue)
         #expect(abs(fresh.spaceWarpStack[1].p2 - 1.7) < 1e-5)
         #expect(abs(fresh.spaceWarpStack[2].axis.z - (-0.8)) < 1e-5)
+        #expect(abs(fresh.spaceWarpStack[0].p2 - 1) < 1e-5)              // Hall of Mirrors toggle
+        #expect(fresh.spaceWarpStack[3].type == SpaceWarpKind.coxeter.rawValue)
+        #expect(abs(fresh.spaceWarpStack[3].p1 - 5) < 1e-5 && abs(fresh.spaceWarpStack[3].p2 - 3) < 1e-5)  // {5,3}
+        #expect(fresh.spaceWarpStack[4].type == SpaceWarpKind.planeFold.rawValue)
+        #expect(fresh.spaceWarpStack[4].isEnabled == false)             // disabled state preserved
+
+        // Load is AUTHORITATIVE: a scene with no transforms clears a live stack.
+        let emptyPreset = FractalPreset.fromSettings(RenderSettings(), name: "Empty")
+        #expect(emptyPreset.spaceWarpOps == nil)
+        emptyPreset.apply(to: fresh)
+        #expect(fresh.spaceWarpStack.isEmpty)   // previous scene's transforms don't leak through
     }
 
     @Test("WarpCatalog is the single source of truth: one descriptor per kind, valid GPU bridge")
@@ -274,6 +289,38 @@ struct FractalPresetPersistenceTests {
         }
         #expect(abs(op.axisX) < 1e-5 && abs(op.axisY) < 1e-5 && abs(op.axisZ - 1.0) < 1e-5)  // unit normal
         #expect(abs(op.p1 - 0.5) < 1e-5)                           // distance unchanged
+    }
+
+    @Test("Transform-stack music targets resolve dynamically + fold into snapshot strength")
+    func spaceWarpMusicTargets() throws {
+        // Slot resolution + availability against the live stack depth.
+        #expect(MusicReactiveTarget.spaceWarp0.spaceWarpSlot == 0)
+        #expect(MusicReactiveTarget.spaceWarp3.spaceWarpSlot == 3)
+        #expect(MusicReactiveTarget.glow.spaceWarpSlot == nil)
+        #expect(MusicReactiveTarget.availableSpaceWarpCases(count: 3) == [.spaceWarp0, .spaceWarp1, .spaceWarp2])
+        #expect(MusicReactiveTarget.availableSpaceWarpCases(count: 0).isEmpty)
+
+        // DYNAMIC id: static is nil (so it stays out of the routed-node lockstep that
+        // validateStartupRouting enforces), resolved one via parameterTargetID(for:).
+        #expect(MusicReactiveTarget.spaceWarp2.parameterTargetID == nil)
+        #expect(MusicReactiveTarget.spaceWarp2.parameterTargetID(for: .mandelbulb)
+                == ParameterTargetID.SpaceWarp.opStrength(slot: 2))
+        #expect(MusicReactiveTarget.spaceWarp0.category == .transform)
+        #expect(MusicReactiveTarget.spaceWarp0.allowedRange == 0...1)
+
+        // The engine publishes a per-slot offset; the snapshot folds it into op strength.
+        func packedStrength0(_ s: RenderSettings) -> Float {
+            withUnsafePointer(to: s.snapshot().spaceWarpStack.ops) { tuplePtr in
+                tuplePtr.withMemoryRebound(to: SpaceWarpOp.self, capacity: Int(kMaxSpaceWarpOps)) { $0[0].strength }
+            }
+        }
+        let settings = RenderSettings()
+        var op = SpaceWarpOpValue(kind: .mirror); op.strength = 0.4
+        settings.spaceWarpStack = [op]
+        settings.setSpaceWarpAudioOffsets([0: 0.5])
+        #expect(abs(packedStrength0(settings) - 0.9) < 1e-5)   // 0.4 + 0.5, within range
+        settings.setSpaceWarpAudioOffsets([:])                 // cleared → base restored
+        #expect(abs(packedStrength0(settings) - 0.4) < 1e-5)
     }
 
     @Test("Coxeter diagram naming: {p,q} → spherical / Euclidean / hyperbolic")

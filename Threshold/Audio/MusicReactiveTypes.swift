@@ -123,17 +123,19 @@ enum MusicReactiveTargetCategory: String, CaseIterable, Sendable {
     case geometry = "Geometry"
     case color = "Color"
     case light = "Light & Effects"
+    case transform = "Transformations"
 
     var icon: String {
         switch self {
         case .geometry: return "cube.transparent"
         case .color: return "paintpalette"
         case .light: return "sun.max"
+        case .transform: return "circle.hexagongrid"
         }
     }
 
     /// Display order for the universal (non-formula) sections.
-    static let universalOrder: [MusicReactiveTargetCategory] = [.geometry, .color, .light]
+    static let universalOrder: [MusicReactiveTargetCategory] = [.geometry, .color, .light, .transform]
 }
 
 enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
@@ -176,9 +178,36 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     case formulaParam14
     case formulaParam15
 
+    // Composable transform-STACK slots — per-slot master amount, resolved against the
+    // LIVE stack (slot N = the Nth transform card). Up to kMaxSpaceWarpOps (8). Dynamic
+    // like formula slots: nil static target id, surfaced only for slots that exist.
+    case spaceWarp0
+    case spaceWarp1
+    case spaceWarp2
+    case spaceWarp3
+    case spaceWarp4
+    case spaceWarp5
+    case spaceWarp6
+    case spaceWarp7
+
     // Legacy (kept for Codable backward-compat; migrated to formulaParam on load)
     case foldingLimit
     case sphereRadius
+
+    /// All transform-slot cases in slot order.
+    static let allSpaceWarpCases: [MusicReactiveTarget] = [
+        .spaceWarp0, .spaceWarp1, .spaceWarp2, .spaceWarp3,
+        .spaceWarp4, .spaceWarp5, .spaceWarp6, .spaceWarp7
+    ]
+
+    /// The slot index (0–7) for a transform-stack target; nil otherwise.
+    var spaceWarpSlot: Int? { Self.allSpaceWarpCases.firstIndex(of: self) }
+    var isSpaceWarp: Bool { spaceWarpSlot != nil }
+
+    /// Transform-stack targets for the slots that actually exist in a `count`-deep stack.
+    static func availableSpaceWarpCases(count: Int) -> [MusicReactiveTarget] {
+        Array(allSpaceWarpCases.prefix(max(0, min(count, allSpaceWarpCases.count))))
+    }
 
     // MARK: - Availability
 
@@ -259,6 +288,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         // Routed core/effect/space targets project their category from the authored
         // ParameterCatalog facet (Slice 5). Formula param slots + legacy Mandelbox
         // aliases (no catalog facet) all group as .geometry.
+        if isSpaceWarp { return .transform }
         if let id = parameterTargetID, let facet = ParameterCatalog.byID[id]?.music { return facet.category }
         return .geometry
     }
@@ -266,6 +296,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     var displayName: String {
         // Canonical core/effect controls source their label from ControlCatalog
         // (single source of truth). Formula slots + legacy targets fall through.
+        if let slot = spaceWarpSlot { return "Transform \(slot + 1)" }
         if let id = parameterTargetID, let spec = ControlCatalog.spec(id) { return spec.name }
         if let slot = formulaParamSlot { return "Formula Param \(slot + 1)" }
         switch self {
@@ -284,6 +315,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
 
     var icon: String {
         // Canonical core/effect controls source their glyph from ControlCatalog.
+        if isSpaceWarp { return "circle.hexagongrid" }
         if let id = parameterTargetID, let spec = ControlCatalog.spec(id) { return spec.icon }
         switch self {
         case .foldingLimit: return "square.dashed"
@@ -303,6 +335,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
 
     var allowedRange: ClosedRange<Float> {
         // Canonical core/effect controls source their range from ControlCatalog.
+        if isSpaceWarp { return 0...1 }   // transform master amount (blend / intensity)
         if let id = parameterTargetID, let spec = ControlCatalog.spec(id) { return spec.range }
         switch self {
         case .foldingLimit: return -10.0...30.0
@@ -314,6 +347,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     var defaultSource: MusicReactiveSource {
         // Routed targets project from the catalog facet (Slice 5). The remaining
         // formula param slots + legacy Mandelbox aliases keep their per-slot defaults.
+        if let slot = spaceWarpSlot { return [.bass, .mid, .treble][slot % 3] }
         if let id = parameterTargetID, let facet = ParameterCatalog.byID[id]?.music { return facet.defaultSource }
         switch self {
         case .formulaParam0, .formulaParam4, .formulaParam8, .formulaParam12, .foldingLimit:
@@ -347,6 +381,9 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     /// Returns the parameter system target ID for routing operations.
     /// Formula param targets require the active fractal type to resolve.
     func parameterTargetID(for fractalType: FractalModelType) -> String? {
+        if let slot = spaceWarpSlot {
+            return ParameterTargetID.SpaceWarp.opStrength(slot: slot)
+        }
         if let desc = formulaDescriptor(for: fractalType) {
             return ParameterTargetID.formula(fractalType: fractalType, formulaIndex: desc.index, name: desc.name)
         }
@@ -371,6 +408,8 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
              .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
              .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
              .formulaParam12, .formulaParam13, .formulaParam14, .formulaParam15: return nil
+        case .spaceWarp0, .spaceWarp1, .spaceWarp2, .spaceWarp3,
+             .spaceWarp4, .spaceWarp5, .spaceWarp6, .spaceWarp7: return nil   // dynamic — resolve via parameterTargetID(for:)
         case .foldingLimit: return ParameterTargetID.formula(fractalType: .mandelbox, formulaIndex: 1, name: "Folding Limit")
         case .sphereRadius: return ParameterTargetID.formula(fractalType: .mandelbox, formulaIndex: 2, name: "Sphere Radius")
         }

@@ -27,6 +27,14 @@ enum ParameterTargetID {
         static let spaceWarpOriginZ = "space.spaceWarpOriginZ"
     }
 
+    /// Composable transform-stack slots (music-bindable). DYNAMIC, like formula slots:
+    /// they resolve against the LIVE stack, so they carry `nil` static target ids and
+    /// stay out of the routed-node lockstep (`validateStartupRouting`). The music engine
+    /// folds their offset straight into `spaceWarpStack[slot].strength` per frame.
+    enum SpaceWarp {
+        static func opStrength(slot: Int) -> String { "spacewarp.\(slot).strength" }
+    }
+
     /// Routed core/effect/space ids — DERIVED from the authored `ParameterCatalog`
     /// (Slice 2). Order matches `routedDescriptors` declaration order, which matches
     /// the former hand-listed order. Only ever consumed as a `Set`, so order is moot.

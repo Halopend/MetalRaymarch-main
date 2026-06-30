@@ -51,6 +51,28 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable {
     var strengthRange: ClosedRange<Float> { descriptor.strengthRange }
     var params: [WarpParamSpec] { descriptor.params }
     var toggle: WarpToggleSpec? { descriptor.toggle }
+    var tagline: String { descriptor.tagline }
+    var family: WarpFamily { descriptor.family }
+
+    /// One-line readable math for the "Under the hood" panel — what the GPU actually
+    /// computes for this transform (p = sample point, op fields as labelled in the UI).
+    var formula: String {
+        switch self {
+        case .twist:        return "p ↦ rotate p about axis by θ = strength · (p·axis) · 1.5"
+        case .bend:         return "p ↦ bow p around axis by angle ∝ strength · |p⊥|"
+        case .mirror:       return "p ↦ mix(p, |p|, strength)   — fold into the positive octant"
+        case .boxFold:      return "p ↦ clamp(p, −L, L)·2 − p   — Mandelbox box fold (Hall of Mirrors → triangle-wave mirror tiling, cells 2L wide)"
+        case .sphereFold:   return "if |p|<min: p·(max/min);  elif |p|<max: p·(max/|p|²)   — inflate the inner region"
+        case .inversion:    return "p ↦ p · clamp(R² / |p|², 0.05, 20)   — turn space inside-out through a sphere"
+        case .kaleidoscope: return "fold the polar angle of p.xz into one wedge of π / segments"
+        case .ripple:       return "p ↦ p + axis · strength · sin((p·axis) · frequency)"
+        case .circle:       return "sphere fold confined to the XZ plane (inner/outer radius)"
+        case .shells:       return "r = |p|;  p ↦ p · (|r − d·round(r/d)| / r)   — fold radius to nearest shell"
+        case .scaleRepeat:  return "p ↦ p · s^(−⌊log_s|p|⌋)   — map |p| into the base octave [1, s) (log-radial Droste)"
+        case .coxeter:      return "reflect p into the {p,q} fundamental domain across 3 mirror normals (n₀,n₁,n₂)"
+        case .planeFold:    return "if p·n < d:  p −= 2 (p·n − d) · n · strength   — reflect when behind the plane"
+        }
+    }
 }
 
 /// A per-operator scalar slider, bound to op.p1 (slot 1) or op.p2 (slot 2).
@@ -71,12 +93,24 @@ struct WarpToggleSpec {
     let icon: String
 }
 
+/// Coarse family grouping for the add-menu, so related transforms cluster together
+/// and the look-alikes are visibly distinguished (the radial trio Sphere Fold /
+/// Sphere Inversion / Tube Fold sit side by side under one heading, etc.).
+enum WarpFamily: String, CaseIterable {
+    case mirror      = "Mirrors & Folds"
+    case spherical   = "Spherical & Radial"
+    case selfSimilar = "Self-Similar Repeats"
+    case distortion  = "Bend & Wave"
+}
+
 /// Everything about one transform kind — the single source of truth bridging the
 /// CPU (UI, params, codegen) and the GPU (`gpuApplyFn` / `gpuDEScaleFn`).
 struct WarpDescriptor {
     let kind: SpaceWarpKind
     let displayName: String
     let icon: String
+    let family: WarpFamily       // add-menu grouping
+    let tagline: String          // one-line plain-language "what it does" (shown on the card)
     let amountLabel: String      // verb for the master-amount slider
     let usesAxis: Bool           // whether the direction axis is meaningful
     let defaultAxis: SIMD3<Float> // seed axis/normal for a fresh op of this kind
@@ -86,13 +120,15 @@ struct WarpDescriptor {
     let toggle: WarpToggleSpec?  // optional boolean option (stored in op.p2)
     let gpuApplyFn: String       // Metal function name (must exist in Shaders.metal)
     let gpuDEScaleFn: String?    // Metal DE-divisor fn, or nil → contributes 1.0
-    let blurb: String
+    let blurb: String            // longer, contrastive description (shown under the hood)
 
-    init(_ kind: SpaceWarpKind, _ displayName: String, icon: String, amountLabel: String = "Amount",
+    init(_ kind: SpaceWarpKind, _ displayName: String, icon: String, family: WarpFamily, tagline: String,
+         amountLabel: String = "Amount",
          usesAxis: Bool = false, defaultAxis: SIMD3<Float> = SIMD3<Float>(0, 1, 0),
          defaultStrength: Float = 1.0, strengthRange: ClosedRange<Float> = 0.0...2.0,
          params: [WarpParamSpec] = [], toggle: WarpToggleSpec? = nil, gpuApplyFn: String, gpuDEScaleFn: String? = nil, blurb: String) {
         self.kind = kind; self.displayName = displayName; self.icon = icon
+        self.family = family; self.tagline = tagline
         self.amountLabel = amountLabel; self.usesAxis = usesAxis; self.defaultAxis = defaultAxis
         self.defaultStrength = defaultStrength; self.strengthRange = strengthRange
         self.params = params; self.toggle = toggle
@@ -104,65 +140,84 @@ struct WarpDescriptor {
 enum WarpCatalog {
     /// The one place every transform is declared. Order = UI menu order.
     static let all: [WarpDescriptor] = [
-        WarpDescriptor(.twist, "Twist", icon: "tornado", amountLabel: "Twist", usesAxis: true, defaultStrength: 0.6,
-                       gpuApplyFn: "warpTwist",
-                       blurb: "Rotate space progressively along an axis."),
-        WarpDescriptor(.bend, "Bend", icon: "wind", amountLabel: "Bend", usesAxis: true, defaultStrength: 0.6,
-                       gpuApplyFn: "warpBend",
-                       blurb: "Bow space around an axis."),
+        // ── Mirrors & Folds ─────────────────────────────────────────────────
         WarpDescriptor(.mirror, "Mirror Fold", icon: "square.on.square",
+                       family: .mirror, tagline: "Fold every axis into one octant",
                        gpuApplyFn: "warpMirror",
-                       blurb: "Reflect space into mirror-symmetric copies."),
+                       blurb: "Folds each axis with abs() so the whole scene mirrors into one positive octant — the simplest reflection fold, applied on all three axes at once. Contrast: Plane Fold mirrors across ONE plane you aim; Kaleidoscope/Coxeter build repeating symmetry."),
         WarpDescriptor(.boxFold, "Box Fold", icon: "cube",
+                       family: .mirror, tagline: "Fold back inside a box (Mandelbox)",
                        params: [WarpParamSpec(slot: 1, label: "Fold Limit", icon: "cube", range: 0.1...3.0, defaultValue: 1.0)],
                        toggle: WarpToggleSpec(label: "Hall of Mirrors", icon: "square.split.2x2"),
-                       gpuApplyFn: "warpBoxFold", gpuDEScaleFn: "warpBoxFoldDEScale",  // divisor is 1 unless Hall of Mirrors is on
-                       blurb: "Fold coordinates back inside a box (the Mandelbox fold), once — or with Hall of Mirrors into nested mirror cells, each one 2× larger and flipped, infinitely."),
-        WarpDescriptor(.sphereFold, "Sphere Fold", icon: "circle.circle",
-                       params: [WarpParamSpec(slot: 1, label: "Min Radius", icon: "smallcircle.filled.circle", range: 0.05...2.0, defaultValue: 0.5),
-                                WarpParamSpec(slot: 2, label: "Max Radius", icon: "circle.circle", range: 0.1...4.0, defaultValue: 1.0)],
-                       gpuApplyFn: "warpSphereFold", gpuDEScaleFn: "warpSphereFoldDEScale",
-                       blurb: "Inflate the inner region radially (Mandelbox sphere fold)."),
-        WarpDescriptor(.inversion, "Spherical Inversion", icon: "globe",
-                       params: [WarpParamSpec(slot: 1, label: "Radius", icon: "globe", range: 0.1...3.0, defaultValue: 1.0)],
-                       gpuApplyFn: "warpInversion", gpuDEScaleFn: "warpInversionDEScale",
-                       blurb: "Turn space inside-out through a sphere."),
-        WarpDescriptor(.kaleidoscope, "Kaleidoscope", icon: "snowflake",
-                       params: [WarpParamSpec(slot: 1, label: "Segments", icon: "snowflake", range: 2.0...16.0, defaultValue: 6.0)],
-                       gpuApplyFn: "warpKaleido",
-                       blurb: "Fold the view into N rotational wedges."),
-        WarpDescriptor(.ripple, "Ripple", icon: "waveform.path", amountLabel: "Ripple", usesAxis: true, defaultStrength: 0.6,
-                       params: [WarpParamSpec(slot: 1, label: "Frequency", icon: "waveform.path", range: 0.1...8.0, defaultValue: 2.0)],
-                       gpuApplyFn: "warpRipple",
-                       blurb: "Accordion-displace space along an axis."),
-        // ── Radial / nested / self-similar ──────────────────────────────────
-        WarpDescriptor(.circle, "Circle", icon: "circle",
-                       params: [WarpParamSpec(slot: 1, label: "Inner Radius", icon: "smallcircle.filled.circle", range: 0.05...2.0, defaultValue: 0.5),
-                                WarpParamSpec(slot: 2, label: "Outer Radius", icon: "circle.circle", range: 0.1...4.0, defaultValue: 1.0)],
-                       gpuApplyFn: "warpCircle", gpuDEScaleFn: "warpCircleDEScale",
-                       blurb: "Sphere fold confined to the XZ plane — circular / tube structure."),
-        WarpDescriptor(.shells, "Shells", icon: "circle.dotted",
-                       params: [WarpParamSpec(slot: 1, label: "Spacing", icon: "circle.dotted", range: 0.1...4.0, defaultValue: 1.0)],
-                       gpuApplyFn: "warpShells",
-                       blurb: "Repeat the fractal in concentric spherical shells at a fixed spacing."),
-        WarpDescriptor(.scaleRepeat, "Scale Repeat", icon: "infinity",
-                       params: [WarpParamSpec(slot: 1, label: "Scale Factor", icon: "infinity", range: 1.1...4.0, defaultValue: 2.0)],
-                       gpuApplyFn: "warpScaleRepeat", gpuDEScaleFn: "warpScaleRepeatDEScale",
-                       blurb: "Repeat self-similarly at growing scales (log-radial / Droste)."),
-        // ── Reflection group (Coxeter) ──────────────────────────────────────
-        WarpDescriptor(.coxeter, "Coxeter", icon: "hexagon", amountLabel: "Mirror",
-                       defaultStrength: 1.0, strengthRange: 0.0...1.0,
-                       params: [WarpParamSpec(slot: 1, label: "p", icon: "hexagon", range: 2.0...8.0, defaultValue: 5.0),
-                                WarpParamSpec(slot: 2, label: "q", icon: "hexagon", range: 2.0...8.0, defaultValue: 3.0)],
-                       gpuApplyFn: "warpCoxeter",   // isometric (reflections) → no DE divisor
-                       blurb: "Fold space into a {p,q} kaleidoscopic mirror group (polyhedral / Coxeter symmetry). {5,3}=icosahedral, {4,3}=octahedral; 1/p+1/q<1/2 goes hyperbolic."),
-        // ── Plane fold (Mandelbulber kaleidoscopic IFS) ─────────────────────
-        WarpDescriptor(.planeFold, "Plane Fold", icon: "triangle", amountLabel: "Fold",
+                       gpuApplyFn: "warpBoxFold",   // both modes isometric → no DE divisor
+                       blurb: "The Mandelbox box fold: any coordinate past ±Fold-Limit is reflected back inside the box (once) — the classic Mandelbox building block. Turn on Hall of Mirrors to instead tile space into infinite IDENTICAL mirrored copies (the classic two-parallel-mirrors effect), each cell 2×Fold-Limit wide."),
+        WarpDescriptor(.planeFold, "Plane Fold", icon: "triangle",
+                       family: .mirror, tagline: "Reflect across a plane you aim",
+                       amountLabel: "Fold",
                        usesAxis: true, defaultAxis: SIMD3<Float>(1, -1, 0),
                        defaultStrength: 1.0, strengthRange: 0.0...1.0,
                        params: [WarpParamSpec(slot: 1, label: "Distance", icon: "ruler", range: -2.0...2.0, defaultValue: 0.0)],
                        gpuApplyFn: "warpPlaneFold",   // conditional reflection (isometric) → no DE divisor
-                       blurb: "Reflect space across a plane you aim with a normal VECTOR — Mandelbulber's kaleidoscopic-IFS fold (reflect when behind the plane). Stack several, each a mirror plane, to build Sierpinski / kaleidoscopic symmetry; add a Scale Repeat for self-similar depth."),
+                       blurb: "Reflects space across ONE plane you aim with a normal vector (the Axis sliders) at the given Distance — Mandelbulber's kaleidoscopic-IFS fold (only points behind the plane are reflected). Stack several, each a mirror plane, to build Sierpinski / kaleidoscopic symmetry; add a Scale Repeat for self-similar depth. Contrast: Mirror Fold is fixed to the coordinate axes; this one points anywhere."),
+        WarpDescriptor(.kaleidoscope, "Kaleidoscope", icon: "snowflake",
+                       family: .mirror, tagline: "Fold the view into N wedges",
+                       params: [WarpParamSpec(slot: 1, label: "Segments", icon: "snowflake", range: 2.0...16.0, defaultValue: 6.0)],
+                       gpuApplyFn: "warpKaleido",
+                       blurb: "Folds the angle around the vertical (Y) axis into N identical pie-slice wedges — classic flat kaleidoscope symmetry in the XZ plane. Contrast: Coxeter is full 3-D polyhedral symmetry; this is 2-D rotational."),
+        WarpDescriptor(.coxeter, "Coxeter", icon: "hexagon",
+                       family: .mirror, tagline: "{p,q} polyhedral mirror symmetry",
+                       amountLabel: "Mirror",
+                       defaultStrength: 1.0, strengthRange: 0.0...1.0,
+                       params: [WarpParamSpec(slot: 1, label: "p", icon: "hexagon", range: 2.0...8.0, defaultValue: 5.0),
+                                WarpParamSpec(slot: 2, label: "q", icon: "hexagon", range: 2.0...8.0, defaultValue: 3.0)],
+                       gpuApplyFn: "warpCoxeter",   // isometric (reflections) → no DE divisor
+                       blurb: "Folds space into a {p,q} reflection group — full 3-D polyhedral mirror symmetry. {5,3}=icosahedral, {4,3}=octahedral, {3,3}=tetrahedral; 1/p+1/q<1/2 goes hyperbolic. Contrast: Kaleidoscope is flat N-fold; this is the polyhedral generalization."),
+        // ── Spherical & Radial ──────────────────────────────────────────────
+        WarpDescriptor(.sphereFold, "Sphere Fold", icon: "circle.circle",
+                       family: .spherical, tagline: "Inflate the core outward (Mandelbox)",
+                       params: [WarpParamSpec(slot: 1, label: "Min Radius", icon: "smallcircle.filled.circle", range: 0.05...2.0, defaultValue: 0.5),
+                                WarpParamSpec(slot: 2, label: "Max Radius", icon: "circle.circle", range: 0.1...4.0, defaultValue: 1.0)],
+                       gpuApplyFn: "warpSphereFold", gpuDEScaleFn: "warpSphereFoldDEScale",
+                       blurb: "Pushes points NEAR the origin outward — inflating/thickening the core — while leaving the region past Max Radius untouched. The Mandelbox 'sphere fold'. Contrast: Sphere Inversion SWAPS near↔far everywhere; Tube Fold does this only in the XZ plane."),
+        WarpDescriptor(.inversion, "Sphere Inversion", icon: "globe",
+                       family: .spherical, tagline: "Turn space inside-out (near ↔ far)",
+                       params: [WarpParamSpec(slot: 1, label: "Radius", icon: "globe", range: 0.1...3.0, defaultValue: 1.0)],
+                       gpuApplyFn: "warpInversion", gpuDEScaleFn: "warpInversionDEScale",
+                       blurb: "A true conformal inversion through a sphere of the given Radius: points inside fly outward and points outside collapse inward — space turned inside-out. Contrast: Sphere Fold only inflates the inside (the outside stays put); this one SWAPS near and far across the whole field."),
+        WarpDescriptor(.circle, "Tube Fold", icon: "cylinder",
+                       family: .spherical, tagline: "Sphere fold in the XZ plane → tubes",
+                       params: [WarpParamSpec(slot: 1, label: "Inner Radius", icon: "smallcircle.filled.circle", range: 0.05...2.0, defaultValue: 0.5),
+                                WarpParamSpec(slot: 2, label: "Outer Radius", icon: "circle.circle", range: 0.1...4.0, defaultValue: 1.0)],
+                       gpuApplyFn: "warpCircle", gpuDEScaleFn: "warpCircleDEScale",
+                       blurb: "Sphere Fold restricted to the horizontal XZ plane — the vertical (Y) axis is left untouched — so it carves vertical tube / cylinder structure instead of spherical blobs. Contrast: Sphere Fold is fully 3-D; this is its 2-D-in-the-plane sibling. (Formerly labelled 'Circle'.)"),
+        WarpDescriptor(.shells, "Shells", icon: "circle.dotted",
+                       family: .spherical, tagline: "Repeat in concentric shells",
+                       params: [WarpParamSpec(slot: 1, label: "Spacing", icon: "circle.dotted", range: 0.1...4.0, defaultValue: 1.0)],
+                       gpuApplyFn: "warpShells",
+                       blurb: "Folds the radius into evenly-spaced concentric shells, repeating the fractal outward like onion layers at a FIXED spacing. Contrast: Scale Repeat spaces its copies so they GROW; these shells are equal thickness."),
+        // ── Self-Similar Repeats ────────────────────────────────────────────
+        WarpDescriptor(.scaleRepeat, "Scale Repeat", icon: "infinity",
+                       family: .selfSimilar, tagline: "Self-similar copies at growing scale",
+                       params: [WarpParamSpec(slot: 1, label: "Scale Factor", icon: "infinity", range: 1.1...4.0, defaultValue: 2.0)],
+                       gpuApplyFn: "warpScaleRepeat", gpuDEScaleFn: "warpScaleRepeatDEScale",
+                       blurb: "Repeats the fractal self-similarly at exponentially GROWING scales (log-radial Droste) — each ring ×Scale-Factor bigger than the last, an infinite-zoom nesting. Contrast: Shells repeat at a FIXED spacing; this one grows."),
+        // ── Bend & Wave (non-fold distortions) ──────────────────────────────
+        WarpDescriptor(.twist, "Twist", icon: "tornado",
+                       family: .distortion, tagline: "Screw space around an axis",
+                       amountLabel: "Twist", usesAxis: true, defaultStrength: 0.6,
+                       gpuApplyFn: "warpTwist",
+                       blurb: "Rotates space progressively along an axis — the further along the axis, the more rotation — for a screw / vortex shear. Contrast: Bend curves around an axis; Twist spins around it."),
+        WarpDescriptor(.bend, "Bend", icon: "wind",
+                       family: .distortion, tagline: "Bow space around an axis",
+                       amountLabel: "Bend", usesAxis: true, defaultStrength: 0.6,
+                       gpuApplyFn: "warpBend",
+                       blurb: "Bows space around an axis, curving straight structure into arcs. Contrast: Twist rotates about the axis; Bend curves toward it."),
+        WarpDescriptor(.ripple, "Ripple", icon: "waveform.path",
+                       family: .distortion, tagline: "Wavy displacement along an axis",
+                       amountLabel: "Ripple", usesAxis: true, defaultStrength: 0.6,
+                       params: [WarpParamSpec(slot: 1, label: "Frequency", icon: "waveform.path", range: 0.1...8.0, defaultValue: 2.0)],
+                       gpuApplyFn: "warpRipple",
+                       blurb: "Displaces space back and forth along an axis in a sine wave — a corrugated / accordion ripple at the given Frequency."),
     ]
 
     private static let byKind: [SpaceWarpKind: WarpDescriptor] =

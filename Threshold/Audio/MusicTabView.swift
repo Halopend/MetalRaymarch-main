@@ -1469,9 +1469,11 @@ struct MusicTabContent: View {
 
     private var availableMappingTargetsToAdd: [MusicReactiveTarget] {
         let existing = Set(cache.audioReactive.musicReactiveMappings.map(\.target))
-        return MusicReactiveTarget.availableCases(for: cache.fractalType).filter { target in
-            !existing.contains(target)
-        }
+        // One transform-stack slot per active op (slot N = transform card #N+1).
+        let warpCount = cache.renderSettings?.spaceWarpStack.count ?? 0
+        let all = MusicReactiveTarget.availableCases(for: cache.fractalType)
+                + MusicReactiveTarget.availableSpaceWarpCases(count: warpCount)
+        return all.filter { !existing.contains($0) }
     }
 
     private func mappingAt(_ index: Int) -> MusicReactiveMapping? {

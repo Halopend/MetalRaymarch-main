@@ -39,6 +39,7 @@ final class MusicReactiveEngine {
         let absAmount: Float
         let sign: Float
         let formulaParamSlot: Int?
+        let spaceWarpSlot: Int?
         let smoothingTime: Float
         let hybridCombo: Float
         let lfo: LFOSettings
@@ -176,6 +177,10 @@ final class MusicReactiveEngine {
         let slotGainLookup = slotGainLookup(for: activeFractalType,
                                             tripletGains: settings.tripletMusicGains)
 
+        // Transform-stack targets bypass the dispatcher: their smoothed offset is
+        // folded straight into spaceWarpStack[slot].strength at snapshot time. Collected
+        // here and written atomically below (empty write clears removed/stale slots).
+        var spaceWarpOffsets: [Int: Float] = [:]
         for mapping in activeResolvedMappings {
             // ── 1. Select audio source level (0-1) ──
             let sourceValue: Float
@@ -281,20 +286,28 @@ final class MusicReactiveEngine {
                 finalOffset = rawTargetValue
             }
 
-            operationsBuffer.append(
-                ParameterOperation(
-                    targetID: mapping.targetID,
-                    source: .audio,
-                    // The music layer is itself additive, so it must receive the
-                    // raw offset to apply on top of the current base value.
-                    value: .absolute(finalOffset),
-                    frameIndex: frameIndex,
-                    smoothing: ParameterOperationSmoothing(
-                        smoothingTime: mapping.smoothingTime
+            if let warpSlot = mapping.spaceWarpSlot {
+                // Additive strength delta, folded into the live op at snapshot time.
+                spaceWarpOffsets[warpSlot] = finalOffset
+            } else {
+                operationsBuffer.append(
+                    ParameterOperation(
+                        targetID: mapping.targetID,
+                        source: .audio,
+                        // The music layer is itself additive, so it must receive the
+                        // raw offset to apply on top of the current base value.
+                        value: .absolute(finalOffset),
+                        frameIndex: frameIndex,
+                        smoothing: ParameterOperationSmoothing(
+                            smoothingTime: mapping.smoothingTime
+                        )
                     )
                 )
-            )
+            }
         }
+
+        // Always publish (an empty set clears slots whose mapping was removed).
+        settings.setSpaceWarpAudioOffsets(spaceWarpOffsets)
 
         if !operationsBuffer.isEmpty {
             pipeline.dispatchAudio(operationsBuffer, settings: settings)
@@ -311,6 +324,8 @@ final class MusicReactiveEngine {
         // Drop any music offsets the playback composer is still layering on the animation
         // (with the engine off, nothing refreshes them back toward zero each frame).
         settings.clearAudioPlaybackOffsets()
+        // Same for the transform-stack offsets — nothing re-publishes them while off.
+        settings.setSpaceWarpAudioOffsets([:])
         layerActive = false
         clearCurveState()
         resetDamping()
@@ -372,6 +387,7 @@ final class MusicReactiveEngine {
                     absAmount: abs(mapping.amount),
                     sign: mapping.amount >= 0 ? 1.0 : -1.0,
                     formulaParamSlot: mapping.target.formulaParamSlot,
+                    spaceWarpSlot: mapping.target.spaceWarpSlot,
                     smoothingTime: max(0.02, mapping.smoothingWindow),
                     hybridCombo: max(0.0, min(1.0, mapping.hybridCombo)),
                     lfo: mapping.lfo
