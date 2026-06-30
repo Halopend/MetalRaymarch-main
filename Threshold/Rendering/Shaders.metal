@@ -457,48 +457,28 @@ FORCE_INLINE float3 warpBend(float3 p, SpaceWarpOp op) {        // 1
 FORCE_INLINE float3 warpMirror(float3 p, SpaceWarpOp op) {      // 2
     return mix(p, abs(p), clamp(op.strength, 0.0f, 1.0f));
 }
-// Hall-of-Mirrors per-axis fold: identity inside [−L, L]; outside, NESTED mirror
-// cells each one octave (2×) WIDER than the last, flipped — "reflection of the
-// reflections at a larger scale, infinitely". Octave k spans |c|∈[L·2ᵏ, L·2ᵏ⁺¹] and
-// maps uniformly back into the base half-cell [0, L] (reversed on even octaves so
-// neighbours mirror, and continuous with the identity region at |c|=L). Each octave
-// is a uniform 2⁻ᵏ contraction → `scaleOut` carries that factor for the DE divisor.
-FORCE_INLINE float boxMirrorAxis(float c, float L, thread float& scaleOut) {
-    float a = fabs(c);
-    if (a <= L) { scaleOut = 1.0f; return c; }      // base cell — identity
-    float k = floor(log2(a / L));                   // octave index (0 = [L, 2L])
-    float invCell = exp2(-k) / L;                   // 1/(L·2ᵏ) — the only exp2 needed
-    float pos = a * invCell - 1.0f;                 // (a − cellInner)/cellInner, in [0, 1)
-    float frac = (fmod(k, 2.0f) < 0.5f) ? (1.0f - pos) : pos;   // even octave reversed
-    scaleOut = L * invCell;                         // = 2⁻ᵏ (contraction) — no second exp2
-    return (c < 0.0f ? -1.0f : 1.0f) * (L * frac);
+// Hall-of-Mirrors per-axis fold: the CLASSIC two-parallel-mirrors tiling — space
+// repeats into infinite IDENTICAL mirrored copies, each cell 2L wide. It's a triangle
+// wave of period 4L: identity on [−L, L], and every neighbouring cell a same-size
+// mirror image of the last (continuous at every wall). Slope is ±1 everywhere, so the
+// fold is ISOMETRIC (no DE divisor needed).
+FORCE_INLINE float hallMirrorAxis(float c, float L) {
+    float period = 4.0f * L;
+    float u = c + L;
+    float m = u - period * floor(u / period);   // positive mod → [0, 4L)
+    return L - fabs(m - 2.0f * L);
 }
 FORCE_INLINE float3 warpBoxFold(float3 p, SpaceWarpOp op) {     // 3
     float t = clamp(op.strength, 0.0f, 1.0f);
     float L = op.p1;   // precomputed max(L, 0.01)
     float3 folded;
     if (op.p2 > 0.5f) {
-        // Hall of Mirrors (growing nested box cells, per axis).
-        float sx, sy, sz;
-        folded = float3(boxMirrorAxis(p.x, L, sx),
-                        boxMirrorAxis(p.y, L, sy),
-                        boxMirrorAxis(p.z, L, sz));
+        // Hall of Mirrors: infinite identical mirrored copies, cells 2L wide.
+        folded = float3(hallMirrorAxis(p.x, L), hallMirrorAxis(p.y, L), hallMirrorAxis(p.z, L));
     } else {
-        folded = clamp(p, -L, L) * 2.0f - p;            // single Tglad box fold (isometric)
+        folded = clamp(p, -L, L) * 2.0f - p;            // single Tglad box fold
     }
-    return mix(p, folded, t);
-}
-// Box fold is isometric (deScale 1) UNLESS Hall of Mirrors is on — then each axis
-// contracts by 2⁻ᵏ; the conservative divisor is the largest (least-contracted) axis.
-FORCE_INLINE float warpBoxFoldDEScale(float3 p, SpaceWarpOp op) {
-    if (op.p2 <= 0.5f) return 1.0f;
-    float t = clamp(op.strength, 0.0f, 1.0f);
-    float L = op.p1;
-    float sx, sy, sz;
-    boxMirrorAxis(p.x, L, sx);
-    boxMirrorAxis(p.y, L, sy);
-    boxMirrorAxis(p.z, L, sz);
-    return max(mix(1.0f, max(sx, max(sy, sz)), t), 1e-3f);
+    return mix(p, folded, t);   // both branches are isometric → no DE divisor (default arm = 1)
 }
 FORCE_INLINE float3 warpSphereFold(float3 p, SpaceWarpOp op) {  // 4
     float t = clamp(op.strength, 0.0f, 1.0f);
@@ -666,7 +646,6 @@ FORCE_INLINE float3 applyWarpOp(float3 p, SpaceWarpOp op) {
 // Conservative DE divisor for one op (only radial warps stretch distance).
 FORCE_INLINE float warpOpDEScale(float3 p, SpaceWarpOp op) {
     switch (op.type) {
-        case 3:  return warpBoxFoldDEScale(p, op);   // 1.0 unless Hall of Mirrors is on
         case 4:  return warpSphereFoldDEScale(p, op);
         case 5:  return warpInversionDEScale(p, op);
         case 8:  return warpCircleDEScale(p, op);
