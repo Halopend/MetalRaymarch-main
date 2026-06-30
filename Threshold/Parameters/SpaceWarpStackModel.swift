@@ -34,6 +34,8 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable {
     case scaleRepeat = 10  // log-radial Droste — self-similar repetition at growing scales
     // Reflection-group family (Coxeter).
     case coxeter = 11      // [p,q] rank-3 reflection group fold — kaleidoscopic / polyhedral symmetry
+    // Plane-fold family (Mandelbulber kaleidoscopic IFS).
+    case planeFold = 12    // reflect across a plane aimed by a normal VECTOR — the kIFS mirror
 
     var id: Int32 { rawValue }
 
@@ -77,6 +79,7 @@ struct WarpDescriptor {
     let icon: String
     let amountLabel: String      // verb for the master-amount slider
     let usesAxis: Bool           // whether the direction axis is meaningful
+    let defaultAxis: SIMD3<Float> // seed axis/normal for a fresh op of this kind
     let defaultStrength: Float
     let strengthRange: ClosedRange<Float>
     let params: [WarpParamSpec]
@@ -86,10 +89,11 @@ struct WarpDescriptor {
     let blurb: String
 
     init(_ kind: SpaceWarpKind, _ displayName: String, icon: String, amountLabel: String = "Amount",
-         usesAxis: Bool = false, defaultStrength: Float = 1.0, strengthRange: ClosedRange<Float> = 0.0...2.0,
+         usesAxis: Bool = false, defaultAxis: SIMD3<Float> = SIMD3<Float>(0, 1, 0),
+         defaultStrength: Float = 1.0, strengthRange: ClosedRange<Float> = 0.0...2.0,
          params: [WarpParamSpec] = [], toggle: WarpToggleSpec? = nil, gpuApplyFn: String, gpuDEScaleFn: String? = nil, blurb: String) {
         self.kind = kind; self.displayName = displayName; self.icon = icon
-        self.amountLabel = amountLabel; self.usesAxis = usesAxis
+        self.amountLabel = amountLabel; self.usesAxis = usesAxis; self.defaultAxis = defaultAxis
         self.defaultStrength = defaultStrength; self.strengthRange = strengthRange
         self.params = params; self.toggle = toggle
         self.gpuApplyFn = gpuApplyFn; self.gpuDEScaleFn = gpuDEScaleFn
@@ -152,6 +156,13 @@ enum WarpCatalog {
                                 WarpParamSpec(slot: 2, label: "q", icon: "hexagon", range: 2.0...8.0, defaultValue: 3.0)],
                        gpuApplyFn: "warpCoxeter",   // isometric (reflections) → no DE divisor
                        blurb: "Fold space into a {p,q} kaleidoscopic mirror group (polyhedral / Coxeter symmetry). {5,3}=icosahedral, {4,3}=octahedral; 1/p+1/q<1/2 goes hyperbolic."),
+        // ── Plane fold (Mandelbulber kaleidoscopic IFS) ─────────────────────
+        WarpDescriptor(.planeFold, "Plane Fold", icon: "triangle", amountLabel: "Fold",
+                       usesAxis: true, defaultAxis: SIMD3<Float>(1, -1, 0),
+                       defaultStrength: 1.0, strengthRange: 0.0...1.0,
+                       params: [WarpParamSpec(slot: 1, label: "Distance", icon: "ruler", range: -2.0...2.0, defaultValue: 0.0)],
+                       gpuApplyFn: "warpPlaneFold",   // conditional reflection (isometric) → no DE divisor
+                       blurb: "Reflect space across a plane you aim with a normal VECTOR — Mandelbulber's kaleidoscopic-IFS fold (reflect when behind the plane). Stack several, each a mirror plane, to build Sierpinski / kaleidoscopic symmetry; add a Scale Repeat for self-similar depth."),
     ]
 
     private static let byKind: [SpaceWarpKind: WarpDescriptor] =
@@ -183,7 +194,7 @@ struct SpaceWarpOpValue: Codable, Identifiable, Hashable {
         self.strength = d.defaultStrength
         self.p1 = d.params.first(where: { $0.slot == 1 })?.defaultValue ?? 0
         self.p2 = d.params.first(where: { $0.slot == 2 })?.defaultValue ?? 0
-        self.axis = SIMD3<Float>(0, 1, 0)
+        self.axis = d.defaultAxis
         self.isEnabled = true
     }
 
@@ -224,8 +235,8 @@ private func precomputedGPUOp(from v: SpaceWarpOpValue) -> SpaceWarpOp {
     var p1 = v.p1
     var p2 = v.p2
     switch v.kind {
-    case .twist, .bend, .mirror:
-        break                                                    // no radius/limit precompute
+    case .twist, .bend, .mirror, .planeFold:
+        break                  // axis pre-normalized at top; planeFold p1 = plane distance (passthrough)
     case .ripple:
         p1 = max(v.p1, 0.01)                                     // freq
     case .boxFold:

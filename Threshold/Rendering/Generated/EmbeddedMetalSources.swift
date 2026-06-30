@@ -2361,6 +2361,26 @@ FORCE_INLINE float3 warpCoxeter(float3 p, SpaceWarpOp op) {    // 11 — [p,q] m
     return mix(p, q, t);
 }
 
+// ── Plane fold (Mandelbulber kaleidoscopic IFS) ──────────────────────────────
+// One conditional plane reflection — the kIFS inner fold: reflect p across the
+// plane {dot(p,n)=d} ONLY when it sits behind the plane (dot < d). n is the unit
+// normal (a VECTOR the user aims, precomputed on CPU); d = op.p1 (signed distance);
+// strength = Mandelbulber's per-plane INTENSITY (0..1 blend; 1 = a true reflection
+// → isometric, deScale 1). Matches kaleidoscopic_ifs.cl:
+//   length = dot(z, direction); if (length < distance) z -= direction*2*(length-distance)*intensity;
+// Stack several (each a mirror plane) to build the kaleidoscopic / Sierpinski set.
+FORCE_INLINE float3 warpPlaneFold(float3 p, SpaceWarpOp op) {  // 12
+    float intensity = clamp(op.strength, 0.0f, 1.0f);
+    if (intensity <= 0.0f) return p;
+    float3 n = warpAxisNorm(op);   // unit plane normal
+    float d = op.p1;               // signed plane distance from origin
+    float len = dot(p, n);
+    if (len < d) {
+        p -= n * (2.0f * (len - d) * intensity);
+    }
+    return p;
+}
+
 // Runtime dispatch (default path): a coherent switch over op.type.
 FORCE_INLINE float3 applyWarpOp(float3 p, SpaceWarpOp op) {
     switch (op.type) {
@@ -2377,6 +2397,7 @@ FORCE_INLINE float3 applyWarpOp(float3 p, SpaceWarpOp op) {
         case 9: return warpShells(p, op);
         case 10: return warpScaleRepeat(p, op);
         case 11: return warpCoxeter(p, op);
+        case 12: return warpPlaneFold(p, op);
     }
 }
 // Conservative DE divisor for one op (only radial warps stretch distance).

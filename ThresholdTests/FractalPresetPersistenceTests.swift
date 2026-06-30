@@ -260,6 +260,22 @@ struct FractalPresetPersistenceTests {
         #expect(cSpaceWarpStack(from: [full(.mirror), full(.mirror)]).count == 1)
     }
 
+    @Test("Plane Fold (kIFS) precompute: normal normalized, distance passthrough, isometric")
+    func planeFoldPrecompute() throws {
+        var pf = SpaceWarpOpValue(kind: .planeFold)
+        #expect(pf.axis == SIMD3<Float>(1, -1, 0))                 // diagonal default normal
+        #expect(SpaceWarpKind.planeFold.usesAxis)                  // normal is user-aimed
+        #expect(SpaceWarpKind.planeFold.descriptor.gpuDEScaleFn == nil)  // reflection → isometric
+        pf.p1 = 0.5                                                // plane distance
+        pf.axis = SIMD3<Float>(0, 0, 3)                            // non-unit → must normalize
+        let stack = cSpaceWarpStack(from: [pf])
+        let op = withUnsafePointer(to: stack.ops) { tuplePtr in
+            tuplePtr.withMemoryRebound(to: SpaceWarpOp.self, capacity: Int(kMaxSpaceWarpOps)) { $0[0] }
+        }
+        #expect(abs(op.axisX) < 1e-5 && abs(op.axisY) < 1e-5 && abs(op.axisZ - 1.0) < 1e-5)  // unit normal
+        #expect(abs(op.p1 - 0.5) < 1e-5)                           // distance unchanged
+    }
+
     @Test("Coxeter diagram naming: {p,q} → spherical / Euclidean / hyperbolic")
     func coxeterDiagramNaming() throws {
         // Spherical (1/p + 1/q > 1/2) — the polyhedral families.
