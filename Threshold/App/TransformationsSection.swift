@@ -159,11 +159,11 @@ struct TransformationsSection: View {
                     }
                 }
 
-                // Direction axis (Twist / Bend / Ripple).
+                // Direction axis / offset vector (Twist / Bend / Ripple / Plane Fold / Offset Fold).
                 if kind.usesAxis {
-                    axisRow(op, "Axis X", "arrow.left.and.right", \.x)
-                    axisRow(op, "Axis Y", "arrow.up.and.down", \.y)
-                    axisRow(op, "Axis Z", "arrow.up.left.and.arrow.down.right", \.z)
+                    axisRow(op, "\(kind.axisLabel) X", "arrow.left.and.right", \.x)
+                    axisRow(op, "\(kind.axisLabel) Y", "arrow.up.and.down", \.y)
+                    axisRow(op, "\(kind.axisLabel) Z", "arrow.up.left.and.arrow.down.right", \.z)
                 }
                 }
             }

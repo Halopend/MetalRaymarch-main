@@ -349,7 +349,7 @@ every slice must launch green. Each slice is independently revertible.
 | 6 | Collapse 3 `gestureBindable*` → one capability filter; add `tripletGroupKey` | gesture assemblers | low | no | Finger-binding menu lists same scalars + xyz triplets |
 | 7 | Generate formula descriptors via `makeFormula`; assert range under `formulaBatchLock` | formula construction unified + ranged | medium | no | Switch through all 12 fractals + `.custom`; formula sliders/gestures unchanged |
 | 8 | Activate `route`: one tab section renders data-driven via `routedDescriptors.filter{route.tab==…}` | (pilots dead `Module.route`) | medium | no | Shape tab visual order pixel-matches hand-placed layout |
-| 9 (deferred) | Generic `audioModulate(targetID:)` clamping via `descriptor.clamp`; assert setter literal == spec.range | RenderSettings clamp drift (6th registry) | high | no | Audio-driven blend/radius clamp identically at extremes |
+| 9 (**LANDED** 2026-06-30) | Generic `audioModulate(targetID:value:)` clamping via `descriptor.clamp` (`RenderSettings.swift`); machine-checked drift closure in `ParameterCatalogTests` — each descriptor's `settings.write` proven to clamp to its OWN spec or pass raw, never a divergent range | RenderSettings clamp drift (6th registry) | high | no | ✅ 44 tests green (Mac). Generic entry clamps every routed id; per-name setters kept (animation compose loop). NOT device-fps-verified — but no hot-path rewire, so no fps risk |
 
 ---
 

@@ -668,6 +668,51 @@ FORCE_INLINE float3 warpPlaneFold(float3 p, SpaceWarpOp op) {  // 12
     return p;
 }
 
+// ── Menger fold (abs + descending sort) ──────────────────────────────────────
+// Fold into the positive octant, then sort the components so the largest is on X.
+// abs() and the coordinate swaps are both isometries (|slope|=1, permutation) →
+// deScale stays 1. This is the Mandelbulber `transf_abs_sym3` / Menger-sponge prep:
+// stacked with a Scale + Offset it builds the sponge's octahedral self-similarity.
+FORCE_INLINE float3 warpMengerFold(float3 p, SpaceWarpOp op) {  // 13
+    float t = clamp(op.strength, 0.0f, 1.0f);
+    float3 a = abs(p);
+    if (a.x < a.y) a.xy = a.yx;
+    if (a.x < a.z) a.xz = a.zx;
+    if (a.y < a.z) a.yz = a.zy;
+    return mix(p, a, t);
+}
+// ── Tiling (domain repeat) ───────────────────────────────────────────────────
+// Wrap space into an infinite lattice of identical cells of edge `size` centred on
+// the origin: p -= size·round(p/size). A translation per cell → isometric (the
+// `round` term is piecewise-constant, contributes 0 to the derivative), deScale 1.
+FORCE_INLINE float3 warpTiling(float3 p, SpaceWarpOp op) {      // 14
+    float t = clamp(op.strength, 0.0f, 1.0f);
+    float s = op.p1;   // precomputed max(size, 0.05)
+    float3 q = p - s * round(p / s);
+    return mix(p, q, t);
+}
+// ── Uniform scale (IFS glue) ─────────────────────────────────────────────────
+// Straight uniform scale of the domain by `strength` (the master slider IS the
+// factor here — no 0..1 blend). |∇ f(p·s)| = s, so the DE must be divided by s to
+// stay Lipschitz-1: warpScaleDEScale returns exactly s. Between two folds this is
+// the classic fold→scale IFS step that grows Sierpinski / Menger structure.
+FORCE_INLINE float3 warpScale(float3 p, SpaceWarpOp op) {       // 15
+    return p * op.strength;   // strength = scale factor (not clamped to 0..1)
+}
+FORCE_INLINE float warpScaleDEScale(float3 p, SpaceWarpOp op) {
+    return max(op.strength, 1e-3f);
+}
+// ── Offset fold (abs about an off-origin centre) ─────────────────────────────
+// p ↦ |p + c|: a mirror fold whose crease is shifted by the offset vector c (the
+// Axis/Offset sliders, used RAW — not normalized). Breaks the origin-symmetry of
+// Mirror Fold, giving asymmetric Mandelbox-like structure. Fold+translate → the
+// blended map is Lipschitz ≤ 1, so deScale 1 (default arm).
+FORCE_INLINE float3 warpOffsetFold(float3 p, SpaceWarpOp op) {  // 16
+    float t = clamp(op.strength, 0.0f, 1.0f);
+    float3 c = float3(op.axisX, op.axisY, op.axisZ);   // raw offset (not normalized)
+    return mix(p, abs(p + c), t);
+}
+
 // Runtime dispatch (default path): a coherent switch over op.type.
 FORCE_INLINE float3 applyWarpOp(float3 p, SpaceWarpOp op) {
     switch (op.type) {
@@ -685,15 +730,20 @@ FORCE_INLINE float3 applyWarpOp(float3 p, SpaceWarpOp op) {
         case 10: return warpScaleRepeat(p, op);
         case 11: return warpCoxeter(p, op);
         case 12: return warpPlaneFold(p, op);
+        case 13: return warpMengerFold(p, op);
+        case 14: return warpTiling(p, op);
+        case 15: return warpScale(p, op);
+        case 16: return warpOffsetFold(p, op);
     }
 }
-// Conservative DE divisor for one op (only radial warps stretch distance).
+// Conservative DE divisor for one op (only radial / scaling warps stretch distance).
 FORCE_INLINE float warpOpDEScale(float3 p, SpaceWarpOp op) {
     switch (op.type) {
         case 4:  return warpSphereFoldDEScale(p, op);
         case 5:  return warpInversionDEScale(p, op);
         case 8:  return warpCircleDEScale(p, op);
         case 10: return warpScaleRepeatDEScale(p, op);
+        case 15: return warpScaleDEScale(p, op);
         default: return 1.0f;
     }
 }

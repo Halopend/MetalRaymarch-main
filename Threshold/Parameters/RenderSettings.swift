@@ -868,6 +868,28 @@ final class RenderSettings: @unchecked Sendable {
     func audioModulateSpaceWarpOriginX(_ value: Float) { withLock { _spaceWarpParam1 = value } }
     func audioModulateSpaceWarpOriginY(_ value: Float) { withLock { _spaceWarpParam2 = value } }
     func audioModulateSpaceWarpOriginZ(_ value: Float) { withLock { _spaceWarpParam3 = value } }
+
+    /// Generic, catalog-clamped audio-modulation entry (parameter-node hierarchy
+    /// Slice 9). Clamps `value` to the routed descriptor's authoritative
+    /// `ParameterCatalog` spec range — the single source of truth — then writes it
+    /// through that descriptor's off-main settings binding.
+    ///
+    /// This is the sanctioned front door for driving a routed core/effect/space
+    /// scalar from the audio layer: new parameters get audio modulation for free by
+    /// authoring a descriptor, instead of hand-writing a per-name `audioModulate<Name>`
+    /// setter with its own copied `ControlCatalog.<spec>.clamp` literal (the "6th
+    /// registry" the migration set out to retire). The per-name setters remain because
+    /// the animation-playback compose loop calls them directly; `ParameterCatalogTests`
+    /// asserts each one clamps to its descriptor's spec, so the two clamp paths can't
+    /// silently drift. No-op for an unknown id.
+    ///
+    /// The clamp is computed lock-free (`spec.clamp` is pure) and the binding write is
+    /// invoked outside any lock, so it composes with the lock-taking property setters
+    /// without reentrancy.
+    func audioModulate(targetID: String, value: Float) {
+        guard let descriptor = ParameterCatalog.byID[targetID] else { return }
+        descriptor.settings.write(self, descriptor.clamp(value))
+    }
     
     var foldingLimit: Float {
         get { withLock { _foldingLimit } }

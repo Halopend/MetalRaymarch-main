@@ -36,6 +36,11 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable {
     case coxeter = 11      // [p,q] rank-3 reflection group fold — kaleidoscopic / polyhedral symmetry
     // Plane-fold family (Mandelbulber kaleidoscopic IFS).
     case planeFold = 12    // reflect across a plane aimed by a normal VECTOR — the kIFS mirror
+    // Mandelbulber-lineage primitives (abs-sort / lattice / scale / offset fold).
+    case mengerFold = 13   // abs + descending-sort fold — Menger-sponge octahedral prep
+    case tiling = 14       // domain repeat — infinite identical cells (round-lattice)
+    case scale = 15        // uniform domain scale (IFS glue; strength = factor, deScale = factor)
+    case offsetFold = 16   // p ↦ |p + c| — mirror fold about an off-origin centre
 
     var id: Int32 { rawValue }
 
@@ -47,6 +52,7 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable {
     var icon: String { descriptor.icon }
     var amountLabel: String { descriptor.amountLabel }
     var usesAxis: Bool { descriptor.usesAxis }
+    var axisLabel: String { descriptor.axisLabel }
     var defaultStrength: Float { descriptor.defaultStrength }
     var strengthRange: ClosedRange<Float> { descriptor.strengthRange }
     var params: [WarpParamSpec] { descriptor.params }
@@ -71,6 +77,10 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable {
         case .scaleRepeat:  return "p ↦ p · s^(−⌊log_s|p|⌋)   — map |p| into the base octave [1, s) (log-radial Droste)"
         case .coxeter:      return "reflect p into the {p,q} fundamental domain across 3 mirror normals (n₀,n₁,n₂)"
         case .planeFold:    return "if p·n < d:  p −= 2 (p·n − d) · n · strength   — reflect when behind the plane"
+        case .mengerFold:   return "p ↦ abs(p), then sort so |x|≥|y|≥|z|   — fold + permute into one octant (Menger prep)"
+        case .tiling:       return "p ↦ p − size · round(p / size)   — wrap into an infinite lattice of size-wide cells"
+        case .scale:        return "p ↦ p · scale   — uniform domain scale (DE ÷ scale); the fold→scale IFS step"
+        case .offsetFold:   return "p ↦ mix(p, |p + c|, strength)   — mirror fold about an off-origin centre c"
         }
     }
 }
@@ -113,6 +123,7 @@ struct WarpDescriptor {
     let tagline: String          // one-line plain-language "what it does" (shown on the card)
     let amountLabel: String      // verb for the master-amount slider
     let usesAxis: Bool           // whether the direction axis is meaningful
+    let axisLabel: String        // noun for the 3 axis sliders ("Axis" / "Offset" / …)
     let defaultAxis: SIMD3<Float> // seed axis/normal for a fresh op of this kind
     let defaultStrength: Float
     let strengthRange: ClosedRange<Float>
@@ -124,12 +135,12 @@ struct WarpDescriptor {
 
     init(_ kind: SpaceWarpKind, _ displayName: String, icon: String, family: WarpFamily, tagline: String,
          amountLabel: String = "Amount",
-         usesAxis: Bool = false, defaultAxis: SIMD3<Float> = SIMD3<Float>(0, 1, 0),
+         usesAxis: Bool = false, axisLabel: String = "Axis", defaultAxis: SIMD3<Float> = SIMD3<Float>(0, 1, 0),
          defaultStrength: Float = 1.0, strengthRange: ClosedRange<Float> = 0.0...2.0,
          params: [WarpParamSpec] = [], toggle: WarpToggleSpec? = nil, gpuApplyFn: String, gpuDEScaleFn: String? = nil, blurb: String) {
         self.kind = kind; self.displayName = displayName; self.icon = icon
         self.family = family; self.tagline = tagline
-        self.amountLabel = amountLabel; self.usesAxis = usesAxis; self.defaultAxis = defaultAxis
+        self.amountLabel = amountLabel; self.usesAxis = usesAxis; self.axisLabel = axisLabel; self.defaultAxis = defaultAxis
         self.defaultStrength = defaultStrength; self.strengthRange = strengthRange
         self.params = params; self.toggle = toggle
         self.gpuApplyFn = gpuApplyFn; self.gpuDEScaleFn = gpuDEScaleFn
@@ -172,6 +183,16 @@ enum WarpCatalog {
                                 WarpParamSpec(slot: 2, label: "q", icon: "hexagon", range: 2.0...8.0, defaultValue: 3.0)],
                        gpuApplyFn: "warpCoxeter",   // isometric (reflections) → no DE divisor
                        blurb: "Folds space into a {p,q} reflection group — full 3-D polyhedral mirror symmetry. {5,3}=icosahedral, {4,3}=octahedral, {3,3}=tetrahedral; 1/p+1/q<1/2 goes hyperbolic. Contrast: Kaleidoscope is flat N-fold; this is the polyhedral generalization."),
+        WarpDescriptor(.mengerFold, "Menger Fold", icon: "square.grid.3x3",
+                       family: .mirror, tagline: "Fold + sort into one octant (Menger)",
+                       gpuApplyFn: "warpMengerFold",   // abs + permutation → isometric, no DE divisor
+                       blurb: "Folds every axis into the positive octant (abs) then sorts the coordinates so the largest is on X — the octahedral prep the Menger sponge is built from. Alone it mirrors the scene into one wedge; stack a Scale + Offset Fold after it to grow true Menger / Sierpinski self-similarity. Contrast: Mirror Fold folds without sorting; this adds the 3-way symmetry the sponge needs."),
+        WarpDescriptor(.offsetFold, "Offset Fold", icon: "square.on.square.dashed",
+                       family: .mirror, tagline: "Mirror fold about an off-centre point",
+                       usesAxis: true, axisLabel: "Offset", defaultAxis: SIMD3<Float>(0.5, 0.0, 0.0),
+                       defaultStrength: 1.0, strengthRange: 0.0...1.0,
+                       gpuApplyFn: "warpOffsetFold",   // fold + translate → isometric, no DE divisor
+                       blurb: "p ↦ |p + Offset|: a mirror fold whose crease is shifted off the origin by the Offset vector, so the two sides fold ASYMMETRICALLY. This broken symmetry is what turns a plain octant fold into Mandelbox-like structure. Contrast: Mirror Fold creases exactly on the axes; this one you can slide."),
         // ── Spherical & Radial ──────────────────────────────────────────────
         WarpDescriptor(.sphereFold, "Sphere Fold", icon: "circle.circle",
                        family: .spherical, tagline: "Inflate the core outward (Mandelbox)",
@@ -201,6 +222,16 @@ enum WarpCatalog {
                        params: [WarpParamSpec(slot: 1, label: "Scale Factor", icon: "infinity", range: 1.1...4.0, defaultValue: 2.0)],
                        gpuApplyFn: "warpScaleRepeat", gpuDEScaleFn: "warpScaleRepeatDEScale",
                        blurb: "Repeats the fractal self-similarly at exponentially GROWING scales (log-radial Droste) — each ring ×Scale-Factor bigger than the last, an infinite-zoom nesting. Contrast: Shells repeat at a FIXED spacing; this one grows."),
+        WarpDescriptor(.tiling, "Tiling", icon: "grid",
+                       family: .selfSimilar, tagline: "Repeat space into an infinite lattice",
+                       params: [WarpParamSpec(slot: 1, label: "Cell Size", icon: "grid", range: 0.2...6.0, defaultValue: 2.0)],
+                       gpuApplyFn: "warpTiling",   // per-cell translation → isometric, no DE divisor
+                       blurb: "Wraps space into an infinite grid of identical cells of the given Cell Size, tiling the whole fractal in every direction like a crystal lattice. Contrast: Shells/Scale Repeat tile RADIALLY (outward rings); this tiles the CARTESIAN grid."),
+        WarpDescriptor(.scale, "Scale", icon: "arrow.up.left.and.arrow.down.right.circle",
+                       family: .selfSimilar, tagline: "Uniform zoom — the IFS fold→scale step",
+                       amountLabel: "Scale", defaultStrength: 2.0, strengthRange: 0.2...3.0,
+                       gpuApplyFn: "warpScale", gpuDEScaleFn: "warpScaleDEScale",
+                       blurb: "A plain uniform scale of the domain (the master slider IS the factor). On its own it just zooms; its real job is BETWEEN folds — a fold then a Scale then another fold is the Iterated-Function-System step that grows Sierpinski / Menger structure. Stack fold→Scale→fold→Scale for a few levels of true self-similarity. Contrast: Scale Repeat bakes infinite growing copies in one op; this is the single, composable scale you place by hand."),
         // ── Bend & Wave (non-fold distortions) ──────────────────────────────
         WarpDescriptor(.twist, "Twist", icon: "tornado",
                        family: .distortion, tagline: "Screw space around an axis",
@@ -290,8 +321,16 @@ private func precomputedGPUOp(from v: SpaceWarpOpValue) -> SpaceWarpOp {
     var p1 = v.p1
     var p2 = v.p2
     switch v.kind {
-    case .twist, .bend, .mirror, .planeFold:
-        break                  // axis pre-normalized at top; planeFold p1 = plane distance (passthrough)
+    case .twist, .bend, .mirror, .planeFold, .mengerFold, .scale:
+        break                  // axis pre-normalized at top; planeFold p1 = plane distance;
+                               // mengerFold uses no fields; scale reads strength as the factor
+    case .tiling:
+        p1 = max(v.p1, 0.05)                                    // cell size
+    case .offsetFold:
+        // Offset fold uses the axis as a RAW translation (crease centre), NOT a
+        // normalized direction — return it unchanged, bypassing the normalize below.
+        return SpaceWarpOp(type: v.type, strength: v.strength, p1: v.p1, p2: v.p2,
+                           axisX: v.axis.x, axisY: v.axis.y, axisZ: v.axis.z, _pad: 0)
     case .ripple:
         p1 = max(v.p1, 0.01)                                     // freq
     case .boxFold:

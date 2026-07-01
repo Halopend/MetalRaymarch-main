@@ -79,6 +79,62 @@ struct ParameterCatalogTests {
         }
     }
 
+    // MARK: Slice 9 — the audioModulate clamp is no longer validator-invisible
+
+    /// The former "6th registry": each `audioModulate<Name>` setter clamps against a
+    /// hand-picked `ControlCatalog.<spec>`, and nothing proved that spec is the SAME
+    /// one its routed descriptor owns. Drive every descriptor's off-main `settings.write`
+    /// past both bounds and assert the stored value is EITHER clamped to that
+    /// descriptor's own spec range OR passed through raw (the params whose write is
+    /// guarded upstream by the dispatcher's spec-range clamp — e.g. fractalScale,
+    /// colorMix, the Twist origin axes). A write that clamps to any *other* range
+    /// (the actual drift failure mode) lands on neither value and trips this test.
+    @Test("Each descriptor's settings.write clamps to its OWN spec range, or not at all (no divergent-range clamp)")
+    func settingsWriteClampMatchesSpec() {
+        let overshoot: Float = 1000
+        for descriptor in ParameterCatalog.routedDescriptors {
+            let lo = descriptor.spec.range.lowerBound
+            let hi = descriptor.spec.range.upperBound
+
+            let highInput = hi + overshoot
+            let sHigh = RenderSettings()
+            descriptor.settings.write(sHigh, highInput)
+            let readHigh = descriptor.settings.read(sHigh)
+            #expect(readHigh == hi || readHigh == highInput,
+                    "\(descriptor.id): write(\(highInput)) stored \(readHigh) — neither spec max \(hi) nor raw input (divergent-range clamp?)")
+
+            let lowInput = lo - overshoot
+            let sLow = RenderSettings()
+            descriptor.settings.write(sLow, lowInput)
+            let readLow = descriptor.settings.read(sLow)
+            #expect(readLow == lo || readLow == lowInput,
+                    "\(descriptor.id): write(\(lowInput)) stored \(readLow) — neither spec min \(lo) nor raw input (divergent-range clamp?)")
+        }
+    }
+
+    /// The generic `audioModulate(targetID:value:)` entry clamps via the catalog for
+    /// EVERY routed id (unlike the raw property setters), so audio can never push a
+    /// routed scalar past its spec range through this door. Unknown ids are a silent no-op.
+    @Test("Generic audioModulate(targetID:value:) clamps to spec for every routed id")
+    func genericAudioModulateClampsToSpec() {
+        for descriptor in ParameterCatalog.routedDescriptors {
+            let lo = descriptor.spec.range.lowerBound
+            let hi = descriptor.spec.range.upperBound
+
+            let sHigh = RenderSettings()
+            sHigh.audioModulate(targetID: descriptor.id, value: hi + 1000)
+            #expect(descriptor.settings.read(sHigh) == hi,
+                    "\(descriptor.id): generic audioModulate did not clamp to spec max \(hi)")
+
+            let sLow = RenderSettings()
+            sLow.audioModulate(targetID: descriptor.id, value: lo - 1000)
+            #expect(descriptor.settings.read(sLow) == lo,
+                    "\(descriptor.id): generic audioModulate did not clamp to spec min \(lo)")
+        }
+        // Unknown id is a no-op (must not trap).
+        RenderSettings().audioModulate(targetID: "definitely.not.a.real.id", value: 1)
+    }
+
     // MARK: Startup routing tripwire — run it in CI, not just at app launch
 
     @Test("validateStartupRouting passes (the lockstep tripwire, exercised in-process)")
