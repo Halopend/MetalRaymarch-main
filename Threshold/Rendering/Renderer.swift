@@ -824,6 +824,11 @@ actor Renderer {
             return
         }
 
+        // Brackets the whole frame (every return path below) as one Instruments
+        // signpost interval; see RenderSignposts.swift.
+        let frameTraceState = RenderTrace.begin("Frame")
+        defer { RenderTrace.end("Frame", frameTraceState) }
+
         frame.startUpdate()
 
         // Perform frame independent work
@@ -849,14 +854,20 @@ actor Renderer {
 
         guard let timing = frame.predictTiming() else { return }
         let clockWaitStart = CACurrentMediaTime()
+        let clockWaitTraceState = RenderTrace.begin("Clock Wait")
         LayerRenderer.Clock().wait(until: timing.optimalInputTime)
+        RenderTrace.end("Clock Wait", clockWaitTraceState)
         frameBreakdown.clockWaitMs = (CACurrentMediaTime() - clockWaitStart) * 1000.0
 
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
             if RENDERER_DEBUG { print("⚠️ Failed to create command buffer; skipping frame") }
             return
         }
-        
+        // Traces this command buffer's commit→completion latency regardless of
+        // which of the frame's several `commandBuffer.commit()` call sites ends
+        // up firing.
+        RenderTrace.traceGPU("GPU Frame", commandBuffer: commandBuffer)
+
         // Use residency set to ensure all resources stay GPU-resident during this frame
         if #available(visionOS 2.0, iOS 18.0, macOS 15.0, *) {
             if let set = residencySet {
@@ -893,11 +904,14 @@ actor Renderer {
         // when we're already below it.)
         // Timeout at 100ms (~10 FPS floor) to detect GPU stalls instead of hanging forever.
         let inFlightWaitStart = CACurrentMediaTime()
+        let inFlightWaitTraceState = RenderTrace.begin("InFlight Wait")
         let waitResult = inFlightSemaphore.wait(timeout: .now() + .milliseconds(100))
+        RenderTrace.end("InFlight Wait", inFlightWaitTraceState)
         frameBreakdown.inFlightWaitMs = (CACurrentMediaTime() - inFlightWaitStart) * 1000.0
         if waitResult == .timedOut {
             // GPU is severely behind — present an empty frame to satisfy CompositorServices,
             // then skip rendering to avoid accumulating latency.
+            RenderTrace.event("GPU Stall", "inFlightSemaphore timed out (100ms)")
             if RENDERER_DEBUG { print("⚠️ GPU stall detected: inFlightSemaphore timed out (100ms)") }
             frame.startSubmission()
             defer { frame.endSubmission() }
@@ -1068,7 +1082,9 @@ actor Renderer {
         frameBreakdown.snapshotMs = (CACurrentMediaTime() - snapshotStart) * 1000.0
         
         let updateGameStateStart = CACurrentMediaTime()
+        let updateGameStateTraceState = RenderTrace.begin("Update Game State")
         let framePreparation = self.updateGameState(drawable: drawable, settingsSnapshot: settingsSnapshot)
+        RenderTrace.end("Update Game State", updateGameStateTraceState)
         frameBreakdown.updateGameStateMs = (CACurrentMediaTime() - updateGameStateStart) * 1000.0
 
         // Begin submission only once CPU updates are complete.
@@ -1077,6 +1093,8 @@ actor Renderer {
         defer { frame.endSubmission() }
 
         let renderEncodeStart = CACurrentMediaTime()
+        let renderEncodeTraceState = RenderTrace.begin("Render Encode")
+        defer { RenderTrace.end("Render Encode", renderEncodeTraceState) }
 
         let framePath = selectFramePath(settingsSnapshot: settingsSnapshot)
         let useAdaptiveCompute: Bool

@@ -14,6 +14,13 @@ struct ThresholdMacApp: App {
                 .onOpenURL { url in
                     appModel.openExternalFile(url)
                 }
+                .task {
+                    // Headless offscreen perf sweep; runs and exits only when
+                    // THRESHOLD_BENCHMARK=1 (see MacBenchmarkHarness).
+                    if BenchmarkMode.isActive {
+                        await MacBenchmarkHarness.run(appModel: appModel)
+                    }
+                }
         }
         .defaultSize(width: 1780, height: 920)
         .windowResizability(.contentMinSize)
@@ -22,7 +29,9 @@ struct ThresholdMacApp: App {
                 appModel.isAppActive = true
                 appModel.presetManager.refreshBundledPresets()
             } else if newPhase == .background || newPhase == .inactive {
-                appModel.isAppActive = false
+                // In benchmark mode keep the render loop alive while unfocused so
+                // an unattended profiler run captures a continuous workload.
+                if !BenchmarkMode.isActive { appModel.isAppActive = false }
                 appModel.saveLastState()
                 Task { await UsageAnalytics.shared.endSession() }
             }

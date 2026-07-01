@@ -242,7 +242,7 @@ struct ThresholdMacRenderView: NSViewRepresentable {
 #endif
 
 
-private final class ThresholdMacRenderer {
+final class ThresholdMacRenderer {
     private enum SetupError: Error {
         case badVertexDescriptor
         case metalLibraryUnavailable
@@ -495,12 +495,80 @@ private final class ThresholdMacRenderer {
         adaptiveResolution.reset()
     }
 
+    // MARK: - Headless benchmark support (BenchmarkMode / MacBenchmarkHarness)
+
+    private var benchColorTexture: MTLTexture?
+    private var benchDepthTexture: MTLTexture?
+
+    /// Renders one native-resolution raymarch frame into an offscreen target and
+    /// blocks until the GPU finishes, returning measured cost. Used only by the
+    /// headless benchmark harness — it bypasses the CAMetalLayer drawable, the
+    /// MTKView display link, and MetalFX so a benchmark can run continuously with
+    /// no on-screen window (the display link is throttled to near-zero when the
+    /// app isn't the composited foreground). It is faithful to the shipping
+    /// raymarch GPU cost: same specialized pipeline, uniforms, distance-estimator,
+    /// and in-kernel step counter as `draw(appModel:)`'s native path.
+    func renderBenchmarkFrame(appModel: AppModel, width: Int, height: Int)
+        -> (gpuMs: Double, cpuEncodeMs: Double, avgSteps: Double)? {
+        guard width > 0, height > 0 else { return nil }
+        drawableSize = CGSize(width: width, height: height)
+
+        if benchColorTexture?.width != width || benchColorTexture?.height != height {
+            let cd = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: colorPixelFormat, width: width, height: height, mipmapped: false)
+            cd.usage = [.renderTarget, .shaderRead]
+            cd.storageMode = .private
+            let dd = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: depthPixelFormat, width: width, height: height, mipmapped: false)
+            dd.usage = [.renderTarget]
+            dd.storageMode = .private
+            benchColorTexture = device.makeTexture(descriptor: cd)
+            benchDepthTexture = device.makeTexture(descriptor: dd)
+        }
+        guard let color = benchColorTexture, let depth = benchDepthTexture else { return nil }
+
+        let cpuStart = CACurrentMediaTime()
+        let frameSlot = uniformBufferIndex
+        let uniformBuffer = uniformBuffers[frameSlot]
+        uniformBufferIndex = (uniformBufferIndex + 1) % uniformBuffers.count
+        writeUniforms(to: uniformBuffer, appModel: appModel)
+
+        let benchBuffer = benchCounterBuffers[frameSlot]
+        let collectSteps = BenchmarkManager.shared.shouldCollectSteps
+        if collectSteps { memset(benchBuffer.contents(), 0, MemoryLayout<UInt32>.stride * 2) }
+
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
+        let pipeline = resolveActivePipeline(appModel: appModel)
+        let descriptor = makeOffscreenRenderPassDescriptor(color: color, depth: depth)
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return nil }
+        encodeRaymarch(into: encoder, pipeline: pipeline, uniformBuffer: uniformBuffer, benchBuffer: benchBuffer)
+        encoder.endEncoding()
+        let cpuEncodeMs = (CACurrentMediaTime() - cpuStart) * 1000.0
+
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+
+        let gpuMs = max(0.0, (commandBuffer.gpuEndTime - commandBuffer.gpuStartTime) * 1000.0)
+        var avgSteps = 0.0
+        if collectSteps {
+            let counters = benchBuffer.contents().bindMemory(to: UInt32.self, capacity: 2)
+            let hit = counters[1]
+            avgSteps = hit > 0 ? Double(counters[0]) / Double(hit) : 0
+        }
+        return (gpuMs, cpuEncodeMs, avgSteps)
+    }
+
     func draw(appModel: AppModel) {
         guard appModel.isAppActive,
               drawableSize.width > 1,
               drawableSize.height > 1 else {
             return
         }
+
+        // Brackets the whole frame (every return path below) as one Instruments
+        // signpost interval; see RenderSignposts.swift.
+        let frameTraceState = RenderTrace.begin("Frame")
+        defer { RenderTrace.end("Frame", frameTraceState) }
 
         // The drawable is acquired later (after the in-flight gate) so a busy
         // drawable pool can't block the render thread during CPU prep. The
@@ -570,7 +638,10 @@ private final class ThresholdMacRenderer {
             currentJitterNDC = .zero
         }
 
-        guard inFlightSemaphore.wait(timeout: .now()) == .success else { return }
+        let inFlightWaitTraceState = RenderTrace.begin("InFlight Wait")
+        let inFlightWaitResult = inFlightSemaphore.wait(timeout: .now())
+        RenderTrace.end("InFlight Wait", inFlightWaitTraceState)
+        guard inFlightWaitResult == .success else { return }
 
         // Acquire the drawable as late as possible — only after the in-flight
         // gate has admitted this frame — so a busy drawable pool stalls nothing
@@ -592,6 +663,10 @@ private final class ThresholdMacRenderer {
             inFlightSemaphore.signal()
             return
         }
+        // Traces this command buffer's commit→completion latency regardless of
+        // which of the frame's several `commandBuffer.commit()` call sites ends
+        // up firing.
+        RenderTrace.traceGPU("GPU Frame", commandBuffer: commandBuffer)
 
         // The direct (native-resolution) path renders straight into the drawable
         // and needs the drawable-sized depth target.
