@@ -113,12 +113,33 @@ def source_root_ref(proj, group, path)
   ref
 end
 
-# --- remove pre-existing targets if FORCE ---
+# --- remove pre-existing targets if FORCE (fully idempotent: strip the host's
+#     embed build-file + dependency, delete the leaked .appex product ref, and —
+#     after the loop — drop any orphaned product refs and the whole navigator
+#     group left by earlier runs, so re-running never accumulates cruft) ---
 EXTS.each do |e|
   if (t = proj.targets.find { |x| x.name == e[:name] })
     abort "target #{e[:name]} already exists (set FORCE=1 to recreate)" unless FORCE
+    prod = t.product_reference
+    host.copy_files_build_phases.each do |ph|
+      ph.files.dup.each { |bf| ph.remove_build_file(bf) if bf.file_ref == prod }
+    end
+    host.dependencies.dup.each { |d| d.remove_from_project if (d.target rescue nil) == t }
     t.remove_from_project
+    prod.remove_from_project if prod   # remove_from_project(target) leaves this behind
   end
+end
+if FORCE
+  # Sweep orphaned appex product refs (from this or prior runs) out of Products.
+  proj.products_group.files.dup.each do |f|
+    f.remove_from_project if f.path.to_s =~ /^ThresholdQL(Thumbnail|Preview)\.appex$/
+  end
+  # Drop the navigator group entirely so duplicate subgroups never linger; it is
+  # recreated below. (ThresholdQuickLook is NOT a synchronized folder, so these
+  # are just organizational refs.)
+  proj.main_group.children
+      .select { |c| c.display_name == "ThresholdQuickLook" && c.is_a?(Xcodeproj::Project::Object::PBXGroup) }
+      .each(&:remove_from_project)
 end
 
 # --- ensure host has an Embed App Extensions copy-files phase (dst = PlugIns) ---
@@ -175,6 +196,16 @@ EXTS.each do |e|
   # Info.plist + entitlements as file refs (visible in navigator, not compiled).
   source_root_ref(proj, grp, e[:infoplist])
   source_root_ref(proj, grp, e[:entitle])
+
+  # Ship catalog.json at Contents/Resources/Formulas/catalog.json so FormulaCatalog
+  # finds it (subdirectory:"Formulas" lookup) — silences the "catalog.json not
+  # found in bundle" log and matches the app bundle layout. The still-render path
+  # does not need it; this just gives catalog-driven lookups real descriptors.
+  catref = source_root_ref(proj, grp, "Threshold/Formulas/catalog.json")
+  cphase = target.new_copy_files_build_phase("Copy Formula Catalog")
+  cphase.symbol_dst_subfolder_spec = :resources
+  cphase.dst_path = "Formulas"
+  cphase.add_file_reference(catref, true)
 
   # Embed into host + depend on it.
   appex_ref = target.product_reference

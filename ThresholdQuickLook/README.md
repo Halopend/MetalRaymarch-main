@@ -43,6 +43,20 @@ decode FractalPreset → RenderSettings() → preset.apply(to:) → settings.sna
 into the appex's own `default.metallib` — identical GPU code to the app, loaded
 via `makeDefaultLibrary(bundle:)`.
 
+### Embedded distance estimators (custom `.threshscene` DEs)
+
+Scenes whose `fractalType == .custom` carry an `embeddedFormula` with Metal DE
+source. For those, `HeadlessRenderer` calls the app's `CustomShaderCompiler`
+(`synthesizeSource` — bundled shader strings from `EmbeddedMetalSources` + the
+scene's DE spliced at the dispatch markers) and `device.makeLibrary(source:)`,
+then builds a pipeline on the same `screenshotVertexShader` /
+`fragmentShaderMono` entry points. Compiled pipelines are **cached by
+`EmbeddedFormula.sourceHash`** so the interactive view never recompiles per
+frame; the preview pre-warms the compile off the main thread before the first
+frame. Compilation of the combined source takes **~6–7 s once per scene** (then
+cached) — fine for a preview, borderline for a first-time thumbnail (the OS
+caches the resulting image afterward).
+
 ## Interactive preview
 
 The spacebar preview (`PreviewViewController`) installs a live
@@ -107,12 +121,51 @@ xcodebuild -project Threshold.xcodeproj -target ThresholdQLThumbnail \
   -configuration Debug CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
 ```
 
-## Known limitations / Milestone 3
+## Quick Look selection (critical — UTI conformance)
 
-- **Custom-formula scenes** (`fractalType == .custom` or `embeddedFormula != nil`)
-  need runtime Metal compilation (`CustomShaderCompiler`) — currently fall back
-  to the baked PNG. Live compile is M3.
-- **Animations / `.threshfx`** show info cards; live keyframe / formula render is M3.
+For the appex to be invoked at all, the file's type must NOT conform to
+`public.text`. The exported UTIs in `Threshold/App/Info.plist` (+ the Mac/iOS
+plists) originally conformed to `public.json` → which conforms to `public.text`
+→ so macOS's built-in **text** thumbnailer claimed the file and won over this
+appex (proven with qlmanage: the thumbnail was the raw JSON text, byte-identical
+to a `.json` copy). Fixed by declaring `public.content` + `public.data` instead
+of `public.json` for all five types.
+
+Caveat: LaunchServices **unions** exported-type conformance across every
+registered build of the app. On a dev machine with old Threshold builds
+(archives, DerivedData, simulators) still declaring `public.json`, the
+`public.text` conformance — and the text-handler hijack — persists until those
+are gone. Verify on a clean install, or prune stale registrations first:
+`lsregister -u <old Threshold.app>` for each, then `qlmanage -r cache`.
+
+## Regression test
+
+`Scripts/ql_render_check.sh` compiles the appex's EXACT source closure (derived
+from `wire_quicklook.rb`, so it can't drift) plus `Tests/RenderCheckMain.swift`
+and a metallib, then renders every bundled scene through the real
+`HeadlessRenderer` (including the runtime embedded-DE compile). It asserts all
+scenes render non-nil and that the empirical 17-scene well-framed allowlist
+renders non-black (mean luminance > 12); exits non-zero on any regression. Built
+`-Onone`. Run it before shipping render changes: `bash Scripts/ql_render_check.sh`.
+
+Note on `RenderKitStubs`: `ParameterCatalog.byID` IS read during render
+(`RenderSettings.audioModulate` runs inside `preset.apply(to:)` for music-mapped
+scenes); the empty stub makes that a correct no-op for a still frame. The stubs
+are *exercised-but-benign*, so the render-check tool — not a per-stub tripwire —
+is the divergence guard.
+
+## Known limitations / next steps
+
+- **Authored-camera framing.** Some scenes render black or extreme close-up
+  because their authored camera assumes gesture navigation from that start
+  point against a fixed eye at z = −3 (see the app's `mac-detailscale`
+  behavior). In the **interactive** preview the user can drag/zoom to find the
+  fractal; **static thumbnails** of such scenes look bad. A future pass could
+  auto-frame (dolly the eye back / reset detailScale) for thumbnails.
+- **Animations / `.threshfx`** still show info cards; live keyframe / standalone
+  formula render is the remaining piece.
+- **Buddhabrot** uses a separate compute path (`BuddhabrotShaders.metal`), not
+  bundled here → falls back.
 - `[FormulaCatalog] catalog.json not found in bundle` is logged harmlessly —
   built-in fractals don't need it. Ship `catalog.json` as an appex resource to
   silence it (needed if M3 adds catalog-driven formulas).

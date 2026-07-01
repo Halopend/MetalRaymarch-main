@@ -68,16 +68,20 @@ struct ParameterDescriptor: Sendable, Identifiable {
 }
 
 enum ParameterCatalog {
-    // Empty: audioModulate() (the only reader) is never invoked by the headless
-    // render path, so no descriptors need to be authored here.
+    // NOTE: byID IS exercised during render — `RenderSettings.audioModulate()`
+    // reads it as part of `preset.apply(to:)` for music-mapped scenes (verified
+    // by the render-check tripwire experiment; the earlier "never called" claim
+    // was wrong). The empty stub makes that a correct no-op: a still frame has no
+    // audio, so skipping the modulation is exactly right. This is *exercised-but-
+    // benign*, not dead code. The real divergence guard is
+    // `Scripts/ql_render_check.sh` — if the app ever makes a *rendered* value
+    // depend on real catalog data, a scene's output changes and the tool's
+    // non-black assertion fails.
     static let byID: [String: ParameterDescriptor] = [:]
-    // Referenced only by ParameterTargetID.coreAndEffect (a static shim) and
-    // ParameterRoutingValidation.validateStartupRouting() — neither runs here.
     static let routedDescriptors: [ParameterDescriptor] = []
 }
 
-// Minimal stand-in for the node type keyed in coreNodes/effectNodes; only
-// `.range` is ever read, and only inside validateStartupRouting (never called).
+// Minimal stand-in for the node type keyed in coreNodes/effectNodes.
 final class FloatParameterNode: @unchecked Sendable {
     let range: ClosedRange<Float> = 0...1
 }

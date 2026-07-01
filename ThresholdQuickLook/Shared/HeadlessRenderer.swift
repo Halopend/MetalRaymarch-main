@@ -227,9 +227,19 @@ final class HeadlessRenderer: @unchecked Sendable {
         guard let queue = device.makeCommandQueue() else { throw Failure.noQueue }
         self.commandQueue = queue
 
-        // Shaders.metal is compiled into this extension bundle's default metallib.
-        let bundle = Bundle(for: HeadlessRenderer.self)
-        let library = (try? device.makeDefaultLibrary(bundle: bundle)) ?? device.makeDefaultLibrary()
+        // Shaders.metal is compiled into this extension bundle's default metallib;
+        // this library backs the BUILT-IN fractal pipeline only (embedded-DE
+        // scenes compile their own library from EmbeddedMetalSources at runtime).
+        // Headless test seam: `THRESHOLD_QL_METALLIB` lets the render-check tool
+        // (Scripts/ql_render_check.sh) point at a prebuilt metallib since a plain
+        // CLI has no app bundle. Unset in the shipping appex → normal bundle path.
+        let library: MTLLibrary?
+        if let p = ProcessInfo.processInfo.environment["THRESHOLD_QL_METALLIB"] {
+            library = try? device.makeLibrary(URL: URL(fileURLWithPath: p))
+        } else {
+            let bundle = Bundle(for: HeadlessRenderer.self)
+            library = (try? device.makeDefaultLibrary(bundle: bundle)) ?? device.makeDefaultLibrary()
+        }
         guard let library else { throw Failure.noLibrary }
 
         guard let vertexFunction = library.makeFunction(name: "screenshotVertexShader") else {

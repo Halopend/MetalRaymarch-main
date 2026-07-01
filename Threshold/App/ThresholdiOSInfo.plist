@@ -90,7 +90,7 @@
 		<dict>
 			<key>UTTypeConformsTo</key>
 			<array>
-				<string>public.json</string>
+				<string>public.content</string>
 				<string>public.data</string>
 			</array>
 			<key>UTTypeDescription</key>
@@ -108,7 +108,7 @@
 		<dict>
 			<key>UTTypeConformsTo</key>
 			<array>
-				<string>public.json</string>
+				<string>public.content</string>
 				<string>public.data</string>
 			</array>
 			<key>UTTypeDescription</key>
@@ -126,7 +126,7 @@
 		<dict>
 			<key>UTTypeConformsTo</key>
 			<array>
-				<string>public.json</string>
+				<string>public.content</string>
 				<string>public.data</string>
 			</array>
 			<key>UTTypeDescription</key>
@@ -144,7 +144,7 @@
 		<dict>
 			<key>UTTypeConformsTo</key>
 			<array>
-				<string>public.json</string>
+				<string>public.content</string>
 				<string>public.data</string>
 			</array>
 			<key>UTTypeDescription</key>
@@ -162,7 +162,7 @@
 		<dict>
 			<key>UTTypeConformsTo</key>
 			<array>
-				<string>public.json</string>
+				<string>public.content</string>
 				<string>public.data</string>
 			</array>
 			<key>UTTypeDescription</key>
