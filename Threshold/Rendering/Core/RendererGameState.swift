@@ -94,14 +94,13 @@ extension Renderer {
         // otherwise they look artificially bounded and fade away too early.
         let traceScaleFloor: Float = isKleinianFamily ? 0.02 : 0.15
         let traceScale = max(effectiveScale, traceScaleFloor)
-        // User render-distance multiplier scales the family cap + base horizon.
-        // The absolute ceiling stays below the projection far plane (farZ 500) so
-        // raymarch depth stays valid for compositing.
-        let userDistanceScale = settingsSnapshot.renderDistanceScale
-        let maxViewDistanceCap: Float = min(480.0, (isKleinianFamily ? 420.0 : 80.0) * userDistanceScale)
-        let baseViewDistance: Float = (isKleinianFamily
+        // Family cap + base horizon stay below the projection far plane (farZ 500)
+        // so raymarch depth stays valid for compositing. (The old render-distance
+        // multiplier was measured to have almost no perf effect; hardcoded to 1×.)
+        let maxViewDistanceCap: Float = isKleinianFamily ? 420.0 : 80.0
+        let baseViewDistance: Float = isKleinianFamily
             ? (RenderSettings.maxViewDistance * 2.0)
-            : RenderSettings.maxViewDistance) * userDistanceScale
+            : RenderSettings.maxViewDistance
         let targetMaxViewDistance = min(maxViewDistanceCap, baseViewDistance / traceScale)
         let maxViewDistanceSpeed: Float = (targetMaxViewDistance > smoothedMaxViewDistance) ? 30.0 : 10.0
         let maxViewDistanceBlend = 1.0 - exp(-maxViewDistanceSpeed * cachedDeltaTime)
@@ -292,7 +291,8 @@ extension Renderer {
                             precomputedLighting: precomputedLighting,
                             precomputedAudio: precomputedAudio,
                             precomputedFog: precomputedFog,
-                            colorScheme: colorSchemeParams)
+                            colorScheme: colorSchemeParams,
+                            benchAblate: 0)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)

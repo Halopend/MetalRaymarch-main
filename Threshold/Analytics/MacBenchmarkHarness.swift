@@ -29,6 +29,9 @@
 import Foundation
 import Metal
 import QuartzCore
+import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
 
 @MainActor
 enum MacBenchmarkHarness {
@@ -40,6 +43,15 @@ enum MacBenchmarkHarness {
         var width: Int
         var height: Int
         var outPath: String
+        /// Formula-param overrides applied AFTER a scene loads, e.g. "8=12" sets
+        /// Bulatov MaxReflections to 12. Used for sensitivity sweeps.
+        var paramOverride: [(Int, Float)]
+        /// If set, one PNG per scene is written here (offscreen frame capture) for
+        /// visual-regression checks.
+        var pngDir: String?
+        /// Force shadows on/off (nil = leave as the scene sets it). Shadows add two
+        /// per-pixel shadow marches, so this isolates their DE-call cost.
+        var shadows: Bool?
     }
 
     private static func log(_ s: String) {
@@ -59,10 +71,23 @@ enum MacBenchmarkHarness {
             h = Int(size[size.index(after: x)...]) ?? h
         }
         let out = env["THRESHOLD_BENCHMARK_OUT"] ?? (NSHomeDirectory() + "/mac-bench.json")
+
+        var overrides: [(Int, Float)] = []
+        for pair in (env["THRESHOLD_BENCHMARK_PARAM_OVERRIDE"] ?? "").split(separator: ",") {
+            let kv = pair.split(separator: "=")
+            if kv.count == 2, let i = Int(kv[0].trimmingCharacters(in: .whitespaces)),
+               let v = Float(kv[1].trimmingCharacters(in: .whitespaces)) {
+                overrides.append((i, v))
+            }
+        }
+        let pngDir = env["THRESHOLD_BENCHMARK_PNG_DIR"]
+        let shadows = env["THRESHOLD_BENCHMARK_SHADOWS"].map { $0 == "1" }
+
         return Config(scenes: scenes,
                       frames: intEnv("THRESHOLD_BENCHMARK_FRAMES", 240),
                       warmup: intEnv("THRESHOLD_BENCHMARK_WARMUP", 60),
-                      width: w, height: h, outPath: out)
+                      width: w, height: h, outPath: out,
+                      paramOverride: overrides, pngDir: pngDir, shadows: shadows)
     }
 
     static func run(appModel: AppModel) async {
@@ -101,6 +126,10 @@ enum MacBenchmarkHarness {
         let settings = appModel.renderSettings
         settings.resolutionScale = 1.0
         settings.tileSize = 0
+        // Snap scene loads instead of the user's eased transition: an ease still
+        // mid-flight when measurement starts makes both the perf numbers (march
+        // steps drift run-to-run) and the PNG capture nondeterministic.
+        settings.sceneTransitionDuration = 0
         BenchmarkManager.shared.collectIterations = true
         defer { BenchmarkManager.shared.collectIterations = false }
 
@@ -132,8 +161,27 @@ enum MacBenchmarkHarness {
         for preset in targets {
             log("loading '\(preset.name)' (fractalType \(preset.fractalType.rawValue))")
             appModel.loadStaticScene(preset)
-            // Let the eased apply + any embedded-DE compile land before warmup.
-            try? await Task.sleep(for: .seconds(1.0))
+            // Let the (snapped) apply + any embedded-DE compile + the renderer's
+            // exponential camera smoothers settle before warmup.
+            try? await Task.sleep(for: .seconds(2.5))
+
+            // Re-assert shadow override after the scene's own value has applied.
+            if let s = cfg.shadows { settings.shadowsEnabled = s; log("  forced shadows=\(s)") }
+
+            // Freeze animation phases + disable the auto color-scheme cycler for
+            // the whole scene so measurement and capture are run-deterministic
+            // (the cycler otherwise advances on wall-clock mid-scene).
+            if cfg.pngDir != nil { settings.benchFreezeAnimationPhases() }
+
+            // Apply formula-param overrides (e.g. MaxReflections sweep) after the
+            // eased apply has settled, so they aren't stomped by the transition.
+            if !cfg.paramOverride.isEmpty {
+                var fp = settings.formulaParams
+                for (i, v) in cfg.paramOverride { FormulaCatalog.setParam(&fp, index: i, value: v) }
+                settings.formulaParams = fp
+                log("  applied param override \(cfg.paramOverride.map { "\($0.0)=\($0.1)" }.joined(separator: ","))")
+                try? await Task.sleep(for: .milliseconds(300))
+            }
 
             for _ in 0..<cfg.warmup {
                 _ = renderer.renderBenchmarkFrame(appModel: appModel, width: cfg.width, height: cfg.height)
@@ -161,6 +209,23 @@ enum MacBenchmarkHarness {
             records.append(rec)
             log(String(format: "  '%@' → gpu avg %.2fms  p95 %.2fms  max %.2fms  steps %.1f  cpuEnc %.2fms",
                        preset.name, rec.gpuMsAvg, rec.gpuMsP95, rec.gpuMsMax, rec.iterationsAvg, rec.cpuEncodeMsAvg))
+
+            if cfg.pngDir != nil {
+                // Pin all CPU-side animation phase accumulators so the capture is
+                // phase-deterministic across runs (see benchFreezeAnimationPhases).
+                settings.benchFreezeAnimationPhases()
+            }
+            if let dir = cfg.pngDir,
+               let cap = renderer.captureBenchmarkBytes(appModel: appModel, width: cfg.width, height: cfg.height) {
+                let safe = preset.name.replacingOccurrences(of: "/", with: "_")
+                let path = (dir as NSString).appendingPathComponent("\(safe).png")
+                if writePNG(bytes: cap.bytes, width: cfg.width, height: cfg.height,
+                            bytesPerRow: cap.bytesPerRow, to: path) {
+                    log("  wrote \(path)")
+                } else {
+                    log("  PNG write FAILED for '\(preset.name)'")
+                }
+            }
         }
 
         writeOut(cfg: cfg, raymarch: raymarch, records: records)
@@ -170,6 +235,24 @@ enum MacBenchmarkHarness {
     }
 
     // MARK: - Helpers
+
+    /// Encode BGRA8 (sRGB) bytes to a PNG file. Returns true on success.
+    private static func writePNG(bytes: Data, width: Int, height: Int, bytesPerRow: Int, to path: String) -> Bool {
+        guard let cs = CGColorSpace(name: CGColorSpace.sRGB),
+              let provider = CGDataProvider(data: bytes as CFData) else { return false }
+        // The offscreen target is bgra8Unorm_srgb → byteOrder32Little + skip-first alpha.
+        let bitmapInfo = CGBitmapInfo(rawValue:
+            CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        guard let cg = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                               bytesPerRow: bytesPerRow, space: cs, bitmapInfo: bitmapInfo,
+                               provider: provider, decode: nil, shouldInterpolate: false,
+                               intent: .defaultIntent) else { return false }
+        let url = URL(fileURLWithPath: path) as CFURL
+        guard let dest = CGImageDestinationCreateWithURL(url, UTType.png.identifier as CFString, 1, nil)
+        else { return false }
+        CGImageDestinationAddImage(dest, cg, nil)
+        return CGImageDestinationFinalize(dest)
+    }
 
     private static func percentile(_ sorted: [Double], _ p: Double) -> Double {
         guard !sorted.isEmpty else { return 0 }

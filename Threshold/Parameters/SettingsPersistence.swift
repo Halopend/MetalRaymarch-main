@@ -168,8 +168,28 @@ enum SettingsPersistence {
         if let c = load(LightingConfig.self,      domain: .lighting)      { settings.lightingConfig = c }
         if let c = load(AudioReactiveConfig.self, domain: .audioReactive) { settings.audioReactiveConfig = c }
         if let c = load(GestureConfig.self,       domain: .gesture)       { settings.gestureConfig = c }
-        if let c = load(SafetyBubbleConfig.self,  domain: .safetyBubble)  { settings.safetyBubbleConfig = c }
+        if let c = load(SafetyBubbleConfig.self,  domain: .safetyBubble)  { settings.safetyBubbleConfig = migrateSafetyBubbleDefaultOn(c) }
         if let c = load(DisplayConfig.self,       domain: .display)       { settings.displayConfig = c }
+    }
+
+    /// One-time visionOS migration: installs that persisted a bubble config before
+    /// the comfort default flipped to ON carry `enabled = false` / the old 0.5
+    /// strength forward forever, so the new default would never be visible on an
+    /// existing device. Nudge to the new defaults exactly once; the flag keeps a
+    /// user who deliberately disables the bubble afterward from being re-stomped.
+    private static func migrateSafetyBubbleDefaultOn(_ config: SafetyBubbleConfig) -> SafetyBubbleConfig {
+        #if os(visionOS)
+        let flagKey = "didMigrateSafetyBubbleDefaultOn"
+        guard !defaults.bool(forKey: flagKey) else { return config }
+        defaults.set(true, forKey: flagKey)
+        var migrated = config
+        migrated.enabled = SafetyBubbleConfig.defaultEnabled
+        migrated.strength = SafetyBubbleConfig.defaultStrength
+        save(migrated, domain: .safetyBubble)
+        return migrated
+        #else
+        return config
+        #endif
     }
 
     /// One-time macOS migration: installs that ran before the Mac MetalFX default

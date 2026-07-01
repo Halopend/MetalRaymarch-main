@@ -57,6 +57,10 @@ extension Renderer {
             let leftAnchor = anchors.leftHand
             let rightAnchor = anchors.rightHand
 
+            // Head pose for gestures that need a facing-relative frame (the
+            // open-palm scene swipe resolves "left/right" against this).
+            let headTransform = worldTracking.queryDeviceAnchor(atTimestamp: time)?.originFromAnchorTransform
+
             // Atomically decide whether to start a new dispatch or just accumulate
             // onto an in-flight one. Returns the delta to use if we're starting;
             // nil means a dispatch is already running and we only accumulated.
@@ -138,7 +142,8 @@ extension Renderer {
                 self.appModel.gestureController?.updateHands(
                     leftAnchor: leftAnchor,
                     rightAnchor: rightAnchor,
-                    deltaTime: delta
+                    deltaTime: delta,
+                    headTransform: headTransform
                 )
             }
             handTrackingDispatchTask = dispatchTask

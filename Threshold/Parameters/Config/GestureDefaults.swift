@@ -39,6 +39,21 @@ enum GestureDefaults {
     static let perFingerTapHoldDuration: Float = 0.08
     static let perFingerTapCooldown: Float = 0.4
 
+    // MARK: - Scene swipe (open-palm bat left/right → previous/next scene)
+    /// Minimum sideways palm speed (m/s, along the head's right axis) for the
+    /// sweep to keep accumulating; dropping below re-anchors the gesture.
+    static let sceneSwipeMinSpeed: Float = 0.5
+    /// Continuous lateral travel (meters) that fires a scene switch.
+    static let sceneSwipeTriggerDistance: Float = 0.30
+    /// The travel must complete within this window (seconds) — a fast bat, not a slow drift.
+    static let sceneSwipeMaxDuration: Float = 0.40
+    /// Sideways travel must dominate vertical + depth drift by this factor.
+    static let sceneSwipeLateralDominance: Float = 1.2
+    static let sceneSwipeCooldown: Float = 0.9
+    /// Open-hand requirements: no finger pinching, hand not curled into a fist.
+    static let sceneSwipeMaxPinch: Float = 0.35
+    static let sceneSwipeMaxFist: Float = 0.5
+
     // MARK: - Two-hand pinch thresholds
     static let twoHandPinchActivateThreshold: Float = 0.7
     static let twoHandPinchReleaseThreshold: Float = 0.3

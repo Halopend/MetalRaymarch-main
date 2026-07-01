@@ -333,6 +333,11 @@ typedef struct
     PrecomputedAudio precomputedAudio;            // Aggregated audio energy
     PrecomputedFog precomputedFog;                // Fog helpers
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
+
+    // Benchmark-only shading-ablation selector (0 in normal use; >=10 activates
+    // fragmentMain's benchAblate dissection branches — set by the Mac headless
+    // benchmark harness via THRESHOLD_BENCHMARK_ABLATE).
+    uint32_t benchAblate;
 } Uniforms;
 
 typedef struct

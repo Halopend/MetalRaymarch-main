@@ -49,7 +49,6 @@ struct RenderSettingsSnapshot {
     let distanceLODStrength: Float
     let shadowsEnabled: Bool
     let boundingSphereSkipEnabled: Bool
-    let renderDistanceScale: Float
     let limitFlash: Float
     let activeGestureIndex: Int
     let safetyBubbleEnabled: Bool

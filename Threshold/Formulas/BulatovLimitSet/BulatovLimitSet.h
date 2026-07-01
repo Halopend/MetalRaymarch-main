@@ -152,6 +152,10 @@ FORCE_INLINE float DE_BulatovLimitSet_Dist(float3 pos, FormulaParams fp, float3x
     float3 p = rot * pos;
     float3 finalP;
     int used;
+    // NOTE (measured 2026-07-01): do NOT cap the reflection loop by `iterations`
+    // here for secondary rays — the fold's `if (!found) break` early-out already
+    // terminates well below the cap, so it saved only ~4% while visibly changing
+    // shading (~13% of pixels). The cost is per-call fixed work, not loop length.
     return bulatovFold(p, fp, finalP, used);
 }
 

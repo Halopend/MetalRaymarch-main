@@ -349,6 +349,11 @@ typedef struct
     PrecomputedAudio precomputedAudio;            // Aggregated audio energy
     PrecomputedFog precomputedFog;                // Fog helpers
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
+
+    // Benchmark-only shading-ablation selector (0 in normal use; >=10 activates
+    // fragmentMain's benchAblate dissection branches — set by the Mac headless
+    // benchmark harness via THRESHOLD_BENCHMARK_ABLATE).
+    uint32_t benchAblate;
 } Uniforms;
 
 typedef struct
@@ -1898,6 +1903,10 @@ FORCE_INLINE float DE_BulatovLimitSet_Dist(float3 pos, FormulaParams fp, float3x
     float3 p = rot * pos;
     float3 finalP;
     int used;
+    // NOTE (measured 2026-07-01): do NOT cap the reflection loop by `iterations`
+    // here for secondary rays — the fold's `if (!found) break` early-out already
+    // terminates well below the cap, so it saved only ~4% while visibly changing
+    // shading (~13% of pixels). The cost is per-call fixed work, not loop length.
     return bulatovFold(p, fp, finalP, used);
 }
 
@@ -5394,14 +5403,25 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         float depth = encodeDepthFromClip(clipPos);
         output.depth = depth;
 
-        float3 nor = GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, uniforms.formulaParams, hitCache);
+        // Benchmark-only shading ablation for perf dissection. The harness sets
+        // uniforms.debugHierarchical >= 10 via THRESHOLD_BENCHMARK_ABLATE; it is
+        // 0 in normal use and the branch is frame-uniform (no divergence):
+        //   10 = flat hits (skip normals + shadows + colour + shade)
+        //   11 = skip ColourWithScheme    12 = skip Shadow marches
+        //   13 = skip GetNormal (view-facing fake normal)
+        const uint benchAblate = uniforms.benchAblate >= 10 ? uniforms.benchAblate : 0;
+        if (benchAblate == 10) {
+            col = half3(0.6h, 0.6h, 0.6h);
+        } else {
+        float3 nor = (benchAblate == 13) ? -marchDir
+                   : GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, uniforms.formulaParams, hitCache);
 
         {
             // Use precomputed spotlight position and intensity from CPU
             float4 spotData = computeSpotlight(p, uniforms.precomputedLighting.spotLightPosition);
             float3 spot = spotData.xyz;
             float atten = spotData.w;
-            
+
             // Blended lighting (precomputed on CPU — frame-uniform)
             float3 sunDir = uniforms.precomputedLighting.sunDir;
             float sunDiffuseScale = uniforms.precomputedLighting.sunDiffuseScale;
@@ -5414,10 +5434,11 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                 uniforms.minDistance,
                 marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count);
 
-            half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
-            half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
+            half shaSpot = (benchAblate == 12) ? half(1.0h) : half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
+            half shaSun = (benchAblate == 12) ? half(1.0h) : half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
 
-            col = ColourWithScheme(p, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme, hitCache);
+            col = (benchAblate == 11) ? half3(0.6h, 0.6h, 0.6h)
+                : ColourWithScheme(p, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme, hitCache);
 
             float3 V = -marchDir;
             col = ShadeSurface(p, nor, V, spot, atten, sunDir, sunDiffuseScale, lightIntensity,
@@ -5426,6 +5447,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                                 lodIterations, fractalType, uniforms.formulaParams);
         }
         // Depth already written at start of this block via clipPos
+        }
     }
     else
     {

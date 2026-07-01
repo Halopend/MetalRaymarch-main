@@ -94,13 +94,6 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // geometry. Experimental.
     var boundingSphereSkipEnabled: Bool = false
 
-    // Render-distance multiplier (1 = current behavior). Scales how far rays march
-    // before giving up (and the per-frame view-distance cap), so geometry farther
-    // than the default ~12-unit horizon resolves. Costs steps — pair with a higher
-    // ray-step budget or the acceleration levers. Clamped against the projection
-    // far plane CPU-side.
-    var renderDistanceScale: Float = 1.0
-
     // MARK: - Validation
 
     mutating func clamp() {
@@ -112,7 +105,6 @@ struct QualityConfig: Codable, Equatable, Sendable {
         coneMarchStrength = coneMarchStrength.clamped(to: 0.0...1.0)
         overRelaxationMax = overRelaxationMax.clamped(to: 1.0...1.6)
         distanceLODStrength = distanceLODStrength.clamped(to: 0.0...1.0)
-        renderDistanceScale = renderDistanceScale.clamped(to: 1.0...8.0)
     }
 
     // MARK: - Codable
@@ -128,7 +120,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         case debugHierarchical, coherentPacketEnabled, computeTemporalReprojectionEnabled, coarsePrepassWarmStartEnabled, foveationStrength
         case smartAdvanceEnabled, coneMarchStrength
         case overRelaxationMax, distanceLODStrength, shadowsEnabled, boundingSphereSkipEnabled
-        case renderDistanceScale, adaptiveRenderQualityEnabled
+        case adaptiveRenderQualityEnabled
     }
 
     init() {}
@@ -152,7 +144,6 @@ struct QualityConfig: Codable, Equatable, Sendable {
         distanceLODStrength   = try c.decodeIfPresent(Float.self, forKey: .distanceLODStrength)   ?? 0.0
         shadowsEnabled        = try c.decodeIfPresent(Bool.self,  forKey: .shadowsEnabled)        ?? true
         boundingSphereSkipEnabled = try c.decodeIfPresent(Bool.self, forKey: .boundingSphereSkipEnabled) ?? false
-        renderDistanceScale   = try c.decodeIfPresent(Float.self, forKey: .renderDistanceScale)   ?? 1.0
         adaptiveRenderQualityEnabled = try c.decodeIfPresent(Bool.self, forKey: .adaptiveRenderQualityEnabled) ?? true
     }
 }

@@ -40,7 +40,10 @@ struct FractalPresetPersistenceTests {
         settings.juliaDriftEffect = julia
 
         // Safety bubble edge fade — get-only on RenderSettings, set via the config.
+        // Bubble must be ON: apply() only restores bubble fields for scenes that
+        // use the bubble (scenes can enable it, never disable — user-owned).
         var sb = settings.safetyBubbleConfig
+        sb.enabled = true
         sb.fadeEnabled = false                    // default true
         sb.fadeWidth = 0.4                        // default 0.1
         settings.safetyBubbleConfig = sb

@@ -185,7 +185,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _distanceLODStrength: Float = loadFloat("distanceLODStrength", default: 0.0)  // 0 = off; drops fractal iterations on faraway samples
     private var _shadowsEnabled: Bool = loadBool("shadowsEnabled", default: true)  // false skips the two per-pixel shadow marches
     private var _boundingSphereSkipEnabled: Bool = loadBool("boundingSphereSkipEnabled", default: false)  // reject rays that miss the fractal's bounding sphere
-    private var _renderDistanceScale: Float = loadFloat("renderDistanceScale", default: 1.0)  // multiplier on how far rays march before giving up (1 = current ~12-unit horizon)
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
     // HUD display
@@ -240,13 +239,14 @@ final class RenderSettings: @unchecked Sendable {
     private var _springVelocity: SIMD3<Float> = .zero      // Current velocity
     private var _springActive: Bool = false                 // Is the user pulling the spring?
 
-    // Safety bubble controls
-    private var _safetyBubbleEnabled: Bool = false  // Cut out a small safe sphere (default off)
+    // Safety bubble controls (defaults live on SafetyBubbleConfig: on for
+    // visionOS comfort, off on desktop)
+    private var _safetyBubbleEnabled: Bool = SafetyBubbleConfig.defaultEnabled  // Cut out a small safe sphere
     private var _safetyBubbleRadius: Float = 1.8    // Radius of the safe bubble (meters)
     private var _safetyBubbleShape: Float = 0.0     // 0...1 = sphere/cube morph (no rotation); 2...6 select discrete platonic solids
     private var _safetyBubbleFadeEnabled: Bool = true
     private var _safetyBubbleFadeWidth: Float = 0.1
-    private var _safetyBubbleStrength: Float = 0.5
+    private var _safetyBubbleStrength: Float = SafetyBubbleConfig.defaultStrength
     
     // === COLOR SCHEME ===
     // Controls the color palette and post-processing for fractal coloring
@@ -1256,17 +1256,6 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _boundingSphereSkipEnabled } }
         set {
             withLock { _boundingSphereSkipEnabled = newValue }
-            persistQuality()
-        }
-    }
-
-    /// Render-distance multiplier (1...8, 1 = current ~12-unit horizon). Scales the
-    /// per-frame view-distance target/cap so geometry beyond the default horizon
-    /// resolves. Clamped against the projection far plane where it's applied.
-    var renderDistanceScale: Float {
-        get { withLock { _renderDistanceScale } }
-        set {
-            withLock { _renderDistanceScale = max(1.0, min(8.0, newValue)) }
             persistQuality()
         }
     }
@@ -2346,7 +2335,6 @@ final class RenderSettings: @unchecked Sendable {
                 distanceLODStrength: _distanceLODStrength,
                 shadowsEnabled: _shadowsEnabled,
                 boundingSphereSkipEnabled: _boundingSphereSkipEnabled,
-                renderDistanceScale: _renderDistanceScale,
                 limitFlash: _limitFlash,
                 activeGestureIndex: _activeGestureIndex,
                 safetyBubbleEnabled: _safetyBubbleEnabled,
@@ -3553,6 +3541,32 @@ final class RenderSettings: @unchecked Sendable {
         SettingsPersistence.save(colorConfig, domain: .color)
     }
 
+    /// Benchmark-harness only: pin every CPU-side animation accumulator to a fixed
+    /// value so a PNG regression capture is phase-deterministic across runs (the
+    /// phases integrate ∫speed·dt, so they otherwise land at run-dependent values
+    /// and two identical builds diff as "different"). Never called in normal use.
+    func benchFreezeAnimationPhases() {
+        withLock {
+            _colorAnimTime = 5.0
+            _lightAnimTime = 5.0
+            _huePhase = 1.0
+            _pulsePhase = 1.0
+            _fogHuePhase = 1.0
+            _gradientPhase = 0.25
+            _polarRotationAccum = 0.0
+            _juliaDriftAccum = 0.0
+            _colorSchemeAutoTimer = 0.0
+            // Stop the auto color-scheme cycler and finish any in-flight
+            // transition: the cycler advances on a wall-clock interval, which
+            // lands at run-dependent points → a capture mid-lerp (or one cycle
+            // ahead) diffs as "different" between identical builds. Disabling is
+            // transient — backing var only, never persisted.
+            _colorSchemeAutoTransition = false
+            _colorScheme = _targetColorScheme
+            _colorSchemeTransitionProgress = 1.0
+        }
+    }
+
     /// Persist the quality config (throttled — foveation slider may fire rapidly).
     private func persistQuality() {
         guard SettingsPersistence.shouldSave(domain: .quality) else { return }
@@ -3633,7 +3647,6 @@ final class RenderSettings: @unchecked Sendable {
                 c.distanceLODStrength = _distanceLODStrength
                 c.shadowsEnabled = _shadowsEnabled
                 c.boundingSphereSkipEnabled = _boundingSphereSkipEnabled
-                c.renderDistanceScale = _renderDistanceScale
                 return c
             }
         }
@@ -3662,7 +3675,6 @@ final class RenderSettings: @unchecked Sendable {
                 _distanceLODStrength = max(0.0, min(1.0, newValue.distanceLODStrength))
                 _shadowsEnabled = newValue.shadowsEnabled
                 _boundingSphereSkipEnabled = newValue.boundingSphereSkipEnabled
-                _renderDistanceScale = max(1.0, min(8.0, newValue.renderDistanceScale))
             }
         }
     }

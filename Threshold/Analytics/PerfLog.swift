@@ -99,7 +99,6 @@ struct PerfRaymarchConfig: Codable, Sendable {
     var foveationStrength: Double
     var coherentPacketEnabled: Bool
     var boundingSphereSkipEnabled: Bool
-    var renderDistanceScale: Double
 
     /// One-line human summary for the markdown log.
     var summary: String {
@@ -109,8 +108,7 @@ struct PerfRaymarchConfig: Codable, Sendable {
             + "lod=\(pct(distanceLODStrength)) smartAdv=\(smartAdvanceEnabled ? "on" : "off") "
             + "shadows=\(shadowsEnabled ? "on" : "off") fov=\(pct(foveationStrength)) "
             + "coherent=\(coherentPacketEnabled ? "on" : "off") "
-            + "boundSphere=\(boundingSphereSkipEnabled ? "on" : "off") "
-            + "renderDist=\(String(format: "%.1f", renderDistanceScale))x"
+            + "boundSphere=\(boundingSphereSkipEnabled ? "on" : "off")"
     }
 }
 
@@ -161,8 +159,7 @@ extension PerfRaymarchConfig {
             shadowsEnabled: q.shadowsEnabled,
             foveationStrength: Double(q.foveationStrength),
             coherentPacketEnabled: q.coherentPacketEnabled,
-            boundingSphereSkipEnabled: q.boundingSphereSkipEnabled,
-            renderDistanceScale: Double(q.renderDistanceScale))
+            boundingSphereSkipEnabled: q.boundingSphereSkipEnabled)
     }
 }
 

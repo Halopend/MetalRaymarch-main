@@ -37,6 +37,7 @@ final class GestureController {
     private let twoPointGrabEngine = TwoPointGrabEngine()
     private let singleHandDragEngine = SingleHandDragEngine()
     private var windowPullState = WindowPullGestureState()
+    private var sceneSwipeState = SceneSwipeGestureState()
 
     // ==========================================================================
     // PER-FRACTAL PARAMETER RANGES  (cached from FractalTypeDescriptor)
@@ -121,6 +122,16 @@ final class GestureController {
     var onOpenRenderMenu: (() -> Void)?
     var onOpenQuickToggles: (() -> Void)?
     var onMenuWindowPullTowardUser: (() -> Void)?
+    /// Fired by the open-palm horizontal swipe ("batting through the air").
+    /// +1 = next scene (swipe toward the user's right, mirrors the Mac right
+    /// arrow), -1 = previous scene (swipe left).
+    var onSceneSwipe: ((Int) -> Void)?
+
+    /// Head axes projected onto the horizontal plane, updated each hand-tracking
+    /// frame from the device anchor so swipe "left/right" follows where the user
+    /// is facing. Fall back to the world axes when the pose is unavailable.
+    private var headRight = SIMD3<Float>(1, 0, 0)
+    private var headForward = SIMD3<Float>(0, 0, -1)
     
     // Reference to render settings
     private weak var renderSettings: RenderSettings?
@@ -152,6 +163,11 @@ final class GestureController {
         menuToggleEngine.reset()
         perFingerTapEngine.reset()
         windowPullState = WindowPullGestureState()
+        // Drop swipe anchors but KEEP the cooldown: a swipe itself loads a scene
+        // (which lands here), and resetting the cooldown would let one long
+        // sweep fire twice.
+        sceneSwipeState.left = SceneSwipeHandState()
+        sceneSwipeState.right = SceneSwipeHandState()
     }
     
     /// Apply default parameter values for the current fractal type.
@@ -172,11 +188,19 @@ final class GestureController {
     /// - Parameter deltaTime: Time since last hand tracking update (not used for smoothing anymore)
 #if os(visionOS)
     @available(visionOS 2.0, *)
-    func updateHands(leftAnchor: HandAnchor?, rightAnchor: HandAnchor?, deltaTime: Float = 1.0/90.0) {
+    func updateHands(leftAnchor: HandAnchor?, rightAnchor: HandAnchor?, deltaTime: Float = 1.0/90.0,
+                     headTransform: simd_float4x4? = nil) {
         operationFrameCounter &+= 1
         refreshCachedDescriptorValues()
         leftHand = buildHandData(from: leftAnchor)
         rightHand = buildHandData(from: rightAnchor)
+
+        if let headTransform {
+            let right = SIMD3<Float>(headTransform.columns.0.x, 0, headTransform.columns.0.z)
+            if simd_length_squared(right) > 1e-6 { headRight = simd_normalize(right) }
+            let forward = SIMD3<Float>(-headTransform.columns.2.x, 0, -headTransform.columns.2.z)
+            if simd_length_squared(forward) > 1e-6 { headForward = simd_normalize(forward) }
+        }
         
         // Track left hand stability: count continuous frames of tracking.
         // Resets when the left hand disappears from tracking.
@@ -242,6 +266,7 @@ final class GestureController {
         }
 
         processWindowPullGesture(deltaTime: deltaTime)
+        processSceneSwipeGesture(deltaTime: deltaTime)
     }
 #endif
 
@@ -380,7 +405,94 @@ final class GestureController {
             onMenuWindowPullTowardUser?()
         }
     }
-    
+
+    // MARK: - Scene Swipe ("bat through the air" left/right)
+
+    /// Open-palm fast horizontal sweep → previous/next scene, mirroring the Mac
+    /// left/right arrow keys. Either hand works. The sweep must be quick
+    /// (sceneSwipeMaxDuration), long enough (sceneSwipeTriggerDistance), mostly
+    /// sideways relative to where the user faces, and made with an open hand so
+    /// pinch-drags, grabs, and finger-to-palm menu poses can't fire it.
+    private func processSceneSwipeGesture(deltaTime: Float) {
+        if sceneSwipeState.cooldown > 0 {
+            sceneSwipeState.cooldown = max(0, sceneSwipeState.cooldown - deltaTime)
+        }
+
+        // Same gate as parameter gestures: hands over menu controls must not flip
+        // scenes. Also stand down while any manipulation gesture owns a hand.
+        guard !suppressParameterGestures,
+              !grabState.isActive,
+              renderSettings?.isGeometryGestureActive != true else {
+            sceneSwipeState.left.clearAnchor()
+            sceneSwipeState.right.clearAnchor()
+            return
+        }
+
+        let allowTrigger = sceneSwipeState.cooldown <= 0
+        var step = updateSceneSwipeHand(&sceneSwipeState.left, hand: leftHand,
+                                        deltaTime: deltaTime, allowTrigger: allowTrigger)
+        if step == nil {
+            step = updateSceneSwipeHand(&sceneSwipeState.right, hand: rightHand,
+                                        deltaTime: deltaTime, allowTrigger: allowTrigger)
+        }
+        if let step {
+            sceneSwipeState.cooldown = GestureDefaults.sceneSwipeCooldown
+            sceneSwipeState.left.clearAnchor()
+            sceneSwipeState.right.clearAnchor()
+            onSceneSwipe?(step)
+            UsageAnalytics.shared.trackHandGestureUsed()
+        }
+    }
+
+    /// Advances one hand's swipe tracking. Returns +1 / -1 when a swipe fires
+    /// (toward the user's right / left), nil otherwise. Mutates only `state`.
+    private func updateSceneSwipeHand(_ state: inout SceneSwipeHandState, hand: HandData,
+                                      deltaTime: Float, allowTrigger: Bool) -> Int? {
+        let palm = hand.palmCenter
+        // Open hand only: tracked palm, nothing pinching, not curled into a fist.
+        guard hand.isTracked,
+              simd_length_squared(palm) > 1e-6,
+              max(hand.indexPinch, max(hand.middlePinch, hand.ringPinch)) < GestureDefaults.sceneSwipeMaxPinch,
+              hand.fistStrength() < GestureDefaults.sceneSwipeMaxFist else {
+            state = SceneSwipeHandState()
+            return nil
+        }
+
+        defer {
+            state.prevPalm = palm
+            state.hasPrev = true
+        }
+        guard state.hasPrev, deltaTime > 1e-4 else { return nil }
+
+        let lateralSpeed = simd_dot(palm - state.prevPalm, headRight) / deltaTime
+        let lateralFromAnchor = simd_dot(palm - state.anchor, headRight)
+
+        // Re-anchor when the sweep stalls or reverses direction; the trigger
+        // distance must be covered in one continuous fast motion.
+        if !state.hasAnchor
+            || abs(lateralSpeed) < GestureDefaults.sceneSwipeMinSpeed
+            || (abs(lateralFromAnchor) > 0.01 && (lateralSpeed > 0) != (lateralFromAnchor > 0)) {
+            state.hasAnchor = true
+            state.anchor = palm
+            state.anchorAge = 0
+            return nil
+        }
+
+        state.anchorAge += deltaTime
+        guard allowTrigger,
+              state.anchorAge <= GestureDefaults.sceneSwipeMaxDuration else { return nil }
+
+        let travel = palm - state.anchor
+        let lateral = simd_dot(travel, headRight)
+        let vertical = abs(travel.y)
+        let depth = abs(simd_dot(travel, headForward))
+        guard abs(lateral) >= GestureDefaults.sceneSwipeTriggerDistance,
+              abs(lateral) >= vertical * GestureDefaults.sceneSwipeLateralDominance,
+              abs(lateral) >= depth * GestureDefaults.sceneSwipeLateralDominance else { return nil }
+
+        return lateral > 0 ? 1 : -1
+    }
+
     // MARK: - Gesture Processing
     
     private func processGestures() {

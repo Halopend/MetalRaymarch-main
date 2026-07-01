@@ -466,6 +466,11 @@ class AppModel {
         gestureController?.onMenuWindowPullTowardUser = { [weak self] in
             self?.pullMenuWindowTowardUser()
         }
+        // Open-palm swipe through the air = the Mac left/right arrow keys:
+        // swipe right → next scene, swipe left → previous.
+        gestureController?.onSceneSwipe = { [weak self] step in
+            self?.cycleJumpingOffScene(forward: step > 0)
+        }
 
         refreshMenuInteractionState()
         

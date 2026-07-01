@@ -330,6 +330,16 @@ final class ThresholdMacRenderer {
         }
     }
 
+    /// Benchmark-only shading-ablation mode routed into `uniforms.debugHierarchical`
+    /// (>=10 activates fragmentMain's benchAblate branches). Always 0 outside a
+    /// THRESHOLD_BENCHMARK run, so shipping behavior is untouched.
+    private static let benchAblateMode: UInt32 = {
+        guard BenchmarkMode.isActive,
+              let v = ProcessInfo.processInfo.environment["THRESHOLD_BENCHMARK_ABLATE"],
+              let n = UInt32(v), n >= 10 else { return 0 }
+        return n
+    }()
+
     private static let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
     private static let maxBuffersInFlight = 2
     private static let defaultTargetPosition = SIMD3<Float>(0.1, 0.1, 0.1)
@@ -499,34 +509,34 @@ final class ThresholdMacRenderer {
 
     private var benchColorTexture: MTLTexture?
     private var benchDepthTexture: MTLTexture?
+    /// When set, animation time is pinned to this value for the next frame(s) —
+    /// used by `captureBenchmarkBytes` so PNG regression captures are
+    /// phase-deterministic. Always nil outside the harness.
+    private var benchFixedTime: Float?
 
-    /// Renders one native-resolution raymarch frame into an offscreen target and
-    /// blocks until the GPU finishes, returning measured cost. Used only by the
-    /// headless benchmark harness — it bypasses the CAMetalLayer drawable, the
-    /// MTKView display link, and MetalFX so a benchmark can run continuously with
-    /// no on-screen window (the display link is throttled to near-zero when the
-    /// app isn't the composited foreground). It is faithful to the shipping
-    /// raymarch GPU cost: same specialized pipeline, uniforms, distance-estimator,
-    /// and in-kernel step counter as `draw(appModel:)`'s native path.
-    func renderBenchmarkFrame(appModel: AppModel, width: Int, height: Int)
+    /// During a pinned-time capture, also pin the CPU-accumulated color-cycle
+    /// phases (they integrate ∫speed·dt across the run, so they land at a
+    /// run-dependent value that `time` pinning alone can't fix). Identity when
+    /// `benchFixedTime` is nil, i.e. on every normal frame.
+    private func benchStableColorScheme(_ scheme: ColorSchemeParams) -> ColorSchemeParams {
+        guard benchFixedTime != nil else { return scheme }
+        var s = scheme
+        s.hueCyclePhase = 1.0
+        s.pulseCyclePhase = 1.0
+        s.animTime = 5.0
+        s.gradientOffset = 0.25
+        return s
+    }
+
+    /// Shared offscreen raymarch encode used by the headless benchmark harness.
+    /// Renders one native-resolution frame into the given targets and blocks until
+    /// the GPU finishes, returning measured cost. Faithful to the shipping raymarch
+    /// GPU cost: same specialized pipeline, uniforms, distance-estimator, and
+    /// in-kernel step counter as `draw(appModel:)`'s native path — it just bypasses
+    /// the CAMetalLayer drawable / MTKView display link / MetalFX so a benchmark
+    /// can run continuously with no on-screen window.
+    private func encodeBenchmarkPass(color: MTLTexture, depth: MTLTexture, appModel: AppModel)
         -> (gpuMs: Double, cpuEncodeMs: Double, avgSteps: Double)? {
-        guard width > 0, height > 0 else { return nil }
-        drawableSize = CGSize(width: width, height: height)
-
-        if benchColorTexture?.width != width || benchColorTexture?.height != height {
-            let cd = MTLTextureDescriptor.texture2DDescriptor(
-                pixelFormat: colorPixelFormat, width: width, height: height, mipmapped: false)
-            cd.usage = [.renderTarget, .shaderRead]
-            cd.storageMode = .private
-            let dd = MTLTextureDescriptor.texture2DDescriptor(
-                pixelFormat: depthPixelFormat, width: width, height: height, mipmapped: false)
-            dd.usage = [.renderTarget]
-            dd.storageMode = .private
-            benchColorTexture = device.makeTexture(descriptor: cd)
-            benchDepthTexture = device.makeTexture(descriptor: dd)
-        }
-        guard let color = benchColorTexture, let depth = benchDepthTexture else { return nil }
-
         let cpuStart = CACurrentMediaTime()
         let frameSlot = uniformBufferIndex
         let uniformBuffer = uniformBuffers[frameSlot]
@@ -556,6 +566,62 @@ final class ThresholdMacRenderer {
             avgSteps = hit > 0 ? Double(counters[0]) / Double(hit) : 0
         }
         return (gpuMs, cpuEncodeMs, avgSteps)
+    }
+
+    /// Perf-measurement path: renders into cached `.private` targets (no CPU
+    /// readback overhead) and returns cost.
+    func renderBenchmarkFrame(appModel: AppModel, width: Int, height: Int)
+        -> (gpuMs: Double, cpuEncodeMs: Double, avgSteps: Double)? {
+        guard width > 0, height > 0 else { return nil }
+        drawableSize = CGSize(width: width, height: height)
+
+        if benchColorTexture?.width != width || benchColorTexture?.height != height {
+            let cd = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: colorPixelFormat, width: width, height: height, mipmapped: false)
+            cd.usage = [.renderTarget, .shaderRead]
+            cd.storageMode = .private
+            let dd = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: depthPixelFormat, width: width, height: height, mipmapped: false)
+            dd.usage = [.renderTarget]
+            dd.storageMode = .private
+            benchColorTexture = device.makeTexture(descriptor: cd)
+            benchDepthTexture = device.makeTexture(descriptor: dd)
+        }
+        guard let color = benchColorTexture, let depth = benchDepthTexture else { return nil }
+        return encodeBenchmarkPass(color: color, depth: depth, appModel: appModel)
+    }
+
+    /// Visual-verification path: renders one frame into a CPU-readable `.shared`
+    /// color target and returns the raw BGRA8 bytes so the harness can write a PNG
+    /// (used to confirm an optimization didn't change the image). Animation time is
+    /// pinned to a fixed value for this frame so captures are phase-deterministic
+    /// (color cycling otherwise lands at a run-dependent phase → bogus diffs). Not
+    /// on the perf hot path — allocates per call.
+    func captureBenchmarkBytes(appModel: AppModel, width: Int, height: Int)
+        -> (bytes: Data, bytesPerRow: Int)? {
+        guard width > 0, height > 0 else { return nil }
+        benchFixedTime = 5.0
+        defer { benchFixedTime = nil }
+        drawableSize = CGSize(width: width, height: height)
+        let cd = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: colorPixelFormat, width: width, height: height, mipmapped: false)
+        cd.usage = [.renderTarget, .shaderRead]
+        cd.storageMode = .shared
+        let dd = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: depthPixelFormat, width: width, height: height, mipmapped: false)
+        dd.usage = [.renderTarget]
+        dd.storageMode = .private
+        guard let color = device.makeTexture(descriptor: cd),
+              let depth = device.makeTexture(descriptor: dd),
+              encodeBenchmarkPass(color: color, depth: depth, appModel: appModel) != nil else { return nil }
+
+        let bytesPerRow = width * 4
+        var data = Data(count: bytesPerRow * height)
+        data.withUnsafeMutableBytes { raw in
+            color.getBytes(raw.baseAddress!, bytesPerRow: bytesPerRow,
+                           from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+        }
+        return (data, bytesPerRow)
     }
 
     func draw(appModel: AppModel) {
@@ -1134,7 +1200,11 @@ final class ThresholdMacRenderer {
 
         let snapshot = settings.snapshot()
         updateTemporalInvalidationState(settings: snapshot)
-        let uniforms = makeUniforms(settings: snapshot, elapsedTime: Float(now - startTime), deltaTime: Float(deltaTime))
+        // benchFixedTime pins animation time for the harness's PNG-capture frame so
+        // visual-regression diffs are deterministic (color cycles/warps otherwise
+        // land at a run-dependent phase). nil in normal use and for perf frames.
+        let effectiveElapsed = benchFixedTime ?? Float(now - startTime)
+        let uniforms = makeUniforms(settings: snapshot, elapsedTime: effectiveElapsed, deltaTime: Float(deltaTime))
         let pointer = buffer.contents().bindMemory(to: UniformsArray.self, capacity: 1)
         pointer.pointee.uniforms.0 = uniforms
         pointer.pointee.uniforms.1 = uniforms
@@ -1439,12 +1509,11 @@ final class ThresholdMacRenderer {
         let isKleinianFamily = settings.fractalType == .kleinian || settings.fractalType == .theliPseudoKleinian
         let traceScaleFloor: Float = isKleinianFamily ? 0.02 : 0.15
         let traceScale = max(effectiveScale, traceScaleFloor)
-        // User render-distance multiplier scales the family cap + base horizon.
-        // The absolute ceiling stays below the projection far plane (farZ 500) so
-        // raymarch depth stays valid.
-        let userDistanceScale = settings.renderDistanceScale
-        let maxViewDistanceCap: Float = min(480.0, (isKleinianFamily ? 420.0 : 80.0) * userDistanceScale)
-        let baseViewDistance: Float = (isKleinianFamily ? RenderSettings.maxViewDistance * 2.0 : RenderSettings.maxViewDistance) * userDistanceScale
+        // Family cap + base horizon stay below the projection far plane (farZ 500)
+        // so raymarch depth stays valid. (The old render-distance multiplier was
+        // measured to have almost no perf effect and was hardcoded to 1×.)
+        let maxViewDistanceCap: Float = isKleinianFamily ? 420.0 : 80.0
+        let baseViewDistance: Float = isKleinianFamily ? RenderSettings.maxViewDistance * 2.0 : RenderSettings.maxViewDistance
         // The march runs in MODEL space, where the fractal is a fixed size and
         // detail-scale "zoom" only moves the camera toward the origin. Dividing the
         // view distance by the zoomed scale is correct for zooming OUT (camera
@@ -1593,7 +1662,8 @@ final class ThresholdMacRenderer {
                         precomputedLighting: precomputedLighting,
                         precomputedAudio: precomputedAudio,
                         precomputedFog: precomputedFog,
-                        colorScheme: settings.colorSchemeParams)
+                        colorScheme: benchStableColorScheme(settings.colorSchemeParams),
+                        benchAblate: Self.benchAblateMode)
     }
 
     private static func buildRenderPipeline(device: MTLDevice,

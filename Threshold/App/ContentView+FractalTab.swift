@@ -701,32 +701,8 @@ extension ContentView {
             // ── Render Quality (resolution / framerate headroom) ──
             performanceQualityControls
 
-            // ── Render Distance ──
-            // How far rays march before giving up. Costs steps, so pair higher
-            // values with the iteration budget / acceleration levers.
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Render Distance")
-                    Spacer()
-                    Text(cache.quality.renderDistanceScale < 1.01
-                         ? "Default"
-                         : String(format: "%.1f×", cache.quality.renderDistanceScale))
-                        .fontWeight(.bold).monospacedDigit()
-                        .foregroundStyle(cache.quality.renderDistanceScale < 1.01 ? Color.secondary : Color.cyan)
-                }
-                Slider(value: Binding(
-                    get: { cache.quality.renderDistanceScale },
-                    set: { newValue in
-                        cache.quality.renderDistanceScale = newValue
-                        cache.push(\.renderDistanceScale, value: newValue)
-                    }
-                ), in: 1...8)
-                .tint(.cyan)
-
-                Text("Extends how far the march reaches, so geometry past the default horizon resolves. Far geometry needs more steps to reach — raise the iteration budget below, or lean on cone marching / detail falloff to afford it.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+            // (Render Distance slider removed 2026-07-01: measured to have almost
+            // no perf effect — the multiplier is hardcoded to 1× in the renderers.)
 
             // ── Acceleration (the gamut of march speedup techniques) ──
             fractalAccelerationSection

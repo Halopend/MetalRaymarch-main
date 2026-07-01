@@ -75,9 +75,8 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
     let isKleinianFamily = settings.fractalType == .kleinian || settings.fractalType == .theliPseudoKleinian
     let traceScaleFloor: Float = isKleinianFamily ? 0.02 : 0.15
     let traceScale = max(effectiveScale, traceScaleFloor)
-    let userDistanceScale = settings.renderDistanceScale
-    let maxViewDistanceCap: Float = min(480.0, (isKleinianFamily ? 420.0 : 80.0) * userDistanceScale)
-    let baseViewDistance: Float = (isKleinianFamily ? RenderSettings.maxViewDistance * 2.0 : RenderSettings.maxViewDistance) * userDistanceScale
+    let maxViewDistanceCap: Float = isKleinianFamily ? 420.0 : 80.0
+    let baseViewDistance: Float = isKleinianFamily ? RenderSettings.maxViewDistance * 2.0 : RenderSettings.maxViewDistance
     let viewDistanceScale = max(min(effectiveScale, smoothedScale), traceScaleFloor)
     let targetMaxViewDistance = min(maxViewDistanceCap, baseViewDistance / viewDistanceScale)
     let maxViewDistance = max(4.0, min(maxViewDistanceCap, targetMaxViewDistance))
@@ -118,6 +117,23 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
     let scaleCorrectedBubbleRadius = settings.safetyBubbleRadius / max(effectiveScale, 0.001)
     let scaleCorrectedFadeWidth = settings.safetyBubbleFadeWidth / max(effectiveScale, 0.001)
 
+    // Hoisted out of the Uniforms(...) call below: the single-expression init is
+    // large enough that nested calls/ternaries push swiftc's type-checker over its
+    // "reasonable time" limit.
+    let isMandelbulb = settings.fractalType == .mandelbulb
+    let bubbleEnabled: Int32 = isMandelbulb ? 0 : (settings.safetyBubbleEnabled ? 1 : 0)
+    let bubbleStrength: Float = isMandelbulb ? 0.0 : settings.safetyBubbleStrength
+    let coneMarchScale = RenderPrecompute.coneMarchScale(
+        strength: settings.coneMarchStrength,
+        projection: projection,
+        viewportHeight: Float(drawableSize.height))
+    let pixelFootprintPerDist = RenderPrecompute.pixelFootprintPerDist(
+        projection: projection,
+        viewportHeight: Float(drawableSize.height))
+    let springLen = simd_length(settings.springDisplacement)
+    let springVisible: Int32 = (settings.springActive || springLen > 0.001) ? 1 : 0
+    let renderResolution = SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height))
+
     return Uniforms(projectionMatrix: jitteredProjection,
                     modelViewMatrix: modelView,
                     inverseModelViewMatrix: inverseModelView,
@@ -135,11 +151,11 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
                     foldingLimit: settings.foldingLimit,
                     sphereRadius: settings.sphereRadius,
                     safetyBubbleRadius: scaleCorrectedBubbleRadius,
-                    safetyBubbleEnabled: settings.fractalType == .mandelbulb ? 0 : (settings.safetyBubbleEnabled ? 1 : 0),
+                    safetyBubbleEnabled: bubbleEnabled,
                     safetyBubbleShape: settings.safetyBubbleShape,
                     safetyBubbleFadeEnabled: settings.safetyBubbleFadeEnabled ? 1 : 0,
                     safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
-                    safetyBubbleStrength: settings.fractalType == .mandelbulb ? 0.0 : settings.safetyBubbleStrength,
+                    safetyBubbleStrength: bubbleStrength,
                     colorIterations: settings.colorIterations,
                     limitFlash: settings.limitFlash,
                     activeGesture: Int32(settings.activeGestureIndex),
@@ -159,26 +175,21 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
                     stepMultiplier: settings.stepMultiplier,
                     boundingSphereRadius: settings.estimatedBoundingSphereRadius,
                     smartAdvanceEnabled: settings.smartAdvanceEnabled ? 1 : 0,
-                    coneMarchScale: RenderPrecompute.coneMarchScale(
-                        strength: settings.coneMarchStrength,
-                        projection: projection,
-                        viewportHeight: Float(drawableSize.height)),
+                    coneMarchScale: coneMarchScale,
                     shadowsEnabled: settings.shadowsEnabled ? 1 : 0,
                     distanceLODFalloff: settings.distanceLODStrength * 0.5,
                     benchCollectSteps: 0,
-                    pixelFootprintPerDist: RenderPrecompute.pixelFootprintPerDist(
-                        projection: projection,
-                        viewportHeight: Float(drawableSize.height)),
+                    pixelFootprintPerDist: pixelFootprintPerDist,
                     coarseRateMagMax: 1.0,
                     springDisplacementX: settings.springDisplacement.x,
                     springDisplacementY: settings.springDisplacement.y,
                     springDisplacementZ: settings.springDisplacement.z,
-                    springStretch: simd_length(settings.springDisplacement),
+                    springStretch: springLen,
                     springAnchorNDC: SIMD2<Float>(0.7, -0.7),
-                    springVisible: (settings.springActive || simd_length(settings.springDisplacement) > 0.001) ? 1 : 0,
+                    springVisible: springVisible,
                     springRestRadius: 0.06,
                     jitterOffset: .zero,
-                    renderResolution: [Float(drawableSize.width), Float(drawableSize.height)],
+                    renderResolution: renderResolution,
                     floorPlane: SIMD4<Float>(0, 1, 0, 0),
                     floorCenterRadius: SIMD4<Float>(0, 0, 0, 0),
                     formulaParams: settings.formulaParams,
@@ -186,7 +197,8 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
                     precomputedLighting: precomputedLighting,
                     precomputedAudio: precomputedAudio,
                     precomputedFog: precomputedFog,
-                    colorScheme: settings.colorSchemeParams)
+                    colorScheme: settings.colorSchemeParams,
+                    benchAblate: 0)
 }
 
 // MARK: - Headless Metal render harness

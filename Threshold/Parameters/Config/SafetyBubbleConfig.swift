@@ -98,12 +98,23 @@ enum SafetyBubbleShapePreset: Int, CaseIterable, Identifiable, Sendable {
 }
 
 struct SafetyBubbleConfig: Codable, Equatable, Sendable {
-    var enabled: Bool = false
+    /// Comfort default: on Vision Pro the bubble starts ON so scenes can't push
+    /// geometry into the viewer's face. Desktop/iPad keep it off — there the
+    /// bubble is purely a scene-authored aesthetic.
+#if os(visionOS)
+    static let defaultEnabled = true
+#else
+    static let defaultEnabled = false
+#endif
+    /// Default strength = Blend UI slider at halfway (slider shows 1 − √strength).
+    static let defaultStrength: Float = 0.25
+
+    var enabled: Bool = SafetyBubbleConfig.defaultEnabled
     var radius: Float = 1.8        // 0.05 - 2.5 meters
     var shape: Float = 0.0         // 0...1 = legacy sphere/cube morph, 2...6 = discrete presets
     var fadeEnabled: Bool = true
     var fadeWidth: Float = 0.1     // 0.0 - 1.0
-    var strength: Float = 0.5     // 0.0 - 1.0
+    var strength: Float = SafetyBubbleConfig.defaultStrength     // 0.0 - 1.0
 
     // MARK: - Validation
 

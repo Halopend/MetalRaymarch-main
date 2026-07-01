@@ -727,29 +727,33 @@ struct FractalPreset: Codable, Identifiable {
             }
         }
         
-        if let safetyBubbleEnabled = safetyBubbleEnabled {
-            settings.safetyBubbleEnabled = safetyBubbleEnabled
-        }
-        if let safetyBubbleRadius = safetyBubbleRadius {
-            settings.safetyBubbleRadius = safetyBubbleRadius
-        }
-        if let safetyBubbleShape = safetyBubbleShape {
-            settings.safetyBubbleShape = safetyBubbleShape
-        }
-        if let safetyBubbleBlend = safetyBubbleBlend {
-            settings.safetyBubbleBlend = safetyBubbleBlend
-        }
-        // Bubble edge fade — get-only on RenderSettings, so restore through the
-        // whole-config setter (reads current values set just above, mutates fade).
-        if safetyBubbleFadeEnabled != nil || safetyBubbleFadeWidth != nil {
-            var sb = settings.safetyBubbleConfig
-            if let safetyBubbleFadeEnabled = safetyBubbleFadeEnabled {
-                sb.fadeEnabled = safetyBubbleFadeEnabled
+        // The safety bubble is user-owned comfort state: users can disable it,
+        // scenes cannot. A scene that uses the bubble as part of its authored
+        // look applies its full bubble state, but a scene saved without it
+        // must NOT silently disable (or reshape) the user's bubble on load.
+        if safetyBubbleEnabled == true {
+            settings.safetyBubbleEnabled = true
+            if let safetyBubbleRadius = safetyBubbleRadius {
+                settings.safetyBubbleRadius = safetyBubbleRadius
             }
-            if let safetyBubbleFadeWidth = safetyBubbleFadeWidth {
-                sb.fadeWidth = safetyBubbleFadeWidth
+            if let safetyBubbleShape = safetyBubbleShape {
+                settings.safetyBubbleShape = safetyBubbleShape
             }
-            settings.safetyBubbleConfig = sb
+            if let safetyBubbleBlend = safetyBubbleBlend {
+                settings.safetyBubbleBlend = safetyBubbleBlend
+            }
+            // Bubble edge fade — get-only on RenderSettings, so restore through the
+            // whole-config setter (reads current values set just above, mutates fade).
+            if safetyBubbleFadeEnabled != nil || safetyBubbleFadeWidth != nil {
+                var sb = settings.safetyBubbleConfig
+                if let safetyBubbleFadeEnabled = safetyBubbleFadeEnabled {
+                    sb.fadeEnabled = safetyBubbleFadeEnabled
+                }
+                if let safetyBubbleFadeWidth = safetyBubbleFadeWidth {
+                    sb.fadeWidth = safetyBubbleFadeWidth
+                }
+                settings.safetyBubbleConfig = sb
+            }
         }
 
         // Space module (domain transforms) — restore when present.
