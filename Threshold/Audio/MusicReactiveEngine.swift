@@ -40,6 +40,7 @@ final class MusicReactiveEngine {
         let sign: Float
         let formulaParamSlot: Int?
         let spaceWarpSlot: Int?
+        let spaceWarpField: SpaceWarpField
         let smoothingTime: Float
         let hybridCombo: Float
         let lfo: LFOSettings
@@ -180,7 +181,7 @@ final class MusicReactiveEngine {
         // Transform-stack targets bypass the dispatcher: their smoothed offset is
         // folded straight into spaceWarpStack[slot].strength at snapshot time. Collected
         // here and written atomically below (empty write clears removed/stale slots).
-        var spaceWarpOffsets: [Int: Float] = [:]
+        var spaceWarpOffsets: [SpaceWarpFieldKey: Float] = [:]
         for mapping in activeResolvedMappings {
             // ── 1. Select audio source level (0-1) ──
             let sourceValue: Float
@@ -287,8 +288,9 @@ final class MusicReactiveEngine {
             }
 
             if let warpSlot = mapping.spaceWarpSlot {
-                // Additive strength delta, folded into the live op at snapshot time.
-                spaceWarpOffsets[warpSlot] = finalOffset
+                // Additive delta for the chosen field, folded into the live op at
+                // snapshot time (strength by default; also param1/2 or an axis component).
+                spaceWarpOffsets[SpaceWarpFieldKey(slot: warpSlot, field: mapping.spaceWarpField)] = finalOffset
             } else {
                 operationsBuffer.append(
                     ParameterOperation(
@@ -388,6 +390,7 @@ final class MusicReactiveEngine {
                     sign: mapping.amount >= 0 ? 1.0 : -1.0,
                     formulaParamSlot: mapping.target.formulaParamSlot,
                     spaceWarpSlot: mapping.target.spaceWarpSlot,
+                    spaceWarpField: mapping.spaceWarpField,
                     smoothingTime: max(0.02, mapping.smoothingWindow),
                     hybridCombo: max(0.0, min(1.0, mapping.hybridCombo)),
                     lfo: mapping.lfo

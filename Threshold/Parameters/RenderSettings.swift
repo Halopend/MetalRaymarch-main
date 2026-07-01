@@ -119,10 +119,10 @@ final class RenderSettings: @unchecked Sendable {
     // Composable domain-transform stack (Transformations UI). Order = order of
     // application; empty = off. See SpaceWarpOpValue / TransformationsSection.
     private var _spaceWarpStack: [SpaceWarpOpValue] = []
-    // Transient per-slot music offsets (slot → additive strength delta), written by
-    // the music engine each frame and folded into each op's strength at snapshot time.
+    // Transient music offsets keyed by (slot, field) → additive delta, written by the
+    // music engine each frame and folded into each op's chosen field at snapshot time.
     // NOT persisted (it's live modulation, not authored state); empty = no modulation.
-    private var _spaceWarpAudioOffsets: [Int: Float] = [:]
+    private var _spaceWarpAudioOffsets: [SpaceWarpFieldKey: Float] = [:]
     // Cached GPU-packed stack (simplify + transcendental precompute + pack). It is a
     // pure function of `_spaceWarpStack` + `_spaceWarpAudioOffsets`, so it only needs
     // rebuilding when one of those changes — nil = dirty. Rebuilding it every frame
@@ -602,10 +602,10 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _spaceWarpStack = newValue; _cachedPackedSpaceWarpStack = nil } }
     }
 
-    /// Replace the music-driven per-slot strength offsets atomically (slot → delta).
-    /// Called once per audio frame by the music engine; pass `[:]` to clear (mapping
-    /// removed / music off). Folded into op strengths at snapshot time.
-    func setSpaceWarpAudioOffsets(_ offsets: [Int: Float]) {
+    /// Replace the music-driven per-(slot, field) offsets atomically. Called once per
+    /// audio frame by the music engine; pass `[:]` to clear (mapping removed / music
+    /// off). Folded into each op's chosen field at snapshot time.
+    func setSpaceWarpAudioOffsets(_ offsets: [SpaceWarpFieldKey: Float]) {
         withLock {
             // Called every audio frame ("always publish"). Only invalidate the packed
             // cache when the offsets actually change, so the common no-transform-binding
@@ -621,9 +621,8 @@ final class RenderSettings: @unchecked Sendable {
     private func spaceWarpStackWithAudioOffsetsLocked() -> [SpaceWarpOpValue] {
         guard !_spaceWarpAudioOffsets.isEmpty else { return _spaceWarpStack }
         var ops = _spaceWarpStack
-        for (slot, delta) in _spaceWarpAudioOffsets where slot >= 0 && slot < ops.count {
-            let r = ops[slot].kind.strengthRange
-            ops[slot].strength = min(r.upperBound, max(r.lowerBound, ops[slot].strength + delta))
+        for (key, delta) in _spaceWarpAudioOffsets where key.slot >= 0 && key.slot < ops.count {
+            ops[key.slot].applyAudioDelta(delta, field: key.field)
         }
         return ops
     }

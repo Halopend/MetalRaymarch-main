@@ -68,7 +68,14 @@ struct TransformationsSection: View {
 
     private var addMenu: some View {
         Menu {
-            // Grouped by family so the look-alikes (e.g. the spherical trio) cluster.
+            // Curated starting stacks up top — each REPLACES the current stack.
+            Section("Recipes") {
+                Button { surprise() } label: { Label("Surprise Me", systemImage: "dice") }
+                ForEach(WarpCatalog.recipes) { recipe in
+                    Button { apply(recipe) } label: { Label(recipe.name, systemImage: recipe.icon) }
+                }
+            }
+            // Individual transforms, grouped by family so the look-alikes cluster.
             ForEach(WarpFamily.allCases, id: \.self) { family in
                 Section(family.rawValue) {
                     ForEach(SpaceWarpKind.allCases.filter { $0.family == family }) { kind in
@@ -102,6 +109,20 @@ struct TransformationsSection: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                }
+                // ♪ badge: which field(s) of this slot are music-linked (bind/edit in
+                // the Music tab). Shows the first link's field + a count if there's more.
+                if let m = musicMappings(forSlot: index).first {
+                    let all = musicMappings(forSlot: index)
+                    let extra = all.count > 1 ? " +\(all.count - 1)" : ""
+                    Label(kind.musicFieldLabel(m.spaceWarpField) + extra, systemImage: "music.note")
+                        .font(.caption2.weight(.semibold))
+                        .labelStyle(.titleAndIcon)
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(Capsule().fill(.tint.opacity(0.18)))
+                        .foregroundStyle(.tint)
+                        .help(all.map { "\(kind.musicFieldLabel($0.spaceWarpField)) ← \($0.source.displayName) (\($0.responseCurve.displayName))" }
+                            .joined(separator: "\n") + "\nEdit in the Music tab.")
                 }
                 Spacer()
                 Toggle("", isOn: Binding(
@@ -290,6 +311,19 @@ struct TransformationsSection: View {
         refresh &+= 1
     }
 
+    /// Load a curated recipe — REPLACES the current stack with its ops (capped at
+    /// the GPU limit). A starting point to tweak, not a locked preset.
+    private func apply(_ recipe: WarpRecipe) {
+        renderSettings.spaceWarpStack = Array(recipe.make().prefix(Int(kMaxSpaceWarpOps)))
+        refresh &+= 1
+    }
+
+    /// Drop a random structure-forming stack.
+    private func surprise() {
+        renderSettings.spaceWarpStack = Array(WarpCatalog.randomStack().prefix(Int(kMaxSpaceWarpOps)))
+        refresh &+= 1
+    }
+
     private func delete(_ id: UUID) {
         var arr = renderSettings.spaceWarpStack
         arr.removeAll { $0.id == id }
@@ -323,6 +357,15 @@ struct TransformationsSection: View {
     /// 0…2 range is exactly mid-track, which read as a thumb "stuck in the centre".
     private func liveOp(_ id: UUID) -> SpaceWarpOpValue? {
         renderSettings.spaceWarpStack.first { $0.id == id }
+    }
+
+    /// Enabled music mappings driving any field of this stack slot — drives the ♪
+    /// badge so a music link set in the Music tab is visible right here on the card.
+    /// Slot index == the model stack index the audio offset folds into.
+    private func musicMappings(forSlot index: Int) -> [MusicReactiveMapping] {
+        renderSettings.musicReactiveMappings.filter {
+            $0.isEnabled && $0.target.spaceWarpSlot == index
+        }
     }
 }
 

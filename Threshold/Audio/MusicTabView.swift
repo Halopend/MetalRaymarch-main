@@ -1366,6 +1366,29 @@ struct MusicTabContent: View {
                                         Spacer()
                                     }
 
+                                    // Transform slots can drive any field of the op, not
+                                    // just its strength — pick from the fields the live
+                                    // transform at this slot actually has.
+                                    if mapping.target.isSpaceWarp,
+                                       let slot = mapping.target.spaceWarpSlot,
+                                       let stack = cache.renderSettings?.spaceWarpStack,
+                                       slot < stack.count {
+                                        let kind = stack[slot].kind
+                                        let fields = kind.musicFields
+                                        if fields.count > 1 {
+                                            Picker("Drives", selection: Binding(
+                                                get: { mappingAt(index)?.spaceWarpField ?? .strength },
+                                                set: { newValue in updateMapping(index) { $0.spaceWarpField = newValue } }
+                                            )) {
+                                                ForEach(fields, id: \.self) { f in
+                                                    Text(kind.musicFieldLabel(f)).tag(f)
+                                                }
+                                            }
+                                            .pickerStyle(.menu)
+                                            .font(.caption)
+                                        }
+                                    }
+
                                     Picker("Source", selection: Binding(
                                         get: { mappingAt(index)?.source ?? .composite },
                                         set: { newValue in updateMapping(index) { $0.source = newValue } }

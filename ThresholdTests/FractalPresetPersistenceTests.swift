@@ -317,7 +317,7 @@ struct FractalPresetPersistenceTests {
         let settings = RenderSettings()
         var op = SpaceWarpOpValue(kind: .mirror); op.strength = 0.4
         settings.spaceWarpStack = [op]
-        settings.setSpaceWarpAudioOffsets([0: 0.5])
+        settings.setSpaceWarpAudioOffsets([SpaceWarpFieldKey(slot: 0, field: .strength): 0.5])
         #expect(abs(packedStrength0(settings) - 0.9) < 1e-5)   // 0.4 + 0.5, within range
         settings.setSpaceWarpAudioOffsets([:])                 // cleared → base restored
         #expect(abs(packedStrength0(settings) - 0.4) < 1e-5)
@@ -402,5 +402,61 @@ struct FractalPresetPersistenceTests {
         #expect(settings.platformEnabled == false)
         #expect(settings.cellShadingEnabled == true)
         #expect(abs(settings.lightVariationRate - 0.2) < 1e-5)
+    }
+}
+
+@Suite("Transform music field-binding — back-compat + per-field fold")
+struct SpaceWarpMusicFieldTests {
+
+    // A mapping saved before `spaceWarpField` existed has no such key; it must decode
+    // to `.strength` so old scenes behave exactly as before.
+    @Test("MusicReactiveMapping without spaceWarpField decodes to .strength")
+    func backCompatDecodeDefaultsToStrength() throws {
+        let m = MusicReactiveMapping(target: .spaceWarp0, source: .bass, amount: 1, isEnabled: true)
+        let data = try JSONEncoder().encode(m)
+        var obj = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(obj["spaceWarpField"] != nil, "encode should emit the field key")
+        obj.removeValue(forKey: "spaceWarpField")
+        let stripped = try JSONSerialization.data(withJSONObject: obj)
+        let decoded = try JSONDecoder().decode(MusicReactiveMapping.self, from: stripped)
+        #expect(decoded.spaceWarpField == .strength)
+    }
+
+    @Test("A non-default spaceWarpField round-trips through Codable")
+    func fieldRoundTrips() throws {
+        var m = MusicReactiveMapping(target: .spaceWarp2, source: .treble, amount: 1, isEnabled: true)
+        m.spaceWarpField = .param1
+        let decoded = try JSONDecoder().decode(MusicReactiveMapping.self, from: JSONEncoder().encode(m))
+        #expect(decoded.spaceWarpField == .param1)
+    }
+
+    @Test("applyAudioDelta writes the chosen field and clamps to its range")
+    func foldAppliesToFieldAndClamps() {
+        // Strength (ripple range 0…2).
+        var op = SpaceWarpOpValue(kind: .ripple)
+        op.strength = 0.5
+        op.applyAudioDelta(0.3, field: .strength)
+        #expect(abs(op.strength - 0.8) < 1e-5)
+        op.applyAudioDelta(100, field: .strength)
+        #expect(op.strength == 2.0)                 // clamped to strengthRange.upper
+
+        // Param 1 (ripple Frequency, range 0.1…8, default 2).
+        var op2 = SpaceWarpOpValue(kind: .ripple)
+        op2.applyAudioDelta(1.0, field: .param1)
+        #expect(abs(op2.p1 - 3.0) < 1e-5)
+
+        // Axis component (range −1…1; twist default axis is (0,1,0)).
+        var op3 = SpaceWarpOpValue(kind: .twist)
+        op3.applyAudioDelta(0.5, field: .axisX)
+        #expect(abs(op3.axis.x - 0.5) < 1e-5)
+        op3.applyAudioDelta(5, field: .axisY)
+        #expect(op3.axis.y == 1.0)                  // clamped to axis range upper
+    }
+
+    @Test("musicFields exposes exactly the fields each transform actually has")
+    func musicFieldsMatchTransform() {
+        #expect(SpaceWarpKind.mirror.musicFields == [.strength])                       // no params, no axis
+        #expect(SpaceWarpKind.sphereFold.musicFields == [.strength, .param1, .param2]) // two slots, no axis
+        #expect(SpaceWarpKind.ripple.musicFields == [.strength, .param1, .axisX, .axisY, .axisZ]) // slot1 + axis
     }
 }

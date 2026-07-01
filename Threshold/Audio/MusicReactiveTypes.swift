@@ -451,6 +451,10 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
     var smoothingWindow: Float
     /// Hybrid-only blend: 0 = mostly drift, 1 = more fast vibration.
     var hybridCombo: Float
+    /// Which field of a transform-stack op this mapping drives (only meaningful when
+    /// `target` is a `spaceWarpN` slot). Defaults to `.strength` — the sole field
+    /// bindable before this existed — so pre-existing scenes decode unchanged.
+    var spaceWarpField: SpaceWarpField
 
     init(id: UUID = UUID(),
          target: MusicReactiveTarget,
@@ -460,7 +464,8 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
          responseCurve: ResponseCurve? = nil,
          lfo: LFOSettings = .default,
          smoothingWindow: Float = 0.0,
-         hybridCombo: Float = 0.35) {
+         hybridCombo: Float = 0.35,
+         spaceWarpField: SpaceWarpField = .strength) {
         self.id = id
         self.target = target
         self.source = source
@@ -470,6 +475,7 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         self.lfo = lfo
         self.smoothingWindow = smoothingWindow
         self.hybridCombo = hybridCombo
+        self.spaceWarpField = spaceWarpField
         sanitizeInPlace()
     }
 
@@ -490,7 +496,7 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
     // responseSpeed/mode) in older saved data are simply ignored.
     enum CodingKeys: String, CodingKey {
         case id, target, source, amount, isEnabled
-        case responseCurve, lfo, smoothingWindow, hybridCombo
+        case responseCurve, lfo, smoothingWindow, hybridCombo, spaceWarpField
     }
 
     init(from decoder: Decoder) throws {
@@ -505,6 +511,7 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         self.lfo = try c.decodeIfPresent(LFOSettings.self, forKey: .lfo) ?? .default
         self.smoothingWindow = try c.decodeIfPresent(Float.self, forKey: .smoothingWindow) ?? 0.0
         self.hybridCombo = try c.decodeIfPresent(Float.self, forKey: .hybridCombo) ?? 0.35
+        self.spaceWarpField = try c.decodeIfPresent(SpaceWarpField.self, forKey: .spaceWarpField) ?? .strength
         sanitizeInPlace()
     }
 

@@ -60,6 +60,40 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable {
     var tagline: String { descriptor.tagline }
     var family: WarpFamily { descriptor.family }
 
+    /// The fields of this transform that make sense to music-drive: always the master
+    /// amount, plus whichever scalar slots and axis it actually uses. Drives the
+    /// Music-tab field picker so users can't bind a param a transform doesn't have.
+    var musicFields: [SpaceWarpField] {
+        var fields: [SpaceWarpField] = [.strength]
+        if params.contains(where: { $0.slot == 1 }) { fields.append(.param1) }
+        if params.contains(where: { $0.slot == 2 }) { fields.append(.param2) }
+        if usesAxis { fields += [.axisX, .axisY, .axisZ] }
+        return fields
+    }
+
+    /// Human label for one music-drivable field, using this transform's own naming
+    /// (e.g. `.strength` → "Twist", `.param1` → "Fold Limit", `.axisX` → "Offset X").
+    func musicFieldLabel(_ field: SpaceWarpField) -> String {
+        switch field {
+        case .strength: return amountLabel
+        case .param1:   return params.first(where: { $0.slot == 1 })?.label ?? "Param 1"
+        case .param2:   return params.first(where: { $0.slot == 2 })?.label ?? "Param 2"
+        case .axisX:    return "\(axisLabel) X"
+        case .axisY:    return "\(axisLabel) Y"
+        case .axisZ:    return "\(axisLabel) Z"
+        }
+    }
+
+    /// Valid range for a music-driven field (used to clamp the audio-folded value).
+    func range(for field: SpaceWarpField) -> ClosedRange<Float> {
+        switch field {
+        case .strength: return strengthRange
+        case .param1:   return params.first(where: { $0.slot == 1 })?.range ?? 0...1
+        case .param2:   return params.first(where: { $0.slot == 2 })?.range ?? 0...1
+        case .axisX, .axisY, .axisZ: return -1...1   // matches the axis sliders
+        }
+    }
+
     /// One-line readable math for the "Under the hood" panel — what the GPU actually
     /// computes for this transform (p = sample point, op fields as labelled in the UI).
     var formula: String {
@@ -83,6 +117,32 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable {
         case .offsetFold:   return "p ↦ mix(p, |p + c|, strength)   — mirror fold about an off-origin centre c"
         }
     }
+}
+
+/// Which field of a stack op the music layer drives. Music bindings default to
+/// `.strength` (the only field bindable before this existed), so old scenes decode
+/// unchanged. `param1`/`param2` map to the op's two scalar slots; `axisX/Y/Z` to the
+/// direction/offset vector.
+enum SpaceWarpField: String, Codable, CaseIterable, Sendable {
+    case strength, param1, param2, axisX, axisY, axisZ
+
+    var displayName: String {
+        switch self {
+        case .strength: return "Strength"
+        case .param1:   return "Param 1"
+        case .param2:   return "Param 2"
+        case .axisX:    return "Axis X"
+        case .axisY:    return "Axis Y"
+        case .axisZ:    return "Axis Z"
+        }
+    }
+}
+
+/// Identifies one music-driven field of one stack slot (the key the audio engine
+/// publishes offsets under, folded into the live op at snapshot time).
+struct SpaceWarpFieldKey: Hashable, Sendable {
+    let slot: Int
+    let field: SpaceWarpField
 }
 
 /// A per-operator scalar slider, bound to op.p1 (slot 1) or op.p2 (slot 2).
@@ -257,6 +317,99 @@ enum WarpCatalog {
     static func descriptor(for kind: SpaceWarpKind) -> WarpDescriptor {
         byKind[kind] ?? all[0]
     }
+
+    // MARK: - Recipes (curated starting stacks)
+
+    /// One-tap curated stacks for the add menu. Each `make()` returns a FRESH set of
+    /// editable ops (new UUIDs) that REPLACE the current stack — a starting point to
+    /// explore from, not a locked preset. They lean on the many-to-one folds/repeats,
+    /// which produce their character robustly regardless of fine tuning, so they read
+    /// as "something" immediately even before the user starts dialing.
+    static let recipes: [WarpRecipe] = [
+        WarpRecipe("Icosahedral Bloom", icon: "hexagon.fill",
+                   blurb: "A {5,3} icosahedral reflection group with a soft sphere-fold core — dense polyhedral mirror symmetry.") {
+            [ warpOp(.coxeter, p1: 5, p2: 3),
+              warpOp(.sphereFold, strength: 0.6, p1: 0.5, p2: 1.4),
+              warpOp(.scaleRepeat, strength: 1.0, p1: 2.0) ]
+        },
+        WarpRecipe("Menger Blocks", icon: "square.grid.3x3.fill",
+                   blurb: "Abs-sort fold → scale → offset → fold: two levels of the Menger sponge's boxy self-similarity.") {
+            [ warpOp(.mengerFold),
+              warpOp(.scale, strength: 2.6),
+              warpOp(.offsetFold, strength: 1.0, axis: SIMD3<Float>(1, 1, 0)),
+              warpOp(.mengerFold) ]
+        },
+        WarpRecipe("Kaleido Tunnel", icon: "snowflake",
+                   blurb: "Lattice repeat → 6-fold kaleidoscope → a slow twist: a receding tunnel with rotational symmetry.") {
+            [ warpOp(.tiling, strength: 1.0, p1: 3.0),
+              warpOp(.kaleidoscope, strength: 1.0, p1: 6.0),
+              warpOp(.twist, strength: 0.4, axis: SIMD3<Float>(0, 1, 0)) ]
+        },
+        WarpRecipe("Nested Spheres", icon: "circle.circle.fill",
+                   blurb: "Turn space inside-out, then repeat it in concentric shells — Apollonian-flavoured nested bubbles.") {
+            [ warpOp(.inversion, strength: 1.0, p1: 1.0),
+              warpOp(.shells, strength: 1.0, p1: 1.0),
+              warpOp(.mirror, strength: 1.0) ]
+        },
+        WarpRecipe("Sierpinski Web", icon: "triangle.fill",
+                   blurb: "Three aimed plane-fold mirrors then a ×2 scale — the classic tetrahedral kaleidoscopic-IFS step, a couple levels deep.") {
+            [ warpOp(.planeFold, strength: 1.0, p1: 0.0, axis: SIMD3<Float>(1, -1, 0)),
+              warpOp(.planeFold, strength: 1.0, p1: 0.0, axis: SIMD3<Float>(0, 1, -1)),
+              warpOp(.planeFold, strength: 1.0, p1: 0.0, axis: SIMD3<Float>(1, 0, -1)),
+              warpOp(.scale, strength: 2.0) ]
+        },
+    ]
+
+    /// A random "Surprise Me" stack (2–4 ops) drawn from a palette weighted toward the
+    /// structure-forming folds/repeats so the result reliably looks like *something*.
+    /// Params and axes are randomized within each op's valid ranges.
+    static func randomStack() -> [SpaceWarpOpValue] {
+        let palette: [SpaceWarpKind] = [
+            .mirror, .boxFold, .sphereFold, .inversion, .kaleidoscope, .mengerFold,
+            .tiling, .scaleRepeat, .shells, .coxeter, .twist, .offsetFold, .circle,
+        ]
+        let n = Int.random(in: 2...4)
+        return (0..<n).map { _ in
+            let kind = palette.randomElement() ?? .mirror
+            var op = SpaceWarpOpValue(kind: kind)
+            let sr = kind.strengthRange
+            op.strength = Float.random(in: Swift.max(sr.lowerBound, 0.4)...sr.upperBound)
+            for spec in kind.params {
+                let v = Float.random(in: spec.range)
+                if spec.slot == 1 { op.p1 = v } else { op.p2 = v }
+            }
+            if kind.usesAxis {
+                op.axis = SIMD3<Float>(.random(in: -1...1), .random(in: -1...1), .random(in: -1...1))
+            }
+            return op
+        }
+    }
+}
+
+/// A named, curated starting stack surfaced in the Transformations add menu.
+struct WarpRecipe: Identifiable, Sendable {
+    let id = UUID()
+    let name: String
+    let icon: String
+    let blurb: String
+    let make: @Sendable () -> [SpaceWarpOpValue]
+
+    init(_ name: String, icon: String, blurb: String, make: @escaping @Sendable () -> [SpaceWarpOpValue]) {
+        self.name = name; self.icon = icon; self.blurb = blurb; self.make = make
+    }
+}
+
+/// Build one recipe op from its kind defaults, overriding only the fields a recipe
+/// cares about. Each call mints a fresh UUID so a recipe can be applied repeatedly
+/// without ForEach id collisions.
+func warpOp(_ kind: SpaceWarpKind, strength: Float? = nil,
+            p1: Float? = nil, p2: Float? = nil, axis: SIMD3<Float>? = nil) -> SpaceWarpOpValue {
+    var op = SpaceWarpOpValue(kind: kind)
+    if let strength { op.strength = strength }
+    if let p1 { op.p1 = p1 }
+    if let p2 { op.p2 = p2 }
+    if let axis { op.axis = axis }
+    return op
 }
 
 /// One operator instance in the stack (Swift-side editable model). Mirrors the
@@ -288,6 +441,21 @@ struct SpaceWarpOpValue: Codable, Identifiable, Hashable {
          axis: SIMD3<Float>, isEnabled: Bool) {
         self.id = id; self.type = type; self.strength = strength
         self.p1 = p1; self.p2 = p2; self.axis = axis; self.isEnabled = isEnabled
+    }
+
+    /// Add a music offset to one field, clamped to that field's range for this kind.
+    /// Used by the snapshot fold so audio modulation stays inside valid bounds.
+    mutating func applyAudioDelta(_ delta: Float, field: SpaceWarpField) {
+        let r = kind.range(for: field)
+        let clamp = { (v: Float) in min(r.upperBound, max(r.lowerBound, v + delta)) }
+        switch field {
+        case .strength: strength = clamp(strength)
+        case .param1:   p1 = clamp(p1)
+        case .param2:   p2 = clamp(p2)
+        case .axisX:    axis.x = clamp(axis.x)
+        case .axisY:    axis.y = clamp(axis.y)
+        case .axisZ:    axis.z = clamp(axis.z)
+        }
     }
 }
 
