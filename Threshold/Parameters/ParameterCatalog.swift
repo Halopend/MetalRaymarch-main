@@ -272,6 +272,24 @@ enum ParameterCatalog {
                 writeAudioOffset: nil,
                 audioOffsetActiveDuringPlayback: nil)),
 
+        // Gradient phase offset ("Color Offset"). Routed like saturation but without
+        // the animation-playback offset path (no writeAudioOffset), matching colorMix.
+        ParameterDescriptor(
+            spec: ControlCatalog.gradientOffset,
+            route: nil,
+            capability: .universal,
+            gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
+            music: MusicFacet(category: .color, defaultSource: .composite, defaultResponseCurve: .drift, hasFlashingRisk: false),
+            ui: UIBinding(
+                read: { $0.color.gradientState.gradient.offset },
+                write: { cache, v in cache.color.gradientState.gradient.offset = v; cache.push(\.gradientOffset, value: v) },
+                persists: true),
+            settings: SettingsBinding(
+                read: { $0.gradientOffset },
+                write: { settings, value in settings.audioModulateGradientOffset(value) },
+                writeAudioOffset: nil,
+                audioOffsetActiveDuringPlayback: nil)),
+
         // MARK: Space transforms (cross-fractal)
 
         ParameterDescriptor(

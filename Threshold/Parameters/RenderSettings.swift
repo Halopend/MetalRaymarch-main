@@ -59,7 +59,6 @@ final class RenderSettings: @unchecked Sendable {
         }
         let defaultsList: [MusicReactiveMapping] = [
             MusicReactiveTarget.fractalScale.defaultMapping(enabled: true),
-            MusicReactiveTarget.colorMix.defaultMapping(enabled: true),
             MusicReactiveTarget.glow.defaultMapping(enabled: true),
             MusicReactiveTarget.fog.defaultMapping(enabled: true),
         ]
@@ -124,6 +123,12 @@ final class RenderSettings: @unchecked Sendable {
     // the music engine each frame and folded into each op's strength at snapshot time.
     // NOT persisted (it's live modulation, not authored state); empty = no modulation.
     private var _spaceWarpAudioOffsets: [Int: Float] = [:]
+    // Cached GPU-packed stack (simplify + transcendental precompute + pack). It is a
+    // pure function of `_spaceWarpStack` + `_spaceWarpAudioOffsets`, so it only needs
+    // rebuilding when one of those changes — nil = dirty. Rebuilding it every frame
+    // in snapshot() re-ran the simplifier + sin/cos/log/sqrt precompute (plus 2–3 heap
+    // array allocs) for a STATIC stack; this caches the result across frames.
+    private var _cachedPackedSpaceWarpStack: SpaceWarpStack?
     // RETIRED warp-stack codegen state. The transform stack now renders via the
     // bundled count-driven runtime loop (uniform-driven), so these stay at their
     // "no injected warp library" defaults forever. The render backends still read
@@ -594,14 +599,21 @@ final class RenderSettings: @unchecked Sendable {
     /// order of application; an empty stack means no transforms.
     var spaceWarpStack: [SpaceWarpOpValue] {
         get { withLock { _spaceWarpStack } }
-        set { withLock { _spaceWarpStack = newValue } }
+        set { withLock { _spaceWarpStack = newValue; _cachedPackedSpaceWarpStack = nil } }
     }
 
     /// Replace the music-driven per-slot strength offsets atomically (slot → delta).
     /// Called once per audio frame by the music engine; pass `[:]` to clear (mapping
     /// removed / music off). Folded into op strengths at snapshot time.
     func setSpaceWarpAudioOffsets(_ offsets: [Int: Float]) {
-        withLock { _spaceWarpAudioOffsets = offsets }
+        withLock {
+            // Called every audio frame ("always publish"). Only invalidate the packed
+            // cache when the offsets actually change, so the common no-transform-binding
+            // case (an empty set re-published each frame) keeps the cache warm.
+            guard _spaceWarpAudioOffsets != offsets else { return }
+            _spaceWarpAudioOffsets = offsets
+            _cachedPackedSpaceWarpStack = nil
+        }
     }
 
     /// Apply the live music offsets to a copy of the stack, clamped to each op's
@@ -614,6 +626,17 @@ final class RenderSettings: @unchecked Sendable {
             ops[slot].strength = min(r.upperBound, max(r.lowerBound, ops[slot].strength + delta))
         }
         return ops
+    }
+
+    /// The GPU-packed stack, rebuilt only when the model or the audio offsets changed
+    /// (`_cachedPackedSpaceWarpStack == nil`). Lock-free — call only from inside
+    /// `withLock`. This is what snapshot() reads each frame; the expensive
+    /// simplify+precompute+pack (`cSpaceWarpStack`) now runs once per edit, not per frame.
+    private func packedSpaceWarpStackLocked() -> SpaceWarpStack {
+        if let cached = _cachedPackedSpaceWarpStack { return cached }
+        let packed = cSpaceWarpStack(from: spaceWarpStackWithAudioOffsetsLocked())
+        _cachedPackedSpaceWarpStack = packed
+        return packed
     }
 
     /// RETIRED warp-stack codegen hooks. The transform stack now renders via the
@@ -798,6 +821,14 @@ final class RenderSettings: @unchecked Sendable {
     func audioModulateSaturation(_ value: Float) {
         withLock {
             _colorSchemeSaturation = ControlCatalog.saturation.clamp(value)
+        }
+    }
+
+    /// Modulate the gradient phase offset ("Color Offset"). Writes the backing
+    /// value directly (no persistence), mirroring the other `audioModulate*` setters.
+    func audioModulateGradientOffset(_ value: Float) {
+        withLock {
+            _gradientState.gradient.offset = ControlCatalog.gradientOffset.clamp(value)
         }
     }
 
@@ -2269,7 +2300,7 @@ final class RenderSettings: @unchecked Sendable {
                 spaceWarpParam2: _spaceWarpParam2,
                 spaceWarpParam3: _spaceWarpParam3,
                 spaceWarpAxis: _spaceWarpAxis,
-                spaceWarpStack: cSpaceWarpStack(from: spaceWarpStackWithAudioOffsetsLocked()),
+                spaceWarpStack: packedSpaceWarpStackLocked(),
                 platformRadius: _platformRadius,
                 platformEnabled: _platformEnabled,
                 audioLevel: _audioLevel,

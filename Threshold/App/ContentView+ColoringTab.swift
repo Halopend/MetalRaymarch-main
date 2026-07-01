@@ -233,8 +233,9 @@ extension ContentView {
                 EffectSliderRow(icon: "arrow.right", label: "Offset",
                     value: $cache.color.gradientState.gradient.offset, range: 0...1,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.gradientOffset, value: cache.color.gradientState.gradient.offset) },
-                    showToggle: false)
+                    onChanged: { cache.commitGradientOffset() },
+                    showToggle: false,
+                    musicTargetID: ParameterTargetID.Effect.gradientOffset)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "waveform.path", label: "Smoothing",
                     value: $cache.color.gradientState.gradient.smoothing, range: 0...1,
@@ -253,8 +254,7 @@ extension ContentView {
                     value: $cache.color.colorMix, range: 0...1.0,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorMix, value: cache.color.colorMix) },
-                    showToggle: false,
-                    musicTargetID: ParameterTargetID.Core.colorMix)
+                    showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "number", label: "Iterations",
                     value: $cache.color.colorIterations, range: ControlCatalog.colorIterations.range,

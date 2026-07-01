@@ -103,8 +103,7 @@ extension ContentView {
                     value: Binding(get: { cache.lighting.hueRotationEffect.speed }, set: { cache.lighting.hueRotationEffect.speed = $0 }),
                     range: 0...0.5,
                     enabled: Binding(get: { cache.lighting.hueRotationEffect.enabled }, set: { cache.lighting.hueRotationEffect.enabled = $0 }),
-                    onChanged: { cache.commitHueRotationEffect() },
-                    musicTargetID: ParameterTargetID.Effect.hueSpeed)
+                    onChanged: { cache.commitHueRotationEffect() })
                 EffectSliderRow(icon: "circle.lefthalf.filled", label: "Hue Intensity",
                     value: Binding(get: { cache.lighting.hueRotationEffect.intensity }, set: { cache.lighting.hueRotationEffect.intensity = $0 }),
                     range: 0...1,

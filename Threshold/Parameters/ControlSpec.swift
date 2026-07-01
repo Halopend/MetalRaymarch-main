@@ -143,6 +143,15 @@ enum ControlCatalog {
         range: 0.5...2.5,
         defaultValue: 1.8)
 
+    /// Gradient phase offset (rotates colors through the gradient). Wraps 0…1;
+    /// exposed as a music-bindable "Color Offset".
+    static let gradientOffset = ControlSpec(
+        id: ParameterTargetID.Effect.gradientOffset,
+        name: "Color Offset",
+        icon: "arrow.right",
+        range: 0.0...1.0,
+        defaultValue: 0.0)
+
     // MARK: Space transforms
     //
     // Cross-fractal sphere-projection blend + radius. Canonical (in `allSpecs`) so
@@ -288,7 +297,7 @@ enum ControlCatalog {
     /// Every canonical spec in declaration order.
     static let allSpecs: [ControlSpec] = [
         fractalScale, colorMix, iterations,
-        glow, fog, bloom, hueSpeed, saturation, safetyBubbleRadius,
+        glow, fog, bloom, hueSpeed, saturation, safetyBubbleRadius, gradientOffset,
         sphereProjectionBlend, sphereProjectionRadius,
         spaceWarpStrength, spaceWarpOriginX, spaceWarpOriginY, spaceWarpOriginZ
     ]

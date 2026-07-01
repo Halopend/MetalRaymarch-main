@@ -154,6 +154,9 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     // Universal geometry parameter — safety bubble inner radius.
     case safetyBubbleRadius
 
+    // Universal color parameter — gradient phase offset ("Color Offset").
+    case gradientOffset
+
     // Universal space-transform params — cross-fractal sphere projection.
     case sphereProjectionBlend
     case sphereProjectionRadius
@@ -222,8 +225,8 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     /// Cases shown in the UI add-menu. Excludes legacy/deprecated targets.
     /// Formula param slots beyond what the active fractal supports are hidden.
     static var availableCases: [MusicReactiveTarget] {
-        [.fractalScale, .colorMix, .iterations,
-         .glow, .fog, .bloom, .hueSpeed, .saturation, .safetyBubbleRadius,
+        [.fractalScale, .iterations,
+         .glow, .fog, .bloom, .saturation, .safetyBubbleRadius, .gradientOffset,
          .sphereProjectionBlend, .sphereProjectionRadius]
     }
 
@@ -232,8 +235,8 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     static func availableCases(for fractalType: FractalModelType) -> [MusicReactiveTarget] {
         let formulaCount = floatFormulaParams(for: fractalType).count
         let formulaSlots = Array(allFormulaParamCases.prefix(formulaCount))
-        return [.fractalScale, .colorMix, .iterations,
-                .glow, .fog, .bloom, .hueSpeed, .saturation, .safetyBubbleRadius,
+        return [.fractalScale, .iterations,
+                .glow, .fog, .bloom, .saturation, .safetyBubbleRadius, .gradientOffset,
                 .sphereProjectionBlend, .sphereProjectionRadius] + formulaSlots
     }
 
@@ -402,6 +405,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .hueSpeed: return ParameterTargetID.Effect.hueSpeed
         case .saturation: return ParameterTargetID.Effect.saturation
         case .safetyBubbleRadius: return ParameterTargetID.Effect.safetyBubbleRadius
+        case .gradientOffset: return ParameterTargetID.Effect.gradientOffset
         case .sphereProjectionBlend: return ParameterTargetID.Space.sphereProjectionBlend
         case .sphereProjectionRadius: return ParameterTargetID.Space.sphereProjectionRadius
         case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
@@ -666,11 +670,10 @@ enum ReactivityPreset: String, CaseIterable {
         for slot in slots where slot < formulaCount && slot < formulaSlots.count {
             result.append(formulaSlots[slot].defaultMapping(for: fractalType))
         }
-        if geo.colorMix  { result.append(MusicReactiveTarget.colorMix.defaultMapping(for: fractalType)) }
+        // colorMix + hueSpeed are no longer music-bindable (see availableCases).
         if effects.glow       { result.append(MusicReactiveTarget.glow.defaultMapping(for: fractalType)) }
         if effects.fog        { result.append(MusicReactiveTarget.fog.defaultMapping(for: fractalType)) }
         if effects.bloom      { result.append(MusicReactiveTarget.bloom.defaultMapping(for: fractalType)) }
-        if effects.hueSpeed   { result.append(MusicReactiveTarget.hueSpeed.defaultMapping(for: fractalType)) }
         if effects.saturation { result.append(MusicReactiveTarget.saturation.defaultMapping(for: fractalType)) }
         if effects.iterations { result.append(MusicReactiveTarget.iterations.defaultMapping(for: fractalType)) }
 

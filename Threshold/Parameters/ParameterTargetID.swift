@@ -14,6 +14,7 @@ enum ParameterTargetID {
         static let hueSpeed = "effect.hueSpeed"
         static let saturation = "effect.saturation"
         static let safetyBubbleRadius = "effect.safetyBubbleRadius"
+        static let gradientOffset = "effect.gradientOffset"
     }
 
     /// Space-transform scalars (cross-fractal). Routed like core/effect params so

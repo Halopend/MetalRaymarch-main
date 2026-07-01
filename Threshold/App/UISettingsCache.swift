@@ -382,6 +382,14 @@ final class UISettingsCache {
             pushEffectParam(ParameterTargetID.Effect.saturation, value: color.colorSchemeSaturation)
         }
     }
+
+    /// Gradient phase offset ("Color Offset"). Persists the base, then routes through
+    /// the layer stack so music composes additively (and a slider edit recenters the
+    /// music drift), mirroring saturation/sphere projection.
+    func commitGradientOffset() {
+        push(\.gradientOffset, value: color.gradientState.gradient.offset)
+        pushEffectParam(ParameterTargetID.Effect.gradientOffset, value: color.gradientState.gradient.offset)
+    }
 }
 
 extension UISettingsCache {
