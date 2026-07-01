@@ -500,6 +500,13 @@ extension Renderer {
         }
                 let colorIterations = Int32(request?.colorIterations ?? appModel.renderSettings.colorIterations)
         let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
+        // Live, authoritative per-frame derivation of whether the space-warp seam is
+        // needed. Conservative: an active custom library (custom fractal OR a
+        // `.threshfx` warp) keeps it ON. Only a pure built-in with an empty stack
+        // bakes it OFF (FC_HAS_SPACEWARP=false → the whole warp path DCEs). Because
+        // this reads the LIVE stack, adding the first transform flips it to true the
+        // same frame — so a `_SW0` pipeline can never be served for a warped scene.
+        let hasSpaceWarp = !appModel.renderSettings.spaceWarpStack.isEmpty || activeCustomHash != nil
 
         // Fast-path: parameters unchanged since last call — skip string alloc + dict lookup
         if iterations == lastSelectIter && raySteps == lastSelectRS &&
@@ -508,6 +515,7 @@ extension Renderer {
            fractalType.rawValue == lastSelectFT &&
            activeCustomHash == lastSelectCustomHash &&
            bubbleEnabled == lastSelectBubble &&
+           hasSpaceWarp == lastSelectSpaceWarp &&
            mandelbulbPower == lastSelectPower, let cached = lastSelectedPipeline {
             recordPipelineTelemetry(renderHit: true, renderSource: "fast-path")
             if fractalType == .custom, !lastSelectedIsSpecialized {
@@ -517,7 +525,14 @@ extension Renderer {
             return cached
         }
 
-        // Build unified cache key (only on parameter change)
+        // Past the fast-path: record this frame's space-warp presence for next frame's
+        // guard. Set here (not in cacheSelectedRenderPipeline) so every non-fast-path
+        // return reflects the current frame; a fast-path HIT above already had it equal.
+        lastSelectSpaceWarp = hasSpaceWarp
+
+        // Build unified cache key (only on parameter change). The `_SW` segment must
+        // stay in lockstep with `FractalPreset.pipelineCacheKey`'s scene segment so a
+        // prewarmed/preset pipeline is found once its scene is applied.
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
         let keyContext = RenderPipelineKeyContext(
@@ -528,7 +543,7 @@ extension Renderer {
             qualityMode: qualityMode,
             colorIterations: colorIterations,
             powerKey: powerKey,
-            sceneKey: "_B\(bubbleEnabled ? 1 : 0)"
+            sceneKey: "_B\(bubbleEnabled ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)"
         )
         let cacheKey = keyContext.exactKey(neonEnabled: neonMode)
         if RENDERER_DEBUG,
@@ -567,6 +582,7 @@ extension Renderer {
                 fractalIterations: Int32(iterations),
                 shadowIterations: Int32(max(iterations - 2, 2)),
                 safetyBubbleEnabled: bubbleEnabled,
+                hasSpaceWarp: hasSpaceWarp,   // pair the baked FC with cacheKey's _SW segment
                 qualityMode: Int32(qualityMode),
                 debugHierarchical: false,
                 maxRaySteps: Int32(raySteps),

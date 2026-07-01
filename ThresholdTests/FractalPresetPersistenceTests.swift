@@ -460,3 +460,49 @@ struct SpaceWarpMusicFieldTests {
         #expect(SpaceWarpKind.ripple.musicFields == [.strength, .param1, .axisX, .axisY, .axisZ]) // slot1 + axis
     }
 }
+
+@Suite("FC_HAS_SPACEWARP pipeline-key gate")
+struct SpaceWarpPipelineKeyTests {
+
+    // The renderer bakes FC_HAS_SPACEWARP into a distinct pipeline variant and folds
+    // its state into the cache key as `_SW0/_SW1`. `FractalPreset.pipelineCacheKey`
+    // must carry the SAME segment (in the `_B..._SW..._N` scene slot) or a
+    // prewarmed/preset pipeline is stored under a key `selectPipeline` never looks up.
+    // These lock the key ⇄ FC pairing so a warped scene can never collide with the
+    // `_SW0` (seam-compiled-out) variant.
+
+    private func preset(_ configure: (RenderSettings) -> Void) -> FractalPreset {
+        let s = RenderSettings()
+        s.fractalType = .mandelbox
+        configure(s)
+        return FractalPreset.fromSettings(s, name: "k")
+    }
+
+    @Test("Empty stack bakes _SW0; any transform bakes _SW1; keys are distinct")
+    func keyReflectsSpaceWarpPresence() {
+        let noWarp = preset { $0.spaceWarpStack = [] }
+        #expect(noWarp.pipelineCacheKey.contains("_SW0"))
+        #expect(!noWarp.pipelineCacheKey.contains("_SW1"))
+
+        let warped = preset { $0.spaceWarpStack = [SpaceWarpOpValue(kind: .mirror)] }
+        #expect(warped.pipelineCacheKey.contains("_SW1"))
+
+        // Distinct keys ⇒ distinct pipeline variants ⇒ no collision.
+        #expect(noWarp.pipelineCacheKey != warped.pipelineCacheKey)
+    }
+
+    @Test("The _SW segment sits in the scene slot, matching RenderPipelineKeyContext")
+    func keySegmentPosition() {
+        // RenderPipelineKeyContext builds `..._RS{n}{sceneKey}_N{neon}...` with
+        // sceneKey = "_B{bubble}_SW{sw}"; the preset key must mirror it exactly.
+        let warped = preset { $0.spaceWarpStack = [SpaceWarpOpValue(kind: .boxFold)] }
+        #expect(warped.pipelineCacheKey.contains("_SW1_N"),
+                "expected `_SW1` immediately before `_N` (the scene-segment slot): \(warped.pipelineCacheKey)")
+    }
+
+    @Test("Custom fractals conservatively keep the seam ON (_SW1)")
+    func customKeepsSeamOn() {
+        let custom = preset { $0.fractalType = .custom; $0.spaceWarpStack = [] }
+        #expect(custom.pipelineCacheKey.contains("_SW1"))
+    }
+}

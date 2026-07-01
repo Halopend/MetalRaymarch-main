@@ -83,6 +83,7 @@ extension Renderer {
         var fractalIterations: Int32?      // FC index 0
         var shadowIterations: Int32?       // FC index 1
         var safetyBubbleEnabled: Bool?     // FC index 2
+        var hasSpaceWarp: Bool?            // FC index 3 — nil leaves it undefined (shader defaults ON = full stack)
         var qualityMode: Int32?            // FC index 4 (0=high, 1=medium, 2=low)
         var debugHierarchical: Bool?       // FC index 5
         var maxRaySteps: Int32?            // FC index 6 - max ray marching steps
@@ -117,6 +118,9 @@ extension Renderer {
             }
             if var bubble = safetyBubbleEnabled {
                 constants.setConstantValue(&bubble, type: .bool, index: FunctionConstantIndex.safetyBubbleEnabled.rawValue)
+            }
+            if var sw = hasSpaceWarp {
+                constants.setConstantValue(&sw, type: .bool, index: FunctionConstantIndex.hasSpaceWarp.rawValue)
             }
             if var quality = qualityMode {
                 constants.setConstantValue(&quality, type: .int, index: FunctionConstantIndex.qualityMode.rawValue)
@@ -192,6 +196,7 @@ extension Renderer {
                 fractalIterations: fc.fractalIterations,
                 shadowIterations: fc.shadowIterations,
                 safetyBubbleEnabled: preset.effectiveSafetyBubbleEnabled,
+                hasSpaceWarp: preset.effectiveHasSpaceWarp,
                 qualityMode: fc.qualityMode,
                 debugHierarchical: false,
                 maxRaySteps: fc.maxRaySteps,

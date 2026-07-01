@@ -148,6 +148,18 @@ constant bool FC_COHERENT_PACKET [[function_constant(14)]];
 constant bool FC_COARSE_WARM_START [[function_constant(15)]];
 constant bool FC_COARSE_WS_ON = is_function_constant_defined(FC_COARSE_WARM_START) ? FC_COARSE_WARM_START : false;
 
+// Space-warp (Transformations) presence gate (index 3 was free). When baked FALSE
+// on a scene that has NO transforms (empty stack, no custom warp), the whole
+// space-warp seam — the applyWarpOp switch, the per-op loop, the SpaceWarpOp array
+// reads, and the DE-divisor threading (deScale collapses to a compile-time 1.0) —
+// is dead-code-eliminated from the hot DE path, freeing registers / raising
+// occupancy for the common no-transform case. DEFAULTS TRUE when unset (generic
+// fallback, visionOS, screenshot, custom-warp pipelines), so those paths run the
+// full stack exactly as before — only the Mac specialized `_SW0` variant bakes it
+// off, and only for scenes provably without any warp.
+constant bool FC_HAS_SPACEWARP [[function_constant(3)]];
+constant bool FC_HAS_SPACEWARP_ON = is_function_constant_defined(FC_HAS_SPACEWARP) ? FC_HAS_SPACEWARP : true;
+
 // Include the fractal formula library (non-Mandelbox DE functions + dispatch)
 // Must be after metal_stdlib, ShaderTypes.h, and function constants so that
 // formula headers can reference FC_* constants (e.g. FC_MANDELBULB_POWER).
@@ -809,6 +821,7 @@ FORCE_INLINE SpaceTransform spaceWarpStackTransform(float3 p, FractalParams para
 // A loaded .threshfx warp overrides the whole built-in path via
 // THRESHOLD_CUSTOM_SPACE_WARP, exactly as before.
 FORCE_INLINE float3 applySpaceWarp(float3 p, FractalParams params) {
+    if (!FC_HAS_SPACEWARP_ON) { return p; }   // no-transform variant: seam compiled out
 #ifdef THRESHOLD_CUSTOM_SPACE_WARP
     float strength = params.spaceWarpStrength;
     if (strength <= 0.0f) { return p; }
@@ -818,6 +831,7 @@ FORCE_INLINE float3 applySpaceWarp(float3 p, FractalParams params) {
 #endif
 }
 FORCE_INLINE float applySpaceWarpDEScale(float3 p, FractalParams params) {
+    if (!FC_HAS_SPACEWARP_ON) { return 1.0f; }   // no-transform variant: DE divisor is a compile-time 1
 #ifdef THRESHOLD_CUSTOM_SPACE_WARP
     return customSpaceWarpDEScale(p, params.spaceWarpStrength, params.spaceWarpParam1, params.spaceWarpParam2, params.spaceWarpParam3);
 #else
@@ -828,6 +842,9 @@ FORCE_INLINE float applySpaceWarpDEScale(float3 p, FractalParams params) {
 // single sweep; an opaque .threshfx warp can't be fused, so it falls back to its
 // two ABI calls (but those never looped, so no doubling is lost).
 FORCE_INLINE SpaceTransform applySpaceWarpTransform(float3 p, FractalParams params) {
+    if (!FC_HAS_SPACEWARP_ON) {   // no-transform variant: identity point, unit divisor
+        SpaceTransform r; r.point = p; r.deScale = 1.0f; return r;
+    }
 #ifdef THRESHOLD_CUSTOM_SPACE_WARP
     SpaceTransform r;
     r.point = p;

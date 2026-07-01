@@ -14,6 +14,22 @@ left behind by the recent strip-down, and **duplication between the Mac and visi
 paths** that has begun to drift. The two highest-leverage themes are unifying the duplicated
 Apple Music adapters and the duplicated animation-interpolation helpers.
 
+> **Re-verification 2026-07-01.** A grep sweep of the current tree found **most of Tier 1
+> already done** in prior passes (checkboxes below were left stale). Confirmed REMOVED and no
+> longer present: `FractalParams.minDistanceVal`, `OrbitCache.p0`, `GestureFeatureFlags` (+ its
+> dead menu-toggle branch), `AppModel.headHeightMeters`, `FormulaCatalog.categories`/`byCategory`,
+> `SettingsSubTab.help`, `EmbeddedFormulaInstallResult.isReady`, `RenderSettings.slot(for:)`,
+> `SettingsPersistence.saveMusicPresets`, `MusicService.appleMusicAdapter`,
+> `GestureContext.ranges`/`.frameIndex`, the vestigial `GestureOperation` cases, and
+> `legacyPersistenceKey`/`legacySlots`. Tier-2 `Float.clamped(to:)` is promoted (`ControlSpec.swift:342`)
+> and the configs use it; the animation-interpolation closures now call the `KeyframeLerp.*` statics.
+> The duplicated `formatDuration` (AnimationViews) was deduped this pass into one file-scope helper.
+> NOT dead anymore — the "dead motion-vector proxy block" now feeds `t_pred` (`Shaders.metal:2766`),
+> so leave it. STILL PRESENT (verified): Buddhabrot `colorLow/Mid/High` dead setters + `logBase`
+> (deferred — `BuddhabrotRenderer.swift` has concurrent-edit risk), `ColourWithScheme` unused args
+> (signature evolved — needs fresh per-arg analysis, and inlining likely DCEs them already), the
+> SharePlay backend entry points (intentionally retained), and the Tier-2 duplications below.
+
 ---
 
 ## Tier 1 — Confident dead-code removals (verified unused project-wide)
@@ -70,7 +86,7 @@ Apple Music adapters and the duplicated animation-interpolation helpers.
 - [ ] **Easing/interpolation dispatch duplicated** — `AnimationManager.swift:1084-1100` and `1280-1297` — spline/bezier/easing select repeated verbatim. Extract one `interpolate(keyframes:from:to:progress:)`.
 - [ ] **`max(lo, min(hi, x))` clamp open-coded ~30× across Config** — `Parameters/Config/*` — a clean `Float.clamped(to:)` already exists but is `private` in `GestureConfig.swift:138`. Promote it to a shared extension; rewrite every config `clamp()` to use it.
 - [ ] **`"%d:%02d"` m:ss formatting in 3 places** — `Audio/AppleMusicManager.swift:442`, `MusicServiceProtocol.swift` (`UnifiedTrack.durationString`), `Animation/AnimationViews.swift` — add one shared duration formatter.
-- [ ] **`formatDuration` byte-identical in two views** — `Animation/AnimationViews.swift:468-476` and `1235-1243` — extract one shared helper.
+- [x] **`formatDuration` byte-identical in two views** — `Animation/AnimationViews.swift` — *(done 2026-07-01: extracted one `fileprivate func formatDuration` at file scope; both copies deleted.)*
 - [ ] **Gesture activation state machine duplicated** — `Gestures/MenuToggleGestureEngine.swift:99-119` vs `PerFingerTapGestureEngine` — same hysteresis + debounce + hold-timer + cooldown. Extract a reusable `HoldToActivate`/`HysteresisLatch` helper.
 - [ ] **Codable↔UserDefaults round-trip boilerplate** — `Gestures/FractalDefaultsStore.swift`, `Parameters/GestureSensitivityStore.swift`, `Config/PerFractalGestureStore.swift` — same encode/decode/`forKey` dance. Add `UserDefaults.setCodable/codable` (or a property wrapper).
 - [ ] **Buddhabrot lock boilerplate ×28** — `BuddhabrotRenderer.swift:49-220` — `private var _x; var x { get/set withLock }` repeated for ~28 props. A `@Locked` property wrapper collapses each 6-line block to one.

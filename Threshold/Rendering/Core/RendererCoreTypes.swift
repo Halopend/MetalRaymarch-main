@@ -17,6 +17,7 @@ enum FunctionConstantIndex: Int {
     case fractalIterations = 0
     case shadowIterations = 1
     case safetyBubbleEnabled = 2
+    case hasSpaceWarp = 3  // Compiles out the entire space-warp seam when a scene has no transforms (FC_HAS_SPACEWARP)
     case qualityMode = 4
     case debugHierarchical = 5
     case maxRaySteps = 6  // Base max ray steps (actual count scaled by quality at runtime)

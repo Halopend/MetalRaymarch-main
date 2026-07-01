@@ -781,6 +781,7 @@ actor Renderer {
     var lastSelectPower: Int32?
     var lastSelectCustomHash: String?
     var lastSelectBubble: Bool?
+    var lastSelectSpaceWarp: Bool?
     var lastSelectedPipeline: MTLRenderPipelineState?
     var lastSelectedIsSpecialized: Bool = false
     

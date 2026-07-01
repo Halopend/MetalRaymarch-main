@@ -1783,32 +1783,33 @@ struct BulatovGen {
     float d;      // sphere radius (sign carries the inside/outside test), or plane offset
 };
 
-// Reflect v in a generator, folding the accumulated inversion scale.
+// Fused membership-test + reflection: test whether v lies on the "wrong" side of a
+// generator and, if so, reflect it in one shot — reusing the squared distance so a
+// sphere is never measured twice (the old split test/reflect pair computed |v-c|²
+// once to decide and again to invert). Returns true iff a reflection happened.
 //   sphere → conformal inversion: v ↦ c + (r²/|v-c|²)(v-c)   (scale ×= r²/|v-c|²)
 //   plane  → mirror reflection across the plane (isometry, scale unchanged)
-FORCE_INLINE void bulatovReflect(BulatovGen s, thread float3& v, thread float& scale) {
-    if (s.type == 0) {                                  // sphere inversion
+// Membership: inversion sphere (d<0) folds points INSIDE it; bounding sphere (d>0)
+// folds points OUTSIDE it; a plane folds points behind it (dot(v,n) < offset). For a
+// unit plane normal, that membership value dot(v,n)-offset is exactly the reflection
+// coefficient, so the plane branch computes it only once.
+FORCE_INLINE bool bulatovStep(BulatovGen s, thread float3& v, thread float& scale) {
+    if (s.type == 0) {                                  // sphere
         float3 d = v - s.c;
-        float len2 = max(dot(d, d), 1e-12f);
-        float factor = (s.d * s.d) / len2;
+        float len2 = dot(d, d);
+        float r2   = s.d * s.d;
+        bool reflect = (s.d < 0.0f) ? (len2 < r2) : (len2 > r2);
+        if (!reflect) return false;
+        float factor = r2 / max(len2, 1e-12f);
         v = d * factor + s.c;
         scale *= factor;
-    } else {                                            // plane reflection
-        float vn = dot(v - s.c * s.d, s.c);
-        v -= 2.0f * s.c * vn;
+        return true;
     }
-}
-
-// Signed membership test: < 0 means "needs reflecting" — i.e. the point is inside
-// an inversion sphere (negative stored radius), outside a bounding sphere
-// (positive radius), or behind a mirror plane.
-FORCE_INLINE float bulatovDistance(BulatovGen s, float3 v) {
-    if (s.type == 0) {
-        float3 d = v - s.c;
-        float dd = dot(d, d) - s.d * s.d;
-        return (s.d < 0.0f) ? dd : -dd;
-    }
-    return dot(v, s.c) - s.d;
+    // plane: s.c is a unit normal, so dot(v,c) - d == dot(v - c*d, c)
+    float vn = dot(v, s.c) - s.d;
+    if (vn >= 0.0f) return false;
+    v -= 2.0f * s.c * vn;
+    return true;
 }
 
 // Iterate reflections until the point sits inside the fundamental domain, then
@@ -1829,9 +1830,14 @@ FORCE_INLINE float bulatovFold(float3 pos, FormulaParams fp,
     float distanceFactor = fp.params[9];
     int   mask      = (int)(fp.params[10] + 0.5f);
 
-    // Sphere radii that make the intersection angle exactly π/n (Bulatov eq.).
-    if (angleCube >= 2.0f) rc = 2.0f * sc / sqrt(2.0f * (1.0f + cos(pi / angleCube)));
-    if (angleOcta >= 2.0f) ro = so * sqrt(2.0f) / sqrt(2.0f * (1.0f + cos(pi / angleOcta)));
+    // Pre-normalized mirror normals (normalize(0,-1,1) and normalize(-1,1,0)) as
+    // compile-time constants — no runtime rsqrt per DE call.
+    const float invSqrt2 = 0.70710678118654752f;
+
+    // Sphere radii that make the intersection angle exactly π/n (Bulatov eq.). Only
+    // evaluate the transcendentals when the matching sphere generator is enabled.
+    if ((mask & 1) && angleCube >= 2.0f) rc = 2.0f * sc / sqrt(2.0f * (1.0f + cos(pi / angleCube)));
+    if ((mask & 2) && angleOcta >= 2.0f) ro = so * 1.41421356237f / sqrt(2.0f * (1.0f + cos(pi / angleOcta)));
 
     sc *= scale; so *= scale; rc *= scale; ro *= scale;
 
@@ -1841,8 +1847,8 @@ FORCE_INLINE float bulatovFold(float3 pos, FormulaParams fp,
     if (mask & 1)  gens[n++] = BulatovGen{ 0, float3(sc, sc, sc), -rc };
     if (mask & 2)  gens[n++] = BulatovGen{ 0, float3(0.0f, 0.0f, so), -ro };
     if (mask & 4)  gens[n++] = BulatovGen{ 1, float3(1.0f, 0.0f, 0.0f), 0.0f };
-    if (mask & 8)  gens[n++] = BulatovGen{ 1, normalize(float3(0.0f, -1.0f, 1.0f)), 0.0f };
-    if (mask & 16) gens[n++] = BulatovGen{ 1, normalize(float3(-1.0f, 1.0f, 0.0f)), 0.0f };
+    if (mask & 8)  gens[n++] = BulatovGen{ 1, float3(0.0f, -invSqrt2, invSqrt2), 0.0f };
+    if (mask & 16) gens[n++] = BulatovGen{ 1, float3(-invSqrt2, invSqrt2, 0.0f), 0.0f };
     if (mask & 32) gens[n++] = BulatovGen{ 0, float3(0.0f), rOutside * scale };
 
     float3 p = pos;
@@ -1852,10 +1858,7 @@ FORCE_INLINE float bulatovFold(float3 pos, FormulaParams fp,
     while (count > 0) {
         bool found = false;
         for (int i = 0; i < n; ++i) {
-            if (bulatovDistance(gens[i], p) < 0.0f) {
-                bulatovReflect(gens[i], p, s);
-                found = true;
-            }
+            if (bulatovStep(gens[i], p, s)) found = true;
         }
         if (!found) break;          // settled inside the fundamental domain
         ++used;
@@ -2052,6 +2055,18 @@ constant bool FC_COHERENT_PACKET [[function_constant(14)]];
 // NOTE: index 14 is taken by FC_COHERENT_PACKET, so this uses index 15.
 constant bool FC_COARSE_WARM_START [[function_constant(15)]];
 constant bool FC_COARSE_WS_ON = is_function_constant_defined(FC_COARSE_WARM_START) ? FC_COARSE_WARM_START : false;
+
+// Space-warp (Transformations) presence gate (index 3 was free). When baked FALSE
+// on a scene that has NO transforms (empty stack, no custom warp), the whole
+// space-warp seam — the applyWarpOp switch, the per-op loop, the SpaceWarpOp array
+// reads, and the DE-divisor threading (deScale collapses to a compile-time 1.0) —
+// is dead-code-eliminated from the hot DE path, freeing registers / raising
+// occupancy for the common no-transform case. DEFAULTS TRUE when unset (generic
+// fallback, visionOS, screenshot, custom-warp pipelines), so those paths run the
+// full stack exactly as before — only the Mac specialized `_SW0` variant bakes it
+// off, and only for scenes provably without any warp.
+constant bool FC_HAS_SPACEWARP [[function_constant(3)]];
+constant bool FC_HAS_SPACEWARP_ON = is_function_constant_defined(FC_HAS_SPACEWARP) ? FC_HAS_SPACEWARP : true;
 
 // Include the fractal formula library (non-Mandelbox DE functions + dispatch)
 // Must be after metal_stdlib, ShaderTypes.h, and function constants so that
@@ -2714,6 +2729,7 @@ FORCE_INLINE SpaceTransform spaceWarpStackTransform(float3 p, FractalParams para
 // A loaded .threshfx warp overrides the whole built-in path via
 // THRESHOLD_CUSTOM_SPACE_WARP, exactly as before.
 FORCE_INLINE float3 applySpaceWarp(float3 p, FractalParams params) {
+    if (!FC_HAS_SPACEWARP_ON) { return p; }   // no-transform variant: seam compiled out
 #ifdef THRESHOLD_CUSTOM_SPACE_WARP
     float strength = params.spaceWarpStrength;
     if (strength <= 0.0f) { return p; }
@@ -2723,6 +2739,7 @@ FORCE_INLINE float3 applySpaceWarp(float3 p, FractalParams params) {
 #endif
 }
 FORCE_INLINE float applySpaceWarpDEScale(float3 p, FractalParams params) {
+    if (!FC_HAS_SPACEWARP_ON) { return 1.0f; }   // no-transform variant: DE divisor is a compile-time 1
 #ifdef THRESHOLD_CUSTOM_SPACE_WARP
     return customSpaceWarpDEScale(p, params.spaceWarpStrength, params.spaceWarpParam1, params.spaceWarpParam2, params.spaceWarpParam3);
 #else
@@ -2733,6 +2750,9 @@ FORCE_INLINE float applySpaceWarpDEScale(float3 p, FractalParams params) {
 // single sweep; an opaque .threshfx warp can't be fused, so it falls back to its
 // two ABI calls (but those never looped, so no doubling is lost).
 FORCE_INLINE SpaceTransform applySpaceWarpTransform(float3 p, FractalParams params) {
+    if (!FC_HAS_SPACEWARP_ON) {   // no-transform variant: identity point, unit divisor
+        SpaceTransform r; r.point = p; r.deScale = 1.0f; return r;
+    }
 #ifdef THRESHOLD_CUSTOM_SPACE_WARP
     SpaceTransform r;
     r.point = p;

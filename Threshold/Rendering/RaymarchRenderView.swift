@@ -841,7 +841,17 @@ private final class ThresholdMacRenderer {
             guard let h = custom.hash else { return "" }
             return "CX\(h)_"
         }()
-        let key = customPrefix + "FT\(fractalType)_FI\(iterations)_RS\(raySteps)_CI\(colorIterations)\(powerKey)"
+        // A scene with NO transforms bakes FC_HAS_SPACEWARP=false, so the whole
+        // space-warp seam (applyWarpOp switch, per-op loop, deScale threading) is
+        // dead-code-eliminated from the hot DE path. Conservative: any non-empty
+        // stack OR any active custom library (which may carry a `.threshfx` warp)
+        // keeps it ON. Derived from the SAME `settings` snapshot the constant is set
+        // from and folded into the cache key, so the key and the baked FC can never
+        // desync (no stale-pipeline "transforms silently vanish" bug). Toggling the
+        // first transform flips the key → cache miss → the generic pipeline (FC unset
+        // → defaults ON) renders correctly while the new variant compiles.
+        let hasSpaceWarp = !settings.spaceWarpStack.isEmpty || custom.hash != nil
+        let key = customPrefix + "FT\(fractalType)_FI\(iterations)_RS\(raySteps)_CI\(colorIterations)\(powerKey)_SW\(hasSpaceWarp ? 1 : 0)"
 
         if let specialized = specializedPipelineCache.pipeline(for: key) {
             appModel.isUsingSpecializedPipeline = true
@@ -858,6 +868,7 @@ private final class ThresholdMacRenderer {
                 fractalType: fractalType,
                 colorIterations: colorIterations,
                 power: power,
+                hasSpaceWarp: hasSpaceWarp,
                 customLibrary: custom.library
             )
         }
@@ -874,6 +885,7 @@ private final class ThresholdMacRenderer {
                                           fractalType: Int32,
                                           colorIterations: Int32,
                                           power: Int32?,
+                                          hasSpaceWarp: Bool,
                                           customLibrary: MTLLibrary?) {
         let cache = specializedPipelineCache
         // When a custom `.threshfx` is active, build against its runtime-compiled
@@ -903,6 +915,10 @@ private final class ThresholdMacRenderer {
         if var p = power {
             constants.setConstantValue(&p, type: .int, index: 12)
         }
+        // FC_HAS_SPACEWARP (index 3): bake the space-warp seam in/out. Baked false only
+        // for scenes provably without any transform, letting the whole warp path DCE.
+        var sw = hasSpaceWarp
+        constants.setConstantValue(&sw, type: .bool, index: 3)
 
         let fragmentFunction: MTLFunction
         do {

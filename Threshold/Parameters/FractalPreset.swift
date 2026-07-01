@@ -519,17 +519,27 @@ struct FractalPreset: Codable, Identifiable {
         fractalType != .mandelbulb && (safetyBubbleEnabled ?? true)
     }
 
+    /// Whether this preset needs the space-warp seam compiled in (FC_HAS_SPACEWARP).
+    /// Conservative: any transform stack OR a custom library (which may carry a
+    /// `.threshfx` warp) keeps it ON. Only a pure built-in with an empty stack bakes
+    /// it OFF, letting the whole warp path dead-code-eliminate. Over-approximation
+    /// only ever costs the optimization, never correctness (mirrors the renderer's
+    /// live derivation in `selectPipeline`, which is authoritative per frame).
+    var effectiveHasSpaceWarp: Bool {
+        !(spaceWarpOps?.isEmpty ?? true) || fractalType == .custom || embeddedFormula != nil
+    }
+
     /// Returns a unique key for pipeline caching based on function constants.
     /// Presets with identical function constant values can share pipelines.
     ///
-    /// The `_B...` scene segment must match `RenderPipelineKeyContext`'s exact key
-    /// (inserted between RS and _N). Without it, `getPipeline(forPreset:)` stores
+    /// The `_B..._SW...` scene segment must match `RenderPipelineKeyContext`'s exact
+    /// key (inserted between RS and _N). Without it, `getPipeline(forPreset:)` stores
     /// the prewarmed pipeline under a key `selectPipeline` never looks up once the
     /// preset is applied, so preset loads miss the prewarm and rebuild/fall back.
     var pipelineCacheKey: String {
         let fc = deriveFunctionConstants()
         let powerKey = fc.mandelbulbPower.map { "_P\($0)" } ?? ""
-        let sceneKey = "_B\(effectiveSafetyBubbleEnabled ? 1 : 0)"
+        let sceneKey = "_B\(effectiveSafetyBubbleEnabled ? 1 : 0)_SW\(effectiveHasSpaceWarp ? 1 : 0)"
         return "FT\(fractalType.rawValue)_FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)\(sceneKey)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)_CI\(fc.colorIterations)\(powerKey)"
     }
     

@@ -7,6 +7,18 @@
 
 import SwiftUI
 
+/// Compact duration label ("12.3s" under a minute, "2m 5s" over) shared by the
+/// scene rows and the scene editor (was duplicated verbatim in both).
+fileprivate func formatDuration(_ duration: TimeInterval) -> String {
+    if duration < 60 {
+        return String(format: "%.1fs", duration)
+    } else {
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return "\(minutes)m \(seconds)s"
+    }
+}
+
 fileprivate enum AnimationEditorLayout {
     static let sceneEditorMinWidth: CGFloat = 560
     static let workspaceInset: CGFloat = 6
@@ -465,15 +477,6 @@ struct SceneRowView: View {
         }
     }
     
-    private func formatDuration(_ duration: TimeInterval) -> String {
-        if duration < 60 {
-            return String(format: "%.1fs", duration)
-        } else {
-            let minutes = Int(duration) / 60
-            let seconds = Int(duration) % 60
-            return "\(minutes)m \(seconds)s"
-        }
-    }
 }
 
 // MARK: - Create Scene Sheet
@@ -1232,15 +1235,6 @@ struct SceneEditorView: View {
         }
     }
     
-    private func formatDuration(_ duration: TimeInterval) -> String {
-        if duration < 60 {
-            return String(format: "%.1fs", duration)
-        } else {
-            let minutes = Int(duration) / 60
-            let seconds = Int(duration) % 60
-            return "\(minutes)m \(seconds)s"
-        }
-    }
 
     // ── Service icon / color helpers ──────────────────────────────────────
 
