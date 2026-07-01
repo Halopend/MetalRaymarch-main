@@ -58,6 +58,9 @@ SHARED_SOURCES = [
   "Threshold/Parameters/SpaceWarpStackSimplifier.swift",
   "Threshold/Parameters/ModuleRegistry.swift",
   "Threshold/Parameters/Module.swift",
+  # --- embedded distance-estimator runtime compile (custom .threshfx DEs) ---
+  "Threshold/Rendering/Core/CustomShaderCompiler.swift",
+  "Threshold/Rendering/Generated/EmbeddedMetalSources.swift",
   # --- metal (compiled into each appex's own default.metallib) ---
   "Threshold/Rendering/Shaders.metal",
   # --- new shared glue (lives under ThresholdQuickLook/Shared) ---

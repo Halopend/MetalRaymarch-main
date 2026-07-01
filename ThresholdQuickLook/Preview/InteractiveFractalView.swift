@@ -14,6 +14,7 @@ import simd
 final class InteractiveFractalView: MTKView {
 
     private let settings: RenderSettings
+    private let formula: EmbeddedFormula?
     private let baseRotation: simd_quatf
     private let baseScale: Float
 
@@ -24,9 +25,10 @@ final class InteractiveFractalView: MTKView {
     private let orbitSensitivity: Float = 0.008
     private let zoomSensitivity: Float = 0.02
 
-    init?(settings: RenderSettings) {
+    init?(settings: RenderSettings, formula: EmbeddedFormula?) {
         guard let device = HeadlessRenderer.shared?.metalDevice else { return nil }
         self.settings = settings
+        self.formula = formula
         self.baseRotation = settings.worldRotation
         self.baseScale = settings.scale
         super.init(frame: .zero, device: device)
@@ -83,6 +85,6 @@ final class InteractiveFractalView: MTKView {
     // MARK: Draw
 
     override func draw(_ dirtyRect: NSRect) {
-        HeadlessRenderer.shared?.render(snapshot: settings.snapshot(), in: self)
+        HeadlessRenderer.shared?.render(snapshot: settings.snapshot(), in: self, formula: formula)
     }
 }

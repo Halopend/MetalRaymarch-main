@@ -201,9 +201,16 @@ final class HeadlessRenderer: @unchecked Sendable {
 
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
-    private let pipelineState: MTLRenderPipelineState
+    private let pipelineState: MTLRenderPipelineState        // built-in fractals
     private let depthState: MTLDepthStencilState
     private let mesh: MTKMesh
+    private let vertexDescriptor: MTLVertexDescriptor
+
+    /// Custom (embedded-DE) pipelines compiled on demand from a scene's Metal
+    /// source, cached by `EmbeddedFormula.sourceHash` so the interactive view
+    /// never recompiles per frame.
+    private let cacheLock = NSLock()
+    private var customPipelines: [String: MTLRenderPipelineState] = [:]
 
     /// Exposed so an interactive MTKView can share the same device.
     var metalDevice: MTLDevice { device }
@@ -244,6 +251,7 @@ final class HeadlessRenderer: @unchecked Sendable {
         vd.layouts[BufferIndex.meshPositions.rawValue].stepFunction = .perVertex
         vd.layouts[BufferIndex.meshGenerics.rawValue].stride = 8
         vd.layouts[BufferIndex.meshGenerics.rawValue].stepFunction = .perVertex
+        self.vertexDescriptor = vd
 
         let pd = MTLRenderPipelineDescriptor()
         pd.label = "Threshold QL Raymarch"
@@ -277,29 +285,32 @@ final class HeadlessRenderer: @unchecked Sendable {
 
     // MARK: Public render entry points
 
-    /// Render a scene / music-preset. Returns nil for custom-formula scenes
-    /// (embedded Metal, Milestone 3) so the caller can fall back to the baked
-    /// thumbnail. Never throws.
+    /// Render a scene / music-preset. Live-renders built-in fractals AND scenes
+    /// with an embedded distance estimator (the DE Metal source is compiled at
+    /// runtime and cached). Returns nil only when a scene claims `.custom` but
+    /// carries no formula, or on GPU failure. Never throws.
     func render(preset: FractalPreset, pixelSize: CGSize) -> CGImage? {
-        guard preset.fractalType != .custom, preset.embeddedFormula == nil else { return nil }
+        if preset.fractalType == .custom && preset.embeddedFormula == nil { return nil }
         let settings = RenderSettings()
         preset.apply(to: settings)
-        return render(snapshot: settings.snapshot(), pixelSize: pixelSize)
+        return render(snapshot: settings.snapshot(), pixelSize: pixelSize, formula: preset.embeddedFormula)
     }
 
-    func render(snapshot: RenderSettingsSnapshot, pixelSize: CGSize) -> CGImage? {
+    func render(snapshot: RenderSettingsSnapshot, pixelSize: CGSize, formula: EmbeddedFormula? = nil) -> CGImage? {
+        guard let pipeline = resolvePipeline(for: formula) else { return nil }
         let requested = Int(max(pixelSize.width, pixelSize.height).rounded())
         let side = max(minSide, min(maxSide, requested == 0 ? 512 : requested))
         let uniforms = packUniforms(snapshot, drawableSize: CGSize(width: side, height: side), elapsedTime: 0)
-        return renderImage(uniforms: uniforms, side: side)
+        return renderImage(uniforms: uniforms, side: side, pipeline: pipeline)
     }
 
     /// Live-render a snapshot into an interactive MTKView's current drawable.
     /// The view must be configured `.bgra8Unorm` + depth `.depth32Float` to
     /// match the shared pipeline. Presents and commits; safe to call from the
-    /// main thread on demand.
-    func render(snapshot: RenderSettingsSnapshot, in view: MTKView) {
-        guard let rpd = view.currentRenderPassDescriptor,
+    /// main thread on demand. Pass the scene's `formula` for embedded-DE scenes.
+    func render(snapshot: RenderSettingsSnapshot, in view: MTKView, formula: EmbeddedFormula? = nil) {
+        guard let pipeline = resolvePipeline(for: formula),
+              let rpd = view.currentRenderPassDescriptor,
               let drawable = view.currentDrawable,
               let cmd = commandQueue.makeCommandBuffer() else { return }
         let size = view.drawableSize
@@ -308,10 +319,56 @@ final class HeadlessRenderer: @unchecked Sendable {
         rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         rpd.depthAttachment.loadAction = .clear
         rpd.depthAttachment.clearDepth = 1.0
-        guard encodeDraw(uniforms: uniforms, passDescriptor: rpd,
-                         width: Int(size.width), height: Int(size.height), commandBuffer: cmd) else { return }
+        guard encodeDraw(uniforms: uniforms, passDescriptor: rpd, width: Int(size.width),
+                         height: Int(size.height), pipeline: pipeline, commandBuffer: cmd) else { return }
         cmd.present(drawable)
         cmd.commit()
+    }
+
+    /// Whether a scene at `url` needs (and can get) a compiled custom pipeline —
+    /// used to pre-warm the compile before the interactive view's first frame.
+    @discardableResult
+    func prewarm(formula: EmbeddedFormula?) -> Bool { resolvePipeline(for: formula) != nil }
+
+    // MARK: Pipeline resolution (built-in vs embedded-DE)
+
+    private func resolvePipeline(for formula: EmbeddedFormula?) -> MTLRenderPipelineState? {
+        guard let formula else { return pipelineState }
+        let key = formula.sourceHash
+        cacheLock.lock()
+        let cached = customPipelines[key]
+        cacheLock.unlock()
+        if let cached { return cached }
+        guard let built = compileCustomPipeline(formula) else { return nil }
+        cacheLock.lock()
+        customPipelines[key] = built
+        cacheLock.unlock()
+        return built
+    }
+
+    /// Synthesize the self-contained Metal source (base shaders + the scene's DE
+    /// spliced in, via the app's `CustomShaderCompiler`), compile it, and build a
+    /// pipeline on the same entry points. Compilation can take a second or two;
+    /// callers cache the result.
+    private func compileCustomPipeline(_ formula: EmbeddedFormula) -> MTLRenderPipelineState? {
+        let isWarp = formula.effectKind == .spaceWarp
+        guard let source = try? CustomShaderCompiler.synthesizeSource(
+            fractal: isWarp ? nil : formula, spaceWarp: isWarp ? formula : nil) else { return nil }
+        let options = MTLCompileOptions()
+        if #available(macOS 15.0, *) { options.mathMode = .fast } else { options.fastMathEnabled = true }
+        guard let lib = try? device.makeLibrary(source: source, options: options),
+              let vfn = lib.makeFunction(name: "screenshotVertexShader"),
+              let ffn = try? lib.makeFunction(name: "fragmentShaderMono", constantValues: MTLFunctionConstantValues())
+        else { return nil }
+        let pd = MTLRenderPipelineDescriptor()
+        pd.label = "Threshold QL Custom DE"
+        pd.vertexFunction = vfn
+        pd.fragmentFunction = ffn
+        pd.vertexDescriptor = vertexDescriptor
+        pd.colorAttachments[0].pixelFormat = .bgra8Unorm
+        pd.depthAttachmentPixelFormat = .depth32Float
+        pd.rasterSampleCount = 1
+        return try? device.makeRenderPipelineState(descriptor: pd)
     }
 
     // MARK: Core render
@@ -320,7 +377,8 @@ final class HeadlessRenderer: @unchecked Sendable {
     /// Returns false if the encoder or uniform buffer could not be created.
     @discardableResult
     private func encodeDraw(uniforms: Uniforms, passDescriptor rpd: MTLRenderPassDescriptor,
-                            width: Int, height: Int, commandBuffer cmd: MTLCommandBuffer) -> Bool {
+                            width: Int, height: Int, pipeline: MTLRenderPipelineState,
+                            commandBuffer cmd: MTLCommandBuffer) -> Bool {
         var uniformsArray = UniformsArray(uniforms: (uniforms, uniforms))
         guard let uniformBuffer = device.makeBuffer(bytes: &uniformsArray,
                                                     length: MemoryLayout<UniformsArray>.stride,
@@ -329,7 +387,7 @@ final class HeadlessRenderer: @unchecked Sendable {
               let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else { return false }
         enc.setCullMode(.front)
         enc.setFrontFacing(.counterClockwise)
-        enc.setRenderPipelineState(pipelineState)
+        enc.setRenderPipelineState(pipeline)
         enc.setDepthStencilState(depthState)
         enc.setViewport(MTLViewport(originX: 0, originY: 0, width: Double(width), height: Double(height), znear: 0, zfar: 1))
         enc.setVertexBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
@@ -349,7 +407,7 @@ final class HeadlessRenderer: @unchecked Sendable {
         return true
     }
 
-    private func renderImage(uniforms: Uniforms, side: Int) -> CGImage? {
+    private func renderImage(uniforms: Uniforms, side: Int, pipeline: MTLRenderPipelineState) -> CGImage? {
         let colorDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm,
                                                                  width: side, height: side, mipmapped: false)
         colorDesc.usage = [.renderTarget, .shaderRead]
@@ -373,7 +431,8 @@ final class HeadlessRenderer: @unchecked Sendable {
         rpd.depthAttachment.clearDepth = 1.0
 
         guard let cmd = commandQueue.makeCommandBuffer() else { return nil }
-        guard encodeDraw(uniforms: uniforms, passDescriptor: rpd, width: side, height: side, commandBuffer: cmd) else { return nil }
+        guard encodeDraw(uniforms: uniforms, passDescriptor: rpd, width: side, height: side,
+                         pipeline: pipeline, commandBuffer: cmd) else { return nil }
         if let blit = cmd.makeBlitCommandEncoder() {
             blit.synchronize(resource: colorTex)
             blit.endEncoding()

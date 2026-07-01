@@ -19,10 +19,12 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
     override func loadView() { self.view = container }
 
     func preparePreviewOfFile(at url: URL) async throws {
-        // Build the interactive scene settings (decode + GPU param setup), then
-        // install UI on the main actor.
-        if let settings = Self.interactiveSettings(for: url) {
-            await MainActor.run { self.installInteractive(settings) }
+        // Build the interactive scene settings (decode + GPU param setup) and, for
+        // embedded-DE scenes, compile the custom pipeline here — off the main
+        // actor — so the view's first frame is instant. Then install UI.
+        if let scene = Self.interactiveScene(for: url) {
+            HeadlessRenderer.shared?.prewarm(formula: scene.formula)
+            await MainActor.run { self.installInteractive(scene) }
             return
         }
         let cg = ThresholdPreviewRender.image(for: url, pixelSize: CGSize(width: 1024, height: 1024))
@@ -31,8 +33,8 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
 
     // MARK: Install
 
-    @MainActor private func installInteractive(_ settings: RenderSettings) {
-        guard let fractalView = InteractiveFractalView(settings: settings) else {
+    @MainActor private func installInteractive(_ scene: InteractiveScene) {
+        guard let fractalView = InteractiveFractalView(settings: scene.settings, formula: scene.formula) else {
             installStatic(nil); return
         }
         embed(fractalView)
@@ -61,9 +63,15 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
 
     // MARK: Scene → interactive settings
 
-    /// Returns a configured `RenderSettings` when `url` is a live-renderable
-    /// fractal scene, else nil (caller shows a static preview).
-    private static func interactiveSettings(for url: URL) -> RenderSettings? {
+    private struct InteractiveScene {
+        let settings: RenderSettings
+        let formula: EmbeddedFormula?
+    }
+
+    /// Returns a live-renderable scene (built-in OR embedded-DE) for `url`, else
+    /// nil (caller shows a static preview). A `.custom` scene missing its formula
+    /// is not renderable.
+    private static func interactiveScene(for url: URL) -> InteractiveScene? {
         switch ThresholdPreviewRender.DocumentKind(url: url) {
         case .scene, .musicPreset: break
         default: return nil
@@ -71,9 +79,9 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
         guard HeadlessRenderer.shared != nil,
               let data = try? Data(contentsOf: url),
               let preset = try? ThresholdPreviewRender.decoder.decode(FractalPreset.self, from: data),
-              preset.fractalType != .custom, preset.embeddedFormula == nil else { return nil }
+              !(preset.fractalType == .custom && preset.embeddedFormula == nil) else { return nil }
         let settings = RenderSettings()
         preset.apply(to: settings)
-        return settings
+        return InteractiveScene(settings: settings, formula: preset.embeddedFormula)
     }
 }

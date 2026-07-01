@@ -17,8 +17,8 @@ Handles all five document UTIs (declared in `Threshold/App/Info.plist`):
 
 | Ext | UTI | Behavior |
 |---|---|---|
-| `.threshscene` | `…threshold.scene` | **Live render**; preview is **interactive** (drag = orbit, scroll = zoom) |
-| `.threshmp` | `…threshold.music-preset` | **Live render** + interactive |
+| `.threshscene` | `…threshold.scene` | **Live render** (built-in **and** embedded-DE); preview is **interactive** (drag = orbit, scroll = zoom) |
+| `.threshmp` | `…threshold.music-preset` | **Live render** (built-in + embedded-DE) + interactive |
 | `.threshanim` | `…threshold.animation` | Info card (live keyframe render = M3) |
 | `.threshanimv` | `…threshold.music-animation` | Info card (M3) |
 | `.threshfx` | `…threshold.formula` | Info card (embedded-Metal render = M3) |

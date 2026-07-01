@@ -7,108 +7,105 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		00B10DA8AE1826C3E110D6E0 /* AudioReactiveConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53CC8AFA69EB323686B57414 /* AudioReactiveConfig.swift */; };
-		0107ED06B04E6946957F4079 /* SpaceWarpStackModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F67BF0D6EA85BB5730FEB2AE /* SpaceWarpStackModel.swift */; };
-		014C27CAA0FA9FDF43FFD6C1 /* InteractiveFractalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50A8757A47F2EAC500CDCF1F /* InteractiveFractalView.swift */; };
-		02CB3F85AE962042862C0589 /* DisplayConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BD6DB684EA4E59569EC3150 /* DisplayConfig.swift */; };
-		03845B5B8E095AB416C5D138 /* FractalPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3E9AA8D46A11C08744F2057 /* FractalPreset.swift */; };
-		0769BDA05757E981399A67FB /* PreviewViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0908AC63313E91FD1F4070F /* PreviewViewController.swift */; };
-		0A4D90DB78BB364DBEC28E03 /* GradientColorSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 961D5C02DEF185D9A8E9D2B1 /* GradientColorSystem.swift */; };
-		13C449293D457807DF56544A /* PerFractalGestureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7FC7DB944348F1336346E0E /* PerFractalGestureStore.swift */; };
-		1BC383711F4EDA47FCD4CDD8 /* ColorConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F505FCB5FEB4DA7843B1FA8 /* ColorConfig.swift */; };
-		1EA1C69E10F220CC063EC5FA /* SafetyBubbleConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB309D976ADE8A147E2B7888 /* SafetyBubbleConfig.swift */; };
-		2016D3A8A6B27EFDD3A55A42 /* FractalModelType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BBA131CC51E3212C2D81B07 /* FractalModelType.swift */; };
-		220ADBD9D90C1991FE262F7E /* FormulaCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = E992C59AE9FF9D1E95B0BDBC /* FormulaCatalog.swift */; };
-		23B92B1BAC40BEB33364A4B5 /* GestureConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50C5C71CD7613D21CB1F007E /* GestureConfig.swift */; };
-		23E9CE69F06C3AACA7ABA8E0 /* ThresholdQLThumbnail.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = CC03AB8DDB5D0491F1E7317C /* ThresholdQLThumbnail.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		241C436511441702073375D1 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5F21B7E3B05068BAEABC78FD /* Cocoa.framework */; };
-		26D9A202181CCACAE36673D8 /* Module.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3984702BB4A0685DD01E73C /* Module.swift */; };
-		28452A688753F7995411DBB8 /* EmbeddedFormula.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5B288303F45CB944ECEDB41 /* EmbeddedFormula.swift */; };
-		2CFA073542FF9846716A0A21 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 2E0C56DF4D04A84533BE0A14 /* Shaders.metal */; };
-		30049C3DCF748335E7A6D06F /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5F21B7E3B05068BAEABC78FD /* Cocoa.framework */; };
-		391CE6B65A4E900267C29448 /* QualityConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D0BBEAD91DDCC75A4B4990B /* QualityConfig.swift */; };
-		392A5B7980FE0A02507AE4A3 /* GestureDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE619C113925750C8B07B6F0 /* GestureDefaults.swift */; };
-		3933AA70C545920341E80BE0 /* RenderPrecompute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A69589EF0D4F537CE2A81C1 /* RenderPrecompute.swift */; };
-		3A40785F9DEC7BA7AEF5ABB4 /* HeadlessRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29962EB3706F8F59C3B29D0A /* HeadlessRenderer.swift */; };
-		3A8521819FBAF9F42CEBA132 /* FingerGestureAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81D1CA7C5323A27C6DF387CB /* FingerGestureAction.swift */; };
-		3AF62E21ACDB1446960F183D /* GeometryConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F4D35D63391470A2595C189 /* GeometryConfig.swift */; };
-		4479EC2437DCE0C9BA404628 /* SpaceWarpStackModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84E5E0D3988B1D38D6F9A222 /* SpaceWarpStackModel.swift */; };
-		4691FCCD342A8B2801AB7D1D /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DB7C91C3C950A238C6629C8 /* Metal.framework */; };
-		470A23A170F3CDB4D021C641 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F0889039A72D264A1C717A36 /* MetalKit.framework */; };
-		4879BB986CC9A3D611EC93BF /* ControlSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F8FD05BEFA016879CDA00F8 /* ControlSpec.swift */; };
-		4CA40CC0E2753328E09DBC24 /* SafetyBubbleConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = D725BACEFDDB1FADADAC8468 /* SafetyBubbleConfig.swift */; };
-		4D1DC77963AAC5113A635FD5 /* FractalTypeDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6F641A82D9FF2279665D51C /* FractalTypeDescriptor.swift */; };
-		4FA9507F861128845AC70A3D /* MusicReactiveTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2D8819F0D30C19ECF49F682 /* MusicReactiveTypes.swift */; };
-		50699672785D2E198FCC92AF /* SpaceWarpStackSimplifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BC0CEA1771EAE51686065FB /* SpaceWarpStackSimplifier.swift */; };
-		558F6E299E887E5FAAEF660A /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F0889039A72D264A1C717A36 /* MetalKit.framework */; };
-		5B3B352013D87387D679F2A5 /* GestureConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7149981848B6CAECB507C79C /* GestureConfig.swift */; };
-		5F00EFB7F98C95FAA4A0AAEC /* ParameterTargetID.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31CF65166AEDDE7A54B4E1DB /* ParameterTargetID.swift */; };
-		640FD3C748EF6A466C8AA045 /* FractalTypeDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE1F8A3721BCBF07CB69D45A /* FractalTypeDescriptor.swift */; };
-		67FC5EC0DEF7013F4B347A9C /* RenderSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E7233B915D4D4C57A35F8D9 /* RenderSettings.swift */; };
-		6F72CE05AA2EB6258B75C1D3 /* LightingTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E64792008D48F967DAA5B8A /* LightingTypes.swift */; };
-		6F7D9B4E5643452B4B753D50 /* FingerGestureAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D36ED9260AE5AD36543E91D /* FingerGestureAction.swift */; };
-		70B58575C21CFAC3520E2FF1 /* AudioReactiveConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ACEE4D29D7D887288C0BA13 /* AudioReactiveConfig.swift */; };
-		72F95BECF891421D2E578CC2 /* GeometryConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9902731AD7D3EC8A7230EB4F /* GeometryConfig.swift */; };
-		732A64F799309512115C0F47 /* LightingConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAA4DBE740D0FA66E5793944 /* LightingConfig.swift */; };
-		73315AA521A38C8EAF487217 /* ThresholdPreviewRender.swift in Sources */ = {isa = PBXBuildFile; fileRef = B69B4E2CCE6827C3C772245F /* ThresholdPreviewRender.swift */; };
-		78A4FFFC4F0677F19228BAA6 /* ModuleRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B16E3DEC3B1AE305DC7233C /* ModuleRegistry.swift */; };
-		78EA1E15057D5D35FDB4C200 /* RenderKitStubs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B0CC76E6DCD4FFFA313852F /* RenderKitStubs.swift */; };
-		7F6D5F7387930890FB1094BA /* LightingConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7473A7E2A7C52564F6BB3ED7 /* LightingConfig.swift */; };
-		80194CC2A58725CC5C2A548F /* SettingsPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = F56D8DEC1D17F200F108DA6E /* SettingsPersistence.swift */; };
-		8271DB921834CC9106843BD0 /* HeadlessRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B73DEBCA75A2986ECF1A23C /* HeadlessRenderer.swift */; };
-		8714176E235CC989F3C3C31D /* ThresholdQLPreview.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 6C3FD0AA3A5337DC2DF56504 /* ThresholdQLPreview.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		88E213048AC805F021E6504A /* RendererMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF343C62545E579F461FE76A /* RendererMath.swift */; };
-		9083F934CC605F6A915856C2 /* MusicReactiveTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E134CCE614E18E967148691C /* MusicReactiveTypes.swift */; };
-		93FC96BE00BB5A23DF08F1FE /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = AAA80C144FAECF092F926F50 /* Shaders.metal */; };
-		9C2B1F5126BC76FBCE41A656 /* ControlSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BF6DE014F2B941F9CBACC27 /* ControlSpec.swift */; };
-		9DEA3083A59EFD9D541F10A9 /* RenderModes.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8FDF96D8811FFDEBCEC631 /* RenderModes.swift */; };
-		A2F51BCBCA3B35EDDB290A45 /* FractalPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CFCDD1EB78E33960F249793 /* FractalPreset.swift */; };
-		A47AA97031114625CB82AE9A /* ColorConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B0180893D51722684C08FA8 /* ColorConfig.swift */; };
-		A8310655088746CBCD177DDE /* MenuToggleGestureMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47A7A1E7890D078A625D4B07 /* MenuToggleGestureMode.swift */; };
-		A8F5A050402E509FE4228A10 /* PerFractalGestureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F2AE970D06DA26634D38396 /* PerFractalGestureStore.swift */; };
-		ABE828AC819E4A776AD0936B /* QualityPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46FB4BD326157F79C00F4D9 /* QualityPreset.swift */; };
-		B0A01AC2382EC1BBC5E5858F /* RenderSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEE6DDB44B4956F4A9978855 /* RenderSettings.swift */; };
-		B4BF12A9A51C43FF9ABE3EBB /* EmbeddedFormula.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53B4F6A0923DDAEDC92DD41C /* EmbeddedFormula.swift */; };
-		B793F6FEE0D60FC768BD3E81 /* Quartz.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 519FE4B93D9608C2B01CFD7C /* Quartz.framework */; };
-		B8C41FEB175A9A11068FC3B7 /* ThresholdPreviewRender.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB64CDDF386BC8508AE9C6F5 /* ThresholdPreviewRender.swift */; };
-		B99342744C5383BA8259A3F7 /* GradientColorSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD8650BD2781576BDA866B7E /* GradientColorSystem.swift */; };
-		CA6611F8C0D9AA7D365A71F1 /* MenuToggleGestureMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C1F1702E0D5BBE0289BAFA /* MenuToggleGestureMode.swift */; };
-		CE035EA20B566B9A01649503 /* RenderPrecompute.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2E518522A9CB5053DFFC259 /* RenderPrecompute.swift */; };
-		CE3E4E38861B8F001109517F /* FractalModelType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4394968B9E03BD4789EF8CC3 /* FractalModelType.swift */; };
-		CED08F02DA5D262A21A2CB74 /* QualityPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFDBDC155A1F3FB4E8FC54A4 /* QualityPreset.swift */; };
-		CF11C754939172029FE24852 /* SpaceWarpStackSimplifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = F64A3D2D64CE4EA72B8A4402 /* SpaceWarpStackSimplifier.swift */; };
-		D4E8096F7436A650D351E766 /* RenderSettingsSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = F347B364DE696241804149C3 /* RenderSettingsSnapshot.swift */; };
-		D5461B087343762BE0177BF5 /* QuickLookThumbnailing.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 089099A22D36850131757BA0 /* QuickLookThumbnailing.framework */; };
-		D5CAC81A4E69C40DF71A7C9F /* LightingTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E838767C9E841AEAD60BAB91 /* LightingTypes.swift */; };
-		DBC95C4B11285CF0F786E140 /* ParameterTargetID.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13B17F6E932D15A30C93FD80 /* ParameterTargetID.swift */; };
-		DE1DFEE42DAD00CAFC9729A4 /* ModuleRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 606BB6792DA823DD97821812 /* ModuleRegistry.swift */; };
-		E3BACA0C04474F9FD8E9A806 /* SettingsPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50DADB8919836828BAE7993 /* SettingsPersistence.swift */; };
-		E5706930EB10126D0E0BA95D /* RenderKitStubs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 169EE8B2CF505C0EF2237C4A /* RenderKitStubs.swift */; };
-		E86812E69B749700B6E10BF2 /* ThumbnailProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 438CC8E7121646B280974E3D /* ThumbnailProvider.swift */; };
-		EA43D71AB7B893FCBD6B865F /* FormulaCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0CB424531FC6CC45B5ED4DE /* FormulaCatalog.swift */; };
-		EC44C6BCCAFF3AEE92F9B06A /* RenderSettingsSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6895E0900398CA08E3EEFB73 /* RenderSettingsSnapshot.swift */; };
-		EE4D0CDC7C4C310D89806FD6 /* Module.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62B305D88AAA049EACF439F4 /* Module.swift */; };
-		F20E301FCF119962855F5058 /* GestureDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E77448A6651F130B63F526 /* GestureDefaults.swift */; };
-		F753809C4D795C6736710970 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DB7C91C3C950A238C6629C8 /* Metal.framework */; };
-		FA21FA33855A00AE827A2115 /* QualityConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8E333B08504F55A3DB2081C /* QualityConfig.swift */; };
-		FB3C037D30B8C6E3B9ED7CB9 /* RenderModes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E358725962DB57F45AC0C54 /* RenderModes.swift */; };
-		FD5A97607C3B9FCBA977FF61 /* DisplayConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = C50EBD15CCE53FCCE853FB78 /* DisplayConfig.swift */; };
-		FFCF47109E22C3DB4030B4FE /* RendererMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 367CBFF13D9A1D842A8477D8 /* RendererMath.swift */; };
+		00F658BBA5265DB38A09012E /* GestureConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 460F6690F79DF51ADDC42530 /* GestureConfig.swift */; };
+		034BDEB1DB58567C7CC17A72 /* ThumbnailProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA51A9AC6AFB57EAC2BDAD53 /* ThumbnailProvider.swift */; };
+		0433720B0291CA83F3B2994B /* SpaceWarpStackSimplifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAE2D04E4E22D694D52FED6E /* SpaceWarpStackSimplifier.swift */; };
+		085500D0AB56AA7F0991F6F4 /* EmbeddedFormula.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2339B53F7DF0A8DF0D298E14 /* EmbeddedFormula.swift */; };
+		0A694F27C614C6A6CDD4D1F6 /* SpaceWarpStackModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C4B5D83D1E1E4E64CBF5BD7 /* SpaceWarpStackModel.swift */; };
+		0AEFFF2E4770FE0642DE2B69 /* LightingConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 330FD3A39D64608DAD6767FA /* LightingConfig.swift */; };
+		0CE73EC158149FCA62574D6E /* FormulaCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CF8752D5719FA6DDBAC87DA /* FormulaCatalog.swift */; };
+		0E225CDE504396B724A44CB2 /* Quartz.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 461F910BC79EBF63B5C29573 /* Quartz.framework */; };
+		0F8547D690214FCFDAED1F56 /* MusicReactiveTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E9D983884782BF105022C3 /* MusicReactiveTypes.swift */; };
+		0FF01709623DECB8F0C39763 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 20EA82FA2BB7C1B38D87B821 /* Shaders.metal */; };
+		10615399B645EA9CE2AC858C /* QualityConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1084066A997044935034418 /* QualityConfig.swift */; };
+		13347774F584E48BBC09FD7B /* LightingConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA8E4C86D7D5934C68FF60D /* LightingConfig.swift */; };
+		14803CAED81F27443EA438EF /* AudioReactiveConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1053A750DCDDE5FC276B5F3A /* AudioReactiveConfig.swift */; };
+		163AFB266770B9B2BC82C950 /* GestureConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8122F0A44FF02CD067EC973E /* GestureConfig.swift */; };
+		19875B8F4E3B92349696DCBC /* RenderSettingsSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B0B5F2A1EBDA06C1FE47532 /* RenderSettingsSnapshot.swift */; };
+		1BFCB25464279471D93F1A2F /* MenuToggleGestureMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CBA01BD20F6FEDB37C5234C /* MenuToggleGestureMode.swift */; };
+		1D3BE951AD6C5F103AD4DC15 /* EmbeddedFormula.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E7DFDCAF679AC1C6E7BE8C0 /* EmbeddedFormula.swift */; };
+		1EB181B7FC412501B83DD212 /* FingerGestureAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA064DDEBED168C1403CF9FC /* FingerGestureAction.swift */; };
+		2C7EAB8851AB0195773861FC /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 37D3A3272F51BBE19A3CDAD7 /* MetalKit.framework */; };
+		2D8B97554E5613FEDD6B862A /* PerFractalGestureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 635171EA7CC6BB9548AE93D9 /* PerFractalGestureStore.swift */; };
+		2F52F62E3336970A7D92BDD9 /* CustomShaderCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F327D48736FD2946792084A4 /* CustomShaderCompiler.swift */; };
+		304679E6B344CBBEBF13F373 /* RenderPrecompute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DB40AD9308C4DF7C5D6EFEF /* RenderPrecompute.swift */; };
+		325917EED7E9737D2F6EC8AA /* FractalPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A191F3EEBB124AA64FEFBB4 /* FractalPreset.swift */; };
+		3324964C905C179B95F9A2F2 /* RenderSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = D58C40F0C81D77415131982A /* RenderSettings.swift */; };
+		3441D8F5C723C1976E26C200 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0CD407A50A4FE37188F833F4 /* Cocoa.framework */; };
+		365D56C6DD7A2E03010F1BE5 /* GradientColorSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 092CEBD8544DB5373A50D928 /* GradientColorSystem.swift */; };
+		39ED0017E6F2DF0564B6C8A6 /* GestureDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44F4A0D7DCA754169CA2BAA1 /* GestureDefaults.swift */; };
+		3CBFD15AD0AA1A7FE78E5723 /* ModuleRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE45FE779975297527CDE85E /* ModuleRegistry.swift */; };
+		3D64F4E68ECB6E1182B79064 /* SpaceWarpStackModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35EB9CD89A47D63854AE2A97 /* SpaceWarpStackModel.swift */; };
+		3EAF4CBDCA08CA27CB6612FF /* CustomShaderCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BBC59088B8BB5606C8EE918 /* CustomShaderCompiler.swift */; };
+		3F8FE344D7DCDCBC70C126EB /* FractalModelType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14F1234BC5E2202FA4E954CB /* FractalModelType.swift */; };
+		40F7E026C31B96391994D205 /* QualityPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A4AD30512448E51F0666C72 /* QualityPreset.swift */; };
+		43DEA6CB9E376548333DEABE /* RendererMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D7CDBD6615F6E3B19DA79B9 /* RendererMath.swift */; };
+		441A4C56EB1726A442FB2C0A /* GestureDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = C41E5EB86DC4D70D12ADB6E3 /* GestureDefaults.swift */; };
+		515CFF16710FD7C630034E52 /* QualityConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CEF6774A4D84CB401B03A36 /* QualityConfig.swift */; };
+		5767D5DD1BA55EDFEBD4B371 /* DisplayConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B9E073BC1CCAC67A90792D0 /* DisplayConfig.swift */; };
+		59DF3AA218082725289628F2 /* MenuToggleGestureMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3A4F0A1B29231AAD7C444CB /* MenuToggleGestureMode.swift */; };
+		611285ED59BD1AB1C83EC0E1 /* ModuleRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B1A9BA403EF111AF231A886 /* ModuleRegistry.swift */; };
+		6188AB7347DC2DA1B018864C /* Module.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1405AA7E0099BE085E2CDAFF /* Module.swift */; };
+		64CAF74B2828F955D432E472 /* RenderPrecompute.swift in Sources */ = {isa = PBXBuildFile; fileRef = D18F55BF6186B4399E00D835 /* RenderPrecompute.swift */; };
+		67B7B56C7AEC17CEC344928D /* SettingsPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = D63B790BD54920E047EE6FFD /* SettingsPersistence.swift */; };
+		7471383080000D6FE1B3AE4F /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0CD407A50A4FE37188F833F4 /* Cocoa.framework */; };
+		7630007D28CB6330DDB52661 /* RenderKitStubs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D95D4B40B4A73AA14CB6F7D /* RenderKitStubs.swift */; };
+		79DD7BBDA2099CC120B243AE /* FormulaCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B12D3A962C763424A76EFA2 /* FormulaCatalog.swift */; };
+		7D190DBBF5457FD628713C2A /* PerFractalGestureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33AAA69AC00E42073C15F838 /* PerFractalGestureStore.swift */; };
+		7DF7CA8491EF7F8A3F3A0491 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 9DA88BE058FCC264F16CD64F /* Shaders.metal */; };
+		7E5CD6A23E534D8D3D410E90 /* LightingTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B616F0EA5437066225F75FC /* LightingTypes.swift */; };
+		804B62CDA16A6C1ACDC137A3 /* Module.swift in Sources */ = {isa = PBXBuildFile; fileRef = 142A1AEC8AC1062BF4FEE067 /* Module.swift */; };
+		819FB6DC006BF66174FC5573 /* SafetyBubbleConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C5DC5A8A5851DF3A6EFBB2B /* SafetyBubbleConfig.swift */; };
+		867F36FB50FF2FF0089A6F85 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 37D3A3272F51BBE19A3CDAD7 /* MetalKit.framework */; };
+		878043659D1137664E651D11 /* PreviewViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 464899F6A58959A5D1C10C2A /* PreviewViewController.swift */; };
+		8A2DF225D8ED5F2A17B88E14 /* GeometryConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0C1CAB13706454AF27E0B79 /* GeometryConfig.swift */; };
+		8B2DE175A56C8DB3265BF214 /* ParameterTargetID.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCBC0F8B21F2F45F4CA98826 /* ParameterTargetID.swift */; };
+		9316FA75D6711FC1529AB16F /* ColorConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C719FC5AD7D80C767B9CD28 /* ColorConfig.swift */; };
+		9380B3B97D58CF9B47129B4C /* FingerGestureAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65C5A19373398CF9B86F9D0E /* FingerGestureAction.swift */; };
+		98D2A74D3C5B02E1D02B722A /* QuickLookThumbnailing.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C2C60FE2AC612DBC45321348 /* QuickLookThumbnailing.framework */; };
+		9A11C739C2E9BE77F507D346 /* GeometryConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59638417CD90B07044530428 /* GeometryConfig.swift */; };
+		9A8D93C25DDA331A4EEB4DF8 /* RendererMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCBA0A6FCB2D6A8809201B2 /* RendererMath.swift */; };
+		9C32C3D42C90797FD16CB06A /* EmbeddedMetalSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34BA4BF452165EB09D2A74AC /* EmbeddedMetalSources.swift */; };
+		9CD00840FC72C012FFE4A18C /* RenderSettingsSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FADD50E9E8587D887633581 /* RenderSettingsSnapshot.swift */; };
+		A2DA160BF98F66B98DFD54A6 /* AudioReactiveConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22B8ECC017055FE3AC69595D /* AudioReactiveConfig.swift */; };
+		A4ADEBD0CC81DD91C07D27D5 /* ControlSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE6BB0D8C24F31498D5C679E /* ControlSpec.swift */; };
+		A4EB52EB8E873FA78FD21534 /* RenderSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A68D26D737236E5E1B909F41 /* RenderSettings.swift */; };
+		AC7FCBC7A1EC2408119428A0 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2D9C0FCEA23C2A00B886BC75 /* Metal.framework */; };
+		B3DEF1FEBF060F80C4A5424E /* DisplayConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24B46BC576EA61A1DB77D405 /* DisplayConfig.swift */; };
+		B71A7E876A3EAF736A141FCA /* InteractiveFractalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4249DE37D4A8F3828380A567 /* InteractiveFractalView.swift */; };
+		B8F172360F77EB0440328D3D /* FractalModelType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88194FE4E041E69DF04FB756 /* FractalModelType.swift */; };
+		C6923FC2186B6AA49936070F /* ColorConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7344C8492EECDE379CB8C40E /* ColorConfig.swift */; };
+		CAFD8E5F1B60B660BD04E6BD /* RenderModes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A2DF7D676A209685F80554F /* RenderModes.swift */; };
+		CD6D459B47F013B2FFFC32BC /* FractalTypeDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1442C28B5E3323F5A030B812 /* FractalTypeDescriptor.swift */; };
+		CEEDC9B71F141ED6982F62AF /* ThresholdQLPreview.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 1A5291D859C108E16FABC3B4 /* ThresholdQLPreview.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		CF50053E0288060688E202C7 /* ThresholdQLThumbnail.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = C86D9C06CB400145D31C4D82 /* ThresholdQLThumbnail.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		D323820D26077976A87603F5 /* MusicReactiveTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48B70896A74FF36713122D42 /* MusicReactiveTypes.swift */; };
+		D36FA42814E8500C056E752E /* RenderKitStubs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5244C01BBFB2B31579F4E3EE /* RenderKitStubs.swift */; };
+		D56797594E80873A9ED04DAC /* SafetyBubbleConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8928C631A44AC2F2A94DC149 /* SafetyBubbleConfig.swift */; };
+		D56F197B222D90EEAA162F20 /* HeadlessRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F8738FA26BDDEAB22BB1D45 /* HeadlessRenderer.swift */; };
+		D82A5146E11D4D4C0133CD95 /* FractalPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 098E990A937679A90065C78C /* FractalPreset.swift */; };
+		DFAC9921D8F278098A6BE549 /* ThresholdPreviewRender.swift in Sources */ = {isa = PBXBuildFile; fileRef = F47E40981B366A3CBAB5F9FF /* ThresholdPreviewRender.swift */; };
+		E3E80617CC6E9A4114D1E0E3 /* SettingsPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C1C85942E9794432E22B19D /* SettingsPersistence.swift */; };
+		E4746E81E82EF1BE0E904B56 /* EmbeddedMetalSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4AD79311697999614A63C65 /* EmbeddedMetalSources.swift */; };
+		E537803E0131B3BDEDFE0195 /* FractalTypeDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6EAE28F33DD4803DB243A22 /* FractalTypeDescriptor.swift */; };
+		E6614B7A7F2160C3D7C0AEFE /* ParameterTargetID.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D8CAAB04BF5CAD1616D4603 /* ParameterTargetID.swift */; };
+		E773114AD067C3F06D14399E /* HeadlessRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C83DA5BCDFDAE66CBFA043D2 /* HeadlessRenderer.swift */; };
+		E9E6A22A1E5BC6801166265D /* ControlSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F6A566D43A4E998BFA11097 /* ControlSpec.swift */; };
+		EB2D9C9BBA487FB2C885555A /* GradientColorSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCCDBB3ED932379CC49DA403 /* GradientColorSystem.swift */; };
+		ED36A745765CFF6690F54496 /* RenderModes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 764F1C31F4299223D90BF4AD /* RenderModes.swift */; };
+		F0ACD38E37965F3075BBC3D1 /* LightingTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A22F1E19BB2AFF9E920AB53 /* LightingTypes.swift */; };
+		F641960371E6EF18BB1A131C /* ThresholdPreviewRender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17F88B502717F5319CC832F3 /* ThresholdPreviewRender.swift */; };
+		F7DADA93ABE18D4E82ED74C8 /* QualityPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = D38041E4EB81DB291C1BDB33 /* QualityPreset.swift */; };
+		FAE9BE99080EF29739728BAE /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2D9C0FCEA23C2A00B886BC75 /* Metal.framework */; };
+		FCDB58C7C1A84EB9775EC10A /* SpaceWarpStackSimplifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 088A86FAE62DA5A245408A1F /* SpaceWarpStackSimplifier.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		3C5DF535694BDF6C1F44D003 /* PBXContainerItemProxy */ = {
+		5E6817C2ED7BCB7B78521290 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = D7D716892CEAC4B100CEEA51 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 825ECA685F44239D09BD5F8C;
-			remoteInfo = ThresholdQLThumbnail;
-		};
-		77E5406506782B43A54BE160 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = D7D716892CEAC4B100CEEA51 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = F65099CC30F58BCAC908337E;
+			remoteGlobalIDString = D29CF86F86D18C580CA06124;
 			remoteInfo = ThresholdQLPreview;
 		};
 		D8A000072D00000000000001 /* PBXContainerItemProxy */ = {
@@ -118,17 +115,24 @@
 			remoteGlobalIDString = D7D716B62CEAC4B200CEEA51;
 			remoteInfo = ThresholdMac;
 		};
+		E49BA58C75B84E006D03A5B9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D7D716892CEAC4B100CEEA51 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 455EA762396683E298589FD0;
+			remoteInfo = ThresholdQLThumbnail;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		579DEB7606EAD8C8907B073A /* Embed App Extensions */ = {
+		484A83441DFAD497CC97D953 /* Embed App Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				23E9CE69F06C3AACA7ABA8E0 /* ThresholdQLThumbnail.appex in Embed App Extensions */,
-				8714176E235CC989F3C3C31D /* ThresholdQLPreview.appex in Embed App Extensions */,
+				CF50053E0288060688E202C7 /* ThresholdQLThumbnail.appex in Embed App Extensions */,
+				CEEDC9B71F141ED6982F62AF /* ThresholdQLPreview.appex in Embed App Extensions */,
 			);
 			name = "Embed App Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -136,98 +140,102 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		03D382BBDC578316A97EFB30 /* ThresholdQLPreview.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; name = ThresholdQLPreview.entitlements; path = ThresholdQuickLook/Preview/ThresholdQLPreview.entitlements; sourceTree = SOURCE_ROOT; };
-		089099A22D36850131757BA0 /* QuickLookThumbnailing.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuickLookThumbnailing.framework; path = System/Library/Frameworks/QuickLookThumbnailing.framework; sourceTree = SDKROOT; };
-		0ACEE4D29D7D887288C0BA13 /* AudioReactiveConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AudioReactiveConfig.swift; path = Threshold/Parameters/Config/AudioReactiveConfig.swift; sourceTree = SOURCE_ROOT; };
-		0B0180893D51722684C08FA8 /* ColorConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ColorConfig.swift; path = Threshold/Parameters/Config/ColorConfig.swift; sourceTree = SOURCE_ROOT; };
-		0B16E3DEC3B1AE305DC7233C /* ModuleRegistry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ModuleRegistry.swift; path = Threshold/Parameters/ModuleRegistry.swift; sourceTree = SOURCE_ROOT; };
-		0BBA131CC51E3212C2D81B07 /* FractalModelType.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FractalModelType.swift; path = Threshold/App/FractalModelType.swift; sourceTree = SOURCE_ROOT; };
-		0BF6DE014F2B941F9CBACC27 /* ControlSpec.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlSpec.swift; path = Threshold/Parameters/ControlSpec.swift; sourceTree = SOURCE_ROOT; };
-		0CFCDD1EB78E33960F249793 /* FractalPreset.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FractalPreset.swift; path = Threshold/Parameters/FractalPreset.swift; sourceTree = SOURCE_ROOT; };
-		0D36ED9260AE5AD36543E91D /* FingerGestureAction.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FingerGestureAction.swift; path = Threshold/Gestures/FingerGestureAction.swift; sourceTree = SOURCE_ROOT; };
-		13B17F6E932D15A30C93FD80 /* ParameterTargetID.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ParameterTargetID.swift; path = Threshold/Parameters/ParameterTargetID.swift; sourceTree = SOURCE_ROOT; };
-		169EE8B2CF505C0EF2237C4A /* RenderKitStubs.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderKitStubs.swift; path = ThresholdQuickLook/Shared/RenderKitStubs.swift; sourceTree = SOURCE_ROOT; };
-		1BC0CEA1771EAE51686065FB /* SpaceWarpStackSimplifier.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SpaceWarpStackSimplifier.swift; path = Threshold/Parameters/SpaceWarpStackSimplifier.swift; sourceTree = SOURCE_ROOT; };
-		1DB7C91C3C950A238C6629C8 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
-		29962EB3706F8F59C3B29D0A /* HeadlessRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HeadlessRenderer.swift; path = ThresholdQuickLook/Shared/HeadlessRenderer.swift; sourceTree = SOURCE_ROOT; };
-		2BD6DB684EA4E59569EC3150 /* DisplayConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DisplayConfig.swift; path = Threshold/Parameters/Config/DisplayConfig.swift; sourceTree = SOURCE_ROOT; };
-		2E0C56DF4D04A84533BE0A14 /* Shaders.metal */ = {isa = PBXFileReference; includeInIndex = 1; name = Shaders.metal; path = Threshold/Rendering/Shaders.metal; sourceTree = SOURCE_ROOT; };
-		2F4D35D63391470A2595C189 /* GeometryConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GeometryConfig.swift; path = Threshold/Parameters/Config/GeometryConfig.swift; sourceTree = SOURCE_ROOT; };
-		31CF65166AEDDE7A54B4E1DB /* ParameterTargetID.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ParameterTargetID.swift; path = Threshold/Parameters/ParameterTargetID.swift; sourceTree = SOURCE_ROOT; };
-		367CBFF13D9A1D842A8477D8 /* RendererMath.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RendererMath.swift; path = Threshold/Rendering/Core/RendererMath.swift; sourceTree = SOURCE_ROOT; };
-		3A69589EF0D4F537CE2A81C1 /* RenderPrecompute.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderPrecompute.swift; path = Threshold/Rendering/Core/RenderPrecompute.swift; sourceTree = SOURCE_ROOT; };
-		3E358725962DB57F45AC0C54 /* RenderModes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderModes.swift; path = Threshold/Rendering/Core/RenderModes.swift; sourceTree = SOURCE_ROOT; };
-		438CC8E7121646B280974E3D /* ThumbnailProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ThumbnailProvider.swift; path = ThresholdQuickLook/Thumbnail/ThumbnailProvider.swift; sourceTree = SOURCE_ROOT; };
-		4394968B9E03BD4789EF8CC3 /* FractalModelType.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FractalModelType.swift; path = Threshold/App/FractalModelType.swift; sourceTree = SOURCE_ROOT; };
-		47A7A1E7890D078A625D4B07 /* MenuToggleGestureMode.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MenuToggleGestureMode.swift; path = Threshold/Gestures/MenuToggleGestureMode.swift; sourceTree = SOURCE_ROOT; };
-		4E64792008D48F967DAA5B8A /* LightingTypes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LightingTypes.swift; path = Threshold/App/LightingTypes.swift; sourceTree = SOURCE_ROOT; };
-		50A8757A47F2EAC500CDCF1F /* InteractiveFractalView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = InteractiveFractalView.swift; path = ThresholdQuickLook/Preview/InteractiveFractalView.swift; sourceTree = SOURCE_ROOT; };
-		50C5C71CD7613D21CB1F007E /* GestureConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GestureConfig.swift; path = Threshold/Parameters/Config/GestureConfig.swift; sourceTree = SOURCE_ROOT; };
-		519FE4B93D9608C2B01CFD7C /* Quartz.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Quartz.framework; path = System/Library/Frameworks/Quartz.framework; sourceTree = SDKROOT; };
-		5240DFEED13A642A484100FF /* ThresholdQLThumbnail.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; name = ThresholdQLThumbnail.entitlements; path = ThresholdQuickLook/Thumbnail/ThresholdQLThumbnail.entitlements; sourceTree = SOURCE_ROOT; };
-		53B4F6A0923DDAEDC92DD41C /* EmbeddedFormula.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmbeddedFormula.swift; path = Threshold/Formulas/EmbeddedFormula.swift; sourceTree = SOURCE_ROOT; };
-		53CC8AFA69EB323686B57414 /* AudioReactiveConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AudioReactiveConfig.swift; path = Threshold/Parameters/Config/AudioReactiveConfig.swift; sourceTree = SOURCE_ROOT; };
-		5DE846742494A0AA7B3D6F6B /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = ThresholdQuickLook/Preview/Info.plist; sourceTree = SOURCE_ROOT; };
-		5F21B7E3B05068BAEABC78FD /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
-		606BB6792DA823DD97821812 /* ModuleRegistry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ModuleRegistry.swift; path = Threshold/Parameters/ModuleRegistry.swift; sourceTree = SOURCE_ROOT; };
-		62B305D88AAA049EACF439F4 /* Module.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Module.swift; path = Threshold/Parameters/Module.swift; sourceTree = SOURCE_ROOT; };
-		6895E0900398CA08E3EEFB73 /* RenderSettingsSnapshot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderSettingsSnapshot.swift; path = Threshold/Parameters/RenderSettingsSnapshot.swift; sourceTree = SOURCE_ROOT; };
-		6B0CC76E6DCD4FFFA313852F /* RenderKitStubs.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderKitStubs.swift; path = ThresholdQuickLook/Shared/RenderKitStubs.swift; sourceTree = SOURCE_ROOT; };
-		6B73DEBCA75A2986ECF1A23C /* HeadlessRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HeadlessRenderer.swift; path = ThresholdQuickLook/Shared/HeadlessRenderer.swift; sourceTree = SOURCE_ROOT; };
-		6C3FD0AA3A5337DC2DF56504 /* ThresholdQLPreview.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ThresholdQLPreview.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		6F2AE970D06DA26634D38396 /* PerFractalGestureStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PerFractalGestureStore.swift; path = Threshold/Parameters/Config/PerFractalGestureStore.swift; sourceTree = SOURCE_ROOT; };
-		6F505FCB5FEB4DA7843B1FA8 /* ColorConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ColorConfig.swift; path = Threshold/Parameters/Config/ColorConfig.swift; sourceTree = SOURCE_ROOT; };
-		7149981848B6CAECB507C79C /* GestureConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GestureConfig.swift; path = Threshold/Parameters/Config/GestureConfig.swift; sourceTree = SOURCE_ROOT; };
-		718C6BCF560E2851B7BC3D21 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = ThresholdQuickLook/Thumbnail/Info.plist; sourceTree = SOURCE_ROOT; };
-		7473A7E2A7C52564F6BB3ED7 /* LightingConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LightingConfig.swift; path = Threshold/Parameters/Config/LightingConfig.swift; sourceTree = SOURCE_ROOT; };
-		81D1CA7C5323A27C6DF387CB /* FingerGestureAction.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FingerGestureAction.swift; path = Threshold/Gestures/FingerGestureAction.swift; sourceTree = SOURCE_ROOT; };
-		84E5E0D3988B1D38D6F9A222 /* SpaceWarpStackModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SpaceWarpStackModel.swift; path = Threshold/Parameters/SpaceWarpStackModel.swift; sourceTree = SOURCE_ROOT; };
-		8D0BBEAD91DDCC75A4B4990B /* QualityConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = QualityConfig.swift; path = Threshold/Parameters/Config/QualityConfig.swift; sourceTree = SOURCE_ROOT; };
-		92C1F1702E0D5BBE0289BAFA /* MenuToggleGestureMode.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MenuToggleGestureMode.swift; path = Threshold/Gestures/MenuToggleGestureMode.swift; sourceTree = SOURCE_ROOT; };
-		961D5C02DEF185D9A8E9D2B1 /* GradientColorSystem.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GradientColorSystem.swift; path = Threshold/Parameters/GradientColorSystem.swift; sourceTree = SOURCE_ROOT; };
-		9902731AD7D3EC8A7230EB4F /* GeometryConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GeometryConfig.swift; path = Threshold/Parameters/Config/GeometryConfig.swift; sourceTree = SOURCE_ROOT; };
-		9E7233B915D4D4C57A35F8D9 /* RenderSettings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderSettings.swift; path = Threshold/Parameters/RenderSettings.swift; sourceTree = SOURCE_ROOT; };
-		9F8FD05BEFA016879CDA00F8 /* ControlSpec.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlSpec.swift; path = Threshold/Parameters/ControlSpec.swift; sourceTree = SOURCE_ROOT; };
-		A0CB424531FC6CC45B5ED4DE /* FormulaCatalog.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FormulaCatalog.swift; path = Threshold/App/FormulaCatalog.swift; sourceTree = SOURCE_ROOT; };
-		A2E518522A9CB5053DFFC259 /* RenderPrecompute.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderPrecompute.swift; path = Threshold/Rendering/Core/RenderPrecompute.swift; sourceTree = SOURCE_ROOT; };
-		A6F641A82D9FF2279665D51C /* FractalTypeDescriptor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FractalTypeDescriptor.swift; path = Threshold/App/FractalTypeDescriptor.swift; sourceTree = SOURCE_ROOT; };
-		AAA80C144FAECF092F926F50 /* Shaders.metal */ = {isa = PBXFileReference; includeInIndex = 1; name = Shaders.metal; path = Threshold/Rendering/Shaders.metal; sourceTree = SOURCE_ROOT; };
-		AB64CDDF386BC8508AE9C6F5 /* ThresholdPreviewRender.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ThresholdPreviewRender.swift; path = ThresholdQuickLook/Shared/ThresholdPreviewRender.swift; sourceTree = SOURCE_ROOT; };
-		AD8650BD2781576BDA866B7E /* GradientColorSystem.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GradientColorSystem.swift; path = Threshold/Parameters/GradientColorSystem.swift; sourceTree = SOURCE_ROOT; };
-		AEE6DDB44B4956F4A9978855 /* RenderSettings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderSettings.swift; path = Threshold/Parameters/RenderSettings.swift; sourceTree = SOURCE_ROOT; };
-		B46FB4BD326157F79C00F4D9 /* QualityPreset.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = QualityPreset.swift; path = Threshold/Parameters/QualityPreset.swift; sourceTree = SOURCE_ROOT; };
-		B5B288303F45CB944ECEDB41 /* EmbeddedFormula.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmbeddedFormula.swift; path = Threshold/Formulas/EmbeddedFormula.swift; sourceTree = SOURCE_ROOT; };
-		B69B4E2CCE6827C3C772245F /* ThresholdPreviewRender.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ThresholdPreviewRender.swift; path = ThresholdQuickLook/Shared/ThresholdPreviewRender.swift; sourceTree = SOURCE_ROOT; };
-		BAA4DBE740D0FA66E5793944 /* LightingConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LightingConfig.swift; path = Threshold/Parameters/Config/LightingConfig.swift; sourceTree = SOURCE_ROOT; };
-		BE1F8A3721BCBF07CB69D45A /* FractalTypeDescriptor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FractalTypeDescriptor.swift; path = Threshold/App/FractalTypeDescriptor.swift; sourceTree = SOURCE_ROOT; };
-		BE619C113925750C8B07B6F0 /* GestureDefaults.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GestureDefaults.swift; path = Threshold/Parameters/Config/GestureDefaults.swift; sourceTree = SOURCE_ROOT; };
-		C2D8819F0D30C19ECF49F682 /* MusicReactiveTypes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MusicReactiveTypes.swift; path = Threshold/Audio/MusicReactiveTypes.swift; sourceTree = SOURCE_ROOT; };
-		C3984702BB4A0685DD01E73C /* Module.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Module.swift; path = Threshold/Parameters/Module.swift; sourceTree = SOURCE_ROOT; };
-		C3E9AA8D46A11C08744F2057 /* FractalPreset.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FractalPreset.swift; path = Threshold/Parameters/FractalPreset.swift; sourceTree = SOURCE_ROOT; };
-		C50EBD15CCE53FCCE853FB78 /* DisplayConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DisplayConfig.swift; path = Threshold/Parameters/Config/DisplayConfig.swift; sourceTree = SOURCE_ROOT; };
-		CC03AB8DDB5D0491F1E7317C /* ThresholdQLThumbnail.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ThresholdQLThumbnail.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		CFDBDC155A1F3FB4E8FC54A4 /* QualityPreset.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = QualityPreset.swift; path = Threshold/Parameters/QualityPreset.swift; sourceTree = SOURCE_ROOT; };
-		D725BACEFDDB1FADADAC8468 /* SafetyBubbleConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SafetyBubbleConfig.swift; path = Threshold/Parameters/Config/SafetyBubbleConfig.swift; sourceTree = SOURCE_ROOT; };
+		088A86FAE62DA5A245408A1F /* SpaceWarpStackSimplifier.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SpaceWarpStackSimplifier.swift; path = Threshold/Parameters/SpaceWarpStackSimplifier.swift; sourceTree = SOURCE_ROOT; };
+		092CEBD8544DB5373A50D928 /* GradientColorSystem.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GradientColorSystem.swift; path = Threshold/Parameters/GradientColorSystem.swift; sourceTree = SOURCE_ROOT; };
+		098E990A937679A90065C78C /* FractalPreset.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FractalPreset.swift; path = Threshold/Parameters/FractalPreset.swift; sourceTree = SOURCE_ROOT; };
+		0BBC59088B8BB5606C8EE918 /* CustomShaderCompiler.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CustomShaderCompiler.swift; path = Threshold/Rendering/Core/CustomShaderCompiler.swift; sourceTree = SOURCE_ROOT; };
+		0C9CB7B4E0BE63E7EDE299B9 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = ThresholdQuickLook/Thumbnail/Info.plist; sourceTree = SOURCE_ROOT; };
+		0CD407A50A4FE37188F833F4 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
+		0CF8752D5719FA6DDBAC87DA /* FormulaCatalog.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FormulaCatalog.swift; path = Threshold/App/FormulaCatalog.swift; sourceTree = SOURCE_ROOT; };
+		0D7CDBD6615F6E3B19DA79B9 /* RendererMath.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RendererMath.swift; path = Threshold/Rendering/Core/RendererMath.swift; sourceTree = SOURCE_ROOT; };
+		1053A750DCDDE5FC276B5F3A /* AudioReactiveConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AudioReactiveConfig.swift; path = Threshold/Parameters/Config/AudioReactiveConfig.swift; sourceTree = SOURCE_ROOT; };
+		1405AA7E0099BE085E2CDAFF /* Module.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Module.swift; path = Threshold/Parameters/Module.swift; sourceTree = SOURCE_ROOT; };
+		142A1AEC8AC1062BF4FEE067 /* Module.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Module.swift; path = Threshold/Parameters/Module.swift; sourceTree = SOURCE_ROOT; };
+		1442C28B5E3323F5A030B812 /* FractalTypeDescriptor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FractalTypeDescriptor.swift; path = Threshold/App/FractalTypeDescriptor.swift; sourceTree = SOURCE_ROOT; };
+		14F1234BC5E2202FA4E954CB /* FractalModelType.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FractalModelType.swift; path = Threshold/App/FractalModelType.swift; sourceTree = SOURCE_ROOT; };
+		17F88B502717F5319CC832F3 /* ThresholdPreviewRender.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ThresholdPreviewRender.swift; path = ThresholdQuickLook/Shared/ThresholdPreviewRender.swift; sourceTree = SOURCE_ROOT; };
+		1A22F1E19BB2AFF9E920AB53 /* LightingTypes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LightingTypes.swift; path = Threshold/App/LightingTypes.swift; sourceTree = SOURCE_ROOT; };
+		1A5291D859C108E16FABC3B4 /* ThresholdQLPreview.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ThresholdQLPreview.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		1B0B5F2A1EBDA06C1FE47532 /* RenderSettingsSnapshot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderSettingsSnapshot.swift; path = Threshold/Parameters/RenderSettingsSnapshot.swift; sourceTree = SOURCE_ROOT; };
+		1B12D3A962C763424A76EFA2 /* FormulaCatalog.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FormulaCatalog.swift; path = Threshold/App/FormulaCatalog.swift; sourceTree = SOURCE_ROOT; };
+		1F6A566D43A4E998BFA11097 /* ControlSpec.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlSpec.swift; path = Threshold/Parameters/ControlSpec.swift; sourceTree = SOURCE_ROOT; };
+		20EA82FA2BB7C1B38D87B821 /* Shaders.metal */ = {isa = PBXFileReference; includeInIndex = 1; name = Shaders.metal; path = Threshold/Rendering/Shaders.metal; sourceTree = SOURCE_ROOT; };
+		22B8ECC017055FE3AC69595D /* AudioReactiveConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AudioReactiveConfig.swift; path = Threshold/Parameters/Config/AudioReactiveConfig.swift; sourceTree = SOURCE_ROOT; };
+		2339B53F7DF0A8DF0D298E14 /* EmbeddedFormula.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmbeddedFormula.swift; path = Threshold/Formulas/EmbeddedFormula.swift; sourceTree = SOURCE_ROOT; };
+		24B46BC576EA61A1DB77D405 /* DisplayConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DisplayConfig.swift; path = Threshold/Parameters/Config/DisplayConfig.swift; sourceTree = SOURCE_ROOT; };
+		2A191F3EEBB124AA64FEFBB4 /* FractalPreset.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FractalPreset.swift; path = Threshold/Parameters/FractalPreset.swift; sourceTree = SOURCE_ROOT; };
+		2D9C0FCEA23C2A00B886BC75 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		2E7DFDCAF679AC1C6E7BE8C0 /* EmbeddedFormula.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmbeddedFormula.swift; path = Threshold/Formulas/EmbeddedFormula.swift; sourceTree = SOURCE_ROOT; };
+		330FD3A39D64608DAD6767FA /* LightingConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LightingConfig.swift; path = Threshold/Parameters/Config/LightingConfig.swift; sourceTree = SOURCE_ROOT; };
+		33AAA69AC00E42073C15F838 /* PerFractalGestureStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PerFractalGestureStore.swift; path = Threshold/Parameters/Config/PerFractalGestureStore.swift; sourceTree = SOURCE_ROOT; };
+		34BA4BF452165EB09D2A74AC /* EmbeddedMetalSources.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmbeddedMetalSources.swift; path = Threshold/Rendering/Generated/EmbeddedMetalSources.swift; sourceTree = SOURCE_ROOT; };
+		35EB9CD89A47D63854AE2A97 /* SpaceWarpStackModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SpaceWarpStackModel.swift; path = Threshold/Parameters/SpaceWarpStackModel.swift; sourceTree = SOURCE_ROOT; };
+		37D3A3272F51BBE19A3CDAD7 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
+		3A2DF7D676A209685F80554F /* RenderModes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderModes.swift; path = Threshold/Rendering/Core/RenderModes.swift; sourceTree = SOURCE_ROOT; };
+		3B9E073BC1CCAC67A90792D0 /* DisplayConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DisplayConfig.swift; path = Threshold/Parameters/Config/DisplayConfig.swift; sourceTree = SOURCE_ROOT; };
+		3C719FC5AD7D80C767B9CD28 /* ColorConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ColorConfig.swift; path = Threshold/Parameters/Config/ColorConfig.swift; sourceTree = SOURCE_ROOT; };
+		3D95D4B40B4A73AA14CB6F7D /* RenderKitStubs.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderKitStubs.swift; path = ThresholdQuickLook/Shared/RenderKitStubs.swift; sourceTree = SOURCE_ROOT; };
+		4249DE37D4A8F3828380A567 /* InteractiveFractalView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = InteractiveFractalView.swift; path = ThresholdQuickLook/Preview/InteractiveFractalView.swift; sourceTree = SOURCE_ROOT; };
+		44F4A0D7DCA754169CA2BAA1 /* GestureDefaults.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GestureDefaults.swift; path = Threshold/Parameters/Config/GestureDefaults.swift; sourceTree = SOURCE_ROOT; };
+		460F6690F79DF51ADDC42530 /* GestureConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GestureConfig.swift; path = Threshold/Parameters/Config/GestureConfig.swift; sourceTree = SOURCE_ROOT; };
+		461F910BC79EBF63B5C29573 /* Quartz.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Quartz.framework; path = System/Library/Frameworks/Quartz.framework; sourceTree = SDKROOT; };
+		464899F6A58959A5D1C10C2A /* PreviewViewController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PreviewViewController.swift; path = ThresholdQuickLook/Preview/PreviewViewController.swift; sourceTree = SOURCE_ROOT; };
+		48B70896A74FF36713122D42 /* MusicReactiveTypes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MusicReactiveTypes.swift; path = Threshold/Audio/MusicReactiveTypes.swift; sourceTree = SOURCE_ROOT; };
+		4B616F0EA5437066225F75FC /* LightingTypes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LightingTypes.swift; path = Threshold/App/LightingTypes.swift; sourceTree = SOURCE_ROOT; };
+		50A7E9694F361FCE00BDB336 /* ThresholdQLPreview.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; name = ThresholdQLPreview.entitlements; path = ThresholdQuickLook/Preview/ThresholdQLPreview.entitlements; sourceTree = SOURCE_ROOT; };
+		5244C01BBFB2B31579F4E3EE /* RenderKitStubs.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderKitStubs.swift; path = ThresholdQuickLook/Shared/RenderKitStubs.swift; sourceTree = SOURCE_ROOT; };
+		59638417CD90B07044530428 /* GeometryConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GeometryConfig.swift; path = Threshold/Parameters/Config/GeometryConfig.swift; sourceTree = SOURCE_ROOT; };
+		5EA8E4C86D7D5934C68FF60D /* LightingConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LightingConfig.swift; path = Threshold/Parameters/Config/LightingConfig.swift; sourceTree = SOURCE_ROOT; };
+		635171EA7CC6BB9548AE93D9 /* PerFractalGestureStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PerFractalGestureStore.swift; path = Threshold/Parameters/Config/PerFractalGestureStore.swift; sourceTree = SOURCE_ROOT; };
+		65C5A19373398CF9B86F9D0E /* FingerGestureAction.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FingerGestureAction.swift; path = Threshold/Gestures/FingerGestureAction.swift; sourceTree = SOURCE_ROOT; };
+		6A4AD30512448E51F0666C72 /* QualityPreset.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = QualityPreset.swift; path = Threshold/Parameters/QualityPreset.swift; sourceTree = SOURCE_ROOT; };
+		6CBA01BD20F6FEDB37C5234C /* MenuToggleGestureMode.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MenuToggleGestureMode.swift; path = Threshold/Gestures/MenuToggleGestureMode.swift; sourceTree = SOURCE_ROOT; };
+		6CEF6774A4D84CB401B03A36 /* QualityConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = QualityConfig.swift; path = Threshold/Parameters/Config/QualityConfig.swift; sourceTree = SOURCE_ROOT; };
+		7344C8492EECDE379CB8C40E /* ColorConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ColorConfig.swift; path = Threshold/Parameters/Config/ColorConfig.swift; sourceTree = SOURCE_ROOT; };
+		764F1C31F4299223D90BF4AD /* RenderModes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderModes.swift; path = Threshold/Rendering/Core/RenderModes.swift; sourceTree = SOURCE_ROOT; };
+		7B1A9BA403EF111AF231A886 /* ModuleRegistry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ModuleRegistry.swift; path = Threshold/Parameters/ModuleRegistry.swift; sourceTree = SOURCE_ROOT; };
+		7C5DC5A8A5851DF3A6EFBB2B /* SafetyBubbleConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SafetyBubbleConfig.swift; path = Threshold/Parameters/Config/SafetyBubbleConfig.swift; sourceTree = SOURCE_ROOT; };
+		7D8CAAB04BF5CAD1616D4603 /* ParameterTargetID.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ParameterTargetID.swift; path = Threshold/Parameters/ParameterTargetID.swift; sourceTree = SOURCE_ROOT; };
+		7F8738FA26BDDEAB22BB1D45 /* HeadlessRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HeadlessRenderer.swift; path = ThresholdQuickLook/Shared/HeadlessRenderer.swift; sourceTree = SOURCE_ROOT; };
+		7FADD50E9E8587D887633581 /* RenderSettingsSnapshot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderSettingsSnapshot.swift; path = Threshold/Parameters/RenderSettingsSnapshot.swift; sourceTree = SOURCE_ROOT; };
+		8122F0A44FF02CD067EC973E /* GestureConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GestureConfig.swift; path = Threshold/Parameters/Config/GestureConfig.swift; sourceTree = SOURCE_ROOT; };
+		87582488F40D41F77FCD4742 /* ThresholdQLThumbnail.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; name = ThresholdQLThumbnail.entitlements; path = ThresholdQuickLook/Thumbnail/ThresholdQLThumbnail.entitlements; sourceTree = SOURCE_ROOT; };
+		88194FE4E041E69DF04FB756 /* FractalModelType.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FractalModelType.swift; path = Threshold/App/FractalModelType.swift; sourceTree = SOURCE_ROOT; };
+		8928C631A44AC2F2A94DC149 /* SafetyBubbleConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SafetyBubbleConfig.swift; path = Threshold/Parameters/Config/SafetyBubbleConfig.swift; sourceTree = SOURCE_ROOT; };
+		8C1C85942E9794432E22B19D /* SettingsPersistence.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SettingsPersistence.swift; path = Threshold/Parameters/SettingsPersistence.swift; sourceTree = SOURCE_ROOT; };
+		8DB40AD9308C4DF7C5D6EFEF /* RenderPrecompute.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderPrecompute.swift; path = Threshold/Rendering/Core/RenderPrecompute.swift; sourceTree = SOURCE_ROOT; };
+		9C4B5D83D1E1E4E64CBF5BD7 /* SpaceWarpStackModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SpaceWarpStackModel.swift; path = Threshold/Parameters/SpaceWarpStackModel.swift; sourceTree = SOURCE_ROOT; };
+		9DA88BE058FCC264F16CD64F /* Shaders.metal */ = {isa = PBXFileReference; includeInIndex = 1; name = Shaders.metal; path = Threshold/Rendering/Shaders.metal; sourceTree = SOURCE_ROOT; };
+		A68D26D737236E5E1B909F41 /* RenderSettings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderSettings.swift; path = Threshold/Parameters/RenderSettings.swift; sourceTree = SOURCE_ROOT; };
+		A6EAE28F33DD4803DB243A22 /* FractalTypeDescriptor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FractalTypeDescriptor.swift; path = Threshold/App/FractalTypeDescriptor.swift; sourceTree = SOURCE_ROOT; };
+		A9607A53D991759363816FE3 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = ThresholdQuickLook/Preview/Info.plist; sourceTree = SOURCE_ROOT; };
+		BA51A9AC6AFB57EAC2BDAD53 /* ThumbnailProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ThumbnailProvider.swift; path = ThresholdQuickLook/Thumbnail/ThumbnailProvider.swift; sourceTree = SOURCE_ROOT; };
+		BE45FE779975297527CDE85E /* ModuleRegistry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ModuleRegistry.swift; path = Threshold/Parameters/ModuleRegistry.swift; sourceTree = SOURCE_ROOT; };
+		C1084066A997044935034418 /* QualityConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = QualityConfig.swift; path = Threshold/Parameters/Config/QualityConfig.swift; sourceTree = SOURCE_ROOT; };
+		C2C60FE2AC612DBC45321348 /* QuickLookThumbnailing.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuickLookThumbnailing.framework; path = System/Library/Frameworks/QuickLookThumbnailing.framework; sourceTree = SDKROOT; };
+		C3A4F0A1B29231AAD7C444CB /* MenuToggleGestureMode.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MenuToggleGestureMode.swift; path = Threshold/Gestures/MenuToggleGestureMode.swift; sourceTree = SOURCE_ROOT; };
+		C41E5EB86DC4D70D12ADB6E3 /* GestureDefaults.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GestureDefaults.swift; path = Threshold/Parameters/Config/GestureDefaults.swift; sourceTree = SOURCE_ROOT; };
+		C83DA5BCDFDAE66CBFA043D2 /* HeadlessRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HeadlessRenderer.swift; path = ThresholdQuickLook/Shared/HeadlessRenderer.swift; sourceTree = SOURCE_ROOT; };
+		C86D9C06CB400145D31C4D82 /* ThresholdQLThumbnail.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ThresholdQLThumbnail.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		CCCDBB3ED932379CC49DA403 /* GradientColorSystem.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GradientColorSystem.swift; path = Threshold/Parameters/GradientColorSystem.swift; sourceTree = SOURCE_ROOT; };
+		CDCBA0A6FCB2D6A8809201B2 /* RendererMath.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RendererMath.swift; path = Threshold/Rendering/Core/RendererMath.swift; sourceTree = SOURCE_ROOT; };
+		CE6BB0D8C24F31498D5C679E /* ControlSpec.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlSpec.swift; path = Threshold/Parameters/ControlSpec.swift; sourceTree = SOURCE_ROOT; };
+		D18F55BF6186B4399E00D835 /* RenderPrecompute.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderPrecompute.swift; path = Threshold/Rendering/Core/RenderPrecompute.swift; sourceTree = SOURCE_ROOT; };
+		D38041E4EB81DB291C1BDB33 /* QualityPreset.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = QualityPreset.swift; path = Threshold/Parameters/QualityPreset.swift; sourceTree = SOURCE_ROOT; };
+		D58C40F0C81D77415131982A /* RenderSettings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderSettings.swift; path = Threshold/Parameters/RenderSettings.swift; sourceTree = SOURCE_ROOT; };
+		D63B790BD54920E047EE6FFD /* SettingsPersistence.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SettingsPersistence.swift; path = Threshold/Parameters/SettingsPersistence.swift; sourceTree = SOURCE_ROOT; };
 		D7D716912CEAC4B100CEEA51 /* Threshold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threshold.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D7D716B12CEAC4B200CEEA51 /* Threshold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threshold.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D7E0000A2E00000000000001 /* Threshold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threshold.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		D7FC7DB944348F1336346E0E /* PerFractalGestureStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PerFractalGestureStore.swift; path = Threshold/Parameters/Config/PerFractalGestureStore.swift; sourceTree = SOURCE_ROOT; };
 		D8A000012D00000000000001 /* ThresholdTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThresholdTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		DB309D976ADE8A147E2B7888 /* SafetyBubbleConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SafetyBubbleConfig.swift; path = Threshold/Parameters/Config/SafetyBubbleConfig.swift; sourceTree = SOURCE_ROOT; };
-		E134CCE614E18E967148691C /* MusicReactiveTypes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MusicReactiveTypes.swift; path = Threshold/Audio/MusicReactiveTypes.swift; sourceTree = SOURCE_ROOT; };
-		E4E77448A6651F130B63F526 /* GestureDefaults.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GestureDefaults.swift; path = Threshold/Parameters/Config/GestureDefaults.swift; sourceTree = SOURCE_ROOT; };
-		E50DADB8919836828BAE7993 /* SettingsPersistence.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SettingsPersistence.swift; path = Threshold/Parameters/SettingsPersistence.swift; sourceTree = SOURCE_ROOT; };
-		E838767C9E841AEAD60BAB91 /* LightingTypes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LightingTypes.swift; path = Threshold/App/LightingTypes.swift; sourceTree = SOURCE_ROOT; };
-		E8E333B08504F55A3DB2081C /* QualityConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = QualityConfig.swift; path = Threshold/Parameters/Config/QualityConfig.swift; sourceTree = SOURCE_ROOT; };
-		E992C59AE9FF9D1E95B0BDBC /* FormulaCatalog.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FormulaCatalog.swift; path = Threshold/App/FormulaCatalog.swift; sourceTree = SOURCE_ROOT; };
-		EE8FDF96D8811FFDEBCEC631 /* RenderModes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderModes.swift; path = Threshold/Rendering/Core/RenderModes.swift; sourceTree = SOURCE_ROOT; };
-		F0889039A72D264A1C717A36 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
-		F0908AC63313E91FD1F4070F /* PreviewViewController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PreviewViewController.swift; path = ThresholdQuickLook/Preview/PreviewViewController.swift; sourceTree = SOURCE_ROOT; };
-		F347B364DE696241804149C3 /* RenderSettingsSnapshot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderSettingsSnapshot.swift; path = Threshold/Parameters/RenderSettingsSnapshot.swift; sourceTree = SOURCE_ROOT; };
-		F56D8DEC1D17F200F108DA6E /* SettingsPersistence.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SettingsPersistence.swift; path = Threshold/Parameters/SettingsPersistence.swift; sourceTree = SOURCE_ROOT; };
-		F64A3D2D64CE4EA72B8A4402 /* SpaceWarpStackSimplifier.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SpaceWarpStackSimplifier.swift; path = Threshold/Parameters/SpaceWarpStackSimplifier.swift; sourceTree = SOURCE_ROOT; };
-		F67BF0D6EA85BB5730FEB2AE /* SpaceWarpStackModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SpaceWarpStackModel.swift; path = Threshold/Parameters/SpaceWarpStackModel.swift; sourceTree = SOURCE_ROOT; };
-		FF343C62545E579F461FE76A /* RendererMath.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RendererMath.swift; path = Threshold/Rendering/Core/RendererMath.swift; sourceTree = SOURCE_ROOT; };
+		DA064DDEBED168C1403CF9FC /* FingerGestureAction.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FingerGestureAction.swift; path = Threshold/Gestures/FingerGestureAction.swift; sourceTree = SOURCE_ROOT; };
+		DCBC0F8B21F2F45F4CA98826 /* ParameterTargetID.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ParameterTargetID.swift; path = Threshold/Parameters/ParameterTargetID.swift; sourceTree = SOURCE_ROOT; };
+		E4E9D983884782BF105022C3 /* MusicReactiveTypes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MusicReactiveTypes.swift; path = Threshold/Audio/MusicReactiveTypes.swift; sourceTree = SOURCE_ROOT; };
+		EAE2D04E4E22D694D52FED6E /* SpaceWarpStackSimplifier.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SpaceWarpStackSimplifier.swift; path = Threshold/Parameters/SpaceWarpStackSimplifier.swift; sourceTree = SOURCE_ROOT; };
+		F0C1CAB13706454AF27E0B79 /* GeometryConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GeometryConfig.swift; path = Threshold/Parameters/Config/GeometryConfig.swift; sourceTree = SOURCE_ROOT; };
+		F327D48736FD2946792084A4 /* CustomShaderCompiler.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CustomShaderCompiler.swift; path = Threshold/Rendering/Core/CustomShaderCompiler.swift; sourceTree = SOURCE_ROOT; };
+		F47E40981B366A3CBAB5F9FF /* ThresholdPreviewRender.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ThresholdPreviewRender.swift; path = ThresholdQuickLook/Shared/ThresholdPreviewRender.swift; sourceTree = SOURCE_ROOT; };
+		F4AD79311697999614A63C65 /* EmbeddedMetalSources.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmbeddedMetalSources.swift; path = Threshold/Rendering/Generated/EmbeddedMetalSources.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -309,25 +317,25 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		3D0ED333C2938B250EF80432 /* Frameworks */ = {
+		21E5C4F6B3A17DCE31946FE0 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				241C436511441702073375D1 /* Cocoa.framework in Frameworks */,
-				B793F6FEE0D60FC768BD3E81 /* Quartz.framework in Frameworks */,
-				F753809C4D795C6736710970 /* Metal.framework in Frameworks */,
-				558F6E299E887E5FAAEF660A /* MetalKit.framework in Frameworks */,
+				3441D8F5C723C1976E26C200 /* Cocoa.framework in Frameworks */,
+				98D2A74D3C5B02E1D02B722A /* QuickLookThumbnailing.framework in Frameworks */,
+				FAE9BE99080EF29739728BAE /* Metal.framework in Frameworks */,
+				2C7EAB8851AB0195773861FC /* MetalKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		7CCAFDA8FAAAD15112EE2976 /* Frameworks */ = {
+		B2BB89F33653C128F082DD31 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				30049C3DCF748335E7A6D06F /* Cocoa.framework in Frameworks */,
-				D5461B087343762BE0177BF5 /* QuickLookThumbnailing.framework in Frameworks */,
-				4691FCCD342A8B2801AB7D1D /* Metal.framework in Frameworks */,
-				470A23A170F3CDB4D021C641 /* MetalKit.framework in Frameworks */,
+				7471383080000D6FE1B3AE4F /* Cocoa.framework in Frameworks */,
+				0E225CDE504396B724A44CB2 /* Quartz.framework in Frameworks */,
+				AC7FCBC7A1EC2408119428A0 /* Metal.framework in Frameworks */,
+				867F36FB50FF2FF0089A6F85 /* MetalKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -362,128 +370,132 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		14CEC26904E71DE311C11548 /* OS X */ = {
+		01E3C8E7FC4DE108651BAC28 /* ThresholdQLThumbnail */ = {
 			isa = PBXGroup;
 			children = (
-				5F21B7E3B05068BAEABC78FD /* Cocoa.framework */,
-			);
-			name = "OS X";
-			sourceTree = "<group>";
-		};
-		35B57CDE85CC8FA3E7EFE55D /* ThresholdQuickLook */ = {
-			isa = PBXGroup;
-			children = (
-				5D941E37258F144323FE0D0C /* ThresholdQLThumbnail */,
-				7920ADD1F636D992609DC913 /* ThresholdQLPreview */,
-			);
-			name = ThresholdQuickLook;
-			sourceTree = "<group>";
-		};
-		5D941E37258F144323FE0D0C /* ThresholdQLThumbnail */ = {
-			isa = PBXGroup;
-			children = (
-				C3E9AA8D46A11C08744F2057 /* FractalPreset.swift */,
-				9E7233B915D4D4C57A35F8D9 /* RenderSettings.swift */,
-				6895E0900398CA08E3EEFB73 /* RenderSettingsSnapshot.swift */,
-				FF343C62545E579F461FE76A /* RendererMath.swift */,
-				3A69589EF0D4F537CE2A81C1 /* RenderPrecompute.swift */,
-				3E358725962DB57F45AC0C54 /* RenderModes.swift */,
-				4394968B9E03BD4789EF8CC3 /* FractalModelType.swift */,
-				E992C59AE9FF9D1E95B0BDBC /* FormulaCatalog.swift */,
-				BE1F8A3721BCBF07CB69D45A /* FractalTypeDescriptor.swift */,
-				4E64792008D48F967DAA5B8A /* LightingTypes.swift */,
-				961D5C02DEF185D9A8E9D2B1 /* GradientColorSystem.swift */,
-				CFDBDC155A1F3FB4E8FC54A4 /* QualityPreset.swift */,
-				B5B288303F45CB944ECEDB41 /* EmbeddedFormula.swift */,
-				53CC8AFA69EB323686B57414 /* AudioReactiveConfig.swift */,
-				6F505FCB5FEB4DA7843B1FA8 /* ColorConfig.swift */,
-				2BD6DB684EA4E59569EC3150 /* DisplayConfig.swift */,
-				2F4D35D63391470A2595C189 /* GeometryConfig.swift */,
-				7149981848B6CAECB507C79C /* GestureConfig.swift */,
-				BE619C113925750C8B07B6F0 /* GestureDefaults.swift */,
-				BAA4DBE740D0FA66E5793944 /* LightingConfig.swift */,
-				D7FC7DB944348F1336346E0E /* PerFractalGestureStore.swift */,
-				E8E333B08504F55A3DB2081C /* QualityConfig.swift */,
-				D725BACEFDDB1FADADAC8468 /* SafetyBubbleConfig.swift */,
-				0D36ED9260AE5AD36543E91D /* FingerGestureAction.swift */,
-				47A7A1E7890D078A625D4B07 /* MenuToggleGestureMode.swift */,
-				C2D8819F0D30C19ECF49F682 /* MusicReactiveTypes.swift */,
-				31CF65166AEDDE7A54B4E1DB /* ParameterTargetID.swift */,
-				F56D8DEC1D17F200F108DA6E /* SettingsPersistence.swift */,
-				84E5E0D3988B1D38D6F9A222 /* SpaceWarpStackModel.swift */,
-				9F8FD05BEFA016879CDA00F8 /* ControlSpec.swift */,
-				F64A3D2D64CE4EA72B8A4402 /* SpaceWarpStackSimplifier.swift */,
-				0B16E3DEC3B1AE305DC7233C /* ModuleRegistry.swift */,
-				62B305D88AAA049EACF439F4 /* Module.swift */,
-				2E0C56DF4D04A84533BE0A14 /* Shaders.metal */,
-				29962EB3706F8F59C3B29D0A /* HeadlessRenderer.swift */,
-				169EE8B2CF505C0EF2237C4A /* RenderKitStubs.swift */,
-				AB64CDDF386BC8508AE9C6F5 /* ThresholdPreviewRender.swift */,
-				438CC8E7121646B280974E3D /* ThumbnailProvider.swift */,
-				718C6BCF560E2851B7BC3D21 /* Info.plist */,
-				5240DFEED13A642A484100FF /* ThresholdQLThumbnail.entitlements */,
+				098E990A937679A90065C78C /* FractalPreset.swift */,
+				D58C40F0C81D77415131982A /* RenderSettings.swift */,
+				1B0B5F2A1EBDA06C1FE47532 /* RenderSettingsSnapshot.swift */,
+				0D7CDBD6615F6E3B19DA79B9 /* RendererMath.swift */,
+				8DB40AD9308C4DF7C5D6EFEF /* RenderPrecompute.swift */,
+				764F1C31F4299223D90BF4AD /* RenderModes.swift */,
+				14F1234BC5E2202FA4E954CB /* FractalModelType.swift */,
+				1B12D3A962C763424A76EFA2 /* FormulaCatalog.swift */,
+				A6EAE28F33DD4803DB243A22 /* FractalTypeDescriptor.swift */,
+				4B616F0EA5437066225F75FC /* LightingTypes.swift */,
+				CCCDBB3ED932379CC49DA403 /* GradientColorSystem.swift */,
+				D38041E4EB81DB291C1BDB33 /* QualityPreset.swift */,
+				2339B53F7DF0A8DF0D298E14 /* EmbeddedFormula.swift */,
+				22B8ECC017055FE3AC69595D /* AudioReactiveConfig.swift */,
+				7344C8492EECDE379CB8C40E /* ColorConfig.swift */,
+				24B46BC576EA61A1DB77D405 /* DisplayConfig.swift */,
+				F0C1CAB13706454AF27E0B79 /* GeometryConfig.swift */,
+				8122F0A44FF02CD067EC973E /* GestureConfig.swift */,
+				C41E5EB86DC4D70D12ADB6E3 /* GestureDefaults.swift */,
+				330FD3A39D64608DAD6767FA /* LightingConfig.swift */,
+				635171EA7CC6BB9548AE93D9 /* PerFractalGestureStore.swift */,
+				6CEF6774A4D84CB401B03A36 /* QualityConfig.swift */,
+				7C5DC5A8A5851DF3A6EFBB2B /* SafetyBubbleConfig.swift */,
+				DA064DDEBED168C1403CF9FC /* FingerGestureAction.swift */,
+				C3A4F0A1B29231AAD7C444CB /* MenuToggleGestureMode.swift */,
+				48B70896A74FF36713122D42 /* MusicReactiveTypes.swift */,
+				DCBC0F8B21F2F45F4CA98826 /* ParameterTargetID.swift */,
+				D63B790BD54920E047EE6FFD /* SettingsPersistence.swift */,
+				9C4B5D83D1E1E4E64CBF5BD7 /* SpaceWarpStackModel.swift */,
+				1F6A566D43A4E998BFA11097 /* ControlSpec.swift */,
+				EAE2D04E4E22D694D52FED6E /* SpaceWarpStackSimplifier.swift */,
+				7B1A9BA403EF111AF231A886 /* ModuleRegistry.swift */,
+				142A1AEC8AC1062BF4FEE067 /* Module.swift */,
+				0BBC59088B8BB5606C8EE918 /* CustomShaderCompiler.swift */,
+				F4AD79311697999614A63C65 /* EmbeddedMetalSources.swift */,
+				9DA88BE058FCC264F16CD64F /* Shaders.metal */,
+				C83DA5BCDFDAE66CBFA043D2 /* HeadlessRenderer.swift */,
+				3D95D4B40B4A73AA14CB6F7D /* RenderKitStubs.swift */,
+				17F88B502717F5319CC832F3 /* ThresholdPreviewRender.swift */,
+				BA51A9AC6AFB57EAC2BDAD53 /* ThumbnailProvider.swift */,
+				0C9CB7B4E0BE63E7EDE299B9 /* Info.plist */,
+				87582488F40D41F77FCD4742 /* ThresholdQLThumbnail.entitlements */,
 			);
 			name = ThresholdQLThumbnail;
 			sourceTree = "<group>";
 		};
-		7920ADD1F636D992609DC913 /* ThresholdQLPreview */ = {
+		16F961684398BF220A20F2B8 /* ThresholdQuickLook */ = {
 			isa = PBXGroup;
 			children = (
-				0CFCDD1EB78E33960F249793 /* FractalPreset.swift */,
-				AEE6DDB44B4956F4A9978855 /* RenderSettings.swift */,
-				F347B364DE696241804149C3 /* RenderSettingsSnapshot.swift */,
-				367CBFF13D9A1D842A8477D8 /* RendererMath.swift */,
-				A2E518522A9CB5053DFFC259 /* RenderPrecompute.swift */,
-				EE8FDF96D8811FFDEBCEC631 /* RenderModes.swift */,
-				0BBA131CC51E3212C2D81B07 /* FractalModelType.swift */,
-				A0CB424531FC6CC45B5ED4DE /* FormulaCatalog.swift */,
-				A6F641A82D9FF2279665D51C /* FractalTypeDescriptor.swift */,
-				E838767C9E841AEAD60BAB91 /* LightingTypes.swift */,
-				AD8650BD2781576BDA866B7E /* GradientColorSystem.swift */,
-				B46FB4BD326157F79C00F4D9 /* QualityPreset.swift */,
-				53B4F6A0923DDAEDC92DD41C /* EmbeddedFormula.swift */,
-				0ACEE4D29D7D887288C0BA13 /* AudioReactiveConfig.swift */,
-				0B0180893D51722684C08FA8 /* ColorConfig.swift */,
-				C50EBD15CCE53FCCE853FB78 /* DisplayConfig.swift */,
-				9902731AD7D3EC8A7230EB4F /* GeometryConfig.swift */,
-				50C5C71CD7613D21CB1F007E /* GestureConfig.swift */,
-				E4E77448A6651F130B63F526 /* GestureDefaults.swift */,
-				7473A7E2A7C52564F6BB3ED7 /* LightingConfig.swift */,
-				6F2AE970D06DA26634D38396 /* PerFractalGestureStore.swift */,
-				8D0BBEAD91DDCC75A4B4990B /* QualityConfig.swift */,
-				DB309D976ADE8A147E2B7888 /* SafetyBubbleConfig.swift */,
-				81D1CA7C5323A27C6DF387CB /* FingerGestureAction.swift */,
-				92C1F1702E0D5BBE0289BAFA /* MenuToggleGestureMode.swift */,
-				E134CCE614E18E967148691C /* MusicReactiveTypes.swift */,
-				13B17F6E932D15A30C93FD80 /* ParameterTargetID.swift */,
-				E50DADB8919836828BAE7993 /* SettingsPersistence.swift */,
-				F67BF0D6EA85BB5730FEB2AE /* SpaceWarpStackModel.swift */,
-				0BF6DE014F2B941F9CBACC27 /* ControlSpec.swift */,
-				1BC0CEA1771EAE51686065FB /* SpaceWarpStackSimplifier.swift */,
-				606BB6792DA823DD97821812 /* ModuleRegistry.swift */,
-				C3984702BB4A0685DD01E73C /* Module.swift */,
-				AAA80C144FAECF092F926F50 /* Shaders.metal */,
-				6B73DEBCA75A2986ECF1A23C /* HeadlessRenderer.swift */,
-				6B0CC76E6DCD4FFFA313852F /* RenderKitStubs.swift */,
-				B69B4E2CCE6827C3C772245F /* ThresholdPreviewRender.swift */,
-				F0908AC63313E91FD1F4070F /* PreviewViewController.swift */,
-				50A8757A47F2EAC500CDCF1F /* InteractiveFractalView.swift */,
-				5DE846742494A0AA7B3D6F6B /* Info.plist */,
-				03D382BBDC578316A97EFB30 /* ThresholdQLPreview.entitlements */,
+				01E3C8E7FC4DE108651BAC28 /* ThresholdQLThumbnail */,
+				D7B6E33E77AFC11845D7F8E1 /* ThresholdQLPreview */,
 			);
-			name = ThresholdQLPreview;
+			name = ThresholdQuickLook;
 			sourceTree = "<group>";
 		};
-		ABC1E13C93A2BB025E77B559 /* Frameworks */ = {
+		62E3213337E064001A89C66A /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				14CEC26904E71DE311C11548 /* OS X */,
-				089099A22D36850131757BA0 /* QuickLookThumbnailing.framework */,
-				1DB7C91C3C950A238C6629C8 /* Metal.framework */,
-				F0889039A72D264A1C717A36 /* MetalKit.framework */,
-				519FE4B93D9608C2B01CFD7C /* Quartz.framework */,
+				C36A8ED7C98C4CA4193AAEA0 /* OS X */,
+				C2C60FE2AC612DBC45321348 /* QuickLookThumbnailing.framework */,
+				2D9C0FCEA23C2A00B886BC75 /* Metal.framework */,
+				37D3A3272F51BBE19A3CDAD7 /* MetalKit.framework */,
+				461F910BC79EBF63B5C29573 /* Quartz.framework */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		C36A8ED7C98C4CA4193AAEA0 /* OS X */ = {
+			isa = PBXGroup;
+			children = (
+				0CD407A50A4FE37188F833F4 /* Cocoa.framework */,
+			);
+			name = "OS X";
+			sourceTree = "<group>";
+		};
+		D7B6E33E77AFC11845D7F8E1 /* ThresholdQLPreview */ = {
+			isa = PBXGroup;
+			children = (
+				2A191F3EEBB124AA64FEFBB4 /* FractalPreset.swift */,
+				A68D26D737236E5E1B909F41 /* RenderSettings.swift */,
+				7FADD50E9E8587D887633581 /* RenderSettingsSnapshot.swift */,
+				CDCBA0A6FCB2D6A8809201B2 /* RendererMath.swift */,
+				D18F55BF6186B4399E00D835 /* RenderPrecompute.swift */,
+				3A2DF7D676A209685F80554F /* RenderModes.swift */,
+				88194FE4E041E69DF04FB756 /* FractalModelType.swift */,
+				0CF8752D5719FA6DDBAC87DA /* FormulaCatalog.swift */,
+				1442C28B5E3323F5A030B812 /* FractalTypeDescriptor.swift */,
+				1A22F1E19BB2AFF9E920AB53 /* LightingTypes.swift */,
+				092CEBD8544DB5373A50D928 /* GradientColorSystem.swift */,
+				6A4AD30512448E51F0666C72 /* QualityPreset.swift */,
+				2E7DFDCAF679AC1C6E7BE8C0 /* EmbeddedFormula.swift */,
+				1053A750DCDDE5FC276B5F3A /* AudioReactiveConfig.swift */,
+				3C719FC5AD7D80C767B9CD28 /* ColorConfig.swift */,
+				3B9E073BC1CCAC67A90792D0 /* DisplayConfig.swift */,
+				59638417CD90B07044530428 /* GeometryConfig.swift */,
+				460F6690F79DF51ADDC42530 /* GestureConfig.swift */,
+				44F4A0D7DCA754169CA2BAA1 /* GestureDefaults.swift */,
+				5EA8E4C86D7D5934C68FF60D /* LightingConfig.swift */,
+				33AAA69AC00E42073C15F838 /* PerFractalGestureStore.swift */,
+				C1084066A997044935034418 /* QualityConfig.swift */,
+				8928C631A44AC2F2A94DC149 /* SafetyBubbleConfig.swift */,
+				65C5A19373398CF9B86F9D0E /* FingerGestureAction.swift */,
+				6CBA01BD20F6FEDB37C5234C /* MenuToggleGestureMode.swift */,
+				E4E9D983884782BF105022C3 /* MusicReactiveTypes.swift */,
+				7D8CAAB04BF5CAD1616D4603 /* ParameterTargetID.swift */,
+				8C1C85942E9794432E22B19D /* SettingsPersistence.swift */,
+				35EB9CD89A47D63854AE2A97 /* SpaceWarpStackModel.swift */,
+				CE6BB0D8C24F31498D5C679E /* ControlSpec.swift */,
+				088A86FAE62DA5A245408A1F /* SpaceWarpStackSimplifier.swift */,
+				BE45FE779975297527CDE85E /* ModuleRegistry.swift */,
+				1405AA7E0099BE085E2CDAFF /* Module.swift */,
+				F327D48736FD2946792084A4 /* CustomShaderCompiler.swift */,
+				34BA4BF452165EB09D2A74AC /* EmbeddedMetalSources.swift */,
+				20EA82FA2BB7C1B38D87B821 /* Shaders.metal */,
+				7F8738FA26BDDEAB22BB1D45 /* HeadlessRenderer.swift */,
+				5244C01BBFB2B31579F4E3EE /* RenderKitStubs.swift */,
+				F47E40981B366A3CBAB5F9FF /* ThresholdPreviewRender.swift */,
+				464899F6A58959A5D1C10C2A /* PreviewViewController.swift */,
+				4249DE37D4A8F3828380A567 /* InteractiveFractalView.swift */,
+				A9607A53D991759363816FE3 /* Info.plist */,
+				50A7E9694F361FCE00BDB336 /* ThresholdQLPreview.entitlements */,
+			);
+			name = ThresholdQLPreview;
 			sourceTree = "<group>";
 		};
 		D7D716882CEAC4B100CEEA51 = {
@@ -492,8 +504,8 @@
 				D7D716932CEAC4B100CEEA51 /* Threshold */,
 				D8A000022D00000000000001 /* ThresholdTests */,
 				D7D716922CEAC4B100CEEA51 /* Products */,
-				35B57CDE85CC8FA3E7EFE55D /* ThresholdQuickLook */,
-				ABC1E13C93A2BB025E77B559 /* Frameworks */,
+				16F961684398BF220A20F2B8 /* ThresholdQuickLook */,
+				62E3213337E064001A89C66A /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -504,8 +516,8 @@
 				D7D716B12CEAC4B200CEEA51 /* Threshold.app */,
 				D8A000012D00000000000001 /* ThresholdTests.xctest */,
 				D7E0000A2E00000000000001 /* Threshold.app */,
-				CC03AB8DDB5D0491F1E7317C /* ThresholdQLThumbnail.appex */,
-				6C3FD0AA3A5337DC2DF56504 /* ThresholdQLPreview.appex */,
+				C86D9C06CB400145D31C4D82 /* ThresholdQLThumbnail.appex */,
+				1A5291D859C108E16FABC3B4 /* ThresholdQLPreview.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -513,13 +525,13 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		825ECA685F44239D09BD5F8C /* ThresholdQLThumbnail */ = {
+		455EA762396683E298589FD0 /* ThresholdQLThumbnail */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = B8D40DAE7BBBFE22C5C4328A /* Build configuration list for PBXNativeTarget "ThresholdQLThumbnail" */;
+			buildConfigurationList = 48DFEB43656600513BA621B1 /* Build configuration list for PBXNativeTarget "ThresholdQLThumbnail" */;
 			buildPhases = (
-				DDB315F6D7B4C9E08468AC88 /* Sources */,
-				7CCAFDA8FAAAD15112EE2976 /* Frameworks */,
-				F2EDBC80E8EB4B5202D81F8F /* Resources */,
+				E22911A6F2439CA1803DA8B7 /* Sources */,
+				21E5C4F6B3A17DCE31946FE0 /* Frameworks */,
+				242CC3FCDBDEEBF22D15F7FC /* Resources */,
 			);
 			buildRules = (
 			);
@@ -527,7 +539,24 @@
 			);
 			name = ThresholdQLThumbnail;
 			productName = ThresholdQLThumbnail;
-			productReference = CC03AB8DDB5D0491F1E7317C /* ThresholdQLThumbnail.appex */;
+			productReference = C86D9C06CB400145D31C4D82 /* ThresholdQLThumbnail.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		D29CF86F86D18C580CA06124 /* ThresholdQLPreview */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F210C1E0170D25310F8233AF /* Build configuration list for PBXNativeTarget "ThresholdQLPreview" */;
+			buildPhases = (
+				BE61D441F757133621DD6F39 /* Sources */,
+				B2BB89F33653C128F082DD31 /* Frameworks */,
+				22AF89C4899425F42F33B025 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ThresholdQLPreview;
+			productName = ThresholdQLPreview;
+			productReference = 1A5291D859C108E16FABC3B4 /* ThresholdQLPreview.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
 		D7D716902CEAC4B100CEEA51 /* Threshold */ = {
@@ -558,13 +587,13 @@
 				D7D716B32CEAC4B200CEEA51 /* Sources */,
 				D7D716B42CEAC4B200CEEA51 /* Frameworks */,
 				D7D716B52CEAC4B200CEEA51 /* Resources */,
-				579DEB7606EAD8C8907B073A /* Embed App Extensions */,
+				484A83441DFAD497CC97D953 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				0D722C8256D55D7F4A7AFF76 /* PBXTargetDependency */,
-				93CC85ED0696457341A2FBEC /* PBXTargetDependency */,
+				2743E03EF8EA619B8AFBF3D4 /* PBXTargetDependency */,
+				B89A2C623C27D1A520B79E53 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				D7D716932CEAC4B100CEEA51 /* Threshold */,
@@ -614,23 +643,6 @@
 			productReference = D8A000012D00000000000001 /* ThresholdTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		F65099CC30F58BCAC908337E /* ThresholdQLPreview */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = B7BE5110DFE361C0E6C77AAC /* Build configuration list for PBXNativeTarget "ThresholdQLPreview" */;
-			buildPhases = (
-				946C5D17288C616FF88BB49A /* Sources */,
-				3D0ED333C2938B250EF80432 /* Frameworks */,
-				0F337B058869A70E00B7DD47 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = ThresholdQLPreview;
-			productName = ThresholdQLPreview;
-			productReference = 6C3FD0AA3A5337DC2DF56504 /* ThresholdQLPreview.appex */;
-			productType = "com.apple.product-type.app-extension";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -674,14 +686,21 @@
 				D7D716B62CEAC4B200CEEA51 /* ThresholdMac */,
 				D7E0000F2E00000000000001 /* ThresholdiOS */,
 				D8A000062D00000000000001 /* ThresholdTests */,
-				825ECA685F44239D09BD5F8C /* ThresholdQLThumbnail */,
-				F65099CC30F58BCAC908337E /* ThresholdQLPreview */,
+				455EA762396683E298589FD0 /* ThresholdQLThumbnail */,
+				D29CF86F86D18C580CA06124 /* ThresholdQLPreview */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		0F337B058869A70E00B7DD47 /* Resources */ = {
+		22AF89C4899425F42F33B025 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		242CC3FCDBDEEBF22D15F7FC /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -703,13 +722,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		D7E0000E2E00000000000001 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		F2EDBC80E8EB4B5202D81F8F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -741,49 +753,51 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		946C5D17288C616FF88BB49A /* Sources */ = {
+		BE61D441F757133621DD6F39 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A2F51BCBCA3B35EDDB290A45 /* FractalPreset.swift in Sources */,
-				B0A01AC2382EC1BBC5E5858F /* RenderSettings.swift in Sources */,
-				D4E8096F7436A650D351E766 /* RenderSettingsSnapshot.swift in Sources */,
-				FFCF47109E22C3DB4030B4FE /* RendererMath.swift in Sources */,
-				CE035EA20B566B9A01649503 /* RenderPrecompute.swift in Sources */,
-				9DEA3083A59EFD9D541F10A9 /* RenderModes.swift in Sources */,
-				2016D3A8A6B27EFDD3A55A42 /* FractalModelType.swift in Sources */,
-				EA43D71AB7B893FCBD6B865F /* FormulaCatalog.swift in Sources */,
-				4D1DC77963AAC5113A635FD5 /* FractalTypeDescriptor.swift in Sources */,
-				D5CAC81A4E69C40DF71A7C9F /* LightingTypes.swift in Sources */,
-				B99342744C5383BA8259A3F7 /* GradientColorSystem.swift in Sources */,
-				ABE828AC819E4A776AD0936B /* QualityPreset.swift in Sources */,
-				B4BF12A9A51C43FF9ABE3EBB /* EmbeddedFormula.swift in Sources */,
-				70B58575C21CFAC3520E2FF1 /* AudioReactiveConfig.swift in Sources */,
-				A47AA97031114625CB82AE9A /* ColorConfig.swift in Sources */,
-				FD5A97607C3B9FCBA977FF61 /* DisplayConfig.swift in Sources */,
-				72F95BECF891421D2E578CC2 /* GeometryConfig.swift in Sources */,
-				23B92B1BAC40BEB33364A4B5 /* GestureConfig.swift in Sources */,
-				F20E301FCF119962855F5058 /* GestureDefaults.swift in Sources */,
-				7F6D5F7387930890FB1094BA /* LightingConfig.swift in Sources */,
-				A8F5A050402E509FE4228A10 /* PerFractalGestureStore.swift in Sources */,
-				391CE6B65A4E900267C29448 /* QualityConfig.swift in Sources */,
-				1EA1C69E10F220CC063EC5FA /* SafetyBubbleConfig.swift in Sources */,
-				3A8521819FBAF9F42CEBA132 /* FingerGestureAction.swift in Sources */,
-				CA6611F8C0D9AA7D365A71F1 /* MenuToggleGestureMode.swift in Sources */,
-				9083F934CC605F6A915856C2 /* MusicReactiveTypes.swift in Sources */,
-				DBC95C4B11285CF0F786E140 /* ParameterTargetID.swift in Sources */,
-				E3BACA0C04474F9FD8E9A806 /* SettingsPersistence.swift in Sources */,
-				0107ED06B04E6946957F4079 /* SpaceWarpStackModel.swift in Sources */,
-				9C2B1F5126BC76FBCE41A656 /* ControlSpec.swift in Sources */,
-				50699672785D2E198FCC92AF /* SpaceWarpStackSimplifier.swift in Sources */,
-				DE1DFEE42DAD00CAFC9729A4 /* ModuleRegistry.swift in Sources */,
-				26D9A202181CCACAE36673D8 /* Module.swift in Sources */,
-				93FC96BE00BB5A23DF08F1FE /* Shaders.metal in Sources */,
-				8271DB921834CC9106843BD0 /* HeadlessRenderer.swift in Sources */,
-				78EA1E15057D5D35FDB4C200 /* RenderKitStubs.swift in Sources */,
-				73315AA521A38C8EAF487217 /* ThresholdPreviewRender.swift in Sources */,
-				0769BDA05757E981399A67FB /* PreviewViewController.swift in Sources */,
-				014C27CAA0FA9FDF43FFD6C1 /* InteractiveFractalView.swift in Sources */,
+				325917EED7E9737D2F6EC8AA /* FractalPreset.swift in Sources */,
+				A4EB52EB8E873FA78FD21534 /* RenderSettings.swift in Sources */,
+				9CD00840FC72C012FFE4A18C /* RenderSettingsSnapshot.swift in Sources */,
+				9A8D93C25DDA331A4EEB4DF8 /* RendererMath.swift in Sources */,
+				64CAF74B2828F955D432E472 /* RenderPrecompute.swift in Sources */,
+				CAFD8E5F1B60B660BD04E6BD /* RenderModes.swift in Sources */,
+				B8F172360F77EB0440328D3D /* FractalModelType.swift in Sources */,
+				0CE73EC158149FCA62574D6E /* FormulaCatalog.swift in Sources */,
+				CD6D459B47F013B2FFFC32BC /* FractalTypeDescriptor.swift in Sources */,
+				F0ACD38E37965F3075BBC3D1 /* LightingTypes.swift in Sources */,
+				365D56C6DD7A2E03010F1BE5 /* GradientColorSystem.swift in Sources */,
+				40F7E026C31B96391994D205 /* QualityPreset.swift in Sources */,
+				1D3BE951AD6C5F103AD4DC15 /* EmbeddedFormula.swift in Sources */,
+				14803CAED81F27443EA438EF /* AudioReactiveConfig.swift in Sources */,
+				9316FA75D6711FC1529AB16F /* ColorConfig.swift in Sources */,
+				5767D5DD1BA55EDFEBD4B371 /* DisplayConfig.swift in Sources */,
+				9A11C739C2E9BE77F507D346 /* GeometryConfig.swift in Sources */,
+				00F658BBA5265DB38A09012E /* GestureConfig.swift in Sources */,
+				39ED0017E6F2DF0564B6C8A6 /* GestureDefaults.swift in Sources */,
+				13347774F584E48BBC09FD7B /* LightingConfig.swift in Sources */,
+				7D190DBBF5457FD628713C2A /* PerFractalGestureStore.swift in Sources */,
+				10615399B645EA9CE2AC858C /* QualityConfig.swift in Sources */,
+				D56797594E80873A9ED04DAC /* SafetyBubbleConfig.swift in Sources */,
+				9380B3B97D58CF9B47129B4C /* FingerGestureAction.swift in Sources */,
+				1BFCB25464279471D93F1A2F /* MenuToggleGestureMode.swift in Sources */,
+				0F8547D690214FCFDAED1F56 /* MusicReactiveTypes.swift in Sources */,
+				E6614B7A7F2160C3D7C0AEFE /* ParameterTargetID.swift in Sources */,
+				E3E80617CC6E9A4114D1E0E3 /* SettingsPersistence.swift in Sources */,
+				3D64F4E68ECB6E1182B79064 /* SpaceWarpStackModel.swift in Sources */,
+				A4ADEBD0CC81DD91C07D27D5 /* ControlSpec.swift in Sources */,
+				FCDB58C7C1A84EB9775EC10A /* SpaceWarpStackSimplifier.swift in Sources */,
+				3CBFD15AD0AA1A7FE78E5723 /* ModuleRegistry.swift in Sources */,
+				6188AB7347DC2DA1B018864C /* Module.swift in Sources */,
+				2F52F62E3336970A7D92BDD9 /* CustomShaderCompiler.swift in Sources */,
+				9C32C3D42C90797FD16CB06A /* EmbeddedMetalSources.swift in Sources */,
+				0FF01709623DECB8F0C39763 /* Shaders.metal in Sources */,
+				D56F197B222D90EEAA162F20 /* HeadlessRenderer.swift in Sources */,
+				D36FA42814E8500C056E752E /* RenderKitStubs.swift in Sources */,
+				DFAC9921D8F278098A6BE549 /* ThresholdPreviewRender.swift in Sources */,
+				878043659D1137664E651D11 /* PreviewViewController.swift in Sources */,
+				B71A7E876A3EAF736A141FCA /* InteractiveFractalView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -815,65 +829,67 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		DDB315F6D7B4C9E08468AC88 /* Sources */ = {
+		E22911A6F2439CA1803DA8B7 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				03845B5B8E095AB416C5D138 /* FractalPreset.swift in Sources */,
-				67FC5EC0DEF7013F4B347A9C /* RenderSettings.swift in Sources */,
-				EC44C6BCCAFF3AEE92F9B06A /* RenderSettingsSnapshot.swift in Sources */,
-				88E213048AC805F021E6504A /* RendererMath.swift in Sources */,
-				3933AA70C545920341E80BE0 /* RenderPrecompute.swift in Sources */,
-				FB3C037D30B8C6E3B9ED7CB9 /* RenderModes.swift in Sources */,
-				CE3E4E38861B8F001109517F /* FractalModelType.swift in Sources */,
-				220ADBD9D90C1991FE262F7E /* FormulaCatalog.swift in Sources */,
-				640FD3C748EF6A466C8AA045 /* FractalTypeDescriptor.swift in Sources */,
-				6F72CE05AA2EB6258B75C1D3 /* LightingTypes.swift in Sources */,
-				0A4D90DB78BB364DBEC28E03 /* GradientColorSystem.swift in Sources */,
-				CED08F02DA5D262A21A2CB74 /* QualityPreset.swift in Sources */,
-				28452A688753F7995411DBB8 /* EmbeddedFormula.swift in Sources */,
-				00B10DA8AE1826C3E110D6E0 /* AudioReactiveConfig.swift in Sources */,
-				1BC383711F4EDA47FCD4CDD8 /* ColorConfig.swift in Sources */,
-				02CB3F85AE962042862C0589 /* DisplayConfig.swift in Sources */,
-				3AF62E21ACDB1446960F183D /* GeometryConfig.swift in Sources */,
-				5B3B352013D87387D679F2A5 /* GestureConfig.swift in Sources */,
-				392A5B7980FE0A02507AE4A3 /* GestureDefaults.swift in Sources */,
-				732A64F799309512115C0F47 /* LightingConfig.swift in Sources */,
-				13C449293D457807DF56544A /* PerFractalGestureStore.swift in Sources */,
-				FA21FA33855A00AE827A2115 /* QualityConfig.swift in Sources */,
-				4CA40CC0E2753328E09DBC24 /* SafetyBubbleConfig.swift in Sources */,
-				6F7D9B4E5643452B4B753D50 /* FingerGestureAction.swift in Sources */,
-				A8310655088746CBCD177DDE /* MenuToggleGestureMode.swift in Sources */,
-				4FA9507F861128845AC70A3D /* MusicReactiveTypes.swift in Sources */,
-				5F00EFB7F98C95FAA4A0AAEC /* ParameterTargetID.swift in Sources */,
-				80194CC2A58725CC5C2A548F /* SettingsPersistence.swift in Sources */,
-				4479EC2437DCE0C9BA404628 /* SpaceWarpStackModel.swift in Sources */,
-				4879BB986CC9A3D611EC93BF /* ControlSpec.swift in Sources */,
-				CF11C754939172029FE24852 /* SpaceWarpStackSimplifier.swift in Sources */,
-				78A4FFFC4F0677F19228BAA6 /* ModuleRegistry.swift in Sources */,
-				EE4D0CDC7C4C310D89806FD6 /* Module.swift in Sources */,
-				2CFA073542FF9846716A0A21 /* Shaders.metal in Sources */,
-				3A40785F9DEC7BA7AEF5ABB4 /* HeadlessRenderer.swift in Sources */,
-				E5706930EB10126D0E0BA95D /* RenderKitStubs.swift in Sources */,
-				B8C41FEB175A9A11068FC3B7 /* ThresholdPreviewRender.swift in Sources */,
-				E86812E69B749700B6E10BF2 /* ThumbnailProvider.swift in Sources */,
+				D82A5146E11D4D4C0133CD95 /* FractalPreset.swift in Sources */,
+				3324964C905C179B95F9A2F2 /* RenderSettings.swift in Sources */,
+				19875B8F4E3B92349696DCBC /* RenderSettingsSnapshot.swift in Sources */,
+				43DEA6CB9E376548333DEABE /* RendererMath.swift in Sources */,
+				304679E6B344CBBEBF13F373 /* RenderPrecompute.swift in Sources */,
+				ED36A745765CFF6690F54496 /* RenderModes.swift in Sources */,
+				3F8FE344D7DCDCBC70C126EB /* FractalModelType.swift in Sources */,
+				79DD7BBDA2099CC120B243AE /* FormulaCatalog.swift in Sources */,
+				E537803E0131B3BDEDFE0195 /* FractalTypeDescriptor.swift in Sources */,
+				7E5CD6A23E534D8D3D410E90 /* LightingTypes.swift in Sources */,
+				EB2D9C9BBA487FB2C885555A /* GradientColorSystem.swift in Sources */,
+				F7DADA93ABE18D4E82ED74C8 /* QualityPreset.swift in Sources */,
+				085500D0AB56AA7F0991F6F4 /* EmbeddedFormula.swift in Sources */,
+				A2DA160BF98F66B98DFD54A6 /* AudioReactiveConfig.swift in Sources */,
+				C6923FC2186B6AA49936070F /* ColorConfig.swift in Sources */,
+				B3DEF1FEBF060F80C4A5424E /* DisplayConfig.swift in Sources */,
+				8A2DF225D8ED5F2A17B88E14 /* GeometryConfig.swift in Sources */,
+				163AFB266770B9B2BC82C950 /* GestureConfig.swift in Sources */,
+				441A4C56EB1726A442FB2C0A /* GestureDefaults.swift in Sources */,
+				0AEFFF2E4770FE0642DE2B69 /* LightingConfig.swift in Sources */,
+				2D8B97554E5613FEDD6B862A /* PerFractalGestureStore.swift in Sources */,
+				515CFF16710FD7C630034E52 /* QualityConfig.swift in Sources */,
+				819FB6DC006BF66174FC5573 /* SafetyBubbleConfig.swift in Sources */,
+				1EB181B7FC412501B83DD212 /* FingerGestureAction.swift in Sources */,
+				59DF3AA218082725289628F2 /* MenuToggleGestureMode.swift in Sources */,
+				D323820D26077976A87603F5 /* MusicReactiveTypes.swift in Sources */,
+				8B2DE175A56C8DB3265BF214 /* ParameterTargetID.swift in Sources */,
+				67B7B56C7AEC17CEC344928D /* SettingsPersistence.swift in Sources */,
+				0A694F27C614C6A6CDD4D1F6 /* SpaceWarpStackModel.swift in Sources */,
+				E9E6A22A1E5BC6801166265D /* ControlSpec.swift in Sources */,
+				0433720B0291CA83F3B2994B /* SpaceWarpStackSimplifier.swift in Sources */,
+				611285ED59BD1AB1C83EC0E1 /* ModuleRegistry.swift in Sources */,
+				804B62CDA16A6C1ACDC137A3 /* Module.swift in Sources */,
+				3EAF4CBDCA08CA27CB6612FF /* CustomShaderCompiler.swift in Sources */,
+				E4746E81E82EF1BE0E904B56 /* EmbeddedMetalSources.swift in Sources */,
+				7DF7CA8491EF7F8A3F3A0491 /* Shaders.metal in Sources */,
+				E773114AD067C3F06D14399E /* HeadlessRenderer.swift in Sources */,
+				7630007D28CB6330DDB52661 /* RenderKitStubs.swift in Sources */,
+				F641960371E6EF18BB1A131C /* ThresholdPreviewRender.swift in Sources */,
+				034BDEB1DB58567C7CC17A72 /* ThumbnailProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		0D722C8256D55D7F4A7AFF76 /* PBXTargetDependency */ = {
+		2743E03EF8EA619B8AFBF3D4 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = ThresholdQLThumbnail;
-			target = 825ECA685F44239D09BD5F8C /* ThresholdQLThumbnail */;
-			targetProxy = 3C5DF535694BDF6C1F44D003 /* PBXContainerItemProxy */;
+			target = 455EA762396683E298589FD0 /* ThresholdQLThumbnail */;
+			targetProxy = E49BA58C75B84E006D03A5B9 /* PBXContainerItemProxy */;
 		};
-		93CC85ED0696457341A2FBEC /* PBXTargetDependency */ = {
+		B89A2C623C27D1A520B79E53 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = ThresholdQLPreview;
-			target = F65099CC30F58BCAC908337E /* ThresholdQLPreview */;
-			targetProxy = 77E5406506782B43A54BE160 /* PBXContainerItemProxy */;
+			target = D29CF86F86D18C580CA06124 /* ThresholdQLPreview */;
+			targetProxy = 5E6817C2ED7BCB7B78521290 /* PBXContainerItemProxy */;
 		};
 		D8A000082D00000000000001 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -883,7 +899,7 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		446FC437CBAF2F7FD9271AD6 /* Release */ = {
+		681B9792655A8E6565832B92 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ThresholdQuickLook/Preview/ThresholdQLPreview.entitlements;
@@ -907,7 +923,7 @@
 			};
 			name = Release;
 		};
-		52C0187A724AFF7BBDFAC896 /* Debug */ = {
+		834C06353B19956D63F2DB11 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ThresholdQuickLook/Thumbnail/ThresholdQLThumbnail.entitlements;
@@ -929,9 +945,9 @@
 				SWIFT_OBJC_BRIDGING_HEADER = Threshold/Rendering/ShaderTypes.h;
 				SWIFT_VERSION = 6.0;
 			};
-			name = Debug;
+			name = Release;
 		};
-		B90E6C4924F4194C0BFE5BBA /* Debug */ = {
+		C5251AC46FA015B65B51556A /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ThresholdQuickLook/Preview/ThresholdQLPreview.entitlements;
@@ -947,6 +963,30 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_HEADER_SEARCH_PATHS = "$(inherited)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold.QLPreview;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = Threshold/Rendering/ShaderTypes.h;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		CD9E3E1B8FBBFA576FE998DE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ThresholdQuickLook/Thumbnail/ThresholdQLThumbnail.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = PMHYFM3SU4;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ThresholdQuickLook/Thumbnail/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MTL_HEADER_SEARCH_PATHS = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold.QLThumbnail;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
@@ -1379,47 +1419,14 @@
 			};
 			name = Release;
 		};
-		E6951DC12BE20C12F88C0545 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = ThresholdQuickLook/Thumbnail/ThresholdQLThumbnail.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = PMHYFM3SU4;
-				ENABLE_HARDENED_RUNTIME = YES;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = ThresholdQuickLook/Thumbnail/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../../../../Frameworks",
-				);
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MTL_HEADER_SEARCH_PATHS = "$(inherited)";
-				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold.QLThumbnail;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				SWIFT_OBJC_BRIDGING_HEADER = Threshold/Rendering/ShaderTypes.h;
-				SWIFT_VERSION = 6.0;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		B7BE5110DFE361C0E6C77AAC /* Build configuration list for PBXNativeTarget "ThresholdQLPreview" */ = {
+		48DFEB43656600513BA621B1 /* Build configuration list for PBXNativeTarget "ThresholdQLThumbnail" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				446FC437CBAF2F7FD9271AD6 /* Release */,
-				B90E6C4924F4194C0BFE5BBA /* Debug */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		B8D40DAE7BBBFE22C5C4328A /* Build configuration list for PBXNativeTarget "ThresholdQLThumbnail" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				E6951DC12BE20C12F88C0545 /* Release */,
-				52C0187A724AFF7BBDFAC896 /* Debug */,
+				834C06353B19956D63F2DB11 /* Release */,
+				CD9E3E1B8FBBFA576FE998DE /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1465,6 +1472,15 @@
 			buildConfigurations = (
 				D8A000092D00000000000001 /* Debug */,
 				D8A0000A2D00000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F210C1E0170D25310F8233AF /* Build configuration list for PBXNativeTarget "ThresholdQLPreview" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				681B9792655A8E6565832B92 /* Release */,
+				C5251AC46FA015B65B51556A /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
