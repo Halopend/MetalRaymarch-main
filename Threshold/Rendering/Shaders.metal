@@ -228,6 +228,12 @@ constant float kMinQualityForShadows = 0.25f;   // Skip shadows below this quali
 // Kept cool to avoid muddy yellow shifts when post glow is enabled.
 constant half3 kGlowColor = half3(0.07h, 0.11h, 0.20h);
 
+// Inner ray-glow accumulation tuning (SceneWithCache / SceneWithCacheFromStart):
+// near-miss DE values below this floor contribute glow; the accumulator is
+// scaled down by kGlowAccumScale before being stored in SceneResult.
+constant float kGlowNearMissFloor = 0.04f;
+constant float kGlowAccumScale = 0.25f;
+
 // =============================================================================
 // SHARED HELPER FUNCTIONS - Eliminate duplicate code across shaders
 // =============================================================================
@@ -261,15 +267,53 @@ FORCE_INLINE half3 applyGlow(half3 col, half glow) {
     return col + glow * glow * kGlowColor;
 }
 
+// Per-step inner ray-glow accumulation, shared by SceneWithCache and
+// SceneWithCacheFromStart. Glow builds up as the march grazes near-misses
+// (small DE values just above the hit threshold) — see kGlowNearMissFloor.
+FORCE_INLINE float accumulateGlow(float glow, float h, float glowIntensity) {
+    return fma(saturate(kGlowNearMissFloor - h), glowIntensity, glow);
+}
+
+// Finalizes the glow accumulator into the SceneResult's stored (normalized) form.
+FORCE_INLINE float finalizeGlow(float glow) {
+    return saturate(glow * kGlowAccumScale);
+}
+
 // Clamp color before post-processing
 FORCE_INLINE half3 clampColor(half3 col) {
     return clamp(col, half3(0.0h), half3(2.0h));
+}
+
+// Narkowicz ACES filmic tonemap fit. Compresses HDR-range values (bloom/glow
+// can exceed 1.0 before this point) into displayable range with a filmic
+// shoulder, applied BEFORE the user-tunable gamma/display-curve step in
+// PostEffectsWithScheme — gamma remains a separate artistic control, this is
+// purely the HDR-compression stage.
+FORCE_INLINE half3 acesFilm(half3 x) {
+    const half a = 2.51h, b = 0.03h, c = 2.43h, d = 0.59h, e = 0.14h;
+    return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
 }
 
 FORCE_INLINE half quantizeCelLight(half value, ColorSchemeParams scheme) {
     if (scheme.cellShadingEnabled == 0) { return value; }
     half levels = half(max(scheme.cellShadingLevels, 2.0f));
     return floor(saturate(value) * levels) / max(levels - 1.0h, 1.0h);
+}
+
+// Standard HSV (h in turns [0,1), s,v in [0,1]) -> RGB conversion.
+// Used by applyNeonColorScheme (and any other procedural-hue coloring) instead
+// of hand-rolled branch chains.
+FORCE_INLINE half3 hsv2rgb(half h, half s, half v) {
+    half hue = fract(h) * 6.0h;
+    half x = 1.0h - abs(fmod(hue, 2.0h) - 1.0h);
+    half3 baseColor;
+    if (hue < 1.0h)      baseColor = half3(1.0h, x, 0.0h);
+    else if (hue < 2.0h) baseColor = half3(x, 1.0h, 0.0h);
+    else if (hue < 3.0h) baseColor = half3(0.0h, 1.0h, x);
+    else if (hue < 4.0h) baseColor = half3(0.0h, x, 1.0h);
+    else if (hue < 5.0h) baseColor = half3(x, 0.0h, 1.0h);
+    else                  baseColor = half3(1.0h, 0.0h, x);
+    return mix(half3(1.0h), baseColor, s) * v;
 }
 
 FORCE_INLINE float3 sphericalInvertPoint(float3 point, float radius) {
@@ -1299,15 +1343,7 @@ FORCE_INLINE half3 applyNeonColorScheme(half trapMin, half trapIter, half trapAn
     half colorPhase = fract(it * half(scheme.hueFrequency) * 0.5h + half(scheme.hueOffset));
     
     // Convert hue phase to RGB via HSV (saturation=1, value=1)
-    half hue = colorPhase * 6.0h;
-    half x = 1.0h - abs(fmod(hue, 2.0h) - 1.0h);
-    half3 baseColor;
-    if (hue < 1.0h)      baseColor = half3(1.0h, x, 0.0h);
-    else if (hue < 2.0h) baseColor = half3(x, 1.0h, 0.0h);
-    else if (hue < 3.0h) baseColor = half3(0.0h, 1.0h, x);
-    else if (hue < 4.0h) baseColor = half3(0.0h, x, 1.0h);
-    else if (hue < 5.0h) baseColor = half3(x, 0.0h, 1.0h);
-    else                  baseColor = half3(1.0h, 0.0h, x);
+    half3 baseColor = hsv2rgb(colorPhase, 1.0h, 1.0h);
     
     // Optional soft banding - branchless multiply
     half bandActive = step(0.1h, half(scheme.bandFrequency));
@@ -1829,6 +1865,12 @@ FORCE_INLINE float relaxedOmegaCap(int type) {
     case FractalTypeMandelbulbJulia:
     case FractalTypeQuaternionJulia:
         return 1.1f;
+    case FractalTypeBulatovLimitSet:
+        // Reflection-group LIMIT SET: the `factor/scale` estimator OVERESTIMATES
+        // far from the (measure-zero) set, so even plain sphere tracing must not
+        // over-step or rays tunnel clean through the thin filigree (→ blank). The
+        // conservative step lives in the low default DistanceFactor; pin omega to 1.
+        return 1.0f;
     default: // Kleinian family, custom formulas, future types
         return 1.2f;
     }
@@ -1991,18 +2033,18 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
             OrbitCache hitCache;
             MapWithOrbitCacheUnified(p, params, foldingLimit, effIter, type, fp, colorIterations, hitCache);
             result.cache = hitCache;
-            result.distGlow = float2(t, saturate(glow * 0.25));
+            result.distGlow = float2(t, finalizeGlow(glow));
             result.steps = j;
             return result;
         }
 
         if (UNLIKELY(t > maxRayDistance)) break;
 
-        glow = fma(saturate(0.04 - h), glowIntensity, glow);
+        glow = accumulateGlow(glow, h, glowIntensity);
         t += stepLen;
     }
 
-    result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
+    result.distGlow = float2(kRayMissThreshold + 100.0, finalizeGlow(glow));
     return result;
 }
 
@@ -2069,18 +2111,18 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
             OrbitCache hitCache;
             MapWithOrbitCacheUnified(p, params, foldingLimit, effIter, type, fp, colorIterations, hitCache);
             result.cache = hitCache;
-            result.distGlow = float2(t, saturate(glow * 0.25));
+            result.distGlow = float2(t, finalizeGlow(glow));
             result.steps = j;
             return result;
         }
 
         if (UNLIKELY(t > endT)) break;
 
-        glow = fma(saturate(0.04 - h), glowIntensity, glow);
+        glow = accumulateGlow(glow, h, glowIntensity);
         t += stepLen;
     }
-    
-    result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
+
+    result.distGlow = float2(kRayMissThreshold + 100.0, finalizeGlow(glow));
     return result;
 }
 
@@ -2216,10 +2258,20 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, Preco
         rgb = mix(rgb, flashColor, edgeGlow * 0.8h);
     }
     
-    // Clamp before gamma to avoid NaN from negative values
+    // Clamp before gamma to avoid NaN from negative values (matches the
+    // original pre-tonemap behavior so tonemapStrength == 0 is unchanged).
     rgb = saturate(rgb);
-    
-    // Gamma from scheme
+
+    // Filmic tonemap (ACES fit), optional and blended by colorScheme.tonemapStrength
+    // (default 0 = off, byte-identical to the prior plain-clamp behavior).
+    // Compresses HDR-range glow/bloom values with a filmic shoulder instead of
+    // a hard clip when dialed in.
+    if (scheme.tonemapStrength > 0.001f) {
+        rgb = mix(rgb, acesFilm(rgb), half(scheme.tonemapStrength));
+    }
+
+    // Gamma from scheme (user-tunable artistic display curve, applied after
+    // tonemap so it does not fight the filmic shoulder).
     return powr(max(rgb, half3(kPowEpsilonHalf)), half3(scheme.gamma));
 }
 
@@ -2336,6 +2388,81 @@ FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimi
     
     // Clamp to minimum 0.2 for ambient fill - prevents harsh black shadows
     return max(saturate(res), 0.2f);
+}
+
+// === Cheap SDF ambient occlusion (iq-style 5-tap march along the normal) ===
+// Replaces the old flat "0.15 + hemisphere*0.1" fake-ambient magnitude with a
+// real occlusion estimate from the geometry-only DE (same cheap function
+// Shadow() uses — no fold/trap/Jacobian tracking). Gated by FC_QUALITY_MODE
+// the same way Shadow() gates itself, so low-quality tiers skip the march
+// entirely and fall back to a flat (unoccluded) value.
+FORCE_INLINE float computeAO(float3 hitPos, float3 nor, FractalParams params, float foldingLimit,
+                              int iterations, int fractalType, FormulaParams fp)
+{
+    const int qualityMode = is_function_constant_defined(FC_QUALITY_MODE) ? FC_QUALITY_MODE : 0;
+    if (qualityMode >= 2) return 1.0f;
+
+    float ao = 1.0f;
+    float sca = 1.0f;
+    for (int i = 0; i < 5; i++) {
+        float h = 0.01f + 0.02f * float(i * i);
+        float3 p = hitPos + nor * h;
+        float d = MapDistOnlyUnified(p, params, foldingLimit, iterations, fractalType, fp);
+        ao -= (h - d) * sca;
+        sca *= 0.7f;
+    }
+    return clamp(1.0f - ao, 0.0f, 1.0f);
+}
+
+// === Shared lighting-assembly helper ===
+// Factors out the diffuse+specular+ambient math that was duplicated nearly
+// verbatim between the visionOS adaptiveHierarchical8x8 compute kernel and the
+// Mac fragmentMain fragment shader. Both call sites already share the heavier
+// helpers (computeSpotlight/Shadow/ColourWithScheme/applyFog/applyGlow/
+// PostEffectsWithScheme) — this collects only the per-pixel dot-product
+// assembly: diffuse spot+sun terms, real-AO-driven ambient, and the
+// Schlick-fresnel specular contribution. Shadow computation (including
+// visionOS's tile-shared-shadow optimization) stays at each call site; this
+// function only consumes the resulting shadow scalars.
+FORCE_INLINE half3 ShadeSurface(float3 hitPos, float3 nor, float3 viewDir,
+                                 float3 spot, float atten, float3 sunDir,
+                                 float sunDiffuseScale, float lightIntensity, float specPower,
+                                 half shaSpot, half shaSun, half3 baseColor,
+                                 ColorSchemeParams colorScheme,
+                                 FractalParams params, float foldingLimit,
+                                 int iterations, int fractalType, FormulaParams fp)
+{
+    float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
+    half bri = quantizeCelLight(half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity), colorScheme);
+    half briSun = quantizeCelLight(half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale), colorScheme);
+
+    // Real ambient occlusion (optional, blended in by colorScheme.aoStrength).
+    // At aoStrength == 0 this is byte-identical to the old flat hemisphere
+    // ambient (the default, so existing scenes/presets render unchanged).
+    // Hemisphere sky/ground tint is kept as a directional COLOR modulator;
+    // the occlusion MAGNITUDE comes from the AO march, blended in to taste.
+    half hemisphereAO = half(nor.y * 0.5 + 0.5); // sky/ground ambient tint
+    half flatAmbient = 0.15h + hemisphereAO * 0.1h;
+    half ambient = flatAmbient;
+    if (colorScheme.aoStrength > 0.001f) {
+        float aoTerm = computeAO(hitPos, nor, params, foldingLimit, iterations, fractalType, fp);
+        ambient = mix(flatAmbient, flatAmbient * half(aoTerm), half(colorScheme.aoStrength));
+    }
+
+    half3 col = (baseColor * bri * shaSpot) + (baseColor * briSun * shaSun) + (baseColor * ambient);
+
+    if (colorScheme.cellShadingEnabled == 0) {
+        float NoV = saturate(dot(nor, viewDir));
+        float fresnel = fma(1.0f - 0.04f, powr(max(1.0f - NoV, 0.0f), 5.0f), 0.04f);
+        float3 Hspot = normalize(spot + viewDir);
+        float3 Hsun = normalize(sunDir + viewDir);
+        float specSpot = powr(max(dot(nor, Hspot), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
+        float specSun = powr(max(dot(nor, Hsun), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
+        col += half3(specSpot) * shaSpot * bri;
+        col += half3(specSun) * shaSun * briSun;
+    }
+
+    return col;
 }
 
 // === Temporal-reprojection shared helpers (extracted from adaptiveHierarchical8x8) ===
@@ -2962,31 +3089,14 @@ kernel void adaptiveHierarchical8x8(
             shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
         }
         
-        float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
-        half bri = quantizeCelLight(half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity), uniforms.colorScheme);
-        half briSun = quantizeCelLight(half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale), uniforms.colorScheme);
-        
         col = ColourWithScheme(p, 1.0, uniforms.minDistance, uniforms.fractalScale,
                     uniforms.foldingLimit, uniforms.sphereRadius, int(uniforms.colorIterations), uniforms.colorScheme, hitCache);
-        
-        // Add ambient term (0.15) to prevent pure black in shadows + hemisphere ambient
-        half hemisphereAO = half(nor.y * 0.5 + 0.5); // Simple sky/ground ambient
-        half ambient = 0.15h + hemisphereAO * 0.1h;
-        col = (col * bri * shaSpot) + (col * briSun * shaSun) + (col * ambient);
-        
-        // Specular
+
         float3 V = -marchDir;
-        float NoV = saturate(dot(nor, V));
-        float fresnel = fma(1.0f - 0.04f, powr(max(1.0f - NoV, 0.0f), 5.0f), 0.04f);
-        float specPower = uniforms.precomputedLighting.specPower;
-        float3 Hspot = normalize(spot + V);
-        float3 Hsun = normalize(sunDir + V);
-        float specSpot = powr(max(dot(nor, Hspot), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
-        float specSun = powr(max(dot(nor, Hsun), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
-        if (uniforms.colorScheme.cellShadingEnabled == 0) {
-            col += half3(specSpot) * shaSpot * bri;
-            col += half3(specSun) * shaSun * briSun;
-        }
+        col = ShadeSurface(p, nor, V, spot, atten, sunDir, sunDiffuseScale, lightIntensity,
+                            uniforms.precomputedLighting.specPower, shaSpot, shaSun, col,
+                            uniforms.colorScheme, fractalParams, uniforms.foldingLimit,
+                            lodIterations, fractalType, uniforms.formulaParams);
     }
     
     // Apply fog, glow, and clamp using helper functions
@@ -3332,31 +3442,13 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
             half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
 
-            float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
-            half bri = quantizeCelLight(half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity), uniforms.colorScheme);
-            half briSun = quantizeCelLight(half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale), uniforms.colorScheme);
-
             col = ColourWithScheme(p, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme, hitCache);
-            
-            // Add ambient term to prevent harsh shadows
-            half hemisphereAO = half(nor.y * 0.5 + 0.5);
-            half ambient = 0.15h + hemisphereAO * 0.1h;
-            col = (col * bri * shaSpot) + (col * briSun * shaSun) + (col * ambient);
 
-            if (uniforms.colorScheme.cellShadingEnabled == 0) {
-                float3 V = -marchDir;
-                float NoV = saturate(dot(nor, V));
-                float fresnel = fma(1.0f - 0.04f, powr(max(1.0f - NoV, 0.0f), 5.0f), 0.04f);
-                float specPower = uniforms.precomputedLighting.specPower;
-                float3 Hspot = normalize(spot + V);
-                float3 Hsun = normalize(sunDir + V);
-                float specSpot = powr(max(dot(nor, Hspot), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
-                float specSun = powr(max(dot(nor, Hsun), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
-                col += half3(specSpot) * shaSpot * bri;
-                col += half3(specSun) * shaSun * briSun;
-            }
-            
-
+            float3 V = -marchDir;
+            col = ShadeSurface(p, nor, V, spot, atten, sunDir, sunDiffuseScale, lightIntensity,
+                                uniforms.precomputedLighting.specPower, shaSpot, shaSun, col,
+                                uniforms.colorScheme, fractalParams, uniforms.foldingLimit,
+                                lodIterations, fractalType, uniforms.formulaParams);
         }
         // Depth already written at start of this block via clipPos
     }

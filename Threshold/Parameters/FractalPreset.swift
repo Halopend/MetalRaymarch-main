@@ -133,6 +133,8 @@ struct FractalPreset: Codable, Identifiable {
     var platformRadius: Float?            // DisplayConfig — glass-floor size
     var cellShadingEnabled: Bool?         // ColorConfig — toon shading on/off
     var cellShadingLevels: Float?         // ColorConfig — toon banding levels
+    var aoStrength: Float?                // ColorConfig — ambient-occlusion blend (0 = old flat ambient)
+    var tonemapStrength: Float?           // ColorConfig — filmic (ACES) tonemap blend (0 = old plain clamp)
     var lightVariationRate: Float?        // LightingConfig — master time-variation speed
     var beatFlashEffect: BeatFlashEffect?       // LightingConfig — beat-driven flash
     var polarRotationEffect: PolarRotationEffect? // LightingConfig — polar-angle drift
@@ -164,7 +166,7 @@ struct FractalPreset: Codable, Identifiable {
         case schemaVersion, modules // module layer (typed/keyed params)
         // Additional scene state (previously dropped on save)
         case platformEnabled, platformRadius
-        case cellShadingEnabled, cellShadingLevels
+        case cellShadingEnabled, cellShadingLevels, aoStrength, tonemapStrength
         case lightVariationRate, beatFlashEffect, polarRotationEffect, juliaDriftEffect
         case safetyBubbleFadeEnabled, safetyBubbleFadeWidth
     }
@@ -349,6 +351,8 @@ struct FractalPreset: Codable, Identifiable {
         platformRadius = try container.decodeIfPresent(Float.self, forKey: .platformRadius)
         cellShadingEnabled = try container.decodeIfPresent(Bool.self, forKey: .cellShadingEnabled)
         cellShadingLevels = try container.decodeIfPresent(Float.self, forKey: .cellShadingLevels)
+        aoStrength = try container.decodeIfPresent(Float.self, forKey: .aoStrength) ?? 0.0
+        tonemapStrength = try container.decodeIfPresent(Float.self, forKey: .tonemapStrength) ?? 0.0
         lightVariationRate = try container.decodeIfPresent(Float.self, forKey: .lightVariationRate)
         beatFlashEffect = try container.decodeIfPresent(BeatFlashEffect.self, forKey: .beatFlashEffect)
         polarRotationEffect = try container.decodeIfPresent(PolarRotationEffect.self, forKey: .polarRotationEffect)
@@ -438,6 +442,8 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(platformRadius, forKey: .platformRadius)
         try container.encodeIfPresent(cellShadingEnabled, forKey: .cellShadingEnabled)
         try container.encodeIfPresent(cellShadingLevels, forKey: .cellShadingLevels)
+        try container.encodeIfPresent(aoStrength, forKey: .aoStrength)
+        try container.encodeIfPresent(tonemapStrength, forKey: .tonemapStrength)
         try container.encodeIfPresent(lightVariationRate, forKey: .lightVariationRate)
         try container.encodeIfPresent(beatFlashEffect, forKey: .beatFlashEffect)
         try container.encodeIfPresent(polarRotationEffect, forKey: .polarRotationEffect)
@@ -579,6 +585,8 @@ struct FractalPreset: Codable, Identifiable {
         // Cell (toon) shading (previously dropped).
         preset.cellShadingEnabled = col.cellShadingEnabled
         preset.cellShadingLevels = col.cellShadingLevels
+        preset.aoStrength = col.aoStrength
+        preset.tonemapStrength = col.tonemapStrength
 
         // ── Lighting domain (1 lock acquisition) ──
         let lit = settings.lightingConfig
@@ -833,6 +841,8 @@ struct FractalPreset: Codable, Identifiable {
         if let cellShadingLevels = cellShadingLevels {
             settings.cellShadingLevels = cellShadingLevels
         }
+        settings.aoStrength = aoStrength ?? 0.0
+        settings.tonemapStrength = tonemapStrength ?? 0.0
         if let arc = audioReactiveConfig {
             // Full config present (files saved by current builds): restore everything.
             settings.audioReactiveConfig = arc

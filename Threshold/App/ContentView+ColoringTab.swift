@@ -333,6 +333,24 @@ extension ContentView {
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.yellow.opacity(0.06)))
+
+            // Ambient occlusion & filmic tonemap (off by default — opt-in upgrades
+            // to the lighting/grading model, dial in to taste)
+            VStack(spacing: 4) {
+                EffectSliderRow(icon: "circle.lefthalf.striped.horizontal", label: "Ambient Occlusion",
+                    value: $cache.color.aoStrength, range: ControlCatalog.aoStrength.range,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.aoStrength, value: cache.color.aoStrength) },
+                    showToggle: false)
+                Divider().padding(.leading, 159)
+                EffectSliderRow(icon: "camera.aperture", label: "Filmic Tonemap",
+                    value: $cache.color.tonemapStrength, range: ControlCatalog.tonemapStrength.range,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.tonemapStrength, value: cache.color.tonemapStrength) },
+                    showToggle: false)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
         }
     }
 }

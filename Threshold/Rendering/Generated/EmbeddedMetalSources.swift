@@ -96,6 +96,10 @@ typedef NS_ENUM(EnumBackingType, FractalType)
     FractalTypeTheliPseudoKleinian = 15,
     FractalTypeKleinian              = 17,
     FractalTypeBoxSphereFolder         = 20,
+    // NOTE: 21 is reserved — the legacy `mandelboxSphereProjection` type folded
+    // into base Mandelbox + the Space-tab Sphere Projection control (see
+    // FractalModelType back-compat decode). Do not reuse it.
+    FractalTypeBulatovLimitSet         = 22,
     // Sentinel for runtime-compiled custom DE formulas (.threshfx).
     // The static dispatch in FractalFormulas.h returns far for this value;
     // custom rendering uses a separately-compiled MTLLibrary.
@@ -640,6 +644,7 @@ struct OrbitData {
 #include "TheliPseudoKleinian/TheliPseudoKleinian.h"
 #include "Kleinian/Kleinian.h"
 #include "BoxSphereFolder/BoxSphereFolder.h"
+#include "BulatovLimitSet/BulatovLimitSet.h"
 
 // ============================================================================
 // DISPATCH — distance only
@@ -663,6 +668,8 @@ FORCE_INLINE float FractalDE_Dispatch(float3 pos, int fractalType, FormulaParams
             return DE_Kleinian_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypeBoxSphereFolder:
             return DE_BoxSphereFolder_Dist(pos, fp, fp.rotMatrix1, iterations);
+        case FractalTypeBulatovLimitSet:
+            return DE_BulatovLimitSet_Dist(pos, fp, fp.rotMatrix1, iterations);
         // __CUSTOM_DISPATCH_DIST__
         default:
             return 1e10f; // Unknown type — far away
@@ -693,6 +700,8 @@ FORCE_INLINE float FractalDE_WithOrbit(float3 pos, int fractalType, FormulaParam
             return DE_Kleinian(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypeBoxSphereFolder:
             return DE_BoxSphereFolder(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
+        case FractalTypeBulatovLimitSet:
+            return DE_BulatovLimitSet(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         // __CUSTOM_DISPATCH_ORBIT__
         default:
             orbit.trap = 1e20f;
@@ -1734,6 +1743,165 @@ FORCE_INLINE float DE_BoxSphereFolder_Dist(float3 pos, FormulaParams fp, float3x
 
 """#
 
+    static let bulatovLimitSetH: String = #"""
+//
+//  BulatovLimitSet.h
+//  Threshold
+//
+//  Limit set of a hyperbolic reflection group, after Vladimir Bulatov's
+//  "Limit Set of 4D Hyperbolic Reflection Group" (bulatov.org, Dec 2012).
+//
+//  A sample point is repeatedly REFLECTED in a small set of generator spheres
+//  and planes (the "fundamental domain") until it lands inside the domain; the
+//  accumulated conformal-inversion scale gives the distance estimate. This is
+//  the same reflection-group machinery as our Coxeter space-warp (`warpCoxeter`)
+//  — fold a point into a fundamental domain across mirror planes — but with
+//  SPHERE generators (inversions) added to the planes. Those inversions are what
+//  turn a finite polyhedral fold into an infinite fractal limit set (the points
+//  of accumulation of the group action).
+//
+//  The default generators reproduce Bulatov's octahedral-symmetry example:
+//  a cube-corner sphere, an octahedron-face sphere, and three mirror planes
+//  ((1,0,0), (0,-1,1), (-1,1,0)) — with an optional bounding "outside" sphere.
+//
+//  params[0]=SizeCube  [1]=SizeOcta [2]=RCube   [3]=ROcta
+//  params[4]=AngleCube [5]=AngleOcta [6]=Scale  [7]=ROutside
+//  params[8]=MaxReflections [9]=DistanceFactor
+//  params[10]=GeneratorMask  (bit0 cube-corner sphere, 1 octa sphere,
+//             2 mirror X, 3 mirror YZ, 4 mirror XY, 5 outside sphere)
+//
+//  Requires: FractalFormulaCommon.h
+//
+
+#ifndef DE_BulatovLimitSet_h
+#define DE_BulatovLimitSet_h
+
+// One generator of the fundamental domain: a sphere (type 0) or plane (type 1).
+struct BulatovGen {
+    int   type;   // 0 = sphere, 1 = plane
+    float3 c;     // sphere centre, or (normalized) plane normal
+    float d;      // sphere radius (sign carries the inside/outside test), or plane offset
+};
+
+// Reflect v in a generator, folding the accumulated inversion scale.
+//   sphere → conformal inversion: v ↦ c + (r²/|v-c|²)(v-c)   (scale ×= r²/|v-c|²)
+//   plane  → mirror reflection across the plane (isometry, scale unchanged)
+FORCE_INLINE void bulatovReflect(BulatovGen s, thread float3& v, thread float& scale) {
+    if (s.type == 0) {                                  // sphere inversion
+        float3 d = v - s.c;
+        float len2 = max(dot(d, d), 1e-12f);
+        float factor = (s.d * s.d) / len2;
+        v = d * factor + s.c;
+        scale *= factor;
+    } else {                                            // plane reflection
+        float vn = dot(v - s.c * s.d, s.c);
+        v -= 2.0f * s.c * vn;
+    }
+}
+
+// Signed membership test: < 0 means "needs reflecting" — i.e. the point is inside
+// an inversion sphere (negative stored radius), outside a bounding sphere
+// (positive radius), or behind a mirror plane.
+FORCE_INLINE float bulatovDistance(BulatovGen s, float3 v) {
+    if (s.type == 0) {
+        float3 d = v - s.c;
+        float dd = dot(d, d) - s.d * s.d;
+        return (s.d < 0.0f) ? dd : -dd;
+    }
+    return dot(v, s.c) - s.d;
+}
+
+// Iterate reflections until the point sits inside the fundamental domain, then
+// turn the accumulated inversion scale into a distance estimate. Returns the DE
+// and reports the folded point + reflection count for coloring.
+FORCE_INLINE float bulatovFold(float3 pos, FormulaParams fp,
+                               thread float3& outP, thread int& reflectionsUsed) {
+    const float pi = 3.1415926f;
+    float sc        = fp.params[0];
+    float so        = fp.params[1];
+    float rc        = fp.params[2];
+    float ro        = fp.params[3];
+    float angleCube = fp.params[4];
+    float angleOcta = fp.params[5];
+    float scale     = fp.params[6];
+    float rOutside  = fp.params[7];
+    int   maxCount  = clamp((int)(fp.params[8] + 0.5f), 0, 256);
+    float distanceFactor = fp.params[9];
+    int   mask      = (int)(fp.params[10] + 0.5f);
+
+    // Sphere radii that make the intersection angle exactly π/n (Bulatov eq.).
+    if (angleCube >= 2.0f) rc = 2.0f * sc / sqrt(2.0f * (1.0f + cos(pi / angleCube)));
+    if (angleOcta >= 2.0f) ro = so * sqrt(2.0f) / sqrt(2.0f * (1.0f + cos(pi / angleOcta)));
+
+    sc *= scale; so *= scale; rc *= scale; ro *= scale;
+
+    // Build the fundamental domain (up to 6 generators) from the toggle mask.
+    BulatovGen gens[6];
+    int n = 0;
+    if (mask & 1)  gens[n++] = BulatovGen{ 0, float3(sc, sc, sc), -rc };
+    if (mask & 2)  gens[n++] = BulatovGen{ 0, float3(0.0f, 0.0f, so), -ro };
+    if (mask & 4)  gens[n++] = BulatovGen{ 1, float3(1.0f, 0.0f, 0.0f), 0.0f };
+    if (mask & 8)  gens[n++] = BulatovGen{ 1, normalize(float3(0.0f, -1.0f, 1.0f)), 0.0f };
+    if (mask & 16) gens[n++] = BulatovGen{ 1, normalize(float3(-1.0f, 1.0f, 0.0f)), 0.0f };
+    if (mask & 32) gens[n++] = BulatovGen{ 0, float3(0.0f), rOutside * scale };
+
+    float3 p = pos;
+    float  s = 1.0f;
+    int    used = 0;
+    int    count = maxCount;
+    while (count > 0) {
+        bool found = false;
+        for (int i = 0; i < n; ++i) {
+            if (bulatovDistance(gens[i], p) < 0.0f) {
+                bulatovReflect(gens[i], p, s);
+                found = true;
+            }
+        }
+        if (!found) break;          // settled inside the fundamental domain
+        ++used;
+        --count;
+    }
+
+    // One more conformal step to normalize points at infinity, then DE = factor / scale.
+    s *= 2.0f / (1.0f + dot(p, p));
+    outP = p;
+    reflectionsUsed = used;
+    return distanceFactor / max(s, 1e-9f);
+}
+
+// ---------------------------------------------------------------------------
+// Full orbit-tracking version (coloring + normals)
+// ---------------------------------------------------------------------------
+FORCE_INLINE float DE_BulatovLimitSet(float3 pos, FormulaParams fp, float3x3 rot,
+                                      int iterations, int colorIterations,
+                                      thread OrbitData& orbit) {
+    float3 p = rot * pos;                 // identity unless the user rotates the set
+    float3 finalP;
+    int used;
+    float de = bulatovFold(p, fp, finalP, used);
+
+    orbit.trap = dot(finalP, finalP);     // radial trap of the folded point
+    orbit.trapIteration = used;
+    orbit.trapPosition = finalP;
+    orbit.finalP = finalP;
+    orbit.iterationsUsed = used;
+    return de;
+}
+
+// ---------------------------------------------------------------------------
+// Lean distance-only (shadows, normals via finite differences)
+// ---------------------------------------------------------------------------
+FORCE_INLINE float DE_BulatovLimitSet_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {
+    float3 p = rot * pos;
+    float3 finalP;
+    int used;
+    return bulatovFold(p, fp, finalP, used);
+}
+
+#endif /* DE_BulatovLimitSet_h */
+
+"""#
+
     static let shadersMetal: String = #"""
 //
 //  Shaders.metal
@@ -2194,48 +2362,28 @@ FORCE_INLINE float3 warpBend(float3 p, SpaceWarpOp op) {        // 1
 FORCE_INLINE float3 warpMirror(float3 p, SpaceWarpOp op) {      // 2
     return mix(p, abs(p), clamp(op.strength, 0.0f, 1.0f));
 }
-// Hall-of-Mirrors per-axis fold: identity inside [−L, L]; outside, NESTED mirror
-// cells each one octave (2×) WIDER than the last, flipped — "reflection of the
-// reflections at a larger scale, infinitely". Octave k spans |c|∈[L·2ᵏ, L·2ᵏ⁺¹] and
-// maps uniformly back into the base half-cell [0, L] (reversed on even octaves so
-// neighbours mirror, and continuous with the identity region at |c|=L). Each octave
-// is a uniform 2⁻ᵏ contraction → `scaleOut` carries that factor for the DE divisor.
-FORCE_INLINE float boxMirrorAxis(float c, float L, thread float& scaleOut) {
-    float a = fabs(c);
-    if (a <= L) { scaleOut = 1.0f; return c; }      // base cell — identity
-    float k = floor(log2(a / L));                   // octave index (0 = [L, 2L])
-    float invCell = exp2(-k) / L;                   // 1/(L·2ᵏ) — the only exp2 needed
-    float pos = a * invCell - 1.0f;                 // (a − cellInner)/cellInner, in [0, 1)
-    float frac = (fmod(k, 2.0f) < 0.5f) ? (1.0f - pos) : pos;   // even octave reversed
-    scaleOut = L * invCell;                         // = 2⁻ᵏ (contraction) — no second exp2
-    return (c < 0.0f ? -1.0f : 1.0f) * (L * frac);
+// Hall-of-Mirrors per-axis fold: the CLASSIC two-parallel-mirrors tiling — space
+// repeats into infinite IDENTICAL mirrored copies, each cell 2L wide. It's a triangle
+// wave of period 4L: identity on [−L, L], and every neighbouring cell a same-size
+// mirror image of the last (continuous at every wall). Slope is ±1 everywhere, so the
+// fold is ISOMETRIC (no DE divisor needed).
+FORCE_INLINE float hallMirrorAxis(float c, float L) {
+    float period = 4.0f * L;
+    float u = c + L;
+    float m = u - period * floor(u / period);   // positive mod → [0, 4L)
+    return L - fabs(m - 2.0f * L);
 }
 FORCE_INLINE float3 warpBoxFold(float3 p, SpaceWarpOp op) {     // 3
     float t = clamp(op.strength, 0.0f, 1.0f);
     float L = op.p1;   // precomputed max(L, 0.01)
     float3 folded;
     if (op.p2 > 0.5f) {
-        // Hall of Mirrors (growing nested box cells, per axis).
-        float sx, sy, sz;
-        folded = float3(boxMirrorAxis(p.x, L, sx),
-                        boxMirrorAxis(p.y, L, sy),
-                        boxMirrorAxis(p.z, L, sz));
+        // Hall of Mirrors: infinite identical mirrored copies, cells 2L wide.
+        folded = float3(hallMirrorAxis(p.x, L), hallMirrorAxis(p.y, L), hallMirrorAxis(p.z, L));
     } else {
-        folded = clamp(p, -L, L) * 2.0f - p;            // single Tglad box fold (isometric)
+        folded = clamp(p, -L, L) * 2.0f - p;            // single Tglad box fold
     }
-    return mix(p, folded, t);
-}
-// Box fold is isometric (deScale 1) UNLESS Hall of Mirrors is on — then each axis
-// contracts by 2⁻ᵏ; the conservative divisor is the largest (least-contracted) axis.
-FORCE_INLINE float warpBoxFoldDEScale(float3 p, SpaceWarpOp op) {
-    if (op.p2 <= 0.5f) return 1.0f;
-    float t = clamp(op.strength, 0.0f, 1.0f);
-    float L = op.p1;
-    float sx, sy, sz;
-    boxMirrorAxis(p.x, L, sx);
-    boxMirrorAxis(p.y, L, sy);
-    boxMirrorAxis(p.z, L, sz);
-    return max(mix(1.0f, max(sx, max(sy, sz)), t), 1e-3f);
+    return mix(p, folded, t);   // both branches are isometric → no DE divisor (default arm = 1)
 }
 FORCE_INLINE float3 warpSphereFold(float3 p, SpaceWarpOp op) {  // 4
     float t = clamp(op.strength, 0.0f, 1.0f);
@@ -2403,7 +2551,6 @@ FORCE_INLINE float3 applyWarpOp(float3 p, SpaceWarpOp op) {
 // Conservative DE divisor for one op (only radial warps stretch distance).
 FORCE_INLINE float warpOpDEScale(float3 p, SpaceWarpOp op) {
     switch (op.type) {
-        case 3:  return warpBoxFoldDEScale(p, op);   // 1.0 unless Hall of Mirrors is on
         case 4:  return warpSphereFoldDEScale(p, op);
         case 5:  return warpInversionDEScale(p, op);
         case 8:  return warpCircleDEScale(p, op);
@@ -3587,6 +3734,12 @@ FORCE_INLINE float relaxedOmegaCap(int type) {
     case FractalTypeMandelbulbJulia:
     case FractalTypeQuaternionJulia:
         return 1.1f;
+    case FractalTypeBulatovLimitSet:
+        // Reflection-group LIMIT SET: the `factor/scale` estimator OVERESTIMATES
+        // far from the (measure-zero) set, so even plain sphere tracing must not
+        // over-step or rays tunnel clean through the thin filigree (→ blank). The
+        // conservative step lives in the low default DistanceFactor; pin omega to 1.
+        return 1.0f;
     default: // Kleinian family, custom formulas, future types
         return 1.2f;
     }

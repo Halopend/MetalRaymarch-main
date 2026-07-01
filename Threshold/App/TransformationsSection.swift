@@ -29,9 +29,15 @@ struct TransformationsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(spacing: 8) {
                 Label("Transformations", systemImage: "circle.hexagongrid")
                     .font(.headline)
+                Text("BETA")
+                    .font(.caption2.weight(.heavy))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Capsule().fill(.orange.opacity(0.22)))
+                    .foregroundStyle(.orange)
+                    .accessibilityLabel("Beta feature")
                 Spacer()
                 addMenu
             }
@@ -62,8 +68,13 @@ struct TransformationsSection: View {
 
     private var addMenu: some View {
         Menu {
-            ForEach(SpaceWarpKind.allCases) { kind in
-                Button { add(kind) } label: { Label(kind.displayName, systemImage: kind.icon) }
+            // Grouped by family so the look-alikes (e.g. the spherical trio) cluster.
+            ForEach(WarpFamily.allCases, id: \.self) { family in
+                Section(family.rawValue) {
+                    ForEach(SpaceWarpKind.allCases.filter { $0.family == family }) { kind in
+                        Button { add(kind) } label: { Label(kind.displayName, systemImage: kind.icon) }
+                    }
+                }
             }
         } label: {
             Label("Add", systemImage: "plus.circle.fill")
@@ -84,8 +95,14 @@ struct TransformationsSection: View {
                     .font(.caption2.monospacedDigit().weight(.bold))
                     .foregroundStyle(.secondary)
                     .frame(width: 16)
-                Label(kind.displayName, systemImage: kind.icon)
-                    .font(.subheadline.weight(.medium))
+                VStack(alignment: .leading, spacing: 1) {
+                    Label(kind.displayName, systemImage: kind.icon)
+                        .font(.subheadline.weight(.medium))
+                    Text(kind.tagline)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
                 Spacer()
                 Toggle("", isOn: Binding(
                     get: { liveOp(op.id)?.isEnabled ?? op.isEnabled },
@@ -111,7 +128,8 @@ struct TransformationsSection: View {
                     value: Binding(get: { liveOp(op.id)?.strength ?? op.strength },
                                    set: { v in update(op.id) { $0.strength = v } }),
                     range: kind.strengthRange,
-                    enabled: .constant(true), onChanged: {}, showToggle: false)
+                    enabled: .constant(true), onChanged: {}, showToggle: false,
+                    valueFormat: { String(format: "%.2f", $0) })
 
                 // Per-operator scalars.
                 ForEach(kind.params) { spec in
@@ -121,7 +139,8 @@ struct TransformationsSection: View {
                             get: { let o = liveOp(op.id) ?? op; return spec.slot == 1 ? o.p1 : o.p2 },
                             set: { v in update(op.id) { if spec.slot == 1 { $0.p1 = v } else { $0.p2 = v } } }),
                         range: spec.range,
-                        enabled: .constant(true), onChanged: {}, showToggle: false)
+                        enabled: .constant(true), onChanged: {}, showToggle: false,
+                        valueFormat: { String(format: "%.2f", $0) })
                 }
 
                 // Per-transform boolean option (e.g. Box Fold "Hall of Mirrors"),
@@ -150,9 +169,54 @@ struct TransformationsSection: View {
             }
             .opacity(op.isEnabled ? 1.0 : 0.4)
             .disabled(!op.isEnabled)
+
+            underTheHood(kind)
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+    }
+
+    /// Self-documenting panel: what this transform does, the math, and the EXACT
+    /// Metal function it runs on the GPU (pulled live from the embedded shader).
+    @ViewBuilder
+    private func underTheHood(_ kind: SpaceWarpKind) -> some View {
+        let d = kind.descriptor
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(d.blurb)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(kind.formula)
+                    .font(.caption2.monospaced())
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let src = WarpSource.metalFunction(named: d.gpuApplyFn) {
+                    codeBlock(src)
+                }
+                if let de = d.gpuDEScaleFn, let src = WarpSource.metalFunction(named: de) {
+                    Text("Distance-estimator correction")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    codeBlock(src)
+                }
+            }
+            .padding(.top, 6)
+        } label: {
+            Label("Under the hood — ƒ \(d.gpuApplyFn)", systemImage: "function")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.tint)
+        }
+    }
+
+    private func codeBlock(_ source: String) -> some View {
+        ScrollView(.horizontal, showsIndicators: true) {
+            Text(source)
+                .font(.system(.caption2, design: .monospaced))
+                .textSelection(.enabled)
+                .padding(8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.22)))
     }
 
     private func axisRow(_ op: SpaceWarpOpValue, _ label: String, _ icon: String,
@@ -163,7 +227,8 @@ struct TransformationsSection: View {
                 get: { (liveOp(op.id) ?? op).axis[keyPath: comp] },
                 set: { v in update(op.id) { $0.axis[keyPath: comp] = v } }),
             range: -1.0...1.0,
-            enabled: .constant(true), onChanged: {}, showToggle: false)
+            enabled: .constant(true), onChanged: {}, showToggle: false,
+            valueFormat: { String(format: "%.2f", $0) })
     }
 
     /// Dedicated editor for the Coxeter [p,q] reflection group: traditional Schläfli
@@ -258,5 +323,30 @@ struct TransformationsSection: View {
     /// 0…2 range is exactly mid-track, which read as a thumb "stuck in the centre".
     private func liveOp(_ id: UUID) -> SpaceWarpOpValue? {
         renderSettings.spaceWarpStack.first { $0.id == id }
+    }
+}
+
+/// Pulls the EXACT Metal source of a `warp…` function out of the embedded shader,
+/// so the panel can show users what a transform really runs on the GPU. Returns nil
+/// if the function isn't found (the UI then shows just the readable formula).
+enum WarpSource {
+    static func metalFunction(named fn: String) -> String? {
+        let src = EmbeddedMetalSources.shadersMetal
+        // Locate the definition by its signature: "warpFoo(float3 p, SpaceWarpOp op)".
+        guard let sig = src.range(of: "\(fn)(float3 p, SpaceWarpOp op)") else { return nil }
+        // Back up to the start of the declaration line (the FORCE_INLINE return type).
+        let lineStart = src[..<sig.lowerBound].lastIndex(of: "\n").map { src.index(after: $0) } ?? src.startIndex
+        // First "{" after the signature, then balance braces to the matching "}".
+        guard let open = src.range(of: "{", range: sig.upperBound..<src.endIndex) else { return nil }
+        var depth = 0
+        var i = open.lowerBound
+        var end = src.endIndex
+        while i < src.endIndex {
+            let c = src[i]
+            if c == "{" { depth += 1 }
+            else if c == "}" { depth -= 1; if depth == 0 { end = src.index(after: i); break } }
+            i = src.index(after: i)
+        }
+        return String(src[lineStart..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

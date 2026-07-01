@@ -264,6 +264,8 @@ final class RenderSettings: @unchecked Sendable {
     private var _lightingSoftness: Float = 0.35              // 0 = sharp vibrance-driven, 1 = classic soft lighting
     private var _cellShadingEnabled: Bool = false
     private var _cellShadingLevels: Float = 4.0
+    private var _aoStrength: Float = 0.0                     // Ambient-occlusion blend (0 = old flat ambient, default)
+    private var _tonemapStrength: Float = 0.0                // Filmic (ACES) tonemap blend (0 = old plain clamp, default)
     
     // === MODULAR LIGHTING EFFECTS ===
     // Card-based lighting system with presets and individual effect toggles
@@ -1650,6 +1652,24 @@ final class RenderSettings: @unchecked Sendable {
             persistColor()
         }
     }
+
+    /// Ambient-occlusion blend (0 = old flat hemisphere ambient, 1 = full SDF AO march)
+    var aoStrength: Float {
+        get { withLock { _aoStrength } }
+        set {
+            withLock { _aoStrength = ControlCatalog.aoStrength.clamp(newValue) }
+            persistColor()
+        }
+    }
+
+    /// Filmic (ACES) tonemap blend (0 = old plain clamp, 1 = full filmic curve)
+    var tonemapStrength: Float {
+        get { withLock { _tonemapStrength } }
+        set {
+            withLock { _tonemapStrength = ControlCatalog.tonemapStrength.clamp(newValue) }
+            persistColor()
+        }
+    }
     
     /// Midtone curve adjustment (-1 to 1)
     var colorSchemeCurve: Float {
@@ -2158,8 +2178,8 @@ final class RenderSettings: @unchecked Sendable {
             highlights: _colorSchemeHighlights,
             cellShadingEnabled: _cellShadingEnabled ? 1 : 0,
             cellShadingLevels: _cellShadingLevels,
-            cellEdgeStrength: 0.0,
-            _cellPad: 0.0,
+            aoStrength: _aoStrength,
+            tonemapStrength: _tonemapStrength,
             neonIntensity: neonIntensity,
             hueFrequency: hueFreq,
             hueOffset: hueOffset,
@@ -3613,6 +3633,8 @@ final class RenderSettings: @unchecked Sendable {
                 c.lightingSoftness = _lightingSoftness
                 c.cellShadingEnabled = _cellShadingEnabled
                 c.cellShadingLevels = _cellShadingLevels
+                c.aoStrength = _aoStrength
+                c.tonemapStrength = _tonemapStrength
                 c.colorSchemeAutoTransition = _colorSchemeAutoTransition
                 c.colorSchemeAutoInterval = _colorSchemeAutoInterval
                 c.colorSchemeTransitionDuration = _colorSchemeTransitionDuration
@@ -3642,6 +3664,8 @@ final class RenderSettings: @unchecked Sendable {
                 _lightingSoftness = newValue.lightingSoftness
                 _cellShadingEnabled = newValue.cellShadingEnabled
                 _cellShadingLevels = ControlCatalog.cellShadingLevels.clamp(newValue.cellShadingLevels)
+                _aoStrength = ControlCatalog.aoStrength.clamp(newValue.aoStrength)
+                _tonemapStrength = ControlCatalog.tonemapStrength.clamp(newValue.tonemapStrength)
                 _colorSchemeAutoTransition = newValue.colorSchemeAutoTransition
                 _colorSchemeAutoInterval = newValue.colorSchemeAutoInterval
                 _colorSchemeTransitionDuration = newValue.colorSchemeTransitionDuration

@@ -26,6 +26,8 @@ struct ColorConfig: Codable, Equatable, Sendable {
     var lightingSoftness: Float = 0.5      // 0.0 - 1.0
     var cellShadingEnabled: Bool = false
     var cellShadingLevels: Float = 4.0     // 2.0 - 8.0
+    var aoStrength: Float = 0.0            // 0.0 - 1.0 (0 = old flat ambient, default)
+    var tonemapStrength: Float = 0.0       // 0.0 - 1.0 (0 = old plain clamp, default)
 
     // Auto-transition
     var colorSchemeAutoTransition: Bool = false
@@ -46,6 +48,8 @@ struct ColorConfig: Codable, Equatable, Sendable {
         colorSchemeHighlights = ControlCatalog.colorSchemeHighlights.clamp(colorSchemeHighlights)
         lightingSoftness = ControlCatalog.lightingSoftness.clamp(lightingSoftness)
         cellShadingLevels = ControlCatalog.cellShadingLevels.clamp(cellShadingLevels)
+        aoStrength = ControlCatalog.aoStrength.clamp(aoStrength)
+        tonemapStrength = ControlCatalog.tonemapStrength.clamp(tonemapStrength)
         colorSchemeAutoInterval = ControlCatalog.colorSchemeAutoInterval.clamp(colorSchemeAutoInterval)
         colorSchemeTransitionDuration = ControlCatalog.colorSchemeTransitionDuration.clamp(colorSchemeTransitionDuration)
     }

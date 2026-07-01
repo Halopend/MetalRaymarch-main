@@ -126,6 +126,10 @@ struct EffectSliderRow: View {
     @Binding var enabled: Bool
     let onChanged: () -> Void
     var showToggle: Bool = true
+    /// When set (and `showToggle` is false), the trailing slot shows the live numeric
+    /// value formatted by this closure instead of an empty spacer. Opt-in so existing
+    /// rows are unchanged.
+    var valueFormat: ((Float) -> String)? = nil
     /// When set, the slider shows a live "derived value" ghost marker while
     /// music-reactive modulation is driving this parameter.
     var musicTargetID: String? = nil
@@ -161,6 +165,11 @@ struct EffectSliderRow: View {
                     .toggleStyle(.switch)
                     .controlSize(.mini)
                     .onChange(of: enabled) { _, _ in onChanged() }
+            } else if let valueFormat {
+                Text(valueFormat(value))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, alignment: .trailing)
             } else {
                 Spacer().frame(width: 44)
             }

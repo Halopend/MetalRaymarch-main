@@ -19,6 +19,9 @@ enum FractalModelType: Int32, CaseIterable {
     case theliPseudoKleinian = 15
     case kleinian              = 17
     case boxSphereFolder         = 20
+    // Note: rawValue 21 is reserved for the legacy `mandelboxSphereProjection`
+    // back-compat alias (decodes to `.mandelbox`); see the Codable extension below.
+    case bulatovLimitSet         = 22
     /// Sentinel for runtime-compiled DE shaders (.threshfx). Mirrors
     /// `FractalTypeCustom` in ShaderTypes.h. The single active embedded formula
     /// is registered with `FractalTypeRegistry` and `FormulaCatalog` at load time.

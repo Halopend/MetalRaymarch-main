@@ -281,6 +281,7 @@ enum FractalTypeAppEnum: String, AppEnum {
     case theliPseudoKleinian
     case kleinian
     case boxSphereFolder
+    case bulatovLimitSet
 
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Fractal Type"
 
@@ -295,6 +296,7 @@ enum FractalTypeAppEnum: String, AppEnum {
         .theliPseudoKleinian: "Theli Pseudo Kleinian",
         .kleinian: "Kleinian",
         .boxSphereFolder: "Box Sphere Folder",
+        .bulatovLimitSet: "Bulatov Limit Set",
     ]
 
     /// Maps back to the engine enum by matching the shared codableString

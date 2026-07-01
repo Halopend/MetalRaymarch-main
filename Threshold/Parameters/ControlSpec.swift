@@ -269,6 +269,14 @@ enum ControlCatalog {
         id: "color.cellShadingLevels", name: "Cell Shading Levels", icon: "square.stack.3d.up",
         range: 2.0...8.0, defaultValue: 4.0)
 
+    static let aoStrength = ControlSpec(
+        id: "color.aoStrength", name: "Ambient Occlusion", icon: "circle.lefthalf.striped.horizontal",
+        range: 0.0...1.0, defaultValue: 0.0)
+
+    static let tonemapStrength = ControlSpec(
+        id: "color.tonemapStrength", name: "Filmic Tonemap", icon: "camera.aperture",
+        range: 0.0...1.0, defaultValue: 0.0)
+
     static let colorSchemeAutoInterval = ControlSpec(
         id: "color.autoInterval", name: "Auto Transition Interval", icon: "timer",
         range: 5.0...120.0, defaultValue: 30.0)
@@ -298,7 +306,8 @@ enum ControlCatalog {
         colorSchemeContrast, colorSchemeVibrance, colorSchemeCurve,
         colorSchemeShadows, colorSchemeHighlights,
         colorSchemeGamma, lightingSoftness, cellShadingLevels,
-        colorSchemeAutoInterval, colorSchemeTransitionDuration
+        colorSchemeAutoInterval, colorSchemeTransitionDuration,
+        aoStrength, tonemapStrength
     ]
 
     /// Routed + long-tail. Every spec the catalog declares.

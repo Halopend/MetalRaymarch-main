@@ -80,6 +80,10 @@ typedef NS_ENUM(EnumBackingType, FractalType)
     FractalTypeTheliPseudoKleinian = 15,
     FractalTypeKleinian              = 17,
     FractalTypeBoxSphereFolder         = 20,
+    // NOTE: 21 is reserved — the legacy `mandelboxSphereProjection` type folded
+    // into base Mandelbox + the Space-tab Sphere Projection control (see
+    // FractalModelType back-compat decode). Do not reuse it.
+    FractalTypeBulatovLimitSet         = 22,
     // Sentinel for runtime-compiled custom DE formulas (.threshfx).
     // The static dispatch in FractalFormulas.h returns far for this value;
     // custom rendering uses a separately-compiled MTLLibrary.
@@ -121,8 +125,8 @@ typedef struct
     float highlights;                 // Highlight adjustment
     int cellShadingEnabled;           // 0 = smooth lighting, 1 = quantized diffuse bands
     float cellShadingLevels;          // Number of lighting bands (2-8)
-    float cellEdgeStrength;           // Reserved for outline/rim strength
-    float _cellPad;                   // Alignment padding
+    float aoStrength;                 // Ambient-occlusion blend (0 = old flat hemisphere ambient, default; 1 = full SDF AO march)
+    float tonemapStrength;            // Filmic (ACES) tonemap blend (0 = old plain clamp, default; 1 = full filmic curve)
     
     // Neon mode parameters (HSV-based orbit trap coloring)
     float neonIntensity;              // 0 = off, 1 = full neon mode
