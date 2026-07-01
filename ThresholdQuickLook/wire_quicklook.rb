@@ -83,7 +83,8 @@ EXTS = [
     bundle:    "#{HOST_BUNDLE}.QLPreview",
     infoplist: "ThresholdQuickLook/Preview/Info.plist",
     entitle:   "ThresholdQuickLook/Preview/ThresholdQLPreview.entitlements",
-    sources:   ["ThresholdQuickLook/Preview/PreviewViewController.swift"],
+    sources:   ["ThresholdQuickLook/Preview/PreviewViewController.swift",
+                "ThresholdQuickLook/Preview/InteractiveFractalView.swift"],
     frameworks:["Quartz.framework", "Metal.framework", "MetalKit.framework"],
   },
 ]

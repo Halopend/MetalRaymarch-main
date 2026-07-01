@@ -205,6 +205,9 @@ final class HeadlessRenderer: @unchecked Sendable {
     private let depthState: MTLDepthStencilState
     private let mesh: MTKMesh
 
+    /// Exposed so an interactive MTKView can share the same device.
+    var metalDevice: MTLDevice { device }
+
     /// Largest square render we produce; Quick Look scales down as needed.
     private let maxSide = 1024
     private let minSide = 128
@@ -291,44 +294,44 @@ final class HeadlessRenderer: @unchecked Sendable {
         return renderImage(uniforms: uniforms, side: side)
     }
 
+    /// Live-render a snapshot into an interactive MTKView's current drawable.
+    /// The view must be configured `.bgra8Unorm` + depth `.depth32Float` to
+    /// match the shared pipeline. Presents and commits; safe to call from the
+    /// main thread on demand.
+    func render(snapshot: RenderSettingsSnapshot, in view: MTKView) {
+        guard let rpd = view.currentRenderPassDescriptor,
+              let drawable = view.currentDrawable,
+              let cmd = commandQueue.makeCommandBuffer() else { return }
+        let size = view.drawableSize
+        let uniforms = packUniforms(snapshot, drawableSize: size, elapsedTime: 0)
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        rpd.depthAttachment.loadAction = .clear
+        rpd.depthAttachment.clearDepth = 1.0
+        guard encodeDraw(uniforms: uniforms, passDescriptor: rpd,
+                         width: Int(size.width), height: Int(size.height), commandBuffer: cmd) else { return }
+        cmd.present(drawable)
+        cmd.commit()
+    }
+
     // MARK: Core render
 
-    private func renderImage(uniforms: Uniforms, side: Int) -> CGImage? {
-        let colorDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm,
-                                                                 width: side, height: side, mipmapped: false)
-        colorDesc.usage = [.renderTarget, .shaderRead]
-        colorDesc.storageMode = .shared
-        guard let colorTex = device.makeTexture(descriptor: colorDesc) else { return nil }
-
-        let depthDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .depth32Float,
-                                                                 width: side, height: side, mipmapped: false)
-        depthDesc.usage = [.renderTarget]
-        depthDesc.storageMode = .private
-        guard let depthTex = device.makeTexture(descriptor: depthDesc) else { return nil }
-
+    /// Shared draw: binds pipeline + uniforms + proxy mesh into a render pass.
+    /// Returns false if the encoder or uniform buffer could not be created.
+    @discardableResult
+    private func encodeDraw(uniforms: Uniforms, passDescriptor rpd: MTLRenderPassDescriptor,
+                            width: Int, height: Int, commandBuffer cmd: MTLCommandBuffer) -> Bool {
         var uniformsArray = UniformsArray(uniforms: (uniforms, uniforms))
         guard let uniformBuffer = device.makeBuffer(bytes: &uniformsArray,
                                                     length: MemoryLayout<UniformsArray>.stride,
                                                     options: .storageModeShared),
-              let benchBuffer = device.makeBuffer(length: 16, options: .storageModeShared) else { return nil }
-
-        let rpd = MTLRenderPassDescriptor()
-        rpd.colorAttachments[0].texture = colorTex
-        rpd.colorAttachments[0].loadAction = .clear
-        rpd.colorAttachments[0].storeAction = .store
-        rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
-        rpd.depthAttachment.texture = depthTex
-        rpd.depthAttachment.loadAction = .clear
-        rpd.depthAttachment.storeAction = .dontCare
-        rpd.depthAttachment.clearDepth = 1.0
-
-        guard let cmd = commandQueue.makeCommandBuffer(),
-              let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else { return nil }
+              let benchBuffer = device.makeBuffer(length: 16, options: .storageModeShared),
+              let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else { return false }
         enc.setCullMode(.front)
         enc.setFrontFacing(.counterClockwise)
         enc.setRenderPipelineState(pipelineState)
         enc.setDepthStencilState(depthState)
-        enc.setViewport(MTLViewport(originX: 0, originY: 0, width: Double(side), height: Double(side), znear: 0, zfar: 1))
+        enc.setViewport(MTLViewport(originX: 0, originY: 0, width: Double(width), height: Double(height), znear: 0, zfar: 1))
         enc.setVertexBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
         enc.setFragmentBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
         enc.setFragmentBuffer(benchBuffer, offset: 0, index: BufferIndex.benchCounters.rawValue)
@@ -343,7 +346,34 @@ final class HeadlessRenderer: @unchecked Sendable {
                                       indexBufferOffset: submesh.indexBuffer.offset)
         }
         enc.endEncoding()
+        return true
+    }
 
+    private func renderImage(uniforms: Uniforms, side: Int) -> CGImage? {
+        let colorDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm,
+                                                                 width: side, height: side, mipmapped: false)
+        colorDesc.usage = [.renderTarget, .shaderRead]
+        colorDesc.storageMode = .shared
+        guard let colorTex = device.makeTexture(descriptor: colorDesc) else { return nil }
+
+        let depthDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .depth32Float,
+                                                                 width: side, height: side, mipmapped: false)
+        depthDesc.usage = [.renderTarget]
+        depthDesc.storageMode = .private
+        guard let depthTex = device.makeTexture(descriptor: depthDesc) else { return nil }
+
+        let rpd = MTLRenderPassDescriptor()
+        rpd.colorAttachments[0].texture = colorTex
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.colorAttachments[0].storeAction = .store
+        rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        rpd.depthAttachment.texture = depthTex
+        rpd.depthAttachment.loadAction = .clear
+        rpd.depthAttachment.storeAction = .dontCare
+        rpd.depthAttachment.clearDepth = 1.0
+
+        guard let cmd = commandQueue.makeCommandBuffer() else { return nil }
+        guard encodeDraw(uniforms: uniforms, passDescriptor: rpd, width: side, height: side, commandBuffer: cmd) else { return nil }
         if let blit = cmd.makeBlitCommandEncoder() {
             blit.synchronize(resource: colorTex)
             blit.endEncoding()
@@ -351,7 +381,6 @@ final class HeadlessRenderer: @unchecked Sendable {
         cmd.commit()
         cmd.waitUntilCompleted()
         if cmd.error != nil { return nil }
-
         return Self.makeCGImage(from: colorTex, side: side)
     }
 

@@ -17,8 +17,8 @@ Handles all five document UTIs (declared in `Threshold/App/Info.plist`):
 
 | Ext | UTI | Behavior |
 |---|---|---|
-| `.threshscene` | `…threshold.scene` | **Live render** of the fractal |
-| `.threshmp` | `…threshold.music-preset` | **Live render** |
+| `.threshscene` | `…threshold.scene` | **Live render**; preview is **interactive** (drag = orbit, scroll = zoom) |
+| `.threshmp` | `…threshold.music-preset` | **Live render** + interactive |
 | `.threshanim` | `…threshold.animation` | Info card (live keyframe render = M3) |
 | `.threshanimv` | `…threshold.music-animation` | Info card (M3) |
 | `.threshfx` | `…threshold.formula` | Info card (embedded-Metal render = M3) |
@@ -43,11 +43,30 @@ decode FractalPreset → RenderSettings() → preset.apply(to:) → settings.sna
 into the appex's own `default.metallib` — identical GPU code to the app, loaded
 via `makeDefaultLibrary(bundle:)`.
 
+## Interactive preview
+
+The spacebar preview (`PreviewViewController`) installs a live
+`InteractiveFractalView` (an `MTKView`) for fractal scenes:
+
+- **drag** → orbit (yaw/pitch composed on top of the scene's authored rotation)
+- **scroll** → zoom (model scale, matching the app's desktop-zoom semantics)
+
+It keeps the scene's `RenderSettings`, mutates `worldRotation`/`scale` on input,
+and re-renders on demand (`isPaused` + `enableSetNeedsDisplay`, so idle = free)
+via `HeadlessRenderer.render(snapshot:in:)`. Non-scene documents and any
+render/decode failure fall back to a static image.
+
+> Interactivity requires the macOS Quick Look panel to forward mouse events to
+> the extension's view — verify in Finder once the host app is installed. The
+> thumbnail is always a static image.
+
 ## Source layout
 
-- `Shared/HeadlessRenderer.swift` — offscreen Metal renderer + `packUniforms`.
+- `Shared/HeadlessRenderer.swift` — offscreen Metal renderer + `packUniforms`;
+  also renders live into an `MTKView` (`render(snapshot:in:)`).
 - `Shared/ThresholdPreviewRender.swift` — dispatch facade + info-card fallback.
 - `Shared/RenderKitStubs.swift` — small typed stand-ins (see "Reused app source").
+- `Preview/InteractiveFractalView.swift` — the draggable live view.
 - `Thumbnail/`, `Preview/` — the two providers + their `Info.plist` + entitlements.
 
 ## Reused app source (the important maintenance note)
