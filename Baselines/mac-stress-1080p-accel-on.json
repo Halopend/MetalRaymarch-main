@@ -1,0 +1,46 @@
+{
+  "buildNumber" : "20",
+  "capturedAt" : "2026-07-02T00:09:05Z",
+  "deviceModel" : "arm64",
+  "gitDirty" : false,
+  "gitSHA" : "unknown",
+  "marketingVersion" : "1",
+  "osVersion" : "27.0.0",
+  "raymarch" : {
+    "baseFractalIterations" : 6,
+    "baseMaxRaySteps" : 168,
+    "boundingSphereSkipEnabled" : true,
+    "coherentPacketEnabled" : false,
+    "coneMarchStrength" : 1,
+    "distanceLODStrength" : 0.9800000190734863,
+    "foveationStrength" : 0,
+    "overRelaxationMax" : 1.600000023841858,
+    "shadowsEnabled" : true,
+    "smartAdvanceEnabled" : false,
+    "tileSize" : 0
+  },
+  "scenes" : [
+    {
+      "cpuEncodeMsAvg" : 0.11091336515770915,
+      "drawableHeight" : 1080,
+      "drawableWidth" : 1920,
+      "fpsAvg" : 51.09760538932519,
+      "fpsMin" : 50.42758376960888,
+      "fractalType" : 17,
+      "frames" : 240,
+      "gpuMsAvg" : 19.570388717450744,
+      "gpuMsMax" : 19.830416713375598,
+      "gpuMsMin" : 19.317458325531334,
+      "gpuMsP95" : 19.695500028319657,
+      "holdSeconds" : 0,
+      "iterationsAvg" : 17.067291743900935,
+      "iters" : 6,
+      "name" : "Stress test",
+      "raySteps" : 168,
+      "renderPath" : "mac-offscreen",
+      "tileSize" : 0,
+      "views" : 1
+    }
+  ],
+  "schemaVersion" : 1
+}

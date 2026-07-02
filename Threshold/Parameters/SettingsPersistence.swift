@@ -119,7 +119,19 @@ enum SettingsPersistence {
 
     // MARK: Generic Save / Load
 
+    /// Benchmark launches must be hermetic in BOTH directions: reading the
+    /// user's persisted state lets a live session's device-local settings
+    /// silently change what a benchmark measures (observed 2026-07-01: stale
+    /// persisted fractalIterations rendered the canonical scene black and the
+    /// harness reported a 4× "speedup"), and writing lets an unattended run
+    /// stomp the user's real app settings. Checked via the environment directly
+    /// (not BenchmarkMode) so the Quick Look shared-source closure, which
+    /// includes this file but not BenchmarkMode.swift, still compiles.
+    static let benchmarkHermetic =
+        ProcessInfo.processInfo.environment["THRESHOLD_BENCHMARK"] == "1"
+
     static func save<T: Codable>(_ value: T, domain: Domain) {
+        guard !benchmarkHermetic else { return }
         guard let data = try? encoder.encode(value) else { return }
         defaults.set(data, forKey: domain.rawValue)
     }
@@ -139,6 +151,7 @@ enum SettingsPersistence {
     }
 
     static func load<T: Codable>(_ type: T.Type, domain: Domain) -> T? {
+        guard !benchmarkHermetic else { return nil }
         guard let data = defaults.data(forKey: domain.rawValue),
               let decoded = try? decoder.decode(type, from: data) else { return nil }
         return decoded

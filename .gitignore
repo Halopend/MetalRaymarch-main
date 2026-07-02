@@ -13,6 +13,9 @@ Traces
 .claude/
 build/*
 .build/*
+
+# LLVM/Clang profiling artifacts (e.g. default.profraw from instrumented runs)
+*.profraw
 Threshold/uml-generated/Animation.err
 Threshold/uml-generated/Animation.puml
 Threshold/uml-generated/App.err

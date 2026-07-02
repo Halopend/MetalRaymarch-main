@@ -23,6 +23,12 @@
 //    THRESHOLD_BENCHMARK_WARMUP=60         warmup frames per scene (discarded)
 //    THRESHOLD_BENCHMARK_SIZE=1920x1080    offscreen render resolution
 //    THRESHOLD_BENCHMARK_OUT=/path.json    output path for the PerfRunRecord JSON
+//    THRESHOLD_BENCHMARK_QC=k=v,k=v        QualityConfig overrides applied after
+//                                          each scene load (see applyQCOverride).
+//                                          Needed because benchmark launches are
+//                                          hermetic: persisted device-local
+//                                          settings (incl. the acceleration
+//                                          levers) are ignored.
 //
 
 #if os(macOS)
@@ -52,6 +58,36 @@ enum MacBenchmarkHarness {
         /// Force shadows on/off (nil = leave as the scene sets it). Shadows add two
         /// per-pixel shadow marches, so this isolates their DE-call cost.
         var shadows: Bool?
+        /// QualityConfig overrides applied after each scene loads, e.g.
+        /// "coneMarchStrength=1,distanceLODStrength=0.98". Benchmark launches are
+        /// hermetic (persisted device-local settings are ignored), so the
+        /// acceleration levers a real install runs with — worth ~2.7× on the
+        /// canonical scene — must be pinned explicitly to be measured at all.
+        var qcOverride: [(String, Float)]
+    }
+
+    /// Apply "key=value" QualityConfig overrides by field name. Unknown keys are
+    /// logged and skipped so a typo fails loudly in the run log, not silently.
+    private static func applyQCOverride(_ pairs: [(String, Float)], to settings: RenderSettings) {
+        guard !pairs.isEmpty else { return }
+        var qc = settings.qualityConfig
+        for (key, v) in pairs {
+            switch key {
+            case "coneMarchStrength":            qc.coneMarchStrength = v
+            case "distanceLODStrength":          qc.distanceLODStrength = v
+            case "overRelaxationMax":            qc.overRelaxationMax = v
+            case "smartAdvanceEnabled":          qc.smartAdvanceEnabled = v != 0
+            case "boundingSphereSkipEnabled":    qc.boundingSphereSkipEnabled = v != 0
+            case "coarsePrepassWarmStartEnabled": qc.coarsePrepassWarmStartEnabled = v != 0
+            case "coherentPacketEnabled":        qc.coherentPacketEnabled = v != 0
+            case "foveationStrength":            qc.foveationStrength = v
+            case "baseFractalIterations":        qc.baseFractalIterations = Int(v)
+            case "baseMaxRaySteps":              qc.baseMaxRaySteps = Int(v)
+            default: log("  WARN unknown QC override key '\(key)' — skipped")
+            }
+        }
+        settings.qualityConfig = qc
+        log("  applied QC override \(pairs.map { "\($0.0)=\($0.1)" }.joined(separator: ","))")
     }
 
     private static func log(_ s: String) {
@@ -83,11 +119,20 @@ enum MacBenchmarkHarness {
         let pngDir = env["THRESHOLD_BENCHMARK_PNG_DIR"]
         let shadows = env["THRESHOLD_BENCHMARK_SHADOWS"].map { $0 == "1" }
 
+        var qcOverride: [(String, Float)] = []
+        for pair in (env["THRESHOLD_BENCHMARK_QC"] ?? "").split(separator: ",") {
+            let kv = pair.split(separator: "=")
+            if kv.count == 2, let v = Float(kv[1].trimmingCharacters(in: .whitespaces)) {
+                qcOverride.append((kv[0].trimmingCharacters(in: .whitespaces), v))
+            }
+        }
+
         return Config(scenes: scenes,
                       frames: intEnv("THRESHOLD_BENCHMARK_FRAMES", 240),
                       warmup: intEnv("THRESHOLD_BENCHMARK_WARMUP", 60),
                       width: w, height: h, outPath: out,
-                      paramOverride: overrides, pngDir: pngDir, shadows: shadows)
+                      paramOverride: overrides, pngDir: pngDir, shadows: shadows,
+                      qcOverride: qcOverride)
     }
 
     static func run(appModel: AppModel) async {
@@ -155,7 +200,6 @@ enum MacBenchmarkHarness {
         }
         guard !targets.isEmpty else { log("FATAL no matching scenes"); exit(4) }
 
-        let raymarch = PerfRaymarchConfig(from: settings.qualityConfig)
         var records: [PerfSceneRecord] = []
 
         for preset in targets {
@@ -167,6 +211,21 @@ enum MacBenchmarkHarness {
 
             // Re-assert shadow override after the scene's own value has applied.
             if let s = cfg.shadows { settings.shadowsEnabled = s; log("  forced shadows=\(s)") }
+
+            // Pin the acceleration levers (and any other QualityConfig field)
+            // after the scene apply so the measured config is exactly what the
+            // caller asked for.
+            applyQCOverride(cfg.qcOverride, to: settings)
+
+            // Provenance guard: log the quality values actually in effect so a
+            // measurement made with the wrong iteration/step budget (stale
+            // persisted state, a preset resolving to an unexpected copy, an
+            // apply that didn't land) is visible in the run log instead of
+            // silently producing a bogus number. Compare against the scene
+            // file's authored fractalIterations/maxRaySteps when in doubt.
+            let qcNow = settings.qualityConfig
+            log("  effective iters=\(qcNow.baseFractalIterations) raySteps=\(qcNow.baseMaxRaySteps) "
+                + "resScale=\(settings.resolutionScale) shadows=\(settings.shadowsEnabled)")
 
             // Freeze animation phases + disable the auto color-scheme cycler for
             // the whole scene so measurement and capture are run-deterministic
@@ -228,6 +287,9 @@ enum MacBenchmarkHarness {
             }
         }
 
+        // Captured after the scene loop so QC overrides (applied per scene) are
+        // reflected in the recorded config.
+        let raymarch = PerfRaymarchConfig(from: settings.qualityConfig)
         writeOut(cfg: cfg, raymarch: raymarch, records: records)
         log("done → \(cfg.outPath)")
         try? await Task.sleep(for: .milliseconds(200))

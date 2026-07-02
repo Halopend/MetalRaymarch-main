@@ -30,19 +30,24 @@ final class RenderSettings: @unchecked Sendable {
     // Collapse the repetitive 4-line closure pattern into one-liners.
     
     /// Load a persisted Bool, returning `fallback` if the key has never been set.
+    /// (All four loaders return the code default under
+    /// `SettingsPersistence.benchmarkHermetic` — see that flag for why.)
     private static func loadBool(_ key: String, default fallback: Bool) -> Bool {
-        guard UserDefaults.standard.object(forKey: key) != nil else { return fallback }
+        guard !SettingsPersistence.benchmarkHermetic,
+              UserDefaults.standard.object(forKey: key) != nil else { return fallback }
         return UserDefaults.standard.bool(forKey: key)
     }
-    
+
     /// Load a persisted Float, returning `fallback` when the key has never been written.
     private static func loadFloat(_ key: String, default fallback: Float) -> Float {
-        guard UserDefaults.standard.object(forKey: key) != nil else { return fallback }
+        guard !SettingsPersistence.benchmarkHermetic,
+              UserDefaults.standard.object(forKey: key) != nil else { return fallback }
         return UserDefaults.standard.float(forKey: key)
     }
 
     private static func loadGestureBinding(_ key: String,
                                            default fallback: GestureActionBinding) -> GestureActionBinding {
+        guard !SettingsPersistence.benchmarkHermetic else { return fallback }
         let defaults = UserDefaults.standard
         if let data = defaults.data(forKey: key),
            let decoded = try? JSONDecoder().decode(GestureActionBinding.self, from: data) {
@@ -53,7 +58,8 @@ final class RenderSettings: @unchecked Sendable {
 
     private static func loadMusicReactiveMappings(_ key: String) -> [MusicReactiveMapping] {
         let defaults = UserDefaults.standard
-        if let data = defaults.data(forKey: key),
+        if !SettingsPersistence.benchmarkHermetic,
+           let data = defaults.data(forKey: key),
            let decoded = try? JSONDecoder().decode([MusicReactiveMapping].self, from: data) {
             return sanitizeMusicReactiveMappings(decoded)
         }
@@ -62,7 +68,8 @@ final class RenderSettings: @unchecked Sendable {
             MusicReactiveTarget.glow.defaultMapping(enabled: true),
             MusicReactiveTarget.fog.defaultMapping(enabled: true),
         ]
-        if let data = try? JSONEncoder().encode(defaultsList) {
+        if !SettingsPersistence.benchmarkHermetic,
+           let data = try? JSONEncoder().encode(defaultsList) {
             defaults.set(data, forKey: key)
         }
         return defaultsList
