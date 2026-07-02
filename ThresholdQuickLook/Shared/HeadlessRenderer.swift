@@ -224,7 +224,8 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
                     benchAblate: 0,
                     passthroughBackground: 0,
                     boundingFogEnabled: 0,
-                    boundingShadowDepth: 0)
+                    boundingShadowDepth: 0,
+                    boundingShapeType: 0)
 }
 
 // MARK: - Headless Metal render harness

@@ -383,6 +383,10 @@ typedef struct
     // Inner Shadow band width, as a fraction of boundingSphereRadius (0-1).
     // Only used while boundingFogEnabled == 2.
     float boundingShadowDepth;
+    // Bounding Shape family/preset — same encoding as safetyBubbleShape:
+    // 0...1 = sphere/cube morph, 2...6 = discrete platonic solids (see
+    // SafetyBubbleShapePreset). Feeds safetyBubbleDistance() directly.
+    float boundingShapeType;
 } Uniforms;
 
 typedef struct
@@ -5566,20 +5570,24 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         // Depth already written at start of this block via clipPos
         }
 
-        // Bounding Fog: fade hits out over the outer band of the bounding
-        // sphere so the clip reads as fog rather than a hard cut.
-        // Mode 1 (Ghost Fade) keeps the original fixed outer-third band —
-        // translucent, composited via outAlpha below. Mode 2 (Inner Shadow)
-        // uses an adjustable band (boundingShadowDepth) and stays opaque.
-        if (uniforms.boundingFogEnabled == 2 && uniforms.boundingSphereRadius > 0.0f) {
-            float rHit = length(p);
-            float depth = clamp(uniforms.boundingShadowDepth, 0.02f, 0.95f);
-            float innerEdge = uniforms.boundingSphereRadius * (1.0f - depth);
-            boundFade = half(1.0f - smoothstep(innerEdge, uniforms.boundingSphereRadius, rHit));
-        } else if (uniforms.boundingFogEnabled != 0 && uniforms.boundingSphereRadius > 0.0f) {
-            float rHit = length(p);
-            boundFade = half(1.0f - smoothstep(uniforms.boundingSphereRadius * 0.65f,
-                                               uniforms.boundingSphereRadius, rHit));
+        // Bounding: clip/fade hits against the selected Bounding Shape (sphere,
+        // cube, or a platonic solid — same shape family as the Safety Bubble,
+        // reusing its distance function). shapeDist is 0 at the shape's surface,
+        // negative inside, positive outside.
+        // Mode 0 (Off) hard-clips at the surface. Mode 1 (Ghost Fade) keeps the
+        // original fixed outer-third band — translucent, composited via outAlpha
+        // below. Mode 2 (Inner Shadow) uses an adjustable band
+        // (boundingShadowDepth) and stays opaque.
+        if (uniforms.boundingSphereRadius > 0.0f) {
+            float shapeDist = safetyBubbleDistance(p, float3(0.0f), uniforms.boundingSphereRadius, uniforms.boundingShapeType);
+            if (uniforms.boundingFogEnabled == 2) {
+                float depth = clamp(uniforms.boundingShadowDepth, 0.02f, 0.95f);
+                boundFade = half(1.0f - smoothstep(-uniforms.boundingSphereRadius * depth, 0.0f, shapeDist));
+            } else if (uniforms.boundingFogEnabled == 1) {
+                boundFade = half(1.0f - smoothstep(-uniforms.boundingSphereRadius * 0.35f, 0.0f, shapeDist));
+            } else {
+                boundFade = shapeDist > 0.0f ? 0.0h : 1.0h;
+            }
         }
     }
     else

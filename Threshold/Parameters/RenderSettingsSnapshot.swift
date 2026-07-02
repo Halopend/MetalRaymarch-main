@@ -52,6 +52,7 @@ struct RenderSettingsSnapshot {
     let boundingShapeRadius: Float
     let boundingShapeFogMode: Int
     let boundingShapeShadowDepth: Float
+    let boundingShapeType: Float
     let zoomFogCompensationEnabled: Bool
     let limitFlash: Float
     let activeGestureIndex: Int

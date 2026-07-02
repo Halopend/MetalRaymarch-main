@@ -135,6 +135,10 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // Only used while boundingShapeFogMode == 2 (Ghost Fade keeps a fixed band).
     var boundingShapeShadowDepth: Float = 0.35
 
+    // Bounding Shape family/preset — same encoding as SafetyBubbleConfig.shape:
+    // 0...1 = sphere/cube morph, 2...6 = discrete platonic solids.
+    var boundingShapeType: Float = 0.0
+
     // Zoom fog compensation: scale fog intensity down on zoom-out so the fog
     // sphere's world radius stays constant instead of swallowing the fractal.
     // Off = raw fog at every zoom (was hardcoded on for the Kleinian family).
@@ -146,6 +150,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         boundingShapeRadius = max(0.05, min(30.0, boundingShapeRadius))
         boundingShapeFogMode = boundingShapeFogMode.clamped(to: 0...2)
         boundingShapeShadowDepth = boundingShapeShadowDepth.clamped(to: 0.02...0.95)
+        boundingShapeType = boundingShapeType.clamped(to: 0.0...SafetyBubbleShapePreset.maxStoredValue)
         baseFractalIterations = baseFractalIterations.clamped(to: 2...24)
         baseMaxRaySteps = baseMaxRaySteps.clamped(to: 16...200)
         resolutionScale = resolutionScale.clamped(to: ControlCatalog.resolutionScale)
@@ -170,7 +175,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         case smartAdvanceEnabled, coneMarchStrength
         case overRelaxationMax, distanceLODStrength, shadowsEnabled, boundingSphereSkipEnabled, boundingShapeRadius
         case boundingShapeFogEnabled  // legacy Bool key, migrated into boundingShapeFogMode on decode
-        case boundingShapeFogMode, boundingShapeShadowDepth
+        case boundingShapeFogMode, boundingShapeShadowDepth, boundingShapeType
         case zoomFogCompensationEnabled
         case adaptiveRenderQualityEnabled
     }
@@ -205,6 +210,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
             boundingShapeFogMode = legacyFogEnabled ? 1 : 0
         }
         boundingShapeShadowDepth = try c.decodeIfPresent(Float.self, forKey: .boundingShapeShadowDepth) ?? 0.35
+        boundingShapeType = try c.decodeIfPresent(Float.self, forKey: .boundingShapeType) ?? 0.0
         zoomFogCompensationEnabled = try c.decodeIfPresent(Bool.self, forKey: .zoomFogCompensationEnabled) ?? false
         adaptiveRenderQualityEnabled = try c.decodeIfPresent(Bool.self, forKey: .adaptiveRenderQualityEnabled) ?? true
     }
@@ -233,6 +239,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         try c.encode(boundingShapeRadius, forKey: .boundingShapeRadius)
         try c.encode(boundingShapeFogMode, forKey: .boundingShapeFogMode)
         try c.encode(boundingShapeShadowDepth, forKey: .boundingShapeShadowDepth)
+        try c.encode(boundingShapeType, forKey: .boundingShapeType)
         try c.encode(zoomFogCompensationEnabled, forKey: .zoomFogCompensationEnabled)
         try c.encode(adaptiveRenderQualityEnabled, forKey: .adaptiveRenderQualityEnabled)
     }

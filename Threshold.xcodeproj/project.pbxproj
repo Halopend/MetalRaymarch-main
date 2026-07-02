@@ -43,6 +43,7 @@
 		4CEAD909CE739CAC4DA53FB1 /* MenuToggleGestureMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13E0E291C71A2ACF08D9B125 /* MenuToggleGestureMode.swift */; };
 		4D1917EA83801D257DFD0C48 /* PerFractalGestureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0699360DD28FC3B04D6FADBB /* PerFractalGestureStore.swift */; };
 		4EFA6DEAD08F625897C00F1A /* SafetyBubbleConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 794BF202BA7BBC02F4FB580F /* SafetyBubbleConfig.swift */; };
+		F78F895497B34B17AE8C7DBC /* HandAttractionConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C5C7E2D7B294CB5BAC955F4 /* HandAttractionConfig.swift */; };
 		522D0EBE5B4AD8DB253BD23B /* PreviewViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1131A122AD8E8C61F00CF65 /* PreviewViewController.swift */; };
 		57E6C682186713D4EFFFCDC9 /* FingerGestureAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9DF786ED3BC98E2F232D550 /* FingerGestureAction.swift */; };
 		583434B273EC906E48710819 /* RenderSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 725149DCC30BFBEC6B030A69 /* RenderSettings.swift */; };
@@ -77,6 +78,7 @@
 		9F0F14D9860FB847DC472B38 /* RendererMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = F769728D520A7B9927A98F93 /* RendererMath.swift */; };
 		A2DE4D640BCEBEE8E04E7BA9 /* ParameterTargetID.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D7A3D65630F4A3C1CADC20B /* ParameterTargetID.swift */; };
 		A49EED5D47CFEEEC9B2D0D66 /* SafetyBubbleConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 592A3385CBE68CE5E0CE2736 /* SafetyBubbleConfig.swift */; };
+		48DD30AFDC864E1A8827943A /* HandAttractionConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1BCB01768C3439E8FADC03A /* HandAttractionConfig.swift */; };
 		A9FCB5B990EE53439ED9FE83 /* Module.swift in Sources */ = {isa = PBXBuildFile; fileRef = A92085A1D3050F75ED8A6181 /* Module.swift */; };
 		AAD15F51E358FB97079A964D /* FormulaCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCC942C32813788F2922D732 /* FormulaCatalog.swift */; };
 		AC4F16D232DF53817715103D /* GestureDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF71849134C54AACB11F7F79 /* GestureDefaults.swift */; };
@@ -192,6 +194,7 @@
 		53952F29F6202ECF606B2D07 /* MusicReactiveTypes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MusicReactiveTypes.swift; path = Threshold/Audio/MusicReactiveTypes.swift; sourceTree = SOURCE_ROOT; };
 		5452116D4975BC87388B1C02 /* GradientColorSystem.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GradientColorSystem.swift; path = Threshold/Parameters/GradientColorSystem.swift; sourceTree = SOURCE_ROOT; };
 		592A3385CBE68CE5E0CE2736 /* SafetyBubbleConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SafetyBubbleConfig.swift; path = Threshold/Parameters/Config/SafetyBubbleConfig.swift; sourceTree = SOURCE_ROOT; };
+		E1BCB01768C3439E8FADC03A /* HandAttractionConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HandAttractionConfig.swift; path = Threshold/Parameters/Config/HandAttractionConfig.swift; sourceTree = SOURCE_ROOT; };
 		5B0B6169B9B8A1360E944DC7 /* QualityPreset.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = QualityPreset.swift; path = Threshold/Parameters/QualityPreset.swift; sourceTree = SOURCE_ROOT; };
 		5F147CA447647DC08A7270CB /* ControlSpec.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlSpec.swift; path = Threshold/Parameters/ControlSpec.swift; sourceTree = SOURCE_ROOT; };
 		6016FBED960DB946AF37F903 /* ModuleRegistry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ModuleRegistry.swift; path = Threshold/Parameters/ModuleRegistry.swift; sourceTree = SOURCE_ROOT; };
@@ -206,6 +209,7 @@
 		73C3366DC9A7B03E01CA6145 /* LightingConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LightingConfig.swift; path = Threshold/Parameters/Config/LightingConfig.swift; sourceTree = SOURCE_ROOT; };
 		77411092B7F9F5CDE50778EF /* catalog.json */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.json; name = catalog.json; path = Threshold/Formulas/catalog.json; sourceTree = SOURCE_ROOT; };
 		794BF202BA7BBC02F4FB580F /* SafetyBubbleConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SafetyBubbleConfig.swift; path = Threshold/Parameters/Config/SafetyBubbleConfig.swift; sourceTree = SOURCE_ROOT; };
+		0C5C7E2D7B294CB5BAC955F4 /* HandAttractionConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HandAttractionConfig.swift; path = Threshold/Parameters/Config/HandAttractionConfig.swift; sourceTree = SOURCE_ROOT; };
 		7D3E7246F6CB0F47DC18ED2B /* SpaceWarpStackModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SpaceWarpStackModel.swift; path = Threshold/Parameters/SpaceWarpStackModel.swift; sourceTree = SOURCE_ROOT; };
 		82382DEE190B80E008CB478A /* EmbeddedFormula.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmbeddedFormula.swift; path = Threshold/Formulas/EmbeddedFormula.swift; sourceTree = SOURCE_ROOT; };
 		84464F5A5A3EA90D108BE9DE /* Shaders.metal */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.metal; name = Shaders.metal; path = Threshold/Rendering/Shaders.metal; sourceTree = SOURCE_ROOT; };
@@ -432,6 +436,7 @@
 				0699360DD28FC3B04D6FADBB /* PerFractalGestureStore.swift */,
 				B0DB4C6D494E5C05AAEC692A /* QualityConfig.swift */,
 				592A3385CBE68CE5E0CE2736 /* SafetyBubbleConfig.swift */,
+				E1BCB01768C3439E8FADC03A /* HandAttractionConfig.swift */,
 				4B350E64C5F7F1096CBBB78A /* FingerGestureAction.swift */,
 				13E0E291C71A2ACF08D9B125 /* MenuToggleGestureMode.swift */,
 				FEA56106848E5205ACD6B14B /* MusicReactiveTypes.swift */,
@@ -482,6 +487,7 @@
 				B9C5FA648249DB0F2D05AE9A /* PerFractalGestureStore.swift */,
 				CB9355103B22F7838F0D27C4 /* QualityConfig.swift */,
 				794BF202BA7BBC02F4FB580F /* SafetyBubbleConfig.swift */,
+				0C5C7E2D7B294CB5BAC955F4 /* HandAttractionConfig.swift */,
 				A9DF786ED3BC98E2F232D550 /* FingerGestureAction.swift */,
 				3A9D8FADF5AEC88F8AD9BEB3 /* MenuToggleGestureMode.swift */,
 				53952F29F6202ECF606B2D07 /* MusicReactiveTypes.swift */,
@@ -808,6 +814,7 @@
 				860846B5E4E9C07801C319D1 /* PerFractalGestureStore.swift in Sources */,
 				741A24A6222F4DE84FC4340B /* QualityConfig.swift in Sources */,
 				4EFA6DEAD08F625897C00F1A /* SafetyBubbleConfig.swift in Sources */,
+				F78F895497B34B17AE8C7DBC /* HandAttractionConfig.swift in Sources */,
 				57E6C682186713D4EFFFCDC9 /* FingerGestureAction.swift in Sources */,
 				DAE738BAB47FB196A01860F6 /* MenuToggleGestureMode.swift in Sources */,
 				39502D1DFD77A81148277079 /* MusicReactiveTypes.swift in Sources */,
@@ -884,6 +891,7 @@
 				4D1917EA83801D257DFD0C48 /* PerFractalGestureStore.swift in Sources */,
 				8AB5B9DD36E23A6AB8158396 /* QualityConfig.swift in Sources */,
 				A49EED5D47CFEEEC9B2D0D66 /* SafetyBubbleConfig.swift in Sources */,
+				48DD30AFDC864E1A8827943A /* HandAttractionConfig.swift in Sources */,
 				DC91F33468E07387A410CE06 /* FingerGestureAction.swift in Sources */,
 				4CEAD909CE739CAC4DA53FB1 /* MenuToggleGestureMode.swift in Sources */,
 				1F0525301945DD5FAAC74A7A /* MusicReactiveTypes.swift in Sources */,

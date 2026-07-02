@@ -367,6 +367,10 @@ typedef struct
     // Inner Shadow band width, as a fraction of boundingSphereRadius (0-1).
     // Only used while boundingFogEnabled == 2.
     float boundingShadowDepth;
+    // Bounding Shape family/preset — same encoding as safetyBubbleShape:
+    // 0...1 = sphere/cube morph, 2...6 = discrete platonic solids (see
+    // SafetyBubbleShapePreset). Feeds safetyBubbleDistance() directly.
+    float boundingShapeType;
 } Uniforms;
 
 typedef struct

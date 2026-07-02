@@ -402,7 +402,8 @@ extension Renderer {
                             // the black background (see fragmentMain).
                             passthroughBackground: passthroughBackgroundActive ? 1 : 0,
                             boundingFogEnabled: Int32(settingsSnapshot.boundingShapeFogMode),
-                            boundingShadowDepth: settingsSnapshot.boundingShapeShadowDepth)
+                            boundingShadowDepth: settingsSnapshot.boundingShapeShadowDepth,
+                            boundingShapeType: settingsSnapshot.boundingShapeType)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)

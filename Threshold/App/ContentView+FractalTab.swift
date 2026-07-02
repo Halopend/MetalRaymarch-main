@@ -639,18 +639,72 @@ extension ContentView {
             HStack(spacing: 6) {
                 Image(systemName: "circle.dashed").foregroundStyle(.cyan)
                 Text("Bounding").font(.headline)
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { cache.quality.boundingSphereSkipEnabled },
+                    set: { v in
+                        cache.quality.boundingSphereSkipEnabled = v; cache.push(\.boundingSphereSkipEnabled, value: v)
+                    }
+                ))
+                .labelsHidden()
+                .help("Bounds the visible fractal to the shape below: rays that miss it skip the march entirely. Large sizes just cull background; tight sizes deliberately clip the fractal to the shape (nice for Mixed immersion).")
             }
 
-            accelToggleCompact("Bounding Shape",
-                        isOn: cache.quality.boundingSphereSkipEnabled,
-                        help: "Bounds the visible fractal to a sphere: rays that miss it skip the march entirely. Set the radius below — large values just cull background; tight values deliberately clip the fractal to the shape (nice for Mixed immersion).") { v in
-                cache.quality.boundingSphereSkipEnabled = v; cache.push(\.boundingSphereSkipEnabled, value: v)
-            }
+            let selectedBoundingFamily = SafetyBubbleShapePreset.family(for: cache.quality.boundingShapeType)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Bounding Shape"); Spacer()
+                    Picker("Bounding Shape", selection: Binding<SafetyBubbleShapeFamily>(
+                        get: { selectedBoundingFamily },
+                        set: { family in
+                            let newValue = SafetyBubbleShapePreset.storedValue(for: family, currentValue: cache.quality.boundingShapeType)
+                            cache.quality.boundingShapeType = newValue
+                            cache.push(\.boundingShapeType, value: newValue)
+                        }
+                    )) {
+                        ForEach(SafetyBubbleShapeFamily.allCases) { family in
+                            Text(family.rawValue).tag(family)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 260)
+                }
+                if selectedBoundingFamily == .platonic {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
+                        ForEach(SafetyBubbleShapePreset.platonicOptions) { preset in
+                            let isSelected = SafetyBubbleShapePreset(storedValue: cache.quality.boundingShapeType) == preset
 
-            accelSliderCompact("Bounding Radius",
+                            Button {
+                                cache.quality.boundingShapeType = preset.storedValue
+                                cache.push(\.boundingShapeType, value: preset.storedValue)
+                            } label: {
+                                Text(preset.displayName)
+                                    .font(.caption.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(isSelected ? Color.black : Color.primary)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(isSelected ? Color.white.opacity(0.88) : Color.white.opacity(0.08))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(isSelected ? 0.14 : 0.08), lineWidth: 1)
+                            )
+                        }
+                    }
+                }
+            }
+            .disabled(!cache.quality.boundingSphereSkipEnabled)
+            .opacity(cache.quality.boundingSphereSkipEnabled ? 1 : 0.45)
+
+            accelSliderCompact("Bounding Size",
                         value: cache.quality.boundingShapeRadius, range: 0.05...30,
                         display: String(format: "%.1f", cache.quality.boundingShapeRadius),
-                        help: "Radius of the bounding sphere in model units. Only active while Bounding Shape is on.") { v in
+                        help: "Size of the bounding shape in model units. Only active while Bounding is on.") { v in
                 cache.quality.boundingShapeRadius = v; cache.push(\.boundingShapeRadius, value: v)
             }
             .disabled(!cache.quality.boundingSphereSkipEnabled)

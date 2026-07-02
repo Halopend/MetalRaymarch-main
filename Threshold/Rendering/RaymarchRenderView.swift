@@ -1709,7 +1709,8 @@ final class ThresholdMacRenderer {
                         benchAblate: Self.benchAblateMode,
                         passthroughBackground: 0,
                         boundingFogEnabled: Int32(settings.boundingShapeFogMode),
-                        boundingShadowDepth: settings.boundingShapeShadowDepth)
+                        boundingShadowDepth: settings.boundingShapeShadowDepth,
+                        boundingShapeType: settings.boundingShapeType)
     }
 
     private static func buildRenderPipeline(device: MTLDevice,

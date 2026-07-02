@@ -205,6 +205,9 @@ final class RenderSettings: @unchecked Sendable {
     // the old "boundingShapeFogEnabled" Bool (true → Ghost Fade) when unset.
     private var _boundingShapeFogMode: Int = loadInt("boundingShapeFogMode", default: loadBool("boundingShapeFogEnabled", default: false) ? 1 : 0)
     private var _boundingShapeShadowDepth: Float = loadFloat("boundingShapeShadowDepth", default: 0.35)  // Inner Shadow band width, fraction of boundingShapeRadius
+    // Bounding Shape family/preset — same encoding as safetyBubbleShape (0...1 =
+    // sphere/cube morph, 2...6 = discrete platonic solids).
+    private var _boundingShapeType: Float = loadFloat("boundingShapeType", default: 0.0)
     private var _zoomFogCompensationEnabled: Bool = loadBool("zoomFogCompensationEnabled", default: false)  // scale fog intensity down on zoom-out so the fog sphere's world radius stays constant (was hardcoded on for Kleinian)
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
@@ -1316,6 +1319,16 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _boundingShapeShadowDepth } }
         set {
             withLock { _boundingShapeShadowDepth = max(0.02, min(0.95, newValue)) }
+            persistQuality()
+        }
+    }
+
+    /// Bounding Shape family/preset. 0...1 = sphere/cube morph (no rotation),
+    /// 2...6 select discrete platonic solids — same encoding as `safetyBubbleShape`.
+    var boundingShapeType: Float {
+        get { withLock { _boundingShapeType } }
+        set {
+            withLock { _boundingShapeType = max(0.0, min(SafetyBubbleShapePreset.maxStoredValue, newValue)) }
             persistQuality()
         }
     }
@@ -2437,6 +2450,7 @@ final class RenderSettings: @unchecked Sendable {
                 boundingShapeRadius: _boundingShapeRadius,
                 boundingShapeFogMode: _boundingShapeFogMode,
                 boundingShapeShadowDepth: _boundingShapeShadowDepth,
+                boundingShapeType: _boundingShapeType,
                 zoomFogCompensationEnabled: _zoomFogCompensationEnabled,
                 limitFlash: _limitFlash,
                 activeGestureIndex: _activeGestureIndex,
@@ -3762,6 +3776,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.boundingShapeRadius = _boundingShapeRadius
                 c.boundingShapeFogMode = _boundingShapeFogMode
                 c.boundingShapeShadowDepth = _boundingShapeShadowDepth
+                c.boundingShapeType = _boundingShapeType
                 c.zoomFogCompensationEnabled = _zoomFogCompensationEnabled
                 return c
             }
@@ -3794,6 +3809,7 @@ final class RenderSettings: @unchecked Sendable {
                 _boundingShapeRadius = max(0.05, min(30.0, newValue.boundingShapeRadius))
                 _boundingShapeFogMode = newValue.boundingShapeFogMode
                 _boundingShapeShadowDepth = newValue.boundingShapeShadowDepth
+                _boundingShapeType = max(0.0, min(SafetyBubbleShapePreset.maxStoredValue, newValue.boundingShapeType))
                 _zoomFogCompensationEnabled = newValue.zoomFogCompensationEnabled
             }
         }

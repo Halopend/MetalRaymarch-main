@@ -136,6 +136,7 @@ struct FractalPreset: Codable, Identifiable {
     var boundingShapeFogEnabled: Bool?    // legacy — migrated into boundingShapeFogMode on load
     var boundingShapeFogMode: Int?        // Bounding edge treatment: 0=off, 1=Ghost Fade, 2=Inner Shadow
     var boundingShapeShadowDepth: Float?  // Inner Shadow band width, fraction of boundingShapeRadius
+    var boundingShapeType: Float?         // Bounding Shape family/preset (sphere/cube/platonic), same encoding as safetyBubbleShape
     var platformRadius: Float?            // DisplayConfig — glass-floor size
     var cellShadingEnabled: Bool?         // ColorConfig — toon shading on/off
     var cellShadingLevels: Float?         // ColorConfig — toon banding levels
@@ -173,7 +174,7 @@ struct FractalPreset: Codable, Identifiable {
         // Additional scene state (previously dropped on save)
         case platformEnabled, platformRadius
         case mixedModeScene, boundingShapeEnabled, boundingShapeRadius, boundingShapeFogEnabled
-        case boundingShapeFogMode, boundingShapeShadowDepth
+        case boundingShapeFogMode, boundingShapeShadowDepth, boundingShapeType
         case cellShadingEnabled, cellShadingLevels, aoStrength, tonemapStrength
         case lightVariationRate, beatFlashEffect, polarRotationEffect, juliaDriftEffect
         case safetyBubbleFadeEnabled, safetyBubbleFadeWidth
@@ -362,6 +363,7 @@ struct FractalPreset: Codable, Identifiable {
         boundingShapeFogEnabled = try container.decodeIfPresent(Bool.self, forKey: .boundingShapeFogEnabled)
         boundingShapeFogMode = try container.decodeIfPresent(Int.self, forKey: .boundingShapeFogMode)
         boundingShapeShadowDepth = try container.decodeIfPresent(Float.self, forKey: .boundingShapeShadowDepth)
+        boundingShapeType = try container.decodeIfPresent(Float.self, forKey: .boundingShapeType)
         platformRadius = try container.decodeIfPresent(Float.self, forKey: .platformRadius)
         cellShadingEnabled = try container.decodeIfPresent(Bool.self, forKey: .cellShadingEnabled)
         cellShadingLevels = try container.decodeIfPresent(Float.self, forKey: .cellShadingLevels)
@@ -458,6 +460,7 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(boundingShapeRadius, forKey: .boundingShapeRadius)
         try container.encodeIfPresent(boundingShapeFogMode, forKey: .boundingShapeFogMode)
         try container.encodeIfPresent(boundingShapeShadowDepth, forKey: .boundingShapeShadowDepth)
+        try container.encodeIfPresent(boundingShapeType, forKey: .boundingShapeType)
         try container.encodeIfPresent(platformRadius, forKey: .platformRadius)
         try container.encodeIfPresent(cellShadingEnabled, forKey: .cellShadingEnabled)
         try container.encodeIfPresent(cellShadingLevels, forKey: .cellShadingLevels)
@@ -651,6 +654,7 @@ struct FractalPreset: Codable, Identifiable {
         preset.boundingShapeRadius = settings.boundingShapeRadius
         preset.boundingShapeFogMode = settings.boundingShapeFogMode
         preset.boundingShapeShadowDepth = settings.boundingShapeShadowDepth
+        preset.boundingShapeType = settings.boundingShapeType
         // Mixed-immersion scene marker (visionOS): recorded only when the scene
         // is saved while Mixed is active, so loading it can restore the
         // passthrough presentation. Full/Partial saves leave it nil and loading
@@ -834,6 +838,9 @@ struct FractalPreset: Codable, Identifiable {
         }
         if let boundingShapeShadowDepth = boundingShapeShadowDepth {
             settings.boundingShapeShadowDepth = boundingShapeShadowDepth
+        }
+        if let boundingShapeType = boundingShapeType {
+            settings.boundingShapeType = boundingShapeType
         }
 
         // Mixed-immersion scene (visionOS): switch the presentation style to
