@@ -984,6 +984,8 @@ struct ContentView: View {
             return topDockTab == .explore && exploreRailSection == .musicReactive && selectedTab != .gestures && selectedTab != .settings
         case .exploreAnimated:
             return topDockTab == .explore && exploreRailSection == .animated && selectedTab != .gestures && selectedTab != .settings
+        case .exploreMixed:
+            return topDockTab == .explore && exploreRailSection == .mixed && selectedTab != .gestures && selectedTab != .settings
         case .exploreCustomScenes:
             return topDockTab == .explore && exploreRailSection == .customScenes && selectedTab != .gestures && selectedTab != .settings
         case .shapeParameters:
@@ -1030,6 +1032,8 @@ struct ContentView: View {
                 activateExploreSection(.musicReactive)
             case .exploreAnimated:
                 activateExploreSection(.animated)
+            case .exploreMixed:
+                activateExploreSection(.mixed)
             case .exploreCustomScenes:
                 activateExploreSection(.customScenes)
             case .shapeParameters:
@@ -1073,6 +1077,7 @@ struct ContentView: View {
         case .jumpingOff: return .exploreJumpingOff
         case .musicReactive: return .exploreMusicReactive
         case .animated: return .exploreAnimated
+        case .mixed: return .exploreMixed
         case .customScenes: return .exploreCustomScenes
         }
     }

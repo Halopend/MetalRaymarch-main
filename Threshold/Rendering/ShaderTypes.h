@@ -344,6 +344,12 @@ typedef struct
     // visionOS. Glow/fog on miss pixels stays in RGB, which composites
     // additively over passthrough under premultiplied alpha. 0 everywhere else.
     int passthroughBackground;
+
+    // 1 = fade surfaces out near the bounding-shape boundary instead of a hard
+    // clip (Bounding Fog toggle). Fades RGB (and alpha, when
+    // passthroughBackground is set) over the outer ~third of the sphere.
+    // Only meaningful while boundingSphereRadius > 0.
+    int boundingFogEnabled;
 } Uniforms;
 
 typedef struct

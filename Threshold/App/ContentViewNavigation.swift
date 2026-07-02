@@ -61,6 +61,7 @@ enum ExploreRailSection: String, CaseIterable {
     case jumpingOff = "Jumping Off"
     case musicReactive = "Music Reactive"
     case animated = "Animated"
+    case mixed = "Mixed"
     case customScenes = "Custom Scenes"
 
     var icon: String {
@@ -68,6 +69,7 @@ enum ExploreRailSection: String, CaseIterable {
         case .jumpingOff: return "photo.on.rectangle.angled"
         case .musicReactive: return "waveform"
         case .animated: return "film.stack"
+        case .mixed: return "circle.dashed.inset.filled"
         case .customScenes: return "chevron.left.forwardslash.chevron.right"
         }
     }
@@ -77,6 +79,7 @@ enum ExploreRailSection: String, CaseIterable {
         case .jumpingOff: return .jumpingOff
         case .musicReactive: return .musicReactive
         case .animated: return .animated
+        case .mixed: return .mixed
         case .customScenes: return .customScenes
         }
     }
@@ -201,6 +204,7 @@ enum PinnedRailControl: String, CaseIterable {
     case exploreJumpingOff
     case exploreMusicReactive
     case exploreAnimated
+    case exploreMixed
     case exploreCustomScenes
     case shapeParameters
     case shapeFormula
@@ -224,6 +228,7 @@ enum PinnedRailControl: String, CaseIterable {
         case .exploreJumpingOff: return ExploreRailSection.jumpingOff.rawValue
         case .exploreMusicReactive: return ExploreRailSection.musicReactive.rawValue
         case .exploreAnimated: return ExploreRailSection.animated.rawValue
+        case .exploreMixed: return ExploreRailSection.mixed.rawValue
         case .exploreCustomScenes: return ExploreRailSection.customScenes.rawValue
         case .shapeParameters: return ShapeRailSection.parameters.rawValue
         case .shapeFormula: return ShapeRailSection.formula.rawValue
@@ -249,6 +254,7 @@ enum PinnedRailControl: String, CaseIterable {
         case .exploreJumpingOff: return ExploreRailSection.jumpingOff.icon
         case .exploreMusicReactive: return ExploreRailSection.musicReactive.icon
         case .exploreAnimated: return ExploreRailSection.animated.icon
+        case .exploreMixed: return ExploreRailSection.mixed.icon
         case .exploreCustomScenes: return ExploreRailSection.customScenes.icon
         case .shapeParameters: return ShapeRailSection.parameters.icon
         case .shapeFormula: return ShapeRailSection.formula.icon

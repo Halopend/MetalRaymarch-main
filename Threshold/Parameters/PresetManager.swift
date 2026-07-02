@@ -397,6 +397,7 @@ extension PresetManager {
 
         for ext in sceneExts {
             sceneURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Scenes") ?? []
+            sceneURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Mixed") ?? []
             sceneURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: nil) ?? []
         }
         for ext in musicExts {
@@ -439,14 +440,33 @@ extension PresetManager {
         for url in allURLs {
             do {
                 let data = try Data(contentsOf: url)
-                let preset = try decoder.decode(FractalPreset.self, from: data)
+                var preset = try decoder.decode(FractalPreset.self, from: data)
+                // Scenes shipped under Examples/Mixed are authored for Mixed
+                // immersion: mark them even when the file predates the
+                // mixedModeScene field, so loading one switches the headset to
+                // Mixed and they populate the Mixed browse section.
+                if url.pathComponents.contains("Mixed") {
+                    preset.mixedModeScene = true
+                }
                 presets.append(preset)
             } catch {
                 print("⚠️ DefaultPresets: failed to decode \(url.lastPathComponent) — \(error)")
             }
         }
-        print("ℹ️ DefaultPresets: successfully decoded \(presets.count) preset(s)")
-        return presets
+        // The multi-location scan can find the same file both in its Examples
+        // subdirectory and flattened at the bundle root. Dedupe by preset id,
+        // letting a Mixed-marked copy win regardless of scan order.
+        let mixedIDs = Set(presets.filter { $0.mixedModeScene == true }.map(\.id))
+        var seenIDs = Set<UUID>()
+        var uniquePresets: [FractalPreset] = []
+        for var preset in presets where seenIDs.insert(preset.id).inserted {
+            if mixedIDs.contains(preset.id) {
+                preset.mixedModeScene = true
+            }
+            uniquePresets.append(preset)
+        }
+        print("ℹ️ DefaultPresets: successfully decoded \(uniquePresets.count) unique preset(s) (\(mixedIDs.count) mixed-mode)")
+        return uniquePresets
     }
     
     /// Clean Mandelbox at the default/reset position, used as the first-launch

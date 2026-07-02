@@ -582,11 +582,28 @@ extension ContentView {
                     cache.quality.coarsePrepassWarmStartEnabled = v; cache.push(\.coarsePrepassWarmStartEnabled, value: v)
                 }
 
-                accelToggleCompact("Bounding Skip",
+                accelToggleCompact("Bounding Shape",
                             isOn: cache.quality.boundingSphereSkipEnabled,
-                            help: "Rays that miss a sphere enclosing the fractal skip the march entirely. Uses a generous bound, so it mainly culls background; sprawling fractals (Kleinian, large folds) may clip — experimental.") { v in
+                            help: "Bounds the visible fractal to a sphere: rays that miss it skip the march entirely. Set the radius below — large values just cull background; tight values deliberately clip the fractal to the shape (nice for Mixed immersion).") { v in
                     cache.quality.boundingSphereSkipEnabled = v; cache.push(\.boundingSphereSkipEnabled, value: v)
                 }
+
+                accelSliderCompact("Bounding Radius",
+                            value: cache.quality.boundingShapeRadius, range: 0.5...30,
+                            display: String(format: "%.1f", cache.quality.boundingShapeRadius),
+                            help: "Radius of the bounding sphere in model units. Only active while Bounding Shape is on.") { v in
+                    cache.quality.boundingShapeRadius = v; cache.push(\.boundingShapeRadius, value: v)
+                }
+                .disabled(!cache.quality.boundingSphereSkipEnabled)
+                .opacity(cache.quality.boundingSphereSkipEnabled ? 1 : 0.45)
+
+                accelToggleCompact("Bounding Fog",
+                            isOn: cache.quality.boundingShapeFogEnabled,
+                            help: "Fades the fractal out near the bounding shape's edge instead of a hard clip. In Partial/Mixed immersion the fade goes to passthrough.") { v in
+                    cache.quality.boundingShapeFogEnabled = v; cache.push(\.boundingShapeFogEnabled, value: v)
+                }
+                .disabled(!cache.quality.boundingSphereSkipEnabled)
+                .opacity(cache.quality.boundingSphereSkipEnabled ? 1 : 0.45)
             }
         }
         .padding()

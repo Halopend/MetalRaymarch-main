@@ -49,6 +49,8 @@ struct RenderSettingsSnapshot {
     let distanceLODStrength: Float
     let shadowsEnabled: Bool
     let boundingSphereSkipEnabled: Bool
+    let boundingShapeRadius: Float
+    let boundingShapeFogEnabled: Bool
     let limitFlash: Float
     let activeGestureIndex: Int
     let safetyBubbleEnabled: Bool
@@ -94,13 +96,12 @@ extension RenderSettingsSnapshot {
         tileSize == 8
     }
 
-    /// Bounding sphere (model space) used by the empty-space-skip in the march.
-    /// 0 disables it. When the experimental skip is enabled we feed a generous
-    /// fixed radius: the box/bulb fractal families sit within a few model units of
-    /// the origin, so this rarely clips while still letting rays that miss it (or
-    /// approach from outside) skip the march. Sprawling families (Kleinian, large
-    /// folds) may clip — hence experimental + off by default.
+    /// Bounding shape (sphere, model space) used by the march. 0 disables it.
+    /// When enabled, rays that miss the sphere skip the march — bounding the
+    /// visible fractal to the shape. The radius is user-set (Bounding Shape
+    /// control); the 6.0 default is generous for box/bulb families, tighter
+    /// values deliberately clip the fractal (e.g. for Mixed-immersion scenes).
     var estimatedBoundingSphereRadius: Float {
-        boundingSphereSkipEnabled ? 6.0 : 0.0
+        boundingSphereSkipEnabled ? boundingShapeRadius : 0.0
     }
 }

@@ -192,6 +192,8 @@ final class RenderSettings: @unchecked Sendable {
     private var _distanceLODStrength: Float = loadFloat("distanceLODStrength", default: 0.0)  // 0 = off; drops fractal iterations on faraway samples
     private var _shadowsEnabled: Bool = loadBool("shadowsEnabled", default: true)  // false skips the two per-pixel shadow marches
     private var _boundingSphereSkipEnabled: Bool = loadBool("boundingSphereSkipEnabled", default: false)  // reject rays that miss the fractal's bounding sphere
+    private var _boundingShapeRadius: Float = loadFloat("boundingShapeRadius", default: 6.0)  // bounding shape (sphere) radius, model units
+    private var _boundingShapeFogEnabled: Bool = loadBool("boundingShapeFogEnabled", default: false)  // soft fog fade at the bounding-shape edge instead of a hard clip
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
     // HUD display
@@ -1257,12 +1259,34 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    /// Bounding-sphere empty-space skip. When true the uniform builders feed a
-    /// generous enclosing radius so rays that miss it skip the march entirely.
+    /// Bounding Shape (sphere for now). When true the uniform builders feed
+    /// `boundingShapeRadius` so rays that miss the sphere skip the march
+    /// entirely — bounding the visible fractal to the shape.
     var boundingSphereSkipEnabled: Bool {
         get { withLock { _boundingSphereSkipEnabled } }
         set {
             withLock { _boundingSphereSkipEnabled = newValue }
+            persistQuality()
+        }
+    }
+
+    /// Radius of the bounding shape in model units. Only takes effect while
+    /// `boundingSphereSkipEnabled` is on.
+    var boundingShapeRadius: Float {
+        get { withLock { _boundingShapeRadius } }
+        set {
+            withLock { _boundingShapeRadius = max(0.5, min(30.0, newValue)) }
+            persistQuality()
+        }
+    }
+
+    /// Bounding Fog: fade surfaces out over the outer band of the bounding
+    /// shape instead of a hard clip. Only takes effect while
+    /// `boundingSphereSkipEnabled` is on.
+    var boundingShapeFogEnabled: Bool {
+        get { withLock { _boundingShapeFogEnabled } }
+        set {
+            withLock { _boundingShapeFogEnabled = newValue }
             persistQuality()
         }
     }
@@ -2342,6 +2366,8 @@ final class RenderSettings: @unchecked Sendable {
                 distanceLODStrength: _distanceLODStrength,
                 shadowsEnabled: _shadowsEnabled,
                 boundingSphereSkipEnabled: _boundingSphereSkipEnabled,
+                boundingShapeRadius: _boundingShapeRadius,
+                boundingShapeFogEnabled: _boundingShapeFogEnabled,
                 limitFlash: _limitFlash,
                 activeGestureIndex: _activeGestureIndex,
                 safetyBubbleEnabled: _safetyBubbleEnabled,
@@ -3654,6 +3680,8 @@ final class RenderSettings: @unchecked Sendable {
                 c.distanceLODStrength = _distanceLODStrength
                 c.shadowsEnabled = _shadowsEnabled
                 c.boundingSphereSkipEnabled = _boundingSphereSkipEnabled
+                c.boundingShapeRadius = _boundingShapeRadius
+                c.boundingShapeFogEnabled = _boundingShapeFogEnabled
                 return c
             }
         }
@@ -3682,6 +3710,8 @@ final class RenderSettings: @unchecked Sendable {
                 _distanceLODStrength = max(0.0, min(1.0, newValue.distanceLODStrength))
                 _shadowsEnabled = newValue.shadowsEnabled
                 _boundingSphereSkipEnabled = newValue.boundingSphereSkipEnabled
+                _boundingShapeRadius = max(0.5, min(30.0, newValue.boundingShapeRadius))
+                _boundingShapeFogEnabled = newValue.boundingShapeFogEnabled
             }
         }
     }

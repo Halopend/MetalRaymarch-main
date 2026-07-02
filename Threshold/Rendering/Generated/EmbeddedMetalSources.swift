@@ -360,6 +360,12 @@ typedef struct
     // visionOS. Glow/fog on miss pixels stays in RGB, which composites
     // additively over passthrough under premultiplied alpha. 0 everywhere else.
     int passthroughBackground;
+
+    // 1 = fade surfaces out near the bounding-shape boundary instead of a hard
+    // clip (Bounding Fog toggle). Fades RGB (and alpha, when
+    // passthroughBackground is set) over the outer ~third of the sphere.
+    // Only meaningful while boundingSphereRadius > 0.
+    int boundingFogEnabled;
 } Uniforms;
 
 typedef struct
@@ -4237,9 +4243,11 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, Preco
     half vignetteBase = max(16.0h * q.x * q.y, kPowEpsilonHalf);
     rgb *= 0.5h + 0.5h * powr(vignetteBase, 0.2h);
     
-    // Limit flash effect - bright edge glow when parameter hits min/max
+    // Limit flash effect - edge glow when parameter hits min/max. The limit
+    // flash is deliberately subtle (scaled well below the beat flash): a faint
+    // translucent edge cue, not a screen takeover.
     half beatFlash = scheme.beatFlashEnabled ? beat * half(scheme.beatFlashIntensity) : 0.0h;
-    half combinedFlash = max(limitFlash, beatFlash);
+    half combinedFlash = max(limitFlash * 0.35h, beatFlash);
     if (combinedFlash > 0.01h) {
         half2 edgeDist = abs(xy - 0.5h) * 2.0h;
         half edge = max(edgeDist.x, edgeDist.y);
@@ -5370,6 +5378,9 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     half3 col = half3(0.0h);
     float2 ret;
     OrbitCache hitCache = makeEmptyOrbitCache();
+    // Bounding Fog: 1 = untouched; falls toward 0 as the hit point approaches
+    // the bounding-shape boundary (soft fade instead of the hard sphere clip).
+    half boundFade = 1.0h;
 
     // === TEMPORAL DEPTH WARM-START ===
     // When the caller reprojected a valid previous-frame hit distance, march a
@@ -5454,6 +5465,14 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         }
         // Depth already written at start of this block via clipPos
         }
+
+        // Bounding Fog: fade hits out over the outer band of the bounding
+        // sphere so the clip reads as fog rather than a hard cut.
+        if (uniforms.boundingFogEnabled != 0 && uniforms.boundingSphereRadius > 0.0f) {
+            float rHit = length(p);
+            boundFade = half(1.0f - smoothstep(uniforms.boundingSphereRadius * 0.65f,
+                                               uniforms.boundingSphereRadius, rHit));
+        }
     }
     else
     {
@@ -5468,6 +5487,12 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     col = clampColor(col);
 
     col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), glow);
+
+    // Bounding Fog: applied before the floor circle / spring blob composite so
+    // those overlays stay at full strength. Fades to black in Full immersion;
+    // combined with the alpha fade below it fades to passthrough in
+    // Partial/Mixed.
+    col *= boundFade;
 
     FloorCircleHit floorHit = evaluateFloorCircle(cameraPos, rd, ret.x, uniforms.floorPlane, uniforms.floorCenterRadius);
     col = compositeFloorCircle(col, floorHit);
@@ -5488,8 +5513,14 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     // passthrough, preserving the glow halo around the fractal. Floor-circle
     // pixels count as hits.
     float outAlpha = 1.0f;
-    if (uniforms.passthroughBackground != 0 && ret.x >= kRayMissThreshold && floorHit.alpha <= 0.0f) {
-        outAlpha = 0.0f;
+    if (uniforms.passthroughBackground != 0) {
+        if (ret.x >= kRayMissThreshold && floorHit.alpha <= 0.0f) {
+            outAlpha = 0.0f;
+        } else {
+            // Bounding Fog: hits near the boundary fade to transparent
+            // (boundFade is 1 when the fog toggle is off or the ray missed).
+            outAlpha = float(boundFade);
+        }
     }
     output.color = float4(float3(col), outAlpha);
     return output;

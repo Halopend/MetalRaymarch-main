@@ -222,7 +222,7 @@ extension ContentView {
             QuickToggleRow("Self-Shadows", "moon", home: .shapePerformance,
                 get: { cache.quality.shadowsEnabled },
                 set: { cache.quality.shadowsEnabled = $0; cache.push(\.shadowsEnabled, value: $0) }),
-            QuickToggleRow("Bounding Sphere Skip", "circle.dashed", home: .shapePerformance,
+            QuickToggleRow("Bounding Shape", "circle.dashed", home: .shapePerformance,
                 get: { cache.quality.boundingSphereSkipEnabled },
                 set: { cache.quality.boundingSphereSkipEnabled = $0; cache.push(\.boundingSphereSkipEnabled, value: $0) }),
         ]

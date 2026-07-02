@@ -62,6 +62,10 @@ extension Renderer {
             -simd_dot(floorNormalModel, floorCenterModel)
         )
 
+        guard platformRadius > 0 else {
+            // Disabled: zero radius makes evaluateFloorCircle bail immediately.
+            return (SIMD4<Float>(0, 1, 0, 0), SIMD4<Float>(0, 0, 0, 0))
+        }
         let floorRadiusMeters = max(0.5, platformRadius)
         let floorRadiusModel = floorRadiusMeters / max(effectiveScale, 0.001)
         let floorCenterRadius = SIMD4<Float>(floorCenterModel.x, floorCenterModel.y, floorCenterModel.z, floorRadiusModel)
@@ -112,11 +116,17 @@ extension Renderer {
 
         // Use raw device anchor transform (no smoothing) to ensure compositor-predicted pose is used
         let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
+        // Glass-floor platform: honor the user toggle, and force it off in
+        // Mixed immersion — the real floor is visible there, so a virtual
+        // platform floating over passthrough is just clutter. Radius <= 0
+        // disables the circle in makeFloorCircleUniforms/the shader.
+        let platformVisible = settingsSnapshot.platformEnabled
+            && appModel.immersionStyleForRenderer != .mixed
         let floorCircle = Self.makeFloorCircleUniforms(
             modelMatrix: modelMatrix,
             effectiveScale: effectiveScale,
             deviceTransform: deviceTransform,
-            platformRadius: settingsSnapshot.platformRadius
+            platformRadius: platformVisible ? settingsSnapshot.platformRadius : 0
         )
 
         // One-time logging of device anchor to verify position tracking is working
@@ -296,7 +306,8 @@ extension Renderer {
                             // Partial/Mixed immersion: miss rays write alpha 0
                             // so the compositor shows passthrough instead of
                             // the black background (see fragmentMain).
-                            passthroughBackground: passthroughBackgroundActive ? 1 : 0)
+                            passthroughBackground: passthroughBackgroundActive ? 1 : 0,
+                            boundingFogEnabled: settingsSnapshot.boundingShapeFogEnabled ? 1 : 0)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)

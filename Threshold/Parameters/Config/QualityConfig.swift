@@ -94,9 +94,16 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // geometry. Experimental.
     var boundingSphereSkipEnabled: Bool = false
 
+    // Bounding shape (sphere) radius in model units; used while the skip is on.
+    var boundingShapeRadius: Float = 6.0
+
+    // Soft fog fade at the bounding-shape edge instead of a hard clip.
+    var boundingShapeFogEnabled: Bool = false
+
     // MARK: - Validation
 
     mutating func clamp() {
+        boundingShapeRadius = max(0.5, min(30.0, boundingShapeRadius))
         baseFractalIterations = baseFractalIterations.clamped(to: 2...24)
         baseMaxRaySteps = baseMaxRaySteps.clamped(to: 16...200)
         resolutionScale = resolutionScale.clamped(to: ControlCatalog.resolutionScale)
@@ -119,7 +126,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         case resolutionScale, renderQuality, tileSize
         case debugHierarchical, coherentPacketEnabled, computeTemporalReprojectionEnabled, coarsePrepassWarmStartEnabled, foveationStrength
         case smartAdvanceEnabled, coneMarchStrength
-        case overRelaxationMax, distanceLODStrength, shadowsEnabled, boundingSphereSkipEnabled
+        case overRelaxationMax, distanceLODStrength, shadowsEnabled, boundingSphereSkipEnabled, boundingShapeRadius, boundingShapeFogEnabled
         case adaptiveRenderQualityEnabled
     }
 
@@ -144,6 +151,8 @@ struct QualityConfig: Codable, Equatable, Sendable {
         distanceLODStrength   = try c.decodeIfPresent(Float.self, forKey: .distanceLODStrength)   ?? 0.0
         shadowsEnabled        = try c.decodeIfPresent(Bool.self,  forKey: .shadowsEnabled)        ?? true
         boundingSphereSkipEnabled = try c.decodeIfPresent(Bool.self, forKey: .boundingSphereSkipEnabled) ?? false
+        boundingShapeRadius   = try c.decodeIfPresent(Float.self, forKey: .boundingShapeRadius)   ?? 6.0
+        boundingShapeFogEnabled = try c.decodeIfPresent(Bool.self, forKey: .boundingShapeFogEnabled) ?? false
         adaptiveRenderQualityEnabled = try c.decodeIfPresent(Bool.self, forKey: .adaptiveRenderQualityEnabled) ?? true
     }
 }

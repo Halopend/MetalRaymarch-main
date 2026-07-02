@@ -130,6 +130,10 @@ struct FractalPreset: Codable, Identifiable {
     // (QualityConfig) are intentionally NOT included: a scene must not force
     // foveation/cone-march/etc. onto another device.
     var platformEnabled: Bool?            // DisplayConfig — glass-floor on/off
+    var mixedModeScene: Bool?             // visionOS — scene authored for Mixed immersion (passthrough background); nil for Full/Partial
+    var boundingShapeEnabled: Bool?       // Bounding Shape (sphere) clip on/off
+    var boundingShapeRadius: Float?       // Bounding Shape radius, model units
+    var boundingShapeFogEnabled: Bool?    // Bounding Fog — soft fade at the shape edge
     var platformRadius: Float?            // DisplayConfig — glass-floor size
     var cellShadingEnabled: Bool?         // ColorConfig — toon shading on/off
     var cellShadingLevels: Float?         // ColorConfig — toon banding levels
@@ -166,6 +170,7 @@ struct FractalPreset: Codable, Identifiable {
         case schemaVersion, modules // module layer (typed/keyed params)
         // Additional scene state (previously dropped on save)
         case platformEnabled, platformRadius
+        case mixedModeScene, boundingShapeEnabled, boundingShapeRadius, boundingShapeFogEnabled
         case cellShadingEnabled, cellShadingLevels, aoStrength, tonemapStrength
         case lightVariationRate, beatFlashEffect, polarRotationEffect, juliaDriftEffect
         case safetyBubbleFadeEnabled, safetyBubbleFadeWidth
@@ -348,6 +353,10 @@ struct FractalPreset: Codable, Identifiable {
 
         // Additional scene state (previously dropped) — all optional/backward-compatible.
         platformEnabled = try container.decodeIfPresent(Bool.self, forKey: .platformEnabled)
+        mixedModeScene = try container.decodeIfPresent(Bool.self, forKey: .mixedModeScene)
+        boundingShapeEnabled = try container.decodeIfPresent(Bool.self, forKey: .boundingShapeEnabled)
+        boundingShapeRadius = try container.decodeIfPresent(Float.self, forKey: .boundingShapeRadius)
+        boundingShapeFogEnabled = try container.decodeIfPresent(Bool.self, forKey: .boundingShapeFogEnabled)
         platformRadius = try container.decodeIfPresent(Float.self, forKey: .platformRadius)
         cellShadingEnabled = try container.decodeIfPresent(Bool.self, forKey: .cellShadingEnabled)
         cellShadingLevels = try container.decodeIfPresent(Float.self, forKey: .cellShadingLevels)
@@ -439,6 +448,10 @@ struct FractalPreset: Codable, Identifiable {
 
         // Additional scene state (previously dropped on save)
         try container.encodeIfPresent(platformEnabled, forKey: .platformEnabled)
+        try container.encodeIfPresent(mixedModeScene, forKey: .mixedModeScene)
+        try container.encodeIfPresent(boundingShapeEnabled, forKey: .boundingShapeEnabled)
+        try container.encodeIfPresent(boundingShapeRadius, forKey: .boundingShapeRadius)
+        try container.encodeIfPresent(boundingShapeFogEnabled, forKey: .boundingShapeFogEnabled)
         try container.encodeIfPresent(platformRadius, forKey: .platformRadius)
         try container.encodeIfPresent(cellShadingEnabled, forKey: .cellShadingEnabled)
         try container.encodeIfPresent(cellShadingLevels, forKey: .cellShadingLevels)
@@ -627,6 +640,19 @@ struct FractalPreset: Codable, Identifiable {
         // Glass-floor platform (previously dropped).
         preset.platformEnabled = disp.platformEnabled
         preset.platformRadius = disp.platformRadius
+        // Bounding Shape (sphere) — artistic clip, round-trips with the scene.
+        preset.boundingShapeEnabled = settings.boundingSphereSkipEnabled
+        preset.boundingShapeRadius = settings.boundingShapeRadius
+        preset.boundingShapeFogEnabled = settings.boundingShapeFogEnabled
+        // Mixed-immersion scene marker (visionOS): recorded only when the scene
+        // is saved while Mixed is active, so loading it can restore the
+        // passthrough presentation. Full/Partial saves leave it nil and loading
+        // never *exits* Mixed — the user controls that from the picker.
+        #if os(visionOS)
+        if AppModel.shared?.immersionStyleForRenderer == .mixed {
+            preset.mixedModeScene = true
+        }
+        #endif
         // Composable domain-transform stack (Transformations section). Direct
         // RenderSettings property, not in DisplayConfig. Empty array → nil so older
         // readers and round-trips stay clean.
@@ -785,6 +811,28 @@ struct FractalPreset: Codable, Identifiable {
         if let platformRadius = platformRadius {
             settings.platformRadius = platformRadius
         }
+
+        // Bounding Shape (sphere) — restore when present (older scenes leave it as-is).
+        if let boundingShapeEnabled = boundingShapeEnabled {
+            settings.boundingSphereSkipEnabled = boundingShapeEnabled
+        }
+        if let boundingShapeRadius = boundingShapeRadius {
+            settings.boundingShapeRadius = boundingShapeRadius
+        }
+        if let boundingShapeFogEnabled = boundingShapeFogEnabled {
+            settings.boundingShapeFogEnabled = boundingShapeFogEnabled
+        }
+
+        // Mixed-immersion scene (visionOS): switch the presentation style to
+        // Mixed when the scene was authored for it. Never switches *away* from
+        // Mixed — that stays a user choice in the immersion picker.
+        #if os(visionOS)
+        if mixedModeScene == true {
+            Task { @MainActor in
+                AppModel.shared?.immersionStylePreference = .mixed
+            }
+        }
+        #endif
 
         // v2.0 modular lighting effects
         if let lightingMode = lightingMode {

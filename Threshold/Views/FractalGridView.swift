@@ -11,6 +11,7 @@ enum FractalBrowseTab: String, CaseIterable {
     case jumpingOff = "Jumping Off"
     case musicReactive = "Music Reactive"
     case animated = "Animated"
+    case mixed = "Mixed"
     case customScenes = "Custom Scenes"
 }
 
@@ -123,6 +124,11 @@ struct FractalGridView: View {
                     case .animated:
                         if let animationManager {
                             animatedScenesGrid(animationManager)
+                        }
+
+                    case .mixed:
+                        if let animationManager {
+                            mixedScenesGrid(animationManager)
                         }
 
                     case .customScenes:
@@ -279,6 +285,52 @@ struct FractalGridView: View {
     }
 
     @ViewBuilder
+    private func mixedScenesGrid(_ animationManager: AnimationManager) -> some View {
+        let staticScenePresets = mixedScenePresets()
+        let activeSelection = currentSceneSelection(
+            currentScene: animationManager.currentScene,
+            visibleAnimationScenes: [],
+            staticScenePresets: staticScenePresets
+        )
+
+        VStack(alignment: .leading, spacing: 10) {
+            browserHeader(
+                title: "Mixed",
+                systemImage: "circle.dashed.inset.filled",
+                description: "Scenes authored for Mixed immersion — the fractal floats in your room over passthrough.",
+                current: currentSceneSelectionLabel(
+                    selection: activeSelection,
+                    visibleAnimationScenes: [],
+                    staticScenePresets: staticScenePresets
+                ),
+                accentColor: .mint
+            )
+
+            if staticScenePresets.isEmpty {
+                emptySectionLabel("No mixed-mode scenes yet — save a scene while Mixed immersion is active")
+            } else {
+                LazyVGrid(columns: sceneColumns, spacing: 12) {
+                    ForEach(Array(staticScenePresets.enumerated()), id: \.offset) { _, preset in
+                        sceneCard(
+                            title: preset.name,
+                            subtitle: preset.fractalType.displayName,
+                            detail: staticSceneDetail(for: preset),
+                            systemImage: AppIcons.photo,
+                            thumbnailData: preset.thumbnailData,
+                            isSelected: activeSelection == .staticPreset(preset.id),
+                            onEdit: nil
+                        ) {
+                            selectStaticScenePreset(preset, using: animationManager)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.mint.opacity(0.08)))
+    }
+
+    @ViewBuilder
     private func musicReactiveScenesGrid(_ animationManager: AnimationManager) -> some View {
         let staticScenePresets = musicReactivePresets()
         let activeSelection = currentSceneSelection(
@@ -332,13 +384,17 @@ struct FractalGridView: View {
     }
 
     private func jumpingOffPresets() -> [FractalPreset] {
-        filteredStaticPresets().filter { $0.isJumpingOffPreset }
+        filteredStaticPresets().filter { $0.isJumpingOffPreset && $0.mixedModeScene != true }
     }
 
     private func musicReactivePresets() -> [FractalPreset] {
         filteredStaticPresets().filter { preset in
-            !preset.isCustomScenePreset && !preset.isJumpingOffPreset
+            !preset.isCustomScenePreset && !preset.isJumpingOffPreset && preset.mixedModeScene != true
         }
+    }
+
+    private func mixedScenePresets() -> [FractalPreset] {
+        filteredStaticPresets().filter { $0.mixedModeScene == true }
     }
 
     private func customScenePresets() -> [FractalPreset] {
@@ -421,6 +477,9 @@ struct FractalGridView: View {
     }
 
     private func staticSceneDetail(for preset: FractalPreset) -> String {
+        if preset.mixedModeScene == true {
+            return "Mixed immersion scene"
+        }
         if preset.isCustomScenePreset {
             return "Custom embedded formula"
         }

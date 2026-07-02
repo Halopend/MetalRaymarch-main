@@ -199,7 +199,8 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
                     precomputedFog: precomputedFog,
                     colorScheme: settings.colorSchemeParams,
                     benchAblate: 0,
-                    passthroughBackground: 0)
+                    passthroughBackground: 0,
+                    boundingFogEnabled: 0)
 }
 
 // MARK: - Headless Metal render harness
