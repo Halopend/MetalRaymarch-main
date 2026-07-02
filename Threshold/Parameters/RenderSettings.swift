@@ -45,6 +45,13 @@ final class RenderSettings: @unchecked Sendable {
         return UserDefaults.standard.float(forKey: key)
     }
 
+    /// Load a persisted Int, returning `fallback` when the key has never been written.
+    private static func loadInt(_ key: String, default fallback: Int) -> Int {
+        guard !SettingsPersistence.benchmarkHermetic,
+              UserDefaults.standard.object(forKey: key) != nil else { return fallback }
+        return UserDefaults.standard.integer(forKey: key)
+    }
+
     private static func loadGestureBinding(_ key: String,
                                            default fallback: GestureActionBinding) -> GestureActionBinding {
         guard !SettingsPersistence.benchmarkHermetic else { return fallback }
@@ -193,7 +200,11 @@ final class RenderSettings: @unchecked Sendable {
     private var _shadowsEnabled: Bool = loadBool("shadowsEnabled", default: true)  // false skips the two per-pixel shadow marches
     private var _boundingSphereSkipEnabled: Bool = loadBool("boundingSphereSkipEnabled", default: false)  // reject rays that miss the fractal's bounding sphere
     private var _boundingShapeRadius: Float = loadFloat("boundingShapeRadius", default: 6.0)  // bounding shape (sphere) radius, model units
-    private var _boundingShapeFogEnabled: Bool = loadBool("boundingShapeFogEnabled", default: false)  // soft fog fade at the bounding-shape edge instead of a hard clip
+    // Bounding-edge treatment: 0 = off, 1 = Ghost Fade (translucent, the original
+    // combined RGB+alpha fade), 2 = Inner Shadow (opaque RGB-only darken). Migrates
+    // the old "boundingShapeFogEnabled" Bool (true → Ghost Fade) when unset.
+    private var _boundingShapeFogMode: Int = loadInt("boundingShapeFogMode", default: loadBool("boundingShapeFogEnabled", default: false) ? 1 : 0)
+    private var _boundingShapeShadowDepth: Float = loadFloat("boundingShapeShadowDepth", default: 0.35)  // Inner Shadow band width, fraction of boundingShapeRadius
     private var _zoomFogCompensationEnabled: Bool = loadBool("zoomFogCompensationEnabled", default: false)  // scale fog intensity down on zoom-out so the fog sphere's world radius stays constant (was hardcoded on for Kleinian)
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
@@ -1276,18 +1287,28 @@ final class RenderSettings: @unchecked Sendable {
     var boundingShapeRadius: Float {
         get { withLock { _boundingShapeRadius } }
         set {
-            withLock { _boundingShapeRadius = max(0.5, min(30.0, newValue)) }
+            withLock { _boundingShapeRadius = max(0.05, min(30.0, newValue)) }
             persistQuality()
         }
     }
 
-    /// Bounding Fog: fade surfaces out over the outer band of the bounding
-    /// shape instead of a hard clip. Only takes effect while
-    /// `boundingSphereSkipEnabled` is on.
-    var boundingShapeFogEnabled: Bool {
-        get { withLock { _boundingShapeFogEnabled } }
+    /// Bounding-edge treatment: 0 = off (hard clip), 1 = Ghost Fade (fades RGB and,
+    /// under passthrough, alpha too — translucent), 2 = Inner Shadow (fades RGB
+    /// only — stays opaque). Only takes effect while `boundingSphereSkipEnabled` is on.
+    var boundingShapeFogMode: Int {
+        get { withLock { _boundingShapeFogMode } }
         set {
-            withLock { _boundingShapeFogEnabled = newValue }
+            withLock { _boundingShapeFogMode = max(0, min(2, newValue)) }
+            persistQuality()
+        }
+    }
+
+    /// Inner Shadow band width, as a fraction of `boundingShapeRadius` (0...1).
+    /// Only takes effect while `boundingShapeFogMode == 2`.
+    var boundingShapeShadowDepth: Float {
+        get { withLock { _boundingShapeShadowDepth } }
+        set {
+            withLock { _boundingShapeShadowDepth = max(0.02, min(0.95, newValue)) }
             persistQuality()
         }
     }
@@ -2380,7 +2401,8 @@ final class RenderSettings: @unchecked Sendable {
                 shadowsEnabled: _shadowsEnabled,
                 boundingSphereSkipEnabled: _boundingSphereSkipEnabled,
                 boundingShapeRadius: _boundingShapeRadius,
-                boundingShapeFogEnabled: _boundingShapeFogEnabled,
+                boundingShapeFogMode: _boundingShapeFogMode,
+                boundingShapeShadowDepth: _boundingShapeShadowDepth,
                 zoomFogCompensationEnabled: _zoomFogCompensationEnabled,
                 limitFlash: _limitFlash,
                 activeGestureIndex: _activeGestureIndex,
@@ -3695,7 +3717,8 @@ final class RenderSettings: @unchecked Sendable {
                 c.shadowsEnabled = _shadowsEnabled
                 c.boundingSphereSkipEnabled = _boundingSphereSkipEnabled
                 c.boundingShapeRadius = _boundingShapeRadius
-                c.boundingShapeFogEnabled = _boundingShapeFogEnabled
+                c.boundingShapeFogMode = _boundingShapeFogMode
+                c.boundingShapeShadowDepth = _boundingShapeShadowDepth
                 c.zoomFogCompensationEnabled = _zoomFogCompensationEnabled
                 return c
             }
@@ -3725,8 +3748,9 @@ final class RenderSettings: @unchecked Sendable {
                 _distanceLODStrength = max(0.0, min(1.0, newValue.distanceLODStrength))
                 _shadowsEnabled = newValue.shadowsEnabled
                 _boundingSphereSkipEnabled = newValue.boundingSphereSkipEnabled
-                _boundingShapeRadius = max(0.5, min(30.0, newValue.boundingShapeRadius))
-                _boundingShapeFogEnabled = newValue.boundingShapeFogEnabled
+                _boundingShapeRadius = max(0.05, min(30.0, newValue.boundingShapeRadius))
+                _boundingShapeFogMode = newValue.boundingShapeFogMode
+                _boundingShapeShadowDepth = newValue.boundingShapeShadowDepth
                 _zoomFogCompensationEnabled = newValue.zoomFogCompensationEnabled
             }
         }

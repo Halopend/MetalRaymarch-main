@@ -345,11 +345,15 @@ typedef struct
     // additively over passthrough under premultiplied alpha. 0 everywhere else.
     int passthroughBackground;
 
-    // 1 = fade surfaces out near the bounding-shape boundary instead of a hard
-    // clip (Bounding Fog toggle). Fades RGB (and alpha, when
-    // passthroughBackground is set) over the outer ~third of the sphere.
-    // Only meaningful while boundingSphereRadius > 0.
+    // Bounding-edge treatment; only meaningful while boundingSphereRadius > 0.
+    // 0 = off (hard clip). 1 = Ghost Fade: fades RGB (and alpha, when
+    // passthroughBackground is set) over the outer ~third of the sphere —
+    // translucent near the boundary. 2 = Inner Shadow: fades RGB only over a
+    // band whose width is boundingShadowDepth, staying fully opaque.
     int boundingFogEnabled;
+    // Inner Shadow band width, as a fraction of boundingSphereRadius (0-1).
+    // Only used while boundingFogEnabled == 2.
+    float boundingShadowDepth;
 } Uniforms;
 
 typedef struct

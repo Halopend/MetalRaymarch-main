@@ -3559,7 +3559,15 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
         // Bounding Fog: fade hits out over the outer band of the bounding
         // sphere so the clip reads as fog rather than a hard cut.
-        if (uniforms.boundingFogEnabled != 0 && uniforms.boundingSphereRadius > 0.0f) {
+        // Mode 1 (Ghost Fade) keeps the original fixed outer-third band —
+        // translucent, composited via outAlpha below. Mode 2 (Inner Shadow)
+        // uses an adjustable band (boundingShadowDepth) and stays opaque.
+        if (uniforms.boundingFogEnabled == 2 && uniforms.boundingSphereRadius > 0.0f) {
+            float rHit = length(p);
+            float depth = clamp(uniforms.boundingShadowDepth, 0.02f, 0.95f);
+            float innerEdge = uniforms.boundingSphereRadius * (1.0f - depth);
+            boundFade = half(1.0f - smoothstep(innerEdge, uniforms.boundingSphereRadius, rHit));
+        } else if (uniforms.boundingFogEnabled != 0 && uniforms.boundingSphereRadius > 0.0f) {
             float rHit = length(p);
             boundFade = half(1.0f - smoothstep(uniforms.boundingSphereRadius * 0.65f,
                                                uniforms.boundingSphereRadius, rHit));
@@ -3608,9 +3616,10 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         if (ret.x >= kRayMissThreshold && floorHit.alpha <= 0.0f) {
             outAlpha = 0.0f;
         } else {
-            // Bounding Fog: hits near the boundary fade to transparent
-            // (boundFade is 1 when the fog toggle is off or the ray missed).
-            outAlpha = float(boundFade);
+            // Ghost Fade: hits near the boundary fade to transparent (boundFade
+            // is 1 when the fog mode is off/Inner Shadow or the ray missed).
+            // Inner Shadow stays opaque — it only darkens RGB above.
+            outAlpha = (uniforms.boundingFogEnabled == 2) ? 1.0f : float(boundFade);
         }
     }
     output.color = float4(float3(col), outAlpha);

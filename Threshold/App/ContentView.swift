@@ -477,7 +477,7 @@ struct ContentView: View {
 
 #if os(visionOS)
             ImmersionStylePicker()
-                .frame(maxWidth: 240)
+                .frame(maxWidth: 320)
 #endif
 
             VStack(spacing: 8) {
@@ -914,6 +914,8 @@ struct ContentView: View {
             fractalSubTab = .space
         case .transformations:
             fractalSubTab = .transform
+        case .bounding:
+            fractalSubTab = .bounding
         case .performance:
             fractalSubTab = .render
         }
@@ -996,6 +998,8 @@ struct ContentView: View {
             return topDockTab == .shape && shapeRailSection == .space && selectedTab != .gestures && selectedTab != .settings
         case .shapeTransformations:
             return topDockTab == .shape && shapeRailSection == .transformations && selectedTab != .gestures && selectedTab != .settings
+        case .shapeBounding:
+            return topDockTab == .shape && shapeRailSection == .bounding && selectedTab != .gestures && selectedTab != .settings
         case .shapePerformance:
             return topDockTab == .performance && selectedTab != .gestures && selectedTab != .settings
         case .visualizationsColor:
@@ -1044,6 +1048,8 @@ struct ContentView: View {
                 activateShapeSection(.space)
             case .shapeTransformations:
                 activateShapeSection(.transformations)
+            case .shapeBounding:
+                activateShapeSection(.bounding)
             case .shapePerformance:
                 activatePerformanceSection(.acceleration)
             case .visualizationsColor:
@@ -1088,6 +1094,7 @@ struct ContentView: View {
         case .formula: return .shapeFormula
         case .space: return .shapeSpace
         case .transformations: return .shapeTransformations
+        case .bounding: return .shapeBounding
         case .performance: return .shapePerformance
         }
     }
@@ -1129,6 +1136,9 @@ struct ContentView: View {
             case .transform:
                 topDockTab = .shape
                 shapeRailSection = .transformations
+            case .bounding:
+                topDockTab = .shape
+                shapeRailSection = .bounding
             case .render:
                 // Performance is now its own top-dock tab, not a Shape rail entry.
                 topDockTab = .performance
@@ -1254,7 +1264,7 @@ struct ContentView: View {
 
 #if os(visionOS)
             ImmersionStylePicker(showsCaption: false)
-                .frame(width: 150)
+                .frame(width: 260)
 #endif
 
             Spacer(minLength: 12)

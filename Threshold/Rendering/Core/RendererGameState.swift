@@ -184,14 +184,16 @@ extension Renderer {
         var precomputedFog = Self.makePrecomputedFog(from: settingsSnapshot)
         // Zoom fog compensation (Settings toggle, default off): fog operates on
         // MODEL-space march distance, so on zoom-out the fog sphere's world radius
-        // shrinks with the model and washes out the fractal. Scaling intensity by
-        // effectiveScale/0.15 holds the fog's WORLD radius constant once zoomed out
-        // past 0.15 — a no-op at scale >= 0.15. (Was previously hardcoded on for
-        // the Kleinian family only.)
+        // shrinks with the model and washes out the fractal — starting as soon as
+        // scale drops below 1.0. Scaling intensity by effectiveScale holds the
+        // fog's WORLD radius constant at its scale==1 value for the whole
+        // zoom-out range — a no-op at scale >= 1 (zoom-in unaffected). (Was
+        // previously hardcoded on for the Kleinian family only, and briefly keyed
+        // to the unrelated 0.15 horizon-lift floor.)
         if settingsSnapshot.zoomFogCompensationEnabled {
             let baseFog = precomputedFog.fog.x
             if baseFog > 1e-6 {
-                let fogScale = min(1.0, max(effectiveScale, 1e-4) / 0.15)
+                let fogScale = min(1.0, max(effectiveScale, 1e-4))
                 let fogIntensity = baseFog * fogScale
                 let invFog = fogIntensity > 1e-6 ? 1.0 / fogIntensity : 0.0
                 precomputedFog = PrecomputedFog(
@@ -336,7 +338,8 @@ extension Renderer {
                             // so the compositor shows passthrough instead of
                             // the black background (see fragmentMain).
                             passthroughBackground: passthroughBackgroundActive ? 1 : 0,
-                            boundingFogEnabled: settingsSnapshot.boundingShapeFogEnabled ? 1 : 0)
+                            boundingFogEnabled: Int32(settingsSnapshot.boundingShapeFogMode),
+                            boundingShadowDepth: settingsSnapshot.boundingShapeShadowDepth)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)

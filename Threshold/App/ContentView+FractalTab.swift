@@ -61,6 +61,13 @@ extension ContentView {
                         .padding(.vertical, 8)
                 }
 
+            case .bounding:
+                ScrollView(.vertical, showsIndicators: true) {
+                    fractalBoundingContent
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                }
+
             case .render:
                 ScrollView(.vertical, showsIndicators: true) {
                     performanceTabContent
@@ -581,26 +588,67 @@ extension ContentView {
                             help: "A low-res cone pre-pass marches one cone per 8×8 block and writes a provable lower bound on the nearest surface distance; the full march starts there, skipping empty space without ever skipping a surface. Conservative and exact (box/fold fractals, un-warped domain only). Fragment renderer path; off by default.") { v in
                     cache.quality.coarsePrepassWarmStartEnabled = v; cache.push(\.coarsePrepassWarmStartEnabled, value: v)
                 }
+            }
+        }
+        .padding()
+        .background(Color.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+    }
 
-                accelToggleCompact("Bounding Shape",
-                            isOn: cache.quality.boundingSphereSkipEnabled,
-                            help: "Bounds the visible fractal to a sphere: rays that miss it skip the march entirely. Set the radius below — large values just cull background; tight values deliberately clip the fractal to the shape (nice for Mixed immersion).") { v in
-                    cache.quality.boundingSphereSkipEnabled = v; cache.push(\.boundingSphereSkipEnabled, value: v)
+    // MARK: - Shape tab (rail sub-tab: Bounding)
+
+    /// Bounding Shape/Radius/Fog controls, moved out of Acceleration into their
+    /// own Shape rail tab — these are shape/framing choices, not perf knobs.
+    var fractalBoundingContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "circle.dashed").foregroundStyle(.cyan)
+                Text("Bounding").font(.headline)
+            }
+
+            accelToggleCompact("Bounding Shape",
+                        isOn: cache.quality.boundingSphereSkipEnabled,
+                        help: "Bounds the visible fractal to a sphere: rays that miss it skip the march entirely. Set the radius below — large values just cull background; tight values deliberately clip the fractal to the shape (nice for Mixed immersion).") { v in
+                cache.quality.boundingSphereSkipEnabled = v; cache.push(\.boundingSphereSkipEnabled, value: v)
+            }
+
+            accelSliderCompact("Bounding Radius",
+                        value: cache.quality.boundingShapeRadius, range: 0.05...30,
+                        display: String(format: "%.1f", cache.quality.boundingShapeRadius),
+                        help: "Radius of the bounding sphere in model units. Only active while Bounding Shape is on.") { v in
+                cache.quality.boundingShapeRadius = v; cache.push(\.boundingShapeRadius, value: v)
+            }
+            .disabled(!cache.quality.boundingSphereSkipEnabled)
+            .opacity(cache.quality.boundingSphereSkipEnabled ? 1 : 0.45)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Bounding Fog").font(.caption)
+                Picker("Bounding Fog", selection: Binding(
+                    get: { BoundingFogMode(rawValue: cache.quality.boundingShapeFogMode) ?? .off },
+                    set: { mode in
+                        cache.quality.boundingShapeFogMode = mode.rawValue
+                        cache.push(\.boundingShapeFogMode, value: mode.rawValue)
+                    }
+                )) {
+                    ForEach(BoundingFogMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
                 }
+                .pickerStyle(.segmented)
 
-                accelSliderCompact("Bounding Radius",
-                            value: cache.quality.boundingShapeRadius, range: 0.5...30,
-                            display: String(format: "%.1f", cache.quality.boundingShapeRadius),
-                            help: "Radius of the bounding sphere in model units. Only active while Bounding Shape is on.") { v in
-                    cache.quality.boundingShapeRadius = v; cache.push(\.boundingShapeRadius, value: v)
-                }
-                .disabled(!cache.quality.boundingSphereSkipEnabled)
-                .opacity(cache.quality.boundingSphereSkipEnabled ? 1 : 0.45)
+                Text(BoundingFogMode(rawValue: cache.quality.boundingShapeFogMode)?.help ?? BoundingFogMode.off.help)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .disabled(!cache.quality.boundingSphereSkipEnabled)
+            .opacity(cache.quality.boundingSphereSkipEnabled ? 1 : 0.45)
 
-                accelToggleCompact("Bounding Fog",
-                            isOn: cache.quality.boundingShapeFogEnabled,
-                            help: "Fades the fractal out near the bounding shape's edge instead of a hard clip. In Partial/Mixed immersion the fade goes to passthrough.") { v in
-                    cache.quality.boundingShapeFogEnabled = v; cache.push(\.boundingShapeFogEnabled, value: v)
+            if cache.quality.boundingShapeFogMode == BoundingFogMode.innerShadow.rawValue {
+                accelSliderCompact("Shadow Depth",
+                            value: cache.quality.boundingShapeShadowDepth, range: 0.02...0.95,
+                            display: "\(Int((cache.quality.boundingShapeShadowDepth * 100).rounded()))%",
+                            help: "How far the darkening reaches in from the bounding shape's edge, as a fraction of its radius.") { v in
+                    cache.quality.boundingShapeShadowDepth = v; cache.push(\.boundingShapeShadowDepth, value: v)
                 }
                 .disabled(!cache.quality.boundingSphereSkipEnabled)
                 .opacity(cache.quality.boundingSphereSkipEnabled ? 1 : 0.45)

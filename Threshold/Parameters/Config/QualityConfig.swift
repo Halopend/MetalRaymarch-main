@@ -9,6 +9,35 @@
 
 import Foundation
 
+/// Bounding-edge treatment shown by the Shape → Bounding tab's picker.
+/// Backed by `QualityConfig.boundingShapeFogMode`'s raw Int.
+enum BoundingFogMode: Int, CaseIterable, Identifiable, Sendable {
+    case off = 0
+    case ghostFade = 1
+    case innerShadow = 2
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .off: return "Off"
+        case .ghostFade: return "Ghost Fade"
+        case .innerShadow: return "Inner Shadow"
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .off:
+            return "Hard clip at the bounding shape's edge."
+        case .ghostFade:
+            return "Fades the fractal out near the bounding shape's edge. In Partial/Mixed immersion the fade goes translucent, revealing passthrough."
+        case .innerShadow:
+            return "Darkens the fractal near the bounding shape's edge without ever going translucent — stays fully opaque, even in Partial/Mixed immersion. Depth slider controls how far the darkening reaches in."
+        }
+    }
+}
+
 struct QualityConfig: Codable, Equatable, Sendable {
     /// visionOS compositor render-quality ceiling. Single source of truth for both
     /// `configuration.maxRenderQuality` (set at layer creation — governs drawable
@@ -97,8 +126,14 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // Bounding shape (sphere) radius in model units; used while the skip is on.
     var boundingShapeRadius: Float = 6.0
 
-    // Soft fog fade at the bounding-shape edge instead of a hard clip.
-    var boundingShapeFogEnabled: Bool = false
+    // Bounding-edge treatment: 0 = off (hard clip), 1 = Ghost Fade (fades RGB
+    // and, under passthrough, alpha too — translucent), 2 = Inner Shadow (fades
+    // RGB only, stays opaque — the original pre-passthrough fog behavior).
+    var boundingShapeFogMode: Int = 0
+
+    // Inner Shadow band width, as a fraction of boundingShapeRadius (0...1).
+    // Only used while boundingShapeFogMode == 2 (Ghost Fade keeps a fixed band).
+    var boundingShapeShadowDepth: Float = 0.35
 
     // Zoom fog compensation: scale fog intensity down on zoom-out so the fog
     // sphere's world radius stays constant instead of swallowing the fractal.
@@ -108,7 +143,9 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // MARK: - Validation
 
     mutating func clamp() {
-        boundingShapeRadius = max(0.5, min(30.0, boundingShapeRadius))
+        boundingShapeRadius = max(0.05, min(30.0, boundingShapeRadius))
+        boundingShapeFogMode = boundingShapeFogMode.clamped(to: 0...2)
+        boundingShapeShadowDepth = boundingShapeShadowDepth.clamped(to: 0.02...0.95)
         baseFractalIterations = baseFractalIterations.clamped(to: 2...24)
         baseMaxRaySteps = baseMaxRaySteps.clamped(to: 16...200)
         resolutionScale = resolutionScale.clamped(to: ControlCatalog.resolutionScale)
@@ -131,7 +168,9 @@ struct QualityConfig: Codable, Equatable, Sendable {
         case resolutionScale, renderQuality, tileSize
         case debugHierarchical, coherentPacketEnabled, computeTemporalReprojectionEnabled, coarsePrepassWarmStartEnabled, foveationStrength
         case smartAdvanceEnabled, coneMarchStrength
-        case overRelaxationMax, distanceLODStrength, shadowsEnabled, boundingSphereSkipEnabled, boundingShapeRadius, boundingShapeFogEnabled
+        case overRelaxationMax, distanceLODStrength, shadowsEnabled, boundingSphereSkipEnabled, boundingShapeRadius
+        case boundingShapeFogEnabled  // legacy Bool key, migrated into boundingShapeFogMode on decode
+        case boundingShapeFogMode, boundingShapeShadowDepth
         case zoomFogCompensationEnabled
         case adaptiveRenderQualityEnabled
     }
@@ -158,8 +197,43 @@ struct QualityConfig: Codable, Equatable, Sendable {
         shadowsEnabled        = try c.decodeIfPresent(Bool.self,  forKey: .shadowsEnabled)        ?? true
         boundingSphereSkipEnabled = try c.decodeIfPresent(Bool.self, forKey: .boundingSphereSkipEnabled) ?? false
         boundingShapeRadius   = try c.decodeIfPresent(Float.self, forKey: .boundingShapeRadius)   ?? 6.0
-        boundingShapeFogEnabled = try c.decodeIfPresent(Bool.self, forKey: .boundingShapeFogEnabled) ?? false
+        if let mode = try c.decodeIfPresent(Int.self, forKey: .boundingShapeFogMode) {
+            boundingShapeFogMode = mode
+        } else {
+            // Migrate the old on/off toggle: true meant the (now-named) Ghost Fade behavior.
+            let legacyFogEnabled = try c.decodeIfPresent(Bool.self, forKey: .boundingShapeFogEnabled) ?? false
+            boundingShapeFogMode = legacyFogEnabled ? 1 : 0
+        }
+        boundingShapeShadowDepth = try c.decodeIfPresent(Float.self, forKey: .boundingShapeShadowDepth) ?? 0.35
         zoomFogCompensationEnabled = try c.decodeIfPresent(Bool.self, forKey: .zoomFogCompensationEnabled) ?? false
         adaptiveRenderQualityEnabled = try c.decodeIfPresent(Bool.self, forKey: .adaptiveRenderQualityEnabled) ?? true
+    }
+
+    // Manual (not synthesized): CodingKeys carries a legacy `boundingShapeFogEnabled`
+    // key with no matching stored property (read-only migration in init(from:)),
+    // which blocks Encodable auto-synthesis.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(baseFractalIterations, forKey: .baseFractalIterations)
+        try c.encode(baseMaxRaySteps, forKey: .baseMaxRaySteps)
+        try c.encode(resolutionScale, forKey: .resolutionScale)
+        try c.encode(renderQuality, forKey: .renderQuality)
+        try c.encode(tileSize, forKey: .tileSize)
+        try c.encode(debugHierarchical, forKey: .debugHierarchical)
+        try c.encode(coherentPacketEnabled, forKey: .coherentPacketEnabled)
+        try c.encode(computeTemporalReprojectionEnabled, forKey: .computeTemporalReprojectionEnabled)
+        try c.encode(coarsePrepassWarmStartEnabled, forKey: .coarsePrepassWarmStartEnabled)
+        try c.encode(foveationStrength, forKey: .foveationStrength)
+        try c.encode(smartAdvanceEnabled, forKey: .smartAdvanceEnabled)
+        try c.encode(coneMarchStrength, forKey: .coneMarchStrength)
+        try c.encode(overRelaxationMax, forKey: .overRelaxationMax)
+        try c.encode(distanceLODStrength, forKey: .distanceLODStrength)
+        try c.encode(shadowsEnabled, forKey: .shadowsEnabled)
+        try c.encode(boundingSphereSkipEnabled, forKey: .boundingSphereSkipEnabled)
+        try c.encode(boundingShapeRadius, forKey: .boundingShapeRadius)
+        try c.encode(boundingShapeFogMode, forKey: .boundingShapeFogMode)
+        try c.encode(boundingShapeShadowDepth, forKey: .boundingShapeShadowDepth)
+        try c.encode(zoomFogCompensationEnabled, forKey: .zoomFogCompensationEnabled)
+        try c.encode(adaptiveRenderQualityEnabled, forKey: .adaptiveRenderQualityEnabled)
     }
 }

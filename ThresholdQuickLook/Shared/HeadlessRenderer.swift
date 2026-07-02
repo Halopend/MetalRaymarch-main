@@ -110,12 +110,13 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
     let precomputedAudio = RenderPrecompute.makePrecomputedAudio(from: settings)
     var precomputedFog = RenderPrecompute.makePrecomputedFog(from: settings)
     // Zoom fog compensation (Settings toggle, default off): holds the fog's WORLD
-    // radius constant on zoom-out (no-op at scale >= 0.15; mirrors
-    // RaymarchRenderView — was previously hardcoded on for Kleinian only).
+    // radius constant on zoom-out for the whole range below scale 1 (no-op at
+    // scale >= 1; mirrors RaymarchRenderView — was previously hardcoded on for
+    // Kleinian only, and briefly keyed to the unrelated 0.15 horizon-lift floor).
     if settings.zoomFogCompensationEnabled {
         let baseFog = precomputedFog.fog.x
         if baseFog > 1e-6 {
-            let fogScale = min(1.0, max(effectiveScale, 1e-4) / 0.15)
+            let fogScale = min(1.0, max(effectiveScale, 1e-4))
             let fogIntensity = baseFog * fogScale
             let inverseFog = fogIntensity > 1e-6 ? 1.0 / fogIntensity : 0.0
             precomputedFog = PrecomputedFog(fog: SIMD4<Float>(fogIntensity, inverseFog, 0.0, 0.0), color: precomputedFog.color)
@@ -215,7 +216,8 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
                     colorScheme: settings.colorSchemeParams,
                     benchAblate: 0,
                     passthroughBackground: 0,
-                    boundingFogEnabled: 0)
+                    boundingFogEnabled: 0,
+                    boundingShadowDepth: 0)
 }
 
 // MARK: - Headless Metal render harness

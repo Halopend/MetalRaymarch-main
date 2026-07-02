@@ -90,6 +90,7 @@ enum ShapeRailSection: String, CaseIterable {
     case formula = "Formula"
     case space = "Space"
     case transformations = "Transform"
+    case bounding = "Bounding"
     case performance = "Performance"
 
     var icon: String {
@@ -98,6 +99,7 @@ enum ShapeRailSection: String, CaseIterable {
         case .formula: return "function"
         case .space: return "rotate.3d"
         case .transformations: return "square.stack.3d.up"
+        case .bounding: return "circle.dashed"
         case .performance: return "speedometer"
         }
     }
@@ -210,6 +212,7 @@ enum PinnedRailControl: String, CaseIterable {
     case shapeFormula
     case shapeSpace
     case shapeTransformations
+    case shapeBounding
     case shapePerformance
     case visualizationsColor
     case visualizationsMapping
@@ -234,6 +237,7 @@ enum PinnedRailControl: String, CaseIterable {
         case .shapeFormula: return ShapeRailSection.formula.rawValue
         case .shapeSpace: return ShapeRailSection.space.rawValue
         case .shapeTransformations: return ShapeRailSection.transformations.rawValue
+        case .shapeBounding: return ShapeRailSection.bounding.rawValue
         case .shapePerformance: return ShapeRailSection.performance.rawValue
         case .visualizationsColor: return VisualizationsRailSection.color.title
         case .visualizationsMapping: return VisualizationsRailSection.mapping.title
@@ -260,6 +264,7 @@ enum PinnedRailControl: String, CaseIterable {
         case .shapeFormula: return ShapeRailSection.formula.icon
         case .shapeSpace: return ShapeRailSection.space.icon
         case .shapeTransformations: return ShapeRailSection.transformations.icon
+        case .shapeBounding: return ShapeRailSection.bounding.icon
         case .shapePerformance: return ShapeRailSection.performance.icon
         case .visualizationsColor: return VisualizationsRailSection.color.icon
         case .visualizationsMapping: return VisualizationsRailSection.mapping.icon
@@ -276,7 +281,7 @@ enum PinnedRailControl: String, CaseIterable {
     }
 }
 
-enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shape", space = "Space", transform = "Transform", render = "Render" }
+enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shape", space = "Space", transform = "Transform", bounding = "Bounding", render = "Render" }
 enum ShapeInnerTab: String, CaseIterable { case parameters = "Parameters", formula = "Formula" }
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
 enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic Color", `static` = "Atmosphere" }
