@@ -583,6 +583,67 @@ extension ContentView {
                 }
             }
             .tint(.orange)
+
+            Toggle(isOn: $handEffectsBeta) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Hand Effects (Beta)")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Shows the Shape → Hands tab: interaction spheres that attract or repel the fractal surface around your tracked hands (visionOS). Turning this off also disables the effect.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .tint(.orange)
+            .onChange(of: handEffectsBeta) { _, on in
+                if !on {
+                    // Leaving the beta turns the effect off (tuning is kept);
+                    // steer navigation away from the now-hidden tab.
+                    appModel.renderSettings.handAttractionEnabled = false
+                    if shapeInnerTab == .hands { shapeInnerTab = .parameters }
+                }
+            }
+
+            Toggle(isOn: Binding(
+                get: { cache.quality.recreateLegacyComputeCacheBug },
+                set: {
+                    cache.quality.recreateLegacyComputeCacheBug = $0
+                    cache.push(\.recreateLegacyComputeCacheBug, value: $0)
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Legacy Sphere Projection Bug")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Recreates the old \"Accidental Sphere Projection\" artifact look by serving the nearest cached compute pipeline even when iteration/ray-step counts mismatch.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .tint(.orange)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Sphere Projection Mismatch (δ)")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text(String(format: "%+.2f", cache.display.deIterationMismatch))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: Binding(
+                    get: { cache.display.deIterationMismatch },
+                    set: {
+                        cache.display.deIterationMismatch = $0
+                        cache.push(\.deIterationMismatch, value: $0)
+                    }
+                ), in: -8...8)
+                .tint(.orange)
+                Text("Deterministic version of the legacy bug: the distance estimator's absScalePow term is computed as if the fold loop ran δ extra iterations. 0 = correct DE. Saves with the scene.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))

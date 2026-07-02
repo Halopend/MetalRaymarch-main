@@ -184,7 +184,13 @@ enum SettingsPersistence {
         if let c = load(AudioReactiveConfig.self, domain: .audioReactive) { settings.audioReactiveConfig = c }
         if let c = load(GestureConfig.self,       domain: .gesture)       { settings.gestureConfig = c }
         if let c = load(SafetyBubbleConfig.self,  domain: .safetyBubble)  { settings.safetyBubbleConfig = migrateSafetyBubbleDefaultOn(c) }
-        if let c = load(HandAttractionConfig.self, domain: .handAttraction) { settings.handAttractionConfig = c }
+        if let c = load(HandAttractionConfig.self, domain: .handAttraction) {
+            var cfg = c
+            // Beta gate: while Hand Effects is off, the effect never runs even
+            // if a prior build persisted enabled=true. Tuning is preserved.
+            if !HandAttractionConfig.betaEnabled { cfg.enabled = false }
+            settings.handAttractionConfig = cfg
+        }
         if let c = load(DisplayConfig.self,       domain: .display)       { settings.displayConfig = c }
     }
 

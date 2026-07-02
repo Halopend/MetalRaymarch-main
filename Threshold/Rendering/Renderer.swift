@@ -65,6 +65,7 @@ actor Renderer {
     var lastComputeCustomHash: String?
     var lastComputeBubble: Bool?
     var lastComputePacket: Bool?
+    var lastComputeLegacyBugMode: Bool = false
     var lastSelectedComputePipeline: MTLComputePipelineState?
 
     // === UI UPDATE COORDINATION ===

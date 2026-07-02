@@ -19,6 +19,7 @@ struct RenderSettingsSnapshot {
     let sphereProjectionEnabled: Bool
     let sphereProjectionBlend: Float
     let sphereProjectionRadius: Float
+    let deIterationMismatch: Float
     let spaceWarpStrength: Float
     let spaceWarpParam1: Float
     let spaceWarpParam2: Float

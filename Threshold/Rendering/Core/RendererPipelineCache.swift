@@ -934,13 +934,17 @@ extension Renderer {
             sceneKey: "_B\(bubbleEnabled ? 1 : 0)_CP\(packetEnabled ? 1 : 0)"
         )
 
+        let recreateLegacyBug = appModel.renderSettings.recreateLegacyComputeCacheBug
+
         // Fast-path: parameters unchanged since last call
         if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS && fractalType.rawValue == lastComputeFT && activeCustomHash == lastComputeCustomHash && mbPowerInt == lastComputePower,
            bubbleEnabled == lastComputeBubble, packetEnabled == lastComputePacket,
+           recreateLegacyBug == lastComputeLegacyBugMode,
            let cached = lastSelectedComputePipeline {
             recordPipelineTelemetry(computeHit: true, computeSource: "fast-path")
             return cached
         }
+        lastComputeLegacyBugMode = recreateLegacyBug
 
         let exactKey = keyContext.exactKey
 
@@ -980,6 +984,45 @@ extension Renderer {
                 bubbleEnabled: bubbleEnabled,
                 packetEnabled: packetEnabled
             )
+        }
+
+        // Legacy bug mode ("Accidental Sphere Projection"): serve the NEAREST
+        // cached FI/RS pipeline even though its baked FC_FRACTAL_ITERATIONS
+        // mismatches the CPU-precomputed absScalePow — intentionally recreating
+        // the historical artifact look. Built-ins only; a custom library's
+        // pipelines aren't interchangeable.
+        if recreateLegacyBug, fractalType != .custom {
+            let nearest = computePipelineCache
+                .compactMap { entry -> (key: String, pipeline: MTLComputePipelineState, score: Int)? in
+                    let key = entry.key
+                    guard let fiRange = key.range(of: "FI"),
+                          let rsRange = key.range(of: "_RS", range: fiRange.upperBound..<key.endIndex) else { return nil }
+                    let fiText = String(key[fiRange.upperBound..<rsRange.lowerBound])
+                    let rsSuffix = key[rsRange.upperBound...]
+                    let rsText = rsSuffix.prefix { $0.isNumber }
+                    guard let fi = Int(fiText), let rs = Int(rsText) else { return nil }
+                    let score = abs(fi - fractalIterations) * 1000 + abs(rs - maxRaySteps)
+                    return (key: key, pipeline: entry.value, score: score)
+                }
+                .min { $0.score < $1.score }
+
+            if let nearest {
+                recordPipelineTelemetry(computeHit: true, computeSource: "legacy-nearest")
+                if RENDERER_DEBUG && lastComputePipelineKey != "legacyNearest_\(nearest.key)" {
+                    print("🪲 [ComputeCache] Legacy bug mode: nearest fallback \(nearest.key) for requested FT=\(fractalType.rawValue) FI=\(fractalIterations) RS=\(maxRaySteps)")
+                    lastComputePipelineKey = "legacyNearest_\(nearest.key)"
+                }
+                return cacheSelectedComputePipeline(
+                    nearest.pipeline,
+                    fractalTypeRawValue: fractalType.rawValue,
+                    fractalIterations: fractalIterations,
+                    maxRaySteps: maxRaySteps,
+                    mandelbulbPower: mbPowerInt,
+                    activeCustomHash: activeCustomHash,
+                    bubbleEnabled: bubbleEnabled,
+                    packetEnabled: packetEnabled
+                )
+            }
         }
 
         // 3. Kick off a background build for this exact configuration. Built-in

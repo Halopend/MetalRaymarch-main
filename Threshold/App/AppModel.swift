@@ -151,6 +151,13 @@ class AppModel {
         didSet {
             UserDefaults.standard.set(immersionStylePreference.rawValue, forKey: "immersionStylePreference")
             immersionStyleForRenderer = immersionStylePreference
+            // Bounding follows immersion: Mixed = bounded (the fractal is an
+            // object in the room), Full = unbounded (you're inside it). This
+            // just flips the setting on style change — the user can still
+            // override the toggle at any time afterward.
+            if oldValue != immersionStylePreference {
+                renderSettings.boundingSphereSkipEnabled = (immersionStylePreference == .mixed)
+            }
         }
     }
 

@@ -19,6 +19,11 @@ struct DisplayConfig: Codable, Equatable, Sendable {
     var sphereProjectionEnabled: Bool = false
     var sphereProjectionBlend: Float = 1.0
     var sphereProjectionRadius: Float = 1.0
+    /// DE iteration mismatch (legacy "Accidental Sphere Projection" recreation):
+    /// computes the Mandelbox DE's absScalePow term as if for `iterations + δ`
+    /// while the fold loop runs the real count — the deterministic form of the
+    /// old compute-cache pipeline-mismatch artifact. 0 = off (correct DE).
+    var deIterationMismatch: Float = 0.0
     var platformRadius: Float = 1.888
     /// When `false`, the renderer skips building the glass-floor field in
     /// the immersive space. The radius value is preserved so toggling back
@@ -30,6 +35,7 @@ struct DisplayConfig: Codable, Equatable, Sendable {
         case showMusicShortcuts, lightingPlay, lightingMode
         case sphericalInversionMode, sphericalInversionRadius, platformRadius
         case sphereProjectionEnabled, sphereProjectionBlend, sphereProjectionRadius
+        case deIterationMismatch
         case platformEnabled
     }
 
@@ -45,6 +51,7 @@ struct DisplayConfig: Codable, Equatable, Sendable {
         sphereProjectionEnabled = try container.decodeIfPresent(Bool.self, forKey: .sphereProjectionEnabled) ?? false
         sphereProjectionBlend = try container.decodeIfPresent(Float.self, forKey: .sphereProjectionBlend) ?? 1.0
         sphereProjectionRadius = try container.decodeIfPresent(Float.self, forKey: .sphereProjectionRadius) ?? 1.0
+        deIterationMismatch = (try container.decodeIfPresent(Float.self, forKey: .deIterationMismatch) ?? 0.0).clamped(to: -8.0...8.0)
         // Clamp on decode so previously-saved larger radii (old max was 3.0) snap into
         // the new 0.5…2.5 m range and stay consistent with the slider bounds.
         platformRadius = (try container.decodeIfPresent(Float.self, forKey: .platformRadius) ?? 1.888).clamped(to: 0.5...2.5)

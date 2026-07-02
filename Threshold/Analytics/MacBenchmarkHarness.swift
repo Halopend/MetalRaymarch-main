@@ -175,6 +175,9 @@ enum MacBenchmarkHarness {
             case "foveationStrength":            qc.foveationStrength = v
             case "baseFractalIterations":        qc.baseFractalIterations = Int(v)
             case "baseMaxRaySteps":              qc.baseMaxRaySteps = Int(v)
+            // Not a QualityConfig field, but riding the same override hook:
+            // legacy DE mismatch δ for headless A/B captures.
+            case "deIterationMismatch":          settings.deIterationMismatch = v
             default: log("  WARN unknown QC override key '\(key)' — skipped")
             }
         }

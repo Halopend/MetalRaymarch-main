@@ -90,7 +90,11 @@ enum RenderPrecompute {
         scale.w = abs(scale.w)
 
         let absScalem1 = abs(settings.fractalScale - 1.0)
-        let absScalePow = pow(max(abs(settings.fractalScale), 1e-6), Float(1 - settings.fractalIterations))
+        // deIterationMismatch (δ ≠ 0) deliberately computes this term as if the
+        // fold loop ran `iterations + δ` — the deterministic recreation of the
+        // legacy compute-cache pipeline mismatch ("Accidental Sphere Projection").
+        let absScalePow = pow(max(abs(settings.fractalScale), 1e-6),
+                              Float(1 - settings.fractalIterations) - settings.deIterationMismatch)
         let sphereRadiusSq = settings.sphereRadius * settings.sphereRadius
 
         return PrecomputedFractalParams(

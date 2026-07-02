@@ -120,6 +120,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _sphereProjectionEnabled: Bool = false
     private var _sphereProjectionBlend: Float = 1.0
     private var _sphereProjectionRadius: Float = 1.0
+    private var _deIterationMismatch: Float = 0.0    // Legacy DE mismatch δ (Accidental Sphere Projection recreation); 0 = off
     // Custom space warp (built-in "Twist" by default; a loaded .threshfx warp can
     // override the GPU function). Strength 0 = off (dead-code-eliminated).
     private var _spaceWarpStrength: Float = 0.0
@@ -188,6 +189,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()  // Generic formula params
     private var _tileSize: Int = 0                   // 0=disabled (fragment), 8=8x8 adaptive hierarchical compute
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
+    private var _recreateLegacyComputeCacheBug: Bool = false  // Intentionally allow nearest-pipeline mismatch ("Accidental Sphere Projection" legacy look)
     private var _coherentPacketEnabled: Bool = loadBool("coherentPacketEnabled", default: false)  // Experimental predict-validate raymarch (Stages 0-3)
     private var _computeTemporalReprojectionEnabled: Bool = loadBool("computeTemporalReprojectionEnabled", default: false)  // Compute path: temporal reproject + tile/supertile depth seeding. Off = full coarse+fine march every frame (correct baseline; the seeding can blank disoccluded tiles)
     private var _coarsePrepassWarmStartEnabled: Bool = loadBool("coarsePrepassWarmStartEnabled", default: false)  // visionOS fragment path: conservative cone coarse-prepass warm-start. A low-res cone pass writes a provable LOWER BOUND on each 8x8 block's nearest-surface entry distance; the full march raises its start t to it (skip-to-then-full-march). Off = no cone pass, byte-identical to before. Box/fold + un-warped domain only.
@@ -276,9 +278,9 @@ final class RenderSettings: @unchecked Sendable {
 
     // Hand Attraction: a per-hand interaction sphere (visionOS only) that pulls
     // the fractal surface toward each tracked palm — the inverse of the safety
-    // bubble's push-away carve. Off by default (opt-in, not a comfort feature).
-    // Defaults mirror HandAttractionConfig (tuned 2026-07-02).
-    private var _handAttractionEnabled: Bool = true
+    // bubble's push-away carve. BETA: off by default (opt-in via Settings →
+    // "Hand Effects (Beta)"). Defaults mirror HandAttractionConfig (tuned 2026-07-02).
+    private var _handAttractionEnabled: Bool = false
     private var _handAttractionRadius: Float = 0.36
     private var _handAttractionStrength: Float = 0.39
     private var _handAttractionPocketEnabled: Bool = true
@@ -600,6 +602,18 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _sphereProjectionRadius } }
         set {
             withLock { _sphereProjectionRadius = ControlCatalog.sphereProjectionRadius.clamp(newValue) }
+            persistDisplay()
+        }
+    }
+
+    /// Legacy DE iteration mismatch δ ("Accidental Sphere Projection" look):
+    /// absScalePow is precomputed as if the fold loop ran `iterations + δ`.
+    /// 0 = off (correct DE). Deterministic recreation of the old compute-cache
+    /// pipeline-mismatch artifact.
+    var deIterationMismatch: Float {
+        get { withLock { _deIterationMismatch } }
+        set {
+            withLock { _deIterationMismatch = newValue.clamped(to: -8.0...8.0) }
             persistDisplay()
         }
     }
@@ -1177,6 +1191,14 @@ final class RenderSettings: @unchecked Sendable {
     var debugHierarchical: Bool {
         get { withLock { _debugHierarchical } }
         set { withLock { _debugHierarchical = newValue } }
+    }
+
+    /// Intentionally reenables the legacy nearest-pipeline fallback in the
+    /// compute cache to reproduce the historical "Accidental Sphere Projection"
+    /// artifact look (FC_FRACTAL_ITERATIONS / absScalePow mismatch).
+    var recreateLegacyComputeCacheBug: Bool {
+        get { withLock { _recreateLegacyComputeCacheBug } }
+        set { withLock { _recreateLegacyComputeCacheBug = newValue } }
     }
 
     /// Experimental: enable coherent-packet predict-validate raymarch path.
@@ -2520,6 +2542,7 @@ final class RenderSettings: @unchecked Sendable {
                 sphereProjectionEnabled: _sphereProjectionEnabled,
                 sphereProjectionBlend: _sphereProjectionBlend,
                 sphereProjectionRadius: _sphereProjectionRadius,
+                deIterationMismatch: _deIterationMismatch,
                 spaceWarpStrength: _spaceWarpStrength,
                 spaceWarpParam1: _spaceWarpParam1,
                 spaceWarpParam2: _spaceWarpParam2,
@@ -3875,6 +3898,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.renderQuality = _renderQuality
                 c.tileSize = _tileSize
                 c.debugHierarchical = _debugHierarchical
+                c.recreateLegacyComputeCacheBug = _recreateLegacyComputeCacheBug
                 c.coherentPacketEnabled = _coherentPacketEnabled
                 c.computeTemporalReprojectionEnabled = _computeTemporalReprojectionEnabled
                 c.coarsePrepassWarmStartEnabled = _coarsePrepassWarmStartEnabled
@@ -3908,6 +3932,7 @@ final class RenderSettings: @unchecked Sendable {
                 _renderQuality = max(QualityConfig.visionMinRenderQuality, min(QualityConfig.visionMaxRenderQuality, newValue.renderQuality))
                 _tileSize = newValue.tileSize
                 _debugHierarchical = newValue.debugHierarchical
+                _recreateLegacyComputeCacheBug = newValue.recreateLegacyComputeCacheBug
                 _coherentPacketEnabled = newValue.coherentPacketEnabled
                 _computeTemporalReprojectionEnabled = newValue.computeTemporalReprojectionEnabled
                 _coarsePrepassWarmStartEnabled = newValue.coarsePrepassWarmStartEnabled
@@ -4178,6 +4203,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.sphereProjectionEnabled = _sphereProjectionEnabled
                 c.sphereProjectionBlend = _sphereProjectionBlend
                 c.sphereProjectionRadius = _sphereProjectionRadius
+                c.deIterationMismatch = _deIterationMismatch
                 c.platformRadius = _platformRadius
                 c.platformEnabled = _platformEnabled
                 return c
@@ -4193,6 +4219,7 @@ final class RenderSettings: @unchecked Sendable {
                 _sphereProjectionEnabled = newValue.sphereProjectionEnabled
                 _sphereProjectionBlend = max(0.0, min(1.0, newValue.sphereProjectionBlend))
                 _sphereProjectionRadius = max(0.2, min(12.0, newValue.sphereProjectionRadius))
+                _deIterationMismatch = newValue.deIterationMismatch.clamped(to: -8.0...8.0)
                 _platformRadius = max(0.5, min(2.5, newValue.platformRadius))
                 _platformEnabled = newValue.platformEnabled
             }

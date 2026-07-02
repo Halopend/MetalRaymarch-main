@@ -80,6 +80,8 @@ struct FractalPreset: Codable, Identifiable {
     var sphereProjectionEnabled: Bool?
     var sphereProjectionBlend: Float?
     var sphereProjectionRadius: Float?
+    // Legacy DE iteration mismatch ("Accidental Sphere Projection" look); nil/0 = off.
+    var deIterationMismatch: Float?
     // Composable domain-transform stack (Transformations section). Optional for
     // backward compatibility — older files decode to nil and keep live values.
     var spaceWarpOps: [SpaceWarpOpValue]?
@@ -164,6 +166,7 @@ struct FractalPreset: Codable, Identifiable {
         // Space module (domain transforms)
         case sphericalInversionMode, sphericalInversionRadius
         case sphereProjectionEnabled, sphereProjectionBlend, sphereProjectionRadius
+        case deIterationMismatch
         case spaceWarpOps
         // v2.0 modular lighting effects
         case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect, linearRailEffect
@@ -275,6 +278,7 @@ struct FractalPreset: Codable, Identifiable {
         sphereProjectionEnabled = try container.decodeIfPresent(Bool.self, forKey: .sphereProjectionEnabled)
         sphereProjectionBlend = try container.decodeIfPresent(Float.self, forKey: .sphereProjectionBlend)
         sphereProjectionRadius = try container.decodeIfPresent(Float.self, forKey: .sphereProjectionRadius)
+        deIterationMismatch = try container.decodeIfPresent(Float.self, forKey: .deIterationMismatch)
         spaceWarpOps = try container.decodeIfPresent([SpaceWarpOpValue].self, forKey: .spaceWarpOps)
 
         // Legacy "mandelboxSphereProjection" migration: the dedicated MSP type read
@@ -428,6 +432,7 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(sphereProjectionEnabled, forKey: .sphereProjectionEnabled)
         try container.encodeIfPresent(sphereProjectionBlend, forKey: .sphereProjectionBlend)
         try container.encodeIfPresent(sphereProjectionRadius, forKey: .sphereProjectionRadius)
+        try container.encodeIfPresent(deIterationMismatch, forKey: .deIterationMismatch)
         try container.encodeIfPresent(spaceWarpOps, forKey: .spaceWarpOps)
 
         // v2.0 modular lighting effects
@@ -653,6 +658,7 @@ struct FractalPreset: Codable, Identifiable {
         preset.sphereProjectionEnabled = disp.sphereProjectionEnabled
         preset.sphereProjectionBlend = disp.sphereProjectionBlend
         preset.sphereProjectionRadius = disp.sphereProjectionRadius
+        preset.deIterationMismatch = disp.deIterationMismatch
         // Glass-floor platform (previously dropped).
         preset.platformEnabled = disp.platformEnabled
         preset.platformRadius = disp.platformRadius
@@ -807,7 +813,11 @@ struct FractalPreset: Codable, Identifiable {
         // config when the scene saved one (older scenes leave the user's
         // current config untouched).
         if let handAttraction = handAttraction {
-            settings.handAttractionConfig = handAttraction
+            var cfg = handAttraction
+            // Beta gate: scene-authored hand config keeps its tuning, but the
+            // effect stays off until the user opts into Hand Effects (Beta).
+            if !HandAttractionConfig.betaEnabled { cfg.enabled = false }
+            settings.handAttractionConfig = cfg
         }
 
         // Space module (domain transforms) — restore when present.
@@ -825,6 +835,9 @@ struct FractalPreset: Codable, Identifiable {
         settings.sphereProjectionEnabled = sphereProjectionEnabled ?? false
         settings.sphereProjectionBlend = sphereProjectionBlend ?? 1.0
         settings.sphereProjectionRadius = sphereProjectionRadius ?? 1.0
+        // Same authoritative-reset rule: a scene without the mismatch field
+        // means a correct DE, so clear any δ the previous scene left live.
+        settings.deIterationMismatch = deIterationMismatch ?? 0.0
 
         // Composable domain-transform stack (Transformations section). A scene fully
         // defines its transforms, so apply AUTHORITATIVELY: nil/absent (an empty stack
@@ -840,9 +853,14 @@ struct FractalPreset: Codable, Identifiable {
             settings.platformRadius = platformRadius
         }
 
-        // Bounding Shape (sphere) — restore when present (older scenes leave it as-is).
+        // Bounding Shape (sphere) — a scene's explicit setting wins; otherwise
+        // bounding follows the Mixed-immersion rule: scenes marked Mixed are
+        // bounded, everything else is unbounded. (The user can still flip the
+        // toggle live afterward — this only sets the state at scene load.)
         if let boundingShapeEnabled = boundingShapeEnabled {
             settings.boundingSphereSkipEnabled = boundingShapeEnabled
+        } else {
+            settings.boundingSphereSkipEnabled = (mixedModeScene == true)
         }
         if let boundingShapeRadius = boundingShapeRadius {
             settings.boundingShapeRadius = boundingShapeRadius
