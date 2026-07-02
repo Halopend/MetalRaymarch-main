@@ -41,6 +41,8 @@ extension ContentView {
                             fractalShapeContent
                         case .formula:
                             fractalFormulaContent
+                        case .hands:
+                            fractalHandsContent
                         }
                     }
                     .padding(.horizontal, 16)
@@ -159,6 +161,78 @@ extension ContentView {
         }
     }
 
+    // ── Hands ────────────────────────────────────────────────────────────────
+    // Per-hand interaction sphere on each tracked ARKit palm. Signed strength:
+    // negative (default) makes the surface recoil from the hand, positive makes
+    // it reach toward it. Pocket mode layers a small repel hollow at the hand
+    // on top of an Attract shell, so geometry still pulls toward the hand's
+    // vicinity while leaving a hollow where the hand physically sits.
+    // visionOS only (needs hand tracking).
+    private var fractalHandsContent: some View {
+        VStack(spacing: 12) {
+#if os(visionOS)
+            VStack(spacing: 8) {
+                HStack {
+                    Label("Hand Attraction", systemImage: "hand.raised.fingers.spread")
+                        .font(.headline)
+                    Spacer()
+                    Toggle("", isOn: $cache.handAttraction.enabled)
+                        .labelsHidden()
+                        .onChange(of: cache.handAttraction.enabled) { _, val in
+                            cache.push(\.handAttractionEnabled, value: val)
+                        }
+                }
+                Text("An interaction sphere on each tracked hand. Negative strength pushes the fractal surface away as you reach out; positive strength pulls it toward your palm.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+
+                if cache.handAttraction.enabled {
+                    EffectSliderRow(icon: "circle.dashed", label: "Radius",
+                        value: $cache.handAttraction.radius, range: 0.05...1.0,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.handAttractionRadius, value: cache.handAttraction.radius) },
+                        showToggle: false)
+
+                    EffectSliderRow(icon: "arrow.left.and.right", label: "Repel \u{2190}\u{2192} Attract",
+                        value: $cache.handAttraction.strength, range: -1.0...1.0,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.handAttractionStrength, value: cache.handAttraction.strength) },
+                        showToggle: false,
+                        valueFormat: { v in
+                            if abs(v) < 0.02 { return "Off" }
+                            return v < 0 ? String(format: "Repel %.0f%%", -v * 100) : String(format: "Attract %.0f%%", v * 100)
+                        })
+
+                    if cache.handAttraction.strength > 0.02 {
+                        Divider()
+                        HStack {
+                            Label("Pocket", systemImage: "circle.circle")
+                                .font(.subheadline)
+                            Spacer()
+                            Toggle("", isOn: $cache.handAttraction.pocketEnabled)
+                                .labelsHidden()
+                                .onChange(of: cache.handAttraction.pocketEnabled) { _, val in
+                                    cache.push(\.handAttractionPocketEnabled, value: val)
+                                }
+                        }
+                        Text("Hollows out a small pocket right at the hand while the wider surface still pulls toward it — a place for the hand to sit.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.pink.opacity(0.07)))
+#else
+            Text("Hand Attraction needs ARKit hand tracking and is available on visionOS only.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+#endif
+        }
+    }
+
     @ViewBuilder
     // Composable domain-transform stack (Twist / Bend / folds / inversion / kaleido /
     // ripple / Coxeter), reorderable + stackable — its own "Transform" rail section.
@@ -265,42 +339,6 @@ extension ContentView {
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
-
-            // Hand Attraction: the inverse of the Safety Bubble — an interaction
-            // sphere on each tracked hand that pulls the fractal surface toward
-            // it instead of pushing it away. Needs ARKit hand tracking, so
-            // visionOS only.
-#if os(visionOS)
-            VStack(spacing: 8) {
-                HStack {
-                    Label("Hand Attraction", systemImage: "hand.raised.fingers.spread")
-                        .font(.headline)
-                    Spacer()
-                    Toggle("", isOn: $cache.handAttraction.enabled)
-                        .labelsHidden()
-                        .onChange(of: cache.handAttraction.enabled) { _, val in
-                            cache.push(\.handAttractionEnabled, value: val)
-                        }
-                }
-                Text("Pulls the fractal surface toward each tracked hand — reach out and the geometry bulges to meet your palm.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                if cache.handAttraction.enabled {
-                    EffectSliderRow(icon: "circle.dashed", label: "Radius",
-                        value: $cache.handAttraction.radius, range: 0.05...1.0,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.handAttractionRadius, value: cache.handAttraction.radius) },
-                        showToggle: false)
-                    EffectSliderRow(icon: "circle.righthalf.filled", label: "Strength",
-                        value: $cache.handAttraction.strength, range: 0.0...1.0,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.handAttractionStrength, value: cache.handAttraction.strength) },
-                        showToggle: false)
-                }
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.pink.opacity(0.07)))
-#endif
 
             // Platform section: only relevant on visionOS. The same controls
             // also live in Settings > Display, which is the canonical home

@@ -61,6 +61,14 @@ struct ContentStageConfiguration: CompositorLayerConfiguration {
 @main
 struct MetalProjectTestApp: App {
     @State private var appModel = AppModel()
+
+    /// Digital Crown range for the Immersive style: takes over the whole view
+    /// by default (initialAmount 1.0) and dials down to a third. Dialing to the
+    /// bottom of the range hands off to Mixed (see onImmersionChange below).
+    static let immersionCrownRange: ClosedRange<Double> = (1.0 / 3.0)...1.0
+    /// Crown amount at or below which the Immersive style flips to Mixed.
+    /// Slightly above the range floor so reaching the bottom reliably triggers.
+    static let mixedHandoffThreshold: Double = (1.0 / 3.0) + 0.01
     @AppStorage("hasCompletedIntroOnboarding") private var hasCompletedIntroOnboarding = false
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openWindow) private var openWindow
@@ -157,26 +165,40 @@ struct MetalProjectTestApp: App {
             CompositorLayer(configuration: ContentStageConfiguration()) { @MainActor layerRenderer in
                 Renderer.startRenderLoop(layerRenderer, appModel: appModel)
             }
+            // Crown → Mixed handoff: when the user dials immersion down to the
+            // bottom of the progressive range, switch the style to Mixed so the
+            // fractal drops fully into the room. Returning to Immersive is done
+            // from the picker (Mixed has no crown amount to dial back up).
+            .onImmersionChange { _, newValue in
+                let amount = newValue.amount
+                Task { @MainActor in
+                    guard appModel.immersionStylePreference == .immersive,
+                          let amount,
+                          amount <= MetalProjectTestApp.mixedHandoffThreshold else { return }
+                    appModel.immersionStylePreference = .mixed
+                }
+            }
         }
-        // The selection follows the user's Full / Partial / Mixed preference.
-        // In .progressive the Digital Crown controls the portal size; the
-        // compositor's portal mask is encoded by
-        // Renderer.encodeDrawableRenderContextPass. In .mixed there's no portal —
-        // the scene composites over passthrough (miss rays write alpha 0).
-        // The setter is a no-op — the style only changes when the app changes
-        // the preference.
+        // The selection follows the user's Immersive / Mixed preference.
+        // Immersive = progressive style starting fully immersed; the Digital
+        // Crown dials the portal between full and a third (the compositor's
+        // portal mask is encoded by Renderer.encodeDrawableRenderContextPass).
+        // Mixed has no portal — the scene composites over passthrough (miss
+        // rays write alpha 0). The setter is a no-op — the style only changes
+        // when the app changes the preference.
         .immersionStyle(
             selection: Binding(
                 get: {
                     switch appModel.immersionStylePreference {
-                    case .full: return .full
-                    case .progressive: return .progressive
-                    case .mixed: return .mixed
+                    case .immersive:
+                        return .progressive(MetalProjectTestApp.immersionCrownRange, initialAmount: 1.0)
+                    case .mixed:
+                        return .mixed
                     }
                 },
                 set: { _ in }
             ),
-            in: .mixed, .progressive, .full
+            in: .progressive, .mixed
         )
         .upperLimbVisibility(.visible)
         .persistentSystemOverlays(.hidden)

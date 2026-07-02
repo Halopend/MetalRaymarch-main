@@ -910,6 +910,9 @@ struct ContentView: View {
         case .formula:
             fractalSubTab = .shape
             shapeInnerTab = .formula
+        case .hands:
+            fractalSubTab = .shape
+            shapeInnerTab = .hands
         case .space:
             fractalSubTab = .space
         case .transformations:
@@ -994,6 +997,8 @@ struct ContentView: View {
             return topDockTab == .shape && shapeRailSection == .parameters && selectedTab != .gestures && selectedTab != .settings
         case .shapeFormula:
             return topDockTab == .shape && shapeRailSection == .formula && selectedTab != .gestures && selectedTab != .settings
+        case .shapeHands:
+            return topDockTab == .shape && shapeRailSection == .hands && selectedTab != .gestures && selectedTab != .settings
         case .shapeSpace:
             return topDockTab == .shape && shapeRailSection == .space && selectedTab != .gestures && selectedTab != .settings
         case .shapeTransformations:
@@ -1044,6 +1049,8 @@ struct ContentView: View {
                 activateShapeSection(.parameters)
             case .shapeFormula:
                 activateShapeSection(.formula)
+            case .shapeHands:
+                activateShapeSection(.hands)
             case .shapeSpace:
                 activateShapeSection(.space)
             case .shapeTransformations:
@@ -1092,6 +1099,7 @@ struct ContentView: View {
         switch section {
         case .parameters: return .shapeParameters
         case .formula: return .shapeFormula
+        case .hands: return .shapeHands
         case .space: return .shapeSpace
         case .transformations: return .shapeTransformations
         case .bounding: return .shapeBounding
@@ -1129,7 +1137,11 @@ struct ContentView: View {
                 exploreRailSection = ExploreRailSection.allCases.first(where: { $0.browseTab == fractalBrowseTab }) ?? .jumpingOff
             case .shape:
                 topDockTab = .shape
-                shapeRailSection = shapeInnerTab == .formula ? .formula : .parameters
+                switch shapeInnerTab {
+                case .formula: shapeRailSection = .formula
+                case .hands: shapeRailSection = .hands
+                case .parameters: shapeRailSection = .parameters
+                }
             case .space:
                 topDockTab = .shape
                 shapeRailSection = .space
@@ -1259,6 +1271,8 @@ struct ContentView: View {
                     .disabled(animationManager.isPlaying)
             }
 
+            ResetControl(onReset: resetCurrentFractalSettings)
+
             ToggleImmersiveSpaceButton()
                 .frame(minWidth: 260, alignment: .center)
 
@@ -1270,12 +1284,9 @@ struct ContentView: View {
             Spacer(minLength: 12)
 
             HStack(spacing: 12) {
-                ResetAndSaveControls(
-                    onReset: resetCurrentFractalSettings,
-                    onAdd: {
-                        showSaveDestinationSheet = true
-                    }
-                )
+                SaveControl(onAdd: {
+                    showSaveDestinationSheet = true
+                })
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -1312,7 +1323,7 @@ struct ContentView: View {
 
 // MARK: - Extracted Components
 //
-// ResetAndSaveControls, PresetPreviewGenerator,
+// ResetControl, SaveControl, PresetPreviewGenerator,
 // PresetPreviewCard, SaveDestinationSheet, ExternalFileImportSheet, and
 // FPSIndicatorView moved to ContentViewComponents.swift (Phase 3 refactor).
 // The platform-gated View helpers (thresholdGlassBackground, etc.) moved to

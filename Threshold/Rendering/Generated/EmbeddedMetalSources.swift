@@ -299,7 +299,8 @@ typedef struct
     // march runs in), computed on CPU each frame from the ARKit hand anchors.
     int handAttractionEnabled;     // Master on/off (0/1)
     float handAttractionRadius;    // Per-hand influence radius, model units
-    float handAttractionStrength;  // 0 = off, 1 = fully reaches for the hand
+    float handAttractionStrength;  // signed: 0 = off, >0 = Attract (pull toward), <0 = Repel (push away)
+    int handAttractionPocketEnabled; // Attract-only: carve a small pocket at the hand itself (dual-sphere)
     vector_float3 leftHandPosition;
     int leftHandActive;            // 1 = left hand is currently tracked
     vector_float3 rightHandPosition;
@@ -415,7 +416,8 @@ typedef struct
     float safetyBubbleStrength;   // Temporal fade strength (0=off, 1=fully active)
     int handAttractionEnabled;     // Hand Attraction master on/off (0/1)
     float handAttractionRadius;    // Per-hand influence radius, model units
-    float handAttractionStrength;  // 0 = off, 1 = fully reaches for the hand
+    float handAttractionStrength;  // signed: 0 = off, >0 = Attract, <0 = Repel
+    int handAttractionPocketEnabled; // Attract-only: carve a small pocket at the hand itself
     vector_float3 leftHandPosition;
     int leftHandActive;
     vector_float3 rightHandPosition;
@@ -2448,7 +2450,8 @@ struct FractalParams {
     // the fractal surface (smooth union) instead of carving it away.
     int handAttractionEnabled;
     float handAttractionRadius;
-    float handAttractionStrength;
+    float handAttractionStrength;   // signed: >0 = Attract (pull toward), <0 = Repel (push away)
+    int handAttractionPocketEnabled; // Attract-only: carve a small pocket at the hand itself
     float3 leftHandPosition;
     int leftHandActive;
     float3 rightHandPosition;
@@ -2974,26 +2977,59 @@ FORCE_INLINE float applySafetyBubble(float d, float3 pos, FractalParams params) 
 }
 
 // === HAND ATTRACTION CSG APPLICATION ===
-// Inverse of the safety bubble: instead of carving the fractal away from a
-// point, smoothly UNIONS a small blob at each tracked palm into the surface
-// (polynomial smooth-min), so geometry near the hand reaches out to meet it.
-// handAttractionRadius sets both the blob's own size and the smooth-min blend
-// width, so a bigger radius reads as a wider, gentler pull; strength scales
-// how far that blend reaches (0 = no effect, 1 = full-width blend).
-FORCE_INLINE float applyHandAttractionOne(float d, float3 pos, float3 handPos, float radius, float strength) {
-    float blobDist = length(pos - handPos) - radius * 0.35f;
-    float k = max(radius * strength, 1e-4f);
-    float h = saturate(0.5f + 0.5f * (blobDist - d) / k);
-    return mix(blobDist, d, h) - k * h * (1.0f - h);
+// A per-hand interaction sphere at each tracked palm, with a SIGNED strength:
+//   strength > 0 (Attract) — smooth UNION of a small blob into the surface
+//     (polynomial smooth-min), so geometry near the hand reaches out to meet it.
+//   strength < 0 (Repel)   — smooth SUBTRACTION of the same blob (polynomial
+//     smooth-max, same shape as the Safety Bubble's fade), so geometry recoils
+//     from the hand instead.
+// handAttractionRadius sets both the blob's own size and the smooth blend
+// width, so a bigger radius reads as a wider, gentler effect; |strength|
+// scales how far that blend reaches (0 = no effect, 1 = full-width blend).
+// When pocketEnabled is set alongside Attract, an additional small repel
+// carve is applied right at the hand — the surrounding surface still pulls
+// toward the hand, but a pocket is hollowed out where the hand actually is.
+FORCE_INLINE float applyHandAttractionOne(float d, float3 pos, float3 handPos, float radius, float strength, int pocketEnabled) {
+    float dist = length(pos - handPos);
+    float blobRadius = radius * 0.35f;
+    float blobDist = dist - blobRadius;
+    float k = max(radius * fabs(strength), 1e-4f);
+
+    float result;
+    if (strength >= 0.0f) {
+        // Attract: smooth union pulls surface toward the hand.
+        float h = saturate(0.5f + 0.5f * (blobDist - d) / k);
+        result = mix(blobDist, d, h) - k * h * (1.0f - h);
+
+        if (pocketEnabled != 0) {
+            // Pocket: carve a smaller hollow right at the hand (smooth-max
+            // subtraction), so it still reads as a place for the hand to
+            // sit even while the wider surface reaches for it.
+            float pocketRadius = blobRadius * 0.5f;
+            float pocketDist = dist - pocketRadius;
+            float pk = max(pocketRadius * 0.6f, 1e-4f);
+            float a = result;
+            float b = -pocketDist;
+            float ph = saturate(0.5f + 0.5f * (b - a) / pk);
+            result = mix(a, b, ph) + pk * ph * (1.0f - ph);
+        }
+    } else {
+        // Repel: smooth subtraction pushes surface away from the hand.
+        float a = d;
+        float b = -blobDist;
+        float h = saturate(0.5f + 0.5f * (b - a) / k);
+        result = mix(a, b, h) + k * h * (1.0f - h);
+    }
+    return result;
 }
 
 FORCE_INLINE float applyHandAttraction(float d, float3 pos, FractalParams params) {
-    if (params.handAttractionEnabled == 0 || params.handAttractionStrength < 0.001f) return d;
+    if (params.handAttractionEnabled == 0 || fabs(params.handAttractionStrength) < 0.001f) return d;
     if (params.leftHandActive != 0) {
-        d = applyHandAttractionOne(d, pos, params.leftHandPosition, params.handAttractionRadius, params.handAttractionStrength);
+        d = applyHandAttractionOne(d, pos, params.leftHandPosition, params.handAttractionRadius, params.handAttractionStrength, params.handAttractionPocketEnabled);
     }
     if (params.rightHandActive != 0) {
-        d = applyHandAttractionOne(d, pos, params.rightHandPosition, params.handAttractionRadius, params.handAttractionStrength);
+        d = applyHandAttractionOne(d, pos, params.rightHandPosition, params.handAttractionRadius, params.handAttractionStrength, params.handAttractionPocketEnabled);
     }
     return d;
 }
@@ -3011,6 +3047,7 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
     float3 spaceWarpAxis = float3(0.0f, 1.0f, 0.0f),
     constant SpaceWarpOp* spaceWarpOps = nullptr, int spaceWarpCount = 0,
     int handAttractionEnabled = 0, float handAttractionRadius = 0.0f, float handAttractionStrength = 0.0f,
+    int handAttractionPocketEnabled = 0,
     float3 leftHandPosition = float3(0.0f), int leftHandActive = 0,
     float3 rightHandPosition = float3(0.0f), int rightHandActive = 0)
 {
@@ -3030,6 +3067,7 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
     params.handAttractionEnabled = handAttractionEnabled;
     params.handAttractionRadius = handAttractionRadius;
     params.handAttractionStrength = handAttractionStrength;
+    params.handAttractionPocketEnabled = handAttractionPocketEnabled;
     params.leftHandPosition = leftHandPosition;
     params.leftHandActive = leftHandActive;
     params.rightHandPosition = rightHandPosition;
@@ -4724,7 +4762,7 @@ kernel void adaptiveHierarchical8x8(
         uniforms.precomputedFractal,
         uniforms.minDistance,
         marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count,
-        uniforms.handAttractionEnabled, uniforms.handAttractionRadius, uniforms.handAttractionStrength, uniforms.leftHandPosition, uniforms.leftHandActive, uniforms.rightHandPosition, uniforms.rightHandActive);
+        uniforms.handAttractionEnabled, uniforms.handAttractionRadius, uniforms.handAttractionStrength, uniforms.handAttractionPocketEnabled, uniforms.leftHandPosition, uniforms.leftHandActive, uniforms.rightHandPosition, uniforms.rightHandActive);
 
     // === TEMPORAL REPROJECTION: PER-PIXEL ===
     // Reproject this pixel to previous frame, sample previous depth,
@@ -5477,7 +5515,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         uniforms.precomputedFractal,
         uniforms.minDistance,
         marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count,
-        uniforms.handAttractionEnabled, uniforms.handAttractionRadius, uniforms.handAttractionStrength, uniforms.leftHandPosition, uniforms.leftHandActive, uniforms.rightHandPosition, uniforms.rightHandActive);
+        uniforms.handAttractionEnabled, uniforms.handAttractionRadius, uniforms.handAttractionStrength, uniforms.handAttractionPocketEnabled, uniforms.leftHandPosition, uniforms.leftHandActive, uniforms.rightHandPosition, uniforms.rightHandActive);
 
     half3 col = half3(0.0h);
     float2 ret;

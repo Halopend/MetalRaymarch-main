@@ -56,7 +56,7 @@ struct ToggleImmersiveSpaceButton: View {
                 }
             }
         } label: {
-            Text(appModel.immersiveSpaceState == .open ? "Hide Immersive Space" : "Show Immersive Space")
+            Text(appModel.immersiveSpaceState == .open ? "Exit" : "Launch")
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -80,11 +80,11 @@ struct ToggleImmersiveSpaceButton: View {
 }
 
 #if os(visionOS)
-/// Immersion style picker: Full (classic VR), Partial (portal sized by the
-/// Digital Crown, transparent background inside it), Mixed (no portal — the
-/// fractal floats in the real room over passthrough). Requires visionOS 26
-/// (CompositorServices portal render context) — renders nothing on earlier
-/// systems, where the space stays fully immersive.
+/// Immersion style picker: Immersive (takes over the whole view; the Digital
+/// Crown dials it down to a third, and the bottom of the dial hands off to
+/// Mixed) or Mixed (no portal — the fractal floats in the real room over
+/// passthrough). Requires visionOS 26 (CompositorServices portal render
+/// context) — renders nothing on earlier systems.
 struct ImmersionStylePicker: View {
     @Environment(AppModel.self) private var appModel
     var showsCaption: Bool = true
@@ -94,14 +94,13 @@ struct ImmersionStylePicker: View {
             @Bindable var appModel = appModel
             VStack(spacing: 4) {
                 Picker("Immersion", selection: $appModel.immersionStylePreference) {
-                    Text("Full").tag(AppModel.ImmersionStylePreference.full)
-                    Text("Partial").tag(AppModel.ImmersionStylePreference.progressive)
+                    Text("Immersive").tag(AppModel.ImmersionStylePreference.immersive)
                     Text("Mixed").tag(AppModel.ImmersionStylePreference.mixed)
                 }
                 .pickerStyle(.segmented)
 
-                if showsCaption && appModel.immersionStylePreference == .progressive {
-                    Text("Turn the Digital Crown to adjust immersion")
+                if showsCaption && appModel.immersionStylePreference == .immersive {
+                    Text("Digital Crown dials immersion — all the way down switches to Mixed")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

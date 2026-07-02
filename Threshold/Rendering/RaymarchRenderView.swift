@@ -1644,6 +1644,7 @@ final class ThresholdMacRenderer {
                         handAttractionEnabled: 0,
                         handAttractionRadius: 0,
                         handAttractionStrength: 0,
+                        handAttractionPocketEnabled: 0,
                         leftHandPosition: .zero,
                         leftHandActive: 0,
                         rightHandPosition: .zero,

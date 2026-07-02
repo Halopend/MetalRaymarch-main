@@ -277,7 +277,8 @@ final class RenderSettings: @unchecked Sendable {
     // bubble's push-away carve. Off by default (opt-in, not a comfort feature).
     private var _handAttractionEnabled: Bool = false
     private var _handAttractionRadius: Float = 0.35
-    private var _handAttractionStrength: Float = 0.5
+    private var _handAttractionStrength: Float = -0.35
+    private var _handAttractionPocketEnabled: Bool = false
 
     // === COLOR SCHEME ===
     // Controls the color palette and post-processing for fractal coloring
@@ -1695,11 +1696,20 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    /// How strongly the fractal surface reaches for the hand within its radius (0...1).
+    /// Signed strength: negative = Repel (push away), positive = Attract (pull toward), 0 = off. Range -1...1.
     var handAttractionStrength: Float {
         get { withLock { _handAttractionStrength } }
         set {
-            withLock { _handAttractionStrength = max(0.0, min(1.0, newValue)) }
+            withLock { _handAttractionStrength = max(-1.0, min(1.0, newValue)) }
+            persistHandAttraction()
+        }
+    }
+
+    /// Attract-only: carve a small repel pocket right at the hand (dual-sphere pocket mode).
+    var handAttractionPocketEnabled: Bool {
+        get { withLock { _handAttractionPocketEnabled } }
+        set {
+            withLock { _handAttractionPocketEnabled = newValue }
             persistHandAttraction()
         }
     }
@@ -2463,6 +2473,7 @@ final class RenderSettings: @unchecked Sendable {
                 handAttractionEnabled: _handAttractionEnabled,
                 handAttractionRadius: _handAttractionRadius,
                 handAttractionStrength: _handAttractionStrength,
+                handAttractionPocketEnabled: _handAttractionPocketEnabled,
                 colorSchemeParams: makeColorSchemeParamsLocked(),
                 lightingSoftness: _lightingSoftness,
                 fogEnabled: _fogEffect.enabled,
@@ -4019,6 +4030,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.enabled = _handAttractionEnabled
                 c.radius = _handAttractionRadius
                 c.strength = _handAttractionStrength
+                c.pocketEnabled = _handAttractionPocketEnabled
                 return c
             }
         }
@@ -4029,6 +4041,7 @@ final class RenderSettings: @unchecked Sendable {
                 _handAttractionEnabled = newValue.enabled
                 _handAttractionRadius = newValue.radius
                 _handAttractionStrength = newValue.strength
+                _handAttractionPocketEnabled = newValue.pocketEnabled
             }
         }
     }

@@ -283,7 +283,8 @@ typedef struct
     // march runs in), computed on CPU each frame from the ARKit hand anchors.
     int handAttractionEnabled;     // Master on/off (0/1)
     float handAttractionRadius;    // Per-hand influence radius, model units
-    float handAttractionStrength;  // 0 = off, 1 = fully reaches for the hand
+    float handAttractionStrength;  // signed: 0 = off, >0 = Attract (pull toward), <0 = Repel (push away)
+    int handAttractionPocketEnabled; // Attract-only: carve a small pocket at the hand itself (dual-sphere)
     vector_float3 leftHandPosition;
     int leftHandActive;            // 1 = left hand is currently tracked
     vector_float3 rightHandPosition;
@@ -399,7 +400,8 @@ typedef struct
     float safetyBubbleStrength;   // Temporal fade strength (0=off, 1=fully active)
     int handAttractionEnabled;     // Hand Attraction master on/off (0/1)
     float handAttractionRadius;    // Per-hand influence radius, model units
-    float handAttractionStrength;  // 0 = off, 1 = fully reaches for the hand
+    float handAttractionStrength;  // signed: 0 = off, >0 = Attract, <0 = Repel
+    int handAttractionPocketEnabled; // Attract-only: carve a small pocket at the hand itself
     vector_float3 leftHandPosition;
     int leftHandActive;
     vector_float3 rightHandPosition;

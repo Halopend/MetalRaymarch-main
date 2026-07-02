@@ -129,21 +129,25 @@ class AppModel {
     @ObservationIgnored nonisolated(unsafe) var runtimeViewModeForRenderer: RuntimeViewMode = .raymarch
 
     /// Immersive-space presentation style.
-    /// - `.full`: classic fully-immersive mode.
-    /// - `.progressive` ("Partial"): scene in a portal whose size the user dials
-    ///   with the Digital Crown; background inside the portal is transparent.
+    /// - `.immersive`: progressive style that starts fully immersed
+    ///   (initialAmount 1.0); the Digital Crown dials the portal down to a
+    ///   third, and dialing to the bottom of the range hands off to Mixed
+    ///   (see MetalProjectApp's onImmersionChange).
     /// - `.mixed`: no portal — the fractal floats in the real room and the
     ///   background is fully transparent (passthrough).
-    /// Progressive/mixed need visionOS 26's CompositorServices support, so the
-    /// picker that drives this is availability-gated.
     enum ImmersionStylePreference: String, CaseIterable {
-        case full
-        case progressive
+        case immersive
         case mixed
+
+        /// Decodes persisted values, mapping the legacy "full"/"progressive"
+        /// styles onto `.immersive`.
+        static func fromPersisted(_ raw: String?) -> ImmersionStylePreference {
+            raw == ImmersionStylePreference.mixed.rawValue ? .mixed : .immersive
+        }
     }
 
     var immersionStylePreference: ImmersionStylePreference =
-        ImmersionStylePreference(rawValue: UserDefaults.standard.string(forKey: "immersionStylePreference") ?? "") ?? .full {
+        .fromPersisted(UserDefaults.standard.string(forKey: "immersionStylePreference")) {
         didSet {
             UserDefaults.standard.set(immersionStylePreference.rawValue, forKey: "immersionStylePreference")
             immersionStyleForRenderer = immersionStylePreference
@@ -153,7 +157,7 @@ class AppModel {
     /// Mirror of `immersionStylePreference` readable from the render loop off
     /// the MainActor (same pattern as runtimeViewModeForRenderer).
     @ObservationIgnored nonisolated(unsafe) var immersionStyleForRenderer: ImmersionStylePreference =
-        ImmersionStylePreference(rawValue: UserDefaults.standard.string(forKey: "immersionStylePreference") ?? "") ?? .full
+        .fromPersisted(UserDefaults.standard.string(forKey: "immersionStylePreference"))
 
     // App activity state (used to avoid submitting GPU work while backgrounded)
     // @ObservationIgnored + nonisolated(unsafe) allows cross-thread access without @Observable macro interference

@@ -15,48 +15,48 @@ import UIKit
 import AppKit
 #endif
 
-/// Bottom-bar controls: a plain Reset button paired with a separate "+" button
-/// that opens the save-destination flow. Replaces the former hold-to-save capsule
-/// so saving is an explicit tap on its own control rather than a long-press.
-struct ResetAndSaveControls: View {
+/// A plain Reset button that restores the current fractal to its saved settings.
+/// Lives beside the record control on the opposite end of the bottom bar from
+/// the "+" save button, so it doesn't read as one control with Save.
+struct ResetControl: View {
     let onReset: () -> Void
+
+    var body: some View {
+        Button(action: onReset) {
+            HStack(spacing: 6) {
+                Image(systemName: AppIcons.arrowCounterclockwise)
+                    .font(.system(size: IconSize.small, weight: .semibold))
+                Text("Reset")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 34)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
+        .background(Capsule().fill(Color.secondary.opacity(0.10)))
+        .overlay(Capsule().stroke(Color.secondary.opacity(0.35), lineWidth: 1))
+        .help("Reset the current fractal to its saved settings.")
+    }
+}
+
+/// The "+" button that opens the save-destination flow.
+struct SaveControl: View {
     let onAdd: () -> Void
 
     var body: some View {
-        // Reset and Save are distinct actions, so keep them visually separated:
-        // a wider gap plus a neutral *outlined* Reset against a *solid* green "+"
-        // so they don't read as one control on the visionOS glass material (where
-        // two similarly-tinted adjacent buttons blended together).
-        HStack(spacing: 16) {
-            Button(action: onReset) {
-                HStack(spacing: 6) {
-                    Image(systemName: AppIcons.arrowCounterclockwise)
-                        .font(.system(size: IconSize.small, weight: .semibold))
-                    Text("Reset")
-                        .font(.subheadline.weight(.semibold))
-                }
-                .padding(.horizontal, 14)
-                .frame(height: 34)
-                .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.primary)
-            .background(Capsule().fill(Color.secondary.opacity(0.10)))
-            .overlay(Capsule().stroke(Color.secondary.opacity(0.35), lineWidth: 1))
-            .help("Reset the current fractal to its saved settings.")
-
-            Button(action: onAdd) {
-                Image(systemName: AppIcons.plus)
-                    .font(.system(size: 15, weight: .bold))
-                    .frame(width: 34, height: 34)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white)
-            .background(Circle().fill(Color.green))
-            .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
-            .help("Save the current settings as a new scene.")
+        Button(action: onAdd) {
+            Image(systemName: AppIcons.plus)
+                .font(.system(size: 15, weight: .bold))
+                .frame(width: 34, height: 34)
+                .contentShape(Circle())
         }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+        .background(Circle().fill(Color.green))
+        .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
+        .help("Save the current settings as a new scene.")
     }
 }
 

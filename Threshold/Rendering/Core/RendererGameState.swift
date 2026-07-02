@@ -33,6 +33,7 @@ struct HandAttractionUniforms {
     var enabled: Int32 = 0
     var radius: Float = 0
     var strength: Float = 0
+    var pocketEnabled: Int32 = 0
     var leftPosition: SIMD3<Float> = .zero
     var leftActive: Int32 = 0
     var rightPosition: SIMD3<Float> = .zero
@@ -112,6 +113,7 @@ extension Renderer {
         state.enabled = 1
         state.radius = settingsSnapshot.handAttractionRadius / max(effectiveScale, 0.001)
         state.strength = settingsSnapshot.handAttractionStrength
+        state.pocketEnabled = settingsSnapshot.handAttractionPocketEnabled ? 1 : 0
 
         if lastLeftHandTrackedForAttraction {
             state.leftPosition = Self.worldToModel(lastLeftHandPalmPosition, inverseModelMatrix: inverseModelMatrix)
@@ -338,6 +340,7 @@ extension Renderer {
                             handAttractionEnabled: handAttraction.enabled,
                             handAttractionRadius: handAttraction.radius,
                             handAttractionStrength: handAttraction.strength,
+                            handAttractionPocketEnabled: handAttraction.pocketEnabled,
                             leftHandPosition: handAttraction.leftPosition,
                             leftHandActive: handAttraction.leftActive,
                             rightHandPosition: handAttraction.rightPosition,

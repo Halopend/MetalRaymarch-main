@@ -88,6 +88,7 @@ enum ExploreRailSection: String, CaseIterable {
 enum ShapeRailSection: String, CaseIterable {
     case parameters = "Parameters"
     case formula = "Formula"
+    case hands = "Hands"
     case space = "Space"
     case transformations = "Transform"
     case bounding = "Bounding"
@@ -97,6 +98,7 @@ enum ShapeRailSection: String, CaseIterable {
         switch self {
         case .parameters: return "slider.horizontal.3"
         case .formula: return "function"
+        case .hands: return "hand.raised.fingers.spread"
         case .space: return "rotate.3d"
         case .transformations: return "square.stack.3d.up"
         case .bounding: return "circle.dashed"
@@ -210,6 +212,7 @@ enum PinnedRailControl: String, CaseIterable {
     case exploreCustomScenes
     case shapeParameters
     case shapeFormula
+    case shapeHands
     case shapeSpace
     case shapeTransformations
     case shapeBounding
@@ -235,6 +238,7 @@ enum PinnedRailControl: String, CaseIterable {
         case .exploreCustomScenes: return ExploreRailSection.customScenes.rawValue
         case .shapeParameters: return ShapeRailSection.parameters.rawValue
         case .shapeFormula: return ShapeRailSection.formula.rawValue
+        case .shapeHands: return ShapeRailSection.hands.rawValue
         case .shapeSpace: return ShapeRailSection.space.rawValue
         case .shapeTransformations: return ShapeRailSection.transformations.rawValue
         case .shapeBounding: return ShapeRailSection.bounding.rawValue
@@ -262,6 +266,7 @@ enum PinnedRailControl: String, CaseIterable {
         case .exploreCustomScenes: return ExploreRailSection.customScenes.icon
         case .shapeParameters: return ShapeRailSection.parameters.icon
         case .shapeFormula: return ShapeRailSection.formula.icon
+        case .shapeHands: return ShapeRailSection.hands.icon
         case .shapeSpace: return ShapeRailSection.space.icon
         case .shapeTransformations: return ShapeRailSection.transformations.icon
         case .shapeBounding: return ShapeRailSection.bounding.icon
@@ -282,7 +287,7 @@ enum PinnedRailControl: String, CaseIterable {
 }
 
 enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shape", space = "Space", transform = "Transform", bounding = "Bounding", render = "Render" }
-enum ShapeInnerTab: String, CaseIterable { case parameters = "Parameters", formula = "Formula" }
+enum ShapeInnerTab: String, CaseIterable { case parameters = "Parameters", formula = "Formula", hands = "Hands" }
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
 enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic Color", `static` = "Atmosphere" }
 
