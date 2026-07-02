@@ -141,6 +141,102 @@ extension Renderer {
 #endif
     }
 
+    // MARK: - Progressive Immersion Portal (visionOS 26+)
+
+    /// True when the layer was configured with a render-context stencil format
+    /// at startup (visionOS 26 + layered layout — see ContentStageConfiguration).
+    /// Once configured, the compositor requires the drawable render-context
+    /// pass before EVERY present, in every immersion style — skipping it
+    /// aborts the frame ("need to use drawable render context when supporting
+    /// progressive style"). Style-independent by design.
+    var drawableRenderContextRequired: Bool {
+        guard #available(visionOS 26.0, *) else { return false }
+        guard layerRenderer.configuration.layout == .layered else { return false }
+        return layerRenderer.configuration.drawableRenderContextStencilFormat != .invalid
+    }
+
+    /// True when the background should be transparent this frame — miss rays
+    /// write alpha 0 and the pass clears transparent, so the compositor shows
+    /// passthrough instead of black. Active in both Partial (inside the portal)
+    /// and Mixed (everywhere) immersion styles.
+    var passthroughBackgroundActive: Bool {
+        guard drawableRenderContextRequired else { return false }
+        switch appModel.immersionStyleForRenderer {
+        case .full: return false
+        case .progressive, .mixed: return true
+        }
+    }
+
+    /// Encodes the compositor's drawable render-context pass — REQUIRED before
+    /// every present once the layer declares a render-context stencil format,
+    /// in every immersion style. The context stamps the visible-pixel mask
+    /// (the portal in Partial; the full texture in Full/Mixed) into an
+    /// app-owned stencil texture, then draws the compositor's own effects
+    /// (portal rim/fade) over the drawable. Runs as its own encoder after the
+    /// scene pass so none of the cached scene pipelines need a stencil format —
+    /// pixels hidden by the portal are shaded and then cropped by the
+    /// compositor, which is correct-first; stencil-testing the scene pass is a
+    /// later perf follow-up.
+    ///
+    /// Must be the last encoding before `drawable.encodePresent` — the render
+    /// context takes ownership of the encoder and calls `endEncoding` itself.
+    func encodeDrawableRenderContextPass(commandBuffer: MTLCommandBuffer, drawable: LayerRenderer.Drawable) {
+        guard #available(visionOS 26.0, *) else { return }
+        let stencilFormat = layerRenderer.configuration.drawableRenderContextStencilFormat
+        guard stencilFormat != .invalid,
+              let stencil = ensurePortalStencilTexture(matching: drawable, format: stencilFormat) else { return }
+
+        let renderContext = drawable.addRenderContext(commandBuffer: commandBuffer)
+
+        let descriptor = MTLRenderPassDescriptor()
+        descriptor.colorAttachments[0].texture = drawable.colorTextures[0]
+        descriptor.colorAttachments[0].loadAction = .load
+        descriptor.colorAttachments[0].storeAction = .store
+        descriptor.depthAttachment.texture = drawable.depthTextures[0]
+        descriptor.depthAttachment.loadAction = .load
+        descriptor.depthAttachment.storeAction = .store
+        descriptor.stencilAttachment.texture = stencil
+        descriptor.stencilAttachment.loadAction = .clear
+        descriptor.stencilAttachment.clearStencil = 0
+        descriptor.stencilAttachment.storeAction = .dontCare
+        descriptor.rasterizationRateMap = drawable.rasterizationRateMaps.first
+        descriptor.renderTargetArrayLength = drawable.views.count
+
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return }
+        encoder.label = "Progressive Immersion Portal"
+        renderContext.drawMaskOnStencilAttachment(commandEncoder: encoder, value: 0xFF)
+        renderContext.endEncoding(commandEncoder: encoder)
+
+        if RENDERER_DEBUG && !hasLoggedProgressivePortal {
+            hasLoggedProgressivePortal = true
+            print("✓ Progressive immersion portal pass active (stencil format \(stencilFormat.rawValue))")
+        }
+    }
+
+    /// Drawable-matched stencil texture for the portal mask. Memoryless — the
+    /// mask is written and consumed within the single portal pass.
+    private func ensurePortalStencilTexture(matching drawable: LayerRenderer.Drawable, format: MTLPixelFormat) -> MTLTexture? {
+        let color = drawable.colorTextures[0]
+        let arrayLength = max(1, drawable.views.count)
+        if let existing = portalStencilTexture,
+           existing.width == color.width,
+           existing.height == color.height,
+           existing.arrayLength == arrayLength,
+           existing.pixelFormat == format {
+            return existing
+        }
+        let descriptor = MTLTextureDescriptor()
+        descriptor.textureType = arrayLength > 1 ? .type2DArray : .type2D
+        descriptor.pixelFormat = format
+        descriptor.width = color.width
+        descriptor.height = color.height
+        descriptor.arrayLength = arrayLength
+        descriptor.usage = .renderTarget
+        descriptor.storageMode = .memoryless
+        portalStencilTexture = device.makeTexture(descriptor: descriptor)
+        return portalStencilTexture
+    }
+
     func selectFramePath(settingsSnapshot: RenderSettingsSnapshot) -> RenderFramePath {
         // Resolution is now owned by the compositor's renderQuality (see
         // applyRenderQualityIfNeeded), independent of the render path, so the
@@ -245,7 +341,12 @@ extension Renderer {
         renderPassDescriptor.depthAttachment.storeAction = .store
 
         renderPassDescriptor.colorAttachments[0].loadAction = .clear
-        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
+        // Partial/Mixed immersion: clear transparent so pixels the proxy mesh
+        // never covers show passthrough rather than opaque black (miss rays
+        // inside the mesh go transparent in fragmentMain via
+        // passthroughBackground).
+        let clearAlpha: Double = passthroughBackgroundActive ? 0.0 : 1.0
+        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: clearAlpha)
         renderPassDescriptor.depthAttachment.loadAction = .clear
         renderPassDescriptor.depthAttachment.clearDepth = 1.0
 

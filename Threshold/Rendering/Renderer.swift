@@ -232,6 +232,13 @@ actor Renderer {
     // One-shot log guard for visionOS 26+ queryDrawables() candidate sizes.
     var hasLoggedDrawableQualityOptions: Bool = false
 
+    // Progressive-immersion portal pass (visionOS 26+): app-owned stencil
+    // texture the compositor's drawable render context draws its portal mask
+    // into. Memoryless (clear → dontCare, consumed within the pass); rebuilt
+    // when the drawable geometry changes. See encodeDrawableRenderContextPass.
+    var portalStencilTexture: MTLTexture?
+    var hasLoggedProgressivePortal: Bool = false
+
     var lastHandTrackingUpdateTime: TimeInterval = 0  // Throttle hand UI updates
     // Hand-tracking dispatch coordination between the render loop (Renderer actor)
     // and the per-frame @MainActor Task that processes gestures. A single Mutex
@@ -915,6 +922,9 @@ actor Renderer {
             if RENDERER_DEBUG { print("⚠️ GPU stall detected: inFlightSemaphore timed out (100ms)") }
             frame.startSubmission()
             defer { frame.endSubmission() }
+            if drawableRenderContextRequired {
+                encodeDrawableRenderContextPass(commandBuffer: commandBuffer, drawable: drawable)
+            }
             drawable.encodePresent(commandBuffer: commandBuffer)
             commandBuffer.commit()
             return
@@ -1096,7 +1106,18 @@ actor Renderer {
         let renderEncodeTraceState = RenderTrace.begin("Render Encode")
         defer { RenderTrace.end("Render Encode", renderEncodeTraceState) }
 
-        let framePath = selectFramePath(settingsSnapshot: settingsSnapshot)
+        // Once the layer is configured with a render-context stencil format
+        // (visionOS 26+), the compositor REQUIRES the drawable render-context
+        // pass before EVERY present, in every immersion style — presenting
+        // without it aborts with "need to use drawable render context when
+        // supporting progressive style". So the pass runs per-frame whenever
+        // configured (see the encodeDrawableRenderContextPass calls before
+        // each encodePresent below). The transparent background additionally
+        // needs fragmentMain's miss-alpha, which the compute path doesn't
+        // have — force the fragment path while it's active.
+        let renderContextRequired = drawableRenderContextRequired
+        var framePath = selectFramePath(settingsSnapshot: settingsSnapshot)
+        if passthroughBackgroundActive { framePath = .fragment }
         let useAdaptiveCompute: Bool
 
         if case .adaptiveCompute = framePath {
@@ -1113,6 +1134,9 @@ actor Renderer {
                 // Adaptive-compute frames don't write fragment depth — next
                 // fragment frame must not warm-start from stale history.
                 warmStartGate.invalidate()
+                if renderContextRequired {
+                    encodeDrawableRenderContextPass(commandBuffer: commandBuffer, drawable: drawable)
+                }
                 drawable.encodePresent(commandBuffer: commandBuffer)
                 shouldSignalInFlightSemaphore = false
                 commandBuffer.commit()
@@ -1210,6 +1234,9 @@ actor Renderer {
 
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: fragmentPassPlan.renderPassDescriptor) else {
             if RENDERER_DEBUG { print("⚠️ Failed to create render encoder; skipping frame") }
+            if renderContextRequired {
+                encodeDrawableRenderContextPass(commandBuffer: commandBuffer, drawable: drawable)
+            }
             drawable.encodePresent(commandBuffer: commandBuffer)
             shouldSignalInFlightSemaphore = false
             commandBuffer.commit()
@@ -1393,12 +1420,16 @@ actor Renderer {
             }
         }
 
+        if renderContextRequired {
+            encodeDrawableRenderContextPass(commandBuffer: commandBuffer, drawable: drawable)
+        }
+
         drawable.encodePresent(commandBuffer: commandBuffer)
 
         shouldSignalInFlightSemaphore = false
         commandBuffer.commit()
     }
-    
+
     // MARK: - Adaptive 8x8 Hierarchical Compute Rendering
     
     /// Dispatches the adaptive 8x8 hierarchical compute kernel for high-performance raymarching

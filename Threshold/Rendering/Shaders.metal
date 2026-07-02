@@ -3559,7 +3559,16 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     float2 blobUV = in.texCoord * 2.0f - 1.0f;
     col = compositeSpringBlob(col, blobUV, uniforms);
 
-    output.color = float4(float3(col), 1.0);
+    // Partial immersion (visionOS): miss rays go transparent so the compositor
+    // shows passthrough instead of the black background. RGB keeps the fog/glow
+    // contribution — under premultiplied alpha it composites additively over
+    // passthrough, preserving the glow halo around the fractal. Floor-circle
+    // pixels count as hits.
+    float outAlpha = 1.0f;
+    if (uniforms.passthroughBackground != 0 && ret.x >= kRayMissThreshold && floorHit.alpha <= 0.0f) {
+        outAlpha = 0.0f;
+    }
+    output.color = float4(float3(col), outAlpha);
     return output;
 }
 

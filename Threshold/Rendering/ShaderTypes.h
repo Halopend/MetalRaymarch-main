@@ -338,6 +338,12 @@ typedef struct
     // fragmentMain's benchAblate dissection branches — set by the Mac headless
     // benchmark harness via THRESHOLD_BENCHMARK_ABLATE).
     uint32_t benchAblate;
+
+    // 1 = miss rays write alpha 0 (premultiplied) so the compositor shows
+    // passthrough instead of the black background — Partial immersion on
+    // visionOS. Glow/fog on miss pixels stays in RGB, which composites
+    // additively over passthrough under premultiplied alpha. 0 everywhere else.
+    int passthroughBackground;
 } Uniforms;
 
 typedef struct

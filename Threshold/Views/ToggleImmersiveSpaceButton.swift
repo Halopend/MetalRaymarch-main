@@ -78,3 +78,35 @@ struct ToggleImmersiveSpaceButton: View {
 #endif
     }
 }
+
+#if os(visionOS)
+/// Immersion style picker: Full (classic VR), Partial (portal sized by the
+/// Digital Crown, transparent background inside it), Mixed (no portal — the
+/// fractal floats in the real room over passthrough). Requires visionOS 26
+/// (CompositorServices portal render context) — renders nothing on earlier
+/// systems, where the space stays fully immersive.
+struct ImmersionStylePicker: View {
+    @Environment(AppModel.self) private var appModel
+    var showsCaption: Bool = true
+
+    var body: some View {
+        if #available(visionOS 26.0, *) {
+            @Bindable var appModel = appModel
+            VStack(spacing: 4) {
+                Picker("Immersion", selection: $appModel.immersionStylePreference) {
+                    Text("Full").tag(AppModel.ImmersionStylePreference.full)
+                    Text("Partial").tag(AppModel.ImmersionStylePreference.progressive)
+                    Text("Mixed").tag(AppModel.ImmersionStylePreference.mixed)
+                }
+                .pickerStyle(.segmented)
+
+                if showsCaption && appModel.immersionStylePreference == .progressive {
+                    Text("Turn the Digital Crown to adjust immersion")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+#endif

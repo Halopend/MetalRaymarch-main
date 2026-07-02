@@ -8,6 +8,7 @@
 #if os(visionOS)
 import SwiftUI
 import CompositorServices
+import Metal
 
 struct ContentStageConfiguration: CompositorLayerConfiguration {
     func makeConfiguration(capabilities: LayerRenderer.Capabilities, configuration: inout LayerRenderer.Configuration) {
@@ -33,6 +34,25 @@ struct ContentStageConfiguration: CompositorLayerConfiguration {
             if configuration.isFoveationEnabled {
                 configuration.maxRenderQuality = LayerRenderer.RenderQuality(QualityConfig.visionMaxRenderQuality)
                 print("✓ maxRenderQuality = \(QualityConfig.visionMaxRenderQuality) (platform defaultRenderQuality: \(capabilities.defaultRenderQuality))")
+            }
+        }
+
+        // === PROGRESSIVE IMMERSION (visionOS 26+) ===
+        // Declaring a render-context stencil format opts the layer into the
+        // compositor's portal-mask machinery, which is what lets the
+        // ImmersiveSpace use the .progressive style (Digital Crown dials the
+        // portal size). Full immersion is unaffected while the style stays
+        // .full. NOTE: once configured, the compositor requires the drawable
+        // render-context pass before every present in EVERY style — see
+        // Renderer.encodeDrawableRenderContextPass.
+        if #available(visionOS 26.0, *) {
+            if configuration.layout == .layered,
+               capabilities.supportedLayouts(options: [.progressiveImmersionEnabled]).contains(.layered) {
+                let stencilFormats = capabilities.drawableRenderContextSupportedStencilFormats
+                if let format = stencilFormats.contains(.stencil8) ? MTLPixelFormat.stencil8 : stencilFormats.first {
+                    configuration.drawableRenderContextStencilFormat = format
+                    print("✓ progressive immersion enabled (render-context stencil format: \(format.rawValue))")
+                }
             }
         }
     }
@@ -138,7 +158,26 @@ struct MetalProjectTestApp: App {
                 Renderer.startRenderLoop(layerRenderer, appModel: appModel)
             }
         }
-        .immersionStyle(selection: .constant(.full), in: .full)
+        // The selection follows the user's Full / Partial / Mixed preference.
+        // In .progressive the Digital Crown controls the portal size; the
+        // compositor's portal mask is encoded by
+        // Renderer.encodeDrawableRenderContextPass. In .mixed there's no portal —
+        // the scene composites over passthrough (miss rays write alpha 0).
+        // The setter is a no-op — the style only changes when the app changes
+        // the preference.
+        .immersionStyle(
+            selection: Binding(
+                get: {
+                    switch appModel.immersionStylePreference {
+                    case .full: return .full
+                    case .progressive: return .progressive
+                    case .mixed: return .mixed
+                    }
+                },
+                set: { _ in }
+            ),
+            in: .mixed, .progressive, .full
+        )
         .upperLimbVisibility(.visible)
         .persistentSystemOverlays(.hidden)
         .onChange(of: appModel.immersiveSpaceState) { oldValue, newValue in

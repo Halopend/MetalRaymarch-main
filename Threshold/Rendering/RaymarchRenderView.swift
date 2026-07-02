@@ -1667,7 +1667,8 @@ final class ThresholdMacRenderer {
                         precomputedAudio: precomputedAudio,
                         precomputedFog: precomputedFog,
                         colorScheme: benchStableColorScheme(settings.colorSchemeParams),
-                        benchAblate: Self.benchAblateMode)
+                        benchAblate: Self.benchAblateMode,
+                        passthroughBackground: 0)
     }
 
     private static func buildRenderPipeline(device: MTLDevice,

@@ -128,6 +128,33 @@ class AppModel {
     }
     @ObservationIgnored nonisolated(unsafe) var runtimeViewModeForRenderer: RuntimeViewMode = .raymarch
 
+    /// Immersive-space presentation style.
+    /// - `.full`: classic fully-immersive mode.
+    /// - `.progressive` ("Partial"): scene in a portal whose size the user dials
+    ///   with the Digital Crown; background inside the portal is transparent.
+    /// - `.mixed`: no portal — the fractal floats in the real room and the
+    ///   background is fully transparent (passthrough).
+    /// Progressive/mixed need visionOS 26's CompositorServices support, so the
+    /// picker that drives this is availability-gated.
+    enum ImmersionStylePreference: String, CaseIterable {
+        case full
+        case progressive
+        case mixed
+    }
+
+    var immersionStylePreference: ImmersionStylePreference =
+        ImmersionStylePreference(rawValue: UserDefaults.standard.string(forKey: "immersionStylePreference") ?? "") ?? .full {
+        didSet {
+            UserDefaults.standard.set(immersionStylePreference.rawValue, forKey: "immersionStylePreference")
+            immersionStyleForRenderer = immersionStylePreference
+        }
+    }
+
+    /// Mirror of `immersionStylePreference` readable from the render loop off
+    /// the MainActor (same pattern as runtimeViewModeForRenderer).
+    @ObservationIgnored nonisolated(unsafe) var immersionStyleForRenderer: ImmersionStylePreference =
+        ImmersionStylePreference(rawValue: UserDefaults.standard.string(forKey: "immersionStylePreference") ?? "") ?? .full
+
     // App activity state (used to avoid submitting GPU work while backgrounded)
     // @ObservationIgnored + nonisolated(unsafe) allows cross-thread access without @Observable macro interference
     @ObservationIgnored nonisolated(unsafe) var isAppActive: Bool = true

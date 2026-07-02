@@ -354,6 +354,12 @@ typedef struct
     // fragmentMain's benchAblate dissection branches — set by the Mac headless
     // benchmark harness via THRESHOLD_BENCHMARK_ABLATE).
     uint32_t benchAblate;
+
+    // 1 = miss rays write alpha 0 (premultiplied) so the compositor shows
+    // passthrough instead of the black background — Partial immersion on
+    // visionOS. Glow/fog on miss pixels stays in RGB, which composites
+    // additively over passthrough under premultiplied alpha. 0 everywhere else.
+    int passthroughBackground;
 } Uniforms;
 
 typedef struct
@@ -5476,7 +5482,16 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     float2 blobUV = in.texCoord * 2.0f - 1.0f;
     col = compositeSpringBlob(col, blobUV, uniforms);
 
-    output.color = float4(float3(col), 1.0);
+    // Partial immersion (visionOS): miss rays go transparent so the compositor
+    // shows passthrough instead of the black background. RGB keeps the fog/glow
+    // contribution — under premultiplied alpha it composites additively over
+    // passthrough, preserving the glow halo around the fractal. Floor-circle
+    // pixels count as hits.
+    float outAlpha = 1.0f;
+    if (uniforms.passthroughBackground != 0 && ret.x >= kRayMissThreshold && floorHit.alpha <= 0.0f) {
+        outAlpha = 0.0f;
+    }
+    output.color = float4(float3(col), outAlpha);
     return output;
 }
 

@@ -475,6 +475,11 @@ struct ContentView: View {
 
             ToggleImmersiveSpaceButton()
 
+#if os(visionOS)
+            ImmersionStylePicker()
+                .frame(maxWidth: 240)
+#endif
+
             VStack(spacing: 8) {
                 ProgressView()
                 Text("Compiling shaders — first launch may take a moment…")
@@ -1241,6 +1246,11 @@ struct ContentView: View {
 
             ToggleImmersiveSpaceButton()
                 .frame(minWidth: 260, alignment: .center)
+
+#if os(visionOS)
+            ImmersionStylePicker(showsCaption: false)
+                .frame(width: 150)
+#endif
 
             Spacer(minLength: 12)
 

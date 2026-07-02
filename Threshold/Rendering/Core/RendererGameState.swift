@@ -292,7 +292,11 @@ extension Renderer {
                             precomputedAudio: precomputedAudio,
                             precomputedFog: precomputedFog,
                             colorScheme: colorSchemeParams,
-                            benchAblate: 0)
+                            benchAblate: 0,
+                            // Partial/Mixed immersion: miss rays write alpha 0
+                            // so the compositor shows passthrough instead of
+                            // the black background (see fragmentMain).
+                            passthroughBackground: passthroughBackgroundActive ? 1 : 0)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
