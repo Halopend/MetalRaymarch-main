@@ -169,6 +169,7 @@ enum MacBenchmarkHarness {
             case "overRelaxationMax":            qc.overRelaxationMax = v
             case "smartAdvanceEnabled":          qc.smartAdvanceEnabled = v != 0
             case "boundingSphereSkipEnabled":    qc.boundingSphereSkipEnabled = v != 0
+            case "zoomFogCompensationEnabled":   qc.zoomFogCompensationEnabled = v != 0
             case "coarsePrepassWarmStartEnabled": qc.coarsePrepassWarmStartEnabled = v != 0
             case "coherentPacketEnabled":        qc.coherentPacketEnabled = v != 0
             case "foveationStrength":            qc.foveationStrength = v
@@ -401,6 +402,15 @@ enum MacBenchmarkHarness {
         // Re-pin every config axis after the scene's own values applied.
         if let s = job.shadows { settings.shadowsEnabled = s; log("  forced shadows=\(s)") }
         applyQCOverride(job.qc, to: settings)
+
+        // Dev hook: force a zoom level (detail scale) for zoom-out captures.
+        // Set the target too — interpolateToTargets stomps the raw value.
+        if let ds = ProcessInfo.processInfo.environment["THRESHOLD_BENCHMARK_DETAIL_SCALE"].flatMap(Float.init) {
+            settings.detailScale = ds
+            settings.targetDetailScale = ds
+            log("  forced detailScale=\(ds)")
+            try? await Task.sleep(for: .seconds(1))
+        }
 
         // Ablation mode is read by the renderer per frame; racy-by-design gate
         // (main-actor write, render-thread read) like the other benchmark toggles.

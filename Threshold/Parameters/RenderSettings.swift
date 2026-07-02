@@ -194,6 +194,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _boundingSphereSkipEnabled: Bool = loadBool("boundingSphereSkipEnabled", default: false)  // reject rays that miss the fractal's bounding sphere
     private var _boundingShapeRadius: Float = loadFloat("boundingShapeRadius", default: 6.0)  // bounding shape (sphere) radius, model units
     private var _boundingShapeFogEnabled: Bool = loadBool("boundingShapeFogEnabled", default: false)  // soft fog fade at the bounding-shape edge instead of a hard clip
+    private var _zoomFogCompensationEnabled: Bool = loadBool("zoomFogCompensationEnabled", default: false)  // scale fog intensity down on zoom-out so the fog sphere's world radius stays constant (was hardcoded on for Kleinian)
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
     // HUD display
@@ -1291,6 +1292,18 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
+    /// Zoom fog compensation: scale fog intensity down as the model zooms out so
+    /// the fog sphere's WORLD radius stays constant instead of swallowing the
+    /// fractal. Off = raw fog at every zoom (fog operates on model-space march
+    /// distance). Was previously hardcoded on for the Kleinian family.
+    var zoomFogCompensationEnabled: Bool {
+        get { withLock { _zoomFogCompensationEnabled } }
+        set {
+            withLock { _zoomFogCompensationEnabled = newValue }
+            persistQuality()
+        }
+    }
+
     /// Flash intensity for limit feedback (0-1). Set to 1.0 to trigger flash, decays automatically.
     var limitFlash: Float {
         get { withLock { _limitFlash } }
@@ -2368,6 +2381,7 @@ final class RenderSettings: @unchecked Sendable {
                 boundingSphereSkipEnabled: _boundingSphereSkipEnabled,
                 boundingShapeRadius: _boundingShapeRadius,
                 boundingShapeFogEnabled: _boundingShapeFogEnabled,
+                zoomFogCompensationEnabled: _zoomFogCompensationEnabled,
                 limitFlash: _limitFlash,
                 activeGestureIndex: _activeGestureIndex,
                 safetyBubbleEnabled: _safetyBubbleEnabled,
@@ -3682,6 +3696,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.boundingSphereSkipEnabled = _boundingSphereSkipEnabled
                 c.boundingShapeRadius = _boundingShapeRadius
                 c.boundingShapeFogEnabled = _boundingShapeFogEnabled
+                c.zoomFogCompensationEnabled = _zoomFogCompensationEnabled
                 return c
             }
         }
@@ -3712,6 +3727,7 @@ final class RenderSettings: @unchecked Sendable {
                 _boundingSphereSkipEnabled = newValue.boundingSphereSkipEnabled
                 _boundingShapeRadius = max(0.5, min(30.0, newValue.boundingShapeRadius))
                 _boundingShapeFogEnabled = newValue.boundingShapeFogEnabled
+                _zoomFogCompensationEnabled = newValue.zoomFogCompensationEnabled
             }
         }
     }

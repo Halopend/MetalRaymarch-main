@@ -1589,8 +1589,11 @@ actor Renderer {
             maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
             maxViewDistance: framePreparation.maxViewDistance,
             // Infinite zoom: tighten the march hit-threshold floor as we zoom in so
-            // fine detail keeps resolving (1.0 at base → byte-identical).
-            marchEpsilonScale: 1.0 / max(framePreparation.effectiveScale, 1.0),
+            // fine detail keeps resolving (1.0 at base → byte-identical); loosen it
+            // past the 0.15 zoom-out floor to track the constant world-space pixel
+            // footprint (also bounds step cost over the lifted horizon).
+            marchEpsilonScale: (1.0 / max(framePreparation.effectiveScale, 1.0))
+                * max(1.0, 0.15 / max(framePreparation.effectiveScale, 1e-4)),
             eyeIndex: UInt32(viewIndex),
             debugHierarchical: settingsSnapshot.debugHierarchical ? 1 : 0,
             limitFlash: settingsSnapshot.limitFlash,
@@ -1615,7 +1618,10 @@ actor Renderer {
                 projection: projection,
                 viewportHeight: Float(renderHeight)),
             shadowsEnabled: settingsSnapshot.shadowsEnabled ? 1 : 0,
-            distanceLODFalloff: settingsSnapshot.distanceLODStrength * 0.5,
+            // Distance-LOD reads model-space t; shrink the falloff with zoom-out
+            // scale (1.0 at scale >= 0.15) so iterations don't collapse everywhere.
+            distanceLODFalloff: settingsSnapshot.distanceLODStrength * 0.5
+                * min(1.0, framePreparation.effectiveScale / 0.15),
             // Conservative cone coarse-prepass fields. This adaptive-compute path
             // doesn't run the cone kernel, but the shared TileUniforms initializer
             // requires them; the cone-pass encoder fills real values per eye.
@@ -2042,7 +2048,9 @@ actor Renderer {
                 colorIterations: Int32(settingsSnapshot.colorIterations),
                 maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
                 maxViewDistance: framePreparation.maxViewDistance,
-                marchEpsilonScale: 1.0 / max(framePreparation.effectiveScale, 1.0),
+                // Zoom-in tighten × zoom-out loosen (see the fragment-path site).
+                marchEpsilonScale: (1.0 / max(framePreparation.effectiveScale, 1.0))
+                    * max(1.0, 0.15 / max(framePreparation.effectiveScale, 1e-4)),
                 eyeIndex: UInt32(viewIndex),
                 debugHierarchical: 0,
                 limitFlash: settingsSnapshot.limitFlash,
@@ -2066,7 +2074,8 @@ actor Renderer {
                     projection: projection,
                     viewportHeight: Float(viewportH)),
                 shadowsEnabled: settingsSnapshot.shadowsEnabled ? 1 : 0,
-                distanceLODFalloff: settingsSnapshot.distanceLODStrength * 0.5,
+                distanceLODFalloff: settingsSnapshot.distanceLODStrength * 0.5
+                    * min(1.0, framePreparation.effectiveScale / 0.15),
                 pixelFootprintPerDist: RenderPrecompute.pixelFootprintPerDist(
                     projection: projection,
                     viewportHeight: Float(viewportH)),

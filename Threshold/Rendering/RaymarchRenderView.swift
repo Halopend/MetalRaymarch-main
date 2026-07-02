@@ -1512,7 +1512,6 @@ final class ThresholdMacRenderer {
 
         let isKleinianFamily = settings.fractalType == .kleinian || settings.fractalType == .theliPseudoKleinian
         let traceScaleFloor: Float = isKleinianFamily ? 0.02 : 0.15
-        let traceScale = max(effectiveScale, traceScaleFloor)
         // Family cap + base horizon stay below the projection far plane (farZ 500)
         // so raymarch depth stays valid. (The old render-distance multiplier was
         // measured to have almost no perf effect and was hardcoded to 1×.)
@@ -1526,11 +1525,25 @@ final class ThresholdMacRenderer {
         // and punching a growing hole in the view center. Cap the divisor at the
         // base scale so zooming in never shrinks the range below the base.
         let viewDistanceScale = max(min(effectiveScale, smoothedScale), traceScaleFloor)
-        let targetMaxViewDistance = min(maxViewDistanceCap, baseViewDistance / viewDistanceScale)
+        var targetMaxViewDistance = min(maxViewDistanceCap, baseViewDistance / viewDistanceScale)
+        // Zoom-out: once the divisor floors, the WORLD horizon (maxViewDistance ×
+        // scale) shrinks with the model and the fractal dissolves at a
+        // camera-centered sphere. Lift the horizon so the world-space range never
+        // drops below baseViewDistance. No-op while effectiveScale >= the floor.
+        let safeScale = max(effectiveScale, 1e-4)
+        if effectiveScale < traceScaleFloor {
+            // Cover camera→model distance too (position offsets eat into the
+            // budget), and stay under kRayMissThreshold (900) — hits past it are
+            // classified as misses in the shader.
+            let camDistWorld = simd_length(SIMD3<Float>(0, 0, 3) - settings.position)
+            targetMaxViewDistance = max(targetMaxViewDistance,
+                                        min(880.0, (camDistWorld + baseViewDistance) / safeScale))
+        }
         let maxViewDistanceSpeed: Float = targetMaxViewDistance > smoothedMaxViewDistance ? 30.0 : 10.0
         let maxViewDistanceBlend = 1.0 - exp(-maxViewDistanceSpeed * deltaTime)
         smoothedMaxViewDistance += (targetMaxViewDistance - smoothedMaxViewDistance) * maxViewDistanceBlend
-        let maxViewDistance = max(4.0, min(maxViewDistanceCap, smoothedMaxViewDistance))
+        let horizonCap = max(maxViewDistanceCap, 880.0)
+        let maxViewDistance = max(4.0, min(horizonCap, smoothedMaxViewDistance))
 
         let aspect = Float(max(drawableSize.width, 1) / max(drawableSize.height, 1))
         let projection = RenderPrecompute.makePerspectiveProjection(fovyRadians: Float.pi / 3, aspect: aspect, nearZ: 0.01, farZ: 500.0)
@@ -1566,15 +1579,28 @@ final class ThresholdMacRenderer {
                                                                lightingSoftness: settings.lightingSoftness)
         let precomputedAudio = RenderPrecompute.makePrecomputedAudio(from: settings)
         var precomputedFog = RenderPrecompute.makePrecomputedFog(from: settings)
-        if isKleinianFamily {
+        // Zoom fog compensation (Settings toggle, default off): fog operates on
+        // MODEL-space march distance, so on zoom-out the fog sphere's world radius
+        // shrinks with the model and washes out the fractal. Scaling intensity by
+        // effectiveScale/0.15 holds the fog's WORLD radius constant once zoomed out
+        // past 0.15 — a no-op at scale >= 0.15. (Was previously hardcoded on for
+        // the Kleinian family only.)
+        if settings.zoomFogCompensationEnabled {
             let baseFog = precomputedFog.fog.x
             if baseFog > 1e-6 {
-                let fogScale = min(1.0, max(0.08, traceScale / 0.15))
+                let fogScale = min(1.0, max(effectiveScale, 1e-4) / 0.15)
                 let fogIntensity = baseFog * fogScale
                 let inverseFog = fogIntensity > 1e-6 ? 1.0 / fogIntensity : 0.0
                 precomputedFog = PrecomputedFog(fog: SIMD4<Float>(fogIntensity, inverseFog, 0.0, 0.0), color: precomputedFog.color)
             }
         }
+        // Zoom-out epsilon/LOD rescale (both 1.0 at scale >= 0.15 → byte-identical):
+        // the hit threshold must loosen ∝ 1/scale to track the constant world-space
+        // pixel footprint (this also bounds step cost over the lifted horizon), and
+        // distance-LOD reads model-space t, so its falloff shrinks with scale to
+        // avoid collapsing iterations everywhere on zoom-out.
+        let zoomOutEpsilonLoosen: Float = max(1.0, 0.15 / max(effectiveScale, 1e-4))
+        let zoomOutLODScale: Float = min(1.0, effectiveScale / 0.15)
 
         let lightingWave = sin(elapsedTime * 1.2)
         let animatedColorMix = settings.lightingPlay ? min(max(settings.colorMix + lightingWave * 0.08, 0.0), 1.0) : settings.colorMix
@@ -1597,8 +1623,9 @@ final class ThresholdMacRenderer {
                         maxRaySteps: Int32(settings.maxRaySteps),
                         maxViewDistance: maxViewDistance,
                         // Infinite zoom: tighten the march hit-threshold floor as we zoom in
-                        // so fine detail keeps resolving (1.0 at base → byte-identical).
-                        marchEpsilonScale: 1.0 / max(effectiveScale, 1.0),
+                        // so fine detail keeps resolving (1.0 at base → byte-identical);
+                        // loosen it past the zoom-out floor (see zoomOutEpsilonLoosen).
+                        marchEpsilonScale: (1.0 / max(effectiveScale, 1.0)) * zoomOutEpsilonLoosen,
                         colorMix: animatedColorMix,
                         glowIntensity: animatedGlow,
                         foldingLimit: settings.foldingLimit,
@@ -1641,7 +1668,7 @@ final class ThresholdMacRenderer {
                             projection: projection,
                             viewportHeight: Float(drawableSize.height)),
                         shadowsEnabled: settings.shadowsEnabled ? 1 : 0,
-                        distanceLODFalloff: settings.distanceLODStrength * 0.5,
+                        distanceLODFalloff: settings.distanceLODStrength * 0.5 * zoomOutLODScale,
                         benchCollectSteps: BenchmarkManager.shared.shouldCollectSteps ? 1 : 0,
                         // Conservative cone coarse-prepass: Mac uses fragmentShaderMono,
                         // which never reads the coarse texture (FC off), so these only

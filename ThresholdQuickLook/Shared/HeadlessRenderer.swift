@@ -74,12 +74,21 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
 
     let isKleinianFamily = settings.fractalType == .kleinian || settings.fractalType == .theliPseudoKleinian
     let traceScaleFloor: Float = isKleinianFamily ? 0.02 : 0.15
-    let traceScale = max(effectiveScale, traceScaleFloor)
     let maxViewDistanceCap: Float = isKleinianFamily ? 420.0 : 80.0
     let baseViewDistance: Float = isKleinianFamily ? RenderSettings.maxViewDistance * 2.0 : RenderSettings.maxViewDistance
     let viewDistanceScale = max(min(effectiveScale, smoothedScale), traceScaleFloor)
-    let targetMaxViewDistance = min(maxViewDistanceCap, baseViewDistance / viewDistanceScale)
-    let maxViewDistance = max(4.0, min(maxViewDistanceCap, targetMaxViewDistance))
+    var targetMaxViewDistance = min(maxViewDistanceCap, baseViewDistance / viewDistanceScale)
+    // Zoom-out: lift the horizon so the WORLD-space range never drops below
+    // baseViewDistance (mirrors RaymarchRenderView; no-op at scale >= the floor).
+    let safeScale = max(effectiveScale, 1e-4)
+    if effectiveScale < traceScaleFloor {
+        // Cover camera→model distance too; stay under kRayMissThreshold (900).
+        let camDistWorld = simd_length(SIMD3<Float>(0, 0, 3) - settings.position)
+        targetMaxViewDistance = max(targetMaxViewDistance,
+                                    min(880.0, (camDistWorld + baseViewDistance) / safeScale))
+    }
+    let horizonCap = max(maxViewDistanceCap, 880.0)
+    let maxViewDistance = max(4.0, min(horizonCap, targetMaxViewDistance))
 
     let aspect = Float(max(drawableSize.width, 1) / max(drawableSize.height, 1))
     let projection = RenderPrecompute.makePerspectiveProjection(fovyRadians: Float.pi / 3, aspect: aspect, nearZ: 0.01, farZ: 500.0)
@@ -100,10 +109,13 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
                                                            lightingSoftness: settings.lightingSoftness)
     let precomputedAudio = RenderPrecompute.makePrecomputedAudio(from: settings)
     var precomputedFog = RenderPrecompute.makePrecomputedFog(from: settings)
-    if isKleinianFamily {
+    // Zoom fog compensation (Settings toggle, default off): holds the fog's WORLD
+    // radius constant on zoom-out (no-op at scale >= 0.15; mirrors
+    // RaymarchRenderView — was previously hardcoded on for Kleinian only).
+    if settings.zoomFogCompensationEnabled {
         let baseFog = precomputedFog.fog.x
         if baseFog > 1e-6 {
-            let fogScale = min(1.0, max(0.08, traceScale / 0.15))
+            let fogScale = min(1.0, max(effectiveScale, 1e-4) / 0.15)
             let fogIntensity = baseFog * fogScale
             let inverseFog = fogIntensity > 1e-6 ? 1.0 / fogIntensity : 0.0
             precomputedFog = PrecomputedFog(fog: SIMD4<Float>(fogIntensity, inverseFog, 0.0, 0.0), color: precomputedFog.color)
@@ -123,6 +135,9 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
     let isMandelbulb = settings.fractalType == .mandelbulb
     let bubbleEnabled: Int32 = isMandelbulb ? 0 : (settings.safetyBubbleEnabled ? 1 : 0)
     let bubbleStrength: Float = isMandelbulb ? 0.0 : settings.safetyBubbleStrength
+    // Zoom-out epsilon/LOD rescale (1.0 at scale >= 0.15; mirrors RaymarchRenderView).
+    let zoomOutEpsilonLoosen: Float = max(1.0, 0.15 / max(effectiveScale, 1e-4))
+    let zoomOutLODScale: Float = min(1.0, effectiveScale / 0.15)
     let coneMarchScale = RenderPrecompute.coneMarchScale(
         strength: settings.coneMarchStrength,
         projection: projection,
@@ -145,7 +160,7 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
                     fractalIterations: Int32(settings.fractalIterations),
                     maxRaySteps: Int32(settings.maxRaySteps),
                     maxViewDistance: maxViewDistance,
-                    marchEpsilonScale: 1.0 / max(effectiveScale, 1.0),
+                    marchEpsilonScale: (1.0 / max(effectiveScale, 1.0)) * zoomOutEpsilonLoosen,
                     colorMix: animatedColorMix,
                     glowIntensity: animatedGlow,
                     foldingLimit: settings.foldingLimit,
@@ -177,7 +192,7 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
                     smartAdvanceEnabled: settings.smartAdvanceEnabled ? 1 : 0,
                     coneMarchScale: coneMarchScale,
                     shadowsEnabled: settings.shadowsEnabled ? 1 : 0,
-                    distanceLODFalloff: settings.distanceLODStrength * 0.5,
+                    distanceLODFalloff: settings.distanceLODStrength * 0.5 * zoomOutLODScale,
                     benchCollectSteps: 0,
                     pixelFootprintPerDist: pixelFootprintPerDist,
                     coarseRateMagMax: 1.0,

@@ -191,12 +191,25 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
     ColorInOut out;
 
     Uniforms uniforms = uniformsArray.uniforms[ampId];
-    
-    float4 position = float4(in.position, 1);
+
+    // The proxy mesh is a radius-100 model-space ellipsoid. On deep zoom-out the
+    // camera's model-space distance to the origin exceeds 100, the camera exits
+    // the proxy, and the raymarch gets clipped to the sphere's silhouette.
+    // Inflate the mesh so it always encloses camera + march horizon. modelPos is
+    // only ever used as a point on the eye ray (rd = normalize(modelPos - cam)),
+    // so uniform scaling never changes ray directions. Branch (not a blanket
+    // multiply) so normal-zoom frames run the pre-existing arithmetic unchanged.
+    float3 camModel = (uniforms.inverseModelViewMatrix * float4(0.0f, 0.0f, 0.0f, 1.0f)).xyz;
+    float proxyInflate = (length(camModel) + uniforms.maxViewDistance) * (1.05f / 100.0f);
+    float3 proxyPos = in.position;
+    if (proxyInflate > 1.0f) {
+        proxyPos *= proxyInflate;
+    }
+    float4 position = float4(proxyPos, 1);
     out.position = uniforms.projectionMatrix * uniforms.modelViewMatrix * position;
     out.texCoord = in.texCoord;
-    out.modelPos = in.position;
-    
+    out.modelPos = proxyPos;
+
     return out;
 }
 
@@ -208,12 +221,19 @@ vertex ColorInOut screenshotVertexShader(Vertex in [[stage_in]],
 
     // Use first view's uniforms for screenshot
     Uniforms uniforms = uniformsArray.uniforms[0];
-    
-    float4 position = float4(in.position, 1);
+
+    // Same zoom-out proxy inflate as vertexShader (see comment there).
+    float3 camModel = (uniforms.inverseModelViewMatrix * float4(0.0f, 0.0f, 0.0f, 1.0f)).xyz;
+    float proxyInflate = (length(camModel) + uniforms.maxViewDistance) * (1.05f / 100.0f);
+    float3 proxyPos = in.position;
+    if (proxyInflate > 1.0f) {
+        proxyPos *= proxyInflate;
+    }
+    float4 position = float4(proxyPos, 1);
     out.position = uniforms.projectionMatrix * uniforms.modelViewMatrix * position;
     out.texCoord = in.texCoord;
-    out.modelPos = in.position;
-    
+    out.modelPos = proxyPos;
+
     return out;
 }
 

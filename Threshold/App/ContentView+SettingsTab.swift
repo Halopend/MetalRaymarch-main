@@ -225,6 +225,9 @@ extension ContentView {
             QuickToggleRow("Bounding Shape", "circle.dashed", home: .shapePerformance,
                 get: { cache.quality.boundingSphereSkipEnabled },
                 set: { cache.quality.boundingSphereSkipEnabled = $0; cache.push(\.boundingSphereSkipEnabled, value: $0) }),
+            QuickToggleRow("Zoom Fog Comp", "cloud.fog",
+                get: { cache.quality.zoomFogCompensationEnabled },
+                set: { cache.quality.zoomFogCompensationEnabled = $0; cache.push(\.zoomFogCompensationEnabled, value: $0) }),
         ]
     }
 

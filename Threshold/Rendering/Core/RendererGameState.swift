@@ -105,17 +105,33 @@ extension Renderer {
         let baseViewDistance: Float = isKleinianFamily
             ? (RenderSettings.maxViewDistance * 2.0)
             : RenderSettings.maxViewDistance
-        let targetMaxViewDistance = min(maxViewDistanceCap, baseViewDistance / traceScale)
+        var targetMaxViewDistance = min(maxViewDistanceCap, baseViewDistance / traceScale)
+        // Zoom-out: once traceScale floors, the WORLD horizon (maxViewDistance ×
+        // scale) shrinks with the model and the fractal dissolves at a
+        // camera-centered sphere. Lift the horizon so the world-space range never
+        // drops below baseViewDistance. No-op while effectiveScale >= the floor.
+        // Use raw device anchor transform (no smoothing) to ensure compositor-predicted pose is used
+        let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
+        let safeScale = max(effectiveScale, 1e-4)
+        if effectiveScale < traceScaleFloor {
+            // Cover camera→model distance too (position offsets eat into the
+            // budget), and stay under kRayMissThreshold (900) — hits past it are
+            // classified as misses in the shader.
+            let devicePos = SIMD3<Float>(deviceTransform.columns.3.x,
+                                         deviceTransform.columns.3.y,
+                                         deviceTransform.columns.3.z)
+            let camDistWorld = simd_length(devicePos - smoothedPosition)
+            targetMaxViewDistance = max(targetMaxViewDistance,
+                                        min(880.0, (camDistWorld + baseViewDistance) / safeScale))
+        }
         let maxViewDistanceSpeed: Float = (targetMaxViewDistance > smoothedMaxViewDistance) ? 30.0 : 10.0
         let maxViewDistanceBlend = 1.0 - exp(-maxViewDistanceSpeed * cachedDeltaTime)
         smoothedMaxViewDistance += (targetMaxViewDistance - smoothedMaxViewDistance) * maxViewDistanceBlend
-        let maxViewDistance = max(4.0, min(maxViewDistanceCap, smoothedMaxViewDistance))
+        let horizonCap = max(maxViewDistanceCap, 880.0)
+        let maxViewDistance = max(4.0, min(horizonCap, smoothedMaxViewDistance))
         let scaleMatrix = matrix4x4_scale(effectiveScale, effectiveScale, effectiveScale)
 
         let modelMatrix = translationMatrix * combinedRotationMatrix * scaleMatrix
-
-        // Use raw device anchor transform (no smoothing) to ensure compositor-predicted pose is used
-        let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
         // Glass-floor platform: honor the user toggle, and force it off in
         // Mixed immersion — the real floor is visible there, so a virtual
         // platform floating over passthrough is just clutter. Radius <= 0
@@ -166,11 +182,16 @@ extension Renderer {
         )
         let precomputedAudio = Self.makePrecomputedAudio(from: settingsSnapshot)
         var precomputedFog = Self.makePrecomputedFog(from: settingsSnapshot)
-        if isKleinianFamily {
-            // Keep atmospheric depth while avoiding distant wash-out during deep zoom-out.
+        // Zoom fog compensation (Settings toggle, default off): fog operates on
+        // MODEL-space march distance, so on zoom-out the fog sphere's world radius
+        // shrinks with the model and washes out the fractal. Scaling intensity by
+        // effectiveScale/0.15 holds the fog's WORLD radius constant once zoomed out
+        // past 0.15 — a no-op at scale >= 0.15. (Was previously hardcoded on for
+        // the Kleinian family only.)
+        if settingsSnapshot.zoomFogCompensationEnabled {
             let baseFog = precomputedFog.fog.x
             if baseFog > 1e-6 {
-                let fogScale = min(1.0, max(0.08, traceScale / 0.15))
+                let fogScale = min(1.0, max(effectiveScale, 1e-4) / 0.15)
                 let fogIntensity = baseFog * fogScale
                 let invFog = fogIntensity > 1e-6 ? 1.0 / fogIntensity : 0.0
                 precomputedFog = PrecomputedFog(
@@ -188,6 +209,13 @@ extension Renderer {
         let animatedGlow = settingsSnapshot.lightingPlay ? min(max(baseGlow + max(0, lightingWave) * 0.25, 0.0), 2.0) : baseGlow
 
         let boundingSphereRadius = settingsSnapshot.estimatedBoundingSphereRadius
+        // Zoom-out epsilon/LOD rescale (both 1.0 at scale >= 0.15 → byte-identical):
+        // the hit threshold must loosen ∝ 1/scale to track the constant world-space
+        // pixel footprint (this also bounds step cost over the lifted horizon), and
+        // distance-LOD reads model-space t, so its falloff shrinks with scale to
+        // avoid collapsing iterations everywhere on zoom-out.
+        let zoomOutEpsilonLoosen: Float = max(1.0, 0.15 / max(effectiveScale, 1e-4))
+        let zoomOutLODScale: Float = min(1.0, effectiveScale / 0.15)
         var preparedEyeStates = Array(repeating: RendererPreparedEyeState(), count: drawable.views.count)
 
         func uniforms(forViewIndex viewIndex: Int) -> Uniforms {
@@ -233,8 +261,9 @@ extension Renderer {
                             maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
                             maxViewDistance: maxViewDistance,
                             // Infinite zoom: tighten the march hit-threshold floor as we zoom
-                            // in so fine detail keeps resolving (1.0 at base → byte-identical).
-                            marchEpsilonScale: 1.0 / max(effectiveScale, 1.0),
+                            // in so fine detail keeps resolving (1.0 at base → byte-identical);
+                            // loosen it past the zoom-out floor (see zoomOutEpsilonLoosen).
+                            marchEpsilonScale: (1.0 / max(effectiveScale, 1.0)) * zoomOutEpsilonLoosen,
                             colorMix: animatedColorMix,
                             glowIntensity: animatedGlow,
                             foldingLimit: settingsSnapshot.foldingLimit,
@@ -274,7 +303,7 @@ extension Renderer {
                                 projection: projection,
                                 viewportHeight: Float(view.textureMap.viewport.height)),
                             shadowsEnabled: settingsSnapshot.shadowsEnabled ? 1 : 0,
-                            distanceLODFalloff: settingsSnapshot.distanceLODStrength * 0.5,
+                            distanceLODFalloff: settingsSnapshot.distanceLODStrength * 0.5 * zoomOutLODScale,
                             benchCollectSteps: BenchmarkManager.shared.collectIterations ? 1 : 0,
                             // Conservative cone coarse-prepass: raw per-pixel footprint
                             // (no LOD widening). coarseRateMagMax defaults to 1.0 here;

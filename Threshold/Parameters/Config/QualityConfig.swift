@@ -100,6 +100,11 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // Soft fog fade at the bounding-shape edge instead of a hard clip.
     var boundingShapeFogEnabled: Bool = false
 
+    // Zoom fog compensation: scale fog intensity down on zoom-out so the fog
+    // sphere's world radius stays constant instead of swallowing the fractal.
+    // Off = raw fog at every zoom (was hardcoded on for the Kleinian family).
+    var zoomFogCompensationEnabled: Bool = false
+
     // MARK: - Validation
 
     mutating func clamp() {
@@ -127,6 +132,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         case debugHierarchical, coherentPacketEnabled, computeTemporalReprojectionEnabled, coarsePrepassWarmStartEnabled, foveationStrength
         case smartAdvanceEnabled, coneMarchStrength
         case overRelaxationMax, distanceLODStrength, shadowsEnabled, boundingSphereSkipEnabled, boundingShapeRadius, boundingShapeFogEnabled
+        case zoomFogCompensationEnabled
         case adaptiveRenderQualityEnabled
     }
 
@@ -153,6 +159,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         boundingSphereSkipEnabled = try c.decodeIfPresent(Bool.self, forKey: .boundingSphereSkipEnabled) ?? false
         boundingShapeRadius   = try c.decodeIfPresent(Float.self, forKey: .boundingShapeRadius)   ?? 6.0
         boundingShapeFogEnabled = try c.decodeIfPresent(Bool.self, forKey: .boundingShapeFogEnabled) ?? false
+        zoomFogCompensationEnabled = try c.decodeIfPresent(Bool.self, forKey: .zoomFogCompensationEnabled) ?? false
         adaptiveRenderQualityEnabled = try c.decodeIfPresent(Bool.self, forKey: .adaptiveRenderQualityEnabled) ?? true
     }
 }
