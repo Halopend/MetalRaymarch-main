@@ -62,6 +62,8 @@ struct RenderSettingsSnapshot {
     let safetyBubbleFadeEnabled: Bool
     let safetyBubbleFadeWidth: Float
     let safetyBubbleStrength: Float
+    let safetyBubbleMixedAutoShrink: Bool
+    let safetyBubbleMixedRadius: Float
     let handAttractionEnabled: Bool
     let handAttractionRadius: Float
     let handAttractionStrength: Float
@@ -71,6 +73,8 @@ struct RenderSettingsSnapshot {
     let handAttractionPocketSize: Float
     let handAttractionPocketSoftness: Float
     let handAttractionProjectionDistance: Float
+    let handAttractionForearmEnabled: Bool
+    let handAttractionForearmRadius: Float
     let colorSchemeParams: ColorSchemeParams
     let lightingSoftness: Float
     

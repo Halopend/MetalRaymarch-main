@@ -40,6 +40,12 @@ struct HandAttractionUniforms {
     var leftActive: Int32 = 0
     var rightPosition: SIMD3<Float> = .zero
     var rightActive: Int32 = 0
+    // Forearm capsules (model space): A = wrist (w: 1 tracked / 0),
+    // B = elbow (w: capsule radius, model units; 0 = forearms off).
+    var leftForearmA: SIMD4<Float> = .zero
+    var leftForearmB: SIMD4<Float> = .zero
+    var rightForearmA: SIMD4<Float> = .zero
+    var rightForearmB: SIMD4<Float> = .zero
 }
 
 private enum FloorCircleGeometry {
@@ -146,6 +152,25 @@ extension Renderer {
         if lastRightHandTrackedForAttraction {
             state.rightPosition = Self.worldToModel(projected(lastRightHandPalmPosition), inverseModelMatrix: inverseModelMatrix)
             state.rightActive = 1
+        }
+
+        // Forearm capsules: anchored at the REAL wrist/elbow (never reach-
+        // projected — the arm is where the arm is). Radius scale-corrected
+        // like the ball so it reads as a constant real-world thickness.
+        if settingsSnapshot.handAttractionForearmEnabled {
+            let forearmRadiusModel = settingsSnapshot.handAttractionForearmRadius / max(effectiveScale, 0.001)
+            if lastLeftForearmTracked {
+                let a = Self.worldToModel(lastLeftForearmWrist, inverseModelMatrix: inverseModelMatrix)
+                let b = Self.worldToModel(lastLeftForearmElbow, inverseModelMatrix: inverseModelMatrix)
+                state.leftForearmA = SIMD4<Float>(a, 1)
+                state.leftForearmB = SIMD4<Float>(b, forearmRadiusModel)
+            }
+            if lastRightForearmTracked {
+                let a = Self.worldToModel(lastRightForearmWrist, inverseModelMatrix: inverseModelMatrix)
+                let b = Self.worldToModel(lastRightForearmElbow, inverseModelMatrix: inverseModelMatrix)
+                state.rightForearmA = SIMD4<Float>(a, 1)
+                state.rightForearmB = SIMD4<Float>(b, forearmRadiusModel)
+            }
         }
         return state
     }
@@ -323,7 +348,12 @@ extension Renderer {
 
             // Scale-relative safety bubble: divide radius by effectiveScale so it stays
             // constant in user/world space regardless of detail zoom level.
-            let scaleCorrectedBubbleRadius = settingsSnapshot.safetyBubbleRadius / max(effectiveScale, 0.001)
+            // Mixed immersion: cap the comfort bubble to the mixed radius —
+            // you're "outside" the fractal there, a big bubble just hollows it.
+            let bubbleRadiusMeters = (appModel.immersionStyleForRenderer == .mixed && settingsSnapshot.safetyBubbleMixedAutoShrink)
+                ? min(settingsSnapshot.safetyBubbleRadius, settingsSnapshot.safetyBubbleMixedRadius)
+                : settingsSnapshot.safetyBubbleRadius
+            let scaleCorrectedBubbleRadius = bubbleRadiusMeters / max(effectiveScale, 0.001)
             let scaleCorrectedFadeWidth = settingsSnapshot.safetyBubbleFadeWidth / max(effectiveScale, 0.001)
 
             // Previous frame's view-proj (model → prev clip) for the temporal
@@ -371,6 +401,10 @@ extension Renderer {
                             leftHandActive: handAttraction.leftActive,
                             rightHandPosition: handAttraction.rightPosition,
                             rightHandActive: handAttraction.rightActive,
+                            leftForearmA: handAttraction.leftForearmA,
+                            leftForearmB: handAttraction.leftForearmB,
+                            rightForearmA: handAttraction.rightForearmA,
+                            rightForearmB: handAttraction.rightForearmB,
                             colorIterations: settingsSnapshot.colorIterations,
                             limitFlash: settingsSnapshot.limitFlash,
                             activeGesture: Int32(settingsSnapshot.activeGestureIndex),

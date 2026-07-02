@@ -203,64 +203,110 @@ extension ContentView {
                             return v < 0 ? String(format: "Repel %.0f%%", -v * 100) : String(format: "Attract %.0f%%", v * 100)
                         })
 
-                    // Strength scales the DEPTH of the effect; Ball Size sets the
-                    // solid core, and Softness the width of the blend into the
-                    // surrounding surface.
-                    EffectSliderRow(icon: "circle.fill", label: "Ball Size",
-                        value: $cache.handAttraction.ballScale, range: 0.1...1.0,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.handAttractionBallScale, value: cache.handAttraction.ballScale) },
-                        showToggle: false,
-                        valueFormat: { v in String(format: "%.0f%% of radius", v * 100) })
-
-                    EffectSliderRow(icon: "aqi.medium", label: "Blend Softness",
-                        value: $cache.handAttraction.softness, range: 0.05...2.0,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.handAttractionSoftness, value: cache.handAttraction.softness) },
-                        showToggle: false,
-                        valueFormat: { v in String(format: "%.2f\u{00D7}", v) })
-
-                    EffectSliderRow(icon: "arrow.up.forward", label: "Reach Offset",
-                        value: $cache.handAttraction.projectionDistance, range: 0.0...1.0,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.handAttractionProjectionDistance, value: cache.handAttraction.projectionDistance) },
-                        showToggle: false,
-                        valueFormat: { v in v < 0.005 ? "At hand" : String(format: "%.0f cm ahead", v * 100) })
-                    Text("Reach Offset projects the ball outward from your body through the hand, so it floats in front of the palm instead of on it.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-
-                    if cache.handAttraction.strength > 0.02 {
-                        Divider()
-                        HStack {
-                            Label("Pocket", systemImage: "circle.circle")
-                                .font(.subheadline)
-                            Spacer()
-                            Toggle("", isOn: $cache.handAttraction.pocketEnabled)
-                                .labelsHidden()
-                                .onChange(of: cache.handAttraction.pocketEnabled) { _, val in
-                                    cache.push(\.handAttractionPocketEnabled, value: val)
-                                }
-                        }
-                        Text("Hollows out a small pocket right at the hand while the wider surface still pulls toward it — a place for the hand to sit.")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-
-                        if cache.handAttraction.pocketEnabled {
-                            EffectSliderRow(icon: "circle.circle", label: "Pocket Size",
-                                value: $cache.handAttraction.pocketSize, range: 0.1...1.5,
+                    // Fine-tuning lives behind Advanced so the everyday
+                    // controls stay to Radius + Strength. Print Settings dumps
+                    // the whole config as JSON for locking values in as defaults.
+                    DisclosureGroup {
+                        VStack(spacing: 8) {
+                            EffectSliderRow(icon: "circle.fill", label: "Ball Size",
+                                value: $cache.handAttraction.ballScale, range: 0.1...1.0,
                                 enabled: .constant(true),
-                                onChanged: { cache.push(\.handAttractionPocketSize, value: cache.handAttraction.pocketSize) },
+                                onChanged: { cache.push(\.handAttractionBallScale, value: cache.handAttraction.ballScale) },
                                 showToggle: false,
-                                valueFormat: { v in String(format: "%.0f%% of ball", v * 100) })
+                                valueFormat: { v in String(format: "%.0f%% of radius", v * 100) })
 
-                            EffectSliderRow(icon: "aqi.low", label: "Pocket Softness",
-                                value: $cache.handAttraction.pocketSoftness, range: 0.1...1.5,
+                            EffectSliderRow(icon: "aqi.medium", label: "Blend Softness",
+                                value: $cache.handAttraction.softness, range: 0.05...2.0,
                                 enabled: .constant(true),
-                                onChanged: { cache.push(\.handAttractionPocketSoftness, value: cache.handAttraction.pocketSoftness) },
+                                onChanged: { cache.push(\.handAttractionSoftness, value: cache.handAttraction.softness) },
                                 showToggle: false,
                                 valueFormat: { v in String(format: "%.2f\u{00D7}", v) })
+
+                            EffectSliderRow(icon: "arrow.up.forward", label: "Reach Offset",
+                                value: $cache.handAttraction.projectionDistance, range: 0.0...1.0,
+                                enabled: .constant(true),
+                                onChanged: { cache.push(\.handAttractionProjectionDistance, value: cache.handAttraction.projectionDistance) },
+                                showToggle: false,
+                                valueFormat: { v in v < 0.005 ? "At hand" : String(format: "%.0f cm ahead", v * 100) })
+                            Text("Reach Offset projects the ball outward from your body through the hand, so it floats in front of the palm instead of on it.")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+
+                            Divider()
+                            HStack {
+                                Label("Forearms", systemImage: "figure.wave")
+                                    .font(.subheadline)
+                                Spacer()
+                                Toggle("", isOn: $cache.handAttraction.forearmEnabled)
+                                    .labelsHidden()
+                                    .onChange(of: cache.handAttraction.forearmEnabled) { _, val in
+                                        cache.push(\.handAttractionForearmEnabled, value: val)
+                                    }
+                            }
+                            Text("Extends the effect along each wrist\u{2192}elbow segment, so the whole forearm carves or pulls space, not just the palm.")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            if cache.handAttraction.forearmEnabled {
+                                EffectSliderRow(icon: "capsule", label: "Forearm Radius",
+                                    value: $cache.handAttraction.forearmRadius, range: 0.02...0.3,
+                                    enabled: .constant(true),
+                                    onChanged: { cache.push(\.handAttractionForearmRadius, value: cache.handAttraction.forearmRadius) },
+                                    showToggle: false,
+                                    valueFormat: { v in String(format: "%.0f cm", v * 100) })
+                            }
+
+                            if cache.handAttraction.strength > 0.02 {
+                                Divider()
+                                HStack {
+                                    Label("Pocket", systemImage: "circle.circle")
+                                        .font(.subheadline)
+                                    Spacer()
+                                    Toggle("", isOn: $cache.handAttraction.pocketEnabled)
+                                        .labelsHidden()
+                                        .onChange(of: cache.handAttraction.pocketEnabled) { _, val in
+                                            cache.push(\.handAttractionPocketEnabled, value: val)
+                                        }
+                                }
+                                Text("Hollows out a small pocket right at the hand while the wider surface still pulls toward it — a place for the hand to sit.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+
+                                if cache.handAttraction.pocketEnabled {
+                                    EffectSliderRow(icon: "circle.circle", label: "Pocket Size",
+                                        value: $cache.handAttraction.pocketSize, range: 0.1...1.5,
+                                        enabled: .constant(true),
+                                        onChanged: { cache.push(\.handAttractionPocketSize, value: cache.handAttraction.pocketSize) },
+                                        showToggle: false,
+                                        valueFormat: { v in String(format: "%.0f%% of ball", v * 100) })
+
+                                    EffectSliderRow(icon: "aqi.low", label: "Pocket Softness",
+                                        value: $cache.handAttraction.pocketSoftness, range: 0.1...1.5,
+                                        enabled: .constant(true),
+                                        onChanged: { cache.push(\.handAttractionPocketSoftness, value: cache.handAttraction.pocketSoftness) },
+                                        showToggle: false,
+                                        valueFormat: { v in String(format: "%.2f\u{00D7}", v) })
+                                }
+                            }
+
+                            Divider()
+                            Button {
+                                let config = appModel.renderSettings.handAttractionConfig
+                                let encoder = JSONEncoder()
+                                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                                if let data = try? encoder.encode(config),
+                                   let json = String(data: data, encoding: .utf8) {
+                                    print("\u{1F590} HandAttractionConfig — current values (paste into defaults):\n\(json)")
+                                }
+                            } label: {
+                                Label("Print Settings to Console", systemImage: "printer")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
                         }
+                        .padding(.top, 6)
+                    } label: {
+                        Label("Advanced", systemImage: "slider.horizontal.3")
+                            .font(.subheadline)
                     }
                 }
             }
@@ -309,6 +355,30 @@ extension ContentView {
                         enabled: .constant(true),
                         onChanged: { cache.push(\.safetyBubbleRadius, value: cache.safetyBubble.radius) },
                         showToggle: false)
+
+#if os(visionOS)
+                    HStack {
+                        Label("Shrink in Mixed", systemImage: "arrow.down.right.and.arrow.up.left")
+                            .font(.subheadline)
+                        Spacer()
+                        Toggle("", isOn: $cache.safetyBubble.mixedAutoShrinkEnabled)
+                            .labelsHidden()
+                            .onChange(of: cache.safetyBubble.mixedAutoShrinkEnabled) { _, val in
+                                cache.push(\.safetyBubbleMixedAutoShrink, value: val)
+                            }
+                    }
+                    Text("While Mixed immersion is active, caps the bubble at the radius below — in Mixed you're outside the fractal, so a large bubble mostly hollows it out. Your saved radius returns when you leave Mixed.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    if cache.safetyBubble.mixedAutoShrinkEnabled {
+                        EffectSliderRow(icon: "circle.dashed", label: "Mixed Radius",
+                            value: $cache.safetyBubble.mixedRadius, range: 0.05...1.0,
+                            enabled: .constant(true),
+                            onChanged: { cache.push(\.safetyBubbleMixedRadius, value: cache.safetyBubble.mixedRadius) },
+                            showToggle: false,
+                            valueFormat: { v in String(format: "%.2f m", v) })
+                    }
+#endif
                     let selectedBubbleFamily = SafetyBubbleShapePreset.family(for: cache.safetyBubble.shape)
                     HStack {
                         Text("Shape"); Spacer()

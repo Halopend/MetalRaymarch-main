@@ -36,6 +36,11 @@ struct HandAttractionConfig: Codable, Equatable, Sendable {
     // Reach offset, meters: projects the ball outward from the body center
     // through the hand, so it floats in front of the palm instead of on it.
     var projectionDistance: Float = 0.0
+    // Forearm capsule: extends the interaction along the wrist→elbow segment
+    // so the whole forearm carves/pulls space, not just the palm.
+    var forearmEnabled: Bool = true
+    // Forearm capsule radius, meters.
+    var forearmRadius: Float = 0.07
 
     // MARK: - Codable (tolerant decode so adding fields never resets the
     // user's saved config to defaults)
@@ -43,6 +48,7 @@ struct HandAttractionConfig: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case enabled, radius, strength, pocketEnabled
         case ballScale, softness, pocketSize, pocketSoftness, projectionDistance
+        case forearmEnabled, forearmRadius
     }
 
     init() {}
@@ -58,6 +64,8 @@ struct HandAttractionConfig: Codable, Equatable, Sendable {
         pocketSize = try c.decodeIfPresent(Float.self, forKey: .pocketSize) ?? 0.5
         pocketSoftness = try c.decodeIfPresent(Float.self, forKey: .pocketSoftness) ?? 0.6
         projectionDistance = try c.decodeIfPresent(Float.self, forKey: .projectionDistance) ?? 0.0
+        forearmEnabled = try c.decodeIfPresent(Bool.self, forKey: .forearmEnabled) ?? true
+        forearmRadius = try c.decodeIfPresent(Float.self, forKey: .forearmRadius) ?? 0.07
     }
 
     // MARK: - Validation
@@ -70,5 +78,6 @@ struct HandAttractionConfig: Codable, Equatable, Sendable {
         pocketSize = pocketSize.clamped(to: 0.1...1.5)
         pocketSoftness = pocketSoftness.clamped(to: 0.1...1.5)
         projectionDistance = projectionDistance.clamped(to: 0.0...1.0)
+        forearmRadius = forearmRadius.clamped(to: 0.02...0.3)
     }
 }

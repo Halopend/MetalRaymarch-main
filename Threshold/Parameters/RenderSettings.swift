@@ -271,6 +271,8 @@ final class RenderSettings: @unchecked Sendable {
     private var _safetyBubbleFadeEnabled: Bool = true
     private var _safetyBubbleFadeWidth: Float = 0.1
     private var _safetyBubbleStrength: Float = SafetyBubbleConfig.defaultStrength
+    private var _safetyBubbleMixedAutoShrink: Bool = true
+    private var _safetyBubbleMixedRadius: Float = 0.3
 
     // Hand Attraction: a per-hand interaction sphere (visionOS only) that pulls
     // the fractal surface toward each tracked palm — the inverse of the safety
@@ -284,6 +286,8 @@ final class RenderSettings: @unchecked Sendable {
     private var _handAttractionPocketSize: Float = 0.5
     private var _handAttractionPocketSoftness: Float = 0.6
     private var _handAttractionProjectionDistance: Float = 0.0
+    private var _handAttractionForearmEnabled: Bool = true
+    private var _handAttractionForearmRadius: Float = 0.07
 
     // === COLOR SCHEME ===
     // Controls the color palette and post-processing for fractal coloring
@@ -1655,6 +1659,25 @@ final class RenderSettings: @unchecked Sendable {
             persistSafetyBubble()
         }
     }
+
+    /// Mixed immersion: cap the bubble at `safetyBubbleMixedRadius` while Mixed
+    /// is active (live override; the saved radius is untouched).
+    var safetyBubbleMixedAutoShrink: Bool {
+        get { withLock { _safetyBubbleMixedAutoShrink } }
+        set {
+            withLock { _safetyBubbleMixedAutoShrink = newValue }
+            persistSafetyBubble()
+        }
+    }
+
+    /// Bubble radius cap while Mixed immersion is active (0.05 - 1.0 meters).
+    var safetyBubbleMixedRadius: Float {
+        get { withLock { _safetyBubbleMixedRadius } }
+        set {
+            withLock { _safetyBubbleMixedRadius = max(0.05, min(1.0, newValue)) }
+            persistSafetyBubble()
+        }
+    }
     
     /// Shape of the safety bubble.
     /// 0...1 preserve the legacy sphere/cube morph, 2...6 select discrete solids.
@@ -1761,6 +1784,24 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _handAttractionProjectionDistance } }
         set {
             withLock { _handAttractionProjectionDistance = max(0.0, min(1.0, newValue)) }
+            persistHandAttraction()
+        }
+    }
+
+    /// Forearm capsule: extend the interaction along the wrist→elbow segment.
+    var handAttractionForearmEnabled: Bool {
+        get { withLock { _handAttractionForearmEnabled } }
+        set {
+            withLock { _handAttractionForearmEnabled = newValue }
+            persistHandAttraction()
+        }
+    }
+
+    /// Forearm capsule radius in meters (0.02 - 0.3).
+    var handAttractionForearmRadius: Float {
+        get { withLock { _handAttractionForearmRadius } }
+        set {
+            withLock { _handAttractionForearmRadius = max(0.02, min(0.3, newValue)) }
             persistHandAttraction()
         }
     }
@@ -2521,6 +2562,8 @@ final class RenderSettings: @unchecked Sendable {
                 safetyBubbleFadeEnabled: _safetyBubbleFadeEnabled,
                 safetyBubbleFadeWidth: _safetyBubbleFadeWidth,
                 safetyBubbleStrength: _safetyBubbleStrength,
+                safetyBubbleMixedAutoShrink: _safetyBubbleMixedAutoShrink,
+                safetyBubbleMixedRadius: _safetyBubbleMixedRadius,
                 handAttractionEnabled: _handAttractionEnabled,
                 handAttractionRadius: _handAttractionRadius,
                 handAttractionStrength: _handAttractionStrength,
@@ -2530,6 +2573,8 @@ final class RenderSettings: @unchecked Sendable {
                 handAttractionPocketSize: _handAttractionPocketSize,
                 handAttractionPocketSoftness: _handAttractionPocketSoftness,
                 handAttractionProjectionDistance: _handAttractionProjectionDistance,
+                handAttractionForearmEnabled: _handAttractionForearmEnabled,
+                handAttractionForearmRadius: _handAttractionForearmRadius,
                 colorSchemeParams: makeColorSchemeParamsLocked(),
                 lightingSoftness: _lightingSoftness,
                 fogEnabled: _fogEffect.enabled,
@@ -4061,6 +4106,8 @@ final class RenderSettings: @unchecked Sendable {
                 c.fadeEnabled = _safetyBubbleFadeEnabled
                 c.fadeWidth = _safetyBubbleFadeWidth
                 c.strength = _safetyBubbleStrength
+                c.mixedAutoShrinkEnabled = _safetyBubbleMixedAutoShrink
+                c.mixedRadius = _safetyBubbleMixedRadius
                 return c
             }
         }
@@ -4075,6 +4122,8 @@ final class RenderSettings: @unchecked Sendable {
                 _safetyBubbleFadeEnabled = newValue.fadeEnabled
                 _safetyBubbleFadeWidth = newValue.fadeWidth
                 _safetyBubbleStrength = newValue.strength
+                _safetyBubbleMixedAutoShrink = newValue.mixedAutoShrinkEnabled
+                _safetyBubbleMixedRadius = newValue.mixedRadius
             }
         }
     }
@@ -4092,6 +4141,8 @@ final class RenderSettings: @unchecked Sendable {
                 c.pocketSize = _handAttractionPocketSize
                 c.pocketSoftness = _handAttractionPocketSoftness
                 c.projectionDistance = _handAttractionProjectionDistance
+                c.forearmEnabled = _handAttractionForearmEnabled
+                c.forearmRadius = _handAttractionForearmRadius
                 return c
             }
         }
@@ -4108,6 +4159,8 @@ final class RenderSettings: @unchecked Sendable {
                 _handAttractionPocketSize = newValue.pocketSize
                 _handAttractionPocketSoftness = newValue.pocketSoftness
                 _handAttractionProjectionDistance = newValue.projectionDistance
+                _handAttractionForearmEnabled = newValue.forearmEnabled
+                _handAttractionForearmRadius = newValue.forearmRadius
             }
         }
     }

@@ -498,6 +498,10 @@ struct FractalParams {
     int leftHandActive;
     float3 rightHandPosition;
     int rightHandActive;
+    float4 leftForearmA;             // xyz = wrist, w = 1 tracked / 0
+    float4 leftForearmB;             // xyz = elbow, w = capsule radius (0 = forearms off)
+    float4 rightForearmA;
+    float4 rightForearmB;
     float sphereProjBlend;  // 0 = off; >0 blends post-fold radial sphere projection (Mandelbox path)
     float sphereProjRadius; // Target radius for the post-fold sphere projection
     float spaceWarpStrength; // 0 = off; drives the custom space warp (built-in Twist or a loaded .threshfx warp)
@@ -1073,6 +1077,31 @@ FORCE_INLINE float applyHandAttractionOne(float d, float3 pos, float3 handPos, f
     return result;
 }
 
+// Forearm capsule: the same signed CSG as the hand ball, but along the
+// wrist→elbow segment, so the whole forearm carves/pulls space, not just the
+// palm. A.w = tracked flag, B.w = capsule radius; softness shares the hand
+// ball's blend control (shape.y).
+FORCE_INLINE float applyForearmOne(float d, float3 pos, float4 A, float4 B, float strength, float softness) {
+    float radius = B.w;
+    float3 pa = pos - A.xyz;
+    float3 ba = B.xyz - A.xyz;
+    float t = saturate(dot(pa, ba) / max(dot(ba, ba), 1e-6f));
+    float dist = length(pa - ba * t);
+    // |strength| scales effect depth, same blend-transition scheme as the ball.
+    float effectRadius = radius * saturate(fabs(strength));
+    float capDist = dist - effectRadius;
+    float k = max(radius * softness, 1e-4f);
+    if (strength >= 0.0f) {
+        float h = saturate(0.5f + 0.5f * (capDist - d) / k);
+        return mix(capDist, d, h) - k * h * (1.0f - h);
+    } else {
+        float a = d;
+        float b = -capDist;
+        float h = saturate(0.5f + 0.5f * (b - a) / k);
+        return mix(a, b, h) + k * h * (1.0f - h);
+    }
+}
+
 FORCE_INLINE float applyHandAttraction(float d, float3 pos, FractalParams params) {
     if (params.handAttractionEnabled == 0 || fabs(params.handAttractionStrength) < 0.001f) return d;
     if (params.leftHandActive != 0) {
@@ -1080,6 +1109,12 @@ FORCE_INLINE float applyHandAttraction(float d, float3 pos, FractalParams params
     }
     if (params.rightHandActive != 0) {
         d = applyHandAttractionOne(d, pos, params.rightHandPosition, params.handAttractionRadius, params.handAttractionStrength, params.handAttractionPocketEnabled, params.handAttractionShape);
+    }
+    if (params.leftForearmA.w > 0.5f && params.leftForearmB.w > 0.0f) {
+        d = applyForearmOne(d, pos, params.leftForearmA, params.leftForearmB, params.handAttractionStrength, params.handAttractionShape.y);
+    }
+    if (params.rightForearmA.w > 0.5f && params.rightForearmB.w > 0.0f) {
+        d = applyForearmOne(d, pos, params.rightForearmA, params.rightForearmB, params.handAttractionStrength, params.handAttractionShape.y);
     }
     return d;
 }
@@ -1100,7 +1135,9 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
     int handAttractionPocketEnabled = 0,
     float3 leftHandPosition = float3(0.0f), int leftHandActive = 0,
     float3 rightHandPosition = float3(0.0f), int rightHandActive = 0,
-    float4 handAttractionShape = float4(0.35f, 1.0f, 0.5f, 0.6f))
+    float4 handAttractionShape = float4(0.35f, 1.0f, 0.5f, 0.6f),
+    float4 leftForearmA = float4(0.0f), float4 leftForearmB = float4(0.0f),
+    float4 rightForearmA = float4(0.0f), float4 rightForearmB = float4(0.0f))
 {
     FractalParams params;
     // Use precomputed values (expensive powr() and divisions done on CPU)
@@ -1120,6 +1157,10 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
     params.handAttractionStrength = handAttractionStrength;
     params.handAttractionPocketEnabled = handAttractionPocketEnabled;
     params.handAttractionShape = handAttractionShape;
+    params.leftForearmA = leftForearmA;
+    params.leftForearmB = leftForearmB;
+    params.rightForearmA = rightForearmA;
+    params.rightForearmB = rightForearmB;
     params.leftHandPosition = leftHandPosition;
     params.leftHandActive = leftHandActive;
     params.rightHandPosition = rightHandPosition;
@@ -2814,7 +2855,7 @@ kernel void adaptiveHierarchical8x8(
         uniforms.precomputedFractal,
         uniforms.minDistance,
         marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count,
-        uniforms.handAttractionEnabled, uniforms.handAttractionRadius, uniforms.handAttractionStrength, uniforms.handAttractionPocketEnabled, uniforms.leftHandPosition, uniforms.leftHandActive, uniforms.rightHandPosition, uniforms.rightHandActive, uniforms.handAttractionShape);
+        uniforms.handAttractionEnabled, uniforms.handAttractionRadius, uniforms.handAttractionStrength, uniforms.handAttractionPocketEnabled, uniforms.leftHandPosition, uniforms.leftHandActive, uniforms.rightHandPosition, uniforms.rightHandActive, uniforms.handAttractionShape, uniforms.leftForearmA, uniforms.leftForearmB, uniforms.rightForearmA, uniforms.rightForearmB);
 
     // === TEMPORAL REPROJECTION: PER-PIXEL ===
     // Reproject this pixel to previous frame, sample previous depth,
@@ -3567,7 +3608,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         uniforms.precomputedFractal,
         uniforms.minDistance,
         marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count,
-        uniforms.handAttractionEnabled, uniforms.handAttractionRadius, uniforms.handAttractionStrength, uniforms.handAttractionPocketEnabled, uniforms.leftHandPosition, uniforms.leftHandActive, uniforms.rightHandPosition, uniforms.rightHandActive, uniforms.handAttractionShape);
+        uniforms.handAttractionEnabled, uniforms.handAttractionRadius, uniforms.handAttractionStrength, uniforms.handAttractionPocketEnabled, uniforms.leftHandPosition, uniforms.leftHandActive, uniforms.rightHandPosition, uniforms.rightHandActive, uniforms.handAttractionShape, uniforms.leftForearmA, uniforms.leftForearmB, uniforms.rightForearmA, uniforms.rightForearmB);
 
     half3 col = half3(0.0h);
     float2 ret;

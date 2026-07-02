@@ -157,12 +157,17 @@ extension Renderer {
 
     /// True when the background should be transparent this frame — miss rays
     /// write alpha 0 and the pass clears transparent, so the compositor shows
-    /// passthrough instead of black. Active in both Partial (inside the portal)
-    /// and Mixed (everywhere) immersion styles.
+    /// passthrough instead of black. Mixed style ONLY: in Immersive the frame
+    /// renders opaque, because during fast head turns the compositor's late
+    /// reprojection uncovers frame edges — with a transparent background those
+    /// edges flash the (usually bright) room against the (usually dark) scene,
+    /// which reads as clipping. Opaque frames reproject as black, like the old
+    /// full-immersion mode.
     var passthroughBackgroundActive: Bool {
         guard drawableRenderContextRequired else { return false }
         switch appModel.immersionStyleForRenderer {
-        case .immersive, .mixed: return true
+        case .immersive: return false
+        case .mixed: return true
         }
     }
 

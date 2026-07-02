@@ -248,6 +248,14 @@ actor Renderer {
     var lastLeftHandTrackedForAttraction: Bool = false
     var lastRightHandPalmPosition: SIMD3<Float> = .zero
     var lastRightHandTrackedForAttraction: Bool = false
+    // Forearm capsule endpoints (world space) for the Hand Attraction forearm
+    // extension — wrist + elbow per arm, captured alongside the palms.
+    var lastLeftForearmWrist: SIMD3<Float> = .zero
+    var lastLeftForearmElbow: SIMD3<Float> = .zero
+    var lastLeftForearmTracked: Bool = false
+    var lastRightForearmWrist: SIMD3<Float> = .zero
+    var lastRightForearmElbow: SIMD3<Float> = .zero
+    var lastRightForearmTracked: Bool = false
     // Hand-tracking dispatch coordination between the render loop (Renderer actor)
     // and the per-frame @MainActor Task that processes gestures. A single Mutex
     // replaces the previous pair of `nonisolated(unsafe)` flags: the render loop
@@ -1474,7 +1482,12 @@ actor Renderer {
         // Get color scheme parameters
         let colorSchemeParams = settingsSnapshot.colorSchemeParams
         
-        let scaleCorrectedBubbleRadius = settingsSnapshot.safetyBubbleRadius / max(framePreparation.effectiveScale, 0.001)
+        // Mixed immersion: cap the comfort bubble (see RendererGameState).
+        let mixedBubbleCapActive = appModel.immersionStyleForRenderer == .mixed && settingsSnapshot.safetyBubbleMixedAutoShrink
+        let bubbleRadiusMeters = mixedBubbleCapActive
+            ? min(settingsSnapshot.safetyBubbleRadius, settingsSnapshot.safetyBubbleMixedRadius)
+            : settingsSnapshot.safetyBubbleRadius
+        let scaleCorrectedBubbleRadius = bubbleRadiusMeters / max(framePreparation.effectiveScale, 0.001)
         let scaleCorrectedFadeWidth = settingsSnapshot.safetyBubbleFadeWidth / max(framePreparation.effectiveScale, 0.001)
 
         // Match fragment path projection mapping by using the actual per-eye
@@ -1598,6 +1611,10 @@ actor Renderer {
             leftHandActive: framePreparation.handAttraction.leftActive,
             rightHandPosition: framePreparation.handAttraction.rightPosition,
             rightHandActive: framePreparation.handAttraction.rightActive,
+            leftForearmA: framePreparation.handAttraction.leftForearmA,
+            leftForearmB: framePreparation.handAttraction.leftForearmB,
+            rightForearmA: framePreparation.handAttraction.rightForearmA,
+            rightForearmB: framePreparation.handAttraction.rightForearmB,
             foldingLimit: settingsSnapshot.foldingLimit,
             glowIntensity: framePreparation.animatedGlow,
             colorMix: framePreparation.animatedColorMix,
@@ -2039,7 +2056,12 @@ actor Renderer {
             // only shortens the warm-start skip — never unsafe.
             let coarseRateMagMax: Float = rateMapValid ? 4.0 : 1.0
 
-            let scaleCorrectedBubbleRadius = settingsSnapshot.safetyBubbleRadius / max(framePreparation.effectiveScale, 0.001)
+            // Mixed immersion: cap the comfort bubble (see RendererGameState).
+            let mixedBubbleCapActive = appModel.immersionStyleForRenderer == .mixed && settingsSnapshot.safetyBubbleMixedAutoShrink
+            let bubbleRadiusMeters = mixedBubbleCapActive
+                ? min(settingsSnapshot.safetyBubbleRadius, settingsSnapshot.safetyBubbleMixedRadius)
+                : settingsSnapshot.safetyBubbleRadius
+            let scaleCorrectedBubbleRadius = bubbleRadiusMeters / max(framePreparation.effectiveScale, 0.001)
             let scaleCorrectedFadeWidth = settingsSnapshot.safetyBubbleFadeWidth / max(framePreparation.effectiveScale, 0.001)
 
             var tileUniforms = TileUniforms(
@@ -2067,6 +2089,10 @@ actor Renderer {
                 leftHandActive: framePreparation.handAttraction.leftActive,
                 rightHandPosition: framePreparation.handAttraction.rightPosition,
                 rightHandActive: framePreparation.handAttraction.rightActive,
+                leftForearmA: framePreparation.handAttraction.leftForearmA,
+                leftForearmB: framePreparation.handAttraction.leftForearmB,
+                rightForearmA: framePreparation.handAttraction.rightForearmA,
+                rightForearmB: framePreparation.handAttraction.rightForearmB,
                 foldingLimit: settingsSnapshot.foldingLimit,
                 glowIntensity: framePreparation.animatedGlow,
                 colorMix: framePreparation.animatedColorMix,

@@ -290,6 +290,10 @@ typedef struct
     int leftHandActive;            // 1 = left hand is currently tracked
     vector_float3 rightHandPosition;
     int rightHandActive;           // 1 = right hand is currently tracked
+    vector_float4 leftForearmA;    // xyz = wrist (model space), w = 1 tracked / 0
+    vector_float4 leftForearmB;    // xyz = elbow (model space), w = capsule radius (model units; 0 = forearms off)
+    vector_float4 rightForearmA;
+    vector_float4 rightForearmB;
 
     float colorIterations;   // How many iterations contribute to color
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
@@ -408,6 +412,10 @@ typedef struct
     int leftHandActive;
     vector_float3 rightHandPosition;
     int rightHandActive;
+    vector_float4 leftForearmA;    // xyz = wrist (model space), w = 1 tracked / 0
+    vector_float4 leftForearmB;    // xyz = elbow (model space), w = capsule radius (model units; 0 = forearms off)
+    vector_float4 rightForearmA;
+    vector_float4 rightForearmB;
     float foldingLimit;
     float glowIntensity;
     float colorMix;

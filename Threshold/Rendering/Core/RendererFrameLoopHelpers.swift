@@ -16,6 +16,21 @@ extension Renderer {
         return SIMD3<Float>(worldTransform.columns.3.x, worldTransform.columns.3.y, worldTransform.columns.3.z)
     }
 
+    /// Wrist + elbow world positions for the Hand Attraction forearm capsule.
+    static func forearmSegment(from anchor: HandAnchor?) -> (wrist: SIMD3<Float>, elbow: SIMD3<Float>, tracked: Bool) {
+        guard let anchor, anchor.isTracked, let skeleton = anchor.handSkeleton else {
+            return (.zero, .zero, false)
+        }
+        let wristJoint = skeleton.joint(.forearmWrist)
+        let elbowJoint = skeleton.joint(.forearmArm)
+        guard wristJoint.isTracked, elbowJoint.isTracked else { return (.zero, .zero, false) }
+        func world(_ joint: HandSkeleton.Joint) -> SIMD3<Float> {
+            let t = anchor.originFromAnchorTransform * joint.anchorFromJointTransform
+            return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+        }
+        return (world(wristJoint), world(elbowJoint), true)
+    }
+
     func updateDynamicBufferState() {
         /// Update the state of our uniform buffers before rendering
         /// OPTIMIZATION: Use bitwise AND for modulo when maxBuffersInFlight is power of 2
@@ -81,6 +96,14 @@ extension Renderer {
             lastLeftHandTrackedForAttraction = leftAnchor?.isTracked ?? false
             lastRightHandPalmPosition = Self.palmPosition(from: rightAnchor)
             lastRightHandTrackedForAttraction = rightAnchor?.isTracked ?? false
+            let leftForearm = Self.forearmSegment(from: leftAnchor)
+            lastLeftForearmWrist = leftForearm.wrist
+            lastLeftForearmElbow = leftForearm.elbow
+            lastLeftForearmTracked = leftForearm.tracked
+            let rightForearm = Self.forearmSegment(from: rightAnchor)
+            lastRightForearmWrist = rightForearm.wrist
+            lastRightForearmElbow = rightForearm.elbow
+            lastRightForearmTracked = rightForearm.tracked
 
             // Head pose for gestures that need a facing-relative frame (the
             // open-palm scene swipe resolves "left/right" against this).

@@ -115,6 +115,34 @@ struct SafetyBubbleConfig: Codable, Equatable, Sendable {
     var fadeEnabled: Bool = true
     var fadeWidth: Float = 0.1     // 0.0 - 1.0
     var strength: Float = SafetyBubbleConfig.defaultStrength     // 0.0 - 1.0
+    /// Mixed immersion: cap the bubble at `mixedRadius` while Mixed is active.
+    /// In Mixed you're "outside" the fractal looking at it in your room, so a
+    /// large comfort bubble mostly just hollows out the object. Live override —
+    /// the saved radius is untouched and returns when leaving Mixed.
+    var mixedAutoShrinkEnabled: Bool = true
+    var mixedRadius: Float = 0.3   // 0.05 - 1.0 meters
+
+    // MARK: - Codable (tolerant decode so adding fields never resets the
+    // user's saved bubble config — it carries a comfort-default migration)
+
+    private enum CodingKeys: String, CodingKey {
+        case enabled, radius, shape, fadeEnabled, fadeWidth, strength
+        case mixedAutoShrinkEnabled, mixedRadius
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? SafetyBubbleConfig.defaultEnabled
+        radius = try c.decodeIfPresent(Float.self, forKey: .radius) ?? 1.8
+        shape = try c.decodeIfPresent(Float.self, forKey: .shape) ?? 0.0
+        fadeEnabled = try c.decodeIfPresent(Bool.self, forKey: .fadeEnabled) ?? true
+        fadeWidth = try c.decodeIfPresent(Float.self, forKey: .fadeWidth) ?? 0.1
+        strength = try c.decodeIfPresent(Float.self, forKey: .strength) ?? SafetyBubbleConfig.defaultStrength
+        mixedAutoShrinkEnabled = try c.decodeIfPresent(Bool.self, forKey: .mixedAutoShrinkEnabled) ?? true
+        mixedRadius = try c.decodeIfPresent(Float.self, forKey: .mixedRadius) ?? 0.3
+    }
 
     // MARK: - Validation
 
@@ -123,5 +151,6 @@ struct SafetyBubbleConfig: Codable, Equatable, Sendable {
         shape = shape.clamped(to: 0.0...SafetyBubbleShapePreset.maxStoredValue)
         fadeWidth = fadeWidth.clamped(to: 0.0...1.0)
         strength = strength.clamped(to: 0.0...1.0)
+        mixedRadius = mixedRadius.clamped(to: 0.05...1.0)
     }
 }
