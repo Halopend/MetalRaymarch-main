@@ -65,6 +65,10 @@ struct FractalPreset: Codable, Identifiable {
     var safetyBubbleShape: Float?
     var safetyBubbleBlend: Float?
 
+    // Hand Attraction (visionOS): whole domain config saved as one blob —
+    // its own Codable is tolerant, so new fields never break old scenes.
+    var handAttraction: HandAttractionConfig?
+
     // === SPACE TRANSFORMS (Space module) ===
     // Domain/space-level transforms owned by DisplayConfig. These were previously
     // dropped on save/load (the fields existed only in DisplayConfig, never in the
@@ -178,6 +182,7 @@ struct FractalPreset: Codable, Identifiable {
         case cellShadingEnabled, cellShadingLevels, aoStrength, tonemapStrength
         case lightVariationRate, beatFlashEffect, polarRotationEffect, juliaDriftEffect
         case safetyBubbleFadeEnabled, safetyBubbleFadeWidth
+        case handAttraction
     }
     
     init(id: UUID = UUID(), name: String, createdAt: Date = Date(), thumbnailData: Data? = nil) {
@@ -375,6 +380,7 @@ struct FractalPreset: Codable, Identifiable {
         juliaDriftEffect = try container.decodeIfPresent(JuliaDriftEffect.self, forKey: .juliaDriftEffect)
         safetyBubbleFadeEnabled = try container.decodeIfPresent(Bool.self, forKey: .safetyBubbleFadeEnabled)
         safetyBubbleFadeWidth = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleFadeWidth)
+        handAttraction = try container.decodeIfPresent(HandAttractionConfig.self, forKey: .handAttraction)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -472,6 +478,7 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(juliaDriftEffect, forKey: .juliaDriftEffect)
         try container.encodeIfPresent(safetyBubbleFadeEnabled, forKey: .safetyBubbleFadeEnabled)
         try container.encodeIfPresent(safetyBubbleFadeWidth, forKey: .safetyBubbleFadeWidth)
+        try container.encodeIfPresent(handAttraction, forKey: .handAttraction)
     }
     
     // MARK: - Function Constant Derivation
@@ -680,6 +687,9 @@ struct FractalPreset: Codable, Identifiable {
         preset.safetyBubbleFadeEnabled = sb.fadeEnabled
         preset.safetyBubbleFadeWidth = sb.fadeWidth
 
+        // ── Hand Attraction domain (1 lock acquisition) ──
+        preset.handAttraction = settings.handAttractionConfig
+
         // ── Audio reactive domain (1 lock acquisition) ──
         let arc = settings.audioReactiveConfig
         preset.audioReactiveConfig = arc
@@ -791,6 +801,13 @@ struct FractalPreset: Codable, Identifiable {
                 }
                 settings.safetyBubbleConfig = sb
             }
+        }
+
+        // Hand Attraction: scene-authored interaction feel — restore the whole
+        // config when the scene saved one (older scenes leave the user's
+        // current config untouched).
+        if let handAttraction = handAttraction {
+            settings.handAttractionConfig = handAttraction
         }
 
         // Space module (domain transforms) — restore when present.

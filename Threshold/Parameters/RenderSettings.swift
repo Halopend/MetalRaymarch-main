@@ -277,17 +277,18 @@ final class RenderSettings: @unchecked Sendable {
     // Hand Attraction: a per-hand interaction sphere (visionOS only) that pulls
     // the fractal surface toward each tracked palm — the inverse of the safety
     // bubble's push-away carve. Off by default (opt-in, not a comfort feature).
-    private var _handAttractionEnabled: Bool = false
-    private var _handAttractionRadius: Float = 0.35
-    private var _handAttractionStrength: Float = -0.35
-    private var _handAttractionPocketEnabled: Bool = false
-    private var _handAttractionBallScale: Float = 0.35
-    private var _handAttractionSoftness: Float = 1.0
-    private var _handAttractionPocketSize: Float = 0.5
-    private var _handAttractionPocketSoftness: Float = 0.6
-    private var _handAttractionProjectionDistance: Float = 0.0
-    private var _handAttractionForearmEnabled: Bool = true
-    private var _handAttractionForearmRadius: Float = 0.07
+    // Defaults mirror HandAttractionConfig (tuned 2026-07-02).
+    private var _handAttractionEnabled: Bool = true
+    private var _handAttractionRadius: Float = 0.36
+    private var _handAttractionStrength: Float = 0.39
+    private var _handAttractionPocketEnabled: Bool = true
+    private var _handAttractionBallScale: Float = 0.5
+    private var _handAttractionSoftness: Float = 0.73
+    private var _handAttractionPocketSize: Float = 0.77
+    private var _handAttractionPocketSoftness: Float = 0.18
+    private var _handAttractionProjectionDistance: Float = 0.08
+    private var _handAttractionForearmEnabled: Bool = false
+    private var _handAttractionForearmRadius: Float = 0.06
 
     // === COLOR SCHEME ===
     // Controls the color palette and post-processing for fractal coloring

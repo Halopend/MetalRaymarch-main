@@ -3046,44 +3046,43 @@ FORCE_INLINE float applyHandAttractionOne(float d, float3 pos, float3 handPos, f
     return result;
 }
 
-// Forearm capsule: the same signed CSG as the hand ball, but along the
-// wrist→elbow segment, so the whole forearm carves/pulls space, not just the
-// palm. A.w = tracked flag, B.w = capsule radius; softness shares the hand
-// ball's blend control (shape.y).
-FORCE_INLINE float applyForearmOne(float d, float3 pos, float4 A, float4 B, float strength, float softness) {
+// Forearm capsule: always CARVES empty space along the wrist→elbow segment
+// (smooth-max subtraction), regardless of the hand ball's signed strength.
+// The point of the forearm is limb visibility: the compositor draws the real
+// passthrough arm only where the submitted scene depth is farther than the
+// limb, so the capsule keeps geometry from ever sitting in front of the arm.
+// A.w = tracked flag, B.w = capsule radius; softness shares the hand ball's
+// blend control (shape.y).
+FORCE_INLINE float applyForearmOne(float d, float3 pos, float4 A, float4 B, float softness) {
     float radius = B.w;
     float3 pa = pos - A.xyz;
     float3 ba = B.xyz - A.xyz;
     float t = saturate(dot(pa, ba) / max(dot(ba, ba), 1e-6f));
     float dist = length(pa - ba * t);
-    // |strength| scales effect depth, same blend-transition scheme as the ball.
-    float effectRadius = radius * saturate(fabs(strength));
-    float capDist = dist - effectRadius;
+    float capDist = dist - radius;
     float k = max(radius * softness, 1e-4f);
-    if (strength >= 0.0f) {
-        float h = saturate(0.5f + 0.5f * (capDist - d) / k);
-        return mix(capDist, d, h) - k * h * (1.0f - h);
-    } else {
-        float a = d;
-        float b = -capDist;
-        float h = saturate(0.5f + 0.5f * (b - a) / k);
-        return mix(a, b, h) + k * h * (1.0f - h);
-    }
+    float a = d;
+    float b = -capDist;
+    float h = saturate(0.5f + 0.5f * (b - a) / k);
+    return mix(a, b, h) + k * h * (1.0f - h);
 }
 
 FORCE_INLINE float applyHandAttraction(float d, float3 pos, FractalParams params) {
-    if (params.handAttractionEnabled == 0 || fabs(params.handAttractionStrength) < 0.001f) return d;
-    if (params.leftHandActive != 0) {
+    if (params.handAttractionEnabled == 0) return d;
+    // The hand ball needs a non-zero signed strength; the forearm carve below
+    // is strength-independent (it exists for limb visibility, not sculpting).
+    const bool ballActive = fabs(params.handAttractionStrength) >= 0.001f;
+    if (ballActive && params.leftHandActive != 0) {
         d = applyHandAttractionOne(d, pos, params.leftHandPosition, params.handAttractionRadius, params.handAttractionStrength, params.handAttractionPocketEnabled, params.handAttractionShape);
     }
-    if (params.rightHandActive != 0) {
+    if (ballActive && params.rightHandActive != 0) {
         d = applyHandAttractionOne(d, pos, params.rightHandPosition, params.handAttractionRadius, params.handAttractionStrength, params.handAttractionPocketEnabled, params.handAttractionShape);
     }
     if (params.leftForearmA.w > 0.5f && params.leftForearmB.w > 0.0f) {
-        d = applyForearmOne(d, pos, params.leftForearmA, params.leftForearmB, params.handAttractionStrength, params.handAttractionShape.y);
+        d = applyForearmOne(d, pos, params.leftForearmA, params.leftForearmB, params.handAttractionShape.y);
     }
     if (params.rightForearmA.w > 0.5f && params.rightForearmB.w > 0.0f) {
-        d = applyForearmOne(d, pos, params.rightForearmA, params.rightForearmB, params.handAttractionStrength, params.handAttractionShape.y);
+        d = applyForearmOne(d, pos, params.rightForearmA, params.rightForearmB, params.handAttractionShape.y);
     }
     return d;
 }

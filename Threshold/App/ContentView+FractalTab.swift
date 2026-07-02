@@ -243,7 +243,7 @@ extension ContentView {
                                         cache.push(\.handAttractionForearmEnabled, value: val)
                                     }
                             }
-                            Text("Extends the effect along each wrist\u{2192}elbow segment, so the whole forearm carves or pulls space, not just the palm.")
+                            Text("Carves empty space along each wrist\u{2192}elbow segment so your real forearm stays visible through the fractal \u{2014} the arm shows wherever geometry isn't in front of it.")
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                             if cache.handAttraction.forearmEnabled {
