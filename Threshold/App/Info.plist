@@ -178,6 +178,12 @@
 	</array>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Threshold analyzes live audio input to create music-reactive fractal visualizations.</string>
+	<key>NSAppIntentsUsageDescription</key>
+	<string>Threshold uses App Intents to enable Siri controls for play/pause animations, lighting intensity, tempo/damping, mood-based tuning, and space transformation effects.</string>
+	<key>NSAppIntentsSupported</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationPreferredDefaultSceneSessionRole</key>

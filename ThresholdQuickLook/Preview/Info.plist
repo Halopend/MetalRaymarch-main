@@ -40,5 +40,102 @@
 			<false/>
 		</dict>
 	</dict>
+	<key>NSAppIntentsSupported</key>
+	<true/>
+	<key>NSAppIntentsUsageDescription</key>
+	<string>Threshold uses App Intents to enable Siri controls for play/pause animations, lighting intensity, tempo/damping, mood-based tuning, and space transformation effects.</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.content</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Threshold Fractal Scene</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.puppypower.threshold.scene</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<string>threshscene</string>
+				<key>public.mime-type</key>
+				<string>application/vnd.puppypower.threshold.scene+json</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.content</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Threshold Music Preset</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.puppypower.threshold.music-preset</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<string>threshmp</string>
+				<key>public.mime-type</key>
+				<string>application/vnd.puppypower.threshold.music-preset+json</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.content</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Threshold Animation</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.puppypower.threshold.animation</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<string>threshanim</string>
+				<key>public.mime-type</key>
+				<string>application/vnd.puppypower.threshold.animation+json</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.content</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Threshold Music Video Animation</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.puppypower.threshold.music-animation</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<string>threshanimv</string>
+				<key>public.mime-type</key>
+				<string>application/vnd.puppypower.threshold.music-animation+json</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.content</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Threshold Custom Formula</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.puppypower.threshold.formula</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<string>threshfx</string>
+				<key>public.mime-type</key>
+				<string>application/vnd.puppypower.threshold.formula+json</string>
+			</dict>
+		</dict>
+	</array>
 </dict>
 </plist>

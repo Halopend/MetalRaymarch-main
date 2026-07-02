@@ -330,15 +330,19 @@ final class ThresholdMacRenderer {
         }
     }
 
-    /// Benchmark-only shading-ablation mode routed into `uniforms.debugHierarchical`
+    /// Benchmark-only shading-ablation mode routed into `uniforms.benchAblate`
     /// (>=10 activates fragmentMain's benchAblate branches). Always 0 outside a
-    /// THRESHOLD_BENCHMARK run, so shipping behavior is untouched.
-    private static let benchAblateMode: UInt32 = {
+    /// THRESHOLD_BENCHMARK run, so shipping behavior is untouched. The env value
+    /// is the launch default; plan-mode benchmark jobs may retarget it between
+    /// jobs (MacBenchmarkHarness) — a racy-by-design gate like the other
+    /// benchmark toggles (main-actor write, render-thread read, measurement-only).
+    static let benchAblateModeEnvDefault: UInt32 = {
         guard BenchmarkMode.isActive,
               let v = ProcessInfo.processInfo.environment["THRESHOLD_BENCHMARK_ABLATE"],
               let n = UInt32(v), n >= 10 else { return 0 }
         return n
     }()
+    nonisolated(unsafe) static var benchAblateMode: UInt32 = benchAblateModeEnvDefault
 
     private static let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
     private static let maxBuffersInFlight = 2

@@ -5,9 +5,9 @@
 //  Headless, offscreen performance harness for the Mac renderer. When the app is
 //  launched with THRESHOLD_BENCHMARK=1, this drives the real raymarch pipeline in
 //  a tight loop into an offscreen texture (no window / display link required),
-//  sweeps a caller-named set of scenes, and writes one machine-readable
-//  PerfRunRecord to disk before exiting. A driver script reads that JSON to report
-//  bottlenecks.
+//  executes a benchmark PLAN (a scene × config job matrix) in ONE app launch, and
+//  writes machine-readable results to disk before exiting. Driver scripts live in
+//  Scripts/ (bench.sh, bench_report.py, perf-gate.sh).
 //
 //  Why offscreen: the MTKView render loop is display-link driven, which the
 //  window server throttles to near-zero for a window that isn't the composited
@@ -15,14 +15,27 @@
 //  offscreen with `ThresholdMacRenderer.renderBenchmarkFrame` decouples the
 //  benchmark from compositing while staying faithful to the shipping shader.
 //
-//  Env config (all optional except SCENES):
+//  Two entry modes:
+//
+//  PLAN MODE (preferred — one launch, many configs):
+//    THRESHOLD_BENCHMARK=1 THRESHOLD_BENCHMARK_PLAN=/path/plan.json
+//    Plan file: { "defaults": {<job fields>}, "out": "...", "pngDir": "...",
+//                 "jobs": [ { "name": "...", "scene": "...", ...overrides } ] }
+//    Job fields (all optional except scene; job value ?? defaults ?? built-in):
+//      frames(120) warmup(40) size("1920x1080") settleSeconds(2.5) shadows(bool)
+//      png(bool) qc({key:val}) params({"8":17}) ablate(int >=10)
+//    "scene": "*" expands the job into one job per keyboard-switchable preset.
+//    Output: schemaVersion-2 JSON { meta..., jobs: [{name, scene, config,
+//    metrics: PerfSceneRecord, png}] }.
+//
+//  ENV MODE (legacy single-config; kept byte-compatible — perf-gate.sh uses it):
 //    THRESHOLD_BENCHMARK=1                 enable the harness (see BenchmarkMode)
 //    THRESHOLD_BENCHMARK_SCENES=a,b,c      comma-separated scene names (default: all
 //                                          keyboard-switchable static presets)
 //    THRESHOLD_BENCHMARK_FRAMES=240        measured frames per scene
 //    THRESHOLD_BENCHMARK_WARMUP=60         warmup frames per scene (discarded)
 //    THRESHOLD_BENCHMARK_SIZE=1920x1080    offscreen render resolution
-//    THRESHOLD_BENCHMARK_OUT=/path.json    output path for the PerfRunRecord JSON
+//    THRESHOLD_BENCHMARK_OUT=/path.json    output path (PerfRunRecord JSON)
 //    THRESHOLD_BENCHMARK_QC=k=v,k=v        QualityConfig overrides applied after
 //                                          each scene load (see applyQCOverride).
 //                                          Needed because benchmark launches are
@@ -41,6 +54,8 @@ import UniformTypeIdentifiers
 
 @MainActor
 enum MacBenchmarkHarness {
+
+    // MARK: - Env (legacy) config
 
     struct Config {
         var scenes: [String]
@@ -65,6 +80,82 @@ enum MacBenchmarkHarness {
         /// canonical scene — must be pinned explicitly to be measured at all.
         var qcOverride: [(String, Float)]
     }
+
+    // MARK: - Plan (matrix) config
+
+    /// One job in a benchmark plan. Every field except `scene` is optional and
+    /// falls back to the plan's `defaults`, then to the built-in default — so a
+    /// plan can express a whole A/B/N matrix over one shared config.
+    struct BenchJobSpec: Decodable {
+        var name: String?
+        var scene: String?
+        var frames: Int?
+        var warmup: Int?
+        var size: String?
+        var settleSeconds: Double?
+        var shadows: Bool?
+        var png: Bool?
+        var qc: [String: Float]?
+        var params: [String: Float]?
+        var ablate: UInt32?
+    }
+
+    struct BenchPlan: Decodable {
+        var defaults: BenchJobSpec?
+        var out: String?
+        var pngDir: String?
+        var jobs: [BenchJobSpec]
+    }
+
+    /// A fully-resolved job (spec ?? defaults ?? built-ins).
+    struct ResolvedJob {
+        var name: String
+        var scene: String
+        var frames: Int
+        var warmup: Int
+        var width: Int
+        var height: Int
+        var settleSeconds: Double
+        var shadows: Bool?
+        var png: Bool
+        var qc: [(String, Float)]
+        var params: [(Int, Float)]
+        var ablate: UInt32?
+    }
+
+    struct BenchJobConfigEcho: Codable {
+        var frames: Int
+        var warmup: Int
+        var width: Int
+        var height: Int
+        var settleSeconds: Double
+        var shadows: Bool?
+        var qc: [String: Float]
+        var params: [String: Float]
+        var ablate: UInt32?
+    }
+
+    struct BenchJobResult: Codable {
+        var name: String
+        var scene: String
+        var config: BenchJobConfigEcho
+        var metrics: PerfSceneRecord
+        var png: String?
+    }
+
+    struct BenchPlanRunRecord: Codable {
+        var schemaVersion: Int = 2
+        var capturedAt: String
+        var gitSHA: String
+        var gitDirty: Bool
+        var marketingVersion: String
+        var buildNumber: String
+        var deviceModel: String
+        var osVersion: String
+        var jobs: [BenchJobResult]
+    }
+
+    // MARK: - Config parsing
 
     /// Apply "key=value" QualityConfig overrides by field name. Unknown keys are
     /// logged and skipped so a typo fails loudly in the run log, not silently.
@@ -94,6 +185,14 @@ enum MacBenchmarkHarness {
         FileHandle.standardError.write(Data("🏁 [bench] \(s)\n".utf8))
     }
 
+    private static func parseSize(_ s: String?, defaultW: Int, defaultH: Int) -> (Int, Int) {
+        guard let s, let x = s.firstIndex(of: "x"),
+              let w = Int(s[..<x]), let h = Int(s[s.index(after: x)...]) else {
+            return (defaultW, defaultH)
+        }
+        return (w, h)
+    }
+
     static func configFromEnv() -> Config {
         let env = ProcessInfo.processInfo.environment
         let scenes = (env["THRESHOLD_BENCHMARK_SCENES"] ?? "")
@@ -101,11 +200,7 @@ enum MacBenchmarkHarness {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         func intEnv(_ k: String, _ d: Int) -> Int { env[k].flatMap { Int($0) } ?? d }
-        var w = 1920, h = 1080
-        if let size = env["THRESHOLD_BENCHMARK_SIZE"], let x = size.firstIndex(of: "x") {
-            w = Int(size[..<x]) ?? w
-            h = Int(size[size.index(after: x)...]) ?? h
-        }
+        let (w, h) = parseSize(env["THRESHOLD_BENCHMARK_SIZE"], defaultW: 1920, defaultH: 1080)
         let out = env["THRESHOLD_BENCHMARK_OUT"] ?? (NSHomeDirectory() + "/mac-bench.json")
 
         var overrides: [(Int, Float)] = []
@@ -135,11 +230,46 @@ enum MacBenchmarkHarness {
                       qcOverride: qcOverride)
     }
 
-    static func run(appModel: AppModel) async {
-        let cfg = configFromEnv()
-        log("start scenes=\(cfg.scenes.isEmpty ? "<all>" : cfg.scenes.joined(separator: ",")) "
-            + "frames=\(cfg.frames) warmup=\(cfg.warmup) size=\(cfg.width)x\(cfg.height)")
+    /// Resolve a plan's job specs against its defaults and the built-in defaults,
+    /// expanding `"scene": "*"` into one job per keyboard-switchable preset.
+    private static func resolveJobs(_ plan: BenchPlan, allScenes: [String]) -> [ResolvedJob] {
+        let d = plan.defaults
+        var out: [ResolvedJob] = []
+        for (i, spec) in plan.jobs.enumerated() {
+            guard let sceneField = spec.scene ?? d?.scene else {
+                log("WARN job #\(i) has no scene — skipped"); continue
+            }
+            let sceneNames = sceneField == "*" ? allScenes : [sceneField]
+            for scene in sceneNames {
+                let (w, h) = parseSize(spec.size ?? d?.size, defaultW: 1920, defaultH: 1080)
+                let baseName = spec.name ?? "job\(i)"
+                let name = sceneField == "*" ? "\(baseName)-\(scene)" : baseName
+                // qc/params merge: defaults first, job overrides win per key.
+                var qc = d?.qc ?? [:]
+                for (k, v) in spec.qc ?? [:] { qc[k] = v }
+                var params = d?.params ?? [:]
+                for (k, v) in spec.params ?? [:] { params[k] = v }
+                out.append(ResolvedJob(
+                    name: name,
+                    scene: scene,
+                    frames: spec.frames ?? d?.frames ?? 120,
+                    warmup: spec.warmup ?? d?.warmup ?? 40,
+                    width: w, height: h,
+                    settleSeconds: spec.settleSeconds ?? d?.settleSeconds ?? 2.5,
+                    shadows: spec.shadows ?? d?.shadows,
+                    png: spec.png ?? d?.png ?? false,
+                    qc: qc.sorted { $0.key < $1.key }.map { ($0.key, $0.value) },
+                    params: params.sorted { $0.key < $1.key }
+                        .compactMap { k, v in Int(k).map { ($0, v) } },
+                    ablate: spec.ablate ?? d?.ablate))
+            }
+        }
+        return out
+    }
 
+    // MARK: - Run
+
+    static func run(appModel: AppModel) async {
         appModel.presetManager.refreshBundledPresets()
         try? await Task.sleep(for: .milliseconds(500))
 
@@ -164,7 +294,6 @@ enum MacBenchmarkHarness {
             renderer.embeddedFormulaActivator(renderSettings: appModel.renderSettings)
         appModel.forceShaderRecompileHandler = renderer.shaderRecompiler(appModel: appModel)
         appModel.rendererStartupWarmupComplete = true
-        renderer.drawableSizeDidChange(CGSize(width: cfg.width, height: cfg.height))
 
         // Native res + fragment full-march + armed step counter, so GPU cost and
         // "iterations to converge" are measured consistently (as PerfSweepRunner does).
@@ -178,6 +307,207 @@ enum MacBenchmarkHarness {
         BenchmarkManager.shared.collectIterations = true
         defer { BenchmarkManager.shared.collectIterations = false }
 
+        let env = ProcessInfo.processInfo.environment
+        if let planPath = env["THRESHOLD_BENCHMARK_PLAN"] {
+            await runPlan(path: planPath, appModel: appModel, renderer: renderer, settings: settings)
+        } else {
+            await runEnvMode(appModel: appModel, renderer: renderer, settings: settings)
+        }
+        try? await Task.sleep(for: .milliseconds(200))
+        exit(0)
+    }
+
+    // MARK: - Plan mode (one launch, scene × config matrix)
+
+    private static func runPlan(path: String, appModel: AppModel,
+                                renderer: ThresholdMacRenderer, settings: RenderSettings) async {
+        let plan: BenchPlan
+        do {
+            plan = try JSONDecoder().decode(BenchPlan.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        } catch {
+            log("FATAL plan decode failed (\(path)): \(error)"); exit(4)
+        }
+        let env = ProcessInfo.processInfo.environment
+        let outPath = env["THRESHOLD_BENCHMARK_OUT"] ?? plan.out
+            ?? (path as NSString).deletingPathExtension + ".results.json"
+        let pngDir = env["THRESHOLD_BENCHMARK_PNG_DIR"] ?? plan.pngDir
+            ?? (outPath as NSString).deletingLastPathComponent + "/png"
+
+        let all = appModel.presetManager.presets.filter { $0.name != "__lastState__" }
+        let allSceneNames = all.filter { $0.isKeyboardSwitchableStaticPreset }.map { $0.name }
+        let jobs = resolveJobs(plan, allScenes: allSceneNames)
+        guard !jobs.isEmpty else { log("FATAL plan has no runnable jobs"); exit(4) }
+        log("plan \(path): \(jobs.count) job(s), out=\(outPath)")
+
+        var results: [BenchJobResult] = []
+        var lastLoadedScene: String?
+        for job in jobs {
+            guard let preset = resolvePreset(named: job.scene, in: all) else {
+                log("WARN scene not found: '\(job.scene)' — job '\(job.name)' skipped. Available: "
+                    + all.map { $0.name }.joined(separator: " | "))
+                continue
+            }
+            // Consecutive jobs on the same scene skip the reload + settle: the
+            // per-job overrides below re-pin every config axis a job can vary, so
+            // the only state a reload would reset is exactly what we re-apply.
+            let needsLoad = lastLoadedScene != job.scene
+            if let record = await measure(job: job, preset: preset, reload: needsLoad,
+                                          appModel: appModel, renderer: renderer, settings: settings,
+                                          pngDir: job.png ? pngDir : nil) {
+                results.append(record)
+                lastLoadedScene = job.scene
+            }
+        }
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        let run = BenchPlanRunRecord(
+            capturedAt: iso.string(from: Date()),
+            gitSHA: BuildStamp.gitSHA,
+            gitDirty: BuildStamp.gitDirty,
+            marketingVersion: BuildStamp.marketingVersion,
+            buildNumber: BuildStamp.buildNumber,
+            deviceModel: BuildStamp.deviceModel,
+            osVersion: BuildStamp.osVersion,
+            jobs: results)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        do {
+            try FileManager.default.createDirectory(
+                atPath: (outPath as NSString).deletingLastPathComponent,
+                withIntermediateDirectories: true)
+            try encoder.encode(run).write(to: URL(fileURLWithPath: outPath))
+            log("done — \(results.count)/\(jobs.count) job(s) → \(outPath)")
+        } catch {
+            log("FATAL write failed: \(error)"); exit(5)
+        }
+    }
+
+    /// Measure one resolved job. `reload: false` skips the scene load + settle
+    /// (valid only when the same scene is already loaded — every config axis a
+    /// job can carry is re-applied below regardless).
+    private static func measure(job: ResolvedJob, preset: FractalPreset, reload: Bool,
+                                appModel: AppModel, renderer: ThresholdMacRenderer,
+                                settings: RenderSettings, pngDir: String?) async -> BenchJobResult? {
+        log("job '\(job.name)': scene '\(job.scene)' \(job.width)x\(job.height) "
+            + "frames=\(job.frames) warmup=\(job.warmup)\(reload ? "" : " (scene cached)")")
+        if reload {
+            appModel.loadStaticScene(preset)
+            // Let the (snapped) apply + any embedded-DE compile + the renderer's
+            // exponential camera smoothers settle before warmup.
+            try? await Task.sleep(for: .seconds(job.settleSeconds))
+        }
+
+        // Re-pin every config axis after the scene's own values applied.
+        if let s = job.shadows { settings.shadowsEnabled = s; log("  forced shadows=\(s)") }
+        applyQCOverride(job.qc, to: settings)
+
+        // Ablation mode is read by the renderer per frame; racy-by-design gate
+        // (main-actor write, render-thread read) like the other benchmark toggles.
+        ThresholdMacRenderer.benchAblateMode = job.ablate ?? ThresholdMacRenderer.benchAblateModeEnvDefault
+
+        // Provenance guard: log the quality values actually in effect so a
+        // measurement made with the wrong iteration/step budget is visible in the
+        // run log instead of silently producing a bogus number.
+        let qcNow = settings.qualityConfig
+        log("  effective iters=\(qcNow.baseFractalIterations) raySteps=\(qcNow.baseMaxRaySteps) "
+            + "resScale=\(settings.resolutionScale) shadows=\(settings.shadowsEnabled)"
+            + (job.ablate.map { " ablate=\($0)" } ?? ""))
+
+        // Freeze animation phases + disable the auto color-scheme cycler for
+        // the whole job so measurement and capture are run-deterministic.
+        if pngDir != nil { settings.benchFreezeAnimationPhases() }
+
+        // Formula-param overrides (e.g. MaxReflections sweep) after the apply
+        // has settled, so they aren't stomped by the transition.
+        if !job.params.isEmpty {
+            var fp = settings.formulaParams
+            for (i, v) in job.params { FormulaCatalog.setParam(&fp, index: i, value: v) }
+            settings.formulaParams = fp
+            log("  applied param override \(job.params.map { "\($0.0)=\($0.1)" }.joined(separator: ","))")
+            try? await Task.sleep(for: .milliseconds(300))
+        }
+
+        for _ in 0..<job.warmup {
+            _ = renderer.renderBenchmarkFrame(appModel: appModel, width: job.width, height: job.height)
+        }
+
+        var gpu: [Double] = []
+        var cpuSum = 0.0
+        var stepSum = 0.0
+        var stepN = 0
+        var measured = 0
+        for _ in 0..<job.frames {
+            guard let m = renderer.renderBenchmarkFrame(appModel: appModel,
+                                                        width: job.width, height: job.height) else { continue }
+            measured += 1
+            if m.gpuMs > 0 { gpu.append(m.gpuMs) }
+            cpuSum += m.cpuEncodeMs
+            if m.avgSteps > 0 { stepSum += m.avgSteps; stepN += 1 }
+        }
+
+        let rec = makeRecord(preset: preset, gpu: gpu,
+                             cpuAvg: cpuSum / Double(max(measured, 1)),
+                             iterAvg: stepN > 0 ? stepSum / Double(stepN) : 0,
+                             frames: measured, w: job.width, h: job.height,
+                             qc: settings.qualityConfig)
+        log(String(format: "  '%@' → gpu avg %.2fms  p95 %.2fms  max %.2fms  steps %.1f  cpuEnc %.2fms",
+                   job.name, rec.gpuMsAvg, rec.gpuMsP95, rec.gpuMsMax, rec.iterationsAvg, rec.cpuEncodeMsAvg))
+
+        var pngPath: String?
+        if let dir = pngDir {
+            // Pin the phase accumulators again right before capture (they resume
+            // integrating during the measurement frames).
+            settings.benchFreezeAnimationPhases()
+            if let cap = renderer.captureBenchmarkBytes(appModel: appModel,
+                                                        width: job.width, height: job.height) {
+                let safe = job.name.replacingOccurrences(of: "/", with: "_")
+                let path = (dir as NSString).appendingPathComponent("\(safe).png")
+                try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+                if writePNG(bytes: cap.bytes, width: job.width, height: job.height,
+                            bytesPerRow: cap.bytesPerRow, to: path) {
+                    pngPath = path
+                    log("  wrote \(path)")
+                } else {
+                    log("  PNG write FAILED for '\(job.name)'")
+                }
+            }
+        }
+
+        return BenchJobResult(
+            name: job.name,
+            scene: job.scene,
+            config: BenchJobConfigEcho(
+                frames: job.frames, warmup: job.warmup,
+                width: job.width, height: job.height,
+                settleSeconds: job.settleSeconds,
+                shadows: job.shadows,
+                qc: Dictionary(uniqueKeysWithValues: job.qc),
+                params: Dictionary(uniqueKeysWithValues: job.params.map { (String($0.0), $0.1) }),
+                ablate: job.ablate),
+            metrics: rec,
+            png: pngPath)
+    }
+
+    private static func resolvePreset(named name: String, in all: [FractalPreset]) -> FractalPreset? {
+        if let p = all.first(where: { $0.name == name }) { return p }
+        if name == "Mandelbox" || name == "__default__"
+            || name.caseInsensitiveCompare("start") == .orderedSame {
+            // The app's startup scene is a built-in mandelbox default, not a
+            // bundled .threshscene, so resolve it directly.
+            return PresetManager.mandelboxDefaultPreset()
+        }
+        return nil
+    }
+
+    // MARK: - Env (legacy) mode — behavior kept identical for perf-gate.sh
+
+    private static func runEnvMode(appModel: AppModel,
+                                   renderer: ThresholdMacRenderer, settings: RenderSettings) async {
+        let cfg = configFromEnv()
+        log("start scenes=\(cfg.scenes.isEmpty ? "<all>" : cfg.scenes.joined(separator: ",")) "
+            + "frames=\(cfg.frames) warmup=\(cfg.warmup) size=\(cfg.width)x\(cfg.height)")
+
         // Resolve requested scenes by exact name.
         let all = appModel.presetManager.presets.filter { $0.name != "__lastState__" }
         var targets: [FractalPreset] = []
@@ -185,13 +515,8 @@ enum MacBenchmarkHarness {
             targets = all.filter { $0.isKeyboardSwitchableStaticPreset }
         } else {
             for name in cfg.scenes {
-                if let p = all.first(where: { $0.name == name }) {
+                if let p = resolvePreset(named: name, in: all) {
                     targets.append(p)
-                } else if name == "Mandelbox" || name == "__default__"
-                            || name.caseInsensitiveCompare("start") == .orderedSame {
-                    // The app's startup scene is a built-in mandelbox default, not a
-                    // bundled .threshscene, so resolve it directly.
-                    targets.append(PresetManager.mandelboxDefaultPreset())
                 } else {
                     log("WARN scene not found: '\(name)' — available: "
                         + all.map { $0.name }.joined(separator: " | "))
@@ -201,89 +526,22 @@ enum MacBenchmarkHarness {
         guard !targets.isEmpty else { log("FATAL no matching scenes"); exit(4) }
 
         var records: [PerfSceneRecord] = []
-
         for preset in targets {
             log("loading '\(preset.name)' (fractalType \(preset.fractalType.rawValue))")
-            appModel.loadStaticScene(preset)
-            // Let the (snapped) apply + any embedded-DE compile + the renderer's
-            // exponential camera smoothers settle before warmup.
-            try? await Task.sleep(for: .seconds(2.5))
-
-            // Re-assert shadow override after the scene's own value has applied.
-            if let s = cfg.shadows { settings.shadowsEnabled = s; log("  forced shadows=\(s)") }
-
-            // Pin the acceleration levers (and any other QualityConfig field)
-            // after the scene apply so the measured config is exactly what the
-            // caller asked for.
-            applyQCOverride(cfg.qcOverride, to: settings)
-
-            // Provenance guard: log the quality values actually in effect so a
-            // measurement made with the wrong iteration/step budget (stale
-            // persisted state, a preset resolving to an unexpected copy, an
-            // apply that didn't land) is visible in the run log instead of
-            // silently producing a bogus number. Compare against the scene
-            // file's authored fractalIterations/maxRaySteps when in doubt.
-            let qcNow = settings.qualityConfig
-            log("  effective iters=\(qcNow.baseFractalIterations) raySteps=\(qcNow.baseMaxRaySteps) "
-                + "resScale=\(settings.resolutionScale) shadows=\(settings.shadowsEnabled)")
-
-            // Freeze animation phases + disable the auto color-scheme cycler for
-            // the whole scene so measurement and capture are run-deterministic
-            // (the cycler otherwise advances on wall-clock mid-scene).
-            if cfg.pngDir != nil { settings.benchFreezeAnimationPhases() }
-
-            // Apply formula-param overrides (e.g. MaxReflections sweep) after the
-            // eased apply has settled, so they aren't stomped by the transition.
-            if !cfg.paramOverride.isEmpty {
-                var fp = settings.formulaParams
-                for (i, v) in cfg.paramOverride { FormulaCatalog.setParam(&fp, index: i, value: v) }
-                settings.formulaParams = fp
-                log("  applied param override \(cfg.paramOverride.map { "\($0.0)=\($0.1)" }.joined(separator: ","))")
-                try? await Task.sleep(for: .milliseconds(300))
-            }
-
-            for _ in 0..<cfg.warmup {
-                _ = renderer.renderBenchmarkFrame(appModel: appModel, width: cfg.width, height: cfg.height)
-            }
-
-            var gpu: [Double] = []
-            var cpuSum = 0.0
-            var stepSum = 0.0
-            var stepN = 0
-            var measured = 0
-            for _ in 0..<cfg.frames {
-                guard let m = renderer.renderBenchmarkFrame(appModel: appModel,
-                                                            width: cfg.width, height: cfg.height) else { continue }
-                measured += 1
-                if m.gpuMs > 0 { gpu.append(m.gpuMs) }
-                cpuSum += m.cpuEncodeMs
-                if m.avgSteps > 0 { stepSum += m.avgSteps; stepN += 1 }
-            }
-
-            let rec = makeRecord(preset: preset, gpu: gpu,
-                                 cpuAvg: cpuSum / Double(max(measured, 1)),
-                                 iterAvg: stepN > 0 ? stepSum / Double(stepN) : 0,
-                                 frames: measured, w: cfg.width, h: cfg.height,
-                                 qc: settings.qualityConfig)
-            records.append(rec)
-            log(String(format: "  '%@' → gpu avg %.2fms  p95 %.2fms  max %.2fms  steps %.1f  cpuEnc %.2fms",
-                       preset.name, rec.gpuMsAvg, rec.gpuMsP95, rec.gpuMsMax, rec.iterationsAvg, rec.cpuEncodeMsAvg))
-
-            if cfg.pngDir != nil {
-                // Pin all CPU-side animation phase accumulators so the capture is
-                // phase-deterministic across runs (see benchFreezeAnimationPhases).
-                settings.benchFreezeAnimationPhases()
-            }
-            if let dir = cfg.pngDir,
-               let cap = renderer.captureBenchmarkBytes(appModel: appModel, width: cfg.width, height: cfg.height) {
-                let safe = preset.name.replacingOccurrences(of: "/", with: "_")
-                let path = (dir as NSString).appendingPathComponent("\(safe).png")
-                if writePNG(bytes: cap.bytes, width: cfg.width, height: cfg.height,
-                            bytesPerRow: cap.bytesPerRow, to: path) {
-                    log("  wrote \(path)")
-                } else {
-                    log("  PNG write FAILED for '\(preset.name)'")
-                }
+            let job = ResolvedJob(
+                name: preset.name, scene: preset.name,
+                frames: cfg.frames, warmup: cfg.warmup,
+                width: cfg.width, height: cfg.height,
+                settleSeconds: 2.5,
+                shadows: cfg.shadows,
+                png: cfg.pngDir != nil,
+                qc: cfg.qcOverride,
+                params: cfg.paramOverride,
+                ablate: nil)
+            if let r = await measure(job: job, preset: preset, reload: true,
+                                     appModel: appModel, renderer: renderer, settings: settings,
+                                     pngDir: cfg.pngDir) {
+                records.append(r.metrics)
             }
         }
 
@@ -292,8 +550,6 @@ enum MacBenchmarkHarness {
         let raymarch = PerfRaymarchConfig(from: settings.qualityConfig)
         writeOut(cfg: cfg, raymarch: raymarch, records: records)
         log("done → \(cfg.outPath)")
-        try? await Task.sleep(for: .milliseconds(200))
-        exit(0)
     }
 
     // MARK: - Helpers
