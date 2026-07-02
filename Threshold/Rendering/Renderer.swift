@@ -240,6 +240,14 @@ actor Renderer {
     var hasLoggedProgressivePortal: Bool = false
 
     var lastHandTrackingUpdateTime: TimeInterval = 0  // Throttle hand UI updates
+    // Hand Attraction: last-known palm positions, written synchronously in
+    // updateHandTracking (Renderer actor) and read back the same frame in
+    // updateGameState — no actor hop needed since GestureController's mirror
+    // of this data is @MainActor-isolated and would require one.
+    var lastLeftHandPalmPosition: SIMD3<Float> = .zero
+    var lastLeftHandTrackedForAttraction: Bool = false
+    var lastRightHandPalmPosition: SIMD3<Float> = .zero
+    var lastRightHandTrackedForAttraction: Bool = false
     // Hand-tracking dispatch coordination between the render loop (Renderer actor)
     // and the per-frame @MainActor Task that processes gestures. A single Mutex
     // replaces the previous pair of `nonisolated(unsafe)` flags: the render loop
@@ -1581,6 +1589,13 @@ actor Renderer {
             safetyBubbleFadeEnabled: settingsSnapshot.safetyBubbleFadeEnabled ? 1 : 0,
             safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
             safetyBubbleStrength: (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength,
+            handAttractionEnabled: framePreparation.handAttraction.enabled,
+            handAttractionRadius: framePreparation.handAttraction.radius,
+            handAttractionStrength: framePreparation.handAttraction.strength,
+            leftHandPosition: framePreparation.handAttraction.leftPosition,
+            leftHandActive: framePreparation.handAttraction.leftActive,
+            rightHandPosition: framePreparation.handAttraction.rightPosition,
+            rightHandActive: framePreparation.handAttraction.rightActive,
             foldingLimit: settingsSnapshot.foldingLimit,
             glowIntensity: framePreparation.animatedGlow,
             colorMix: framePreparation.animatedColorMix,
@@ -2041,6 +2056,13 @@ actor Renderer {
                 safetyBubbleFadeEnabled: settingsSnapshot.safetyBubbleFadeEnabled ? 1 : 0,
                 safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
                 safetyBubbleStrength: (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength,
+                handAttractionEnabled: framePreparation.handAttraction.enabled,
+                handAttractionRadius: framePreparation.handAttraction.radius,
+                handAttractionStrength: framePreparation.handAttraction.strength,
+                leftHandPosition: framePreparation.handAttraction.leftPosition,
+                leftHandActive: framePreparation.handAttraction.leftActive,
+                rightHandPosition: framePreparation.handAttraction.rightPosition,
+                rightHandActive: framePreparation.handAttraction.rightActive,
                 foldingLimit: settingsSnapshot.foldingLimit,
                 glowIntensity: framePreparation.animatedGlow,
                 colorMix: framePreparation.animatedColorMix,

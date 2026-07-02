@@ -35,6 +35,7 @@ enum SettingsPersistence {
         case audioReactive  = "cfg.audioReactive"
         case gesture        = "cfg.gesture"
         case safetyBubble   = "cfg.safetyBubble"
+        case handAttraction = "cfg.handAttraction"
         case display        = "cfg.display"
         case music          = "cfg.music"
     }
@@ -168,6 +169,7 @@ enum SettingsPersistence {
         save(settings.audioReactiveConfig, domain: .audioReactive)
         save(settings.gestureConfig, domain: .gesture)
         save(settings.safetyBubbleConfig, domain: .safetyBubble)
+        save(settings.handAttractionConfig, domain: .handAttraction)
         save(settings.displayConfig, domain: .display)
     }
 
@@ -182,6 +184,7 @@ enum SettingsPersistence {
         if let c = load(AudioReactiveConfig.self, domain: .audioReactive) { settings.audioReactiveConfig = c }
         if let c = load(GestureConfig.self,       domain: .gesture)       { settings.gestureConfig = c }
         if let c = load(SafetyBubbleConfig.self,  domain: .safetyBubble)  { settings.safetyBubbleConfig = migrateSafetyBubbleDefaultOn(c) }
+        if let c = load(HandAttractionConfig.self, domain: .handAttraction) { settings.handAttractionConfig = c }
         if let c = load(DisplayConfig.self,       domain: .display)       { settings.displayConfig = c }
     }
 

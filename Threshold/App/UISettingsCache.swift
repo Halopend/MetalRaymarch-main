@@ -45,6 +45,7 @@ final class UISettingsCache {
     var audioReactive: AudioReactiveConfig = AudioReactiveConfig()
     var gesture: GestureConfig = GestureConfig()
     var safetyBubble: SafetyBubbleConfig = SafetyBubbleConfig()
+    var handAttraction: HandAttractionConfig = HandAttractionConfig()
     var quality: QualityConfig = QualityConfig()
     var display: DisplayConfig = DisplayConfig()
 
@@ -156,6 +157,8 @@ final class UISettingsCache {
         if gesture != newGesture { gesture = newGesture }
         let newSafetyBubble = settings.safetyBubbleConfig
         if safetyBubble != newSafetyBubble { safetyBubble = newSafetyBubble }
+        let newHandAttraction = settings.handAttractionConfig
+        if handAttraction != newHandAttraction { handAttraction = newHandAttraction }
         let newQuality = settings.qualityConfig
         if quality != newQuality { quality = newQuality }
         let newDisplay = settings.displayConfig

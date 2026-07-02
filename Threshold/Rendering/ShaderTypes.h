@@ -276,6 +276,19 @@ typedef struct
     int safetyBubbleFadeEnabled;  // Enable smooth fade transition (0/1)
     float safetyBubbleFadeWidth;  // Width of fade region beyond inner radius
     float safetyBubbleStrength;   // Temporal fade strength (0=off, 1=fully active)
+
+    // Hand Attraction (visionOS only): a per-hand interaction sphere that pulls
+    // the fractal surface toward each tracked palm — inverse of the safety
+    // bubble's push-away carve. Positions are MODEL-space (same transform the
+    // march runs in), computed on CPU each frame from the ARKit hand anchors.
+    int handAttractionEnabled;     // Master on/off (0/1)
+    float handAttractionRadius;    // Per-hand influence radius, model units
+    float handAttractionStrength;  // 0 = off, 1 = fully reaches for the hand
+    vector_float3 leftHandPosition;
+    int leftHandActive;            // 1 = left hand is currently tracked
+    vector_float3 rightHandPosition;
+    int rightHandActive;           // 1 = right hand is currently tracked
+
     float colorIterations;   // How many iterations contribute to color
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring, 4=pinky)
@@ -380,6 +393,13 @@ typedef struct
     int safetyBubbleFadeEnabled;  // Enable smooth fade transition (0/1)
     float safetyBubbleFadeWidth;  // Width of fade region beyond inner radius
     float safetyBubbleStrength;   // Temporal fade strength (0=off, 1=fully active)
+    int handAttractionEnabled;     // Hand Attraction master on/off (0/1)
+    float handAttractionRadius;    // Per-hand influence radius, model units
+    float handAttractionStrength;  // 0 = off, 1 = fully reaches for the hand
+    vector_float3 leftHandPosition;
+    int leftHandActive;
+    vector_float3 rightHandPosition;
+    int rightHandActive;
     float foldingLimit;
     float glowIntensity;
     float colorMix;

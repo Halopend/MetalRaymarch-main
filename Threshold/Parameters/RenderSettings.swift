@@ -268,7 +268,14 @@ final class RenderSettings: @unchecked Sendable {
     private var _safetyBubbleFadeEnabled: Bool = true
     private var _safetyBubbleFadeWidth: Float = 0.1
     private var _safetyBubbleStrength: Float = SafetyBubbleConfig.defaultStrength
-    
+
+    // Hand Attraction: a per-hand interaction sphere (visionOS only) that pulls
+    // the fractal surface toward each tracked palm — the inverse of the safety
+    // bubble's push-away carve. Off by default (opt-in, not a comfort feature).
+    private var _handAttractionEnabled: Bool = false
+    private var _handAttractionRadius: Float = 0.35
+    private var _handAttractionStrength: Float = 0.5
+
     // === COLOR SCHEME ===
     // Controls the color palette and post-processing for fractal coloring
     private var _colorScheme: ColorScheme = .classic      // Current color scheme
@@ -1656,7 +1663,34 @@ final class RenderSettings: @unchecked Sendable {
     var safetyBubbleFadeWidth: Float { withLock { _safetyBubbleFadeWidth } }
 
     var safetyBubbleStrength: Float { withLock { _safetyBubbleStrength } }
-    
+
+    /// Enable the Hand Attraction interaction sphere on each tracked hand (visionOS only).
+    var handAttractionEnabled: Bool {
+        get { withLock { _handAttractionEnabled } }
+        set {
+            withLock { _handAttractionEnabled = newValue }
+            persistHandAttraction()
+        }
+    }
+
+    /// Per-hand influence radius, in meters (0.05 - 1.0).
+    var handAttractionRadius: Float {
+        get { withLock { _handAttractionRadius } }
+        set {
+            withLock { _handAttractionRadius = max(0.05, min(1.0, newValue)) }
+            persistHandAttraction()
+        }
+    }
+
+    /// How strongly the fractal surface reaches for the hand within its radius (0...1).
+    var handAttractionStrength: Float {
+        get { withLock { _handAttractionStrength } }
+        set {
+            withLock { _handAttractionStrength = max(0.0, min(1.0, newValue)) }
+            persistHandAttraction()
+        }
+    }
+
     // === COLOR SCHEME SETTINGS ===
     // Controls the color palette and transitions for fractal coloring
     
@@ -2412,6 +2446,9 @@ final class RenderSettings: @unchecked Sendable {
                 safetyBubbleFadeEnabled: _safetyBubbleFadeEnabled,
                 safetyBubbleFadeWidth: _safetyBubbleFadeWidth,
                 safetyBubbleStrength: _safetyBubbleStrength,
+                handAttractionEnabled: _handAttractionEnabled,
+                handAttractionRadius: _handAttractionRadius,
+                handAttractionStrength: _handAttractionStrength,
                 colorSchemeParams: makeColorSchemeParamsLocked(),
                 lightingSoftness: _lightingSoftness,
                 fogEnabled: _fogEffect.enabled,
@@ -3654,6 +3691,12 @@ final class RenderSettings: @unchecked Sendable {
         SettingsPersistence.save(safetyBubbleConfig, domain: .safetyBubble)
     }
 
+    /// Persist the hand attraction config (throttled — radius/strength sliders).
+    private func persistHandAttraction() {
+        guard SettingsPersistence.shouldSave(domain: .handAttraction) else { return }
+        SettingsPersistence.save(handAttractionConfig, domain: .handAttraction)
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // MARK: - Domain Config Struct Accessors
     // Snapshot current state into focused config structs (get) or apply a
@@ -3949,6 +3992,27 @@ final class RenderSettings: @unchecked Sendable {
                 _safetyBubbleFadeEnabled = newValue.fadeEnabled
                 _safetyBubbleFadeWidth = newValue.fadeWidth
                 _safetyBubbleStrength = newValue.strength
+            }
+        }
+    }
+
+    var handAttractionConfig: HandAttractionConfig {
+        get {
+            withLock {
+                var c = HandAttractionConfig()
+                c.enabled = _handAttractionEnabled
+                c.radius = _handAttractionRadius
+                c.strength = _handAttractionStrength
+                return c
+            }
+        }
+        set {
+            var newValue = newValue
+            newValue.clamp()
+            withLock {
+                _handAttractionEnabled = newValue.enabled
+                _handAttractionRadius = newValue.radius
+                _handAttractionStrength = newValue.strength
             }
         }
     }

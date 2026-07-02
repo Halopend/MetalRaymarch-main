@@ -292,6 +292,19 @@ typedef struct
     int safetyBubbleFadeEnabled;  // Enable smooth fade transition (0/1)
     float safetyBubbleFadeWidth;  // Width of fade region beyond inner radius
     float safetyBubbleStrength;   // Temporal fade strength (0=off, 1=fully active)
+
+    // Hand Attraction (visionOS only): a per-hand interaction sphere that pulls
+    // the fractal surface toward each tracked palm — inverse of the safety
+    // bubble's push-away carve. Positions are MODEL-space (same transform the
+    // march runs in), computed on CPU each frame from the ARKit hand anchors.
+    int handAttractionEnabled;     // Master on/off (0/1)
+    float handAttractionRadius;    // Per-hand influence radius, model units
+    float handAttractionStrength;  // 0 = off, 1 = fully reaches for the hand
+    vector_float3 leftHandPosition;
+    int leftHandActive;            // 1 = left hand is currently tracked
+    vector_float3 rightHandPosition;
+    int rightHandActive;           // 1 = right hand is currently tracked
+
     float colorIterations;   // How many iterations contribute to color
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring, 4=pinky)
@@ -396,6 +409,13 @@ typedef struct
     int safetyBubbleFadeEnabled;  // Enable smooth fade transition (0/1)
     float safetyBubbleFadeWidth;  // Width of fade region beyond inner radius
     float safetyBubbleStrength;   // Temporal fade strength (0=off, 1=fully active)
+    int handAttractionEnabled;     // Hand Attraction master on/off (0/1)
+    float handAttractionRadius;    // Per-hand influence radius, model units
+    float handAttractionStrength;  // 0 = off, 1 = fully reaches for the hand
+    vector_float3 leftHandPosition;
+    int leftHandActive;
+    vector_float3 rightHandPosition;
+    int rightHandActive;
     float foldingLimit;
     float glowIntensity;
     float colorMix;
@@ -2419,6 +2439,16 @@ struct FractalParams {
     int bubbleFadeEnabled;  // Enable smooth fade transition
     float bubbleFadeWidth;  // Width of fade region beyond inner radius
     float bubbleStrength;   // Temporal fade (0=off, 1=fully active)
+    // Hand Attraction (visionOS): per-hand interaction sphere, inverse of the
+    // safety bubble — smoothly blends a small blob at each tracked palm INTO
+    // the fractal surface (smooth union) instead of carving it away.
+    int handAttractionEnabled;
+    float handAttractionRadius;
+    float handAttractionStrength;
+    float3 leftHandPosition;
+    int leftHandActive;
+    float3 rightHandPosition;
+    int rightHandActive;
     float sphereProjBlend;  // 0 = off; >0 blends post-fold radial sphere projection (Mandelbox path)
     float sphereProjRadius; // Target radius for the post-fold sphere projection
     float spaceWarpStrength; // 0 = off; drives the custom space warp (built-in Twist or a loaded .threshfx warp)
@@ -2939,6 +2969,31 @@ FORCE_INLINE float applySafetyBubble(float d, float3 pos, FractalParams params) 
     return mix(d, dBubbled, params.bubbleStrength);
 }
 
+// === HAND ATTRACTION CSG APPLICATION ===
+// Inverse of the safety bubble: instead of carving the fractal away from a
+// point, smoothly UNIONS a small blob at each tracked palm into the surface
+// (polynomial smooth-min), so geometry near the hand reaches out to meet it.
+// handAttractionRadius sets both the blob's own size and the smooth-min blend
+// width, so a bigger radius reads as a wider, gentler pull; strength scales
+// how far that blend reaches (0 = no effect, 1 = full-width blend).
+FORCE_INLINE float applyHandAttractionOne(float d, float3 pos, float3 handPos, float radius, float strength) {
+    float blobDist = length(pos - handPos) - radius * 0.35f;
+    float k = max(radius * strength, 1e-4f);
+    float h = saturate(0.5f + 0.5f * (blobDist - d) / k);
+    return mix(blobDist, d, h) - k * h * (1.0f - h);
+}
+
+FORCE_INLINE float applyHandAttraction(float d, float3 pos, FractalParams params) {
+    if (params.handAttractionEnabled == 0 || params.handAttractionStrength < 0.001f) return d;
+    if (params.leftHandActive != 0) {
+        d = applyHandAttractionOne(d, pos, params.leftHandPosition, params.handAttractionRadius, params.handAttractionStrength);
+    }
+    if (params.rightHandActive != 0) {
+        d = applyHandAttractionOne(d, pos, params.rightHandPosition, params.handAttractionRadius, params.handAttractionStrength);
+    }
+    return d;
+}
+
 // OPTIMIZED: Use precomputed values from CPU to avoid per-pixel powr() and division
 // This version is preferred when PrecomputedFractalParams is available in uniforms
 FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
@@ -2950,7 +3005,10 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
     float spaceWarpStrength = 0.0f, float spaceWarpParam1 = 0.0f,
     float spaceWarpParam2 = 0.0f, float spaceWarpParam3 = 0.0f,
     float3 spaceWarpAxis = float3(0.0f, 1.0f, 0.0f),
-    constant SpaceWarpOp* spaceWarpOps = nullptr, int spaceWarpCount = 0)
+    constant SpaceWarpOp* spaceWarpOps = nullptr, int spaceWarpCount = 0,
+    int handAttractionEnabled = 0, float handAttractionRadius = 0.0f, float handAttractionStrength = 0.0f,
+    float3 leftHandPosition = float3(0.0f), int leftHandActive = 0,
+    float3 rightHandPosition = float3(0.0f), int rightHandActive = 0)
 {
     FractalParams params;
     // Use precomputed values (expensive powr() and divisions done on CPU)
@@ -2965,6 +3023,13 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
     params.bubbleFadeEnabled = bubbleFadeEnabled;
     params.bubbleFadeWidth = bubbleFadeWidth;
     params.bubbleStrength = bubbleStrength;
+    params.handAttractionEnabled = handAttractionEnabled;
+    params.handAttractionRadius = handAttractionRadius;
+    params.handAttractionStrength = handAttractionStrength;
+    params.leftHandPosition = leftHandPosition;
+    params.leftHandActive = leftHandActive;
+    params.rightHandPosition = rightHandPosition;
+    params.rightHandActive = rightHandActive;
     params.sphereProjBlend = sphereProjBlend;
     params.sphereProjRadius = sphereProjRadius;
     params.spaceWarpStrength = spaceWarpStrength;
@@ -3012,6 +3077,7 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
     
     // Safety bubble: carve out a shape around the camera to prevent clipping
     d = applySafetyBubble(d, pos, params);
+    d = applyHandAttraction(d, pos, params);
     return d;
 }
 // =============================================================================
@@ -3044,6 +3110,7 @@ FORCE_INLINE float MapDistOnly(float3 pos, FractalParams params, float foldingLi
     
     // Safety bubble check (compile-time eliminated when disabled)
     d = applySafetyBubble(d, pos, params);
+    d = applyHandAttraction(d, pos, params);
     return d;
 }
 
@@ -3105,6 +3172,7 @@ FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float folding
     // If fractional part is negligible, skip the extra iteration
     if (frac < 0.01f) {
         dFloor = applySafetyBubble(dFloor, pos, params);
+        dFloor = applyHandAttraction(dFloor, pos, params);
         return dFloor;
     }
     
@@ -3120,6 +3188,7 @@ FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float folding
     float d = mix(dFloor, dCeil, frac);
     
     d = applySafetyBubble(d, pos, params);
+    d = applyHandAttraction(d, pos, params);
     return d;
 }
 
@@ -3186,7 +3255,8 @@ FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLim
     }
     int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
     float d = FractalDE_Dispatch(w.point, type, fp, loopCount) / w.deScale;
-    return applySafetyBubble(d, pos, params);
+    d = applySafetyBubble(d, pos, params);
+    return applyHandAttraction(d, pos, params);
 }
 
 FORCE_INLINE float MapDistOnlyUnified(float3 pos, FractalParams params, float foldingLimit,
@@ -3198,7 +3268,8 @@ FORCE_INLINE float MapDistOnlyUnified(float3 pos, FractalParams params, float fo
     }
     int loopCount = is_function_constant_defined(FC_SHADOW_ITERATIONS) ? FC_SHADOW_ITERATIONS : iterations;
     float d = FractalDE_Dispatch(w.point, type, fp, loopCount) / w.deScale;
-    return applySafetyBubble(d, pos, params);
+    d = applySafetyBubble(d, pos, params);
+    return applyHandAttraction(d, pos, params);
 }
 
 FORCE_INLINE float MapContinuousUnified(float3 pos, FractalParams params, float foldingLimit,
@@ -3216,7 +3287,8 @@ FORCE_INLINE float MapContinuousUnified(float3 pos, FractalParams params, float 
                         ? int(ceil(fractionalIterations))
                         : int(fractionalIterations), 1);
     float d = FractalDE_Dispatch(w.point, type, fp, loopCount) / w.deScale;
-    return applySafetyBubble(d, pos, params);
+    d = applySafetyBubble(d, pos, params);
+    return applyHandAttraction(d, pos, params);
 }
 
 // =============================================================================
@@ -3606,6 +3678,7 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
     float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
 
     d = applySafetyBubble(d, pos, params);
+    d = applyHandAttraction(d, pos, params);
 
     cache.p = p;
     cache.trap = trap;
@@ -3647,6 +3720,7 @@ FORCE_INLINE float MapWithOrbitCacheUnified(float3 pos, FractalParams params, fl
 
     // Apply safety bubble to non-Mandelbox fractals
     d = applySafetyBubble(d, pos, params);
+    d = applyHandAttraction(d, pos, params);
     
     // Populate OrbitCache from OrbitData for compatibility with coloring/normals
     cache.p = float4(orbit.finalP, 1.0f);
@@ -4645,7 +4719,8 @@ kernel void adaptiveHierarchical8x8(
     FractalParams fractalParams = makeFractalParamsFromPrecomputed(
         uniforms.precomputedFractal,
         uniforms.minDistance,
-        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count);
+        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count,
+        uniforms.handAttractionEnabled, uniforms.handAttractionRadius, uniforms.handAttractionStrength, uniforms.leftHandPosition, uniforms.leftHandActive, uniforms.rightHandPosition, uniforms.rightHandActive);
 
     // === TEMPORAL REPROJECTION: PER-PIXEL ===
     // Reproject this pixel to previous frame, sample previous depth,
@@ -5397,7 +5472,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     FractalParams fractalParams = makeFractalParamsFromPrecomputed(
         uniforms.precomputedFractal,
         uniforms.minDistance,
-        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count);
+        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count,
+        uniforms.handAttractionEnabled, uniforms.handAttractionRadius, uniforms.handAttractionStrength, uniforms.leftHandPosition, uniforms.leftHandActive, uniforms.rightHandPosition, uniforms.rightHandActive);
 
     half3 col = half3(0.0h);
     float2 ret;

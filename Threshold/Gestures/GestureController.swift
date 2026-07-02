@@ -79,7 +79,7 @@ final class GestureController {
     // Hand tracking state
     private var leftHand: HandData = .zero
     private var rightHand: HandData = .zero
-    
+
     // State is owned by mode engines; controller coordinates lifecycle only.
 
     // Left hand tracking stability: prevents two-hand gesture false triggers when

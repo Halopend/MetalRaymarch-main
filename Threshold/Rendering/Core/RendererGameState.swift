@@ -23,6 +23,20 @@ struct RendererFramePreparation {
     var animatedColorMix: Float
     var animatedGlow: Float
     var perEye: [RendererPreparedEyeState]
+    var handAttraction: HandAttractionUniforms
+}
+
+/// Hand Attraction (visionOS only): per-hand interaction sphere state, already
+/// converted to MODEL space and scale-corrected — ready to drop straight into
+/// either the fragment (Uniforms) or compute (TileUniforms) uniform builders.
+struct HandAttractionUniforms {
+    var enabled: Int32 = 0
+    var radius: Float = 0
+    var strength: Float = 0
+    var leftPosition: SIMD3<Float> = .zero
+    var leftActive: Int32 = 0
+    var rightPosition: SIMD3<Float> = .zero
+    var rightActive: Int32 = 0
 }
 
 private enum FloorCircleGeometry {
@@ -71,6 +85,43 @@ extension Renderer {
         let floorCenterRadius = SIMD4<Float>(floorCenterModel.x, floorCenterModel.y, floorCenterModel.z, floorRadiusModel)
 
         return (floorPlane, floorCenterRadius)
+    }
+
+    /// Transforms a world-space point into the MODEL space the raymarcher runs
+    /// in (same math as the floor-circle center above, factored out for reuse).
+    private static func worldToModel(_ worldPoint: SIMD3<Float>, inverseModelMatrix: matrix_float4x4) -> SIMD3<Float> {
+        let homogeneous = inverseModelMatrix * SIMD4<Float>(worldPoint.x, worldPoint.y, worldPoint.z, 1.0)
+        let w = abs(homogeneous.w) > 1e-6 ? homogeneous.w : 1.0
+        return SIMD3<Float>(homogeneous.x, homogeneous.y, homogeneous.z) / w
+    }
+
+    /// Hand Attraction (visionOS only): converts each tracked palm's world-space
+    /// position into the MODEL-space point the shader's interaction sphere uses,
+    /// and scale-corrects the radius so it reads as a constant real-world size
+    /// regardless of the fractal's current detail zoom (mirrors the safety bubble).
+    private func makeHandAttractionUniforms(
+        settingsSnapshot: RenderSettingsSnapshot,
+        modelMatrix: matrix_float4x4,
+        effectiveScale: Float
+    ) -> HandAttractionUniforms {
+        var state = HandAttractionUniforms()
+        guard settingsSnapshot.handAttractionEnabled else { return state }
+        guard lastLeftHandTrackedForAttraction || lastRightHandTrackedForAttraction else { return state }
+
+        let inverseModelMatrix = modelMatrix.inverse
+        state.enabled = 1
+        state.radius = settingsSnapshot.handAttractionRadius / max(effectiveScale, 0.001)
+        state.strength = settingsSnapshot.handAttractionStrength
+
+        if lastLeftHandTrackedForAttraction {
+            state.leftPosition = Self.worldToModel(lastLeftHandPalmPosition, inverseModelMatrix: inverseModelMatrix)
+            state.leftActive = 1
+        }
+        if lastRightHandTrackedForAttraction {
+            state.rightPosition = Self.worldToModel(lastRightHandPalmPosition, inverseModelMatrix: inverseModelMatrix)
+            state.rightActive = 1
+        }
+        return state
     }
 
     func updateGameState(drawable: LayerRenderer.Drawable, settingsSnapshot: RenderSettingsSnapshot) -> RendererFramePreparation {
@@ -143,6 +194,11 @@ extension Renderer {
             effectiveScale: effectiveScale,
             deviceTransform: deviceTransform,
             platformRadius: platformVisible ? settingsSnapshot.platformRadius : 0
+        )
+        let handAttraction = makeHandAttractionUniforms(
+            settingsSnapshot: settingsSnapshot,
+            modelMatrix: modelMatrix,
+            effectiveScale: effectiveScale
         )
 
         // One-time logging of device anchor to verify position tracking is working
@@ -279,6 +335,13 @@ extension Renderer {
                             safetyBubbleFadeEnabled: settingsSnapshot.safetyBubbleFadeEnabled ? 1 : 0,
                             safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
                             safetyBubbleStrength: (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength,
+                            handAttractionEnabled: handAttraction.enabled,
+                            handAttractionRadius: handAttraction.radius,
+                            handAttractionStrength: handAttraction.strength,
+                            leftHandPosition: handAttraction.leftPosition,
+                            leftHandActive: handAttraction.leftActive,
+                            rightHandPosition: handAttraction.rightPosition,
+                            rightHandActive: handAttraction.rightActive,
                             colorIterations: settingsSnapshot.colorIterations,
                             limitFlash: settingsSnapshot.limitFlash,
                             activeGesture: Int32(settingsSnapshot.activeGestureIndex),
@@ -358,7 +421,8 @@ extension Renderer {
             effectiveScale: effectiveScale,
             animatedColorMix: animatedColorMix,
             animatedGlow: animatedGlow,
-            perEye: preparedEyeStates
+            perEye: preparedEyeStates,
+            handAttraction: handAttraction
         )
     }
 }

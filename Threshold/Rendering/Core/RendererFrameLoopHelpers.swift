@@ -1,6 +1,21 @@
 import Foundation
+import ARKit
+import simd
 
 extension Renderer {
+    /// Hand Attraction: world-space palm position for one hand anchor, or `.zero`
+    /// when untracked. Mirrors GestureController.buildHandData's own extraction
+    /// (middle-finger metacarpal reads as the palm).
+    @available(visionOS 2.0, *)
+    static func palmPosition(from anchor: HandAnchor?) -> SIMD3<Float> {
+        guard let anchor, anchor.isTracked,
+              let joint = anchor.handSkeleton?.joint(.middleFingerMetacarpal), joint.isTracked else {
+            return .zero
+        }
+        let worldTransform = anchor.originFromAnchorTransform * joint.anchorFromJointTransform
+        return SIMD3<Float>(worldTransform.columns.3.x, worldTransform.columns.3.y, worldTransform.columns.3.z)
+    }
+
     func updateDynamicBufferState() {
         /// Update the state of our uniform buffers before rendering
         /// OPTIMIZATION: Use bitwise AND for modulo when maxBuffersInFlight is power of 2
@@ -56,6 +71,16 @@ extension Renderer {
         if #available(visionOS 2.0, *) {
             let leftAnchor = anchors.leftHand
             let rightAnchor = anchors.rightHand
+
+            // Hand Attraction (visionOS only): cache each palm's world-space
+            // position directly on the Renderer actor, synchronously — GestureController
+            // is @MainActor and updateGameState runs on the render loop, so routing
+            // through it would require an actor hop. These mirror buildHandData's own
+            // extraction and are read back in makeHandAttractionUniforms this same frame.
+            lastLeftHandPalmPosition = Self.palmPosition(from: leftAnchor)
+            lastLeftHandTrackedForAttraction = leftAnchor?.isTracked ?? false
+            lastRightHandPalmPosition = Self.palmPosition(from: rightAnchor)
+            lastRightHandTrackedForAttraction = rightAnchor?.isTracked ?? false
 
             // Head pose for gestures that need a facing-relative frame (the
             // open-palm scene swipe resolves "left/right" against this).
