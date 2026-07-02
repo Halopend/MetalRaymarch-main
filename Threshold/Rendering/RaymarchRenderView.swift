@@ -1645,6 +1645,7 @@ final class ThresholdMacRenderer {
                         handAttractionRadius: 0,
                         handAttractionStrength: 0,
                         handAttractionPocketEnabled: 0,
+                        handAttractionShape: SIMD4<Float>(0.35, 1.0, 0.5, 0.6),
                         leftHandPosition: .zero,
                         leftHandActive: 0,
                         rightHandPosition: .zero,

@@ -279,6 +279,11 @@ final class RenderSettings: @unchecked Sendable {
     private var _handAttractionRadius: Float = 0.35
     private var _handAttractionStrength: Float = -0.35
     private var _handAttractionPocketEnabled: Bool = false
+    private var _handAttractionBallScale: Float = 0.35
+    private var _handAttractionSoftness: Float = 1.0
+    private var _handAttractionPocketSize: Float = 0.5
+    private var _handAttractionPocketSoftness: Float = 0.6
+    private var _handAttractionProjectionDistance: Float = 0.0
 
     // === COLOR SCHEME ===
     // Controls the color palette and post-processing for fractal coloring
@@ -1714,6 +1719,52 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
+    /// Ball size as a fraction of the influence radius (0.1 - 1.0).
+    var handAttractionBallScale: Float {
+        get { withLock { _handAttractionBallScale } }
+        set {
+            withLock { _handAttractionBallScale = max(0.1, min(1.0, newValue)) }
+            persistHandAttraction()
+        }
+    }
+
+    /// Blend softness (×ball radius, 0.05 - 2.0): transition width into the surface.
+    var handAttractionSoftness: Float {
+        get { withLock { _handAttractionSoftness } }
+        set {
+            withLock { _handAttractionSoftness = max(0.05, min(2.0, newValue)) }
+            persistHandAttraction()
+        }
+    }
+
+    /// Pocket hollow size (×ball radius, 0.1 - 1.5).
+    var handAttractionPocketSize: Float {
+        get { withLock { _handAttractionPocketSize } }
+        set {
+            withLock { _handAttractionPocketSize = max(0.1, min(1.5, newValue)) }
+            persistHandAttraction()
+        }
+    }
+
+    /// Pocket blend softness (×pocket radius, 0.1 - 1.5).
+    var handAttractionPocketSoftness: Float {
+        get { withLock { _handAttractionPocketSoftness } }
+        set {
+            withLock { _handAttractionPocketSoftness = max(0.1, min(1.5, newValue)) }
+            persistHandAttraction()
+        }
+    }
+
+    /// Reach offset in meters (0 - 1): projects the ball outward from the body
+    /// center through the hand so it floats in front of the palm.
+    var handAttractionProjectionDistance: Float {
+        get { withLock { _handAttractionProjectionDistance } }
+        set {
+            withLock { _handAttractionProjectionDistance = max(0.0, min(1.0, newValue)) }
+            persistHandAttraction()
+        }
+    }
+
     // === COLOR SCHEME SETTINGS ===
     // Controls the color palette and transitions for fractal coloring
     
@@ -2474,6 +2525,11 @@ final class RenderSettings: @unchecked Sendable {
                 handAttractionRadius: _handAttractionRadius,
                 handAttractionStrength: _handAttractionStrength,
                 handAttractionPocketEnabled: _handAttractionPocketEnabled,
+                handAttractionBallScale: _handAttractionBallScale,
+                handAttractionSoftness: _handAttractionSoftness,
+                handAttractionPocketSize: _handAttractionPocketSize,
+                handAttractionPocketSoftness: _handAttractionPocketSoftness,
+                handAttractionProjectionDistance: _handAttractionProjectionDistance,
                 colorSchemeParams: makeColorSchemeParamsLocked(),
                 lightingSoftness: _lightingSoftness,
                 fogEnabled: _fogEffect.enabled,
@@ -4031,6 +4087,11 @@ final class RenderSettings: @unchecked Sendable {
                 c.radius = _handAttractionRadius
                 c.strength = _handAttractionStrength
                 c.pocketEnabled = _handAttractionPocketEnabled
+                c.ballScale = _handAttractionBallScale
+                c.softness = _handAttractionSoftness
+                c.pocketSize = _handAttractionPocketSize
+                c.pocketSoftness = _handAttractionPocketSoftness
+                c.projectionDistance = _handAttractionProjectionDistance
                 return c
             }
         }
@@ -4042,6 +4103,11 @@ final class RenderSettings: @unchecked Sendable {
                 _handAttractionRadius = newValue.radius
                 _handAttractionStrength = newValue.strength
                 _handAttractionPocketEnabled = newValue.pocketEnabled
+                _handAttractionBallScale = newValue.ballScale
+                _handAttractionSoftness = newValue.softness
+                _handAttractionPocketSize = newValue.pocketSize
+                _handAttractionPocketSoftness = newValue.pocketSoftness
+                _handAttractionProjectionDistance = newValue.projectionDistance
             }
         }
     }

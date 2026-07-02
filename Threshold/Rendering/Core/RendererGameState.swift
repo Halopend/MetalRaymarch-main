@@ -34,6 +34,8 @@ struct HandAttractionUniforms {
     var radius: Float = 0
     var strength: Float = 0
     var pocketEnabled: Int32 = 0
+    // x = ball size (×radius), y = blend softness, z = pocket size (×ball), w = pocket softness
+    var shape: SIMD4<Float> = SIMD4<Float>(0.35, 1.0, 0.5, 0.6)
     var leftPosition: SIMD3<Float> = .zero
     var leftActive: Int32 = 0
     var rightPosition: SIMD3<Float> = .zero
@@ -103,7 +105,8 @@ extension Renderer {
     private func makeHandAttractionUniforms(
         settingsSnapshot: RenderSettingsSnapshot,
         modelMatrix: matrix_float4x4,
-        effectiveScale: Float
+        effectiveScale: Float,
+        deviceTransform: matrix_float4x4
     ) -> HandAttractionUniforms {
         var state = HandAttractionUniforms()
         guard settingsSnapshot.handAttractionEnabled else { return state }
@@ -114,13 +117,34 @@ extension Renderer {
         state.radius = settingsSnapshot.handAttractionRadius / max(effectiveScale, 0.001)
         state.strength = settingsSnapshot.handAttractionStrength
         state.pocketEnabled = settingsSnapshot.handAttractionPocketEnabled ? 1 : 0
+        state.shape = SIMD4<Float>(settingsSnapshot.handAttractionBallScale,
+                                   settingsSnapshot.handAttractionSoftness,
+                                   settingsSnapshot.handAttractionPocketSize,
+                                   settingsSnapshot.handAttractionPocketSoftness)
+
+        // Reach offset: project the ball outward along the body-center→hand
+        // direction, in WORLD space (meters), so the ball floats in front of
+        // the palm instead of sitting on it. Body center ≈ head dropped to
+        // chest height, so reaching up/down/sideways all project outward.
+        let headWorld = SIMD3<Float>(deviceTransform.columns.3.x,
+                                     deviceTransform.columns.3.y,
+                                     deviceTransform.columns.3.z)
+        let bodyCenterWorld = headWorld - SIMD3<Float>(0, 0.25, 0)
+        let reach = settingsSnapshot.handAttractionProjectionDistance
+        func projected(_ handWorld: SIMD3<Float>) -> SIMD3<Float> {
+            guard reach > 0.001 else { return handWorld }
+            let offset = handWorld - bodyCenterWorld
+            let length = simd_length(offset)
+            guard length > 1e-4 else { return handWorld }
+            return handWorld + (offset / length) * reach
+        }
 
         if lastLeftHandTrackedForAttraction {
-            state.leftPosition = Self.worldToModel(lastLeftHandPalmPosition, inverseModelMatrix: inverseModelMatrix)
+            state.leftPosition = Self.worldToModel(projected(lastLeftHandPalmPosition), inverseModelMatrix: inverseModelMatrix)
             state.leftActive = 1
         }
         if lastRightHandTrackedForAttraction {
-            state.rightPosition = Self.worldToModel(lastRightHandPalmPosition, inverseModelMatrix: inverseModelMatrix)
+            state.rightPosition = Self.worldToModel(projected(lastRightHandPalmPosition), inverseModelMatrix: inverseModelMatrix)
             state.rightActive = 1
         }
         return state
@@ -200,7 +224,8 @@ extension Renderer {
         let handAttraction = makeHandAttractionUniforms(
             settingsSnapshot: settingsSnapshot,
             modelMatrix: modelMatrix,
-            effectiveScale: effectiveScale
+            effectiveScale: effectiveScale,
+            deviceTransform: deviceTransform
         )
 
         // One-time logging of device anchor to verify position tracking is working
@@ -341,6 +366,7 @@ extension Renderer {
                             handAttractionRadius: handAttraction.radius,
                             handAttractionStrength: handAttraction.strength,
                             handAttractionPocketEnabled: handAttraction.pocketEnabled,
+                            handAttractionShape: handAttraction.shape,
                             leftHandPosition: handAttraction.leftPosition,
                             leftHandActive: handAttraction.leftActive,
                             rightHandPosition: handAttraction.rightPosition,

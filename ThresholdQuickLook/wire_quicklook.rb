@@ -48,6 +48,7 @@ SHARED_SOURCES = [
   "Threshold/Parameters/Config/PerFractalGestureStore.swift",
   "Threshold/Parameters/Config/QualityConfig.swift",
   "Threshold/Parameters/Config/SafetyBubbleConfig.swift",
+  "Threshold/Parameters/Config/HandAttractionConfig.swift",
   "Threshold/Gestures/FingerGestureAction.swift",
   "Threshold/Gestures/MenuToggleGestureMode.swift",
   "Threshold/Audio/MusicReactiveTypes.swift",

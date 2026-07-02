@@ -66,6 +66,11 @@ struct RenderSettingsSnapshot {
     let handAttractionRadius: Float
     let handAttractionStrength: Float
     let handAttractionPocketEnabled: Bool
+    let handAttractionBallScale: Float
+    let handAttractionSoftness: Float
+    let handAttractionPocketSize: Float
+    let handAttractionPocketSoftness: Float
+    let handAttractionProjectionDistance: Float
     let colorSchemeParams: ColorSchemeParams
     let lightingSoftness: Float
     

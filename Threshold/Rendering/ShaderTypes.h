@@ -285,6 +285,7 @@ typedef struct
     float handAttractionRadius;    // Per-hand influence radius, model units
     float handAttractionStrength;  // signed: 0 = off, >0 = Attract (pull toward), <0 = Repel (push away)
     int handAttractionPocketEnabled; // Attract-only: carve a small pocket at the hand itself (dual-sphere)
+    vector_float4 handAttractionShape; // x = ball size (×radius), y = blend softness (×ball), z = pocket size (×ball), w = pocket softness (×pocket)
     vector_float3 leftHandPosition;
     int leftHandActive;            // 1 = left hand is currently tracked
     vector_float3 rightHandPosition;
@@ -402,6 +403,7 @@ typedef struct
     float handAttractionRadius;    // Per-hand influence radius, model units
     float handAttractionStrength;  // signed: 0 = off, >0 = Attract, <0 = Repel
     int handAttractionPocketEnabled; // Attract-only: carve a small pocket at the hand itself
+    vector_float4 handAttractionShape; // x = ball size (×radius), y = blend softness (×ball), z = pocket size (×ball), w = pocket softness (×pocket)
     vector_float3 leftHandPosition;
     int leftHandActive;
     vector_float3 rightHandPosition;
