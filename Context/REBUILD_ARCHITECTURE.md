@@ -353,6 +353,32 @@ computed before the op is written, not a separate op. The beta gate becomes a si
 `Capabilities.requiresOptIn` flag checked once at lane resolution, replacing today's
 three separate enforcement sites (persistence load, scene apply, live toggle).
 
+### 4.5 Sensed environment: room bounds + nearby objects (user intent, 2026-07-04)
+
+Two clarifications from the user that the shipped v1s do NOT yet implement — recorded
+here so the rebuild targets intent, not the interim behavior:
+
+- **Bound to Space sizes itself automatically.** The room dimensions are meant to come
+  from the actual sensed room (ARKit planes / room anchor — the plane-detection source
+  already added for object cutouts deliberately excludes wall/floor/ceiling planes as
+  "Bound to Space territory"), NOT from user-set W/D/H sliders. Manual dimensions remain
+  only as the Mac/dev/harness fallback required by the §4.3 fallback rule. Consequence
+  for persistence: scenes carry **enable + mode** (Match Space / Ceiling Open / Walls
+  Open — artistic choices); the dimensions are environment-derived at runtime and never
+  scene-authored. (The current manual-dims round-trip is interim.)
+
+- **Nearby objects scrunch, they don't just cut.** The shipped projected silhouette
+  window is v1 plumbing, not the goal. Intended behavior is the hand-attraction model
+  applied to objects: a **mixed positive/negative field** that makes the fractal
+  *bulge/scrunch around the object's surface* — smooth-union pull toward the surface
+  plus a carve at the object itself (the hands' Attract+pocket shape). In rebuild terms
+  objects are simply additional sources feeding the same deformation op kinds as §4.4
+  (`objectScrunch` ≈ `handAttract` with an object-anchor payload; nearest-N selection on
+  the CPU). Hard constraint carried over from the current tree: per-object field data
+  must ride in the constant buffer behind a pointer (like `spaceWarpOps`), never
+  by-value in `FractalParams` — its 304 B size gate is already at the documented
+  occupancy-collapse threshold.
+
 ---
 
 ## 5. Shader IR — DEs and the transform stack
