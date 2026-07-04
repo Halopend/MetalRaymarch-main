@@ -367,17 +367,17 @@ here so the rebuild targets intent, not the interim behavior:
   Open — artistic choices); the dimensions are environment-derived at runtime and never
   scene-authored. (The current manual-dims round-trip is interim.)
 
-- **Nearby objects scrunch, they don't just cut.** The shipped projected silhouette
-  window is v1 plumbing, not the goal. Intended behavior is the hand-attraction model
-  applied to objects: a **mixed positive/negative field** that makes the fractal
-  *bulge/scrunch around the object's surface* — smooth-union pull toward the surface
-  plus a carve at the object itself (the hands' Attract+pocket shape). In rebuild terms
-  objects are simply additional sources feeding the same deformation op kinds as §4.4
-  (`objectScrunch` ≈ `handAttract` with an object-anchor payload; nearest-N selection on
-  the CPU). Hard constraint carried over from the current tree: per-object field data
-  must ride in the constant buffer behind a pointer (like `spaceWarpOps`), never
-  by-value in `FractalParams` — its 304 B size gate is already at the documented
-  occupancy-collapse threshold.
+- **Nearby objects scrunch, they don't just cut.** The projected silhouette cutout was
+  removed the same day it shipped (user: "really weird how it's just circles of cut
+  out") and replaced in the CURRENT tree by **Environment Scrunch**: scene-reconstruction
+  mesh → CPU-baked 64³ distance grid (world meters, bindless GPU address) → a mixed
+  positive/negative field in the DE that *bulges/scrunches the fractal around real
+  surfaces* — smooth-union hug shell at a small standoff plus a clearance carve at the
+  surface (the hands' Attract+pocket shape applied to the whole room). In rebuild terms
+  the environment SDF is one more spatial input to the §4.4 deformation op family, and
+  the grid stays behind a pointer/address — never by-value in `FractalParams` (its size
+  gate sits at the documented occupancy-collapse threshold; the scrunch added only two
+  pointers).
 
 ---
 
