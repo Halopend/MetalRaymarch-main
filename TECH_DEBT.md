@@ -10,8 +10,11 @@ against the tree 2026-07-04** (every item's status re-checked; counts refreshed;
 #14–#17 from an adversarial scan of the hands/arms + legacy-toggle work and the current
 working tree). **Second delta scan 2026-07-04 (later, PM)** over the still-uncommitted
 Environment Scrunch feature (new `EnvironmentSDF.swift` + expanded persistence tests):
-mostly clean — persistence is device-local-by-design and pinned
-(`envScrunchStaysDeviceLocal`, same family as #14), the RenderSettings wiring follows the
+mostly clean — persistence was originally device-local-by-design and pinned
+(`envScrunchStaysDeviceLocal`, same family as #14). **REVERSED 2026-07-05**: the scrunch
+PARAMETERS (mode/strength/reach/contain) are now scene-authored and round-trip through
+`FractalPreset` (pinned by `envScrunchRoundTrip`); only the scanned-room SDF grid stays
+live/device-local. The RenderSettings wiring follows the
 established locked-accessor + snapshot + apply pattern (did **not** add a 4th `Uniforms`
 drift site — #2 still 3), and the new `EnvironmentSDFGrid: @unchecked Sendable` is
 documented (Mutex-swap publication). It added **one new item (#18)** and **materialized

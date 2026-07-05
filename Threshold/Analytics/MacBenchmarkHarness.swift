@@ -180,6 +180,7 @@ enum MacBenchmarkHarness {
             case "boundSpaceWidth":              qc.boundSpaceWidth = v
             case "boundSpaceDepth":              qc.boundSpaceDepth = v
             case "boundSpaceHeight":             qc.boundSpaceHeight = v
+            case "boundAmbientStrength":         qc.boundAmbientStrength = v
             case "envScrunchEnabled":            qc.envScrunchEnabled = v != 0
             case "envScrunchMode":               qc.envScrunchMode = Int(v)
             case "envScrunchStrength":           qc.envScrunchStrength = v

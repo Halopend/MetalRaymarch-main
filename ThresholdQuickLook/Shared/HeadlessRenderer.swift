@@ -227,8 +227,10 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
                     // thumbnails render unclipped.
                     boundToSpaceMode: 0,
                     boundSpaceSize: SIMD3<Float>(4.0, 2.5, 4.0),
+                    boundAmbientStrength: 0.0,
                     modelToWorldMatrix: modelMatrix,
-                    envScrunch: EnvScrunchParams())
+                    envScrunch: EnvScrunchParams(),
+                    distCache: DistanceCacheParams())
 }
 
 // MARK: - Headless Metal render harness

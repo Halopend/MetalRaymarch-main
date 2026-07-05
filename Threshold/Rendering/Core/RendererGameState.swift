@@ -478,8 +478,12 @@ extension Renderer {
                             boundingShapeType: settingsSnapshot.boundingShapeType,
                             boundToSpaceMode: settingsSnapshot.resolvedBoundToSpaceMode,
                             boundSpaceSize: settingsSnapshot.boundSpaceSize,
+                            boundAmbientStrength: settingsSnapshot.boundAmbientStrength,
                             modelToWorldMatrix: modelMatrix,
-                            envScrunch: envScrunchParams)
+                            envScrunch: envScrunchParams,
+                            // Fractal distance cache is a Mac fragment-path prototype;
+                            // inert (disabled) on the visionOS fragment path.
+                            distCache: DistanceCacheParams())
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)

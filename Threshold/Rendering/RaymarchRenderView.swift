@@ -354,6 +354,16 @@ final class ThresholdMacRenderer {
     private var macEnvGrid: EnvironmentSDFGrid?
     private var macEnvGridBakeAttempted = false
 
+    /// Fractal distance cache (conservative distance-field grid) prototype,
+    /// opt-in via THRESHOLD_DIST_CACHE=1 so the benchmark harness can A/B it.
+    private static let distCacheRequested =
+        ProcessInfo.processInfo.environment["THRESHOLD_DIST_CACHE"] == "1"
+    private var distCache: FractalDistanceCache?
+    private var distCacheInitAttempted = false
+    /// Bake key for the frame being encoded; nil = cache ineligible this frame
+    /// (no bake dispatch, no residency, shader sees enabled == 0).
+    private var distCachePendingKey: Int?
+
     private static let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
     private static let maxBuffersInFlight = 2
     private static let defaultTargetPosition = SIMD3<Float>(0.1, 0.1, 0.1)
@@ -562,6 +572,13 @@ final class ThresholdMacRenderer {
         if collectSteps { memset(benchBuffer.contents(), 0, MemoryLayout<UInt32>.stride * 2) }
 
         guard let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
+        // Fractal distance cache: bake in the measured command buffer so the
+        // harness sees the cache's true amortized cost (rebake only on change).
+        if let distCache, let key = distCachePendingKey {
+            distCache.encodeBakeIfNeeded(commandBuffer: commandBuffer,
+                                         uniformBuffer: uniformBuffer,
+                                         key: key)
+        }
         let pipeline = resolveActivePipeline(appModel: appModel)
         let descriptor = makeOffscreenRenderPassDescriptor(color: color, depth: depth)
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return nil }
@@ -786,6 +803,14 @@ final class ThresholdMacRenderer {
         uniformBufferIndex = (uniformBufferIndex + 1) % uniformBuffers.count
         writeUniforms(to: uniformBuffer, appModel: appModel)
 
+        // Fractal distance cache: (re)bake before the render pass when a
+        // DE-shaping parameter changed. Same command buffer ⇒ never stale.
+        if let distCache, let key = distCachePendingKey {
+            distCache.encodeBakeIfNeeded(commandBuffer: commandBuffer,
+                                         uniformBuffer: uniformBuffer,
+                                         key: key)
+        }
+
         // Step profiling: zero this slot's counters before the GPU accumulates
         // into them, then read back the converged-ray average once the frame
         // completes. When off we still bind the buffer (the shader argument is
@@ -930,6 +955,11 @@ final class ThresholdMacRenderer {
         // uniforms) — make it resident for the fragment march.
         if let envGrid = macEnvGrid {
             encoder.useResource(envGrid.buffer, usage: .read, stages: .fragment)
+        }
+        // Fractal distance cache grid is also bindless (GPU address in the
+        // uniforms) — declare residency whenever it's enabled this frame.
+        if let distCache, distCachePendingKey != nil {
+            encoder.useResource(distCache.buffer, usage: .read, stages: .fragment)
         }
         // fragmentShaderMono declares benchCounters at this index; bind every
         // frame so the argument is satisfied even when profiling is off.
@@ -1523,6 +1553,22 @@ final class ThresholdMacRenderer {
                 device: device,
                 primitives: EnvironmentSDFGrid.parseSynthetic(spec))
         }
+        // Fractal distance cache: decide eligibility + bake key for this frame.
+        // The bake itself is encoded in draw() (same command buffer, before the
+        // render pass) so the grid the fragment march reads is never stale.
+        var distCacheParams = DistanceCacheParams()
+        distCachePendingKey = nil
+        if Self.distCacheRequested, FractalDistanceCache.isEligible(settings: settings) {
+            if distCache == nil, !distCacheInitAttempted {
+                distCacheInitAttempted = true
+                distCache = FractalDistanceCache(device: device)
+            }
+            if let cache = distCache {
+                distCachePendingKey = FractalDistanceCache.bakeKey(settings: settings)
+                distCacheParams = cache.makeParams(enabled: true)
+            }
+        }
+
         let smoothFactor = 1.0 - exp(-15.0 * deltaTime)
         smoothedScale += (settings.scale - smoothedScale) * smoothFactor
 
@@ -1731,6 +1777,7 @@ final class ThresholdMacRenderer {
                         boundingShapeType: settings.boundingShapeType,
                         boundToSpaceMode: settings.resolvedBoundToSpaceMode,
                         boundSpaceSize: settings.boundSpaceSize,
+                        boundAmbientStrength: settings.boundAmbientStrength,
                         modelToWorldMatrix: modelMatrix,
                         // Mac has no room sensing; a synthetic environment can be
                         // injected via THRESHOLD_SYNTHETIC_ENV for headless/dev
@@ -1742,7 +1789,8 @@ final class ThresholdMacRenderer {
                             gridAddress: macEnvGrid?.gpuAddress ?? 0,
                             surfaceMinWorld: macEnvGrid?.surfaceMinWorld ?? .zero,
                             surfaceMaxWorld: macEnvGrid?.surfaceMaxWorld ?? .zero,
-                            farClampMeters: EnvironmentSDFGrid.clampFar))
+                            farClampMeters: EnvironmentSDFGrid.clampFar),
+                        distCache: distCacheParams)
     }
 
     private static func buildRenderPipeline(device: MTLDevice,

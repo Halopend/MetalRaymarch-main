@@ -11,9 +11,11 @@
 //  exception: the Bound-to-Space room clip — its enable+mode are scene-authored
 //  art (round-trip tested below). The manual room dims ride along for now, but
 //  intent (2026-07-04) is auto-sizing from the sensed room, manual dims a
-//  Mac/dev fallback — see REBUILD_ARCHITECTURE.md §4.5. Environment Scrunch —
-//  also QualityConfig — stays device-local ON PURPOSE: it describes the user's
-//  physical room, not the scene (TECH_DEBT.md #14, envScrunchStaysDeviceLocal).
+//  Mac/dev fallback — see REBUILD_ARCHITECTURE.md §4.5. Environment Scrunch's
+//  PARAMETERS (mode/strength/reach/contain) are now scene-authored too (reverses
+//  the earlier envScrunchStaysDeviceLocal decision, TECH_DEBT.md #14) — round-trip
+//  tested below. Only the scanned-room SDF grid stays live/device-local: it
+//  describes the user's physical space and is never serialized.
 //
 
 import Testing
@@ -129,6 +131,85 @@ struct FractalPresetPersistenceTests {
 
         // The shader-facing resolved mode shifts up by one (0 = off).
         #expect(fresh.snapshot().resolvedBoundToSpaceMode == 2)
+    }
+
+    @Test("Bounding SHAPE (size + Inner Shadow depth + fog mode + enable) survives fromSettings → encode → decode → scene-load apply")
+    func boundingShapeRoundTrip() throws {
+        // The "Jelly bowl" case: a scene authored with bounding size 1.2 and
+        // Inner Shadow at 50% must restore exactly on load. Proven through the
+        // SCENE-LOAD path (includePerformance: false) — the path a scene switch
+        // actually uses — since the bounding-shape block lives outside that gate.
+        let settings = RenderSettings()
+        settings.fractalType = .mandelbox
+        settings.boundingSphereSkipEnabled = true          // default false
+        settings.boundingShapeRadius = 1.2                 // "1.2 bounding size", default 6.0
+        settings.boundingShapeFogMode = BoundingFogMode.innerShadow.rawValue
+        settings.boundingShapeShadowDepth = 0.5            // "inner shadow at 50%", default 0.35
+
+        let preset = FractalPreset.fromSettings(settings, name: "Jelly bowl")
+        let data = try JSONEncoder().encode(preset)
+        let decoded = try JSONDecoder().decode(FractalPreset.self, from: data)
+
+        #expect(decoded.boundingShapeEnabled == true)
+        #expect(abs((decoded.boundingShapeRadius ?? -1) - 1.2) < 1e-5)
+        #expect(decoded.boundingShapeFogMode == BoundingFogMode.innerShadow.rawValue)
+        #expect(abs((decoded.boundingShapeShadowDepth ?? -1) - 0.5) < 1e-5)
+
+        let fresh = RenderSettings()
+        fresh.fractalType = .mandelbox
+        decoded.apply(to: fresh, includePerformance: false)   // the scene-switch path
+
+        #expect(fresh.boundingSphereSkipEnabled == true)
+        #expect(abs(fresh.boundingShapeRadius - 1.2) < 1e-5)
+        #expect(fresh.boundingShapeFogMode == BoundingFogMode.innerShadow.rawValue)
+        #expect(abs(fresh.boundingShapeShadowDepth - 0.5) < 1e-5)
+    }
+
+    @Test("Environment Scrunch PARAMETERS survive fromSettings → encode → decode → scene-load apply")
+    func envScrunchRoundTrip() throws {
+        // The scrunch look (mode/strength/reach/contain) travels with the scene,
+        // like the bounding fields. The scanned-room grid itself is not part of
+        // the preset — only these parameters.
+        let settings = RenderSettings()
+        settings.fractalType = .mandelbox
+        settings.envScrunchEnabled = true                 // default false
+        settings.envScrunchMode = 1                       // Shell (default 0)
+        settings.envScrunchStrength = 0.6                 // default 0.8
+        settings.envScrunchReach = 1.0                    // default 0.75
+        settings.envScrunchContain = 2                    // soft blend (default 0)
+        settings.envScrunchContainFeather = 0.2           // default 0.1
+
+        let preset = FractalPreset.fromSettings(settings, name: "Scrunched")
+        let data = try JSONEncoder().encode(preset)
+        let decoded = try JSONDecoder().decode(FractalPreset.self, from: data)
+
+        #expect(decoded.envScrunchEnabled == true)
+        #expect(decoded.envScrunchMode == 1)
+        #expect(abs((decoded.envScrunchStrength ?? -1) - 0.6) < 1e-5)
+        #expect(abs((decoded.envScrunchReach ?? -1) - 1.0) < 1e-5)
+        #expect(decoded.envScrunchContain == 2)
+        #expect(abs((decoded.envScrunchContainFeather ?? -1) - 0.2) < 1e-5)
+
+        let fresh = RenderSettings()
+        fresh.fractalType = .mandelbox
+        decoded.apply(to: fresh, includePerformance: false)   // the scene-switch path
+
+        #expect(fresh.envScrunchEnabled == true)
+        #expect(fresh.envScrunchMode == 1)
+        #expect(abs(fresh.envScrunchStrength - 0.6) < 1e-5)
+        #expect(abs(fresh.envScrunchReach - 1.0) < 1e-5)
+        #expect(fresh.envScrunchContain == 2)
+        #expect(abs(fresh.envScrunchContainFeather - 0.2) < 1e-5)
+
+        // AUTHORITATIVE: a scene WITHOUT scrunch clears it back to the default,
+        // rather than leaking the previous scene's scrunch forward.
+        let bare = FractalPreset(name: "Bare")
+        let user = RenderSettings()
+        user.envScrunchEnabled = true
+        user.envScrunchStrength = 0.9
+        bare.apply(to: user, includePerformance: false)
+        #expect(user.envScrunchEnabled == false)
+        #expect(abs(user.envScrunchStrength - 0.8) < 1e-5)
     }
 
     @Test("Scene apply is ORDER-INDEPENDENT: loading A then B equals loading B fresh")
@@ -261,45 +342,10 @@ struct FractalPresetPersistenceTests {
         expectNoLeak(try recapture(legacyFresh), try recapture(legacyChained), label: "legacy B")
     }
 
-    @Test("Environment Scrunch is DEVICE-LOCAL by design: never serialized, never stomped by scene load")
-    func envScrunchStaysDeviceLocal() throws {
-        // Decision (TECH_DEBT.md #14): unlike Bound to Space (whose enable+mode
-        // are scene-authored art), Environment Scrunch describes the user's
-        // PHYSICAL room — like the safety bubble and the Quality accel fields
-        // it is device-local and must never travel inside a scene/preset. If a
-        // field is added to FractalPreset later, this test failing is the
-        // prompt to make that a conscious decision, not an accident.
-        let authoring = RenderSettings()
-        authoring.fractalType = .mandelbox
-        authoring.envScrunchEnabled = true
-        authoring.envScrunchStrength = 0.75
-        authoring.envScrunchReach = 1.2
-        authoring.envScrunchContain = 2          // containment is device-local too
-        authoring.envScrunchContainFeather = 0.2
-
-        // 1) No scrunch field may appear anywhere in the serialized preset.
-        let preset = FractalPreset.fromSettings(authoring, name: "Scrunch")
-        let data = try JSONEncoder().encode(preset)
-        let raw = try #require(String(data: data, encoding: .utf8))
-        #expect(!raw.contains("envScrunch"),
-                "envScrunch fields leaked into the FractalPreset serialization")
-
-        // 2) Applying a scene must not disturb the device's live scrunch config.
-        let device = RenderSettings()
-        device.fractalType = .mandelbox
-        device.envScrunchEnabled = true
-        device.envScrunchStrength = 0.5
-        device.envScrunchReach = 0.4
-        device.envScrunchContain = 1
-        device.envScrunchContainFeather = 0.05
-        let decoded = try JSONDecoder().decode(FractalPreset.self, from: data)
-        decoded.apply(to: device)
-        #expect(device.envScrunchEnabled == true)
-        #expect(abs(device.envScrunchStrength - 0.5) < 1e-5)
-        #expect(abs(device.envScrunchReach - 0.4) < 1e-5)
-        #expect(device.envScrunchContain == 1)
-        #expect(abs(device.envScrunchContainFeather - 0.05) < 1e-5)
-    }
+    // NOTE: the former `envScrunchStaysDeviceLocal` test was removed 2026-07-05
+    // when scrunch PARAMETERS became scene-authored (see envScrunchRoundTrip
+    // above and the file header). Only the scanned-room SDF grid stays live/
+    // device-local — it is never part of a FractalPreset in the first place.
 
     @Test("Composable Transformations STACK survives fromSettings → encode → decode → apply (order + per-op params)")
     func transformationsStackRoundTrip() throws {

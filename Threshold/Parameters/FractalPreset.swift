@@ -148,6 +148,18 @@ struct FractalPreset: Codable, Identifiable {
     var boundSpaceWidth: Float?           // assumed room width (world x), meters
     var boundSpaceDepth: Float?           // assumed room depth (world z), meters
     var boundSpaceHeight: Float?          // assumed room height (world y), meters
+    var boundAmbientStrength: Float?      // room-derived ambient occlusion, 0 = off
+    // Environment Scrunch — scene-authored artistic parameters (mode/strength/
+    // reach/contain). The room SCAN itself is always live/device-local and never
+    // saved; only how the fractal scrunches travels with the scene. (Reverses the
+    // earlier envScrunchStaysDeviceLocal decision — TECH_DEBT #14 — so a bounded
+    // scene can carry its scrunch look.)
+    var envScrunchEnabled: Bool?          // Scrunch to Surroundings on/off
+    var envScrunchMode: Int?              // 0 = Scrunch (bulge), 1 = Shell
+    var envScrunchStrength: Float?        // 0…1 blend toward the scrunched field
+    var envScrunchReach: Float?           // engage band / shell thickness, meters
+    var envScrunchContain: Int?           // 0 = off, 1 = hard clip, 2 = soft blend
+    var envScrunchContainFeather: Float?  // soft-blend feather half-width, meters
     var platformRadius: Float?            // DisplayConfig — glass-floor size
     var cellShadingEnabled: Bool?         // ColorConfig — toon shading on/off
     var cellShadingLevels: Float?         // ColorConfig — toon banding levels
@@ -188,6 +200,9 @@ struct FractalPreset: Codable, Identifiable {
         case mixedModeScene, boundingShapeEnabled, boundingShapeRadius, boundingShapeFogEnabled
         case boundingShapeFogMode, boundingShapeShadowDepth, boundingShapeType
         case boundToSpaceEnabled, boundToSpaceMode, boundSpaceWidth, boundSpaceDepth, boundSpaceHeight
+        case boundAmbientStrength
+        case envScrunchEnabled, envScrunchMode, envScrunchStrength, envScrunchReach
+        case envScrunchContain, envScrunchContainFeather
         case cellShadingEnabled, cellShadingLevels, aoStrength, tonemapStrength
         case lightVariationRate, beatFlashEffect, polarRotationEffect, juliaDriftEffect
         case safetyBubbleFadeEnabled, safetyBubbleFadeWidth
@@ -384,6 +399,13 @@ struct FractalPreset: Codable, Identifiable {
         boundSpaceWidth = try container.decodeIfPresent(Float.self, forKey: .boundSpaceWidth)
         boundSpaceDepth = try container.decodeIfPresent(Float.self, forKey: .boundSpaceDepth)
         boundSpaceHeight = try container.decodeIfPresent(Float.self, forKey: .boundSpaceHeight)
+        boundAmbientStrength = try container.decodeIfPresent(Float.self, forKey: .boundAmbientStrength)
+        envScrunchEnabled = try container.decodeIfPresent(Bool.self, forKey: .envScrunchEnabled)
+        envScrunchMode = try container.decodeIfPresent(Int.self, forKey: .envScrunchMode)
+        envScrunchStrength = try container.decodeIfPresent(Float.self, forKey: .envScrunchStrength)
+        envScrunchReach = try container.decodeIfPresent(Float.self, forKey: .envScrunchReach)
+        envScrunchContain = try container.decodeIfPresent(Int.self, forKey: .envScrunchContain)
+        envScrunchContainFeather = try container.decodeIfPresent(Float.self, forKey: .envScrunchContainFeather)
         platformRadius = try container.decodeIfPresent(Float.self, forKey: .platformRadius)
         cellShadingEnabled = try container.decodeIfPresent(Bool.self, forKey: .cellShadingEnabled)
         cellShadingLevels = try container.decodeIfPresent(Float.self, forKey: .cellShadingLevels)
@@ -488,6 +510,13 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(boundSpaceWidth, forKey: .boundSpaceWidth)
         try container.encodeIfPresent(boundSpaceDepth, forKey: .boundSpaceDepth)
         try container.encodeIfPresent(boundSpaceHeight, forKey: .boundSpaceHeight)
+        try container.encodeIfPresent(boundAmbientStrength, forKey: .boundAmbientStrength)
+        try container.encodeIfPresent(envScrunchEnabled, forKey: .envScrunchEnabled)
+        try container.encodeIfPresent(envScrunchMode, forKey: .envScrunchMode)
+        try container.encodeIfPresent(envScrunchStrength, forKey: .envScrunchStrength)
+        try container.encodeIfPresent(envScrunchReach, forKey: .envScrunchReach)
+        try container.encodeIfPresent(envScrunchContain, forKey: .envScrunchContain)
+        try container.encodeIfPresent(envScrunchContainFeather, forKey: .envScrunchContainFeather)
         try container.encodeIfPresent(platformRadius, forKey: .platformRadius)
         try container.encodeIfPresent(cellShadingEnabled, forKey: .cellShadingEnabled)
         try container.encodeIfPresent(cellShadingLevels, forKey: .cellShadingLevels)
@@ -690,6 +719,13 @@ struct FractalPreset: Codable, Identifiable {
         preset.boundSpaceWidth = settings.boundSpaceWidth
         preset.boundSpaceDepth = settings.boundSpaceDepth
         preset.boundSpaceHeight = settings.boundSpaceHeight
+        preset.boundAmbientStrength = settings.boundAmbientStrength
+        preset.envScrunchEnabled = settings.envScrunchEnabled
+        preset.envScrunchMode = settings.envScrunchMode
+        preset.envScrunchStrength = settings.envScrunchStrength
+        preset.envScrunchReach = settings.envScrunchReach
+        preset.envScrunchContain = settings.envScrunchContain
+        preset.envScrunchContainFeather = settings.envScrunchContainFeather
         // Mixed-immersion scene marker (visionOS): recorded only when the scene
         // is saved while Mixed is active, so loading it can restore the
         // passthrough presentation. Full/Partial saves leave it nil and loading
@@ -910,6 +946,17 @@ struct FractalPreset: Codable, Identifiable {
         settings.boundSpaceWidth = boundSpaceWidth ?? 4.0
         settings.boundSpaceDepth = boundSpaceDepth ?? 4.0
         settings.boundSpaceHeight = boundSpaceHeight ?? 2.5
+        settings.boundAmbientStrength = boundAmbientStrength ?? 0.5
+        // Environment Scrunch — AUTHORITATIVE to the QualityConfig defaults, like
+        // every other bounding field: a scene without scrunch means scrunch OFF
+        // (default), never the previous scene's. Only the parameters travel; the
+        // scanned-room SDF grid is always live/device-local.
+        settings.envScrunchEnabled = envScrunchEnabled ?? false
+        settings.envScrunchMode = envScrunchMode ?? 0
+        settings.envScrunchStrength = envScrunchStrength ?? 0.8
+        settings.envScrunchReach = envScrunchReach ?? 0.75
+        settings.envScrunchContain = envScrunchContain ?? 0
+        settings.envScrunchContainFeather = envScrunchContainFeather ?? 0.1
 
         // Mixed-immersion scene (visionOS): switch the presentation style to
         // Mixed when the scene was authored for it. Never switches *away* from

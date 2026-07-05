@@ -287,6 +287,34 @@ typedef struct
     vector_float3 cellModel;      // model units per grid cell, per axis (metric box SDF)
 } EnvScrunchParams;
 
+// === FRACTAL DISTANCE CACHE (conservative distance-field grid) ===
+// The fractal DE itself baked into a low-res MODEL-space grid of PROVABLY
+// CONSERVATIVE lower bounds: each voxel stores
+//     max(DE(voxelCenter) − slack·halfDiagonal, 0)
+// so the stored value is a valid empty-sphere radius for ANY point inside the
+// voxel (valid while the local Lipschitz constant ≤ slack). The march samples
+// it (nearest voxel — trilinear would break conservativeness) and, while the
+// cached bound exceeds nearBandModel, steps by the bound WITHOUT evaluating
+// the analytic DE at all; near the surface (or outside the grid, where the
+// sample reads 0) it falls back to the exact DE, so hits are unchanged.
+// Baked on the GPU (distanceCacheBake kernel) in the same command buffer that
+// renders, only when a DE-shaping parameter actually changed — so the cache is
+// never stale and static frames pay nothing. Model space makes it ZOOM-
+// INVARIANT: camera motion and detail-scale zoom never dirty it.
+// CPU-side gating (see FractalDistanceCache.swift): enabled only for the
+// box-fold family whose DE is a true lower bound, and only while camera-
+// dependent DE terms (safety bubble, hands, env scrunch) and distance-LOD
+// (which fattens the far surface below the baked iteration count) are off.
+#define DIST_CACHE_DIM 64    // grid resolution per axis (half floats, DIM^3)
+typedef struct
+{
+    int enabled;             // 0 = off (grid is never dereferenced)
+    float nearBandModel;     // cached bound below this → fall back to the analytic DE (model units)
+    uint64_t gridAddress;    // MTLBuffer.gpuAddress of half[DIM^3] bounds (model units); 0 = none
+    vector_float3 originModel;   // grid min corner, model space
+    vector_float3 invCellModel;  // 1 / cell size, per axis (model units)
+} DistanceCacheParams;
+
 // Hand Attraction + forearm capsules, grouped so the block lives ONCE in the
 // constant Uniforms/TileUniforms buffer and FractalParams (by-value through
 // the DE hot path) carries only a `constant HandFieldParams*` — the same
@@ -438,9 +466,18 @@ typedef struct
     // 2 = Ceiling Open (walls + floor), 3 = Walls Open (floor + ceiling only).
     int boundToSpaceMode;
     vector_float3 boundSpaceSize;       // full room size, meters (w, h, d)
+    // Room-derived ambient: 0 = off, 1 = full. Scales a contact-occlusion term
+    // computed from proximity/facing to the room's closed faces, so surfaces
+    // near the bounded room's walls/floor/ceiling read as ambiently shadowed
+    // by the room. Only meaningful while boundToSpaceMode != 0.
+    float boundAmbientStrength;
     matrix_float4x4 modelToWorldMatrix; // march/model space → world meters
 
     EnvScrunchParams envScrunch;        // scanned-environment scrunch field (grid via bindless address)
+
+    // Conservative fractal distance cache (grid via bindless address).
+    // Mac fragment path only for now; zero/disabled elsewhere.
+    DistanceCacheParams distCache;
 } Uniforms;
 
 typedef struct
@@ -565,6 +602,7 @@ typedef struct
     // === BOUND TO SPACE (assumed-room clip) — see Uniforms for semantics ===
     int boundToSpaceMode;               // 0 = off, 1 = Match Space, 2 = Ceiling Open, 3 = Walls Open
     vector_float3 boundSpaceSize;       // full room size, meters (w, h, d)
+    float boundAmbientStrength;         // room-derived ambient occlusion, 0 = off (see Uniforms)
     matrix_float4x4 modelToWorldMatrix; // march/model space → world meters
 
     EnvScrunchParams envScrunch;        // scanned-environment scrunch field (grid via bindless address)
@@ -582,7 +620,9 @@ typedef struct
 // FractalParams gate lives next to its definition in Shaders.metal.
 // 2026-07-04: +48 B in both — EnvScrunchParams gained the containment box
 // (containMode/Feather + 3× grid-space float3), 112 → 160 B.
-static_assert(sizeof(Uniforms) <= 1936,
+// 2026-07-05: Uniforms +48 B — DistanceCacheParams (fractal distance cache,
+// Mac fragment path), 1936 → 1984. TileUniforms unchanged.
+static_assert(sizeof(Uniforms) <= 1984,
               "Uniforms grew — bump this bound consciously (TECH_DEBT.md #8d)");
 static_assert(sizeof(TileUniforms) <= 1968,
               "TileUniforms grew — bump this bound consciously (TECH_DEBT.md #8d)");

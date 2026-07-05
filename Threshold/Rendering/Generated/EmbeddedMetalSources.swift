@@ -303,6 +303,34 @@ typedef struct
     vector_float3 cellModel;      // model units per grid cell, per axis (metric box SDF)
 } EnvScrunchParams;
 
+// === FRACTAL DISTANCE CACHE (conservative distance-field grid) ===
+// The fractal DE itself baked into a low-res MODEL-space grid of PROVABLY
+// CONSERVATIVE lower bounds: each voxel stores
+//     max(DE(voxelCenter) − slack·halfDiagonal, 0)
+// so the stored value is a valid empty-sphere radius for ANY point inside the
+// voxel (valid while the local Lipschitz constant ≤ slack). The march samples
+// it (nearest voxel — trilinear would break conservativeness) and, while the
+// cached bound exceeds nearBandModel, steps by the bound WITHOUT evaluating
+// the analytic DE at all; near the surface (or outside the grid, where the
+// sample reads 0) it falls back to the exact DE, so hits are unchanged.
+// Baked on the GPU (distanceCacheBake kernel) in the same command buffer that
+// renders, only when a DE-shaping parameter actually changed — so the cache is
+// never stale and static frames pay nothing. Model space makes it ZOOM-
+// INVARIANT: camera motion and detail-scale zoom never dirty it.
+// CPU-side gating (see FractalDistanceCache.swift): enabled only for the
+// box-fold family whose DE is a true lower bound, and only while camera-
+// dependent DE terms (safety bubble, hands, env scrunch) and distance-LOD
+// (which fattens the far surface below the baked iteration count) are off.
+#define DIST_CACHE_DIM 64    // grid resolution per axis (half floats, DIM^3)
+typedef struct
+{
+    int enabled;             // 0 = off (grid is never dereferenced)
+    float nearBandModel;     // cached bound below this → fall back to the analytic DE (model units)
+    uint64_t gridAddress;    // MTLBuffer.gpuAddress of half[DIM^3] bounds (model units); 0 = none
+    vector_float3 originModel;   // grid min corner, model space
+    vector_float3 invCellModel;  // 1 / cell size, per axis (model units)
+} DistanceCacheParams;
+
 // Hand Attraction + forearm capsules, grouped so the block lives ONCE in the
 // constant Uniforms/TileUniforms buffer and FractalParams (by-value through
 // the DE hot path) carries only a `constant HandFieldParams*` — the same
@@ -454,9 +482,18 @@ typedef struct
     // 2 = Ceiling Open (walls + floor), 3 = Walls Open (floor + ceiling only).
     int boundToSpaceMode;
     vector_float3 boundSpaceSize;       // full room size, meters (w, h, d)
+    // Room-derived ambient: 0 = off, 1 = full. Scales a contact-occlusion term
+    // computed from proximity/facing to the room's closed faces, so surfaces
+    // near the bounded room's walls/floor/ceiling read as ambiently shadowed
+    // by the room. Only meaningful while boundToSpaceMode != 0.
+    float boundAmbientStrength;
     matrix_float4x4 modelToWorldMatrix; // march/model space → world meters
 
     EnvScrunchParams envScrunch;        // scanned-environment scrunch field (grid via bindless address)
+
+    // Conservative fractal distance cache (grid via bindless address).
+    // Mac fragment path only for now; zero/disabled elsewhere.
+    DistanceCacheParams distCache;
 } Uniforms;
 
 typedef struct
@@ -581,6 +618,7 @@ typedef struct
     // === BOUND TO SPACE (assumed-room clip) — see Uniforms for semantics ===
     int boundToSpaceMode;               // 0 = off, 1 = Match Space, 2 = Ceiling Open, 3 = Walls Open
     vector_float3 boundSpaceSize;       // full room size, meters (w, h, d)
+    float boundAmbientStrength;         // room-derived ambient occlusion, 0 = off (see Uniforms)
     matrix_float4x4 modelToWorldMatrix; // march/model space → world meters
 
     EnvScrunchParams envScrunch;        // scanned-environment scrunch field (grid via bindless address)
@@ -598,7 +636,9 @@ typedef struct
 // FractalParams gate lives next to its definition in Shaders.metal.
 // 2026-07-04: +48 B in both — EnvScrunchParams gained the containment box
 // (containMode/Feather + 3× grid-space float3), 112 → 160 B.
-static_assert(sizeof(Uniforms) <= 1936,
+// 2026-07-05: Uniforms +48 B — DistanceCacheParams (fractal distance cache,
+// Mac fragment path), 1936 → 1984. TileUniforms unchanged.
+static_assert(sizeof(Uniforms) <= 1984,
               "Uniforms grew — bump this bound consciously (TECH_DEBT.md #8d)");
 static_assert(sizeof(TileUniforms) <= 1968,
               "TileUniforms grew — bump this bound consciously (TECH_DEBT.md #8d)");
@@ -2531,6 +2571,44 @@ inline float spaceBoundsDistance(float3 posWorld, float3 size, int mode) {
     return max(d.x, max(d.y, d.z));
 }
 
+// Room-derived ambient occlusion for Bound to Space. Treats the room's closed
+// faces as blockers of the ambient hemisphere: a surface close to a wall AND
+// facing it loses ambient light there (contact shadow from the room), while
+// surfaces in the open room center are unaffected. Open faces (Ceiling Open /
+// Walls Open push bounds to ±1e8 m) contribute nothing because proximity is 0.
+// Returns a multiplier for the ambient term, 1 = unoccluded.
+inline half roomAmbientOcclusion(float3 posWorld, float3 norWorld,
+                                 float3 size, int mode, float strength) {
+    if (mode == 0 || strength <= 0.001f) return 1.0h;
+    float3 lo, hi;
+    spaceBoundsForMode(size, mode, lo, hi);
+
+    const float kBand = 1.0f;   // meters of falloff from each face
+    // Per-face: outward face normal and distance from the hit to that face.
+    const float3 faceN[6] = {
+        float3(-1, 0, 0), float3(1, 0, 0),
+        float3(0, -1, 0), float3(0, 1, 0),
+        float3(0, 0, -1), float3(0, 0, 1)
+    };
+    const float faceD[6] = {
+        posWorld.x - lo.x, hi.x - posWorld.x,
+        posWorld.y - lo.y, hi.y - posWorld.y,
+        posWorld.z - lo.z, hi.z - posWorld.z
+    };
+
+    float occ = 0.0f;
+    for (int i = 0; i < 6; i++) {
+        float prox = 1.0f - saturate(faceD[i] / kBand);
+        if (prox <= 0.0f) continue;
+        // Fraction of the ambient hemisphere the face blocks: 1 when the
+        // surface faces the wall head-on, 0 when it faces away.
+        float facing = saturate(dot(norWorld, faceN[i]) * 0.5f + 0.5f);
+        occ += prox * prox * facing;
+    }
+    // Cap so a corner (3 near faces) can't drive ambient fully black.
+    return half(1.0f - saturate(strength) * min(occ, 0.85f));
+}
+
 // Clips [t0, t1] against one slab. Division-free-guard for axis-parallel rays:
 // those either stay inside the slab forever or never enter it.
 inline bool spaceSlabClip(float o, float d, float lo, float hi, thread float& t0, thread float& t1) {
@@ -4257,6 +4335,26 @@ FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, Fractal
     return kRayMissThreshold + 100.0f;
 }
 
+// === FRACTAL DISTANCE CACHE (conservative distance-field grid) ===
+// Nearest-voxel fetch of the baked conservative bound. NEAREST on purpose:
+// each voxel's stored value is a proven empty-sphere radius for every point
+// INSIDE that voxel; a trilinear blend with neighbouring voxels' values is not
+// proven for this point, so filtering would break the conservativeness
+// invariant. Out-of-grid returns 0 → the march falls back to the analytic DE.
+FORCE_INLINE float distCacheSample(float3 p, constant DistanceCacheParams& dc, device const half* grid)
+{
+    float3 g = (p - dc.originModel) * dc.invCellModel;
+    if (any(g < 0.0f) || any(g >= float(DIST_CACHE_DIM))) return 0.0f;
+    int3 gi = int3(g);
+    return float(grid[(gi.z * DIST_CACHE_DIM + gi.y) * DIST_CACHE_DIM + gi.x]);
+}
+
+// Lipschitz slack baked into the cached bound (bound = DE − slack·halfDiag).
+// The box-fold family's DE is a true lower bound with local Lipschitz constant
+// ≤ 1, so 1.5 leaves headroom for the space-warp stack's mild stretching.
+// Kept in one place so the bake kernel and any future validation test agree.
+constant float kDistCacheLipschitzSlack = 1.5f;
+
 // Cached scene result - stores orbit state for reuse in normals/colors
 struct SceneResult {
     float2 distGlow;    // .x = distance, .y = glow
@@ -4395,12 +4493,18 @@ FORCE_INLINE bool smartStepUpdate(float h,
 }
 
 // Raymarch that caches orbit state on hit for reuse in normals/colors
-FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float boundingSphereRadius = 0.0, float stepMultiplier = 1.0, float maxRayDistance = kMaxRayDistanceDefault, bool smartAdvance = false, float epsilonScale = 1.0f, float coneMarchScale = 0.0f, float distanceLODFalloff = 0.0f, float warmStartT = -1.0f, int coneCoverageAA = 0, float pixelFootprintPerDist = 0.0f)
+FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float boundingSphereRadius = 0.0, float stepMultiplier = 1.0, float maxRayDistance = kMaxRayDistanceDefault, bool smartAdvance = false, float epsilonScale = 1.0f, float coneMarchScale = 0.0f, float distanceLODFalloff = 0.0f, float warmStartT = -1.0f, int coneCoverageAA = 0, float pixelFootprintPerDist = 0.0f, constant DistanceCacheParams* distCache = nullptr)
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
     result.steps = 0;
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
+
+    // Fractal distance cache: resolve the bindless grid pointer once. The
+    // enable decision is frame-uniform (CPU-gated), so the per-step branch
+    // below stays wavefront-coherent. nullptr ⇒ feature fully compiled around.
+    device const half* dcGrid = (distCache != nullptr && distCache->enabled != 0 && distCache->gridAddress != 0)
+        ? reinterpret_cast<device const half*>(distCache->gridAddress) : nullptr;
 
     float dither = interleavedGradientNoise(fragCoord, time) * 0.015;
     // Mandelbulb DE returns much smaller values near the surface compared to
@@ -4484,7 +4588,20 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
         // Distance iteration LOD: faraway samples drop fractal iterations (their
         // detail is sub-pixel). effIter == iterations when off (distanceLODFalloff 0).
         int effIter = (distanceLODFalloff > 0.0f) ? max(2, iterations - int(t * distanceLODFalloff)) : iterations;
-        float h = MapUnified(p, params, foldingLimit, effIter, type, fp);
+        // Fractal distance cache: while the baked conservative bound is
+        // comfortably above the near band, it IS a valid empty-sphere radius —
+        // step by it and skip the analytic DE entirely. Near the surface (or
+        // outside the grid, where the sample reads 0) run the exact DE, so the
+        // hit test below only ever sees analytic values (nearBand >> threshold).
+        // An underestimated h is still a valid unbounding-sphere radius, so the
+        // relaxed/smart step logic below stays overshoot-safe unchanged.
+        float h;
+        float cachedBound = (dcGrid != nullptr) ? distCacheSample(p, *distCache, dcGrid) : 0.0f;
+        if (dcGrid != nullptr && cachedBound > distCache->nearBandModel) {
+            h = cachedBound;
+        } else {
+            h = MapUnified(p, params, foldingLimit, effIter, type, fp);
+        }
 
         bool sorFail = smartAdvance
             ? smartStepUpdate(h, smartCap, gaveUp, prevH, stepLen)
@@ -4925,7 +5042,8 @@ FORCE_INLINE half3 ShadeSurface(float3 hitPos, float3 nor, float3 viewDir,
                                  half shaSpot, half shaSun, half3 baseColor,
                                  ColorSchemeParams colorScheme,
                                  FractalParams params, float foldingLimit,
-                                 int iterations, int fractalType, FormulaParams fp)
+                                 int iterations, int fractalType, FormulaParams fp,
+                                 half roomAmbientOcc = 1.0h)
 {
     float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
     half bri = quantizeCelLight(half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity), colorScheme);
@@ -4943,6 +5061,9 @@ FORCE_INLINE half3 ShadeSurface(float3 hitPos, float3 nor, float3 viewDir,
         float aoTerm = computeAO(hitPos, nor, params, foldingLimit, iterations, fractalType, fp);
         ambient = mix(flatAmbient, flatAmbient * half(aoTerm), half(colorScheme.aoStrength));
     }
+    // Bound to Space room ambient: contact occlusion from the bounded room's
+    // walls/floor/ceiling (1 when off — see roomAmbientOcclusion).
+    ambient *= roomAmbientOcc;
 
     half3 col = (baseColor * bri * shaSpot) + (baseColor * briSun * shaSun) + (baseColor * ambient);
 
@@ -5628,12 +5749,19 @@ kernel void adaptiveHierarchical8x8(
                     uniforms.foldingLimit, uniforms.sphereRadius, int(uniforms.colorIterations), uniforms.colorScheme, hitCache);
 
         float3 V = -marchDir;
+        half roomAmb = 1.0h;
+        if (uniforms.boundToSpaceMode != 0 && uniforms.boundAmbientStrength > 0.001f) {
+            float3 hitWorld = (uniforms.modelToWorldMatrix * float4(p, 1.0f)).xyz;
+            float3 norWorld = normalize((uniforms.modelToWorldMatrix * float4(nor, 0.0f)).xyz);
+            roomAmb = roomAmbientOcclusion(hitWorld, norWorld, uniforms.boundSpaceSize,
+                                           uniforms.boundToSpaceMode, uniforms.boundAmbientStrength);
+        }
         col = ShadeSurface(p, nor, V, spot, atten, sunDir, sunDiffuseScale, lightIntensity,
                             uniforms.precomputedLighting.specPower, shaSpot, shaSun, col,
                             uniforms.colorScheme, fractalParams, uniforms.foldingLimit,
-                            lodIterations, fractalType, uniforms.formulaParams);
+                            lodIterations, fractalType, uniforms.formulaParams, roomAmb);
     }
-    
+
     // Apply fog, glow, and clamp using helper functions
     half glowH = half(glow);
     col = applyFog(col, adjustedDist, uniforms.precomputedFog);
@@ -5952,7 +6080,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             sceneResult.cache = makeEmptyOrbitCache();
             sceneResult.steps = 0;
         } else {
-            sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, marchEndT, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff, marchStartT, uniforms.coneCoverageAAEnabled, uniforms.pixelFootprintPerDist);
+            sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, marchEndT, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff, marchStartT, uniforms.coneCoverageAAEnabled, uniforms.pixelFootprintPerDist, &uniforms.distCache);
         }
     }
     ret = sceneResult.distGlow;
@@ -6031,10 +6159,17 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                 : ColourWithScheme(p, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme, hitCache);
 
             float3 V = -marchDir;
+            half roomAmb = 1.0h;
+            if (uniforms.boundToSpaceMode != 0 && uniforms.boundAmbientStrength > 0.001f) {
+                float3 hitWorld = (uniforms.modelToWorldMatrix * float4(p, 1.0f)).xyz;
+                float3 norWorld = normalize((uniforms.modelToWorldMatrix * float4(nor, 0.0f)).xyz);
+                roomAmb = roomAmbientOcclusion(hitWorld, norWorld, uniforms.boundSpaceSize,
+                                               uniforms.boundToSpaceMode, uniforms.boundAmbientStrength);
+            }
             col = ShadeSurface(p, nor, V, spot, atten, sunDir, sunDiffuseScale, lightIntensity,
                                 uniforms.precomputedLighting.specPower, shaSpot, shaSun, col,
                                 uniforms.colorScheme, fractalParams, uniforms.foldingLimit,
-                                lodIterations, fractalType, uniforms.formulaParams);
+                                lodIterations, fractalType, uniforms.formulaParams, roomAmb);
         }
         // Depth already written at start of this block via clipPos
         }
@@ -6517,6 +6652,89 @@ fragment float2 macMotionFragment(MacBlitVertexOut in [[stage_in]],
     // input pixel dimensions to recover pixels. Y is flipped for texture space.
     float2 motionNDC = curN - prevN;
     return float2(motionNDC.x * 0.5, -motionNDC.y * 0.5);
+}
+
+// === FRACTAL DISTANCE CACHE BAKE ===
+// Bakes the fractal DE into the conservative distance grid (see
+// DistanceCacheParams in ShaderTypes.h). One thread per voxel: evaluate the
+// SAME MapUnified the march uses (full iteration count, space-warp stack and
+// sphere projection included) at the voxel center and store
+//     max(DE − kDistCacheLipschitzSlack·halfDiagonal, 0)
+// — a lower bound on the DE anywhere inside the voxel while the local
+// Lipschitz constant stays ≤ the slack. Camera-dependent DE terms (safety
+// bubble, hands, env scrunch) are deliberately EXCLUDED here; the CPU gate
+// disables the cache whenever any of them is active, so bake and march can
+// never disagree. Dispatched in the frame's own command buffer before the
+// render pass, only on DE-parameter change — the cache is never stale.
+kernel void distanceCacheBake(device half* outGrid [[buffer(0)]],
+                              constant Uniforms& uniforms [[buffer(BufferIndexUniforms)]],
+                              uint3 tid [[thread_position_in_grid]])
+{
+    if (any(tid >= uint3(DIST_CACHE_DIM))) return;
+    constant DistanceCacheParams& dc = uniforms.distCache;
+    float3 cell = 1.0f / dc.invCellModel;
+    float3 p = dc.originModel + (float3(tid) + 0.5f) * cell;
+
+    FractalParams params = makeFractalParamsFromPrecomputed(
+        uniforms.precomputedFractal,
+        uniforms.minDistance,
+        /*bubble (excluded from the bake)*/ float3(0.0f), 0.0f, 0, 0.0f, 0, 0.0f, 0.0f,
+        uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius,
+        uniforms.spaceWarpStrength, uniforms.spaceWarpParam1,
+        uniforms.spaceWarpParam2, uniforms.spaceWarpParam3,
+        uniforms.spaceWarpAxis,
+        uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count,
+        /*envScrunch (excluded)*/ nullptr,
+        /*handField (excluded)*/ nullptr);
+
+    float d = MapUnified(p, params, uniforms.foldingLimit,
+                         max(int(uniforms.fractalIterations), 2),
+                         uniforms.fractalType, uniforms.formulaParams);
+    float halfDiag = 0.5f * length(cell);
+    float bound = max(d - kDistCacheLipschitzSlack * halfDiag, 0.0f);
+    // Clamp well under half-float max; the march only needs "big" out here.
+    outGrid[(tid.z * DIST_CACHE_DIM + tid.y) * DIST_CACHE_DIM + tid.x] = half(min(bound, 500.0f));
+}
+
+// Debug/validation companion (THRESHOLD_DIST_CACHE_DEBUG=1): per-voxel, probe
+// a few deterministic jittered points and count conservativeness violations —
+// stored bound exceeding the analytic DE at a point inside the voxel. Writes
+// into out[0] = violation count, out[1] = max excess (bound − DE) as float
+// bits, out[2] = nonzero-voxel count. A nonzero count means the baked bound is
+// NOT a valid empty-sphere radius and the cache must not ship for this config.
+kernel void distanceCacheValidate(device const half* grid [[buffer(0)]],
+                                  device atomic_uint* out [[buffer(1)]],
+                                  constant Uniforms& uniforms [[buffer(BufferIndexUniforms)]],
+                                  uint3 tid [[thread_position_in_grid]])
+{
+    if (any(tid >= uint3(DIST_CACHE_DIM))) return;
+    constant DistanceCacheParams& dc = uniforms.distCache;
+    float bound = float(grid[(tid.z * DIST_CACHE_DIM + tid.y) * DIST_CACHE_DIM + tid.x]);
+    if (bound <= 0.0f) return;
+    atomic_fetch_add_explicit(&out[2], 1u, memory_order_relaxed);
+
+    float3 cell = 1.0f / dc.invCellModel;
+    FractalParams params = makeFractalParamsFromPrecomputed(
+        uniforms.precomputedFractal, uniforms.minDistance,
+        float3(0.0f), 0.0f, 0, 0.0f, 0, 0.0f, 0.0f,
+        uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius,
+        uniforms.spaceWarpStrength, uniforms.spaceWarpParam1,
+        uniforms.spaceWarpParam2, uniforms.spaceWarpParam3,
+        uniforms.spaceWarpAxis,
+        uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count,
+        nullptr, nullptr);
+    // 8 deterministic probes: voxel corners-ish jittered inward.
+    for (uint i = 0; i < 8; i++) {
+        float3 f = float3(float(i & 1u), float((i >> 1) & 1u), float((i >> 2) & 1u));
+        float3 p = dc.originModel + (float3(tid) + mix(float3(0.05f), float3(0.95f), f)) * cell;
+        float d = MapUnified(p, params, uniforms.foldingLimit,
+                             max(int(uniforms.fractalIterations), 2),
+                             uniforms.fractalType, uniforms.formulaParams);
+        if (bound > d + 1e-4f) {
+            atomic_fetch_add_explicit(&out[0], 1u, memory_order_relaxed);
+            atomic_fetch_max_explicit(&out[1], as_type<uint>(bound - d), memory_order_relaxed);
+        }
+    }
 }
 
 """#

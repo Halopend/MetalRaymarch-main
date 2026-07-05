@@ -219,6 +219,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _boundSpaceWidth: Float = loadFloat("boundSpaceWidth", default: 4.0)
     private var _boundSpaceDepth: Float = loadFloat("boundSpaceDepth", default: 4.0)
     private var _boundSpaceHeight: Float = loadFloat("boundSpaceHeight", default: 2.5)
+    private var _boundAmbientStrength: Float = loadFloat("boundAmbientStrength", default: 0.5)  // room-derived ambient occlusion, 0 = off
     // Object Cutouts: projected see-through windows around nearby real objects
     // (visionOS plane detection). Device-local comfort setting — not scene state.
     private var _envScrunchEnabled: Bool = loadBool("envScrunchEnabled", default: false)
@@ -1458,6 +1459,16 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _boundSpaceHeight } }
         set {
             withLock { _boundSpaceHeight = max(1.0, min(10.0, newValue)) }
+            persistQuality()
+        }
+    }
+
+    /// Room Ambient: how strongly the bounded room's walls/floor/ceiling
+    /// occlude the ambient term (contact shadow from the room). 0 = off.
+    var boundAmbientStrength: Float {
+        get { withLock { _boundAmbientStrength } }
+        set {
+            withLock { _boundAmbientStrength = max(0.0, min(1.0, newValue)) }
             persistQuality()
         }
     }
@@ -2739,6 +2750,7 @@ final class RenderSettings: @unchecked Sendable {
                 boundToSpaceEnabled: _boundToSpaceEnabled,
                 boundToSpaceMode: _boundToSpaceMode,
                 boundSpaceSize: SIMD3<Float>(_boundSpaceWidth, _boundSpaceHeight, _boundSpaceDepth),
+                boundAmbientStrength: _boundAmbientStrength,
                 envScrunchEnabled: _envScrunchEnabled,
                 envScrunchMode: _envScrunchMode,
                 envScrunchStrength: _envScrunchStrength,
@@ -4088,6 +4100,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.boundSpaceWidth = _boundSpaceWidth
                 c.boundSpaceDepth = _boundSpaceDepth
                 c.boundSpaceHeight = _boundSpaceHeight
+                c.boundAmbientStrength = _boundAmbientStrength
                 c.envScrunchEnabled = _envScrunchEnabled
                 c.envScrunchMode = _envScrunchMode
                 c.envScrunchStrength = _envScrunchStrength
@@ -4134,6 +4147,7 @@ final class RenderSettings: @unchecked Sendable {
                 _boundSpaceWidth = newValue.boundSpaceWidth
                 _boundSpaceDepth = newValue.boundSpaceDepth
                 _boundSpaceHeight = newValue.boundSpaceHeight
+                _boundAmbientStrength = newValue.boundAmbientStrength
                 _envScrunchEnabled = newValue.envScrunchEnabled
                 _envScrunchMode = newValue.envScrunchMode
                 _envScrunchStrength = newValue.envScrunchStrength

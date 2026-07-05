@@ -1709,6 +1709,7 @@ actor Renderer {
             rateMapLayer: UInt32(rateMapLayer),
             boundToSpaceMode: settingsSnapshot.resolvedBoundToSpaceMode,
             boundSpaceSize: settingsSnapshot.boundSpaceSize,
+            boundAmbientStrength: settingsSnapshot.boundAmbientStrength,
             modelToWorldMatrix: framePreparation.modelMatrix,
             envScrunch: framePreparation.envScrunch
         )
@@ -2172,6 +2173,7 @@ actor Renderer {
                 rateMapLayer: UInt32(rateMapLayer),
                 boundToSpaceMode: settingsSnapshot.resolvedBoundToSpaceMode,
                 boundSpaceSize: settingsSnapshot.boundSpaceSize,
+                boundAmbientStrength: settingsSnapshot.boundAmbientStrength,
                 modelToWorldMatrix: framePreparation.modelMatrix,
                 envScrunch: framePreparation.envScrunch
             )

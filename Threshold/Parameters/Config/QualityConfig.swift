@@ -188,6 +188,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
     var boundSpaceWidth: Float = 4.0
     var boundSpaceDepth: Float = 4.0
     var boundSpaceHeight: Float = 2.5
+    var boundAmbientStrength: Float = 0.5   // room-derived ambient occlusion, 0 = off
 
     // Environment Scrunch: the scanned surroundings (visionOS scene
     // reconstruction; synthetic primitives on Mac) baked to a distance grid
@@ -216,6 +217,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         boundSpaceWidth = boundSpaceWidth.clamped(to: 1.0...20.0)
         boundSpaceDepth = boundSpaceDepth.clamped(to: 1.0...20.0)
         boundSpaceHeight = boundSpaceHeight.clamped(to: 1.0...10.0)
+        boundAmbientStrength = boundAmbientStrength.clamped(to: 0.0...1.0)
         envScrunchMode = envScrunchMode.clamped(to: 0...1)
         envScrunchStrength = envScrunchStrength.clamped(to: 0.0...1.0)
         envScrunchReach = envScrunchReach.clamped(to: 0.2...2.0)
@@ -247,6 +249,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         case boundingShapeFogEnabled  // legacy Bool key, migrated into boundingShapeFogMode on decode
         case boundingShapeFogMode, boundingShapeShadowDepth, boundingShapeType
         case boundToSpaceEnabled, boundToSpaceMode, boundSpaceWidth, boundSpaceDepth, boundSpaceHeight
+        case boundAmbientStrength
         case envScrunchEnabled, envScrunchMode, envScrunchStrength, envScrunchReach
         case envScrunchContain, envScrunchContainFeather
         case zoomFogCompensationEnabled
@@ -291,6 +294,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         boundSpaceWidth = try c.decodeIfPresent(Float.self, forKey: .boundSpaceWidth) ?? 4.0
         boundSpaceDepth = try c.decodeIfPresent(Float.self, forKey: .boundSpaceDepth) ?? 4.0
         boundSpaceHeight = try c.decodeIfPresent(Float.self, forKey: .boundSpaceHeight) ?? 2.5
+        boundAmbientStrength = try c.decodeIfPresent(Float.self, forKey: .boundAmbientStrength) ?? 0.5
         envScrunchEnabled = try c.decodeIfPresent(Bool.self, forKey: .envScrunchEnabled) ?? false
         envScrunchMode = try c.decodeIfPresent(Int.self, forKey: .envScrunchMode) ?? 0
         envScrunchStrength = try c.decodeIfPresent(Float.self, forKey: .envScrunchStrength) ?? 0.8
@@ -333,6 +337,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         try c.encode(boundSpaceWidth, forKey: .boundSpaceWidth)
         try c.encode(boundSpaceDepth, forKey: .boundSpaceDepth)
         try c.encode(boundSpaceHeight, forKey: .boundSpaceHeight)
+        try c.encode(boundAmbientStrength, forKey: .boundAmbientStrength)
         try c.encode(envScrunchEnabled, forKey: .envScrunchEnabled)
         try c.encode(envScrunchMode, forKey: .envScrunchMode)
         try c.encode(envScrunchStrength, forKey: .envScrunchStrength)

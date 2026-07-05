@@ -850,6 +850,12 @@ extension ContentView {
                             help: "Assumed ceiling height, meters. The floor is always your real floor.") { v in
                     cache.quality.boundSpaceHeight = v; cache.push(\.boundSpaceHeight, value: v)
                 }
+                accelSliderCompact("Room Ambient",
+                            value: cache.quality.boundAmbientStrength, range: 0...1,
+                            display: String(format: "%.0f%%", cache.quality.boundAmbientStrength * 100),
+                            help: "Ambient light shaped by the room: surfaces near (and facing) the room's walls, floor, and ceiling fall into contact shadow, as if the bounded space itself were the light source. 0% = off.") { v in
+                    cache.quality.boundAmbientStrength = v; cache.push(\.boundAmbientStrength, value: v)
+                }
             }
             .disabled(!cache.quality.boundToSpaceEnabled)
             .opacity(cache.quality.boundToSpaceEnabled ? 1 : 0.45)
