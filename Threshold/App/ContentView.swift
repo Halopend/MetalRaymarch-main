@@ -365,6 +365,11 @@ struct ContentView: View {
     }
 
     private func resetCurrentFractalSettings() {
+        // Tween the reset the same way scene switching does: snapshot the current
+        // displayed values, apply the reset target, then ease back to it (rather
+        // than snapping). commitSceneTransition is a no-op when the transition
+        // duration is 0 or an animation is playing.
+        appModel.renderSettings.beginSceneTransitionSnapshot()
         if let preset = appModel.activeResetPreset {
             appModel.presetManager.loadPreset(
                 preset,
@@ -372,9 +377,11 @@ struct ContentView: View {
                 resetEnvironment: true
             )
             appModel.applyPresetGestureOverridesIfNeeded(for: preset)
-            appModel.gestureController?.syncWithSettings()        } else {
+            appModel.gestureController?.syncWithSettings()
+        } else {
             appModel.gestureController?.applyFractalDefaults()
         }
+        appModel.renderSettings.commitSceneTransition()
         cache.loadFromSettings()
     }
 

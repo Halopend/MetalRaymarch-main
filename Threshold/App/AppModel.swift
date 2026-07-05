@@ -775,6 +775,21 @@ class AppModel {
         activeResetPreset = snapshot
     }
 
+    /// Capture the CURRENT settings as the reset target — used when the user
+    /// manually switches fractal type (there is no source scene). A type switch
+    /// applies that type's defaults, so snapshotting here makes Reset ease back
+    /// to the freshly-selected type instead of the previously-loaded scene's
+    /// type ("reset should also work for last fractal type selected").
+    func rememberActiveResetPresetFromCurrent(name: String = "__typeDefault__") {
+        var snapshot = FractalPreset.fromSettings(
+            renderSettings,
+            name: name,
+            embeddedFormula: activeEmbeddedFormula
+        )
+        snapshot.thumbnailData = nil
+        activeResetPreset = snapshot
+    }
+
     /// Optional side-effects to run around a scene load. Defaults match the
     /// in-app / keyboard scene-switch path; external file imports opt in to
     /// persistence + sheet cleanup.

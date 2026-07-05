@@ -236,6 +236,9 @@ final class UISettingsCache {
             parameterPipeline?.clearFormulaStacks()
             gestureController?.applyFractalDefaults()
             loadFromSettings()
+            // Reset now targets the freshly-selected type's defaults (not the
+            // previously-loaded scene's type). Snapshot after defaults applied.
+            _appModel?.rememberActiveResetPresetFromCurrent()
         }
     }
     
