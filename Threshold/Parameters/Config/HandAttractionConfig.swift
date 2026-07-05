@@ -92,3 +92,20 @@ struct HandAttractionConfig: Codable, Equatable, Sendable {
         forearmRadius = forearmRadius.clamped(to: 0.02...0.3)
     }
 }
+
+// MARK: - Shader-facing hand block (single source — TECH_DEBT.md #2 + #8d)
+
+extension HandFieldParams {
+    /// THE fallback shape (ball scale, blend softness, pocket size, pocket
+    /// softness). Every path that needs a disabled-but-well-formed hand block
+    /// uses `.off`, so this default can never again drift between the Mac,
+    /// Quick Look, and visionOS uniform builders (it did, three times).
+    static let defaultShape = SIMD4<Float>(0.35, 1.0, 0.5, 0.6)
+
+    /// Disabled hand block for paths without ARKit hand tracking (Mac + QL).
+    static var off: HandFieldParams {
+        var p = HandFieldParams()
+        p.shape = Self.defaultShape
+        return p
+    }
+}
