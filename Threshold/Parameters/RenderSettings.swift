@@ -814,6 +814,25 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
+    // MARK: - Arm-slider live updates (visionOS forearm music gesture)
+    // The arm-slider gesture writes a new value every frame while the fingertip
+    // is engaged. Routing that through the persisting setters above would thrash
+    // UserDefaults, so the gesture uses these no-persist live setters during the
+    // slide and calls persistAudioReactiveNow() once on release.
+    func setFractalAudioAmountLive(_ v: Float) {
+        let clamped = max(0.0, min(1.0, v))
+        withLock { _fractalAudioAmount = clamped }
+    }
+    func setFractalAudioDampingLive(_ v: Float) {
+        let clamped = max(0.0, min(3.0, v))
+        withLock { _fractalAudioDamping = clamped }
+    }
+    /// Persist the audio-reactive domain now (used by the arm-slider gesture on
+    /// release, after a run of live setter writes).
+    func persistAudioReactiveNow() {
+        persistAudioReactive()
+    }
+
     var musicReactiveMappings: [MusicReactiveMapping] {
         get { withLock { _musicReactiveMappings } }
         set {

@@ -38,6 +38,7 @@ final class GestureController {
     private let singleHandDragEngine = SingleHandDragEngine()
     private var windowPullState = WindowPullGestureState()
     private var sceneSwipeState = SceneSwipeGestureState()
+    private var armSliderState = ArmSliderGestureState()
 
     // ==========================================================================
     // PER-FRACTAL PARAMETER RANGES  (cached from FractalTypeDescriptor)
@@ -168,6 +169,8 @@ final class GestureController {
         // sweep fire twice.
         sceneSwipeState.left = SceneSwipeHandState()
         sceneSwipeState.right = SceneSwipeHandState()
+        armSliderState.left = ArmSliderHandState()
+        armSliderState.right = ArmSliderHandState()
     }
     
     /// Apply default parameter values for the current fractal type.
@@ -267,6 +270,7 @@ final class GestureController {
 
         processWindowPullGesture(deltaTime: deltaTime)
         processSceneSwipeGesture(deltaTime: deltaTime)
+        processArmSliderGesture(deltaTime: deltaTime)
     }
 #endif
 
@@ -305,7 +309,13 @@ final class GestureController {
 
         // Wrist position
         data.wristPosition = jointPosition(.wrist)
-        
+
+        // Forearm segment (elbow → wrist) for the arm-slider music gesture.
+        data.forearmWrist = jointPosition(.forearmWrist)
+        data.forearmElbow = jointPosition(.forearmArm)
+        data.forearmTracked = simd_length_squared(data.forearmWrist) > 1e-6
+            && simd_length_squared(data.forearmElbow) > 1e-6
+
         // Palm center (average of metacarpals for more accurate palm detection)
         // OPTIMIZATION: Use SIMD addition with single multiply instead of 4 multiplies
         let indexMeta = jointPosition(.indexFingerMetacarpal)
@@ -491,6 +501,105 @@ final class GestureController {
               abs(lateral) >= depth * GestureDefaults.sceneSwipeLateralDominance else { return nil }
 
         return lateral > 0 ? 1 : -1
+    }
+
+    // MARK: - Arm Slider (fingertip slides along the forearm → music strength)
+
+    /// Absolute-position control: the OPPOSITE hand's index fingertip slides
+    /// along a forearm (elbow→wrist). Left forearm sets music INTENSITY
+    /// (fractalAudioAmount), right forearm sets music DAMPENING
+    /// (fractalAudioDamping). "Down the arm" (toward the hand) increases the
+    /// value. Values persist on release. visionOS-only in practice (needs hand
+    /// tracking); harmless elsewhere since the hands are never tracked.
+    private func processArmSliderGesture(deltaTime: Float) {
+        // Stand down while the menu owns a hand or a manipulation gesture is
+        // active, so a pinch-drag near the arm can't also nudge the music.
+        guard let settings = renderSettings,
+              !suppressParameterGestures,
+              !grabState.isActive,
+              settings.isGeometryGestureActive != true else {
+            if armSliderState.left.engaged || armSliderState.right.engaged {
+                renderSettings?.persistAudioReactiveNow()
+            }
+            armSliderState.left = ArmSliderHandState()
+            armSliderState.right = ArmSliderHandState()
+            return
+        }
+
+        // Left forearm ← right index fingertip → music intensity (0…1).
+        let leftWas = armSliderState.left.engaged
+        if updateArmSlider(&armSliderState.left,
+                           elbow: leftHand.forearmElbow, wrist: leftHand.forearmWrist,
+                           pointer: rightHand.indexTip,
+                           tracked: leftHand.forearmTracked && rightHand.isTracked) {
+            settings.setFractalAudioAmountLive(armSliderState.left.value)
+        } else if leftWas {
+            settings.persistAudioReactiveNow()
+            armSliderState.left.hasValue = false
+            UsageAnalytics.shared.trackHandGestureUsed()
+        }
+
+        // Right forearm ← left index fingertip → music dampening (0…max).
+        let rightWas = armSliderState.right.engaged
+        if updateArmSlider(&armSliderState.right,
+                           elbow: rightHand.forearmElbow, wrist: rightHand.forearmWrist,
+                           pointer: leftHand.indexTip,
+                           tracked: rightHand.forearmTracked && leftHand.isTracked) {
+            settings.setFractalAudioDampingLive(armSliderState.right.value * GestureDefaults.armSliderDampingMax)
+        } else if rightWas {
+            settings.persistAudioReactiveNow()
+            armSliderState.right.hasValue = false
+            UsageAnalytics.shared.trackHandGestureUsed()
+        }
+    }
+
+    /// Advances one forearm's slider. Projects the pointer fingertip onto the
+    /// elbow→wrist axis; engages (with hysteresis) only while the fingertip is
+    /// close to and alongside the arm. Returns true while engaged, updating
+    /// `state.value` (smoothed normalized position 0…1). Mutates only `state`.
+    private func updateArmSlider(_ state: inout ArmSliderHandState,
+                                 elbow: SIMD3<Float>, wrist: SIMD3<Float>,
+                                 pointer: SIMD3<Float>, tracked: Bool) -> Bool {
+        guard tracked,
+              simd_length_squared(pointer) > 1e-6,
+              simd_length_squared(elbow) > 1e-6,
+              simd_length_squared(wrist) > 1e-6 else {
+            state.engaged = false
+            return false
+        }
+
+        let axis = wrist - elbow
+        let len = simd_length(axis)
+        guard len >= GestureDefaults.armSliderMinForearmLength else {
+            state.engaged = false
+            return false
+        }
+        let dir = axis / len
+        let rel = pointer - elbow
+        let along = simd_dot(rel, dir)
+        let tRaw = along / len
+        let perp = simd_length(rel - along * dir)
+
+        // Engage close to the arm and alongside it; stay engaged under a looser
+        // radius and a small overhang past each end (hysteresis).
+        let nowEngaged: Bool
+        if state.engaged {
+            nowEngaged = perp <= GestureDefaults.armSliderReleaseRadius && tRaw >= -0.20 && tRaw <= 1.20
+        } else {
+            nowEngaged = perp <= GestureDefaults.armSliderEngageRadius && tRaw >= -0.10 && tRaw <= 1.10
+        }
+        state.engaged = nowEngaged
+        guard nowEngaged else { return false }
+
+        let target = simd_clamp(tRaw, 0, 1)
+        if state.hasValue {
+            let alpha = simd_clamp(GestureDefaults.armSliderSmoothing, 0, 1)
+            state.value += (target - state.value) * alpha
+        } else {
+            state.value = target
+            state.hasValue = true
+        }
+        return true
     }
 
     // MARK: - Gesture Processing

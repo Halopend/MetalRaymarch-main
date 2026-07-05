@@ -63,3 +63,19 @@ struct SceneSwipeGestureState {
     var right = SceneSwipeHandState()
     var cooldown: Float = 0
 }
+
+/// Per-forearm state for the arm-slider music gesture. The opposite hand's
+/// index fingertip slides along the forearm (elbow→wrist); its normalized
+/// position sets a music-reactivity value absolutely (elbow = min, wrist = max).
+/// `value` is the smoothed normalized position; `engaged` gates writes and
+/// drives persist-on-release.
+struct ArmSliderHandState {
+    var engaged: Bool = false
+    var value: Float = 0
+    var hasValue: Bool = false
+}
+
+struct ArmSliderGestureState {
+    var left = ArmSliderHandState()   // left forearm  → music intensity
+    var right = ArmSliderHandState()  // right forearm → music dampening
+}

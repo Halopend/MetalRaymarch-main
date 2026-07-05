@@ -54,6 +54,22 @@ enum GestureDefaults {
     static let sceneSwipeMaxPinch: Float = 0.35
     static let sceneSwipeMaxFist: Float = 0.5
 
+    // MARK: - Arm slider (opposite-hand fingertip slides along forearm → music strength)
+    /// Left forearm sets music intensity, right forearm sets music dampening.
+    /// Position along elbow→wrist maps absolutely (elbow = min, wrist/hand = max).
+    /// Minimum forearm length (meters) for a usable slide; below this the arm is
+    /// too foreshortened to track a position reliably.
+    static let armSliderMinForearmLength: Float = 0.12
+    /// Perpendicular distance (meters) from the fingertip to the forearm line to
+    /// ENGAGE the slider (must be close to the arm to start).
+    static let armSliderEngageRadius: Float = 0.05
+    /// Looser distance (meters) to stay engaged once started (hysteresis).
+    static let armSliderReleaseRadius: Float = 0.09
+    /// Per-frame exponential smoothing toward the touched position (0..1).
+    static let armSliderSmoothing: Float = 0.35
+    /// Full-slide (wrist end) music-dampening value; intensity uses its own 0…1 range.
+    static let armSliderDampingMax: Float = 3.0
+
     // MARK: - Two-hand pinch thresholds
     static let twoHandPinchActivateThreshold: Float = 0.7
     static let twoHandPinchReleaseThreshold: Float = 0.3

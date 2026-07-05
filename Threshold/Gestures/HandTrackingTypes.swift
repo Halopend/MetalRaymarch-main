@@ -23,6 +23,12 @@ struct HandData {
     var palmCenter: SIMD3<Float> = .zero  // Center of palm for gesture detection
     var wristPosition: SIMD3<Float> = .zero  // Wrist joint position
     var palmNormal: SIMD3<Float> = .zero  // Normal vector pointing outward from palm face
+
+    // Forearm segment (world space) for the arm-slider music gesture: the
+    // opposite hand's fingertip slides along elbow→wrist to set a value.
+    var forearmWrist: SIMD3<Float> = .zero  // distal end (hand side)
+    var forearmElbow: SIMD3<Float> = .zero  // proximal end (elbow side)
+    var forearmTracked: Bool = false
     
     // Pinch values (0-1, 1 = fully pinched)
     var indexPinch: Float = 0
