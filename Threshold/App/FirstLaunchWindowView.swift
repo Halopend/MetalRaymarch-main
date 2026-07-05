@@ -8,7 +8,7 @@ import AVKit
 ///   3. Fingers (per-finger actions, read-only) + menu-open gesture picker
 ///   4. Sharing (analytics on by default; user can opt out + username)
 ///
-/// All four navigation dots and back/next buttons update the same
+/// All five navigation icons and back/next buttons update the same
 /// `currentPage` state, so the flow is a single TabView.
 struct FirstLaunchWindowView: View {
     @Environment(AppModel.self) private var appModel
@@ -29,14 +29,27 @@ struct FirstLaunchWindowView: View {
 
     private let pageCount = 5
 
+    /// One glyph per page, in page order, shown by the page indicator below.
+    private let pageIcons: [String] = [
+        AppIcons.boltTrianglebadgeExclamationmarkFill, // 0: Safety
+        AppIcons.sparkles,                             // 1: Welcome
+        AppIcons.move3d,                                // 2: Movement + Scale
+        AppIcons.handTapFill,                           // 3: Fingers
+        AppIcons.person3Fill                            // 4: Sharing
+    ]
+
     var body: some View {
         VStack(spacing: 0) {
-            // Page indicator (5 dots, current one is accent).
-            HStack(spacing: 8) {
+            // Page indicator (5 icons, current one is accent-filled).
+            HStack(spacing: 10) {
                 ForEach(0..<pageCount, id: \.self) { i in
-                    Circle()
-                        .fill(i == currentPage ? Color.accentColor : Color.secondary.opacity(0.3))
-                        .frame(width: 8, height: 8)
+                    Image(systemName: pageIcons[i])
+                        .font(.system(size: IconSize.small, weight: .semibold))
+                        .foregroundStyle(i == currentPage ? Color.white : Color.secondary)
+                        .frame(width: 26, height: 26)
+                        .background(
+                            Circle().fill(i == currentPage ? Color.accentColor : Color.secondary.opacity(0.15))
+                        )
                         .accessibilityLabel("Page \(i + 1) of \(pageCount)")
                 }
             }
