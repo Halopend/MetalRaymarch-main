@@ -775,6 +775,14 @@ extension ContentView {
                             help: "A low-res cone pre-pass marches one cone per 8×8 block and writes a provable lower bound on the nearest surface distance; the full march starts there, skipping empty space without ever skipping a surface. Conservative and exact (box/fold fractals, un-warped domain only). Fragment renderer path; off by default.") { v in
                     cache.quality.coarsePrepassWarmStartEnabled = v; cache.push(\.coarsePrepassWarmStartEnabled, value: v)
                 }
+
+                accelToggleCompact("Cone Coverage AA",
+                            isOn: cache.quality.coneCoverageAAEnabled,
+                            help: "Anti-aliases silhouettes from the cone footprint so Cone Marching can run harder (fewer steps) without blobby, inflated edges. Softens outer edges only — no sub-pixel thin-feature recovery. Fragment renderer path.") { v in
+                    cache.quality.coneCoverageAAEnabled = v; cache.push(\.coneCoverageAAEnabled, value: v)
+                }
+                .disabled(isCompute)
+                .opacity(isCompute ? 0.45 : 1)
             }
         }
         .padding()
@@ -787,6 +795,67 @@ extension ContentView {
     /// own Shape rail tab — these are shape/framing choices, not perf knobs.
     var fractalBoundingContent: some View {
         VStack(alignment: .leading, spacing: 10) {
+            // Bound to Space: clip the fractal to an assumed rectangular room
+            // (world meters, floor at the real floor). Shares the Bounding Fog
+            // edge treatment below with the Bounding shape. Kept at the top of
+            // the tab — it's the most-reached-for room control.
+            HStack(spacing: 6) {
+                Image(systemName: "house").foregroundStyle(.cyan)
+                Text("Bound to Space").font(.headline)
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { cache.quality.boundToSpaceEnabled },
+                    set: { v in
+                        cache.quality.boundToSpaceEnabled = v; cache.push(\.boundToSpaceEnabled, value: v)
+                    }
+                ))
+                .labelsHidden()
+                .help("Clips the fractal to an assumed rectangular room around your starting position — the walls (and optionally ceiling) become the fractal's bounds. Set the sizes below to roughly match your space.")
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Picker("Faces", selection: Binding(
+                    get: { BoundToSpaceMode(rawValue: cache.quality.boundToSpaceMode) ?? .matchSpace },
+                    set: { mode in
+                        cache.quality.boundToSpaceMode = mode.rawValue
+                        cache.push(\.boundToSpaceMode, value: mode.rawValue)
+                    }
+                )) {
+                    ForEach(BoundToSpaceMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(BoundToSpaceMode(rawValue: cache.quality.boundToSpaceMode)?.help ?? BoundToSpaceMode.matchSpace.help)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                accelSliderCompact("Room Width",
+                            value: cache.quality.boundSpaceWidth, range: 1...20,
+                            display: String(format: "%.1f m", cache.quality.boundSpaceWidth),
+                            help: "Assumed room width (left-right), meters.") { v in
+                    cache.quality.boundSpaceWidth = v; cache.push(\.boundSpaceWidth, value: v)
+                }
+                accelSliderCompact("Room Depth",
+                            value: cache.quality.boundSpaceDepth, range: 1...20,
+                            display: String(format: "%.1f m", cache.quality.boundSpaceDepth),
+                            help: "Assumed room depth (front-back), meters.") { v in
+                    cache.quality.boundSpaceDepth = v; cache.push(\.boundSpaceDepth, value: v)
+                }
+                accelSliderCompact("Room Height",
+                            value: cache.quality.boundSpaceHeight, range: 1...10,
+                            display: String(format: "%.1f m", cache.quality.boundSpaceHeight),
+                            help: "Assumed ceiling height, meters. The floor is always your real floor.") { v in
+                    cache.quality.boundSpaceHeight = v; cache.push(\.boundSpaceHeight, value: v)
+                }
+            }
+            .disabled(!cache.quality.boundToSpaceEnabled)
+            .opacity(cache.quality.boundToSpaceEnabled ? 1 : 0.45)
+
+            Divider().padding(.vertical, 2)
+
             HStack(spacing: 6) {
                 Image(systemName: "circle.dashed").foregroundStyle(.cyan)
                 Text("Bounding").font(.headline)
@@ -881,8 +950,8 @@ extension ContentView {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .disabled(!cache.quality.boundingSphereSkipEnabled)
-            .opacity(cache.quality.boundingSphereSkipEnabled ? 1 : 0.45)
+            .disabled(!boundingEdgeTreatmentActive)
+            .opacity(boundingEdgeTreatmentActive ? 1 : 0.45)
 
             if cache.quality.boundingShapeFogMode == BoundingFogMode.innerShadow.rawValue {
                 accelSliderCompact("Shadow Depth",
@@ -891,12 +960,87 @@ extension ContentView {
                             help: "How far the darkening reaches in from the bounding shape's edge, as a fraction of its radius.") { v in
                     cache.quality.boundingShapeShadowDepth = v; cache.push(\.boundingShapeShadowDepth, value: v)
                 }
-                .disabled(!cache.quality.boundingSphereSkipEnabled)
-                .opacity(cache.quality.boundingSphereSkipEnabled ? 1 : 0.45)
+                .disabled(!boundingEdgeTreatmentActive)
+                .opacity(boundingEdgeTreatmentActive ? 1 : 0.45)
             }
+
+            Divider().padding(.vertical, 2)
+
+            // Environment Scrunch: the scanned surroundings (scene
+            // reconstruction on visionOS) become a distance field the fractal
+            // scrunches and bulges around — a proximity field like the hands,
+            // not a see-through cut.
+            HStack(spacing: 6) {
+                Image(systemName: "square.3.layers.3d").foregroundStyle(.cyan)
+                Text("Scrunch to Surroundings").font(.headline)
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { cache.quality.envScrunchEnabled },
+                    set: { v in
+                        cache.quality.envScrunchEnabled = v; cache.push(\.envScrunchEnabled, value: v)
+                    }
+                ))
+                .labelsHidden()
+                .help("Scrunches the fractal around your scanned surroundings: it bulges toward nearby real surfaces while keeping a small clearance at the surface itself. Uses the headset's room scan; on Mac a synthetic environment can be injected via THRESHOLD_SYNTHETIC_ENV.")
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Picker("Mode", selection: Binding(
+                    get: { cache.quality.envScrunchMode },
+                    set: { v in
+                        cache.quality.envScrunchMode = v; cache.push(\.envScrunchMode, value: v)
+                    }
+                )) {
+                    Text("Scrunch").tag(0)
+                    Text("Shell").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .help("Scrunch: the fractal bulges around nearby real surfaces. Shell: the inverse — the fractal only renders within Reach of walls and objects, coating the room instead of filling it.")
+                accelSliderCompact("Strength",
+                            value: cache.quality.envScrunchStrength, range: 0...1,
+                            display: "\(Int((cache.quality.envScrunchStrength * 100).rounded()))%",
+                            help: "How strongly the fractal deforms toward the scrunched shape. Low values bump gently; 100% fully conforms within the reach band.") { v in
+                    cache.quality.envScrunchStrength = v; cache.push(\.envScrunchStrength, value: v)
+                }
+                accelSliderCompact("Reach",
+                            value: cache.quality.envScrunchReach, range: 0.2...2,
+                            display: String(format: "%.1f m", cache.quality.envScrunchReach),
+                            help: "Scrunch: how far from a real surface the pull engages. Shell: the thickness of the rendered layer around walls and objects.") { v in
+                    cache.quality.envScrunchReach = v; cache.push(\.envScrunchReach, value: v)
+                }
+                Picker("Contain", selection: Binding(
+                    get: { cache.quality.envScrunchContain },
+                    set: { v in
+                        cache.quality.envScrunchContain = v; cache.push(\.envScrunchContain, value: v)
+                    }
+                )) {
+                    Text("Off").tag(0)
+                    Text("Hard").tag(1)
+                    Text("Blend").tag(2)
+                }
+                .pickerStyle(.segmented)
+                .help("Keeps the fractal stuck to your scanned room. The room scan is an unsigned distance field, so on its own the scrunch mirrors an outside shell / doubling beyond real walls — Contain clips the fractal to the scanned room box to cut that. Hard: a crisp boundary. Blend: a soft feathered edge (width below). Works with Strength 0 too, for pure auto-containment.")
+                if cache.quality.envScrunchContain == 2 {
+                    accelSliderCompact("Blend Width",
+                                value: cache.quality.envScrunchContainFeather, range: 0...0.5,
+                                display: String(format: "%.2f m", cache.quality.envScrunchContainFeather),
+                                help: "How gradually the fractal fades out as it crosses the scanned room boundary.") { v in
+                        cache.quality.envScrunchContainFeather = v; cache.push(\.envScrunchContainFeather, value: v)
+                    }
+                }
+            }
+            .disabled(!cache.quality.envScrunchEnabled)
+            .opacity(cache.quality.envScrunchEnabled ? 1 : 0.45)
         }
         .padding()
         .background(Color.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// The Bounding Fog picker treats the edges of BOTH bounding systems —
+    /// the Bounding shape and the Bound to Space room — so it stays active
+    /// while either is on.
+    private var boundingEdgeTreatmentActive: Bool {
+        cache.quality.boundingSphereSkipEnabled || cache.quality.boundToSpaceEnabled
     }
 
     /// Developer "Force Recompile" card for the Performance tab. Clears the

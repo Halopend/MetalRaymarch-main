@@ -175,6 +175,17 @@ enum MacBenchmarkHarness {
             case "foveationStrength":            qc.foveationStrength = v
             case "baseFractalIterations":        qc.baseFractalIterations = Int(v)
             case "baseMaxRaySteps":              qc.baseMaxRaySteps = Int(v)
+            case "boundToSpaceEnabled":          qc.boundToSpaceEnabled = v != 0
+            case "boundToSpaceMode":             qc.boundToSpaceMode = Int(v)
+            case "boundSpaceWidth":              qc.boundSpaceWidth = v
+            case "boundSpaceDepth":              qc.boundSpaceDepth = v
+            case "boundSpaceHeight":             qc.boundSpaceHeight = v
+            case "envScrunchEnabled":            qc.envScrunchEnabled = v != 0
+            case "envScrunchMode":               qc.envScrunchMode = Int(v)
+            case "envScrunchStrength":           qc.envScrunchStrength = v
+            case "envScrunchReach":              qc.envScrunchReach = v
+            case "envScrunchContain":            qc.envScrunchContain = Int(v)
+            case "envScrunchContainFeather":     qc.envScrunchContainFeather = v
             // Not a QualityConfig field, but riding the same override hook:
             // legacy DE mismatch δ for headless A/B captures.
             case "deIterationMismatch":          settings.deIterationMismatch = v
