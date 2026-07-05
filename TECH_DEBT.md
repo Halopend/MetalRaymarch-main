@@ -8,17 +8,31 @@ Scored with the same formula: **Priority = (Impact + Risk) × (6 − Effort)**, 
 Ground truth: repo-wide scan 2026-07-01 + session incidents 2026-07-01/02, **re-verified
 against the tree 2026-07-04** (every item's status re-checked; counts refreshed; new items
 #14–#17 from an adversarial scan of the hands/arms + legacy-toggle work and the current
-working tree).
+working tree). **Second delta scan 2026-07-04 (later, PM)** over the still-uncommitted
+Environment Scrunch feature (new `EnvironmentSDF.swift` + expanded persistence tests):
+mostly clean — persistence is device-local-by-design and pinned
+(`envScrunchStaysDeviceLocal`, same family as #14), the RenderSettings wiring follows the
+established locked-accessor + snapshot + apply pattern (did **not** add a 4th `Uniforms`
+drift site — #2 still 3), and the new `EnvironmentSDFGrid: @unchecked Sendable` is
+documented (Mutex-swap publication). It added **one new item (#18)** and **materialized
+#8d** (the `FractalParams` gate was raised 304→320 B in this tree). **Third delta scan
+2026-07-04 (evening)** over the containment addition (Contain hard/blend clip to the
+scanned room AABB; tree now 1,755 insertions / 17 files): persistence + UI + harness all
+follow pattern and the device-local pin was extended in the same commit; but it **widened
+#18** (AABB accumulation + world→grid conversion also untested) and surfaced **#19** (the
+shader's hardcoded `2.0f` far-clamp is comment-lockstepped to `EnvironmentSDFGrid.clampFar`).
 
 ## Health summary
 
-Still unusually clean for its size: **zero TODO/FIXME/HACK markers**, no `try!`, no
-third-party dependencies. Refreshed counts (2026-07-04): `RenderSettings` is now
-**4,355 lines / 473 lock sites** (was 3,912/526 — grew with bound-to-space + cutouts);
-tests are **7 files / 1,283 lines** (basically unchanged); concurrency markers are
-**60 `nonisolated(unsafe)` + 44 `@unchecked Sendable` occurrences** across ~20 files
-(the old "6 globals + 10" figure counted distinct globals and badly understated spread —
-top files: AudioAnalyzer 15, FractalTypeDescriptor 14, Renderer 9).
+Still unusually clean for its size: **zero TODO/FIXME/HACK markers** (4 `XXX` are the
+`DE_XXX` codegen-macro placeholder, not debt), no `try!`, no third-party dependencies.
+Refreshed counts (2026-07-04 evening, incl. the uncommitted Env Scrunch + containment
+tree): `RenderSettings` is now **4,386 lines / 481 lock sites** (was 3,912/526 — grew with
+bound-to-space + Env Scrunch + containment; cutouts were removed, not added); tests are
+**8 files** now (added `EmbedFreshnessTests.swift` + `envScrunchStaysDeviceLocal`, since
+extended for containment); concurrency markers steady at **61 `nonisolated(unsafe)` +
+48 `@unchecked Sendable`** across ~20 files (containment added none). Top files:
+AudioAnalyzer 15, FractalTypeDescriptor 14, Renderer 9.
 
 The debt still concentrates in the same four places (Uniforms seams, persistence-shaped
 tests, no CI, the RenderSettings god object) — **plus one new strategic fact**:
@@ -35,8 +49,10 @@ go/no-go exists (#16), **don't invest in big in-place arch refactors**; seam-har
 | 1 | ~~**Embed-freshness test**~~ | Infra | – | – | – | – | **DONE 2026-07-04**: `ThresholdTests/EmbedFreshnessTests.swift` pins all 13 embedded blocks byte-for-byte to their on-disk sources (repo located via `#filePath`), plus a lockstep check that the test table covers every `emit_block` in the generator. |
 | 2 | **Single `Uniforms` builder**: one shared function feeding the 5 construction sites (visionOS fragment + compute in `Renderer`, `RendererGameState`, Mac `RaymarchRenderView`, QL `HeadlessRenderer`); kills order-sensitivity and copy-drift | Code | 4 | 4 | 2 | 32 | **OPEN — bit a THIRD time.** Hand-attraction shape is now half-centralized: `makeHandAttractionUniforms()` feeds the game-state path, but `RaymarchRenderView.swift:1655` and `HeadlessRenderer` hardcode the same fallback `SIMD4<Float>(0.35, 1.0, 0.5, 0.6)` — a drift trap the moment the default changes. |
 | 3 | **Parameter-layering regression tests**: pure-logic tests for base×gesture×music×animation composition (recenter, offset-around-animation, stomp cases) | Test | 4 | 4 | 3 | 24 | **OPEN.** 3+ documented regressions in exactly this math; still zero coverage. Doubles as a behavior pin if the rebuild (#16) proceeds — its Modulation Engine reimplements this exact composition. |
+| 18 | **`EnvironmentSDF` geometry math has zero tests**: `pointTriangleDistance` (Ericson 7-region barycentric — a classic bug farm), `bake`/`bakeSynthetic` grid indexing, `parseSynthetic` string parsing, **and (widened 2026-07-04 evening) the containment geometry** — surface-AABB accumulation in both bakes + the world→grid clamp conversion in `makeEnvScrunchParams`. The feature is Mac-verified via `THRESHOLD_SYNTHETIC_ENV` but **NOT device-verified — the visionOS mesh-bake path has literally never executed** | Test | 3 | 3 | 2 | 24 | **NEW 2026-07-04 PM, widened evening.** All PURE functions (only `bake` needs an `MTLDevice` for the output buffer) — golden-value unit tests are ~1 sitting and would headlessly exercise the same CPU bake the untested device path uses. A wrong barycentric region = wrong scrunch; a wrong AABB = containment clips at the wrong wall. Blast radius is bounded (the shader clamps out-of-band samples to "no effect"; containment only ever *removes* geometry), which is why R=3 not 4. The containment A/B PNGs (contain off/hard/blend, synthetic room) exist as manual pins in the scratchpad — a golden-image harness job would make them durable. Fold #19 into the same sitting. |
+| 19 | **`clampFar` comment-enforced lockstep**: `Shaders.metal` hardcodes the out-of-grid return as `2.0f * es.metersToModel` with a "keep in sync with `EnvironmentSDFGrid.clampFar`" comment. Change the Swift constant without the shader and Shell mode silently skins the grid boundary instead of cutting beyond it. Fix: carry `farClampModel` in `EnvScrunchParams` (there is padding slack in the three `vector_float3` slots, or accept +16 B) and delete the comment-contract | Code | 2 | 2 | 1 | 20 | **NEW 2026-07-04 evening.** Same disease as #2 (comment-enforced cross-file lockstep), caught while the code is a day old. Single-sitting; pairs with #18's test sitting since a unit test on `envScrunchSample`'s out-of-grid behavior would also pin it. |
 | 14 | ~~**`objectCutout*` preset persistence asymmetry**~~ | Test | – | – | – | – | **DECIDED + PINNED 2026-07-04**: cutouts are **device-local by design** (they describe the user's physical room, not the scene — same family as the safety bubble and Quality accel fields; they also persist per-device via their own UserDefaults keys). Pinned by `objectCutoutsStayDeviceLocal` (asserts no `objectCutout` key ever serializes into `FractalPreset` AND scene apply never stomps the live device config); test header documents the boundToSpace-vs-cutout rationale. |
-| 8d | ~~**`FractalParams`/`Uniforms` size watch**~~ | Perf-adjacent | – | – | – | – | **DONE 2026-07-04**: `static_assert` gates added — `FractalParams ≤ 304 B` next to its definition in `Shaders.metal` (with a do-not-bump-without-harness-measurement comment), `Uniforms ≤ 1856` / `TileUniforms ≤ 1888` / `FormulaParams ≤ 176` at the end of `ShaderTypes.h` (Metal-only guard). Asserts also fire in every runtime `.threshfx` compile via the embeds. **⚠️ Measured finding: `FractalParams` is 304 B by value — ABOVE the 272 B that caused the documented occupancy collapse** (hand+forearm fields, 4×float4 = 80 B). Logged as a candidate for the PERF_PUSH backlog: pack forearms/hands or move them behind the pointer like `spaceWarpOps`. |
+| 8d | ~~**`FractalParams`/`Uniforms` size watch**~~ | Perf-adjacent | – | – | – | – | **DONE 2026-07-04**: `static_assert` gates added — `FractalParams ≤ 304 B` next to its definition in `Shaders.metal` (with a do-not-bump-without-harness-measurement comment), `Uniforms ≤ 1856` / `TileUniforms ≤ 1888` / `FormulaParams ≤ 176` at the end of `ShaderTypes.h` (Metal-only guard). Asserts also fire in every runtime `.threshfx` compile via the embeds. **⚠️ Measured finding: `FractalParams` is 304 B by value — ABOVE the 272 B that caused the documented occupancy collapse** (hand+forearm fields, 4×float4 = 80 B). Logged as a candidate for the PERF_PUSH backlog: pack forearms/hands or move them behind the pointer like `spaceWarpOps`. **↑ 2026-07-04 PM: gate RAISED 304→320 B** — Env Scrunch added `EnvScrunchParams` by value (Uniforms gate 1856→1888→**1936**, TileUniforms 1888→1920→**1968** after containment grew the struct 112→160 B; those live in `constant` space, so growth there is awareness-only). The grid *itself* is correctly behind a bindless pointer (`gpuAddress`), so only ~16 B of scalar params went by-value — the [[fractalparams-byvalue-hotpath]] rule was mostly honored; containment added **zero** by-value bytes (`FractalParams` still 320 B). But by-value `FractalParams` remains **48 B over the 272 B collapse size** and the promised harness measurement is overdue. **Escalate to PERF_PUSH.md now**, before the next by-value field lands. |
 | 16 | ~~**Rebuild go/no-go record**~~ | Arch | – | – | – | – | **DONE 2026-07-04**: `Context/REBUILD_ARCHITECTURE.md` committed with a PROPOSED status block + explicit decision inputs (deferred-shading outcome, next parameter-heavy feature's wiring cost, Vision Pro baseline). #10–13 stay parked until the call is made. |
 | 5 | **CI skeleton**: build (Mac + visionOS schemes) + unit tests + QL render check + perf gate, on push | Infra | 3 | 3 | 2 | 24 | **OPEN, but cheaper now** (E 3→2): `Scripts/perf-gate.sh` and `Scripts/ql_render_check.sh` exist as ready-made steps; still nothing runs them automatically (no `.github/`). Absorbs #8a/#8c as steps. |
 | 4 | ~~**Benchmark persistence isolation**~~ | Infra | – | – | – | – | **ALREADY DONE** (register was stale): `SettingsPersistence.benchmarkHermetic` gates BOTH `save` and `load` on the `THRESHOLD_BENCHMARK` env (`SettingsPersistence.swift:131` — checks the env directly, not `BenchmarkMode`, so the QL source closure still compiles; the 2026-07-04 re-verify grep missed it for that reason). |
@@ -45,13 +61,13 @@ go/no-go exists (#16), **don't invest in big in-place arch refactors**; seam-har
 | 8c | **Bundled-resource flattening workaround**: fold `Scripts/mark_mixed_scenes.py` check into #5's CI (fail if a file under `Examples/Mixed` lacks `mixedModeScene: true`) | Infra | 2 | 2 | 1 | 20 | **OPEN.** |
 | 15 | **Legacy compute-cache toggle is trap code**: `recreateLegacyComputeCacheBug` is a plain in-memory `RenderSettings` property — not persisted anywhere (resets on relaunch), zero tests, and only engages when a stale pipeline already sits in the cache (`RendererPipelineCache` nearest-match path). The *official* recreation is the scene-persisted `deIterationMismatch` δ. Either document the cache toggle as a dev-only curiosity, or remove it and keep only the δ path | Code | 2 | 2 | 1 | 20 | **NEW 2026-07-04** (from the 7a03c037 audit). A future dev can "verify it does nothing" against a warm cache and delete the wrong half. |
 | 17 | **`handEffectsBeta` gate scatter**: the beta gate must agree at 5+ sites (`ContentView.swift:65,605`, `ContentView+SettingsTab.swift:587,598`, `HandAttractionConfig.swift:17` key) — tab visibility, restore, onChange, scene apply. Centralize behind one accessor + one "gated features" test | Code | 2 | 2 | 1 | 20 | **NEW 2026-07-04.** Miss one site when flipping the gate and the feature half-exists. |
-| 6 | **Concurrency-safety pass**: audit the 60 `nonisolated(unsafe)` + 44 `@unchecked Sendable` occurrences; keep documented racy-by-design gates, annotate WHY per-site, fix the drift | Code | 3 | 3 | 3 | 18 | **OPEN — counts corrected up** (was stated as 6+10 globals; occurrence spread is ~20 files). Swift-6 strict concurrency will force this eventually. |
+| 6 | **Concurrency-safety pass**: audit the 61 `nonisolated(unsafe)` + 48 `@unchecked Sendable` occurrences; keep documented racy-by-design gates, annotate WHY per-site, fix the drift | Code | 3 | 3 | 3 | 18 | **OPEN — counts corrected up** (was stated as 6+10 globals; occurrence spread is ~20 files). Swift-6 strict concurrency will force this eventually. |
 | 7 | **Execute CLEANUP_AUDIT backlog** (132 verified items) | Code | 2 | 2 | 2 | 16 | **OPEN.** Do opportunistically when touching each file. |
-| 8 | **ControlSpec tail** (~290 range/default definition sites for ~63 controls; P0 done for 9) | Code | 3 | 3 | 4 | 12 | **OPEN — grew:** new cutout/bound-to-space controls added more scattered ranges/defaults (`1.0...20.0`, feather `0.35`/min `0.02` etc. across QualityConfig / RenderSettings / Snapshot with no named constants). Subsumed by the rebuild's ParameterCatalog if #16 = go. |
+| 8 | **ControlSpec tail** (~290 range/default definition sites for ~63 controls; P0 done for 9) | Code | 3 | 3 | 4 | 12 | **OPEN — keeps growing:** bound-to-space and every envScrunch knob repeat the pattern — e.g. `envScrunchContainFeather` default `0.1` + range `0...0.5` now live at 4 sites (RenderSettings backing, accessor clamp, QualityConfig default+clamp+decode, UI slider range) with no named constant. Subsumed by the rebuild's ParameterCatalog if #16 = go. |
 | 9 | ~~**Untrack `default.profraw`** + `*.profraw` in .gitignore~~ | Infra | – | – | – | – | **DONE** (verified 2026-07-04: `.gitignore:17-18`, file untracked). |
 | 10 | **Sphere-system unification** (3 parallel systems) | Arch | 2 | 2 | 4 | 8 | **PARKED pending #16** — rebuild's Shader IR replaces this seam outright. |
 | 11 | **Param-catalog Slice 8** (route-driven UI) | Arch | 2 | 2 | 4 | 8 | **PARKED pending #16.** |
-| 12 | **`RenderSettings` god-object split** (now 4,355 lines / 473 lock sites) | Arch | 4 | 3 | 5 | 7 | **PARKED pending #16** — this is exactly what ParameterCatalog + Modulation Engine dissolve. If no-go: keep the opportunistic-extraction rule, never a big bang. |
+| 12 | **`RenderSettings` god-object split** (now 4,386 lines / 481 lock sites) | Arch | 4 | 3 | 5 | 7 | **PARKED pending #16** — this is exactly what ParameterCatalog + Modulation Engine dissolve. If no-go: keep the opportunistic-extraction rule, never a big bang. |
 | 13 | **Module architecture stages 3+5** | Arch | 2 | 1 | 4 | 6 | **PARKED pending #16.** |
 
 Not-debt, deliberately kept: gated experimental features (custom scenes opt-in), SharePlay
@@ -65,14 +81,19 @@ not repo debt).
 
 **Phase A — ✅ COMPLETE 2026-07-04:** #1, #14, #8d, #16 executed this session; #4
 turned out to be already done (`benchmarkHermetic`), #9 was done earlier. Byproduct
-finding: `FractalParams` measures **304 B by value** (> the documented 272 B collapse
-size) — flagged in #8d for a harness measurement.
+finding: `FractalParams` measured **304 B by value** (> the documented 272 B collapse
+size) — flagged in #8d for a harness measurement. **Later the same day the Env Scrunch
+tree pushed it to 320 B** (gate raised to match); the measurement is now overdue and moves
+to Phase B / PERF_PUSH.md.
 
-**Phase B — seam hardening (1–2 sessions):** #2, #3, then #5.
+**Phase B — seam hardening (1–2 sessions):** #2, #3, **#18 (+#19 same sitting)**, then #5.
 The Uniforms builder has now bitten **three times in three days** — top code-debt item.
-The layering tests pin the most re-broken math in the app *and* become migration pins for
-the rebuild. CI is cheaper than when first scored (gate scripts already exist) and absorbs
-#8a/#8b/#8c as steps; pairs with PERF_PUSH Phase 0 — one job runs both.
+The layering tests (#3) pin the most re-broken math in the app; the EnvironmentSDF tests
+(#18) pin brand-new, never-device-run geometry math — both are cheap pure-function suites
+and both become migration pins for the rebuild. CI is cheaper than when first scored (gate
+scripts already exist) and absorbs #8a/#8b/#8c as steps; pairs with PERF_PUSH Phase 0 — one
+job runs both. **Also now:** escalate #8d's `FractalParams` = 320 B to PERF_PUSH.md for the
+overdue occupancy measurement (the gate was raised again this session).
 
 **Phase C — opportunistic (ongoing, no dedicated sessions):** #7, #8, #6, #15, #17.
 Rule: when a file is already open for feature work, burn its CLEANUP_AUDIT items and fix
