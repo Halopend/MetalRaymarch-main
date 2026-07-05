@@ -197,6 +197,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _smartAdvanceEnabled: Bool = loadBool("smartAdvanceEnabled", default: false)  // Grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient)
     private var _adaptiveRenderQualityEnabled: Bool = loadBool("adaptiveRenderQualityEnabled", default: true)  // visionOS: auto-lower compositor Render Quality to hold FPS (slider = ceiling)
     private var _coneMarchStrength: Float = loadFloat("coneMarchStrength", default: 0.0)  // 0 = off; scales the distance-growing hit threshold (projected pixel footprint, ConeMarchingPen)
+    private var _coneCoverageAAEnabled: Bool = loadBool("coneCoverageAAEnabled", default: false)  // CTSS-lite silhouette AA from the cone footprint (fragment path); lets Cone Marching run harder without blobby edges
     private var _overRelaxationMax: Float = loadFloat("overRelaxationMax", default: 1.4)  // Keinert over-relaxation ceiling the auto-ramp may reach (1.0 = conservative)
     private var _distanceLODStrength: Float = loadFloat("distanceLODStrength", default: 0.0)  // 0 = off; drops fractal iterations on faraway samples
     private var _shadowsEnabled: Bool = loadBool("shadowsEnabled", default: true)  // false skips the two per-pixel shadow marches
@@ -210,6 +211,22 @@ final class RenderSettings: @unchecked Sendable {
     // Bounding Shape family/preset — same encoding as safetyBubbleShape (0...1 =
     // sphere/cube morph, 2...6 = discrete platonic solids).
     private var _boundingShapeType: Float = loadFloat("boundingShapeType", default: 0.0)
+    // Bound to Space: clip the fractal to an assumed rectangular room in WORLD
+    // meters (floor at y = 0, centered on the user's starting position). Mode:
+    // 0 = Match Space (closed box), 1 = Ceiling Open, 2 = Walls Open.
+    private var _boundToSpaceEnabled: Bool = loadBool("boundToSpaceEnabled", default: false)
+    private var _boundToSpaceMode: Int = loadInt("boundToSpaceMode", default: 0)
+    private var _boundSpaceWidth: Float = loadFloat("boundSpaceWidth", default: 4.0)
+    private var _boundSpaceDepth: Float = loadFloat("boundSpaceDepth", default: 4.0)
+    private var _boundSpaceHeight: Float = loadFloat("boundSpaceHeight", default: 2.5)
+    // Object Cutouts: projected see-through windows around nearby real objects
+    // (visionOS plane detection). Device-local comfort setting — not scene state.
+    private var _envScrunchEnabled: Bool = loadBool("envScrunchEnabled", default: false)
+    private var _envScrunchMode: Int = loadInt("envScrunchMode", default: 0)
+    private var _envScrunchStrength: Float = loadFloat("envScrunchStrength", default: 0.8)
+    private var _envScrunchReach: Float = loadFloat("envScrunchReach", default: 0.75)
+    private var _envScrunchContain: Int = loadInt("envScrunchContain", default: 0)             // 0 = off, 1 = hard clip to scanned room box, 2 = soft blend
+    private var _envScrunchContainFeather: Float = loadFloat("envScrunchContainFeather", default: 0.1) // soft-blend feather half-width, meters
     private var _zoomFogCompensationEnabled: Bool = loadBool("zoomFogCompensationEnabled", default: false)  // scale fog intensity down on zoom-out so the fog sphere's world radius stays constant (was hardcoded on for Kleinian)
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
@@ -1287,6 +1304,18 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
+    /// Cone-coverage anti-aliasing (CTSS-lite). Composites near-miss silhouette
+    /// pixels over the background by a coverage alpha derived from the cone
+    /// footprint, so the Cone Marching threshold can grow (fewer steps) without
+    /// inflating silhouettes. Fragment path only. Off by default.
+    var coneCoverageAAEnabled: Bool {
+        get { withLock { _coneCoverageAAEnabled } }
+        set {
+            withLock { _coneCoverageAAEnabled = newValue }
+            persistQuality()
+        }
+    }
+
     /// Cone marching strength (0...1, 0 = off). Scales how far the march
     /// acceptance threshold grows with ray distance, so a ray stops once the
     /// distance field is within ~N projected pixels of footprint (after Mansour's
@@ -1381,6 +1410,116 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _boundingShapeType } }
         set {
             withLock { _boundingShapeType = max(0.0, min(SafetyBubbleShapePreset.maxStoredValue, newValue)) }
+            persistQuality()
+        }
+    }
+
+    /// Bound to Space: clip the fractal to an assumed rectangular room in WORLD
+    /// meters — floor at y = 0 (the visionOS floor), footprint centered on the
+    /// user's starting position.
+    var boundToSpaceEnabled: Bool {
+        get { withLock { _boundToSpaceEnabled } }
+        set {
+            withLock { _boundToSpaceEnabled = newValue }
+            persistQuality()
+        }
+    }
+
+    /// Which room faces bound the fractal: 0 = Match Space (closed box),
+    /// 1 = Ceiling Open (walls + floor), 2 = Walls Open (floor + ceiling only).
+    var boundToSpaceMode: Int {
+        get { withLock { _boundToSpaceMode } }
+        set {
+            withLock { _boundToSpaceMode = max(0, min(2, newValue)) }
+            persistQuality()
+        }
+    }
+
+    /// Assumed room width (world x), meters.
+    var boundSpaceWidth: Float {
+        get { withLock { _boundSpaceWidth } }
+        set {
+            withLock { _boundSpaceWidth = max(1.0, min(20.0, newValue)) }
+            persistQuality()
+        }
+    }
+
+    /// Assumed room depth (world z), meters.
+    var boundSpaceDepth: Float {
+        get { withLock { _boundSpaceDepth } }
+        set {
+            withLock { _boundSpaceDepth = max(1.0, min(20.0, newValue)) }
+            persistQuality()
+        }
+    }
+
+    /// Assumed room height (world y), meters. Floor is always at y = 0.
+    var boundSpaceHeight: Float {
+        get { withLock { _boundSpaceHeight } }
+        set {
+            withLock { _boundSpaceHeight = max(1.0, min(10.0, newValue)) }
+            persistQuality()
+        }
+    }
+
+    /// Environment Scrunch: the scanned surroundings (visionOS scene
+    /// reconstruction; synthetic primitives on Mac via THRESHOLD_SYNTHETIC_ENV)
+    /// baked to a distance grid the fractal scrunches/bulges around — a mixed
+    /// positive/negative proximity field, the hand-attraction model applied to
+    /// the room instead of a see-through cut.
+    var envScrunchEnabled: Bool {
+        get { withLock { _envScrunchEnabled } }
+        set {
+            withLock { _envScrunchEnabled = newValue }
+            persistQuality()
+        }
+    }
+
+    /// 0 = Scrunch (bulge around surfaces), 1 = Shell (render only within
+    /// Reach of real surfaces — the fractal coats the room instead of filling it).
+    var envScrunchMode: Int {
+        get { withLock { _envScrunchMode } }
+        set {
+            withLock { _envScrunchMode = max(0, min(1, newValue)) }
+            persistQuality()
+        }
+    }
+
+    /// How strongly the fractal blends toward the scrunched field (0...1).
+    var envScrunchStrength: Float {
+        get { withLock { _envScrunchStrength } }
+        set {
+            withLock { _envScrunchStrength = max(0.0, min(1.0, newValue)) }
+            persistQuality()
+        }
+    }
+
+    /// Band (meters) around real surfaces within which the scrunch engages.
+    var envScrunchReach: Float {
+        get { withLock { _envScrunchReach } }
+        set {
+            withLock { _envScrunchReach = max(0.2, min(2.0, newValue)) }
+            persistQuality()
+        }
+    }
+
+    /// Containment: clip the scrunched fractal to the scanned room's AABB so the
+    /// unsigned field's mirror shell beyond real walls (and the base fractal
+    /// outside the room) is cut. 0 = off, 1 = hard clip, 2 = soft blend.
+    var envScrunchContain: Int {
+        get { withLock { _envScrunchContain } }
+        set {
+            withLock { _envScrunchContain = max(0, min(2, newValue)) }
+            persistQuality()
+        }
+    }
+
+    /// Soft-blend feather half-width (meters) for containment mode 2 — how
+    /// gradually the fractal fades out crossing the room boundary.
+    var envScrunchContainFeather: Float {
+        get { withLock { _envScrunchContainFeather } }
+        set {
+            withLock { _envScrunchContainFeather = max(0.0, min(0.5, newValue)) }
             persistQuality()
         }
     }
@@ -2589,6 +2728,7 @@ final class RenderSettings: @unchecked Sendable {
                 foveationStrength: _foveationStrength,
                 smartAdvanceEnabled: _smartAdvanceEnabled,
                 coneMarchStrength: _coneMarchStrength,
+                coneCoverageAAEnabled: _coneCoverageAAEnabled,
                 distanceLODStrength: _distanceLODStrength,
                 shadowsEnabled: _shadowsEnabled,
                 boundingSphereSkipEnabled: _boundingSphereSkipEnabled,
@@ -2596,6 +2736,15 @@ final class RenderSettings: @unchecked Sendable {
                 boundingShapeFogMode: _boundingShapeFogMode,
                 boundingShapeShadowDepth: _boundingShapeShadowDepth,
                 boundingShapeType: _boundingShapeType,
+                boundToSpaceEnabled: _boundToSpaceEnabled,
+                boundToSpaceMode: _boundToSpaceMode,
+                boundSpaceSize: SIMD3<Float>(_boundSpaceWidth, _boundSpaceHeight, _boundSpaceDepth),
+                envScrunchEnabled: _envScrunchEnabled,
+                envScrunchMode: _envScrunchMode,
+                envScrunchStrength: _envScrunchStrength,
+                envScrunchReach: _envScrunchReach,
+                envScrunchContain: _envScrunchContain,
+                envScrunchContainFeather: _envScrunchContainFeather,
                 zoomFogCompensationEnabled: _zoomFogCompensationEnabled,
                 limitFlash: _limitFlash,
                 activeGestureIndex: _activeGestureIndex,
@@ -3925,6 +4074,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.smartAdvanceEnabled = _smartAdvanceEnabled
                 c.adaptiveRenderQualityEnabled = _adaptiveRenderQualityEnabled
                 c.coneMarchStrength = _coneMarchStrength
+                c.coneCoverageAAEnabled = _coneCoverageAAEnabled
                 c.overRelaxationMax = _overRelaxationMax
                 c.distanceLODStrength = _distanceLODStrength
                 c.shadowsEnabled = _shadowsEnabled
@@ -3933,6 +4083,17 @@ final class RenderSettings: @unchecked Sendable {
                 c.boundingShapeFogMode = _boundingShapeFogMode
                 c.boundingShapeShadowDepth = _boundingShapeShadowDepth
                 c.boundingShapeType = _boundingShapeType
+                c.boundToSpaceEnabled = _boundToSpaceEnabled
+                c.boundToSpaceMode = _boundToSpaceMode
+                c.boundSpaceWidth = _boundSpaceWidth
+                c.boundSpaceDepth = _boundSpaceDepth
+                c.boundSpaceHeight = _boundSpaceHeight
+                c.envScrunchEnabled = _envScrunchEnabled
+                c.envScrunchMode = _envScrunchMode
+                c.envScrunchStrength = _envScrunchStrength
+                c.envScrunchReach = _envScrunchReach
+                c.envScrunchContain = _envScrunchContain
+                c.envScrunchContainFeather = _envScrunchContainFeather
                 c.zoomFogCompensationEnabled = _zoomFogCompensationEnabled
                 return c
             }
@@ -3959,6 +4120,7 @@ final class RenderSettings: @unchecked Sendable {
                 _smartAdvanceEnabled = newValue.smartAdvanceEnabled
                 _adaptiveRenderQualityEnabled = newValue.adaptiveRenderQualityEnabled
                 _coneMarchStrength = max(0.0, min(1.0, newValue.coneMarchStrength))
+                _coneCoverageAAEnabled = newValue.coneCoverageAAEnabled
                 _overRelaxationMax = max(1.0, min(1.6, newValue.overRelaxationMax))
                 _distanceLODStrength = max(0.0, min(1.0, newValue.distanceLODStrength))
                 _shadowsEnabled = newValue.shadowsEnabled
@@ -3967,6 +4129,17 @@ final class RenderSettings: @unchecked Sendable {
                 _boundingShapeFogMode = newValue.boundingShapeFogMode
                 _boundingShapeShadowDepth = newValue.boundingShapeShadowDepth
                 _boundingShapeType = max(0.0, min(SafetyBubbleShapePreset.maxStoredValue, newValue.boundingShapeType))
+                _boundToSpaceEnabled = newValue.boundToSpaceEnabled
+                _boundToSpaceMode = newValue.boundToSpaceMode
+                _boundSpaceWidth = newValue.boundSpaceWidth
+                _boundSpaceDepth = newValue.boundSpaceDepth
+                _boundSpaceHeight = newValue.boundSpaceHeight
+                _envScrunchEnabled = newValue.envScrunchEnabled
+                _envScrunchMode = newValue.envScrunchMode
+                _envScrunchStrength = newValue.envScrunchStrength
+                _envScrunchReach = newValue.envScrunchReach
+                _envScrunchContain = newValue.envScrunchContain
+                _envScrunchContainFeather = newValue.envScrunchContainFeather
                 _zoomFogCompensationEnabled = newValue.zoomFogCompensationEnabled
             }
         }

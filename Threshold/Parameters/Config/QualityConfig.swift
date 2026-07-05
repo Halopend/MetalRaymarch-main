@@ -38,6 +38,35 @@ enum BoundingFogMode: Int, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Which faces of the assumed room bound the fractal (Shape → Bounding tab's
+/// Bound to Space picker). Backed by `QualityConfig.boundToSpaceMode`'s raw Int.
+enum BoundToSpaceMode: Int, CaseIterable, Identifiable, Sendable {
+    case matchSpace = 0
+    case ceilingOpen = 1
+    case wallsOpen = 2
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .matchSpace: return "Match Space"
+        case .ceilingOpen: return "Ceiling Open"
+        case .wallsOpen: return "Walls Open"
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .matchSpace:
+            return "Closed box: the fractal only renders inside the assumed room — walls, floor, and ceiling."
+        case .ceilingOpen:
+            return "Walls and floor bound the fractal; it can extend upward past the ceiling."
+        case .wallsOpen:
+            return "Only the floor and ceiling bound the fractal; it can extend outward past the walls."
+        }
+    }
+}
+
 struct QualityConfig: Codable, Equatable, Sendable {
     /// visionOS compositor render-quality ceiling. Single source of truth for both
     /// `configuration.maxRenderQuality` (set at layer creation — governs drawable
@@ -102,6 +131,14 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // footprint up to ~16 px. Works on every render path.
     var coneMarchStrength: Float = 0.0
 
+    // Cone-coverage anti-aliasing (CTSS-lite). Derives a silhouette edge-coverage
+    // alpha from the cone footprint at the closest lateral approach and composites
+    // the near-miss surface over the background. Decouples edge quality from the
+    // Cone Marching threshold so that knob can run harder (fewer steps) without
+    // blobby, inflated silhouettes. Softens outer edges only (no sub-pixel thin-
+    // feature recovery). Fragment path only for now. Off by default.
+    var coneCoverageAAEnabled: Bool = false
+
     // Over-relaxation ceiling (Keinert enhanced sphere tracing): the largest
     // step multiplier the auto-ramp may reach once geometry settles. 1.0 = plain
     // conservative sphere tracing (sharpest on thin features, slowest); higher
@@ -142,6 +179,27 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // 0...1 = sphere/cube morph, 2...6 = discrete platonic solids.
     var boundingShapeType: Float = 0.0
 
+    // Bound to Space: clip the fractal to an assumed rectangular room in WORLD
+    // meters — floor at y = 0 (the visionOS floor), footprint centered on the
+    // user's starting position. Mode: 0 = Match Space (closed box), 1 = Ceiling
+    // Open, 2 = Walls Open (see BoundToSpaceMode).
+    var boundToSpaceEnabled: Bool = false
+    var boundToSpaceMode: Int = 0
+    var boundSpaceWidth: Float = 4.0
+    var boundSpaceDepth: Float = 4.0
+    var boundSpaceHeight: Float = 2.5
+
+    // Environment Scrunch: the scanned surroundings (visionOS scene
+    // reconstruction; synthetic primitives on Mac) baked to a distance grid
+    // that the fractal scrunches/bulges around — a mixed positive/negative
+    // proximity field (the hand-attraction model applied to the room).
+    var envScrunchEnabled: Bool = false
+    var envScrunchMode: Int = 0             // 0 = Scrunch (bulge around surfaces), 1 = Shell (render only within Reach of surfaces)
+    var envScrunchStrength: Float = 0.8     // 0-1 blend toward the scrunched field
+    var envScrunchReach: Float = 0.75       // engage band / shell thickness around surfaces, meters
+    var envScrunchContain: Int = 0          // 0 = off, 1 = hard clip to scanned room box, 2 = soft blend
+    var envScrunchContainFeather: Float = 0.1 // soft-blend feather half-width, meters (mode 2)
+
     // Zoom fog compensation: scale fog intensity down on zoom-out so the fog
     // sphere's world radius stays constant instead of swallowing the fractal.
     // Off = raw fog at every zoom (was hardcoded on for the Kleinian family).
@@ -154,6 +212,15 @@ struct QualityConfig: Codable, Equatable, Sendable {
         boundingShapeFogMode = boundingShapeFogMode.clamped(to: 0...2)
         boundingShapeShadowDepth = boundingShapeShadowDepth.clamped(to: 0.02...0.95)
         boundingShapeType = boundingShapeType.clamped(to: 0.0...SafetyBubbleShapePreset.maxStoredValue)
+        boundToSpaceMode = boundToSpaceMode.clamped(to: 0...2)
+        boundSpaceWidth = boundSpaceWidth.clamped(to: 1.0...20.0)
+        boundSpaceDepth = boundSpaceDepth.clamped(to: 1.0...20.0)
+        boundSpaceHeight = boundSpaceHeight.clamped(to: 1.0...10.0)
+        envScrunchMode = envScrunchMode.clamped(to: 0...1)
+        envScrunchStrength = envScrunchStrength.clamped(to: 0.0...1.0)
+        envScrunchReach = envScrunchReach.clamped(to: 0.2...2.0)
+        envScrunchContain = envScrunchContain.clamped(to: 0...2)
+        envScrunchContainFeather = envScrunchContainFeather.clamped(to: 0.0...0.5)
         baseFractalIterations = baseFractalIterations.clamped(to: 2...24)
         baseMaxRaySteps = baseMaxRaySteps.clamped(to: 16...200)
         resolutionScale = resolutionScale.clamped(to: ControlCatalog.resolutionScale)
@@ -175,10 +242,13 @@ struct QualityConfig: Codable, Equatable, Sendable {
         case baseFractalIterations, baseMaxRaySteps
         case resolutionScale, renderQuality, tileSize
         case debugHierarchical, recreateLegacyComputeCacheBug, coherentPacketEnabled, computeTemporalReprojectionEnabled, coarsePrepassWarmStartEnabled, foveationStrength
-        case smartAdvanceEnabled, coneMarchStrength
+        case smartAdvanceEnabled, coneMarchStrength, coneCoverageAAEnabled
         case overRelaxationMax, distanceLODStrength, shadowsEnabled, boundingSphereSkipEnabled, boundingShapeRadius
         case boundingShapeFogEnabled  // legacy Bool key, migrated into boundingShapeFogMode on decode
         case boundingShapeFogMode, boundingShapeShadowDepth, boundingShapeType
+        case boundToSpaceEnabled, boundToSpaceMode, boundSpaceWidth, boundSpaceDepth, boundSpaceHeight
+        case envScrunchEnabled, envScrunchMode, envScrunchStrength, envScrunchReach
+        case envScrunchContain, envScrunchContainFeather
         case zoomFogCompensationEnabled
         case adaptiveRenderQualityEnabled
     }
@@ -201,6 +271,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         foveationStrength     = try c.decodeIfPresent(Float.self, forKey: .foveationStrength)     ?? 0.0
         smartAdvanceEnabled   = try c.decodeIfPresent(Bool.self,  forKey: .smartAdvanceEnabled)   ?? false
         coneMarchStrength     = try c.decodeIfPresent(Float.self, forKey: .coneMarchStrength)     ?? 0.0
+        coneCoverageAAEnabled = try c.decodeIfPresent(Bool.self,  forKey: .coneCoverageAAEnabled) ?? false
         overRelaxationMax     = try c.decodeIfPresent(Float.self, forKey: .overRelaxationMax)     ?? 1.4
         distanceLODStrength   = try c.decodeIfPresent(Float.self, forKey: .distanceLODStrength)   ?? 0.0
         shadowsEnabled        = try c.decodeIfPresent(Bool.self,  forKey: .shadowsEnabled)        ?? true
@@ -215,6 +286,17 @@ struct QualityConfig: Codable, Equatable, Sendable {
         }
         boundingShapeShadowDepth = try c.decodeIfPresent(Float.self, forKey: .boundingShapeShadowDepth) ?? 0.35
         boundingShapeType = try c.decodeIfPresent(Float.self, forKey: .boundingShapeType) ?? 0.0
+        boundToSpaceEnabled = try c.decodeIfPresent(Bool.self, forKey: .boundToSpaceEnabled) ?? false
+        boundToSpaceMode = try c.decodeIfPresent(Int.self, forKey: .boundToSpaceMode) ?? 0
+        boundSpaceWidth = try c.decodeIfPresent(Float.self, forKey: .boundSpaceWidth) ?? 4.0
+        boundSpaceDepth = try c.decodeIfPresent(Float.self, forKey: .boundSpaceDepth) ?? 4.0
+        boundSpaceHeight = try c.decodeIfPresent(Float.self, forKey: .boundSpaceHeight) ?? 2.5
+        envScrunchEnabled = try c.decodeIfPresent(Bool.self, forKey: .envScrunchEnabled) ?? false
+        envScrunchMode = try c.decodeIfPresent(Int.self, forKey: .envScrunchMode) ?? 0
+        envScrunchStrength = try c.decodeIfPresent(Float.self, forKey: .envScrunchStrength) ?? 0.8
+        envScrunchReach = try c.decodeIfPresent(Float.self, forKey: .envScrunchReach) ?? 0.75
+        envScrunchContain = try c.decodeIfPresent(Int.self, forKey: .envScrunchContain) ?? 0
+        envScrunchContainFeather = try c.decodeIfPresent(Float.self, forKey: .envScrunchContainFeather) ?? 0.1
         zoomFogCompensationEnabled = try c.decodeIfPresent(Bool.self, forKey: .zoomFogCompensationEnabled) ?? false
         adaptiveRenderQualityEnabled = try c.decodeIfPresent(Bool.self, forKey: .adaptiveRenderQualityEnabled) ?? true
     }
@@ -237,6 +319,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         try c.encode(foveationStrength, forKey: .foveationStrength)
         try c.encode(smartAdvanceEnabled, forKey: .smartAdvanceEnabled)
         try c.encode(coneMarchStrength, forKey: .coneMarchStrength)
+        try c.encode(coneCoverageAAEnabled, forKey: .coneCoverageAAEnabled)
         try c.encode(overRelaxationMax, forKey: .overRelaxationMax)
         try c.encode(distanceLODStrength, forKey: .distanceLODStrength)
         try c.encode(shadowsEnabled, forKey: .shadowsEnabled)
@@ -245,6 +328,17 @@ struct QualityConfig: Codable, Equatable, Sendable {
         try c.encode(boundingShapeFogMode, forKey: .boundingShapeFogMode)
         try c.encode(boundingShapeShadowDepth, forKey: .boundingShapeShadowDepth)
         try c.encode(boundingShapeType, forKey: .boundingShapeType)
+        try c.encode(boundToSpaceEnabled, forKey: .boundToSpaceEnabled)
+        try c.encode(boundToSpaceMode, forKey: .boundToSpaceMode)
+        try c.encode(boundSpaceWidth, forKey: .boundSpaceWidth)
+        try c.encode(boundSpaceDepth, forKey: .boundSpaceDepth)
+        try c.encode(boundSpaceHeight, forKey: .boundSpaceHeight)
+        try c.encode(envScrunchEnabled, forKey: .envScrunchEnabled)
+        try c.encode(envScrunchMode, forKey: .envScrunchMode)
+        try c.encode(envScrunchStrength, forKey: .envScrunchStrength)
+        try c.encode(envScrunchReach, forKey: .envScrunchReach)
+        try c.encode(envScrunchContain, forKey: .envScrunchContain)
+        try c.encode(envScrunchContainFeather, forKey: .envScrunchContainFeather)
         try c.encode(zoomFogCompensationEnabled, forKey: .zoomFogCompensationEnabled)
         try c.encode(adaptiveRenderQualityEnabled, forKey: .adaptiveRenderQualityEnabled)
     }

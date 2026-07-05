@@ -47,6 +47,7 @@ struct RenderSettingsSnapshot {
     let foveationStrength: Float
     let smartAdvanceEnabled: Bool
     let coneMarchStrength: Float
+    let coneCoverageAAEnabled: Bool
     let distanceLODStrength: Float
     let shadowsEnabled: Bool
     let boundingSphereSkipEnabled: Bool
@@ -54,6 +55,15 @@ struct RenderSettingsSnapshot {
     let boundingShapeFogMode: Int
     let boundingShapeShadowDepth: Float
     let boundingShapeType: Float
+    let boundToSpaceEnabled: Bool
+    let boundToSpaceMode: Int              // 0 = Match Space, 1 = Ceiling Open, 2 = Walls Open
+    let boundSpaceSize: SIMD3<Float>       // assumed room size, world meters (w, h, d)
+    let envScrunchEnabled: Bool
+    let envScrunchMode: Int                // 0 = Scrunch (bulge), 1 = Shell (only near surfaces)
+    let envScrunchStrength: Float          // 0-1 blend toward the scrunched field
+    let envScrunchReach: Float             // engage band around surfaces, meters
+    let envScrunchContain: Int             // 0 = off, 1 = hard clip to scanned room box, 2 = soft blend
+    let envScrunchContainFeather: Float    // soft-blend feather half-width, meters (mode 2)
     let zoomFogCompensationEnabled: Bool
     let limitFlash: Float
     let activeGestureIndex: Int
@@ -120,5 +130,74 @@ extension RenderSettingsSnapshot {
     /// values deliberately clip the fractal (e.g. for Mixed-immersion scenes).
     var estimatedBoundingSphereRadius: Float {
         boundingSphereSkipEnabled ? boundingShapeRadius : 0.0
+    }
+
+    /// Shader-facing Bound to Space mode: 0 = off; otherwise the user mode
+    /// shifted up by one (1 = Match Space, 2 = Ceiling Open, 3 = Walls Open).
+    var resolvedBoundToSpaceMode: Int32 {
+        boundToSpaceEnabled ? Int32(boundToSpaceMode + 1) : 0
+    }
+
+    /// Shader-facing Environment Scrunch block: the toggle + knobs from this
+    /// snapshot fused with the caller's live grid (world-anchored distance
+    /// field) and the frame's model→world transform. Address 0 or the toggle
+    /// off → default (enabled 0, never dereferenced). Distances are converted
+    /// to MODEL units here so the DE needs no per-sample unit math beyond one
+    /// multiply; hug/carve/soft are fixed world-scale constants chosen to sit
+    /// comfortably above the grid's cell size.
+    func makeEnvScrunchParams(modelToWorld: matrix_float4x4,
+                              gridOrigin: SIMD3<Float>,
+                              gridCell: SIMD3<Float>,
+                              gridAddress: UInt64,
+                              surfaceMinWorld: SIMD3<Float>,
+                              surfaceMaxWorld: SIMD3<Float>,
+                              farClampMeters: Float) -> EnvScrunchParams {
+        var p = EnvScrunchParams()
+        guard envScrunchEnabled, gridAddress != 0,
+              gridCell.x > 0, gridCell.y > 0, gridCell.z > 0 else { return p }
+        // Uniform-scale assumption (same as Bound to Space): model→world
+        // distance scale = length of any basis column.
+        let sx = modelToWorld.columns.0
+        let scale = simd_length(SIMD3<Float>(sx.x, sx.y, sx.z))
+        guard scale > 1e-6 else { return p }
+        let metersToModel = 1.0 / scale
+        p.enabled = 1
+        p.mode = Int32(envScrunchMode)
+        p.strength = envScrunchStrength
+        p.bandModel = envScrunchReach * metersToModel
+        p.softModel = 0.12 * metersToModel   // blend k, meters
+        p.hugModel = 0.15 * metersToModel    // bulge-shell standoff, meters
+        p.carveModel = 0.08 * metersToModel  // clearance kept empty, meters
+        p.metersToModel = metersToModel
+        // Bake far-clamp in model units — the shader's out-of-grid return.
+        // Passed in from EnvironmentSDFGrid.clampFar by the callers so the
+        // shader and the bake can never drift (TECH_DEBT.md #19).
+        p.farClampModel = farClampMeters * metersToModel
+        // model → grid texels: scale(1/cell) ∘ translate(-origin) ∘ modelToWorld
+        var toGrid = matrix_identity_float4x4
+        toGrid.columns.0.x = 1.0 / gridCell.x
+        toGrid.columns.1.y = 1.0 / gridCell.y
+        toGrid.columns.2.z = 1.0 / gridCell.z
+        toGrid.columns.3 = SIMD4<Float>(-gridOrigin.x / gridCell.x,
+                                        -gridOrigin.y / gridCell.y,
+                                        -gridOrigin.z / gridCell.z, 1.0)
+        p.modelToGrid = toGrid * modelToWorld
+        p.gridAddress = gridAddress
+        // Containment box: scanned surface AABB → grid texel coords (so the same
+        // modelToGrid transform handles rotation). Off if degenerate.
+        let dimF = Float(ENV_SCRUNCH_DIM)
+        let zero = SIMD3<Float>(repeating: 0)
+        let dimV = SIMD3<Float>(repeating: dimF)
+        let cmin = simd_clamp((surfaceMinWorld - gridOrigin) / gridCell, zero, dimV)
+        let cmax = simd_clamp((surfaceMaxWorld - gridOrigin) / gridCell, zero, dimV)
+        if envScrunchContain > 0,
+           cmax.x > cmin.x, cmax.y > cmin.y, cmax.z > cmin.z {
+            p.containMode = Int32(envScrunchContain)
+            p.containFeatherModel = envScrunchContainFeather * metersToModel
+            p.containMinGrid = cmin
+            p.containMaxGrid = cmax
+            p.cellModel = gridCell * metersToModel
+        }
+        return p
     }
 }

@@ -7,7 +7,13 @@
 //  never captured by FractalPreset, so authoring them then saving silently lost
 //  them on reload — the same class of bug as the sphere transforms in
 //  SpaceModuleTests. Device-local performance/acceleration settings
-//  (QualityConfig) are deliberately NOT persisted and are not exercised here.
+//  (QualityConfig) are deliberately NOT persisted, with one deliberate
+//  exception: the Bound-to-Space room clip — its enable+mode are scene-authored
+//  art (round-trip tested below). The manual room dims ride along for now, but
+//  intent (2026-07-04) is auto-sizing from the sensed room, manual dims a
+//  Mac/dev fallback — see REBUILD_ARCHITECTURE.md §4.5. Environment Scrunch —
+//  also QualityConfig — stays device-local ON PURPOSE: it describes the user's
+//  physical room, not the scene (TECH_DEBT.md #14, envScrunchStaysDeviceLocal).
 //
 
 import Testing
@@ -89,6 +95,210 @@ struct FractalPresetPersistenceTests {
         #expect(abs(fresh.juliaDriftEffect.speed - 0.35) < 1e-5)
         #expect(fresh.safetyBubbleFadeEnabled == false)
         #expect(abs(fresh.safetyBubbleFadeWidth - 0.4) < 1e-5)
+    }
+
+    @Test("Bound to Space (assumed-room clip) survives fromSettings → encode → decode → apply")
+    func boundToSpaceRoundTrip() throws {
+        let settings = RenderSettings()
+        settings.fractalType = .mandelbox
+        settings.boundToSpaceEnabled = true               // default false
+        settings.boundToSpaceMode = BoundToSpaceMode.ceilingOpen.rawValue
+        settings.boundSpaceWidth = 5.5                    // default 4.0
+        settings.boundSpaceDepth = 3.5                    // default 4.0
+        settings.boundSpaceHeight = 3.0                   // default 2.5
+
+        let preset = FractalPreset.fromSettings(settings, name: "Room")
+        let data = try JSONEncoder().encode(preset)
+        let decoded = try JSONDecoder().decode(FractalPreset.self, from: data)
+
+        #expect(decoded.boundToSpaceEnabled == true)
+        #expect(decoded.boundToSpaceMode == BoundToSpaceMode.ceilingOpen.rawValue)
+        #expect(abs((decoded.boundSpaceWidth ?? -1) - 5.5) < 1e-5)
+        #expect(abs((decoded.boundSpaceDepth ?? -1) - 3.5) < 1e-5)
+        #expect(abs((decoded.boundSpaceHeight ?? -1) - 3.0) < 1e-5)
+
+        let fresh = RenderSettings()
+        fresh.fractalType = .mandelbox
+        decoded.apply(to: fresh)
+
+        #expect(fresh.boundToSpaceEnabled == true)
+        #expect(fresh.boundToSpaceMode == BoundToSpaceMode.ceilingOpen.rawValue)
+        #expect(abs(fresh.boundSpaceWidth - 5.5) < 1e-5)
+        #expect(abs(fresh.boundSpaceDepth - 3.5) < 1e-5)
+        #expect(abs(fresh.boundSpaceHeight - 3.0) < 1e-5)
+
+        // The shader-facing resolved mode shifts up by one (0 = off).
+        #expect(fresh.snapshot().resolvedBoundToSpaceMode == 2)
+    }
+
+    @Test("Scene apply is ORDER-INDEPENDENT: loading A then B equals loading B fresh")
+    func sceneApplyOrderIndependent() throws {
+        // The user-visible bug this pins: "restoring scenes feels broken — it's
+        // picking up things from the previous scene." Any field the capture
+        // side writes conditionally (nil when default/off) combined with an
+        // only-if-present apply() makes the result depend on what was loaded
+        // BEFORE. This test loads a kitchen-sink scene A, then a plain scene B,
+        // and demands the re-captured scene state be byte-identical to loading
+        // B into fresh settings. Deliberate user-owned stickiness (safety
+        // bubble, beta-gated hand effects) is deliberately NOT exercised here.
+        let a = RenderSettings()
+        a.fractalType = .mandelbox
+        a.platformEnabled = false
+        a.platformRadius = 1.1
+        a.cellShadingEnabled = true
+        a.cellShadingLevels = 6.0
+        a.lightVariationRate = 0.3
+        var beat = BeatFlashEffect(); beat.enabled = true; beat.intensity = 0.6
+        a.beatFlashEffect = beat
+        var polar = PolarRotationEffect(); polar.direction = .clockwise; polar.speed = 0.5
+        a.polarRotationEffect = polar
+        var julia = JuliaDriftEffect(); julia.enabled = true; julia.speed = 0.4
+        a.juliaDriftEffect = julia
+        a.boundToSpaceEnabled = true
+        a.boundToSpaceMode = BoundToSpaceMode.wallsOpen.rawValue
+        a.boundSpaceWidth = 6.0; a.boundSpaceDepth = 3.0; a.boundSpaceHeight = 3.2
+        var twist = SpaceWarpOpValue(kind: .twist); twist.strength = 0.7
+        var mirror = SpaceWarpOpValue(kind: .mirror); mirror.strength = 1.0
+        a.spaceWarpStack = [twist, mirror]
+        a.deIterationMismatch = 0.35
+        a.sphereProjectionBlend = 0.5
+        a.sphereProjectionRadius = 1.4
+        a.detailScale = 2.0
+        a.targetDetailScale = 2.0
+        a.worldRotation = simd_quatf(angle: 0.7, axis: SIMD3<Float>(0, 1, 0))
+        a.colorMix = 0.8
+        a.fractalScale = 2.4
+        a.foldingLimit = 1.2
+        a.sphereRadius = 0.4
+        a.minDistance = 0.6
+        let presetA = FractalPreset.fromSettings(a, name: "A")
+
+        // Scene B: a plain, everything-default scene (like an older file).
+        let presetB = FractalPreset.fromSettings(RenderSettings(), name: "B")
+
+        let fixedID = UUID(uuidString: "00000000-0000-0000-0000-0000000000AB")!
+        let fixedDate = Date(timeIntervalSince1970: 0)
+        // Gradient stops (and similar value objects) mint a random UUID per
+        // instance, so two semantically-identical defaults never byte-compare.
+        // Strip every "id" key recursively before comparing.
+        func scrubIDs(_ value: Any) -> Any {
+            if var dict = value as? [String: Any] {
+                dict.removeValue(forKey: "id")
+                return dict.mapValues { scrubIDs($0) }
+            }
+            if let arr = value as? [Any] { return arr.map { scrubIDs($0) } }
+            return value
+        }
+        func recapture(_ s: RenderSettings) throws -> (json: String, dict: [String: Any]) {
+            let p = FractalPreset.fromSettings(s, name: "cmp", id: fixedID, createdAt: fixedDate)
+            let data = try JSONEncoder().encode(p)
+            let raw = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            let dict = try #require(scrubIDs(raw) as? [String: Any])
+            let canonical = try JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])
+            return (String(data: canonical, encoding: .utf8) ?? "", dict)
+        }
+
+        let fresh = RenderSettings()
+        presetB.apply(to: fresh)
+        let chained = RenderSettings()
+        presetA.apply(to: chained)
+        // Live gesture state from "before the load" must not survive it: zoom
+        // and rotation offsets ride in manualOffset* even outside animation
+        // playback, which was the main "never restores the same way" leak.
+        chained.manualOffsetDetailScale = 1.5
+        chained.manualOffsetMinDistance = 0.4
+        chained.manualRotationOffset = simd_quatf(angle: 0.5, axis: SIMD3<Float>(1, 0, 0))
+        presetB.apply(to: chained)
+        #expect(chained.manualOffsetDetailScale == 0)
+        #expect(chained.manualOffsetMinDistance == 0)
+
+        // Same demand for an OLD scene file with none of the newer keys: after
+        // the kitchen-sink scene, loading it must land on the same state as
+        // loading it into fresh settings.
+        let legacyJSON = """
+        {
+          "id": "00000000-0000-0000-0000-0000000000CE",
+          "name": "Old",
+          "createdAt": 0,
+          "fractalIterations": 9,
+          "maxRaySteps": 64,
+          "colorMix": 0.5,
+          "colorIterations": 8,
+          "position": [0, 0, -1.2],
+          "scale": 1,
+          "fractalType": "mandelbox",
+          "minDistance": 0.8,
+          "fractalScale": 2.8,
+          "foldingLimit": 1.0,
+          "sphereRadius": 0.5
+        }
+        """
+        let legacy = try JSONDecoder().decode(FractalPreset.self, from: Data(legacyJSON.utf8))
+        let legacyFresh = RenderSettings()
+        legacy.apply(to: legacyFresh)
+        let legacyChained = RenderSettings()
+        presetA.apply(to: legacyChained)
+        legacy.apply(to: legacyChained)
+
+        func expectNoLeak(_ fresh: (json: String, dict: [String: Any]),
+                          _ chained: (json: String, dict: [String: Any]),
+                          label: String) {
+            guard fresh.json != chained.json else { return }
+            // Name exactly which fields depended on load order.
+            let keys = Set(fresh.dict.keys).union(chained.dict.keys).sorted()
+            var leaks: [String] = []
+            for k in keys {
+                let lhs = fresh.dict[k].map { "\($0)" } ?? "∅"
+                let rhs = chained.dict[k].map { "\($0)" } ?? "∅"
+                if lhs != rhs { leaks.append("\(k): fresh=\(lhs) afterA=\(rhs)") }
+            }
+            Issue.record("""
+                [\(label)] scene apply leaked \(leaks.count) field(s) from the \
+                previously loaded scene:\n\(leaks.joined(separator: "\n"))
+                """)
+        }
+        expectNoLeak(try recapture(fresh), try recapture(chained), label: "current-format B")
+        expectNoLeak(try recapture(legacyFresh), try recapture(legacyChained), label: "legacy B")
+    }
+
+    @Test("Environment Scrunch is DEVICE-LOCAL by design: never serialized, never stomped by scene load")
+    func envScrunchStaysDeviceLocal() throws {
+        // Decision (TECH_DEBT.md #14): unlike Bound to Space (whose enable+mode
+        // are scene-authored art), Environment Scrunch describes the user's
+        // PHYSICAL room — like the safety bubble and the Quality accel fields
+        // it is device-local and must never travel inside a scene/preset. If a
+        // field is added to FractalPreset later, this test failing is the
+        // prompt to make that a conscious decision, not an accident.
+        let authoring = RenderSettings()
+        authoring.fractalType = .mandelbox
+        authoring.envScrunchEnabled = true
+        authoring.envScrunchStrength = 0.75
+        authoring.envScrunchReach = 1.2
+        authoring.envScrunchContain = 2          // containment is device-local too
+        authoring.envScrunchContainFeather = 0.2
+
+        // 1) No scrunch field may appear anywhere in the serialized preset.
+        let preset = FractalPreset.fromSettings(authoring, name: "Scrunch")
+        let data = try JSONEncoder().encode(preset)
+        let raw = try #require(String(data: data, encoding: .utf8))
+        #expect(!raw.contains("envScrunch"),
+                "envScrunch fields leaked into the FractalPreset serialization")
+
+        // 2) Applying a scene must not disturb the device's live scrunch config.
+        let device = RenderSettings()
+        device.fractalType = .mandelbox
+        device.envScrunchEnabled = true
+        device.envScrunchStrength = 0.5
+        device.envScrunchReach = 0.4
+        device.envScrunchContain = 1
+        device.envScrunchContainFeather = 0.05
+        let decoded = try JSONDecoder().decode(FractalPreset.self, from: data)
+        decoded.apply(to: device)
+        #expect(device.envScrunchEnabled == true)
+        #expect(abs(device.envScrunchStrength - 0.5) < 1e-5)
+        #expect(abs(device.envScrunchReach - 0.4) < 1e-5)
+        #expect(device.envScrunchContain == 1)
+        #expect(abs(device.envScrunchContainFeather - 0.05) < 1e-5)
     }
 
     @Test("Composable Transformations STACK survives fromSettings → encode → decode → apply (order + per-op params)")
@@ -366,8 +576,8 @@ struct FractalPresetPersistenceTests {
         if case .invalid = AffineCoxeter.parse("F5~") {} else { Issue.record("F5~ should be invalid") }
     }
 
-    @Test("Older scenes without the new keys decode to nil and leave live values untouched on apply")
-    func legacySceneLeavesFieldsUntouched() throws {
+    @Test("Older scenes without the new keys decode to nil and apply as DEFAULTS (authoritative reset)")
+    func legacySceneResetsMissingFieldsToDefaults() throws {
         // A minimal flat scene with none of the newly-added keys (an older file).
         let json = """
         {
@@ -394,17 +604,24 @@ struct FractalPresetPersistenceTests {
         #expect(preset.beatFlashEffect == nil)
         #expect(preset.safetyBubbleFadeWidth == nil)
 
-        // Pre-seed non-default live values; a legacy preset must NOT clobber them.
+        // Pre-seed non-default live values. Under the ORDER-INDEPENDENT apply
+        // semantics (2026-07-04, "scene restore feels broken" fix) a legacy
+        // preset RESETS missing fields to their declaration defaults — the
+        // previous scene's look must never bleed into the loaded one. (The
+        // safety bubble and beta-gated hand effects remain the documented
+        // user-owned exceptions.)
         let settings = RenderSettings()
         settings.fractalType = .mandelbox
         settings.platformEnabled = false
         settings.cellShadingEnabled = true
         settings.lightVariationRate = 0.2
+        settings.boundToSpaceEnabled = true
         preset.apply(to: settings)
 
-        #expect(settings.platformEnabled == false)
-        #expect(settings.cellShadingEnabled == true)
-        #expect(abs(settings.lightVariationRate - 0.2) < 1e-5)
+        #expect(settings.platformEnabled == true)              // default
+        #expect(settings.cellShadingEnabled == false)          // default
+        #expect(abs(settings.lightVariationRate - 0.5) < 1e-5) // default
+        #expect(settings.boundToSpaceEnabled == false)         // default
     }
 }
 

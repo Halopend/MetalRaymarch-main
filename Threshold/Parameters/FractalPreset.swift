@@ -143,6 +143,11 @@ struct FractalPreset: Codable, Identifiable {
     var boundingShapeFogMode: Int?        // Bounding edge treatment: 0=off, 1=Ghost Fade, 2=Inner Shadow
     var boundingShapeShadowDepth: Float?  // Inner Shadow band width, fraction of boundingShapeRadius
     var boundingShapeType: Float?         // Bounding Shape family/preset (sphere/cube/platonic), same encoding as safetyBubbleShape
+    var boundToSpaceEnabled: Bool?        // Bound to Space (assumed-room clip) on/off
+    var boundToSpaceMode: Int?            // 0 = Match Space, 1 = Ceiling Open, 2 = Walls Open
+    var boundSpaceWidth: Float?           // assumed room width (world x), meters
+    var boundSpaceDepth: Float?           // assumed room depth (world z), meters
+    var boundSpaceHeight: Float?          // assumed room height (world y), meters
     var platformRadius: Float?            // DisplayConfig — glass-floor size
     var cellShadingEnabled: Bool?         // ColorConfig — toon shading on/off
     var cellShadingLevels: Float?         // ColorConfig — toon banding levels
@@ -182,6 +187,7 @@ struct FractalPreset: Codable, Identifiable {
         case platformEnabled, platformRadius
         case mixedModeScene, boundingShapeEnabled, boundingShapeRadius, boundingShapeFogEnabled
         case boundingShapeFogMode, boundingShapeShadowDepth, boundingShapeType
+        case boundToSpaceEnabled, boundToSpaceMode, boundSpaceWidth, boundSpaceDepth, boundSpaceHeight
         case cellShadingEnabled, cellShadingLevels, aoStrength, tonemapStrength
         case lightVariationRate, beatFlashEffect, polarRotationEffect, juliaDriftEffect
         case safetyBubbleFadeEnabled, safetyBubbleFadeWidth
@@ -373,6 +379,11 @@ struct FractalPreset: Codable, Identifiable {
         boundingShapeFogMode = try container.decodeIfPresent(Int.self, forKey: .boundingShapeFogMode)
         boundingShapeShadowDepth = try container.decodeIfPresent(Float.self, forKey: .boundingShapeShadowDepth)
         boundingShapeType = try container.decodeIfPresent(Float.self, forKey: .boundingShapeType)
+        boundToSpaceEnabled = try container.decodeIfPresent(Bool.self, forKey: .boundToSpaceEnabled)
+        boundToSpaceMode = try container.decodeIfPresent(Int.self, forKey: .boundToSpaceMode)
+        boundSpaceWidth = try container.decodeIfPresent(Float.self, forKey: .boundSpaceWidth)
+        boundSpaceDepth = try container.decodeIfPresent(Float.self, forKey: .boundSpaceDepth)
+        boundSpaceHeight = try container.decodeIfPresent(Float.self, forKey: .boundSpaceHeight)
         platformRadius = try container.decodeIfPresent(Float.self, forKey: .platformRadius)
         cellShadingEnabled = try container.decodeIfPresent(Bool.self, forKey: .cellShadingEnabled)
         cellShadingLevels = try container.decodeIfPresent(Float.self, forKey: .cellShadingLevels)
@@ -472,6 +483,11 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(boundingShapeFogMode, forKey: .boundingShapeFogMode)
         try container.encodeIfPresent(boundingShapeShadowDepth, forKey: .boundingShapeShadowDepth)
         try container.encodeIfPresent(boundingShapeType, forKey: .boundingShapeType)
+        try container.encodeIfPresent(boundToSpaceEnabled, forKey: .boundToSpaceEnabled)
+        try container.encodeIfPresent(boundToSpaceMode, forKey: .boundToSpaceMode)
+        try container.encodeIfPresent(boundSpaceWidth, forKey: .boundSpaceWidth)
+        try container.encodeIfPresent(boundSpaceDepth, forKey: .boundSpaceDepth)
+        try container.encodeIfPresent(boundSpaceHeight, forKey: .boundSpaceHeight)
         try container.encodeIfPresent(platformRadius, forKey: .platformRadius)
         try container.encodeIfPresent(cellShadingEnabled, forKey: .cellShadingEnabled)
         try container.encodeIfPresent(cellShadingLevels, forKey: .cellShadingLevels)
@@ -668,6 +684,12 @@ struct FractalPreset: Codable, Identifiable {
         preset.boundingShapeFogMode = settings.boundingShapeFogMode
         preset.boundingShapeShadowDepth = settings.boundingShapeShadowDepth
         preset.boundingShapeType = settings.boundingShapeType
+        // Bound to Space (assumed-room clip) — round-trips with the scene.
+        preset.boundToSpaceEnabled = settings.boundToSpaceEnabled
+        preset.boundToSpaceMode = settings.boundToSpaceMode
+        preset.boundSpaceWidth = settings.boundSpaceWidth
+        preset.boundSpaceDepth = settings.boundSpaceDepth
+        preset.boundSpaceHeight = settings.boundSpaceHeight
         // Mixed-immersion scene marker (visionOS): recorded only when the scene
         // is saved while Mixed is active, so loading it can restore the
         // passthrough presentation. Full/Partial saves leave it nil and loading
@@ -715,6 +737,15 @@ struct FractalPreset: Codable, Identifiable {
             settings.audioReactiveConfig = AudioReactiveConfig()
         }
 
+        // A scene load must start from a CLEAN slate: live gesture offsets
+        // (zoom/rotation/param nudges ride in _manualOffset* even outside
+        // animation playback) and music offsets otherwise carry into the loaded
+        // scene, so the same scene restores differently depending on what the
+        // user did before. Clearing here is what makes apply reproducible.
+        settings.clearAnimationManualOffsets()
+        settings.clearAudioPlaybackOffsets()
+        settings.setSpaceWarpAudioOffsets([:])
+
         settings.baseFractalIterations = fractalIterations
         settings.baseMaxRaySteps = maxRaySteps
         settings.colorMix = colorMix
@@ -738,14 +769,16 @@ struct FractalPreset: Codable, Identifiable {
         settings.foldingLimit = foldingLimit
         settings.sphereRadius = sphereRadius
         
-        // Restore formula params for all types (unified path)
+        // Restore formula params for all types (unified path). AUTHORITATIVE:
+        // a scene without values means the type's defaults — never the previous
+        // scene's parameters.
+        var fp = fractalType.defaultFormulaParams()
         if let vals = formulaParamValues {
-            var fp = fractalType.defaultFormulaParams()
             for i in 0..<min(16, vals.count) {
                 FormulaCatalog.setParam(&fp, index: i, value: vals[i])
             }
-            settings.formulaParams = fp
         }
+        settings.formulaParams = fp
         
         // Also set target values for gesture-controlled parameters
         // This ensures smooth transitions when loading presets
@@ -820,13 +853,11 @@ struct FractalPreset: Codable, Identifiable {
             settings.handAttractionConfig = cfg
         }
 
-        // Space module (domain transforms) — restore when present.
-        if let sphericalInversionMode = sphericalInversionMode {
-            settings.sphericalInversionMode = sphericalInversionMode
-        }
-        if let sphericalInversionRadius = sphericalInversionRadius {
-            settings.sphericalInversionRadius = sphericalInversionRadius
-        }
+        // Space module (domain transforms) — AUTHORITATIVE like the sphere
+        // projection below: a scene without the field means the default, never
+        // the previous scene's inversion.
+        settings.sphericalInversionMode = sphericalInversionMode ?? .off
+        settings.sphericalInversionRadius = sphericalInversionRadius ?? 2.0
         // Sphere projection must be RESET (not left untouched) when the incoming
         // scene doesn't carry it — otherwise the previous scene's enabled state
         // leaks forward. Legacy MSP scenes now turn this ON via the migration above,
@@ -845,13 +876,10 @@ struct FractalPreset: Codable, Identifiable {
         // left live, instead of leaking them into this one.
         settings.spaceWarpStack = spaceWarpOps ?? []
 
-        // Glass-floor platform — restore when present (older scenes leave it as-is).
-        if let platformEnabled = platformEnabled {
-            settings.platformEnabled = platformEnabled
-        }
-        if let platformRadius = platformRadius {
-            settings.platformRadius = platformRadius
-        }
+        // Glass-floor platform — AUTHORITATIVE: absent means the defaults
+        // (platform on at 1.888), never the previous scene's platform.
+        settings.platformEnabled = platformEnabled ?? true
+        settings.platformRadius = platformRadius ?? 1.888
 
         // Bounding Shape (sphere) — a scene's explicit setting wins; otherwise
         // bounding follows the Mixed-immersion rule: scenes marked Mixed are
@@ -862,21 +890,26 @@ struct FractalPreset: Codable, Identifiable {
         } else {
             settings.boundingSphereSkipEnabled = (mixedModeScene == true)
         }
-        if let boundingShapeRadius = boundingShapeRadius {
-            settings.boundingShapeRadius = boundingShapeRadius
-        }
+        // Bounding-shape knobs — AUTHORITATIVE to the declaration defaults
+        // (the enabled flag above keeps its deliberate Mixed-immersion rule;
+        // the legacy fogEnabled → Ghost Fade mapping is preserved).
+        settings.boundingShapeRadius = boundingShapeRadius ?? 6.0
         if let boundingShapeFogMode = boundingShapeFogMode {
             settings.boundingShapeFogMode = boundingShapeFogMode
         } else if let boundingShapeFogEnabled = boundingShapeFogEnabled {
-            // Legacy scenes: the old on/off toggle mapped to Ghost Fade.
             settings.boundingShapeFogMode = boundingShapeFogEnabled ? 1 : 0
+        } else {
+            settings.boundingShapeFogMode = 0
         }
-        if let boundingShapeShadowDepth = boundingShapeShadowDepth {
-            settings.boundingShapeShadowDepth = boundingShapeShadowDepth
-        }
-        if let boundingShapeType = boundingShapeType {
-            settings.boundingShapeType = boundingShapeType
-        }
+        settings.boundingShapeShadowDepth = boundingShapeShadowDepth ?? 0.35
+        settings.boundingShapeType = boundingShapeType ?? 0.0
+        // Bound to Space — AUTHORITATIVE: a scene without the room clip means
+        // OFF with default dims, never the previous scene's room.
+        settings.boundToSpaceEnabled = boundToSpaceEnabled ?? false
+        settings.boundToSpaceMode = boundToSpaceMode ?? 0
+        settings.boundSpaceWidth = boundSpaceWidth ?? 4.0
+        settings.boundSpaceDepth = boundSpaceDepth ?? 4.0
+        settings.boundSpaceHeight = boundSpaceHeight ?? 2.5
 
         // Mixed-immersion scene (visionOS): switch the presentation style to
         // Mixed when the scene was authored for it. Never switches *away* from
@@ -889,75 +922,36 @@ struct FractalPreset: Codable, Identifiable {
         }
         #endif
 
-        // v2.0 modular lighting effects
-        if let lightingMode = lightingMode {
-            settings.lightingMode = lightingMode
-        }
-        if let lightingPreset = lightingPreset {
-            settings.lightingPreset = lightingPreset
-        }
-        if let hueRotationEffect = hueRotationEffect {
-            settings.hueRotationEffect = hueRotationEffect
-        }
-        if let pulseEffect = pulseEffect {
-            settings.pulseEffect = pulseEffect
-        }
-        if let glowEffect = glowEffect {
-            settings.glowEffect = glowEffect
-        }
-        if let bloomEffect = bloomEffect {
-            settings.bloomEffect = bloomEffect
-        }
-        if let fogEffect = fogEffect {
-            settings.fogEffect = fogEffect
-        }
-        if let gradientCycleEffect = gradientCycleEffect {
-            settings.gradientCycleEffect = gradientCycleEffect
-        }
-        if let linearRailEffect = linearRailEffect {
-            settings.linearRailEffect = linearRailEffect
-        }
-        // Remaining lighting state (previously dropped). The effect setters force
-        // lightingPreset = .custom, exactly like the effects above, so this is
-        // consistent with the existing restore behavior.
-        if let lightVariationRate = lightVariationRate {
-            settings.lightVariationRate = lightVariationRate
-        }
-        if let beatFlashEffect = beatFlashEffect {
-            settings.beatFlashEffect = beatFlashEffect
-        }
-        if let polarRotationEffect = polarRotationEffect {
-            settings.polarRotationEffect = polarRotationEffect
-        }
-        if let juliaDriftEffect = juliaDriftEffect {
-            settings.juliaDriftEffect = juliaDriftEffect
-        }
+        // v2.0 modular lighting effects — AUTHORITATIVE: every field falls
+        // back to its RenderSettings declaration default when absent, so an
+        // older scene loads to a defined look instead of inheriting whatever
+        // the previous scene left live. (The effect setters force
+        // lightingPreset = .custom, matching the pre-existing restore order.)
+        settings.lightingMode = lightingMode ?? .animated
+        settings.lightingPreset = lightingPreset ?? .off
+        settings.hueRotationEffect = hueRotationEffect ?? .off
+        settings.pulseEffect = pulseEffect ?? .off
+        settings.glowEffect = glowEffect ?? .off
+        settings.bloomEffect = bloomEffect ?? .off
+        settings.fogEffect = fogEffect ?? FogEffect(enabled: true, intensity: 0.32)
+        settings.gradientCycleEffect = gradientCycleEffect ?? .off
+        settings.linearRailEffect = linearRailEffect ?? .off
+        settings.lightVariationRate = lightVariationRate ?? 0.5
+        settings.beatFlashEffect = beatFlashEffect ?? .off
+        settings.polarRotationEffect = polarRotationEffect ?? .off
+        settings.juliaDriftEffect = juliaDriftEffect ?? .off
 
-        // Color scheme auto-transition
-        if let colorSchemeAutoTransition = colorSchemeAutoTransition {
-            settings.colorSchemeAutoTransition = colorSchemeAutoTransition
-        }
-        if let colorSchemeAutoInterval = colorSchemeAutoInterval {
-            settings.colorSchemeAutoInterval = colorSchemeAutoInterval
-        }
-        if let colorSchemeTransitionDuration = colorSchemeTransitionDuration {
-            settings.colorSchemeTransitionDuration = colorSchemeTransitionDuration
-        }
-        
-        // v2.1 gradient coloring system
-        if let gradientState = gradientState {
-            settings.gradientState = gradientState
-        }
-        if let lightingSoftness = lightingSoftness {
-            settings.lightingSoftness = lightingSoftness
-        }
-        // Cell (toon) shading — restore when present.
-        if let cellShadingEnabled = cellShadingEnabled {
-            settings.cellShadingEnabled = cellShadingEnabled
-        }
-        if let cellShadingLevels = cellShadingLevels {
-            settings.cellShadingLevels = cellShadingLevels
-        }
+        // Color scheme auto-transition — authoritative.
+        settings.colorSchemeAutoTransition = colorSchemeAutoTransition ?? false
+        settings.colorSchemeAutoInterval = colorSchemeAutoInterval ?? 30.0
+        settings.colorSchemeTransitionDuration = colorSchemeTransitionDuration ?? 2.0
+
+        // v2.1 gradient coloring system — authoritative.
+        settings.gradientState = gradientState ?? GradientState()
+        settings.lightingSoftness = lightingSoftness ?? 0.35
+        // Cell (toon) shading — authoritative.
+        settings.cellShadingEnabled = cellShadingEnabled ?? false
+        settings.cellShadingLevels = cellShadingLevels ?? 4.0
         settings.aoStrength = aoStrength ?? 0.0
         settings.tonemapStrength = tonemapStrength ?? 0.0
         if let arc = audioReactiveConfig {
@@ -969,6 +963,10 @@ struct FractalPreset: Codable, Identifiable {
             audioConfig.musicReactiveMappings = mappings
             audioConfig.fractalAudioReactiveEnabled = true
             settings.audioReactiveConfig = audioConfig
+        } else {
+            // No audio state at all (pre-music scene): reset, so the previous
+            // scene's mappings don't keep driving this one.
+            settings.audioReactiveConfig = AudioReactiveConfig()
         }
 
         // === MODULE LAYER ===
