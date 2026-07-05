@@ -94,8 +94,16 @@ extension Renderer {
             } else if !handTrackingAllowed {
                 print("⚠️ Hand tracking provider NOT added (authorization denied)")
             }
+            // Environment Scrunch: scene reconstruction supplies the scanned
+            // surroundings as mesh anchors (needs world sensing, same grant as
+            // pose above).
+            if let sr = sceneReconstruction, authStatus[.worldSensing] == .allowed {
+                providers.append(sr)
+                print("✓ Scene reconstruction provider added (Environment Scrunch source)")
+            }
             try await arSession.run(providers)
             print("✓ ARKit session started with \(providers.count) providers")
+            startEnvironmentMeshTasks()
             if RENDERER_DEBUG {
                 print("  World tracking state: \(worldTracking.state)")
             }
@@ -108,5 +116,87 @@ extension Renderer {
                 hasLoggedWorldTrackingWarning = true
             }
         }
+    }
+
+    // MARK: - Environment Scrunch (scene-reconstruction source)
+
+    /// Consumes the scene-reconstruction anchor stream into `environmentMeshes`
+    /// (world-space triangle soup per anchor) and runs a throttled bake loop
+    /// that folds every anchor into a fresh EnvironmentSDFGrid whenever the
+    /// cache is dirty. Bakes are full rebakes on a utility task (~hundreds of
+    /// ms for a room at 64³) published atomically via the `environmentSDF`
+    /// Mutex — a frame that captured the previous grid keeps a valid buffer.
+    func startEnvironmentMeshTasks() {
+        guard let sr = sceneReconstruction, meshUpdatesTask == nil else { return }
+        meshUpdatesTask = Task.detached(priority: .utility) { [weak self] in
+            for await update in sr.anchorUpdates {
+                guard !Task.isCancelled, let self else { return }
+                let anchor = update.anchor
+                switch update.event {
+                case .removed:
+                    self.environmentMeshes.withLock { $0[anchor.id] = nil }
+                case .added, .updated:
+                    let tris = Renderer.worldTriangles(from: anchor)
+                    self.environmentMeshes.withLock { $0[anchor.id] = tris }
+                }
+                self.environmentMeshesDirty.withLock { $0 = true }
+            }
+        }
+        guard envBakeTask == nil else { return }
+        let bakeDevice = device
+        envBakeTask = Task.detached(priority: .utility) { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self else { return }
+                let dirty = self.environmentMeshesDirty.withLock { d -> Bool in
+                    let was = d; d = false; return was
+                }
+                guard dirty else { continue }
+                let tris = self.environmentMeshes.withLock { Array($0.values) }.flatMap { $0 }
+                guard tris.count >= 3 else { continue }
+                // Center the 8×4×8 m grid on the scanned geometry's footprint;
+                // floor margin comes from the fixed -0.5 m origin offset.
+                var lo = tris[0], hi = tris[0]
+                for t in tris { lo = simd_min(lo, t); hi = simd_max(hi, t) }
+                let center = (lo + hi) * 0.5
+                let origin = SIMD3<Float>(center.x - 4.0, -0.5, center.z - 4.0)
+                if let grid = EnvironmentSDFGrid.bake(device: bakeDevice,
+                                                      triangles: tris,
+                                                      originWorld: origin) {
+                    self.environmentSDF.withLock { $0 = grid }
+                }
+            }
+        }
+    }
+
+    /// Extracts a mesh anchor's triangles as world-space vertex triples.
+    nonisolated static func worldTriangles(from anchor: MeshAnchor) -> [SIMD3<Float>] {
+        let geometry = anchor.geometry
+        let vertices = geometry.vertices
+        let faces = geometry.faces
+        guard vertices.format == .float3 else { return [] }
+        let vBase = vertices.buffer.contents().advanced(by: vertices.offset)
+        func vertex(_ i: Int) -> SIMD3<Float> {
+            let ptr = vBase.advanced(by: i * vertices.stride).assumingMemoryBound(to: Float.self)
+            return SIMD3<Float>(ptr[0], ptr[1], ptr[2])
+        }
+        let toWorld = anchor.originFromAnchorTransform
+        func world(_ i: Int) -> SIMD3<Float> {
+            let p = vertex(i)
+            let w = toWorld * SIMD4<Float>(p.x, p.y, p.z, 1)
+            return SIMD3<Float>(w.x, w.y, w.z)
+        }
+        let iBase = faces.buffer.contents()
+        let indexCount = faces.count * 3
+        var out: [SIMD3<Float>] = []
+        out.reserveCapacity(indexCount)
+        if faces.bytesPerIndex == 4 {
+            let idx = iBase.assumingMemoryBound(to: UInt32.self)
+            for i in 0..<indexCount { out.append(world(Int(idx[i]))) }
+        } else if faces.bytesPerIndex == 2 {
+            let idx = iBase.assumingMemoryBound(to: UInt16.self)
+            for i in 0..<indexCount { out.append(world(Int(idx[i]))) }
+        }
+        return out
     }
 }

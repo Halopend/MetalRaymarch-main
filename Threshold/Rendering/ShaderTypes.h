@@ -248,6 +248,67 @@ typedef struct
     int _pad0; int _pad1; int _pad2;  // 16-byte tail alignment
 } SpaceWarpStack;
 
+// === ENVIRONMENT SCRUNCH (scanned-room proximity field) ===
+// The scanned surroundings (visionOS scene-reconstruction mesh; synthetic
+// primitives on Mac) are baked on the CPU into a band-limited unsigned
+// distance grid in WORLD meters. The DE samples it and applies a mixed
+// positive/negative field — a smooth-union "hug" shell at a small standoff
+// above real surfaces plus a smooth-subtraction clearance at the surface
+// itself — so the fractal scrunches/bulges around the room and its objects
+// (the hand-attraction model applied to the environment).
+#define ENV_SCRUNCH_DIM 64   // grid resolution per axis (half floats, DIM^3)
+typedef struct
+{
+    int enabled;              // 0 = off (grid is never dereferenced)
+    float strength;           // 0..1 blend toward the scrunched field
+    float bandModel;          // engage band around surfaces, model units
+    float softModel;          // smooth-blend k, model units
+    float hugModel;           // bulge-shell standoff above surfaces, model units
+    float carveModel;         // clearance kept empty around surfaces, model units
+    float metersToModel;      // world meters → model units distance scale
+    int mode;                 // 0 = Scrunch (bulge around surfaces), 1 = Shell (render only within band of surfaces)
+    matrix_float4x4 modelToGrid; // model space → grid texel coords (0..DIM)
+    uint64_t gridAddress;     // MTLBuffer.gpuAddress of half[DIM^3] distances (meters); 0 = none
+    // === CONTAINMENT (clip to the scanned room box) ===
+    // The grid is UNSIGNED distance, so any surface-keyed effect mirrors on both
+    // sides of a wall → an "outside shell"/doubling. Clipping the fractal to the
+    // scanned surfaces' AABB (in grid coords, so `modelToGrid` handles rotation)
+    // restores a sign and cuts the mirror. 0 = off, 1 = hard clip, 2 = soft blend.
+    int containMode;
+    float containFeatherModel;  // soft-blend feather half-width, model units (mode 2)
+    // The bake's far-distance clamp converted to MODEL units. envScrunchSample
+    // returns this for out-of-grid points ("far from every scanned surface"),
+    // so Shell mode cuts space beyond the grid instead of skinning its
+    // boundary. Carried here (from EnvironmentSDFGrid.clampFar at build time)
+    // so the shader and the bake can never drift (TECH_DEBT.md #19).
+    float farClampModel;
+    vector_float3 containMinGrid; // room AABB min, grid texel coords
+    vector_float3 containMaxGrid; // room AABB max, grid texel coords
+    vector_float3 cellModel;      // model units per grid cell, per axis (metric box SDF)
+} EnvScrunchParams;
+
+// Hand Attraction + forearm capsules, grouped so the block lives ONCE in the
+// constant Uniforms/TileUniforms buffer and FractalParams (by-value through
+// the DE hot path) carries only a `constant HandFieldParams*` — the same
+// pointer indirection as SpaceWarpOp/EnvScrunchParams (TECH_DEBT.md #8d: the
+// flat copy of these fields was 168 B of the 320 B FractalParams).
+// Hand active flags ride in the position .w lanes (1 = tracked / 0) to avoid
+// float3+int padding waste.
+typedef struct
+{
+    int enabled;              // master on/off (0/1)
+    float radius;             // per-hand influence radius, model units
+    float strength;           // signed: >0 = Attract (pull toward), <0 = Repel
+    int pocketEnabled;        // Attract-only: carve a small pocket at the hand
+    vector_float4 shape;      // x = ball size (×radius), y = blend softness (×ball), z = pocket size (×ball), w = pocket softness (×pocket)
+    vector_float4 leftHand;   // xyz = palm (model space), w = 1 tracked / 0
+    vector_float4 rightHand;  // xyz = palm (model space), w = 1 tracked / 0
+    vector_float4 leftForearmA;  // xyz = wrist (model space), w = 1 tracked / 0
+    vector_float4 leftForearmB;  // xyz = elbow (model space), w = capsule radius (model units; 0 = forearms off)
+    vector_float4 rightForearmA;
+    vector_float4 rightForearmB;
+} HandFieldParams;
+
 typedef struct
 {
     matrix_float4x4 projectionMatrix;
@@ -281,19 +342,9 @@ typedef struct
     // the fractal surface toward each tracked palm — inverse of the safety
     // bubble's push-away carve. Positions are MODEL-space (same transform the
     // march runs in), computed on CPU each frame from the ARKit hand anchors.
-    int handAttractionEnabled;     // Master on/off (0/1)
-    float handAttractionRadius;    // Per-hand influence radius, model units
-    float handAttractionStrength;  // signed: 0 = off, >0 = Attract (pull toward), <0 = Repel (push away)
-    int handAttractionPocketEnabled; // Attract-only: carve a small pocket at the hand itself (dual-sphere)
-    vector_float4 handAttractionShape; // x = ball size (×radius), y = blend softness (×ball), z = pocket size (×ball), w = pocket softness (×pocket)
-    vector_float3 leftHandPosition;
-    int leftHandActive;            // 1 = left hand is currently tracked
-    vector_float3 rightHandPosition;
-    int rightHandActive;           // 1 = right hand is currently tracked
-    vector_float4 leftForearmA;    // xyz = wrist (model space), w = 1 tracked / 0
-    vector_float4 leftForearmB;    // xyz = elbow (model space), w = capsule radius (model units; 0 = forearms off)
-    vector_float4 rightForearmA;
-    vector_float4 rightForearmB;
+    // Hand Attraction + forearms, nested so FractalParams can point at the
+    // block instead of copying it (TECH_DEBT.md #8d).
+    HandFieldParams handField;
 
     float colorIterations;   // How many iterations contribute to color
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
@@ -316,6 +367,7 @@ typedef struct
     float boundingSphereRadius; // Bounding sphere for early ray rejection (0 = disabled)
     int smartAdvanceEnabled; // 1 = grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient to step further through grazing/receding regions)
     float coneMarchScale;    // Cone marching: per-distance growth of the march hit threshold (= projected pixel footprint × stop margin). 0 = off
+    int coneCoverageAAEnabled; // 1 = CTSS-lite silhouette AA: composite near-miss edges over background by cone-footprint coverage (fragment path). 0 = off
     int shadowsEnabled;      // 0 = skip the per-pixel shadow marches (flat, cheaper lighting); 1 = full soft shadows
     float distanceLODFalloff;// Distance iteration LOD: fractal iterations dropped per unit ray distance. 0 = off
     int benchCollectSteps;   // 1 = accumulate per-ray march step counts into BufferIndexBenchCounters (benchmark only)
@@ -377,6 +429,18 @@ typedef struct
     // 0...1 = sphere/cube morph, 2...6 = discrete platonic solids (see
     // SafetyBubbleShapePreset). Feeds safetyBubbleDistance() directly.
     float boundingShapeType;
+
+    // === BOUND TO SPACE (assumed-room clip) ===
+    // Clips the fractal to an axis-aligned rectangular room in WORLD space
+    // (meters): x in [-w/2, w/2], y in [0, h], z in [-d/2, d/2] — the visionOS
+    // world origin sits on the floor at the user's starting position. Open
+    // faces extend to infinity. 0 = off, 1 = Match Space (closed box),
+    // 2 = Ceiling Open (walls + floor), 3 = Walls Open (floor + ceiling only).
+    int boundToSpaceMode;
+    vector_float3 boundSpaceSize;       // full room size, meters (w, h, d)
+    matrix_float4x4 modelToWorldMatrix; // march/model space → world meters
+
+    EnvScrunchParams envScrunch;        // scanned-environment scrunch field (grid via bindless address)
 } Uniforms;
 
 typedef struct
@@ -403,19 +467,9 @@ typedef struct
     int safetyBubbleFadeEnabled;  // Enable smooth fade transition (0/1)
     float safetyBubbleFadeWidth;  // Width of fade region beyond inner radius
     float safetyBubbleStrength;   // Temporal fade strength (0=off, 1=fully active)
-    int handAttractionEnabled;     // Hand Attraction master on/off (0/1)
-    float handAttractionRadius;    // Per-hand influence radius, model units
-    float handAttractionStrength;  // signed: 0 = off, >0 = Attract, <0 = Repel
-    int handAttractionPocketEnabled; // Attract-only: carve a small pocket at the hand itself
-    vector_float4 handAttractionShape; // x = ball size (×radius), y = blend softness (×ball), z = pocket size (×ball), w = pocket softness (×pocket)
-    vector_float3 leftHandPosition;
-    int leftHandActive;
-    vector_float3 rightHandPosition;
-    int rightHandActive;
-    vector_float4 leftForearmA;    // xyz = wrist (model space), w = 1 tracked / 0
-    vector_float4 leftForearmB;    // xyz = elbow (model space), w = capsule radius (model units; 0 = forearms off)
-    vector_float4 rightForearmA;
-    vector_float4 rightForearmB;
+    // Hand Attraction + forearms, nested so FractalParams can point at the
+    // block instead of copying it (TECH_DEBT.md #8d).
+    HandFieldParams handField;
     float foldingLimit;
     float glowIntensity;
     float colorMix;
@@ -446,6 +500,7 @@ typedef struct
     float boundingSphereRadius;  // Bounding sphere for early ray rejection (0 = disabled)
     int smartAdvanceEnabled;     // 1 = grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient to step further through grazing/receding regions)
     float coneMarchScale;        // Cone marching: per-distance growth of the march hit threshold (= projected pixel footprint × stop margin). 0 = off
+    int coneCoverageAAEnabled;   // 1 = CTSS-lite silhouette AA (fragment path only; unused on the compute tile path). 0 = off
     int shadowsEnabled;          // 0 = skip the per-pixel shadow marches (flat, cheaper lighting); 1 = full soft shadows
     float distanceLODFalloff;    // Distance iteration LOD: fractal iterations dropped per unit ray distance. 0 = off
     // === CONSERVATIVE CONE COARSE-PREPASS WARM-START ===
@@ -506,9 +561,33 @@ typedef struct
     vector_float2 screenResolution;  // rateMap.screenSize: logical viewport size for NDC normalization
     int rateMapValid;                // 1 = rateMapData (buffer 1) is a valid rate map to decode
     uint32_t rateMapLayer;           // rate-map layer for this eye (layered: eyeIndex; dedicated: 0)
+
+    // === BOUND TO SPACE (assumed-room clip) — see Uniforms for semantics ===
+    int boundToSpaceMode;               // 0 = off, 1 = Match Space, 2 = Ceiling Open, 3 = Walls Open
+    vector_float3 boundSpaceSize;       // full room size, meters (w, h, d)
+    matrix_float4x4 modelToWorldMatrix; // march/model space → world meters
+
+    EnvScrunchParams envScrunch;        // scanned-environment scrunch field (grid via bindless address)
 } TileUniforms;
 
 // Include Buddhabrot types so they're visible through the bridging header
 #include "../Formulas/Buddhabrot/BuddhabrotTypes.h"
+
+#ifdef __METAL_VERSION__
+// Size gates (TECH_DEBT.md #8d): these structs live in the constant address
+// space (not by-value), so the concern is growth awareness + keeping the
+// Swift/Metal layout in lockstep — growing one is fine, but must be a
+// conscious act. If you added a field on purpose, bump the bound in the same
+// commit (and regenerate EmbeddedMetalSources.swift). The by-value
+// FractalParams gate lives next to its definition in Shaders.metal.
+// 2026-07-04: +48 B in both — EnvScrunchParams gained the containment box
+// (containMode/Feather + 3× grid-space float3), 112 → 160 B.
+static_assert(sizeof(Uniforms) <= 1936,
+              "Uniforms grew — bump this bound consciously (TECH_DEBT.md #8d)");
+static_assert(sizeof(TileUniforms) <= 1968,
+              "TileUniforms grew — bump this bound consciously (TECH_DEBT.md #8d)");
+static_assert(sizeof(FormulaParams) <= 176,
+              "FormulaParams grew — bump this bound consciously (TECH_DEBT.md #8d)");
+#endif
 
 #endif /* ShaderTypes_h */

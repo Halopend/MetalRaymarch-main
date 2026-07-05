@@ -84,6 +84,7 @@ extension Renderer {
         var shadowIterations: Int32?       // FC index 1
         var safetyBubbleEnabled: Bool?     // FC index 2
         var hasSpaceWarp: Bool?            // FC index 3 — nil leaves it undefined (shader defaults ON = full stack)
+        var hasEnvScrunch: Bool?           // FC index 16 — nil leaves it undefined (shader defaults ON = scrunch code present)
         var qualityMode: Int32?            // FC index 4 (0=high, 1=medium, 2=low)
         var debugHierarchical: Bool?       // FC index 5
         var maxRaySteps: Int32?            // FC index 6 - max ray marching steps
@@ -121,6 +122,9 @@ extension Renderer {
             }
             if var sw = hasSpaceWarp {
                 constants.setConstantValue(&sw, type: .bool, index: FunctionConstantIndex.hasSpaceWarp.rawValue)
+            }
+            if var es = hasEnvScrunch {
+                constants.setConstantValue(&es, type: .bool, index: FunctionConstantIndex.hasEnvScrunch.rawValue)
             }
             if var quality = qualityMode {
                 constants.setConstantValue(&quality, type: .int, index: FunctionConstantIndex.qualityMode.rawValue)
@@ -197,6 +201,12 @@ extension Renderer {
                 shadowIterations: fc.shadowIterations,
                 safetyBubbleEnabled: preset.effectiveSafetyBubbleEnabled,
                 hasSpaceWarp: preset.effectiveHasSpaceWarp,
+                // Environment Scrunch is DEVICE-LOCAL (never preset state — see the
+                // envScrunchStaysDeviceLocal test), so presets prewarm the default-OFF
+                // variant; the key's `_ES0` segment pairs with this bake. When the
+                // device toggle is ON, selectPipeline computes `_ES1` and simply
+                // misses the prewarm (rebuild, never a wrong pipeline).
+                hasEnvScrunch: false,
                 qualityMode: fc.qualityMode,
                 debugHierarchical: false,
                 maxRaySteps: fc.maxRaySteps,

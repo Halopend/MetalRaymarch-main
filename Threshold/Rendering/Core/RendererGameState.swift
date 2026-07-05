@@ -24,6 +24,7 @@ struct RendererFramePreparation {
     var animatedGlow: Float
     var perEye: [RendererPreparedEyeState]
     var handAttraction: HandAttractionUniforms
+    var envScrunch: EnvScrunchParams
 }
 
 /// Hand Attraction (visionOS only): per-hand interaction sphere state, already
@@ -35,7 +36,7 @@ struct HandAttractionUniforms {
     var strength: Float = 0
     var pocketEnabled: Int32 = 0
     // x = ball size (×radius), y = blend softness, z = pocket size (×ball), w = pocket softness
-    var shape: SIMD4<Float> = SIMD4<Float>(0.35, 1.0, 0.5, 0.6)
+    var shape: SIMD4<Float> = HandFieldParams.defaultShape
     var leftPosition: SIMD3<Float> = .zero
     var leftActive: Int32 = 0
     var rightPosition: SIMD3<Float> = .zero
@@ -46,6 +47,25 @@ struct HandAttractionUniforms {
     var leftForearmB: SIMD4<Float> = .zero
     var rightForearmA: SIMD4<Float> = .zero
     var rightForearmB: SIMD4<Float> = .zero
+
+    /// Shader-facing packed form (TECH_DEBT.md #8d): the block Uniforms /
+    /// TileUniforms carry once, pointed at by FractalParams. Active flags
+    /// ride the position .w lanes (1 = tracked / 0).
+    var asHandFieldParams: HandFieldParams {
+        var p = HandFieldParams()
+        p.enabled = enabled
+        p.radius = radius
+        p.strength = strength
+        p.pocketEnabled = pocketEnabled
+        p.shape = shape
+        p.leftHand = SIMD4<Float>(leftPosition, leftActive != 0 ? 1.0 : 0.0)
+        p.rightHand = SIMD4<Float>(rightPosition, rightActive != 0 ? 1.0 : 0.0)
+        p.leftForearmA = leftForearmA
+        p.leftForearmB = leftForearmB
+        p.rightForearmA = rightForearmA
+        p.rightForearmB = rightForearmB
+        return p
+    }
 }
 
 private enum FloorCircleGeometry {
@@ -252,6 +272,10 @@ extension Renderer {
             effectiveScale: effectiveScale,
             deviceTransform: deviceTransform
         )
+        let envScrunchParams = makeEnvScrunchParams(
+            settingsSnapshot: settingsSnapshot,
+            modelMatrix: modelMatrix
+        )
 
         // One-time logging of device anchor to verify position tracking is working
         if !hasLoggedDeviceAnchorInfo, let anchor = drawable.deviceAnchor {
@@ -363,7 +387,24 @@ extension Renderer {
                 ? previousViewProjMatrices[viewIndex]
                 : matrix_identity_float4x4
 
-            // Get fovea center from the view's texture map (normalized 0-1)
+            // Break up the large Uniforms initializer to help the type-checker
+            let marchEpsilonScale: Float = (1.0 / max(effectiveScale, 1.0)) * zoomOutEpsilonLoosen
+            let safetyBubbleEnabled: Int32 = (settingsSnapshot.fractalType == .mandelbulb) ? 0 : (settingsSnapshot.safetyBubbleEnabled ? 1 : 0)
+            let safetyBubbleFadeEnabled: Int32 = settingsSnapshot.safetyBubbleFadeEnabled ? 1 : 0
+            let safetyBubbleStrength: Float = (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength
+            let sphereProjectionBlend: Float = settingsSnapshot.sphereProjectionEnabled ? settingsSnapshot.sphereProjectionBlend : 0
+            let smartAdvanceEnabled: Int32 = settingsSnapshot.smartAdvanceEnabled ? 1 : 0
+            let coneCoverageAAEnabled: Int32 = settingsSnapshot.coneCoverageAAEnabled ? 1 : 0
+            let shadowsEnabled: Int32 = settingsSnapshot.shadowsEnabled ? 1 : 0
+            let distanceLODFalloff: Float = settingsSnapshot.distanceLODStrength * 0.5 * zoomOutLODScale
+            let benchCollectSteps: Int32 = BenchmarkManager.shared.collectIterations ? 1 : 0
+            let viewportHeight: Float = Float(view.textureMap.viewport.height)
+            let coneMarchScale: Float = RenderPrecompute.coneMarchScale(strength: settingsSnapshot.coneMarchStrength, projection: projection, viewportHeight: viewportHeight)
+            let pixelFootprintPerDist: Float = RenderPrecompute.pixelFootprintPerDist(projection: projection, viewportHeight: viewportHeight)
+            let springStretch: Float = simd_length(settingsSnapshot.springDisplacement)
+            let springVisible: Int32 = (settingsSnapshot.springActive || springStretch > 0.001) ? 1 : 0
+            let passthroughBackground: Int32 = passthroughBackgroundActive ? 1 : 0
+
             return Uniforms(projectionMatrix: projection,
                             modelViewMatrix: modelView,
                             inverseModelViewMatrix: inverseModelView,
@@ -375,47 +416,27 @@ extension Renderer {
                             fractalIterations: Int32(settingsSnapshot.fractalIterations),
                             maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
                             maxViewDistance: maxViewDistance,
-                            // Infinite zoom: tighten the march hit-threshold floor as we zoom
-                            // in so fine detail keeps resolving (1.0 at base → byte-identical);
-                            // loosen it past the zoom-out floor (see zoomOutEpsilonLoosen).
-                            marchEpsilonScale: (1.0 / max(effectiveScale, 1.0)) * zoomOutEpsilonLoosen,
+                            marchEpsilonScale: marchEpsilonScale,
                             colorMix: animatedColorMix,
                             glowIntensity: animatedGlow,
                             foldingLimit: settingsSnapshot.foldingLimit,
                             sphereRadius: settingsSnapshot.sphereRadius,
                             safetyBubbleRadius: scaleCorrectedBubbleRadius,
-                            // Mandelbulb: force safety bubble off — its compact geometry
-                            // doesn’t need a safety carve-out and the blend/fade creates
-                            // visible artifacts when zooming deep into surface detail.
-                            safetyBubbleEnabled: (settingsSnapshot.fractalType == .mandelbulb) ? 0 : (settingsSnapshot.safetyBubbleEnabled ? 1 : 0),
+                            safetyBubbleEnabled: safetyBubbleEnabled,
                             safetyBubbleShape: settingsSnapshot.safetyBubbleShape,
-                            safetyBubbleFadeEnabled: settingsSnapshot.safetyBubbleFadeEnabled ? 1 : 0,
+                            safetyBubbleFadeEnabled: safetyBubbleFadeEnabled,
                             safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
-                            safetyBubbleStrength: (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength,
-                            handAttractionEnabled: handAttraction.enabled,
-                            handAttractionRadius: handAttraction.radius,
-                            handAttractionStrength: handAttraction.strength,
-                            handAttractionPocketEnabled: handAttraction.pocketEnabled,
-                            handAttractionShape: handAttraction.shape,
-                            leftHandPosition: handAttraction.leftPosition,
-                            leftHandActive: handAttraction.leftActive,
-                            rightHandPosition: handAttraction.rightPosition,
-                            rightHandActive: handAttraction.rightActive,
-                            leftForearmA: handAttraction.leftForearmA,
-                            leftForearmB: handAttraction.leftForearmB,
-                            rightForearmA: handAttraction.rightForearmA,
-                            rightForearmB: handAttraction.rightForearmB,
+                            safetyBubbleStrength: safetyBubbleStrength,
+                            handField: handAttraction.asHandFieldParams,
                             colorIterations: settingsSnapshot.colorIterations,
                             limitFlash: settingsSnapshot.limitFlash,
                             activeGesture: Int32(settingsSnapshot.activeGestureIndex),
-                            // Patched after prepareFragmentPassPlan once the MetalFX
-                            // input size (renderResolution) is known.
                             warmStartEnabled: 0,
                             fractalType: settingsSnapshot.fractalType.rawValue,
                             lightingSoftness: settingsSnapshot.lightingSoftness,
                             sphericalInversionMode: settingsSnapshot.sphericalInversionMode.rawValue,
                             sphericalInversionRadius: settingsSnapshot.sphericalInversionRadius,
-                            sphereProjectionBlend: settingsSnapshot.sphereProjectionEnabled ? settingsSnapshot.sphereProjectionBlend : 0,
+                            sphereProjectionBlend: sphereProjectionBlend,
                             sphereProjectionRadius: settingsSnapshot.sphereProjectionRadius,
                             spaceWarpStrength: settingsSnapshot.spaceWarpStrength,
                             spaceWarpParam1: settingsSnapshot.spaceWarpParam1,
@@ -425,29 +446,20 @@ extension Renderer {
                             spaceWarpStack: settingsSnapshot.spaceWarpStack,
                             stepMultiplier: settingsSnapshot.stepMultiplier,
                             boundingSphereRadius: boundingSphereRadius,
-                            smartAdvanceEnabled: settingsSnapshot.smartAdvanceEnabled ? 1 : 0,
-                            coneMarchScale: RenderPrecompute.coneMarchScale(
-                                strength: settingsSnapshot.coneMarchStrength,
-                                projection: projection,
-                                viewportHeight: Float(view.textureMap.viewport.height)),
-                            shadowsEnabled: settingsSnapshot.shadowsEnabled ? 1 : 0,
-                            distanceLODFalloff: settingsSnapshot.distanceLODStrength * 0.5 * zoomOutLODScale,
-                            benchCollectSteps: BenchmarkManager.shared.collectIterations ? 1 : 0,
-                            // Conservative cone coarse-prepass: raw per-pixel footprint
-                            // (no LOD widening). coarseRateMagMax defaults to 1.0 here;
-                            // the cone kernel (which reads TileUniforms) over-bounds it
-                            // under foveation. The fragment shader only reads the coarse
-                            // texture, not these fields, in Increment 1.
-                            pixelFootprintPerDist: RenderPrecompute.pixelFootprintPerDist(
-                                projection: projection,
-                                viewportHeight: Float(view.textureMap.viewport.height)),
+                            smartAdvanceEnabled: smartAdvanceEnabled,
+                            coneMarchScale: coneMarchScale,
+                            coneCoverageAAEnabled: coneCoverageAAEnabled,
+                            shadowsEnabled: shadowsEnabled,
+                            distanceLODFalloff: distanceLODFalloff,
+                            benchCollectSteps: benchCollectSteps,
+                            pixelFootprintPerDist: pixelFootprintPerDist,
                             coarseRateMagMax: 1.0,
                             springDisplacementX: settingsSnapshot.springDisplacement.x,
                             springDisplacementY: settingsSnapshot.springDisplacement.y,
                             springDisplacementZ: settingsSnapshot.springDisplacement.z,
-                            springStretch: simd_length(settingsSnapshot.springDisplacement),
+                            springStretch: springStretch,
                             springAnchorNDC: SIMD2<Float>(0.7, -0.7),
-                            springVisible: (settingsSnapshot.springActive || simd_length(settingsSnapshot.springDisplacement) > 0.001) ? 1 : 0,
+                            springVisible: springVisible,
                             springRestRadius: 0.06,
                             jitterOffset: .zero,
                             renderResolution: [1, 1],
@@ -460,13 +472,14 @@ extension Renderer {
                             precomputedFog: precomputedFog,
                             colorScheme: colorSchemeParams,
                             benchAblate: 0,
-                            // Partial/Mixed immersion: miss rays write alpha 0
-                            // so the compositor shows passthrough instead of
-                            // the black background (see fragmentMain).
-                            passthroughBackground: passthroughBackgroundActive ? 1 : 0,
+                            passthroughBackground: passthroughBackground,
                             boundingFogEnabled: Int32(settingsSnapshot.boundingShapeFogMode),
                             boundingShadowDepth: settingsSnapshot.boundingShapeShadowDepth,
-                            boundingShapeType: settingsSnapshot.boundingShapeType)
+                            boundingShapeType: settingsSnapshot.boundingShapeType,
+                            boundToSpaceMode: settingsSnapshot.resolvedBoundToSpaceMode,
+                            boundSpaceSize: settingsSnapshot.boundSpaceSize,
+                            modelToWorldMatrix: modelMatrix,
+                            envScrunch: envScrunchParams)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
@@ -486,7 +499,28 @@ extension Renderer {
             animatedColorMix: animatedColorMix,
             animatedGlow: animatedGlow,
             perEye: preparedEyeStates,
-            handAttraction: handAttraction
+            handAttraction: handAttraction,
+            envScrunch: envScrunchParams
         )
+    }
+
+    /// Environment Scrunch: fuse the latest published environment-SDF grid
+    /// (scene-reconstruction bake) with this frame's model matrix and the
+    /// user's knobs. Default (enabled 0) whenever the feature is off or no
+    /// bake has been published yet.
+    private func makeEnvScrunchParams(
+        settingsSnapshot: RenderSettingsSnapshot,
+        modelMatrix: matrix_float4x4
+    ) -> EnvScrunchParams {
+        guard settingsSnapshot.envScrunchEnabled,
+              let grid = environmentSDF.withLock({ $0 }) else { return EnvScrunchParams() }
+        return settingsSnapshot.makeEnvScrunchParams(
+            modelToWorld: modelMatrix,
+            gridOrigin: grid.originWorld,
+            gridCell: grid.cellSize,
+            gridAddress: grid.gpuAddress,
+            surfaceMinWorld: grid.surfaceMinWorld,
+            surfaceMaxWorld: grid.surfaceMaxWorld,
+            farClampMeters: EnvironmentSDFGrid.clampFar)
     }
 }

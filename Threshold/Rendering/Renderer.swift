@@ -318,6 +318,19 @@ actor Renderer {
     let arSession: ARKitSession
     let worldTracking: WorldTrackingProvider
     var handTracking: HandTrackingProvider?
+
+    // === ENVIRONMENT SCRUNCH (scene-reconstruction source) ===
+    // The scanned surroundings as world-space triangle soup per mesh anchor.
+    // The anchorUpdates stream task writes the cache and flags it dirty; a
+    // throttled bake task periodically folds all anchors into a fresh
+    // EnvironmentSDFGrid and publishes it. updateGameState reads the published
+    // grid each frame, so Mutexes bridge the contexts.
+    var sceneReconstruction: SceneReconstructionProvider?
+    let environmentMeshes = Mutex<[UUID: [SIMD3<Float>]]>([:])  // world tri soup (v0,v1,v2 triples)
+    let environmentMeshesDirty = Mutex<Bool>(false)
+    let environmentSDF = Mutex<EnvironmentSDFGrid?>(nil)
+    nonisolated(unsafe) var meshUpdatesTask: Task<Void, Never>?
+    nonisolated(unsafe) var envBakeTask: Task<Void, Never>?
     let layerRenderer: LayerRenderer
     let appModel: AppModel
 
@@ -589,6 +602,9 @@ actor Renderer {
         
         worldTracking = WorldTrackingProvider()
         handTracking = HandTrackingProvider()
+        sceneReconstruction = SceneReconstructionProvider.isSupported
+            ? SceneReconstructionProvider()
+            : nil
         arSession = ARKitSession()
         
         // Defer actor-isolated setup to after init completes
@@ -630,6 +646,8 @@ actor Renderer {
         setupTask?.cancel()
         archiveSerializeTask?.cancel()
         handTrackingDispatchTask?.cancel()
+        meshUpdatesTask?.cancel()
+        envBakeTask?.cancel()
         for task in backgroundRenderPipelineBuildTasks.values {
             task.cancel()
         }
@@ -806,6 +824,7 @@ actor Renderer {
     var lastSelectCustomHash: String?
     var lastSelectBubble: Bool?
     var lastSelectSpaceWarp: Bool?
+    var lastSelectEnvScrunch: Bool?
     var lastSelectedPipeline: MTLRenderPipelineState?
     var lastSelectedIsSpecialized: Bool = false
     
@@ -1259,6 +1278,11 @@ actor Renderer {
             commandBuffer.commit()
             return
         }
+        // Environment Scrunch grid is reached bindlessly (GPU address in the
+        // uniforms) — make it resident for the fragment march.
+        if let envGrid = environmentSDF.withLock({ $0 }) {
+            renderEncoder.useResource(envGrid.buffer, usage: .read, stages: .fragment)
+        }
 
         renderEncoder.label = "Primary Render Encoder"
 
@@ -1587,35 +1611,44 @@ actor Renderer {
             renderHeight = max(1, min(phys.height - viewportOriginY, outputTexture.height - viewportOriginY))
         }
 
+        // Break up the large TileUniforms initializer to help the type-checker
+        let tileResolution = SIMD2<Float>(Float(renderWidth), Float(renderHeight))
+        let tileViewportOrigin = SIMD2<Float>(Float(viewportOriginX), Float(viewportOriginY))
+        let tileSafetyBubbleEnabled: Int32 = (settingsSnapshot.fractalType == .mandelbulb) ? 0 : (settingsSnapshot.safetyBubbleEnabled ? 1 : 0)
+        let tileSafetyBubbleFadeEnabled: Int32 = settingsSnapshot.safetyBubbleFadeEnabled ? 1 : 0
+        let tileSafetyBubbleStrength: Float = (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength
+        let tileMarchEpsilonScale: Float = (1.0 / max(framePreparation.effectiveScale, 1.0)) * max(1.0, 0.15 / max(framePreparation.effectiveScale, 1e-4))
+        let tileSphereProjectionBlend: Float = settingsSnapshot.sphereProjectionEnabled ? settingsSnapshot.sphereProjectionBlend : 0
+        let tileSmartAdvanceEnabled: Int32 = settingsSnapshot.smartAdvanceEnabled ? 1 : 0
+        let tileRenderHeight = Float(renderHeight)
+        let tileConeMarchScale: Float = RenderPrecompute.coneMarchScale(strength: settingsSnapshot.coneMarchStrength, projection: projection, viewportHeight: tileRenderHeight)
+        let tileShadowsEnabled: Int32 = settingsSnapshot.shadowsEnabled ? 1 : 0
+        let tileDistanceLODFalloff: Float = settingsSnapshot.distanceLODStrength * 0.5 * min(1.0, framePreparation.effectiveScale / 0.15)
+        let tilePixelFootprintPerDist: Float = RenderPrecompute.pixelFootprintPerDist(projection: projection, viewportHeight: tileRenderHeight)
+        let tileBlendFactor: Float = settingsSnapshot.isGeometryGestureActive ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5)
+        let tileSpringStretch: Float = simd_length(settingsSnapshot.springDisplacement)
+        let tileSpringVisible: Int32 = (settingsSnapshot.springActive || tileSpringStretch > 0.001) ? 1 : 0
+        let tileTemporalReprojectionEnabled: Int32 = (temporalFrameCount > 0 && settingsSnapshot.sphericalInversionMode.rawValue == 0 && settingsSnapshot.computeTemporalReprojectionEnabled) ? 1 : 0
+        let tileRateMapValid: Int32 = rateMapValid ? 1 : 0
+        let tileDebugHierarchical: UInt32 = settingsSnapshot.debugHierarchical ? 1 : 0
+
         var tileUniforms = TileUniforms(
-            invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
+            invViewMatrix: inverseModelView,
             invProjMatrix: projection.inverse,
             cameraPos: cameraPos,
             time: framePreparation.frameTime,
-            resolution: SIMD2<Float>(Float(renderWidth), Float(renderHeight)),
-            viewportOrigin: SIMD2<Float>(Float(viewportOriginX), Float(viewportOriginY)),
+            resolution: tileResolution,
+            viewportOrigin: tileViewportOrigin,
             minDistance: settingsSnapshot.minDistance,
             fractalScale: settingsSnapshot.fractalScale,
             sphereRadius: settingsSnapshot.sphereRadius,
             safetyBubbleRadius: scaleCorrectedBubbleRadius,
-            safetyBubbleEnabled: (settingsSnapshot.fractalType == .mandelbulb) ? 0 : (settingsSnapshot.safetyBubbleEnabled ? 1 : 0),
+            safetyBubbleEnabled: tileSafetyBubbleEnabled,
             safetyBubbleShape: settingsSnapshot.safetyBubbleShape,
-            safetyBubbleFadeEnabled: settingsSnapshot.safetyBubbleFadeEnabled ? 1 : 0,
+            safetyBubbleFadeEnabled: tileSafetyBubbleFadeEnabled,
             safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
-            safetyBubbleStrength: (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength,
-            handAttractionEnabled: framePreparation.handAttraction.enabled,
-            handAttractionRadius: framePreparation.handAttraction.radius,
-            handAttractionStrength: framePreparation.handAttraction.strength,
-            handAttractionPocketEnabled: framePreparation.handAttraction.pocketEnabled,
-            handAttractionShape: framePreparation.handAttraction.shape,
-            leftHandPosition: framePreparation.handAttraction.leftPosition,
-            leftHandActive: framePreparation.handAttraction.leftActive,
-            rightHandPosition: framePreparation.handAttraction.rightPosition,
-            rightHandActive: framePreparation.handAttraction.rightActive,
-            leftForearmA: framePreparation.handAttraction.leftForearmA,
-            leftForearmB: framePreparation.handAttraction.leftForearmB,
-            rightForearmA: framePreparation.handAttraction.rightForearmA,
-            rightForearmB: framePreparation.handAttraction.rightForearmB,
+            safetyBubbleStrength: tileSafetyBubbleStrength,
+            handField: framePreparation.handAttraction.asHandFieldParams,
             foldingLimit: settingsSnapshot.foldingLimit,
             glowIntensity: framePreparation.animatedGlow,
             colorMix: framePreparation.animatedColorMix,
@@ -1623,20 +1656,15 @@ actor Renderer {
             colorIterations: Int32(settingsSnapshot.colorIterations),
             maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
             maxViewDistance: framePreparation.maxViewDistance,
-            // Infinite zoom: tighten the march hit-threshold floor as we zoom in so
-            // fine detail keeps resolving (1.0 at base → byte-identical); loosen it
-            // past the 0.15 zoom-out floor to track the constant world-space pixel
-            // footprint (also bounds step cost over the lifted horizon).
-            marchEpsilonScale: (1.0 / max(framePreparation.effectiveScale, 1.0))
-                * max(1.0, 0.15 / max(framePreparation.effectiveScale, 1e-4)),
+            marchEpsilonScale: tileMarchEpsilonScale,
             eyeIndex: UInt32(viewIndex),
-            debugHierarchical: settingsSnapshot.debugHierarchical ? 1 : 0,
+            debugHierarchical: tileDebugHierarchical,
             limitFlash: settingsSnapshot.limitFlash,
             fractalType: settingsSnapshot.fractalType.rawValue,
             lightingSoftness: settingsSnapshot.lightingSoftness,
             sphericalInversionMode: settingsSnapshot.sphericalInversionMode.rawValue,
             sphericalInversionRadius: settingsSnapshot.sphericalInversionRadius,
-            sphereProjectionBlend: settingsSnapshot.sphereProjectionEnabled ? settingsSnapshot.sphereProjectionBlend : 0,
+            sphereProjectionBlend: tileSphereProjectionBlend,
             sphereProjectionRadius: settingsSnapshot.sphereProjectionRadius,
             spaceWarpStrength: settingsSnapshot.spaceWarpStrength,
             spaceWarpParam1: settingsSnapshot.spaceWarpParam1,
@@ -1644,44 +1672,25 @@ actor Renderer {
             spaceWarpParam3: settingsSnapshot.spaceWarpParam3,
             spaceWarpAxis: settingsSnapshot.spaceWarpAxis,
             spaceWarpStack: settingsSnapshot.spaceWarpStack,
-            // === GMT-FRACTALS OPTIMIZATIONS ===
             stepMultiplier: settingsSnapshot.stepMultiplier,
-            boundingSphereRadius: settingsSnapshot.estimatedBoundingSphereRadius,  // >0 only when the experimental empty-space skip is enabled
-            smartAdvanceEnabled: settingsSnapshot.smartAdvanceEnabled ? 1 : 0,
-            coneMarchScale: RenderPrecompute.coneMarchScale(
-                strength: settingsSnapshot.coneMarchStrength,
-                projection: projection,
-                viewportHeight: Float(renderHeight)),
-            shadowsEnabled: settingsSnapshot.shadowsEnabled ? 1 : 0,
-            // Distance-LOD reads model-space t; shrink the falloff with zoom-out
-            // scale (1.0 at scale >= 0.15) so iterations don't collapse everywhere.
-            distanceLODFalloff: settingsSnapshot.distanceLODStrength * 0.5
-                * min(1.0, framePreparation.effectiveScale / 0.15),
-            // Conservative cone coarse-prepass fields. This adaptive-compute path
-            // doesn't run the cone kernel, but the shared TileUniforms initializer
-            // requires them; the cone-pass encoder fills real values per eye.
-            pixelFootprintPerDist: RenderPrecompute.pixelFootprintPerDist(
-                projection: projection,
-                viewportHeight: Float(renderHeight)),
+            boundingSphereRadius: settingsSnapshot.estimatedBoundingSphereRadius,
+            smartAdvanceEnabled: tileSmartAdvanceEnabled,
+            coneMarchScale: tileConeMarchScale,
+            coneCoverageAAEnabled: settingsSnapshot.coneCoverageAAEnabled ? 1 : 0,
+            shadowsEnabled: tileShadowsEnabled,
+            distanceLODFalloff: tileDistanceLODFalloff,
+            pixelFootprintPerDist: tilePixelFootprintPerDist,
             coarseRateMagMax: 1.0,
-            blendFactor: settingsSnapshot.isGeometryGestureActive ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5),
+            blendFactor: tileBlendFactor,
             springDisplacementX: settingsSnapshot.springDisplacement.x,
             springDisplacementY: settingsSnapshot.springDisplacement.y,
             springDisplacementZ: settingsSnapshot.springDisplacement.z,
-            springStretch: simd_length(settingsSnapshot.springDisplacement),
-            springAnchorNDC: SIMD2<Float>(0.7, -0.7),  // Bottom-right corner in NDC
-            springVisible: (settingsSnapshot.springActive || simd_length(settingsSnapshot.springDisplacement) > 0.001) ? 1 : 0,
+            springStretch: tileSpringStretch,
+            springAnchorNDC: SIMD2<Float>(0.7, -0.7),
+            springVisible: tileSpringVisible,
             springRestRadius: 0.06,
             jitterOffset: .zero,
-            // Temporal reprojection (and the coherent-packet warm-start it feeds)
-            // reconstruct the march start from the WORLD-space camera ray. When
-            // spherical inversion is active the actual march ray is inverted into a
-            // different scale, so a world-space startT lands past all geometry and
-            // the frame goes black. Gate it off — same hard cut the Mac warm-start
-            // path already applies via warmStartGate.allowsWarmStart.
-            temporalReprojectionEnabled: (temporalFrameCount > 0
-                && settingsSnapshot.sphericalInversionMode.rawValue == 0
-                && settingsSnapshot.computeTemporalReprojectionEnabled) ? 1 : 0,
+            temporalReprojectionEnabled: tileTemporalReprojectionEnabled,
             coherentPacketEnabled: settingsSnapshot.coherentPacketEnabled ? 1 : 0,
             foveationStrength: settingsSnapshot.foveationStrength,
             floorPlane: framePreparation.perEye[viewIndex].floorPlane,
@@ -1696,8 +1705,12 @@ actor Renderer {
             precomputedFog: framePreparation.precomputedFog,
             colorScheme: colorSchemeParams,
             screenResolution: screenResolution,
-            rateMapValid: rateMapValid ? 1 : 0,
-            rateMapLayer: UInt32(rateMapLayer)
+            rateMapValid: tileRateMapValid,
+            rateMapLayer: UInt32(rateMapLayer),
+            boundToSpaceMode: settingsSnapshot.resolvedBoundToSpaceMode,
+            boundSpaceSize: settingsSnapshot.boundSpaceSize,
+            modelToWorldMatrix: framePreparation.modelMatrix,
+            envScrunch: framePreparation.envScrunch
         )
         
         // Copy uniforms to buffer (pointer cached by caller across both eyes)
@@ -1712,6 +1725,12 @@ actor Renderer {
         
         computeEncoder.label = viewIndex == 0 ? "Adaptive Compute - Eye 0" : "Adaptive Compute - Eye 1"
         computeEncoder.setComputePipelineState(pipeline)
+        // Environment Scrunch grid is reached bindlessly (GPU address in the
+        // uniforms), so it needs explicit residency on every encoder that
+        // marches the DE.
+        if let envGrid = environmentSDF.withLock({ $0 }) {
+            computeEncoder.useResource(envGrid.buffer, usage: .read)
+        }
         computeEncoder.setBuffer(uniformBuffer, offset: uniformOffset, index: 0)
         if let rateMapParamBuffer {
             computeEncoder.setBuffer(rateMapParamBuffer, offset: 0, index: 1)
@@ -1981,6 +2000,9 @@ actor Renderer {
         guard let computeEncoder = commandBuffer.makeComputeCommandEncoder() else { return }
         computeEncoder.label = "Cone Coarse-Prepass"
         computeEncoder.setComputePipelineState(pipeline)
+        if let envGrid = environmentSDF.withLock({ $0 }) {
+            computeEncoder.useResource(envGrid.buffer, usage: .read)
+        }
 
         // Dispatch over the FULL render target / 8 (so coarse texels line up with
         // the fragment's floor(fragCoord/8)). One thread per coarse texel.
@@ -2081,19 +2103,7 @@ actor Renderer {
                 safetyBubbleFadeEnabled: settingsSnapshot.safetyBubbleFadeEnabled ? 1 : 0,
                 safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
                 safetyBubbleStrength: (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength,
-                handAttractionEnabled: framePreparation.handAttraction.enabled,
-                handAttractionRadius: framePreparation.handAttraction.radius,
-                handAttractionStrength: framePreparation.handAttraction.strength,
-                handAttractionPocketEnabled: framePreparation.handAttraction.pocketEnabled,
-                handAttractionShape: framePreparation.handAttraction.shape,
-                leftHandPosition: framePreparation.handAttraction.leftPosition,
-                leftHandActive: framePreparation.handAttraction.leftActive,
-                rightHandPosition: framePreparation.handAttraction.rightPosition,
-                rightHandActive: framePreparation.handAttraction.rightActive,
-                leftForearmA: framePreparation.handAttraction.leftForearmA,
-                leftForearmB: framePreparation.handAttraction.leftForearmB,
-                rightForearmA: framePreparation.handAttraction.rightForearmA,
-                rightForearmB: framePreparation.handAttraction.rightForearmB,
+                handField: framePreparation.handAttraction.asHandFieldParams,
                 foldingLimit: settingsSnapshot.foldingLimit,
                 glowIntensity: framePreparation.animatedGlow,
                 colorMix: framePreparation.animatedColorMix,
@@ -2126,6 +2136,7 @@ actor Renderer {
                     strength: settingsSnapshot.coneMarchStrength,
                     projection: projection,
                     viewportHeight: Float(viewportH)),
+                coneCoverageAAEnabled: settingsSnapshot.coneCoverageAAEnabled ? 1 : 0,
                 shadowsEnabled: settingsSnapshot.shadowsEnabled ? 1 : 0,
                 distanceLODFalloff: settingsSnapshot.distanceLODStrength * 0.5
                     * min(1.0, framePreparation.effectiveScale / 0.15),
@@ -2158,7 +2169,11 @@ actor Renderer {
                 colorScheme: settingsSnapshot.colorSchemeParams,
                 screenResolution: screenResolution,
                 rateMapValid: rateMapValid ? 1 : 0,
-                rateMapLayer: UInt32(rateMapLayer)
+                rateMapLayer: UInt32(rateMapLayer),
+                boundToSpaceMode: settingsSnapshot.resolvedBoundToSpaceMode,
+                boundSpaceSize: settingsSnapshot.boundSpaceSize,
+                modelToWorldMatrix: framePreparation.modelMatrix,
+                envScrunch: framePreparation.envScrunch
             )
 
             let uniformOffset = MemoryLayout<TileUniforms>.stride * viewIndex

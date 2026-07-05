@@ -146,6 +146,7 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
     let pixelFootprintPerDist = RenderPrecompute.pixelFootprintPerDist(
         projection: projection,
         viewportHeight: Float(drawableSize.height))
+    let coneCoverageAA: Int32 = settings.coneCoverageAAEnabled ? 1 : 0
     let springLen = simd_length(settings.springDisplacement)
     let springVisible: Int32 = (settings.springActive || springLen > 0.001) ? 1 : 0
     let renderResolution = SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height))
@@ -172,19 +173,8 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
                     safetyBubbleFadeEnabled: settings.safetyBubbleFadeEnabled ? 1 : 0,
                     safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
                     safetyBubbleStrength: bubbleStrength,
-                    handAttractionEnabled: 0,
-                    handAttractionRadius: 0,
-                    handAttractionStrength: 0,
-                    handAttractionPocketEnabled: 0,
-                    handAttractionShape: SIMD4<Float>(0.35, 1.0, 0.5, 0.6),
-                    leftHandPosition: .zero,
-                    leftHandActive: 0,
-                    rightHandPosition: .zero,
-                    rightHandActive: 0,
-                    leftForearmA: .zero,
-                    leftForearmB: .zero,
-                    rightForearmA: .zero,
-                    rightForearmB: .zero,
+                    // No hand tracking in Quick Look — single-source disabled block.
+                    handField: .off,
                     colorIterations: settings.colorIterations,
                     limitFlash: settings.limitFlash,
                     activeGesture: Int32(settings.activeGestureIndex),
@@ -205,6 +195,7 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
                     boundingSphereRadius: settings.estimatedBoundingSphereRadius,
                     smartAdvanceEnabled: settings.smartAdvanceEnabled ? 1 : 0,
                     coneMarchScale: coneMarchScale,
+                    coneCoverageAAEnabled: coneCoverageAA,
                     shadowsEnabled: settings.shadowsEnabled ? 1 : 0,
                     distanceLODFalloff: settings.distanceLODStrength * 0.5 * zoomOutLODScale,
                     benchCollectSteps: 0,
@@ -231,7 +222,13 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
                     passthroughBackground: 0,
                     boundingFogEnabled: 0,
                     boundingShadowDepth: 0,
-                    boundingShapeType: 0)
+                    boundingShapeType: 0,
+                    // Bound to Space / Object Cutouts are live-room features;
+                    // thumbnails render unclipped.
+                    boundToSpaceMode: 0,
+                    boundSpaceSize: SIMD3<Float>(4.0, 2.5, 4.0),
+                    modelToWorldMatrix: modelMatrix,
+                    envScrunch: EnvScrunchParams())
 }
 
 // MARK: - Headless Metal render harness

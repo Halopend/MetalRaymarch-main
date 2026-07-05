@@ -459,6 +459,69 @@ inline float rayIntersectBoundingSphere(float3 ro, float3 rd, float3 center, flo
     return (t > 0.0) ? t : -1.0;  // Behind the camera → treat as miss
 }
 
+// === BOUND TO SPACE (assumed-room clip) ===
+// The room is an axis-aligned box in WORLD space (meters): x in [-w/2, w/2],
+// y in [0, h], z in [-d/2, d/2] — the visionOS world origin sits on the floor
+// at the user's starting position. Mode picks which faces bound the volume
+// (open faces extend to infinity): 1 = Match Space (closed box), 2 = Ceiling
+// Open (walls + floor), 3 = Walls Open (floor + ceiling slab only).
+
+inline void spaceBoundsForMode(float3 size, int mode, thread float3& lo, thread float3& hi) {
+    const float kOpen = 1e8f;
+    lo = float3(-0.5f * size.x, 0.0f, -0.5f * size.z);
+    hi = float3( 0.5f * size.x, size.y, 0.5f * size.z);
+    if (mode == 2) hi.y = kOpen;
+    if (mode == 3) { lo.xz = float2(-kOpen); hi.xz = float2(kOpen); }
+}
+
+// Signed Chebyshev-style distance to the room volume (negative inside) — same
+// convention as safetyBubbleCubeDistance; drives the bounding-edge fade.
+inline float spaceBoundsDistance(float3 posWorld, float3 size, int mode) {
+    float3 lo, hi;
+    spaceBoundsForMode(size, mode, lo, hi);
+    float3 d = max(lo - posWorld, posWorld - hi);
+    return max(d.x, max(d.y, d.z));
+}
+
+// Clips [t0, t1] against one slab. Division-free-guard for axis-parallel rays:
+// those either stay inside the slab forever or never enter it.
+inline bool spaceSlabClip(float o, float d, float lo, float hi, thread float& t0, thread float& t1) {
+    if (fabs(d) < 1e-8f) return o >= lo && o <= hi;
+    float ta = (lo - o) / d;
+    float tb = (hi - o) / d;
+    t0 = max(t0, min(ta, tb));
+    t1 = min(t1, max(ta, tb));
+    return true;
+}
+
+// Clamps a MODEL-space march interval [startT, endT] to the Bound to Space
+// room. The room lives in world meters, so the ray is transformed through
+// modelToWorld and the resulting world interval is converted back to model
+// units (uniform scale ⇒ t_world = t_model · |modelToWorld · rD|). Returns
+// false when the ray never crosses the room volume — the march can be skipped.
+inline bool clampMarchToSpaceBounds(float3 rO, float3 rD,
+                                    float4x4 modelToWorld, float3 spaceSize, int mode,
+                                    thread float& startT, thread float& endT) {
+    if (mode == 0) return true;
+    float3 worldO = (modelToWorld * float4(rO, 1.0f)).xyz;
+    float3 worldD = (modelToWorld * float4(rD, 0.0f)).xyz;
+    float dirScale = length(worldD);
+    if (dirScale < 1e-12f) return true;
+    worldD /= dirScale;
+
+    float3 lo, hi;
+    spaceBoundsForMode(spaceSize, mode, lo, hi);
+    float t0 = 0.0f, t1 = 1e8f;
+    if (!spaceSlabClip(worldO.x, worldD.x, lo.x, hi.x, t0, t1) ||
+        !spaceSlabClip(worldO.y, worldD.y, lo.y, hi.y, t0, t1) ||
+        !spaceSlabClip(worldO.z, worldD.z, lo.z, hi.z, t0, t1)) return false;
+    if (t1 <= t0) return false;
+
+    startT = max(startT, t0 / dirScale);
+    endT = min(endT, t1 / dirScale);
+    return endT > startT;
+}
+
 // visionOS projection outputs z/w in [0, 1] range directly.
 // No transformation needed - just pass through for async timewarp/reprojection.
 inline float encodeDepthFromClip(float4 clipPos) {
@@ -486,22 +549,6 @@ struct FractalParams {
     int bubbleFadeEnabled;  // Enable smooth fade transition
     float bubbleFadeWidth;  // Width of fade region beyond inner radius
     float bubbleStrength;   // Temporal fade (0=off, 1=fully active)
-    // Hand Attraction (visionOS): per-hand interaction sphere, inverse of the
-    // safety bubble — smoothly blends a small blob at each tracked palm INTO
-    // the fractal surface (smooth union) instead of carving it away.
-    int handAttractionEnabled;
-    float handAttractionRadius;
-    float handAttractionStrength;   // signed: >0 = Attract (pull toward), <0 = Repel (push away)
-    int handAttractionPocketEnabled; // Attract-only: carve a small pocket at the hand itself
-    float4 handAttractionShape;      // x = ball size (×radius), y = blend softness, z = pocket size (×ball), w = pocket softness
-    float3 leftHandPosition;
-    int leftHandActive;
-    float3 rightHandPosition;
-    int rightHandActive;
-    float4 leftForearmA;             // xyz = wrist, w = 1 tracked / 0
-    float4 leftForearmB;             // xyz = elbow, w = capsule radius (0 = forearms off)
-    float4 rightForearmA;
-    float4 rightForearmB;
     float sphereProjBlend;  // 0 = off; >0 blends post-fold radial sphere projection (Mandelbox path)
     float sphereProjRadius; // Target radius for the post-fold sphere projection
     float spaceWarpStrength; // 0 = off; drives the custom space warp (built-in Twist or a loaded .threshfx warp)
@@ -517,7 +564,31 @@ struct FractalParams {
     // pointer with count 0 is safe). count == 0 = stack off → identity.
     constant SpaceWarpOp* spaceWarpOps;
     int spaceWarpCount;
+    // Environment Scrunch (scanned-room proximity field): params live ONCE in
+    // the constant Uniforms buffer (pointer, like spaceWarpOps); the distance
+    // grid is a separate buffer reached bindlessly via its GPU address. Both
+    // null/disabled ⇒ identity. Dereferenced only behind the enabled guard.
+    constant EnvScrunchParams* envScrunch;
+    device const half* envGrid;
+    // Hand Attraction (visionOS): per-hand interaction sphere + forearm
+    // capsules. The block lives ONCE in the constant Uniforms buffer
+    // (uniforms.handField); FractalParams carries only this pointer — the
+    // flat copy was 168 B of by-value hot-path state (TECH_DEBT.md #8d).
+    // nullptr or enabled == 0 ⇒ identity; dereferenced only behind that guard.
+    constant HandFieldParams* handField;
 };
+
+// Size gate (TECH_DEBT.md #8d): FractalParams travels BY VALUE through the DE
+// hot path, so growth directly inflates the march loop's register footprint —
+// an embedded array once pushed it to 272 B and collapsed occupancy, and the
+// 2026-07 hand/forearm flat fields pushed it to 320 B before moving behind
+// `handField` (harness-verified byte-identical). Currently 160 B: DE scalars
+// plus POINTERS for the space-warp stack, Environment Scrunch, and the hand
+// field (their data lives once in constant/device memory — the indirection
+// this rule demands). Do NOT bump this bound without a before/after harness
+// measurement (PERF_PUSH.md protocol); prefer packing or pointer indirection.
+static_assert(sizeof(FractalParams) <= 160,
+              "FractalParams (by-value, hot path) grew — measure occupancy impact before raising this bound (TECH_DEBT.md #8d)");
 
 // ── Per-type domain transforms ──────────────────────────────────────────────
 // One function per warp kind so a generated (codegen) stack can call them
@@ -1098,22 +1169,132 @@ FORCE_INLINE float applyForearmOne(float d, float3 pos, float4 A, float4 B, floa
     return mix(a, b, h) + k * h * (1.0f - h);
 }
 
+// === ENVIRONMENT SCRUNCH (scanned-room proximity field) ===
+// Trilinear sample of the CPU-baked band-limited unsigned distance grid
+// (world meters, ENV_SCRUNCH_DIM^3 halfs). `pos` is MODEL space; the params
+// carry a fused model→grid matrix and the meters→model distance scale.
+// Outside the grid (or beyond its clamp) returns bandModel, i.e. "no effect".
+FORCE_INLINE float envScrunchSample(float3 pos, constant EnvScrunchParams& es, device const half* grid) {
+    float3 g = (es.modelToGrid * float4(pos, 1.0f)).xyz;
+    const float DIMf = float(ENV_SCRUNCH_DIM);
+    // Outside the grid = far from every scanned surface: return the bake's
+    // far clamp (carried in the params from EnvironmentSDFGrid.clampFar, so
+    // the two can't drift — TECH_DEBT.md #19), NOT the band, so Shell mode
+    // cuts space beyond the grid instead of skinning its boundary. Scrunch
+    // mode treats anything >= band the same, unaffected.
+    if (any(g < float3(0.5f)) || any(g > float3(DIMf - 1.5f))) return es.farClampModel;
+    float3 gf = g - 0.5f;
+    int3 i0 = int3(floor(gf));
+    float3 f = gf - float3(i0);
+    int base = (i0.z * ENV_SCRUNCH_DIM + i0.y) * ENV_SCRUNCH_DIM + i0.x;
+    const int sy = ENV_SCRUNCH_DIM;
+    const int sz = ENV_SCRUNCH_DIM * ENV_SCRUNCH_DIM;
+    float c000 = float(grid[base]);
+    float c100 = float(grid[base + 1]);
+    float c010 = float(grid[base + sy]);
+    float c110 = float(grid[base + sy + 1]);
+    float c001 = float(grid[base + sz]);
+    float c101 = float(grid[base + sz + 1]);
+    float c011 = float(grid[base + sz + sy]);
+    float c111 = float(grid[base + sz + sy + 1]);
+    float e = mix(mix(mix(c000, c100, f.x), mix(c010, c110, f.x), f.y),
+                  mix(mix(c001, c101, f.x), mix(c011, c111, f.x), f.y), f.z);
+    return e * es.metersToModel;
+}
+
+// Signed box SDF (model units) of the scanned-room containment AABB. Evaluated
+// in grid space so `modelToGrid` folds in the model→world rotation for free;
+// per-axis `cellModel` converts grid-cell steps to model units, so the distance
+// stays metric despite anisotropic cells. Positive outside the room, negative in.
+FORCE_INLINE float envContainBox(float3 pos, constant EnvScrunchParams& es) {
+    float3 g = (es.modelToGrid * float4(pos, 1.0f)).xyz;
+    float3 c = 0.5f * (es.containMinGrid + es.containMaxGrid);
+    float3 hExt = max(0.5f * (es.containMaxGrid - es.containMinGrid), float3(0.0f));
+    float3 q = (abs(g - c) - hExt) * es.cellModel;
+    return length(max(q, float3(0.0f))) + min(max(q.x, max(q.y, q.z)), 0.0f);
+}
+
+// Environment Scrunch: pulls the fractal into a shell that hugs the scanned
+// real-world surfaces (smooth union at a small standoff above them) while
+// keeping the surfaces themselves clear (smooth subtraction inside the
+// clearance) — a mixed positive/negative field, so the fractal scrunches and
+// bulges around the room and its objects instead of punching windows through
+// them. Same strength-blended, not-strictly-Lipschitz approach as the hand
+// ball; the march epsilon margins absorb it. Optional containment then clips the
+// result to the scanned room's AABB — the grid is UNSIGNED so the hug/shell
+// mirrors beyond real walls (an "outside shell"/doubling); the box restores a
+// sign and cuts it. Single return so containment covers the scrunch early-outs
+// too (a point OUTSIDE the room, far from any wall, must still be clipped).
+FORCE_INLINE float applyEnvScrunch(float d, float3 pos, FractalParams params) {
+    constant EnvScrunchParams* es = params.envScrunch;
+    if (es == nullptr || es->enabled == 0 || params.envGrid == nullptr) return d;
+    float e = envScrunchSample(pos, *es, params.envGrid);
+    float k = max(es->softModel, 1e-4f);
+    float out = d;
+
+    if (es->mode == 1) {
+        // SHELL: the fractal exists ONLY within the reach band of real
+        // surfaces — the inverse of Scrunch. Smooth intersection with the
+        // offset surface (e - band), so everything farther than Reach from a
+        // wall/object is cut away and the fractal coats the room; the same
+        // clearance carve keeps the surfaces themselves visible.
+        float cut = e - es->bandModel;              // > 0 outside the shell
+        float h = saturate(0.5f + 0.5f * (cut - d) / k);
+        float sc = mix(d, cut, h) + k * h * (1.0f - h);   // smax(d, cut)
+        float b = es->carveModel - e;
+        float ph = saturate(0.5f + 0.5f * (b - sc) / k);
+        sc = mix(sc, b, ph) + k * ph * (1.0f - ph);       // smax(sc, carve)
+        out = mix(d, sc, saturate(es->strength));
+    } else if (e < es->bandModel) {
+        // SCRUNCH: bulge toward surfaces within the band (else `out` stays d).
+        // Hug shell at hugModel above the real surface (smooth union).
+        float hug = e - es->hugModel;
+        float h = saturate(0.5f + 0.5f * (hug - d) / k);
+        float sc = mix(hug, d, h) - k * h * (1.0f - h);
+        // Clearance carve so the real surface (passthrough) stays visible.
+        float b = es->carveModel - e;
+        float ph = saturate(0.5f + 0.5f * (b - sc) / k);
+        sc = mix(sc, b, ph) + k * ph * (1.0f - ph);
+        float w = saturate(es->strength) * (1.0f - smoothstep(0.0f, es->bandModel, e));
+        out = mix(d, sc, w);
+    }
+
+    // Containment: smax(out, box) — hard intersection (mode 1, k→0) or a soft
+    // feathered boundary (mode 2, k = containFeatherModel). Removing geometry
+    // only ever increases the true nearest-surface distance, so this stays a
+    // valid conservative bound for the coarse warm-start pass.
+    if (es->containMode != 0) {
+        float box = envContainBox(pos, *es);
+        float k2 = (es->containMode == 2) ? max(es->containFeatherModel, 1e-4f) : 1e-4f;
+        float hc = saturate(0.5f + 0.5f * (box - out) / k2);
+        out = mix(out, box, hc) + k2 * hc * (1.0f - hc);
+    }
+    return out;
+}
+
+// Composes BOTH proximity fields: the scanned-environment scrunch first, then
+// the hand field sculpting on top (hands are the nearest-to-user priority).
+// Every DE tail calls this, so all fractal types and Map variants get both.
 FORCE_INLINE float applyHandAttraction(float d, float3 pos, FractalParams params) {
-    if (params.handAttractionEnabled == 0) return d;
+    d = applyEnvScrunch(d, pos, params);
+    // Hand block lives behind a constant pointer (TECH_DEBT.md #8d) — nullptr
+    // or disabled is the common case and returns before any field loads.
+    constant HandFieldParams* hf = params.handField;
+    if (hf == nullptr || hf->enabled == 0) return d;
     // The hand ball needs a non-zero signed strength; the forearm carve below
     // is strength-independent (it exists for limb visibility, not sculpting).
-    const bool ballActive = fabs(params.handAttractionStrength) >= 0.001f;
-    if (ballActive && params.leftHandActive != 0) {
-        d = applyHandAttractionOne(d, pos, params.leftHandPosition, params.handAttractionRadius, params.handAttractionStrength, params.handAttractionPocketEnabled, params.handAttractionShape);
+    const bool ballActive = fabs(hf->strength) >= 0.001f;
+    if (ballActive && hf->leftHand.w > 0.5f) {
+        d = applyHandAttractionOne(d, pos, hf->leftHand.xyz, hf->radius, hf->strength, hf->pocketEnabled, hf->shape);
     }
-    if (ballActive && params.rightHandActive != 0) {
-        d = applyHandAttractionOne(d, pos, params.rightHandPosition, params.handAttractionRadius, params.handAttractionStrength, params.handAttractionPocketEnabled, params.handAttractionShape);
+    if (ballActive && hf->rightHand.w > 0.5f) {
+        d = applyHandAttractionOne(d, pos, hf->rightHand.xyz, hf->radius, hf->strength, hf->pocketEnabled, hf->shape);
     }
-    if (params.leftForearmA.w > 0.5f && params.leftForearmB.w > 0.0f) {
-        d = applyForearmOne(d, pos, params.leftForearmA, params.leftForearmB, params.handAttractionShape.y);
+    if (hf->leftForearmA.w > 0.5f && hf->leftForearmB.w > 0.0f) {
+        d = applyForearmOne(d, pos, hf->leftForearmA, hf->leftForearmB, hf->shape.y);
     }
-    if (params.rightForearmA.w > 0.5f && params.rightForearmB.w > 0.0f) {
-        d = applyForearmOne(d, pos, params.rightForearmA, params.rightForearmB, params.handAttractionShape.y);
+    if (hf->rightForearmA.w > 0.5f && hf->rightForearmB.w > 0.0f) {
+        d = applyForearmOne(d, pos, hf->rightForearmA, hf->rightForearmB, hf->shape.y);
     }
     return d;
 }
@@ -1130,13 +1311,8 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
     float spaceWarpParam2 = 0.0f, float spaceWarpParam3 = 0.0f,
     float3 spaceWarpAxis = float3(0.0f, 1.0f, 0.0f),
     constant SpaceWarpOp* spaceWarpOps = nullptr, int spaceWarpCount = 0,
-    int handAttractionEnabled = 0, float handAttractionRadius = 0.0f, float handAttractionStrength = 0.0f,
-    int handAttractionPocketEnabled = 0,
-    float3 leftHandPosition = float3(0.0f), int leftHandActive = 0,
-    float3 rightHandPosition = float3(0.0f), int rightHandActive = 0,
-    float4 handAttractionShape = float4(0.35f, 1.0f, 0.5f, 0.6f),
-    float4 leftForearmA = float4(0.0f), float4 leftForearmB = float4(0.0f),
-    float4 rightForearmA = float4(0.0f), float4 rightForearmB = float4(0.0f))
+    constant EnvScrunchParams* envScrunch = nullptr,
+    constant HandFieldParams* handField = nullptr)
 {
     FractalParams params;
     // Use precomputed values (expensive powr() and divisions done on CPU)
@@ -1151,19 +1327,11 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
     params.bubbleFadeEnabled = bubbleFadeEnabled;
     params.bubbleFadeWidth = bubbleFadeWidth;
     params.bubbleStrength = bubbleStrength;
-    params.handAttractionEnabled = handAttractionEnabled;
-    params.handAttractionRadius = handAttractionRadius;
-    params.handAttractionStrength = handAttractionStrength;
-    params.handAttractionPocketEnabled = handAttractionPocketEnabled;
-    params.handAttractionShape = handAttractionShape;
-    params.leftForearmA = leftForearmA;
-    params.leftForearmB = leftForearmB;
-    params.rightForearmA = rightForearmA;
-    params.rightForearmB = rightForearmB;
-    params.leftHandPosition = leftHandPosition;
-    params.leftHandActive = leftHandActive;
-    params.rightHandPosition = rightHandPosition;
-    params.rightHandActive = rightHandActive;
+    params.envScrunch = envScrunch;
+    params.envGrid = (envScrunch != nullptr && envScrunch->gridAddress != 0)
+        ? reinterpret_cast<device const half*>(envScrunch->gridAddress) : nullptr;
+    // No copy: retain the constant-buffer pointer (same rule as spaceWarpOps).
+    params.handField = handField;
     params.sphereProjBlend = sphereProjBlend;
     params.sphereProjRadius = sphereProjRadius;
     params.spaceWarpStrength = spaceWarpStrength;
@@ -2046,6 +2214,15 @@ struct SceneResult {
     float2 distGlow;    // .x = distance, .y = glow
     OrbitCache cache;   // Cached orbit state from final hit position
     int steps;          // Fine-march iterations taken to converge (benchmark metric)
+    // === CONE-COVERAGE AA (CTSS-lite) ===
+    // Set only on a grazed miss when coneCoverageAA is on: the ray missed but its
+    // pixel footprint clipped a surface. edgeCoverage is that silhouette's coverage
+    // of the pixel (0 = no edge), edgePos/edgeT the closest-approach sample the
+    // caller shades and composites over the background. Defaults keep every other
+    // SceneResult producer (warm-start, compute tile path) a no-op.
+    float  edgeCoverage = 0.0f;
+    float3 edgePos = float3(0.0f);
+    float  edgeT = 0.0f;
 };
 
 // One step of relaxed sphere tracing (Keinert et al.). Returns true when the
@@ -2170,7 +2347,7 @@ FORCE_INLINE bool smartStepUpdate(float h,
 }
 
 // Raymarch that caches orbit state on hit for reuse in normals/colors
-FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float boundingSphereRadius = 0.0, float stepMultiplier = 1.0, float maxRayDistance = kMaxRayDistanceDefault, bool smartAdvance = false, float epsilonScale = 1.0f, float coneMarchScale = 0.0f, float distanceLODFalloff = 0.0f, float warmStartT = -1.0f)
+FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float boundingSphereRadius = 0.0, float stepMultiplier = 1.0, float maxRayDistance = kMaxRayDistanceDefault, bool smartAdvance = false, float epsilonScale = 1.0f, float coneMarchScale = 0.0f, float distanceLODFalloff = 0.0f, float warmStartT = -1.0f, int coneCoverageAA = 0, float pixelFootprintPerDist = 0.0f)
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
@@ -2231,6 +2408,16 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
     float prevH = 0.0;
     float stepLen = 0.0;
 
+    // CTSS-lite cone-coverage AA: track the closest lateral approach of the
+    // surface, measured as the DE value normalized by this ray's pixel footprint
+    // radius (coneR = pixelFootprintPerDist·t). A ray that never crosses the tight
+    // threshold but whose minConeRatio drops below 1 grazed a surface inside its
+    // pixel — a silhouette edge we anti-alias below. All no-ops when coneCoverageAA
+    // is 0 (the branch is frame-uniform, so it stays coherent and near-free).
+    float minConeRatio = 1e9f;
+    float3 edgeP = float3(0.0f);
+    float edgeTLocal = 0.0f;
+
     for(int j = 0; j < maxSteps; j++)
     {
         // Mandelbulb needs ~4x finer threshold (its DE returns much smaller values).
@@ -2266,10 +2453,40 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
             return result;
         }
 
+        // Cone-coverage AA: remember the tightest normalized approach on a valid
+        // (non-overshoot) step. Skipped entirely when the feature is off.
+        if (coneCoverageAA != 0 && !sorFail)
+        {
+            float coneR = pixelFootprintPerDist * t;
+            float ratio = (coneR > 1e-6f) ? (h / coneR) : 1e9f;
+            if (ratio < minConeRatio) { minConeRatio = ratio; edgeP = p; edgeTLocal = t; }
+        }
+
         if (UNLIKELY(t > maxRayDistance)) break;
 
         glow = accumulateGlow(glow, h, glowIntensity);
         t += stepLen;
+    }
+
+    // Cone-coverage AA: the march missed, but if its footprint grazed a surface
+    // (minConeRatio < 1) record a silhouette edge sample for the caller to shade
+    // and composite over the background. Coverage ramps 1 (surface nearly filled
+    // the pixel) → 0 (surface just touched the footprint edge). One extra orbit-
+    // cache eval, paid only by grazed-miss pixels.
+    if (coneCoverageAA != 0 && minConeRatio < 1.0f)
+    {
+        float cov = 1.0f - smoothstep(0.0f, 1.0f, minConeRatio);
+        if (cov > (1.0f / 255.0f))
+        {
+            int edgeIter = (distanceLODFalloff > 0.0f)
+                ? max(2, iterations - int(edgeTLocal * distanceLODFalloff)) : iterations;
+            OrbitCache edgeCache;
+            MapWithOrbitCacheUnified(edgeP, params, foldingLimit, edgeIter, type, fp, colorIterations, edgeCache);
+            result.cache = edgeCache;
+            result.edgeCoverage = cov;
+            result.edgePos = edgeP;
+            result.edgeT = edgeTLocal;
+        }
     }
 
     result.distGlow = float2(kRayMissThreshold + 100.0, finalizeGlow(glow));
@@ -2854,7 +3071,8 @@ kernel void adaptiveHierarchical8x8(
         uniforms.precomputedFractal,
         uniforms.minDistance,
         marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count,
-        uniforms.handAttractionEnabled, uniforms.handAttractionRadius, uniforms.handAttractionStrength, uniforms.handAttractionPocketEnabled, uniforms.leftHandPosition, uniforms.leftHandActive, uniforms.rightHandPosition, uniforms.rightHandActive, uniforms.handAttractionShape, uniforms.leftForearmA, uniforms.leftForearmB, uniforms.rightForearmA, uniforms.rightForearmB);
+        &uniforms.envScrunch,
+        &uniforms.handField);
 
     // === TEMPORAL REPROJECTION: PER-PIXEL ===
     // Reproject this pixel to previous frame, sample previous depth,
@@ -3013,12 +3231,14 @@ kernel void adaptiveHierarchical8x8(
     if (localIndex == 0) {
         tileIsEmpty = 0;
         
-        // === BOUNDING SPHERE TILE EARLY-EXIT (GMT-fractals technique) ===
+        // === BOUNDING SPHERE / BOUND TO SPACE TILE EARLY-EXIT ===
         // Before coarse raymarching, test rays at the tile center + 4 corners
-        // against the bounding sphere. Only declare empty if ALL 5 rays miss.
+        // against the bounding volumes. Only declare empty if ALL 5 rays miss.
         // Single-center probing dropped 8x8 tiles whenever a thin off-axis
-        // feature crossed only the corner of the tile.
-        if (uniforms.boundingSphereRadius > 0.0) {
+        // feature crossed only the corner of the tile. A probe ray is dead when
+        // it misses ANY enabled volume — visible fractal must sit inside both
+        // the bounding shape and the Bound to Space room.
+        if (uniforms.boundingSphereRadius > 0.0 || uniforms.boundToSpaceMode != 0) {
             const float2 bsOffsets[5] = {
                 float2(ADAPTIVE_TILE_SIZE * 0.5f, ADAPTIVE_TILE_SIZE * 0.5f),
                 float2(0.0f, 0.0f),
@@ -3031,8 +3251,18 @@ kernel void adaptiveHierarchical8x8(
                 float2 px = float2(tileId * ADAPTIVE_TILE_SIZE) + bsOffsets[i];
                 float3 bsModelPoint = reconstructModelPoint(px, uniforms, rateMapData);
                 float3 bsRd = normalize(bsModelPoint - marchOrigin);
-                float bsT = rayIntersectBoundingSphere(marchOrigin, bsRd, float3(0.0), uniforms.boundingSphereRadius);
-                if (bsT < 0.0) bsMissCount++;
+                bool rayDead = false;
+                if (uniforms.boundingSphereRadius > 0.0) {
+                    float bsT = rayIntersectBoundingSphere(marchOrigin, bsRd, float3(0.0), uniforms.boundingSphereRadius);
+                    rayDead = (bsT < 0.0);
+                }
+                if (!rayDead && uniforms.boundToSpaceMode != 0) {
+                    float probeStartT = 0.0f, probeEndT = uniforms.maxViewDistance;
+                    rayDead = !clampMarchToSpaceBounds(marchOrigin, bsRd, uniforms.modelToWorldMatrix,
+                                                       uniforms.boundSpaceSize, uniforms.boundToSpaceMode,
+                                                       probeStartT, probeEndT);
+                }
+                if (rayDead) bsMissCount++;
             }
             if (bsMissCount >= 5) {
                 tileIsEmpty = 1;
@@ -3113,7 +3343,7 @@ kernel void adaptiveHierarchical8x8(
             FractalParams coarseParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
-                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count);
+                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch);
             coarseTCenter = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, coarseParams, lodIterations, fractalType, uniforms.formulaParams, uniforms.maxViewDistance, uniforms.marchEpsilonScale);
             ranCoarseMarch = true;
 
@@ -3199,10 +3429,36 @@ kernel void adaptiveHierarchical8x8(
         sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, fineStartT, pixelCenter, 1.0, maxSteps,
                                               uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff);
     } else {
-        sceneResult = SceneWithCache(marchOrigin, marchDir, pixelCenter, 1.0, maxSteps,
-                         uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff);
+        // Bound to Space: clip the march to the room's interval along this ray
+        // (start raised to room entry, budget capped at room exit). Rays that
+        // never cross the room volume skip the march entirely. A no-op while
+        // boundToSpaceMode == 0.
+        float marchStartT = -1.0f;
+        float marchEndT = uniforms.maxViewDistance;
+        if (!clampMarchToSpaceBounds(marchOrigin, marchDir, uniforms.modelToWorldMatrix,
+                                     uniforms.boundSpaceSize, uniforms.boundToSpaceMode,
+                                     marchStartT, marchEndT)) {
+            sceneResult.distGlow = float2(kRayMissThreshold + 100.0, 0.0);
+            sceneResult.cache = makeEmptyOrbitCache();
+            sceneResult.steps = 0;
+        } else {
+            sceneResult = SceneWithCache(marchOrigin, marchDir, pixelCenter, 1.0, maxSteps,
+                             uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, marchEndT, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff, marchStartT);
+        }
     }
-    
+
+    // Bound to Space: reclassify hits outside the room as misses. The clamped
+    // full march can't produce them (beyond a single overshoot step), but the
+    // temporal reprojection path above can. The 1cm tolerance keeps hits
+    // sliced open right at a wall from speckling into misses. Written back
+    // into sceneResult so every downstream read (didHit, depth) agrees.
+    if (uniforms.boundToSpaceMode != 0 && sceneResult.distGlow.x < kRayMissThreshold) {
+        float3 hitWorld = (uniforms.modelToWorldMatrix * float4(marchOrigin + sceneResult.distGlow.x * marchDir, 1.0f)).xyz;
+        if (spaceBoundsDistance(hitWorld, uniforms.boundSpaceSize, uniforms.boundToSpaceMode) > 0.01f) {
+            sceneResult.distGlow.x = kRayMissThreshold + 100.0f;
+        }
+    }
+
     float adjustedDist = sceneResult.distGlow.x;
     float glow = sceneResult.distGlow.y;
     OrbitCache hitCache = sceneResult.cache;
@@ -3258,7 +3514,7 @@ kernel void adaptiveHierarchical8x8(
                 FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                     uniforms.precomputedFractal,
                     uniforms.minDistance,
-                    marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count);
+                    marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch);
                 tg_shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
                 tg_shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
                 // Publish anchor surface frame for the coherent-packet normal gate.
@@ -3302,7 +3558,7 @@ kernel void adaptiveHierarchical8x8(
                     FractalParams shadowParamsLocal = makeFractalParamsFromPrecomputed(
                         uniforms.precomputedFractal,
                         uniforms.minDistance,
-                        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count);
+                        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch);
                     shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParamsLocal, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
                     shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParamsLocal, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
                     // Tag debug overlay layer for shadow fallback (only when not already tagged by warm-start).
@@ -3315,7 +3571,7 @@ kernel void adaptiveHierarchical8x8(
             FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
-                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count);
+                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch);
             shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
             shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
         }
@@ -3343,7 +3599,7 @@ kernel void adaptiveHierarchical8x8(
     col = PostEffectsWithScheme(col, texCoord, uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), glowH);
     FloorCircleHit floorHit = evaluateFloorCircle(cameraPos, rd, adjustedDist, uniforms.floorPlane, uniforms.floorCenterRadius);
     col = compositeFloorCircle(col, floorHit);
-    
+
     // Debug visualization
     // Use function constant to compile out debug code in release builds
     const bool debugHierarchical = is_function_constant_defined(FC_DEBUG_HIERARCHICAL) ? FC_DEBUG_HIERARCHICAL : (uniforms.debugHierarchical == 1);
@@ -3353,7 +3609,7 @@ kernel void adaptiveHierarchical8x8(
             col = mix(col, half3(1.0h, 1.0h, 0.0h), 0.5h);
         }
     }
-    
+
     float4 finalColor = float4(linearToSRGB(float3(col)), 1.0);
 
     // === COHERENT-PACKET LAYER-OF-ACCEPTANCE OVERLAY (Stage 0) ===
@@ -3465,7 +3721,7 @@ kernel void coneCoarsePrepass8x8(uint2 texel [[thread_position_in_grid]],
     FractalParams fp = makeFractalParamsFromPrecomputed(
         uniforms.precomputedFractal,
         uniforms.minDistance,
-        mO, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count);
+        mO, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch);
 
     float hitThreshold = 0.02f * epsilonScale;
     float t = 0.05f;
@@ -3607,7 +3863,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         uniforms.precomputedFractal,
         uniforms.minDistance,
         marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count,
-        uniforms.handAttractionEnabled, uniforms.handAttractionRadius, uniforms.handAttractionStrength, uniforms.handAttractionPocketEnabled, uniforms.leftHandPosition, uniforms.leftHandActive, uniforms.rightHandPosition, uniforms.rightHandActive, uniforms.handAttractionShape, uniforms.leftForearmA, uniforms.leftForearmB, uniforms.rightForearmA, uniforms.rightForearmB);
+        &uniforms.envScrunch,
+        &uniforms.handField);
 
     half3 col = half3(0.0h);
     float2 ret;
@@ -3633,10 +3890,36 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         // march's start t (never the reprojection-window path above). It's a
         // provable lower bound, so the march still finds exactly what it would
         // have; passing -1.0f (the default) when the feature is off is a no-op.
-        sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff, coarseWarmStartT);
+        //
+        // Bound to Space: clip the march to the room's interval along this ray
+        // (start raised to room entry, budget capped at room exit). Rays that
+        // never cross the room volume skip the march entirely. A no-op while
+        // boundToSpaceMode == 0.
+        float marchStartT = coarseWarmStartT;
+        float marchEndT = uniforms.maxViewDistance;
+        if (!clampMarchToSpaceBounds(marchOrigin, marchDir, uniforms.modelToWorldMatrix,
+                                     uniforms.boundSpaceSize, uniforms.boundToSpaceMode,
+                                     marchStartT, marchEndT)) {
+            sceneResult.distGlow = float2(kRayMissThreshold + 100.0, 0.0);
+            sceneResult.cache = makeEmptyOrbitCache();
+            sceneResult.steps = 0;
+        } else {
+            sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, marchEndT, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff, marchStartT, uniforms.coneCoverageAAEnabled, uniforms.pixelFootprintPerDist);
+        }
     }
     ret = sceneResult.distGlow;
     hitCache = sceneResult.cache;
+
+    // Bound to Space: reclassify hits outside the room as misses. The clamped
+    // full march can't produce them (beyond a single overshoot step), but the
+    // temporal depth warm-start path above can. The 1cm tolerance keeps hits
+    // sliced open right at a wall from speckling into misses.
+    if (uniforms.boundToSpaceMode != 0 && ret.x < kRayMissThreshold) {
+        float3 hitWorld = (uniforms.modelToWorldMatrix * float4(marchOrigin + ret.x * marchDir, 1.0f)).xyz;
+        if (spaceBoundsDistance(hitWorld, uniforms.boundSpaceSize, uniforms.boundToSpaceMode) > 0.01f) {
+            ret.x = kRayMissThreshold + 100.0;
+        }
+    }
 
     // Benchmark: accumulate fine-march iterations for converged (hit) rays so the
     // CPU can read back an average steps-to-converge. No-op unless a sweep armed
@@ -3646,10 +3929,18 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         atomic_fetch_add_explicit(&benchCounters[1], 1u, memory_order_relaxed);
     }
 
-    if (ret.x < kRayMissThreshold)
+    // Cone-coverage AA: a ray that missed but whose footprint grazed a surface
+    // shades the recorded edge sample and composites it over the background by its
+    // coverage (see the fog step below). edgeAA is frame-uniform-gated so it stays
+    // coherent; sceneResult.edgeCoverage is 0 unless the feature actually ran.
+    bool edgeAA = (uniforms.coneCoverageAAEnabled != 0) && (ret.x >= kRayMissThreshold)
+                  && (sceneResult.edgeCoverage > 0.0f);
+    float hitDist = edgeAA ? sceneResult.edgeT : ret.x;
+
+    if (ret.x < kRayMissThreshold || edgeAA)
     {
         // Compute hit position and clip-space depth once (used for depth output and debug visualization)
-        float3 p = marchOrigin + ret.x * marchDir;
+        float3 p = edgeAA ? sceneResult.edgePos : (marchOrigin + ret.x * marchDir);
         float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
         float depth = encodeDepthFromClip(clipPos);
         output.depth = depth;
@@ -3665,7 +3956,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             col = half3(0.6h, 0.6h, 0.6h);
         } else {
         float3 nor = (benchAblate == 13) ? -marchDir
-                   : GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, uniforms.formulaParams, hitCache);
+                   : GetNormal(p, hitDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, uniforms.formulaParams, hitCache);
 
         {
             // Use precomputed spotlight position and intensity from CPU
@@ -3683,7 +3974,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
-                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count);
+                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch);
 
             half shaSpot = (benchAblate == 12) ? half(1.0h) : half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
             half shaSun = (benchAblate == 12) ? half(1.0h) : half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
@@ -3719,6 +4010,25 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                 boundFade = shapeDist > 0.0f ? 0.0h : 1.0h;
             }
         }
+
+        // Bound to Space: same edge treatment against the room's walls, in
+        // WORLD meters (bands: Ghost Fade 0.35 m, Inner Shadow depth × 2 m).
+        // The march is already clipped to the room, so this only softens the
+        // slice at the boundary; composes with the shape fade via min().
+        if (uniforms.boundToSpaceMode != 0) {
+            float3 hitWorld = (uniforms.modelToWorldMatrix * float4(p, 1.0f)).xyz;
+            float spaceDist = spaceBoundsDistance(hitWorld, uniforms.boundSpaceSize, uniforms.boundToSpaceMode);
+            half spaceFade;
+            if (uniforms.boundingFogEnabled == 2) {
+                float depth = clamp(uniforms.boundingShadowDepth, 0.02f, 0.95f);
+                spaceFade = half(1.0f - smoothstep(-2.0f * depth, 0.0f, spaceDist));
+            } else if (uniforms.boundingFogEnabled == 1) {
+                spaceFade = half(1.0f - smoothstep(-0.35f, 0.0f, spaceDist));
+            } else {
+                spaceFade = spaceDist > 0.0f ? 0.0h : 1.0h;
+            }
+            boundFade = min(boundFade, spaceFade);
+        }
     }
     else
     {
@@ -3728,7 +4038,18 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
     // Apply fog, glow, and clamp using helper functions
     half glow = half(ret.y);
-    col = applyFog(col, ret.x, uniforms.precomputedFog);
+    if (edgeAA) {
+        // Cone-coverage AA composite: the shaded edge surface (fogged at its own
+        // depth) over the background sky (fog at infinity), weighted by coverage.
+        // Blending already-fogged colors keeps a distant edge correctly hazed
+        // while the uncovered fraction stays pure sky. The plain fog below is
+        // skipped for this pixel (edgeAA rays keep ret.x at the miss distance).
+        half3 surfCol = applyFog(col, sceneResult.edgeT, uniforms.precomputedFog);
+        half3 skyCol  = applyFog(half3(0.0h), kRayMissThreshold, uniforms.precomputedFog);
+        col = mix(skyCol, surfCol, half(sceneResult.edgeCoverage));
+    } else {
+        col = applyFog(col, ret.x, uniforms.precomputedFog);
+    }
     col = applyGlow(col, glow);
     col = clampColor(col);
 
@@ -3760,7 +4081,10 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     // pixels count as hits.
     float outAlpha = 1.0f;
     if (uniforms.passthroughBackground != 0) {
-        if (ret.x >= kRayMissThreshold && floorHit.alpha <= 0.0f) {
+        if (edgeAA && floorHit.alpha <= 0.0f) {
+            // Silhouette edge over passthrough: present at its coverage.
+            outAlpha = float(sceneResult.edgeCoverage);
+        } else if (ret.x >= kRayMissThreshold && floorHit.alpha <= 0.0f) {
             outAlpha = 0.0f;
         } else {
             // Ghost Fade: hits near the boundary fade to transparent (boundFade

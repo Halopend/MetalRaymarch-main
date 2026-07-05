@@ -344,6 +344,16 @@ final class ThresholdMacRenderer {
     }()
     nonisolated(unsafe) static var benchAblateMode: UInt32 = benchAblateModeEnvDefault
 
+    /// Synthetic environment for headless/dev testing (THRESHOLD_SYNTHETIC_ENV:
+    /// `floor:y` · `sphere:x,y,z,r` · `box:cx,cy,cz,hx,hy,hz` joined by `;`,
+    /// or "1" for a default demo room) — Mac has no room sensing to scan. nil
+    /// (the normal case) leaves Environment Scrunch driven by its toggle alone,
+    /// which on this platform means off.
+    private static let syntheticEnvSpec: String? =
+        ProcessInfo.processInfo.environment["THRESHOLD_SYNTHETIC_ENV"]
+    private var macEnvGrid: EnvironmentSDFGrid?
+    private var macEnvGridBakeAttempted = false
+
     private static let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
     private static let maxBuffersInFlight = 2
     private static let defaultTargetPosition = SIMD3<Float>(0.1, 0.1, 0.1)
@@ -916,6 +926,11 @@ final class ThresholdMacRenderer {
         }
         encoder.setVertexBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
         encoder.setFragmentBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
+        // Environment Scrunch grid is reached bindlessly (GPU address in the
+        // uniforms) — make it resident for the fragment march.
+        if let envGrid = macEnvGrid {
+            encoder.useResource(envGrid.buffer, usage: .read, stages: .fragment)
+        }
         // fragmentShaderMono declares benchCounters at this index; bind every
         // frame so the argument is satisfied even when profiling is off.
         encoder.setFragmentBuffer(benchBuffer, offset: 0, index: BufferIndex.benchCounters.rawValue)
@@ -1500,6 +1515,14 @@ final class ThresholdMacRenderer {
     }
 
     private func makeUniforms(settings: RenderSettingsSnapshot, elapsedTime: Float, deltaTime: Float) -> Uniforms {
+        // Environment Scrunch (Mac): bake the synthetic environment once on
+        // first need — the grid is world-anchored and static on this platform.
+        if settings.envScrunchEnabled, !macEnvGridBakeAttempted, let spec = Self.syntheticEnvSpec {
+            macEnvGridBakeAttempted = true
+            macEnvGrid = EnvironmentSDFGrid.bakeSynthetic(
+                device: device,
+                primitives: EnvironmentSDFGrid.parseSynthetic(spec))
+        }
         let smoothFactor = 1.0 - exp(-15.0 * deltaTime)
         smoothedScale += (settings.scale - smoothedScale) * smoothFactor
 
@@ -1641,19 +1664,7 @@ final class ThresholdMacRenderer {
                         safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
                         safetyBubbleStrength: settings.fractalType == .mandelbulb ? 0.0 : settings.safetyBubbleStrength,
                         // Hand Attraction needs ARKit hand tracking — visionOS only.
-                        handAttractionEnabled: 0,
-                        handAttractionRadius: 0,
-                        handAttractionStrength: 0,
-                        handAttractionPocketEnabled: 0,
-                        handAttractionShape: SIMD4<Float>(0.35, 1.0, 0.5, 0.6),
-                        leftHandPosition: .zero,
-                        leftHandActive: 0,
-                        rightHandPosition: .zero,
-                        rightHandActive: 0,
-                        leftForearmA: .zero,
-                        leftForearmB: .zero,
-                        rightForearmA: .zero,
-                        rightForearmB: .zero,
+                        handField: .off,
                         colorIterations: settings.colorIterations,
                         limitFlash: settings.limitFlash,
                         activeGesture: Int32(settings.activeGestureIndex),
@@ -1685,6 +1696,7 @@ final class ThresholdMacRenderer {
                             strength: settings.coneMarchStrength,
                             projection: projection,
                             viewportHeight: Float(drawableSize.height)),
+                        coneCoverageAAEnabled: settings.coneCoverageAAEnabled ? 1 : 0,
                         shadowsEnabled: settings.shadowsEnabled ? 1 : 0,
                         distanceLODFalloff: settings.distanceLODStrength * 0.5 * zoomOutLODScale,
                         benchCollectSteps: BenchmarkManager.shared.shouldCollectSteps ? 1 : 0,
@@ -1716,7 +1728,21 @@ final class ThresholdMacRenderer {
                         passthroughBackground: 0,
                         boundingFogEnabled: Int32(settings.boundingShapeFogMode),
                         boundingShadowDepth: settings.boundingShapeShadowDepth,
-                        boundingShapeType: settings.boundingShapeType)
+                        boundingShapeType: settings.boundingShapeType,
+                        boundToSpaceMode: settings.resolvedBoundToSpaceMode,
+                        boundSpaceSize: settings.boundSpaceSize,
+                        modelToWorldMatrix: modelMatrix,
+                        // Mac has no room sensing; a synthetic environment can be
+                        // injected via THRESHOLD_SYNTHETIC_ENV for headless/dev
+                        // verification of the scrunch path.
+                        envScrunch: settings.makeEnvScrunchParams(
+                            modelToWorld: modelMatrix,
+                            gridOrigin: macEnvGrid?.originWorld ?? .zero,
+                            gridCell: macEnvGrid?.cellSize ?? .zero,
+                            gridAddress: macEnvGrid?.gpuAddress ?? 0,
+                            surfaceMinWorld: macEnvGrid?.surfaceMinWorld ?? .zero,
+                            surfaceMaxWorld: macEnvGrid?.surfaceMaxWorld ?? .zero,
+                            farClampMeters: EnvironmentSDFGrid.clampFar))
     }
 
     private static func buildRenderPipeline(device: MTLDevice,
