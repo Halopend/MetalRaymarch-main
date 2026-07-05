@@ -38,12 +38,12 @@
 		3B634EF08D10A58333E7F52C /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0CD407A50A4FE37188F833F4 /* Cocoa.framework */; };
 		43FA8D042392D8E6EE3CCFA8 /* QualityPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B0B6169B9B8A1360E944DC7 /* QualityPreset.swift */; };
 		44E2BAD92D4039BA8C1E0AF0 /* EmbeddedMetalSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 267AB8DEF708B1DC20911B9C /* EmbeddedMetalSources.swift */; };
+		48DD30AFDC864E1A8827943A /* HandAttractionConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1BCB01768C3439E8FADC03A /* HandAttractionConfig.swift */; };
 		49BC12B5450C58391BAE94F0 /* ColorConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C77DE10DC1B71A0E493B68 /* ColorConfig.swift */; };
 		4A877657E95AE14A71970EA1 /* EmbeddedFormula.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82382DEE190B80E008CB478A /* EmbeddedFormula.swift */; };
 		4CEAD909CE739CAC4DA53FB1 /* MenuToggleGestureMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13E0E291C71A2ACF08D9B125 /* MenuToggleGestureMode.swift */; };
 		4D1917EA83801D257DFD0C48 /* PerFractalGestureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0699360DD28FC3B04D6FADBB /* PerFractalGestureStore.swift */; };
 		4EFA6DEAD08F625897C00F1A /* SafetyBubbleConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 794BF202BA7BBC02F4FB580F /* SafetyBubbleConfig.swift */; };
-		F78F895497B34B17AE8C7DBC /* HandAttractionConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C5C7E2D7B294CB5BAC955F4 /* HandAttractionConfig.swift */; };
 		522D0EBE5B4AD8DB253BD23B /* PreviewViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1131A122AD8E8C61F00CF65 /* PreviewViewController.swift */; };
 		57E6C682186713D4EFFFCDC9 /* FingerGestureAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9DF786ED3BC98E2F232D550 /* FingerGestureAction.swift */; };
 		583434B273EC906E48710819 /* RenderSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 725149DCC30BFBEC6B030A69 /* RenderSettings.swift */; };
@@ -78,7 +78,6 @@
 		9F0F14D9860FB847DC472B38 /* RendererMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = F769728D520A7B9927A98F93 /* RendererMath.swift */; };
 		A2DE4D640BCEBEE8E04E7BA9 /* ParameterTargetID.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D7A3D65630F4A3C1CADC20B /* ParameterTargetID.swift */; };
 		A49EED5D47CFEEEC9B2D0D66 /* SafetyBubbleConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 592A3385CBE68CE5E0CE2736 /* SafetyBubbleConfig.swift */; };
-		48DD30AFDC864E1A8827943A /* HandAttractionConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1BCB01768C3439E8FADC03A /* HandAttractionConfig.swift */; };
 		A9FCB5B990EE53439ED9FE83 /* Module.swift in Sources */ = {isa = PBXBuildFile; fileRef = A92085A1D3050F75ED8A6181 /* Module.swift */; };
 		AAD15F51E358FB97079A964D /* FormulaCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCC942C32813788F2922D732 /* FormulaCatalog.swift */; };
 		AC4F16D232DF53817715103D /* GestureDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF71849134C54AACB11F7F79 /* GestureDefaults.swift */; };
@@ -99,6 +98,7 @@
 		F03C71847F6FC9D5E0872985 /* GestureDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6098FB1FAC140F981B15B41 /* GestureDefaults.swift */; };
 		F638B6C567B1055C7031DE49 /* FractalModelType.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2ABDB6BC0435A12CEF659CF /* FractalModelType.swift */; };
 		F77351A72ACFDB0DE1919E14 /* LightingTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03E7522477BCD8B767E1FEAD /* LightingTypes.swift */; };
+		F78F895497B34B17AE8C7DBC /* HandAttractionConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C5C7E2D7B294CB5BAC955F4 /* HandAttractionConfig.swift */; };
 		F88BA773C7D8F0471D54B19D /* ThresholdQLThumbnail.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 8BC439643071C561249FAE99 /* ThresholdQLThumbnail.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FCE029F5DBCF2DF1E35858EF /* AudioReactiveConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9824E07E16D25804B68E737E /* AudioReactiveConfig.swift */; };
 		FF839A449C97E5F4B0C2E334 /* FractalModelType.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDAC6A707202A0F62AF31B93 /* FractalModelType.swift */; };
@@ -171,6 +171,7 @@
 		0699360DD28FC3B04D6FADBB /* PerFractalGestureStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PerFractalGestureStore.swift; path = Threshold/Parameters/Config/PerFractalGestureStore.swift; sourceTree = SOURCE_ROOT; };
 		0A3899E6341BEADA0FA5D0C8 /* FormulaCatalog.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FormulaCatalog.swift; path = Threshold/App/FormulaCatalog.swift; sourceTree = SOURCE_ROOT; };
 		0A82142CE4925B851185586A /* CustomShaderCompiler.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CustomShaderCompiler.swift; path = Threshold/Rendering/Core/CustomShaderCompiler.swift; sourceTree = SOURCE_ROOT; };
+		0C5C7E2D7B294CB5BAC955F4 /* HandAttractionConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HandAttractionConfig.swift; path = Threshold/Parameters/Config/HandAttractionConfig.swift; sourceTree = SOURCE_ROOT; };
 		0CD407A50A4FE37188F833F4 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 		0CDDB2DC7FC5EB734A23428C /* SettingsPersistence.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SettingsPersistence.swift; path = Threshold/Parameters/SettingsPersistence.swift; sourceTree = SOURCE_ROOT; };
 		0E518000454DB9D83F3344A0 /* ThresholdQLThumbnail.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; name = ThresholdQLThumbnail.entitlements; path = ThresholdQuickLook/Thumbnail/ThresholdQLThumbnail.entitlements; sourceTree = SOURCE_ROOT; };
@@ -194,7 +195,6 @@
 		53952F29F6202ECF606B2D07 /* MusicReactiveTypes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MusicReactiveTypes.swift; path = Threshold/Audio/MusicReactiveTypes.swift; sourceTree = SOURCE_ROOT; };
 		5452116D4975BC87388B1C02 /* GradientColorSystem.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GradientColorSystem.swift; path = Threshold/Parameters/GradientColorSystem.swift; sourceTree = SOURCE_ROOT; };
 		592A3385CBE68CE5E0CE2736 /* SafetyBubbleConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SafetyBubbleConfig.swift; path = Threshold/Parameters/Config/SafetyBubbleConfig.swift; sourceTree = SOURCE_ROOT; };
-		E1BCB01768C3439E8FADC03A /* HandAttractionConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HandAttractionConfig.swift; path = Threshold/Parameters/Config/HandAttractionConfig.swift; sourceTree = SOURCE_ROOT; };
 		5B0B6169B9B8A1360E944DC7 /* QualityPreset.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = QualityPreset.swift; path = Threshold/Parameters/QualityPreset.swift; sourceTree = SOURCE_ROOT; };
 		5F147CA447647DC08A7270CB /* ControlSpec.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlSpec.swift; path = Threshold/Parameters/ControlSpec.swift; sourceTree = SOURCE_ROOT; };
 		6016FBED960DB946AF37F903 /* ModuleRegistry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ModuleRegistry.swift; path = Threshold/Parameters/ModuleRegistry.swift; sourceTree = SOURCE_ROOT; };
@@ -209,7 +209,6 @@
 		73C3366DC9A7B03E01CA6145 /* LightingConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LightingConfig.swift; path = Threshold/Parameters/Config/LightingConfig.swift; sourceTree = SOURCE_ROOT; };
 		77411092B7F9F5CDE50778EF /* catalog.json */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.json; name = catalog.json; path = Threshold/Formulas/catalog.json; sourceTree = SOURCE_ROOT; };
 		794BF202BA7BBC02F4FB580F /* SafetyBubbleConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SafetyBubbleConfig.swift; path = Threshold/Parameters/Config/SafetyBubbleConfig.swift; sourceTree = SOURCE_ROOT; };
-		0C5C7E2D7B294CB5BAC955F4 /* HandAttractionConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HandAttractionConfig.swift; path = Threshold/Parameters/Config/HandAttractionConfig.swift; sourceTree = SOURCE_ROOT; };
 		7D3E7246F6CB0F47DC18ED2B /* SpaceWarpStackModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SpaceWarpStackModel.swift; path = Threshold/Parameters/SpaceWarpStackModel.swift; sourceTree = SOURCE_ROOT; };
 		82382DEE190B80E008CB478A /* EmbeddedFormula.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmbeddedFormula.swift; path = Threshold/Formulas/EmbeddedFormula.swift; sourceTree = SOURCE_ROOT; };
 		84464F5A5A3EA90D108BE9DE /* Shaders.metal */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.metal; name = Shaders.metal; path = Threshold/Rendering/Shaders.metal; sourceTree = SOURCE_ROOT; };
@@ -254,6 +253,7 @@
 		D817943CBDDDB5B502840504 /* RenderSettingsSnapshot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderSettingsSnapshot.swift; path = Threshold/Parameters/RenderSettingsSnapshot.swift; sourceTree = SOURCE_ROOT; };
 		D8A000012D00000000000001 /* ThresholdTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThresholdTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		DD376B9356FEEDCA283E292E /* RendererMath.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RendererMath.swift; path = Threshold/Rendering/Core/RendererMath.swift; sourceTree = SOURCE_ROOT; };
+		E1BCB01768C3439E8FADC03A /* HandAttractionConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HandAttractionConfig.swift; path = Threshold/Parameters/Config/HandAttractionConfig.swift; sourceTree = SOURCE_ROOT; };
 		E37F7B4C31E78CAEEB2109B0 /* catalog.json */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.json; name = catalog.json; path = Threshold/Formulas/catalog.json; sourceTree = SOURCE_ROOT; };
 		E545B25635280FB3482A5087 /* EmbeddedFormula.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmbeddedFormula.swift; path = Threshold/Formulas/EmbeddedFormula.swift; sourceTree = SOURCE_ROOT; };
 		EA33AD011BE4346D3B183E03 /* RenderPrecompute.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderPrecompute.swift; path = Threshold/Rendering/Core/RenderPrecompute.swift; sourceTree = SOURCE_ROOT; };
@@ -1040,7 +1040,7 @@
 				CODE_SIGN_ENTITLEMENTS = Threshold/Threshold.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 21;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_PREVIEWS = YES;
@@ -1081,7 +1081,7 @@
 				CODE_SIGN_ENTITLEMENTS = Threshold/Threshold.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 21;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
@@ -1253,7 +1253,7 @@
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdMac.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 21;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
@@ -1292,7 +1292,7 @@
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdMac.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 21;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_ASSET_PATHS = "";
@@ -1331,7 +1331,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdiOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 21;
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_PREVIEWS = YES;
 				EXCLUDED_RESOURCE_FILE_NAMES = App/Info.plist;
@@ -1370,7 +1370,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdiOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 21;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_PREVIEWS = YES;
@@ -1408,7 +1408,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 21;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1434,7 +1434,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 21;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				GENERATE_INFOPLIST_FILE = YES;
