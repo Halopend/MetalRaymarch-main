@@ -1,0 +1,332 @@
+{
+  "abiVersion" : 2,
+  "bindings" : [
+    {
+      "component" : 0,
+      "id" : "E9E8935C-D10D-4BA3-90F1-001411CD2572",
+      "lane" : 5,
+      "mapping" : {
+        "curve" : {
+          "exponential" : {
+            "k" : 1.6
+          }
+        },
+        "deadzone" : 0.02,
+        "inputHi" : 1,
+        "inputLo" : 0,
+        "outputHi" : 1.6,
+        "outputLo" : 1.3148361
+      },
+      "param" : "camera.dolly",
+      "policy" : "momentary",
+      "scale" : 1,
+      "signal" : "audio.band.mid"
+    },
+    {
+      "component" : 0,
+      "id" : "A6C21C2E-B632-465D-8677-1141FE17F8D1",
+      "lane" : 5,
+      "mapping" : {
+        "curve" : {
+          "smooth" : {
+
+          }
+        },
+        "deadzone" : 0.02,
+        "inputHi" : 1,
+        "inputLo" : 0,
+        "outputHi" : 0.8,
+        "outputLo" : 0
+      },
+      "param" : "engine.aoStrength",
+      "policy" : "momentary",
+      "scale" : 1,
+      "signal" : "audio.rms"
+    }
+  ],
+  "camera" : {
+    "fovYRadians" : 1.0471975,
+    "orientation" : [
+      0,
+      0,
+      0,
+      1
+    ],
+    "position" : [
+      0,
+      0,
+      3
+    ]
+  },
+  "fractalTypeKey" : "mandelbox",
+  "integratorPhases" : {
+    "de.mandelbulb.rotationPhase" : 0,
+    "scale.zoom" : 2.0576172
+  },
+  "lfos" : [
+    {
+      "bias" : 0,
+      "components" : [
+        {
+          "amplitude" : 1,
+          "phase" : 0,
+          "rateHz" : 0.3,
+          "wave" : "sine"
+        }
+      ],
+      "enabled" : true,
+      "id" : "7330F45A-BB91-47F4-ADF4-E03ADF825359",
+      "name" : "A",
+      "slot" : "lfo.a"
+    }
+  ],
+  "palette" : {
+    "stops" : [
+      {
+        "blue" : 0.08,
+        "green" : 0.01,
+        "position" : 0,
+        "red" : 0.02
+      },
+      {
+        "blue" : 0.9,
+        "green" : 0.85,
+        "position" : 0.35,
+        "red" : 0.05
+      },
+      {
+        "blue" : 0.75,
+        "green" : 0.1,
+        "position" : 0.7,
+        "red" : 0.85
+      },
+      {
+        "blue" : 0.3,
+        "green" : 0.95,
+        "position" : 1,
+        "red" : 0.98
+      }
+    ]
+  },
+  "params" : {
+    "camera.dolly" : [
+      1.0512619018554688
+    ],
+    "camera.orbitPitch" : [
+      0
+    ],
+    "camera.orbitYaw" : [
+      0
+    ],
+    "color.brightness" : [
+      1
+    ],
+    "color.contrast" : [
+      1
+    ],
+    "color.gamma" : [
+      1
+    ],
+    "color.gradient.offset" : [
+      0.38532987236976624
+    ],
+    "color.gradient.repeat" : [
+      13.848958969116211
+    ],
+    "color.gradient.smoothing" : [
+      0.47209200263023376
+    ],
+    "color.mapMode" : [
+      2
+    ],
+    "color.saturation" : [
+      1
+    ],
+    "color.tonemap" : [
+      0
+    ],
+    "color.vibrance" : [
+      0
+    ],
+    "de.kleinian.crossRadius" : [
+      0.8399999737739563
+    ],
+    "de.kleinian.maxX" : [
+      0.3499999940395355
+    ],
+    "de.kleinian.maxY" : [
+      1
+    ],
+    "de.kleinian.maxZ" : [
+      1.2200000286102295
+    ],
+    "de.kleinian.minX" : [
+      -0.32519999146461487
+    ],
+    "de.kleinian.minY" : [
+      -0.7861999869346619
+    ],
+    "de.kleinian.minZ" : [
+      -0.09480000287294388
+    ],
+    "de.kleinian.sphereFold" : [
+      0.6899999976158142
+    ],
+    "de.mandelbox.fixedRadius" : [
+      1.2938528060913086
+    ],
+    "de.mandelbox.foldLimit" : [
+      1.2495988607406616
+    ],
+    "de.mandelbox.minRadius" : [
+      0.5784277319908142
+    ],
+    "de.mandelbox.scale" : [
+      1.2614398002624512
+    ],
+    "de.mandelboxSphereProjection.fixedRadius" : [
+      1
+    ],
+    "de.mandelboxSphereProjection.foldLimit" : [
+      1
+    ],
+    "de.mandelboxSphereProjection.minRadius" : [
+      0.25
+    ],
+    "de.mandelboxSphereProjection.projBlend" : [
+      0.9800000190734863
+    ],
+    "de.mandelboxSphereProjection.projRadius" : [
+      1
+    ],
+    "de.mandelboxSphereProjection.scale" : [
+      2
+    ],
+    "de.mandelbulb.power" : [
+      8
+    ],
+    "de.mandelbulb.rotationSpeed" : [
+      0
+    ],
+    "de.mandelbulbJulia.cX" : [
+      0.20000000298023224
+    ],
+    "de.mandelbulbJulia.cY" : [
+      -0.15000000596046448
+    ],
+    "de.mandelbulbJulia.cZ" : [
+      0.3499999940395355
+    ],
+    "de.mandelbulbJulia.power" : [
+      8
+    ],
+    "de.mengerSponge.offsetX" : [
+      1
+    ],
+    "de.mengerSponge.offsetY" : [
+      1
+    ],
+    "de.mengerSponge.offsetZ" : [
+      1
+    ],
+    "de.mengerSponge.scale" : [
+      3
+    ],
+    "de.quaternionJulia.cW" : [
+      0
+    ],
+    "de.quaternionJulia.cX" : [
+      -0.20000000298023224
+    ],
+    "de.quaternionJulia.cY" : [
+      0.800000011920929
+    ],
+    "de.quaternionJulia.cZ" : [
+      0
+    ],
+    "de.quaternionJulia.threshold" : [
+      10
+    ],
+    "engine.aoStrength" : [
+      1.2087053060531616
+    ],
+    "engine.bubble.blend" : [
+      1
+    ],
+    "engine.bubble.enabled" : [
+      1
+    ],
+    "engine.bubble.radius" : [
+      2.5
+    ],
+    "engine.bubble.shape" : [
+      1.3141741752624512
+    ],
+    "engine.iterations" : [
+      19.810165405273438
+    ],
+    "engine.maxDist" : [
+      1912.09765625
+    ],
+    "engine.shadowSoft" : [
+      8
+    ],
+    "scale.zoomSpeed" : [
+      0.038715362548828125
+    ]
+  },
+  "version" : 1,
+  "warpStack" : [
+    {
+      "a" : [
+        1,
+        0,
+        0,
+        0
+      ],
+      "b" : [
+        0,
+        0,
+        0,
+        0
+      ],
+      "flags" : 0,
+      "kind" : 12,
+      "strength" : 2
+    },
+    {
+      "a" : [
+        2,
+        0,
+        0,
+        0
+      ],
+      "b" : [
+        0,
+        0,
+        0,
+        0
+      ],
+      "flags" : 0,
+      "kind" : 15,
+      "strength" : 0.6844952
+    },
+    {
+      "a" : [
+        1,
+        0,
+        0,
+        0
+      ],
+      "b" : [
+        0,
+        0,
+        0,
+        0
+      ],
+      "flags" : 0,
+      "kind" : 5,
+      "strength" : 1.4074519
+    }
+  ]
+}

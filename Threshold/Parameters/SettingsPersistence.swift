@@ -185,11 +185,7 @@ enum SettingsPersistence {
         if let c = load(GestureConfig.self,       domain: .gesture)       { settings.gestureConfig = c }
         if let c = load(SafetyBubbleConfig.self,  domain: .safetyBubble)  { settings.safetyBubbleConfig = migrateSafetyBubbleDefaultOn(c) }
         if let c = load(HandAttractionConfig.self, domain: .handAttraction) {
-            var cfg = c
-            // Beta gate: while Hand Effects is off, the effect never runs even
-            // if a prior build persisted enabled=true. Tuning is preserved.
-            if !HandAttractionConfig.betaEnabled { cfg.enabled = false }
-            settings.handAttractionConfig = cfg
+            settings.handAttractionConfig = migrateHandAttractionDefaultOn(c)
         }
         if let c = load(DisplayConfig.self,       domain: .display)       { settings.displayConfig = c }
     }
@@ -212,6 +208,21 @@ enum SettingsPersistence {
         #else
         return config
         #endif
+    }
+
+    /// One-time migration: Hand Interaction graduated from beta (previously off
+    /// until the user opted in) to on-by-default. Installs that persisted a
+    /// config before the change carry `enabled = false` forward forever, so
+    /// nudge to on exactly once; a user who deliberately disables it afterward
+    /// is never re-stomped.
+    private static func migrateHandAttractionDefaultOn(_ config: HandAttractionConfig) -> HandAttractionConfig {
+        let flagKey = "didMigrateHandAttractionDefaultOn"
+        guard !defaults.bool(forKey: flagKey) else { return config }
+        defaults.set(true, forKey: flagKey)
+        var migrated = config
+        migrated.enabled = true
+        save(migrated, domain: .handAttraction)
+        return migrated
     }
 
     /// One-time macOS migration: installs that ran before the Mac MetalFX default

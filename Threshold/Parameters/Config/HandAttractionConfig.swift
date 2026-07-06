@@ -11,18 +11,10 @@
 import Foundation
 
 struct HandAttractionConfig: Codable, Equatable, Sendable {
-    /// Hand Effects beta flag (default off). Gates the Shape → Hands tab and
-    /// the effect itself until the feature graduates. User opts in via
-    /// Settings → Experimental → "Hand Effects (Beta)".
-    static let betaUserDefaultsKey = "handEffectsBeta"
-    static var betaEnabled: Bool {
-        UserDefaults.standard.bool(forKey: betaUserDefaultsKey)
-    }
-
-    // BETA: off by default. The tuned attract-with-pocket feel (2026-07-02
-    // user calibration) is preserved as the preset the user gets when they
-    // opt in via Settings → "Hand Effects (Beta)".
-    var enabled: Bool = false
+    // On by default. The tuned attract-with-pocket feel (2026-07-02 user
+    // calibration) is the preset every user gets out of the box; fine-tuning
+    // lives in Settings → Advanced → Hand Interaction.
+    var enabled: Bool = true
     var radius: Float = 0.36     // 0.05 - 1.0 meters — per-hand influence radius
     // Signed: negative = Repel (surface recoils from the hand), positive =
     // Attract (surface reaches for the hand). 0 = off.
@@ -66,7 +58,7 @@ struct HandAttractionConfig: Codable, Equatable, Sendable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         radius = try c.decodeIfPresent(Float.self, forKey: .radius) ?? 0.36
         strength = try c.decodeIfPresent(Float.self, forKey: .strength) ?? 0.39
         pocketEnabled = try c.decodeIfPresent(Bool.self, forKey: .pocketEnabled) ?? true

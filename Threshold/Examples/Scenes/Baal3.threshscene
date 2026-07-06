@@ -3,13 +3,80 @@
   "audioReactiveConfig" : {
     "bassSensitivity" : 1,
     "beatSensitivity" : 1,
-    "fractalAudioAmount" : 0.25,
-    "fractalAudioDamping" : 0,
-    "fractalAudioReactiveEnabled" : false,
-    "fractalBeatPunch" : 0.3,
+    "fractalAudioAmount" : 0.67779225,
+    "fractalAudioDamping" : 0.6489688,
+    "fractalAudioReactiveEnabled" : true,
+    "fractalBeatPunch" : 0.40321195,
     "midSensitivity" : 1,
     "musicReactiveMappings" : [
-
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "980C7FCD-4DD2-49BD-9043-BE79D811C1E6",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "drift",
+        "smoothingWindow" : 0,
+        "source" : "composite",
+        "spaceWarpField" : "strength",
+        "target" : "gradientOffset"
+      },
+      {
+        "amount" : 1.3445401,
+        "hybridCombo" : 0.61696404,
+        "id" : "14380502-47B5-45A6-8E0F-B8C6802B6AB9",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "drift",
+        "smoothingWindow" : 1.1014361,
+        "source" : "bass",
+        "spaceWarpField" : "strength",
+        "target" : "formulaParam2"
+      },
+      {
+        "amount" : 0.71947396,
+        "hybridCombo" : 0.6496766,
+        "id" : "3B937B9A-7E27-4B21-A839-BA4D560B2054",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "drift",
+        "smoothingWindow" : 1.1248767,
+        "source" : "treble",
+        "spaceWarpField" : "strength",
+        "target" : "formulaParam1"
+      },
+      {
+        "amount" : 2.123156,
+        "hybridCombo" : 0.35,
+        "id" : "A92BBEE1-96CA-4429-9833-115B71F0C341",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "sinusoidal",
+        "smoothingWindow" : 0.11552781,
+        "source" : "composite",
+        "spaceWarpField" : "strength",
+        "target" : "fractalScale"
+      }
     ],
     "trebleSensitivity" : 1,
     "tripletMusicGains" : {
@@ -24,6 +91,9 @@
     "enabled" : false,
     "strength" : 0
   },
+  "boundingShapeEnabled" : true,
+  "boundingShapeFogEnabled" : true,
+  "boundingShapeRadius" : 1.7122842,
   "cellShadingEnabled" : false,
   "cellShadingLevels" : 4,
   "colorIterations" : 8,
@@ -39,8 +109,8 @@
   "colorSchemeShadows" : 0.0241513,
   "colorSchemeTransitionDuration" : 2,
   "colorSchemeVibrance" : 1,
-  "createdAt" : "2026-07-01T02:49:45Z",
-  "detailScale" : 0.47499868,
+  "createdAt" : "2026-07-02T05:41:07Z",
+  "detailScale" : 0.26584843,
   "embeddedFormula" : {
     "author" : "Knighty (Fragmentarium), ported by Threshold",
     "category" : "Kleinian",
@@ -117,9 +187,9 @@
   },
   "foldingLimit" : 1,
   "formulaParamValues" : [
-    0.98586667,
-    -0.92555875,
-    -0.13753694,
+    1.1432854,
+    -0.71373624,
+    -0.34645522,
     0.6416264,
     1,
     0.8412322,
@@ -135,7 +205,7 @@
     0
   ],
   "fractalIterations" : 5,
-  "fractalScale" : 2.8,
+  "fractalScale" : 3.0667386,
   "fractalType" : "custom",
   "glowEffect" : {
     "enabled" : false,
@@ -151,7 +221,7 @@
       "id" : "0CA57000-1B2B-4CA3-A8C4-E803A90A80FD",
       "mappingMode" : 5,
       "name" : "Classic",
-      "offset" : 0.20433417,
+      "offset" : 0.06714086,
       "repeatCount" : 1.62572,
       "smoothing" : 1,
       "stops" : [
@@ -209,13 +279,13 @@
     "intensity" : 0.91782963,
     "speed" : 0.03017017
   },
-  "id" : "AC36AB1F-22BE-43C5-82AA-37D4C53BF055",
+  "id" : "1EA5F7B8-F7BC-4E08-B296-BA5A7B577583",
   "juliaDriftEffect" : {
     "enabled" : false,
     "speed" : 0
   },
   "lightVariationRate" : 0.6074416,
-  "lightingMode" : "animated",
+  "lightingMode" : "audioReactive",
   "lightingPreset" : "Custom",
   "lightingSoftness" : 0.35,
   "linearRailEffect" : {
@@ -229,20 +299,88 @@
   },
   "maxRaySteps" : 200,
   "minDistance" : 0.08000652,
+  "mixedModeScene" : true,
   "musicReactiveMappings" : [
-
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "980C7FCD-4DD2-49BD-9043-BE79D811C1E6",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "drift",
+      "smoothingWindow" : 0,
+      "source" : "composite",
+      "spaceWarpField" : "strength",
+      "target" : "gradientOffset"
+    },
+    {
+      "amount" : 1.3445401,
+      "hybridCombo" : 0.61696404,
+      "id" : "14380502-47B5-45A6-8E0F-B8C6802B6AB9",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "drift",
+      "smoothingWindow" : 1.1014361,
+      "source" : "bass",
+      "spaceWarpField" : "strength",
+      "target" : "formulaParam2"
+    },
+    {
+      "amount" : 0.71947396,
+      "hybridCombo" : 0.6496766,
+      "id" : "3B937B9A-7E27-4B21-A839-BA4D560B2054",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "drift",
+      "smoothingWindow" : 1.1248767,
+      "source" : "treble",
+      "spaceWarpField" : "strength",
+      "target" : "formulaParam1"
+    },
+    {
+      "amount" : 2.123156,
+      "hybridCombo" : 0.35,
+      "id" : "A92BBEE1-96CA-4429-9833-115B71F0C341",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "sinusoidal",
+      "smoothingWindow" : 0.11552781,
+      "source" : "composite",
+      "spaceWarpField" : "strength",
+      "target" : "fractalScale"
+    }
   ],
-  "name" : "Great sphere",
+  "name" : "Baal3",
   "platformEnabled" : true,
-  "platformRadius" : 0.94279927,
+  "platformRadius" : 0.894583,
   "polarRotationEffect" : {
     "direction" : "off",
     "speed" : 0
   },
   "position" : [
-    1.2010609,
-    3.1005402,
-    -3.0090492
+    0.11618786,
+    1.2924522,
+    -1.1366609
   ],
   "pulseEffect" : {
     "amount" : 0.35323426,
@@ -251,11 +389,11 @@
   },
   "rating" : 0,
   "resolutionScale" : 1,
-  "safetyBubbleBlend" : 0.5,
+  "safetyBubbleBlend" : 0.6927901,
   "safetyBubbleEnabled" : true,
   "safetyBubbleFadeEnabled" : true,
   "safetyBubbleFadeWidth" : 0.1,
-  "safetyBubbleRadius" : 1.8,
+  "safetyBubbleRadius" : 0.6898765,
   "safetyBubbleShape" : 0,
   "scale" : 1,
   "spaceWarpOps" : [
@@ -301,14 +439,14 @@
   ],
   "sphereProjectionBlend" : 1,
   "sphereProjectionEnabled" : false,
-  "sphereProjectionRadius" : 1,
+  "sphereProjectionRadius" : 0.20211618,
   "sphereRadius" : 0.5,
   "sphericalInversionMode" : "off",
   "sphericalInversionRadius" : 2,
-  "tileSize" : 0,
+  "tileSize" : 8,
   "tonemapStrength" : 0,
-  "worldRotationW" : 0.8133252,
-  "worldRotationX" : -0.015763182,
-  "worldRotationY" : 0.5777983,
-  "worldRotationZ" : -0.06635351
+  "worldRotationW" : 0.9270908,
+  "worldRotationX" : -0.022614734,
+  "worldRotationY" : 0.35803074,
+  "worldRotationZ" : -0.10865166
 }

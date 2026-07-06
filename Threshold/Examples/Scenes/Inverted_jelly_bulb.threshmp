@@ -40,6 +40,7 @@
     "enabled" : true,
     "strength" : 0.5628359
   },
+  "boundAmbientStrength" : 0.5,
   "boundSpaceDepth" : 4,
   "boundSpaceHeight" : 2.5,
   "boundSpaceWidth" : 4,
@@ -47,9 +48,9 @@
   "boundToSpaceMode" : 0,
   "boundingShapeEnabled" : true,
   "boundingShapeFogMode" : 2,
-  "boundingShapeRadius" : 1.2363195,
-  "boundingShapeShadowDepth" : 0.48603556,
-  "boundingShapeType" : 0,
+  "boundingShapeRadius" : 1.3125086,
+  "boundingShapeShadowDepth" : 0.95,
+  "boundingShapeType" : 1,
   "cellShadingEnabled" : false,
   "cellShadingLevels" : 4,
   "colorIterations" : 8,
@@ -57,7 +58,7 @@
   "colorScheme" : "classic",
   "colorSchemeAutoInterval" : 30,
   "colorSchemeAutoTransition" : false,
-  "colorSchemeContrast" : 1.2,
+  "colorSchemeContrast" : 1.15,
   "colorSchemeCurve" : 0.75864005,
   "colorSchemeGamma" : 0.38,
   "colorSchemeHighlights" : 1,
@@ -65,9 +66,15 @@
   "colorSchemeShadows" : -0.01533388,
   "colorSchemeTransitionDuration" : 2,
   "colorSchemeVibrance" : 1,
-  "createdAt" : "2026-07-05T17:19:34Z",
+  "createdAt" : "2026-07-05T22:08:38Z",
   "deIterationMismatch" : 0,
-  "detailScale" : 0.33365488,
+  "detailScale" : 0.16678981,
+  "envScrunchContain" : 2,
+  "envScrunchContainFeather" : 0.5,
+  "envScrunchEnabled" : true,
+  "envScrunchMode" : 0,
+  "envScrunchReach" : 0.28061253,
+  "envScrunchStrength" : 0.9037402,
   "fogEffect" : {
     "colorBlue" : 0.02,
     "colorGreen" : 0.015,
@@ -79,11 +86,11 @@
   },
   "foldingLimit" : 1,
   "formulaParamValues" : [
-    6.467436,
+    11.257174,
     4,
     1,
     0,
-    -0.51776963,
+    2.7742324,
     0,
     0,
     0,
@@ -113,7 +120,7 @@
       "id" : "55C733BB-79E7-4B97-82CC-33BEC7F97E94",
       "mappingMode" : 0,
       "name" : "Neon Cyber",
-      "offset" : 0,
+      "offset" : 0.09712418,
       "repeatCount" : 1,
       "smoothing" : 1,
       "stops" : [
@@ -175,7 +182,7 @@
     "intensity" : 0.9998477,
     "speed" : 0.06453049
   },
-  "id" : "77542F69-7434-4832-80A2-D54ED5E3FCC2",
+  "id" : "6D424B49-9FCC-4E27-9F9E-03F6CAB41E86",
   "juliaDriftEffect" : {
     "enabled" : false,
     "speed" : 0
@@ -215,17 +222,17 @@
       "target" : "gradientOffset"
     }
   ],
-  "name" : "Jellybulb",
+  "name" : "Inverted jelly bulb",
   "platformEnabled" : true,
   "platformRadius" : 1.888,
   "polarRotationEffect" : {
-    "direction" : "counterclockwise",
+    "direction" : "clockwise",
     "speed" : 0.161535
   },
   "position" : [
-    -0.057251386,
-    1.4536602,
-    -1.2557762
+    0.13225254,
+    1.1542405,
+    -1.0677409
   ],
   "pulseEffect" : {
     "amount" : 0,
@@ -234,23 +241,38 @@
   },
   "rating" : 0,
   "resolutionScale" : 1,
-  "safetyBubbleBlend" : 0.25,
-  "safetyBubbleEnabled" : false,
+  "safetyBubbleBlend" : 0.501123,
+  "safetyBubbleEnabled" : true,
   "safetyBubbleFadeEnabled" : true,
   "safetyBubbleFadeWidth" : 0.1,
-  "safetyBubbleRadius" : 1.8,
+  "safetyBubbleRadius" : 1.2460607,
   "safetyBubbleShape" : 0,
   "scale" : 1,
+  "spaceWarpOps" : [
+    {
+      "axis" : [
+        0,
+        1,
+        0
+      ],
+      "id" : "FCE7A08D-B108-43B6-AFE8-428935539BC3",
+      "isEnabled" : true,
+      "p1" : 1.0835121,
+      "p2" : 0,
+      "strength" : 1,
+      "type" : 5
+    }
+  ],
   "sphereProjectionBlend" : 1,
   "sphereProjectionEnabled" : false,
   "sphereProjectionRadius" : 1,
   "sphereRadius" : 0.5,
   "sphericalInversionMode" : "off",
   "sphericalInversionRadius" : 2,
-  "tileSize" : 8,
+  "tileSize" : 0,
   "tonemapStrength" : 0.387253,
-  "worldRotationW" : 0.45146716,
-  "worldRotationX" : -0.5288166,
-  "worldRotationY" : 0.13116895,
-  "worldRotationZ" : 0.70662934
+  "worldRotationW" : -0.44038478,
+  "worldRotationX" : 0.7671889,
+  "worldRotationY" : 0.03417994,
+  "worldRotationZ" : 0.46509594
 }

@@ -795,13 +795,14 @@ extension ContentView {
     /// own Shape rail tab — these are shape/framing choices, not perf knobs.
     var fractalBoundingContent: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Bound to Space: clip the fractal to an assumed rectangular room
-            // (world meters, floor at the real floor). Shares the Bounding Fog
-            // edge treatment below with the Bounding shape. Kept at the top of
-            // the tab — it's the most-reached-for room control.
+            // Irregular Shape Bound (display name; the internal identifiers and
+            // scene CodingKeys stay `boundToSpace*` for save-file compatibility):
+            // clip the fractal to an assumed rectangular room (world meters, floor
+            // at the real floor). Shares the Bounding Fog edge treatment below with
+            // the Bounding shape. Kept at the top of the tab — most-reached-for.
             HStack(spacing: 6) {
                 Image(systemName: "house").foregroundStyle(.cyan)
-                Text("Bound to Space").font(.headline)
+                Text("Irregular Shape Bound").font(.headline)
                 Spacer()
                 Toggle("", isOn: Binding(
                     get: { cache.quality.boundToSpaceEnabled },
