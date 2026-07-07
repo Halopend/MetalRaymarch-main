@@ -390,8 +390,11 @@ final class UsageAnalytics {
         let deltaTime = now.timeIntervalSince(lastSampleTime)
         lastSampleTime = now
         
-        // Clamp delta to avoid huge jumps if app was backgrounded
-        let dt = min(deltaTime, 2.0)
+        // Clamp delta to [0, 2]: the upper bound absorbs backgrounding gaps; the
+        // lower bound rejects a NEGATIVE delta from a backward wall-clock jump
+        // (NTP correction, manual clock change, DST edge), which would otherwise
+        // add negative time to every weighted accumulator and corrupt the stats.
+        let dt = max(min(deltaTime, 2.0), 0)
         totalSessionTime += dt
         
         // Accumulate quality time
