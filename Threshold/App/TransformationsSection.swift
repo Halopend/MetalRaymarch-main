@@ -45,7 +45,12 @@ struct TransformationsSection: View {
     private var sphereProjectionActive: Bool { cache.display.sphereProjectionEnabled }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        // LazyVStack, NOT VStack: users can stack many transforms, and a plain VStack
+        // builds/hosts every op card (DisclosureGroup + sliders + toggles) synchronously
+        // when the tab opens — which HANGS on a long stack. Lazy hosts only visible cards.
+        // Per-card cost is kept low by the WarpSource.metalFunction cache: the 247 KB
+        // shader-source scan that used to run per card, per scroll, is now memoized.
+        LazyVStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Label("Transformations", systemImage: "circle.hexagongrid")
                     .font(.headline)
@@ -522,7 +527,30 @@ struct TransformationsSection: View {
 /// so the panel can show users what a transform really runs on the GPU. Returns nil
 /// if the function isn't found (the UI then shows just the readable formula).
 enum WarpSource {
+    // Scanning the ~247 KB embedded shader string char-by-char is expensive, and this
+    // is called from the Transform op-card bodies — inside an `if let` in a
+    // DisclosureGroup's ViewBuilder, so it runs for EVERY card each time that card is
+    // laid out during scroll, even while the disclosure is collapsed. That per-card,
+    // per-scroll scan was the Transform tab's scroll stall. Memoize by function name:
+    // the embedded source is constant, so each function is scanned at most once.
+    private static let cacheLock = NSLock()
+    nonisolated(unsafe) private static var cache: [String: String?] = [:]
+
     static func metalFunction(named fn: String) -> String? {
+        cacheLock.lock()
+        let cached = cache[fn]
+        cacheLock.unlock()
+        if let cached { return cached }   // present in the dict; the value itself may be nil
+
+        let result = scan(named: fn)
+
+        cacheLock.lock()
+        cache[fn] = result
+        cacheLock.unlock()
+        return result
+    }
+
+    private static func scan(named fn: String) -> String? {
         let src = EmbeddedMetalSources.shadersMetal
         // Locate the definition by its signature: "warpFoo(float3 p, SpaceWarpOp op)".
         guard let sig = src.range(of: "\(fn)(float3 p, SpaceWarpOp op)") else { return nil }

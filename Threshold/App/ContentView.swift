@@ -599,6 +599,16 @@ struct ContentView: View {
     }
 
     private var topDockOrnament: some View {
+#if os(visionOS)
+        // On visionOS the ornament's plate is the system glass — supplying our own
+        // translucent RoundedRectangle fill on top of it fought the glass and left
+        // the bar reading as an empty transparent card with no visible icons/text.
+        // Use glassBackgroundEffect as the sole plate and keep the content in front.
+        topDockBar
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .thresholdGlassBackground(cornerRadius: 18)
+#else
         topDockBar
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -610,7 +620,7 @@ struct ContentView: View {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.14), lineWidth: 1)
             )
-            .thresholdGlassBackground(cornerRadius: 18)
+#endif
     }
 
     // MARK: - Context Rail

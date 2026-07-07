@@ -71,6 +71,7 @@
 
 import Foundation
 import CloudKit
+import Security
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -294,7 +295,17 @@ final class UsageAnalytics {
             return cachedDatabase
         }
 
-        guard FileManager.default.ubiquityIdentityToken != nil else {
+        // Two independent prerequisites, BOTH required before touching CloudKit:
+        //  1. This binary actually carries the iCloud-container entitlement. Local builds
+        //     signed without provisioning (CODE_SIGNING_ALLOWED=NO) have NO entitlements,
+        //     yet if the developer is signed into iCloud the token probe below still passes
+        //     — so `CKContainer.default()` throws an UNCAUGHT ObjC exception (Swift can't
+        //     catch it) and the app freezes in the crash-reporter modal. That freeze reads
+        //     as "the whole app hangs / is completely laggy". Reading our own signed
+        //     entitlements is the only reliable, non-throwing way to detect this.
+        //  2. A user is signed into iCloud (token non-nil).
+        guard Self.hasCloudKitEntitlement,
+              FileManager.default.ubiquityIdentityToken != nil else {
             return nil
         }
 
@@ -302,6 +313,19 @@ final class UsageAnalytics {
         cachedDatabase = database
         return database
     }
+
+    /// Whether THIS binary was signed with the iCloud-container entitlement, read once
+    /// from the running process's own entitlements via the Security framework. Unlike
+    /// `CKContainer.default()` (which aborts with an uncaught ObjC exception when the
+    /// entitlement is absent), this probe is non-throwing, so it's safe on unsigned builds.
+    private static let hasCloudKitEntitlement: Bool = {
+        guard let task = SecTaskCreateFromSelf(nil),
+              let value = SecTaskCopyValueForEntitlement(
+                task, "com.apple.developer.icloud-container-identifiers" as CFString, nil)
+        else { return false }
+        if let identifiers = value as? [Any] { return !identifiers.isEmpty }
+        return true
+    }()
 
     private func buildSnapshot() -> UsageSnapshot {
         let duration = totalSessionTime

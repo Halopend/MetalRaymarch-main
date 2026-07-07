@@ -186,10 +186,14 @@ struct FlashingLightIndicator: View {
 
     var body: some View {
         ZStack {
+            // No animated `.shadow` here: a repeating shadow-blur animation is
+            // re-rasterized every frame, and several of these indicators live inside
+            // scrollable control panels (Music/Transform), so the continuous blur
+            // work stole the frame budget and made those lists scroll laggily. The
+            // opacity + ring-scale pulse reads the same "flashing warning" without it.
             Circle()
                 .fill(isLit ? Color.orange : Color.orange.opacity(0.28))
                 .frame(width: 8, height: 8)
-                .shadow(color: Color.orange.opacity(isLit ? 0.9 : 0.0), radius: isLit ? 6 : 0)
 
             Circle()
                 .stroke(Color.orange.opacity(isLit ? 0.72 : 0.18), lineWidth: 1)

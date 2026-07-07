@@ -84,8 +84,14 @@ private struct ThresholdMacRootView: View {
 
     private var shouldShowControls: Bool {
         // While the controls are broken out into their own window, never show
-        // the slide-over sidebar — otherwise the panel appears twice.
+        // the slide-over sidebar — otherwise the panel appears twice. (The breakout
+        // window hosts its own ContentView, so the import sheet below shows there.)
         guard !appModel.isControlsWindowOpen else { return false }
+        // Force the panel open while an external-file import is pending. The import
+        // confirmation sheet is hosted by ContentView *inside* this panel, so if the
+        // panel auto-hides — or was never revealed when a file was opened from Finder —
+        // ContentView unmounts and the sheet auto-dismisses before the user can act.
+        if appModel.pendingExternalImport != nil { return true }
         return isControlsPinnedOpen || isHoverVisible || appModel.isMenuInteractionActive || activeMenuTrackingCount > 0
     }
 
@@ -121,9 +127,14 @@ private struct ThresholdMacRootView: View {
                 .animation(motionSensitivePanelAnimation, value: shouldShowControls)
                 .allowsHitTesting(shouldShowControls)
 
-                floatingToggle
-                    .padding(.top, panelPadding)
-                    .padding(.trailing, panelPadding)
+                // The pin toggles the slide-over sidebar, which doesn't exist while the
+                // controls are broken out — so hide the pin then. Its absence also reads
+                // as "there's nothing to pin here; use Merge Into Window to bring it back."
+                if !appModel.isControlsWindowOpen {
+                    floatingToggle
+                        .padding(.top, panelPadding)
+                        .padding(.trailing, panelPadding)
+                }
 
                 // Always-on perf HUD (top-leading, opposite the pin button). Shows
                 // FPS plus the continuous GPU-ms cost so acceleration tuning is

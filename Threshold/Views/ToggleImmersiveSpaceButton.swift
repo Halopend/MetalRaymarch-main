@@ -15,6 +15,7 @@ struct ToggleImmersiveSpaceButton: View {
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
 #elseif os(macOS)
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
 #endif
 
     var body: some View {
@@ -67,10 +68,17 @@ struct ToggleImmersiveSpaceButton: View {
         .animation(.none, value: 0)
         .fontWeight(.semibold)
 #elseif os(macOS)
+        // Toggles the controls between the slide-over sidebar and their own window.
+        // The label + action flip with `isControlsWindowOpen` so the same button
+        // sends the controls out and brings them back.
         Button {
-            openWindow(id: AppModel.controlsWindowID)
+            if appModel.isControlsWindowOpen {
+                dismissWindow(id: AppModel.controlsWindowID)
+            } else {
+                openWindow(id: AppModel.controlsWindowID)
+            }
         } label: {
-            Text("Breakout Control Window")
+            Text(appModel.isControlsWindowOpen ? "Merge Into Window" : "Open in Separate Window")
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -80,7 +88,7 @@ struct ToggleImmersiveSpaceButton: View {
 #else
         Button {
         } label: {
-            Text("Breakout Control Window")
+            Text("Open in Separate Window")
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
                 .frame(maxWidth: .infinity, alignment: .center)

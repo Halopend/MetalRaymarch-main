@@ -16,6 +16,8 @@ FORCE_INLINE float DE_Octahedron(float3 pos, FormulaParams fp, float3x3 rot,
                                 thread OrbitData& orbit) {
     float scale  = fp.params[0];
     float3 offset = float3(fp.params[1], fp.params[2], fp.params[3]);
+    // Loop-invariant: hoisted out of the iteration.
+    float3 negOffsetScaled = -(offset * (scale - 1.0f));
 
     float3 z = pos;
     float dr = 1.0f;
@@ -25,15 +27,16 @@ FORCE_INLINE float DE_Octahedron(float3 pos, FormulaParams fp, float3x3 rot,
     int i = 0;
 
     for (; i < iterations; ++i) {
-        // Octahedral folds (abs + sort = octahedral symmetry)
+        // Octahedral folds (abs + branchless descending sort = octahedral symmetry)
         z = abs(z);
-        if (z.x - z.y < 0.0f) z.xy = z.yx;
-        if (z.x - z.z < 0.0f) z.xz = z.zx;
-        if (z.y - z.z < 0.0f) z.yz = z.zy;
+        float sum = z.x + z.y + z.z;
+        float mx = max(max(z.x, z.y), z.z);
+        float mn = min(min(z.x, z.y), z.z);
+        z = float3(mx, sum - mx - mn, mn);
 
-        z = z * scale - offset * (scale - 1.0f);
+        z = fma(z, scale, negOffsetScaled);
         z = rot * z;
-        dr = dr * scale + 1.0f;
+        dr = fma(dr, scale, 1.0f);
 
         float r2 = dot(z, z);
         UpdateTrapMinR2(trap, trapIter, trapPos, r2, i, colorIterations, z);
@@ -53,20 +56,21 @@ FORCE_INLINE float DE_Octahedron(float3 pos, FormulaParams fp, float3x3 rot,
 FORCE_INLINE float DE_Octahedron_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {
     float scale  = fp.params[0];
     float3 offset = float3(fp.params[1], fp.params[2], fp.params[3]);
-    float3 offsetScaled = offset * (scale - 1.0f);
+    float3 negOffsetScaled = -(offset * (scale - 1.0f));
 
     float3 z = pos;
     float dr = 1.0f;
 
     for (int i = 0; i < iterations; ++i) {
         z = abs(z);
-        if (z.x - z.y < 0.0f) z.xy = z.yx;
-        if (z.x - z.z < 0.0f) z.xz = z.zx;
-        if (z.y - z.z < 0.0f) z.yz = z.zy;
+        float sum = z.x + z.y + z.z;
+        float mx = max(max(z.x, z.y), z.z);
+        float mn = min(min(z.x, z.y), z.z);
+        z = float3(mx, sum - mx - mn, mn);
 
-        z = z * scale - offsetScaled;
+        z = fma(z, scale, negOffsetScaled);
         z = rot * z;
-        dr = dr * scale + 1.0f;
+        dr = fma(dr, scale, 1.0f);
     }
 
     return (fast::length(z) - 1.0f) / dr;

@@ -1346,115 +1346,117 @@ struct MusicTabContent: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    ScrollView(.vertical, showsIndicators: true) {
-                        LazyVStack(spacing: 8) {
-                            ForEach(Array(cache.audioReactive.musicReactiveMappings.enumerated()), id: \.element.id) { index, mapping in
-                                VStack(spacing: 4) {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: mapping.target.icon(for: cache.fractalType))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                    // Flowed directly into the outer ScrollView (line ~161) — no nested
+                    // same-axis scroll. LazyVStack, NOT VStack: users can add many mappings,
+                    // and a plain VStack hosts every card's segmented Pickers synchronously
+                    // when the tab opens, which HANGS on a long list. Lazy hosts only visible
+                    // cards. (Remaining scroll cost is re-hosting the AppKit segmented Pickers
+                    // as cards scroll in; the real fix is lighter pure-SwiftUI segments.)
+                    LazyVStack(spacing: 8) {
+                        ForEach(Array(cache.audioReactive.musicReactiveMappings.enumerated()), id: \.element.id) { index, mapping in
+                            VStack(spacing: 4) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: mapping.target.icon(for: cache.fractalType))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
 
-                                        Text(mapping.target.displayName(for: cache.fractalType))
-                                            .font(.caption.bold())
+                                    Text(mapping.target.displayName(for: cache.fractalType))
+                                        .font(.caption.bold())
 
-                                        if mapping.hasFlashingRisk {
-                                            FlashingLightIndicator()
-                                                .help("Can produce flashing or rapidly changing light.")
-                                        }
-
-                                        Spacer()
+                                    if mapping.hasFlashingRisk {
+                                        FlashingLightIndicator()
+                                            .help("Can produce flashing or rapidly changing light.")
                                     }
 
-                                    // Transform slots can drive any field of the op, not
-                                    // just its strength — pick from the fields the live
-                                    // transform at this slot actually has.
-                                    if mapping.target.isSpaceWarp,
-                                       let slot = mapping.target.spaceWarpSlot,
-                                       let stack = cache.renderSettings?.spaceWarpStack,
-                                       slot < stack.count {
-                                        let kind = stack[slot].kind
-                                        let fields = kind.musicFields
-                                        if fields.count > 1 {
-                                            Picker("Drives", selection: Binding(
-                                                get: { mappingAt(index)?.spaceWarpField ?? .strength },
-                                                set: { newValue in updateMapping(index) { $0.spaceWarpField = newValue } }
-                                            )) {
-                                                ForEach(fields, id: \.self) { f in
-                                                    Text(kind.musicFieldLabel(f)).tag(f)
-                                                }
-                                            }
-                                            .pickerStyle(.menu)
-                                            .font(.caption)
-                                        }
-                                    }
-
-                                    Picker("Source", selection: Binding(
-                                        get: { mappingAt(index)?.source ?? .composite },
-                                        set: { newValue in updateMapping(index) { $0.source = newValue } }
-                                    )) {
-                                        ForEach(MusicReactiveSource.pickerCases, id: \.self) { source in
-                                            Text(source.displayName).tag(source)
-                                        }
-                                    }
-                                    .pickerStyle(.segmented)
-
-                                    Picker("Curve", selection: Binding(
-                                        get: { mappingAt(index)?.responseCurve ?? .drift },
-                                        set: { newValue in updateMapping(index) { $0.responseCurve = newValue } }
-                                    )) {
-                                        ForEach(ResponseCurve.pickerCases, id: \.self) { curve in
-                                            Label(curve.displayName, systemImage: curve.icon).tag(curve)
-                                        }
-                                    }
-                                    .pickerStyle(.segmented)
-
-                                    if (mappingAt(index)?.responseCurve ?? .drift) == .hybrid {
-                                        sliderRow(label: "Living", value: Binding(
-                                            get: { mappingAt(index)?.hybridCombo ?? 0.35 },
-                                            set: { newValue in updateMapping(index) { $0.hybridCombo = newValue; $0.sanitizeInPlace() } }
-                                        ), range: 0...1)
-                                    }
-
-                                    sliderRow(label: "Intensity", value: Binding(
-                                        get: { mappingAt(index)?.amount ?? 1.0 },
-                                        set: { newValue in updateMapping(index) { $0.amount = newValue; $0.sanitizeInPlace() } }
-                                    ), range: 0...3)
-
-                                    sliderRow(label: "Smooth", value: Binding(
-                                        get: { mappingAt(index)?.smoothingWindow ?? 0.0 },
-                                        set: { newValue in updateMapping(index) { $0.smoothingWindow = newValue; $0.sanitizeInPlace() } }
-                                    ), range: 0...2)
-
-                                    // Remove control: comfortably sized and bottom-leading so it's
-                                    // an easy tap target and stays clear of the right-edge scrollbar.
-                                    HStack(spacing: 8) {
-                                        Button(role: .destructive) {
-                                            removeMapping(at: index)
-                                        } label: {
-                                            Label("Remove", systemImage: AppIcons.trash)
-                                                .font(.caption.weight(.semibold))
-                                                .padding(.horizontal, 4)
-                                                .padding(.vertical, 2)
-                                        }
-                                        .buttonStyle(.bordered)
-                                        .controlSize(.small)
-                                        .tint(.red)
-
-                                        Spacer()
-                                    }
-                                    .padding(.top, 4)
+                                    Spacer()
                                 }
-                                .padding(8)
-                                .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
+
+                                // Transform slots can drive any field of the op, not
+                                // just its strength — pick from the fields the live
+                                // transform at this slot actually has.
+                                if mapping.target.isSpaceWarp,
+                                   let slot = mapping.target.spaceWarpSlot,
+                                   let stack = cache.renderSettings?.spaceWarpStack,
+                                   slot < stack.count {
+                                    let kind = stack[slot].kind
+                                    let fields = kind.musicFields
+                                    if fields.count > 1 {
+                                        Picker("Drives", selection: Binding(
+                                            get: { mappingAt(index)?.spaceWarpField ?? .strength },
+                                            set: { newValue in updateMapping(index) { $0.spaceWarpField = newValue } }
+                                        )) {
+                                            ForEach(fields, id: \.self) { f in
+                                                Text(kind.musicFieldLabel(f)).tag(f)
+                                            }
+                                        }
+                                        .pickerStyle(.menu)
+                                        .font(.caption)
+                                    }
+                                }
+
+                                Picker("Source", selection: Binding(
+                                    get: { mappingAt(index)?.source ?? .composite },
+                                    set: { newValue in updateMapping(index) { $0.source = newValue } }
+                                )) {
+                                    ForEach(MusicReactiveSource.pickerCases, id: \.self) { source in
+                                        Text(source.displayName).tag(source)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                                Picker("Curve", selection: Binding(
+                                    get: { mappingAt(index)?.responseCurve ?? .drift },
+                                    set: { newValue in updateMapping(index) { $0.responseCurve = newValue } }
+                                )) {
+                                    ForEach(ResponseCurve.pickerCases, id: \.self) { curve in
+                                        Label(curve.displayName, systemImage: curve.icon).tag(curve)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                                if (mappingAt(index)?.responseCurve ?? .drift) == .hybrid {
+                                    sliderRow(label: "Living", value: Binding(
+                                        get: { mappingAt(index)?.hybridCombo ?? 0.35 },
+                                        set: { newValue in updateMapping(index) { $0.hybridCombo = newValue; $0.sanitizeInPlace() } }
+                                    ), range: 0...1)
+                                }
+
+                                sliderRow(label: "Intensity", value: Binding(
+                                    get: { mappingAt(index)?.amount ?? 1.0 },
+                                    set: { newValue in updateMapping(index) { $0.amount = newValue; $0.sanitizeInPlace() } }
+                                ), range: 0...3)
+
+                                sliderRow(label: "Smooth", value: Binding(
+                                    get: { mappingAt(index)?.smoothingWindow ?? 0.0 },
+                                    set: { newValue in updateMapping(index) { $0.smoothingWindow = newValue; $0.sanitizeInPlace() } }
+                                ), range: 0...2)
+
+                                // Remove control: comfortably sized and bottom-leading so it's
+                                // an easy tap target and stays clear of the right-edge scrollbar.
+                                HStack(spacing: 8) {
+                                    Button(role: .destructive) {
+                                        removeMapping(at: index)
+                                    } label: {
+                                        Label("Remove", systemImage: AppIcons.trash)
+                                            .font(.caption.weight(.semibold))
+                                            .padding(.horizontal, 4)
+                                            .padding(.vertical, 2)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .tint(.red)
+
+                                    Spacer()
+                                }
+                                .padding(.top, 4)
                             }
+                            .padding(8)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
                         }
-                        .frame(maxWidth: .infinity, alignment: .top)
                     }
-                    .frame(minHeight: 260, maxHeight: .infinity, alignment: .top)
+                    .frame(maxWidth: .infinity, alignment: .top)
                 }
                 .padding(10)
-                .frame(maxHeight: .infinity, alignment: .top)
                 .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.10)))
             } else {
                 Text("Enable React to Music above to start visualization mappings.")
