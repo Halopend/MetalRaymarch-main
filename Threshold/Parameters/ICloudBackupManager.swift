@@ -71,6 +71,12 @@ final class ICloudBackupManager {
     private nonisolated static let animationsSubdir   = "Animations"
     private nonisolated static let settingsFile     = "settings.json"
     private nonisolated static let metadataFile     = ".metadata.json"
+    // Deletion records live at the Threshold root (hidden, alongside metadata) so
+    // a delete on one device propagates to others instead of the item reappearing
+    // from a cloud copy. Kept separate for presets vs scenes to mirror the local
+    // TombstoneStores. See BackupMerge.reconcile for the resolution rules.
+    private nonisolated static let presetTombstonesFile = ".tombstones-presets.json"
+    private nonisolated static let sceneTombstonesFile  = ".tombstones-scenes.json"
 
     // MARK: - Init
 
@@ -132,8 +138,9 @@ final class ICloudBackupManager {
     // MARK: - Sync (Push)
 
     /// Writes current settings, presets, and user animation scenes to iCloud
-    /// Drive. Existing files in the iCloud folders are removed for items that
-    /// no longer exist locally so the cloud mirrors the local state.
+    /// Drive. Reconciles with the cloud first (newest-wins union) so nothing is
+    /// clobbered or dropped; deletions propagate only via tombstones (targeted
+    /// removal of files the user actually deleted), never a blind mirror.
     func syncToCloud(settings: RenderSettings,
                      presetManager: PresetManager,
                      animationManager: AnimationManager?) {
@@ -153,17 +160,27 @@ final class ICloudBackupManager {
         let settingsPayload = SettingsBackupPayload(from: settings)
         let presets = presetManager.presets
         let scenes = animationManager?.scenes ?? []
+        // Snapshot local deletions so the sync can push them to the cloud (and
+        // reconcile against deletions other devices pushed). Written back below.
+        let localPresetTombstones = TombstoneStore.presets.tombstones
+        let localSceneTombstones = TombstoneStore.scenes.tombstones
 
         Task { [folder] in
             let result = await Self.performSync(
                 to: folder,
                 settingsPayload: settingsPayload,
                 presets: presets,
-                scenes: scenes
+                scenes: scenes,
+                localPresetTombstones: localPresetTombstones,
+                localSceneTombstones: localSceneTombstones
             )
             switch result {
-            case .success(let date):
-                self.lastSyncDate = date
+            case .success(let outcome):
+                self.lastSyncDate = outcome.date
+                // Persist the reconciled tombstone set (may have grown from
+                // cloud deletions, or shrunk where an item was resurrected).
+                TombstoneStore.presets.replaceAll(outcome.presetTombstones)
+                TombstoneStore.scenes.replaceAll(outcome.sceneTombstones)
             case .failure(let error):
                 self.lastError = error.localizedDescription
             }
@@ -171,12 +188,20 @@ final class ICloudBackupManager {
         }
     }
 
+    private struct SyncOutcome: Sendable {
+        let date: Date
+        let presetTombstones: [BackupTombstone]
+        let sceneTombstones: [BackupTombstone]
+    }
+
     private nonisolated static func performSync(
         to folder: URL,
         settingsPayload: SettingsBackupPayload,
         presets: [FractalPreset],
-        scenes: [AnimationScene]
-    ) async -> Result<Date, Error> {
+        scenes: [AnimationScene],
+        localPresetTombstones: [BackupTombstone],
+        localSceneTombstones: [BackupTombstone]
+    ) async -> Result<SyncOutcome, Error> {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
@@ -197,15 +222,32 @@ final class ICloudBackupManager {
             let musicPresetsDir = folder.appendingPathComponent(musicPresetsSubdir, isDirectory: true)
             try fm.createDirectory(at: scenesDir, withIntermediateDirectories: true)
             try fm.createDirectory(at: musicPresetsDir, withIntermediateDirectories: true)
-            // MERGE with what's already in the cloud (newest-wins) BEFORE writing: a
-            // "Back Up Now" must not overwrite a newer copy another device pushed, nor
-            // drop cloud-only presets. Union — nothing is deleted here (deletions come
-            // via tombstones). Read both folders + legacy flat .threshmp in Scenes/.
-            let cloudPresets: [FractalPreset] =
-                decodeAll(in: scenesDir, extensions: ThresholdExportFormat.extensions(in: .preset), decoder: decoder)
-                + decodeAll(in: musicPresetsDir, extensions: ThresholdExportFormat.extensions(in: .preset), decoder: decoder)
-            let mergedPresets = BackupMerge.newestWins(local: presets, cloud: cloudPresets, timestamp: { $0.updatedAt })
-            for preset in mergedPresets {
+            // RECONCILE with the cloud BEFORE writing: a "Back Up Now" must not
+            // overwrite a newer copy another device pushed, nor drop cloud-only
+            // presets — and it must PROPAGATE deletions (local + cloud tombstones)
+            // by targeted file removal, not a blind mirror. Read both folders +
+            // legacy flat .threshmp in Scenes/, keeping each file's URL so a
+            // tombstoned preset can be deleted by id regardless of its filename.
+            let presetExts = ThresholdExportFormat.extensions(in: .preset)
+            let cloudPresetFiles: [(url: URL, item: FractalPreset)] =
+                decodeAllWithURLs(in: scenesDir, extensions: presetExts, decoder: decoder)
+                + decodeAllWithURLs(in: musicPresetsDir, extensions: presetExts, decoder: decoder)
+            let cloudPresetTombstones = readTombstones(
+                folder.appendingPathComponent(presetTombstonesFile), decoder: decoder)
+            let presetResult = BackupMerge.reconcile(
+                local: presets, cloud: cloudPresetFiles.map(\.item),
+                localTombstones: localPresetTombstones, cloudTombstones: cloudPresetTombstones,
+                timestamp: { $0.updatedAt })
+            let survivingPresetIDs = Set(presetResult.items.map(\.id))
+            let tombstonedPresetIDs = Set(presetResult.tombstones.map(\.id))
+            // Targeted delete: remove any cloud file whose id is tombstoned and
+            // did not survive the reconcile (matched by decoded id, so a rename
+            // can't hide it).
+            for file in cloudPresetFiles
+            where tombstonedPresetIDs.contains(file.item.id) && !survivingPresetIDs.contains(file.item.id) {
+                try? fm.removeItem(at: file.url)
+            }
+            for preset in presetResult.items {
                 let hasMusic = !(preset.musicReactiveMappings?.isEmpty ?? true)
                 let format = ThresholdExportFormat.preset(hasMusic: hasMusic)
                 let dir = hasMusic ? musicPresetsDir : scenesDir
@@ -214,31 +256,50 @@ final class ICloudBackupManager {
                 let data = try encoder.encode(preset)
                 try data.write(to: url, options: .atomic)
             }
+            try writeTombstones(presetResult.tombstones,
+                                to: folder.appendingPathComponent(presetTombstonesFile),
+                                encoder: encoder)
 
             // ── Animations ───────────────────────────────────────────────
             let animDir = folder.appendingPathComponent(animationsSubdir, isDirectory: true)
             try fm.createDirectory(at: animDir, withIntermediateDirectories: true)
-            // Merge with cloud (newest-wins by modifiedAt) before writing — same
-            // rationale as presets. Union; no deletion.
-            let cloudScenes: [AnimationScene] =
-                decodeAll(in: animDir, extensions: ThresholdExportFormat.extensions(in: .animation), decoder: decoder)
-            let mergedScenes = BackupMerge.newestWins(local: scenes, cloud: cloudScenes, timestamp: { $0.modifiedAt })
-            for scene in mergedScenes {
+            // Same reconcile (newest-wins by modifiedAt + tombstone-driven deletion).
+            let animExts = ThresholdExportFormat.extensions(in: .animation)
+            let cloudSceneFiles: [(url: URL, item: AnimationScene)] =
+                decodeAllWithURLs(in: animDir, extensions: animExts, decoder: decoder)
+            let cloudSceneTombstones = readTombstones(
+                folder.appendingPathComponent(sceneTombstonesFile), decoder: decoder)
+            let sceneResult = BackupMerge.reconcile(
+                local: scenes, cloud: cloudSceneFiles.map(\.item),
+                localTombstones: localSceneTombstones, cloudTombstones: cloudSceneTombstones,
+                timestamp: { $0.modifiedAt })
+            let survivingSceneIDs = Set(sceneResult.items.map(\.id))
+            let tombstonedSceneIDs = Set(sceneResult.tombstones.map(\.id))
+            for file in cloudSceneFiles
+            where tombstonedSceneIDs.contains(file.item.id) && !survivingSceneIDs.contains(file.item.id) {
+                try? fm.removeItem(at: file.url)
+            }
+            for scene in sceneResult.items {
                 let ext = ThresholdExportFormat.animation(hasSong: scene.attachedSong != nil).ext
                 let fileName = sanitizedFileName(scene.name, id: scene.id, ext: ext)
                 let url = animDir.appendingPathComponent(fileName)
                 let data = try encoder.encode(scene)
                 try data.write(to: url, options: .atomic)
             }
+            try writeTombstones(sceneResult.tombstones,
+                                to: folder.appendingPathComponent(sceneTombstonesFile),
+                                encoder: encoder)
 
             // ── Metadata ─────────────────────────────────────────────────
             let meta = BackupMetadata(date: Date(),
-                                      presetsCount: mergedPresets.count,
-                                      scenesCount: mergedScenes.count)
+                                      presetsCount: presetResult.items.count,
+                                      scenesCount: sceneResult.items.count)
             let metaData = try encoder.encode(meta)
             try metaData.write(to: folder.appendingPathComponent(metadataFile),
                                options: .atomic)
-            return .success(meta.date)
+            return .success(SyncOutcome(date: meta.date,
+                                        presetTombstones: presetResult.tombstones,
+                                        sceneTombstones: sceneResult.tombstones))
         } catch {
             return .failure(error)
         }
@@ -250,6 +311,8 @@ final class ICloudBackupManager {
         let settings: SettingsBackupPayload?
         let presets: [FractalPreset]
         let scenes: [AnimationScene]
+        let presetTombstones: [BackupTombstone]
+        let sceneTombstones: [BackupTombstone]
     }
 
     /// Reads settings, presets, and animation scenes from iCloud Drive and
@@ -281,26 +344,34 @@ final class ICloudBackupManager {
                     payload.apply(to: settings)
                     SettingsPersistence.saveAll(from: settings)
                 }
-                // MERGE cloud into local (newest-wins) rather than replacing, so a
-                // restore never drops presets/scenes that exist only on this device
-                // (not yet backed up). Union — no deletion.
-                if !restored.presets.isEmpty {
-                    let merged = BackupMerge.newestWins(local: presetManager.presets,
-                                                        cloud: restored.presets,
-                                                        timestamp: { $0.updatedAt })
-                    presetManager.replaceAll(with: merged)
+                // RECONCILE cloud into local rather than replacing: never drops
+                // presets/scenes that exist only on this device (not yet backed
+                // up), keeps the newer of any conflicting edit, and APPLIES
+                // deletions from either side via tombstones. Runs whenever the
+                // cloud has items OR tombstones to contribute (an empty cloud with
+                // no tombstones is a no-op, preserving local data).
+                if !restored.presets.isEmpty || !restored.presetTombstones.isEmpty {
+                    let result = BackupMerge.reconcile(
+                        local: presetManager.presets, cloud: restored.presets,
+                        localTombstones: TombstoneStore.presets.tombstones,
+                        cloudTombstones: restored.presetTombstones,
+                        timestamp: { $0.updatedAt })
+                    presetManager.replaceAll(with: result.items)
+                    TombstoneStore.presets.replaceAll(result.tombstones)
                 }
-                // Scenes: merge only USER scenes (bundled defaults are recreated on
-                // launch and live as overrides if the user edited them). Keep
-                // local-only user scenes too.
-                if !restored.scenes.isEmpty {
+                // Scenes: reconcile only USER scenes (bundled defaults are recreated
+                // on launch and live as overrides if edited). Keep local-only user
+                // scenes; apply cloud deletions.
+                if !restored.scenes.isEmpty || !restored.sceneTombstones.isEmpty {
                     let cloudUser = restored.scenes.filter { !DefaultScenes.isDefault($0.id) }
                     let localUser = (animationManager?.scenes ?? []).filter { !DefaultScenes.isDefault($0.id) }
-                    let merged = BackupMerge.newestWins(local: localUser, cloud: cloudUser,
-                                                        timestamp: { $0.modifiedAt })
-                    if !merged.isEmpty {
-                        animationManager?.replaceUserScenes(with: merged)
-                    }
+                    let result = BackupMerge.reconcile(
+                        local: localUser, cloud: cloudUser,
+                        localTombstones: TombstoneStore.scenes.tombstones,
+                        cloudTombstones: restored.sceneTombstones,
+                        timestamp: { $0.modifiedAt })
+                    animationManager?.replaceUserScenes(with: result.items)
+                    TombstoneStore.scenes.replaceAll(result.tombstones)
                 }
                 self.lastSyncDate = Date()
             case .failure(let error):
@@ -349,9 +420,17 @@ final class ICloudBackupManager {
                                                      extensions: ThresholdExportFormat.extensions(in: .animation),
                                                      decoder: decoder)
 
+            // ── Tombstones (deletions to apply on this device) ────────────
+            let presetTombstones = readTombstones(
+                folder.appendingPathComponent(presetTombstonesFile), decoder: decoder)
+            let sceneTombstones = readTombstones(
+                folder.appendingPathComponent(sceneTombstonesFile), decoder: decoder)
+
             return .success(RestoredData(settings: restoredSettings,
                                          presets: presets,
-                                         scenes: scenes))
+                                         scenes: scenes,
+                                         presetTombstones: presetTombstones,
+                                         sceneTombstones: sceneTombstones))
         } catch {
             return .failure(error)
         }
@@ -410,10 +489,11 @@ final class ICloudBackupManager {
         return "\(trimmed)_\(shortID).\(ext)"
     }
 
-    // NOTE: `pruneFiles` (blind "delete every cloud file not in the local set") was
-    // removed — it was the mechanism that could silently wipe presets across devices
-    // or after a stale/empty local load. Deletions will be reintroduced as targeted,
-    // tombstone-driven removals once the merge is built.
+    // NOTE: the old `pruneFiles` (blind "delete every cloud file not in the local
+    // set") is gone — it could silently wipe presets across devices or after a
+    // stale/empty local load. Deletions now flow through tombstones: performSync
+    // removes only the specific cloud files whose id is tombstoned and did not
+    // survive the reconcile (see the targeted-delete loops above).
 
     private nonisolated static func decodeAll<T: Decodable>(in dir: URL,
                                                             extensions: [String],
@@ -429,6 +509,39 @@ final class ICloudBackupManager {
             }
         }
         return results
+    }
+
+    /// Like `decodeAll`, but keeps each item paired with the file it came from so
+    /// the sync can delete a tombstoned item by decoded id (robust to renames).
+    private nonisolated static func decodeAllWithURLs<T: Decodable & Identifiable>(
+        in dir: URL, extensions: [String], decoder: JSONDecoder
+    ) -> [(url: URL, item: T)] where T.ID == UUID {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return [] }
+        var results: [(url: URL, item: T)] = []
+        for url in contents where extensions.contains(url.pathExtension) {
+            try? fm.startDownloadingUbiquitousItem(at: url)
+            guard let data = try? Data(contentsOf: url) else { continue }
+            if let decoded = try? decoder.decode(T.self, from: data) {
+                results.append((url, decoded))
+            }
+        }
+        return results
+    }
+
+    /// Read a cloud tombstone file (missing/undecodable → empty, never fatal).
+    private nonisolated static func readTombstones(_ url: URL, decoder: JSONDecoder) -> [BackupTombstone] {
+        try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        return (try? decoder.decode([BackupTombstone].self, from: data)) ?? []
+    }
+
+    /// Write the merged tombstone set for a kind back to the cloud.
+    private nonisolated static func writeTombstones(_ tombstones: [BackupTombstone],
+                                                    to url: URL,
+                                                    encoder: JSONEncoder) throws {
+        let data = try encoder.encode(tombstones)
+        try data.write(to: url, options: .atomic)
     }
 }
 

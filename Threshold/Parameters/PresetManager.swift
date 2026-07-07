@@ -362,16 +362,22 @@ class PresetManager {
     func deletePreset(_ preset: FractalPreset) {
         presets.removeAll { $0.id == preset.id }
         FractalPreset.clearThumbnailCache(for: preset.id)
+        // Tombstone so the deletion propagates through iCloud instead of the
+        // preset reappearing from another device's copy on the next sync.
+        TombstoneStore.presets.record(preset.id)
         scheduleSavePresets()
     }
-    
+
     /// Delete preset at index
     func deletePreset(at offsets: IndexSet) {
         let removedIDs = offsets.compactMap { index in
             presets.indices.contains(index) ? presets[index].id : nil
         }
         presets.remove(atOffsets: offsets)
-        removedIDs.forEach { FractalPreset.clearThumbnailCache(for: $0) }
+        removedIDs.forEach {
+            FractalPreset.clearThumbnailCache(for: $0)
+            TombstoneStore.presets.record($0)   // propagate deletion via iCloud
+        }
         scheduleSavePresets()
     }
     

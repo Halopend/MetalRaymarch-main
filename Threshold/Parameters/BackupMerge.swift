@@ -15,7 +15,7 @@ import Foundation
 /// item silently reappearing from another device's copy (or the folder watcher).
 /// A tombstone is overridden — "resurrected" — only by an item edited/created at
 /// or after `deletedAt` (same id), at which point the tombstone is dropped.
-struct BackupTombstone: Codable, Identifiable, Equatable {
+struct BackupTombstone: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     var deletedAt: Date
 }

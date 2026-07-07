@@ -370,6 +370,13 @@ final class AnimationManager {
             }
             // Guard against two cloud files sharing a UUID (e.g. a renamed copy).
             guard !knownIDs.contains(scene.id) else { continue }
+            // Don't resurrect a scene the user deleted: skip if a tombstone is
+            // newer than this cloud copy. A newer cloud edit (a genuine
+            // re-creation) still wins and imports.
+            guard !TombstoneStore.scenes.isDeleted(scene.id, newerThan: scene.modifiedAt) else {
+                print("☁️ Skipping tombstoned scene: \(url.lastPathComponent)")
+                continue
+            }
 
             newScenes.append(scene)
             knownIDs.insert(scene.id)   // prevent a duplicate in this same pass
@@ -577,6 +584,10 @@ final class AnimationManager {
             print("👁️‍🗨️ Hid default scene '\(scene.name)'")
         } else {
             userScenes.removeAll { $0.id == scene.id }
+            // Tombstone so the deletion propagates through iCloud instead of the
+            // scene being re-imported by the folder watcher / restore merge.
+            // (Defaults are hidden above, not deleted, so they get no tombstone.)
+            TombstoneStore.scenes.record(scene.id)
             saveScenes()
             print("🗑️ Deleted scene '\(scene.name)'")
         }
