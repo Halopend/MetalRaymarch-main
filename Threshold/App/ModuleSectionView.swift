@@ -182,8 +182,7 @@ extension ModuleUISection {
 
     /// Space Warp box — the cross-platform space-module seam (built-in "Twist";
     /// loadable `.threshfx` space effects override the GPU function). Binds the
-    /// warp strength straight to RenderSettings, as the former hand-written
-    /// `spaceWarpSection` did.
+    /// warp strength straight to RenderSettings.
     @MainActor
     static func spaceWarp(renderSettings: RenderSettings) -> ModuleUISection {
         ModuleUISection(

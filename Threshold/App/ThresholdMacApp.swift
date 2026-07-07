@@ -340,25 +340,4 @@ private struct ThresholdMacRootView: View {
         )
     }
 }
-
-private struct MacWindowMaterialBackground: NSViewRepresentable {
-    let material: NSVisualEffectView.Material
-
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        configure(view)
-        return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        configure(nsView)
-    }
-
-    private func configure(_ view: NSVisualEffectView) {
-        view.material = material
-        view.blendingMode = .withinWindow
-        view.state = .active
-        view.isEmphasized = false
-    }
-}
 #endif

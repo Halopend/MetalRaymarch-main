@@ -595,13 +595,6 @@ extension ContentView {
     // See `TransformationsSection.sphericalInversionCard` / `sphereProjectionCard`.
     // The `ModuleUISection.sphereProjection(cache:)` factory is retained there.
 
-    /// Custom space warp (the cross-platform space-module seam). The built-in
-    /// default is a "Twist" about the vertical axis; a loaded `.threshfx`
-    /// space-warp effect will override the GPU function (Stage 2). 0 = off.
-    private var spaceWarpSection: some View {
-        ModuleSectionView(section: .spaceWarp(renderSettings: appModel.renderSettings))
-    }
-
     // ── Acceleration panel: the gamut of march speedup techniques ──
     // Each control trades a little quality for frame rate in a different way.
     // Bindings write the live RenderSettings (via cache.push) and the UI cache.
