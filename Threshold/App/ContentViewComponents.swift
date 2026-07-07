@@ -550,6 +550,10 @@ struct PerformanceMetricsView: View {
     @Environment(AppModel.self) private var appModel
     var cache: UISettingsCache
 
+    // Force Recompile — embedded in this card (developer/debug).
+    @State private var isRecompilingShaders = false
+    @State private var shaderRecompileStatus: String?
+
     private func fpsColor(_ fps: Double) -> Color {
         if fps >= 85 { return .green }
         if fps >= 60 { return .yellow }
@@ -666,6 +670,42 @@ struct PerformanceMetricsView: View {
                 Text(m.drawableWidth > 0 ? "\(m.drawableWidth) × \(m.drawableHeight) px" : "—")
                     .font(.caption.monospacedDigit())
             }
+
+            Divider()
+
+            // Force Recompile — developer/debug, embedded in the dashboard card.
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: AppIcons.wrenchAndScrewdriver).foregroundStyle(.cyan)
+                    Text("Shaders").font(.headline)
+                }
+                Button {
+                    isRecompilingShaders = true; shaderRecompileStatus = nil
+                    Task {
+                        let result = await appModel.forceShaderRecompile()
+                        await MainActor.run { shaderRecompileStatus = result; isRecompilingShaders = false }
+                    }
+                } label: {
+                    HStack {
+                        if isRecompilingShaders {
+                            ProgressView().scaleEffect(0.7).frame(width: 16, height: 16)
+                        } else {
+                            Image(systemName: AppIcons.arrowTriangle2Circlepath)
+                        }
+                        Text(isRecompilingShaders ? "Recompiling..." : "Force Recompile")
+                    }
+                }
+                .buttonStyle(.borderedProminent).tint(.cyan).disabled(isRecompilingShaders)
+
+                if let status = shaderRecompileStatus {
+                    Text(status).font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text("Rebuilds pipeline states and recompiles the active custom .threshfx formula from source.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding()
         .background(Color.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))

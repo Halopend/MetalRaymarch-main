@@ -190,8 +190,6 @@ struct ContentView: View {
     // Developer state
     @State var isProfilerRunning = false
     @State var isTestAnimationPlaying = false
-    @State var isRecompilingShaders = false
-    @State var shaderRecompileStatus: String?
 #if DEBUG
     @State var isBenchmarking = false
 #endif
