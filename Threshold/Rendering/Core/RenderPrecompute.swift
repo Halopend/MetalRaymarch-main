@@ -90,11 +90,13 @@ enum RenderPrecompute {
         scale.w = abs(scale.w)
 
         let absScalem1 = abs(settings.fractalScale - 1.0)
-        // deIterationMismatch (δ ≠ 0) deliberately computes this term as if the
-        // fold loop ran `iterations + δ` — the deterministic recreation of the
-        // legacy compute-cache pipeline mismatch ("Accidental Sphere Projection").
+        // absScalePow is the Mandelbox DE normalization, kept at the UNBIASED iteration
+        // count. deIterationMismatch now biases the *geometry fold loop* (FC_FRACTAL_ITERATIONS)
+        // instead of this term, so the geometry under-folds RELATIVE to its normalization —
+        // the faithful recreation of the "Accidental Sphere Projection" (the earlier δ-on-this-term
+        // form never reproduced the look). See Context/ACCIDENTAL_SPHERE_PROJECTION.md.
         let absScalePow = pow(max(abs(settings.fractalScale), 1e-6),
-                              Float(1 - settings.fractalIterations) - settings.deIterationMismatch)
+                              Float(1 - settings.fractalIterations))
         let sphereRadiusSq = settings.sphereRadius * settings.sphereRadius
 
         return PrecomputedFractalParams(

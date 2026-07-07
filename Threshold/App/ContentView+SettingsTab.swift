@@ -629,7 +629,7 @@ extension ContentView {
                     }
                 ), in: -8...8)
                 .tint(.orange)
-                Text("Deterministic version of the legacy bug: the distance estimator's absScalePow term is computed as if the fold loop ran δ extra iterations. 0 = correct DE. Saves with the scene.")
+                Text("δ biases the geometry fold loop (FC_FRACTAL_ITERATIONS) while the distance estimator stays normalized to the base count — the faithful \"Accidental Sphere Projection\" under-fold. Negative → fewer folds → sphere. 0 = off. Saves with the scene.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
