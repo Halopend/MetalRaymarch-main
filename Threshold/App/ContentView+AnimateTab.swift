@@ -88,6 +88,11 @@ extension ContentView {
                                     animationManager.currentScene = scene
                                     animationManager.play()
                                     dismissMenuWindowIfNeeded()
+                                },
+                                isPlaying: animationManager.isPlaying
+                                    && animationManager.currentScene?.id == scene.id,
+                                onStop: animateEditButtonsVisible ? nil : {
+                                    animationManager.stop()
                                 }
                             )
                         }

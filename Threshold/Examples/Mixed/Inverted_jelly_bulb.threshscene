@@ -49,7 +49,7 @@
   "boundingShapeEnabled" : true,
   "boundingShapeFogMode" : 2,
   "boundingShapeRadius" : 1.3125086,
-  "boundingShapeShadowDepth" : 0.95,
+  "boundingShapeShadowDepth" : 0.2,
   "boundingShapeType" : 1,
   "cellShadingEnabled" : false,
   "cellShadingLevels" : 4,
