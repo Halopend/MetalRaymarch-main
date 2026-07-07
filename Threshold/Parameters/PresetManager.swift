@@ -147,6 +147,11 @@ class PresetManager {
     /// `nonisolated(unsafe)` so the nonisolated deinit can unregister them; the only
     /// deinit access is removal, and NotificationCenter is thread-safe.
     @ObservationIgnored nonisolated(unsafe) private var storageObservers: [NSObjectProtocol] = []
+
+    /// Live iCloud folder watcher (reflects external adds/deletes without relaunch).
+    @ObservationIgnored private var iCloudQuery: NSMetadataQuery?
+    @ObservationIgnored nonisolated(unsafe) private var iCloudQueryObservers: [NSObjectProtocol] = []
+    @ObservationIgnored private var watchedPresetDirs: [URL] = []
     private static let backupTimestampFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -213,6 +218,42 @@ class PresetManager {
 
     deinit {
         storageObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        iCloudQueryObservers.forEach { NotificationCenter.default.removeObserver($0) }
+    }
+
+    // MARK: - Live iCloud watcher
+
+    /// Watch the iCloud Scenes/ + Music Presets/ folders for external changes and
+    /// reload on any add/update/remove. Idempotent for the same dirs.
+    func startWatchingiCloudPresets(scenesDir: URL, musicDir: URL) {
+        let dirs = [scenesDir, musicDir]
+        guard watchedPresetDirs != dirs else { return }
+        stopWatchingiCloudPresets()
+        watchedPresetDirs = dirs
+        loadPresets()   // immediate pass for files already present
+
+        let query = NSMetadataQuery()
+        query.searchScopes = dirs
+        query.predicate = NSPredicate(format: "%K ENDSWITH '.threshscene' OR %K ENDSWITH '.threshmp'",
+                                      NSMetadataItemFSNameKey, NSMetadataItemFSNameKey)
+        query.operationQueue = .main
+        let reload: @Sendable (Notification) -> Void = { [weak self] _ in
+            Task { @MainActor in self?.loadPresets() }
+        }
+        let o1 = NotificationCenter.default.addObserver(forName: .NSMetadataQueryDidFinishGathering, object: query, queue: .main, using: reload)
+        let o2 = NotificationCenter.default.addObserver(forName: .NSMetadataQueryDidUpdate, object: query, queue: .main, using: reload)
+        iCloudQueryObservers = [o1, o2]
+        query.start()
+        iCloudQuery = query
+        print("☁️ Watching iCloud preset folders for changes")
+    }
+
+    func stopWatchingiCloudPresets() {
+        iCloudQuery?.stop()
+        iCloudQuery = nil
+        iCloudQueryObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        iCloudQueryObservers.removeAll()
+        watchedPresetDirs = []
     }
 
     private static func bundledPresets(forceRefresh: Bool = false) -> [FractalPreset] {

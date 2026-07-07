@@ -23,6 +23,7 @@ struct ContentView: View {
     @Environment(AppModel.self) var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openWindow) var openWindow
     @Environment(\.dismissWindow) var dismissWindow
     
@@ -66,7 +67,6 @@ struct ContentView: View {
     // the per-tab `extension ContentView` files).
     @State private var savedGradientToDelete: Int? = nil
     @State private var showDeleteConfirm = false
-    @State var showICloudRestoreConfirm = false
     @State var renamingGradientIndex: Int? = nil
     @State var renamingGradientName: String = ""
     @AppStorage("allowCustomScenes") var allowCustomScenes: Bool = false
@@ -313,6 +313,11 @@ struct ContentView: View {
             if shouldGateRendererNavigation, !isReady, topDockTab != .explore {
                 withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) { activateTopDock(.explore) }
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Returning to the app: re-mirror the store folder so any files added
+            // or deleted while away (e.g. in the Files app) reflect immediately.
+            if phase == .active { appModel.reloadStoresFromDisk() }
         }
         .sheet(isPresented: $showStorageChoice) {
             StorageModeChoiceSheet { chosen in

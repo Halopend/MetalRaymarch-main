@@ -303,7 +303,7 @@ class AppModel {
 
     @ObservationIgnored var activeRenderLoopTask: Task<Void, Never>?
     @ObservationIgnored var activeRenderLoopID: UUID?
-    @ObservationIgnored nonisolated(unsafe) private var cloudFolderObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var storageWatcherObservers: [NSObjectProtocol] = []
 
     // Render-loop lifecycle (begin/registration, active-task set/cancel,
     // renderer-handler clearing) lives in AppModel+RendererActivation.swift.
@@ -554,28 +554,16 @@ class AppModel {
         // Configure SharePlay session listener
         shareSession?.configureGroupSessions()
 
-        // Start watching the iCloud Animations/ folder once the container resolves.
-        // iCloudBackup.resolveContainer() runs async; we listen for the notification
-        // it posts when the URL first becomes available, and also do a quick poll
-        // in case resolution happened before we registered the observer.
-        cloudFolderObserver = NotificationCenter.default.addObserver(
-            forName: ICloudBackupManager.cloudFolderResolvedNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let animDir = (notification.object as? URL)?
-                .appendingPathComponent("Animations", isDirectory: true) else { return }
-
-            Task { @MainActor [weak self, animDir] in
-                self?.animationManager?.startWatchingiCloudAnimations(animDir: animDir)
+        // Live-watch the active store folder so external adds/deletes in iCloud
+        // Drive reflect without a relaunch. Re-evaluated when the store root
+        // resolves (async iCloud discovery) or the user switches storage mode.
+        refreshStorageWatcher()
+        for name in [StorageLocation.rootResolvedNotification, StorageLocation.modeChangedNotification] {
+            let observer = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.refreshStorageWatcher() }
             }
+            storageWatcherObservers.append(observer)
         }
-        // Also try immediately in case the container was already resolved.
-        if let animDir = iCloudBackup.cloudFolderURL?
-            .appendingPathComponent("Animations", isDirectory: true) {
-            animationManager?.startWatchingiCloudAnimations(animDir: animDir)
-        }
-
     }
     
     /// Save current state for restore on next launch
@@ -632,6 +620,28 @@ class AppModel {
                 MainActor.assumeIsolated { doMerge() }
             }
         }
+    }
+
+    /// Start/stop live folder watching for the active store. iCloud mode watches
+    /// the store subfolders via NSMetadataQuery so external adds/deletes reflect
+    /// live; local mode relies on `reloadStoresFromDisk()` at foreground (an
+    /// NSMetadataQuery only covers ubiquitous files).
+    func refreshStorageWatcher() {
+        guard StorageLocation.shared.mode == .iCloud, let root = StorageLocation.shared.activeRoot else {
+            animationManager?.stopWatchingiCloudAnimations()
+            presetManager.stopWatchingiCloudPresets()
+            return
+        }
+        animationManager?.startWatchingiCloudAnimations(animDir: StorageLocation.animationsDir(root))
+        presetManager.startWatchingiCloudPresets(scenesDir: StorageLocation.scenesDir(root),
+                                                 musicDir: StorageLocation.musicPresetsDir(root))
+    }
+
+    /// Re-mirror both stores from disk (used on app foreground so a file deleted or
+    /// added in the store folder while the app was backgrounded reflects on return).
+    func reloadStoresFromDisk() {
+        presetManager.loadPresets()
+        animationManager?.reloadUserScenesFromStore()
     }
 
     // External-file import (open / preview / commit / cancel / restore) lives in
@@ -1008,9 +1018,7 @@ class AppModel {
     }
 
     deinit {
-        if let token = cloudFolderObserver {
-            NotificationCenter.default.removeObserver(token)
-        }
+        storageWatcherObservers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
 }
