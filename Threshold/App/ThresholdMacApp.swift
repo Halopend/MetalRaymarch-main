@@ -228,9 +228,10 @@ private struct ThresholdMacRootView: View {
         Button {
             toggleControlsPin()
         } label: {
-            Image(systemName: isControlsPinnedOpen ? AppIcons.pinFill : AppIcons.pin)
+            Image(systemName: AppIcons.sidebarRight)
                 .font(.system(size: 13, weight: .semibold))
                 .frame(width: 28, height: 28)
+                .foregroundStyle(isControlsPinnedOpen ? Color.accentColor : Color.primary)
         }
         .buttonStyle(.plain)
         .help(isControlsPinnedOpen ? "Unpin controls (⌘.)" : "Pin controls open (⌘.)")

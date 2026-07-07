@@ -121,7 +121,8 @@ class AppModel {
     }
 
     var immersiveSpaceState = ImmersiveSpaceState.closed
-    /// True while the macOS "Breakout Control Window" is open. The main window's
+    /// True while the controls are broken out into their own macOS window (via the
+    /// "Detach" / "Merge" toggle). The main window's
     /// slide-over sidebar suppresses itself while this is set so the controls
     /// don't appear twice.
     var isControlsWindowOpen = false
