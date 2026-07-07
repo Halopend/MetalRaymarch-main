@@ -319,12 +319,22 @@ final class UsageAnalytics {
     /// `CKContainer.default()` (which aborts with an uncaught ObjC exception when the
     /// entitlement is absent), this probe is non-throwing, so it's safe on unsigned builds.
     private static let hasCloudKitEntitlement: Bool = {
+        #if os(macOS) || os(iOS)
+        // The unsigned-build CloudKit freeze this guards against only happens on the
+        // macOS/iOS local-build workflow (CODE_SIGNING_ALLOWED=NO). SecTask entitlement
+        // introspection exists on those platforms; use it as the non-throwing probe.
         guard let task = SecTaskCreateFromSelf(nil),
               let value = SecTaskCopyValueForEntitlement(
                 task, "com.apple.developer.icloud-container-identifiers" as CFString, nil)
         else { return false }
         if let identifiers = value as? [Any] { return !identifiers.isEmpty }
         return true
+        #else
+        // SecTask APIs aren't available on visionOS/tvOS/etc. Those targets ship as
+        // properly provisioned device builds (the entitlement is present), so there's
+        // no unsigned-build throw to guard against — assume it's available.
+        return true
+        #endif
     }()
 
     private func buildSnapshot() -> UsageSnapshot {
