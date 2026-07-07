@@ -268,9 +268,6 @@ class AppModel {
     /// Drives the on-device performance sweep that writes the per-build perf log.
     let perfSweepRunner = PerfSweepRunner()
 
-    // iCloud Drive backup/restore (presets, scenes, settings)
-    let iCloudBackup = ICloudBackupManager()
-
     // Error reporting for transient banners
     let errorReporter = ErrorReporter()
 
