@@ -53,6 +53,11 @@ struct ContentView: View {
     @State var showStopsPopover = false
     @State private var showSaveDestinationSheet = false
     @State private var didLongPressPinnedRailControl: PinnedRailControl?
+    #if os(macOS)
+    @State var isHoldingSaveSheetAdjustment = false
+    @State var isHoldingImportSheetAdjustment = false
+    @State var isHoldingExportSheetAdjustment = false
+    #endif
 
     // Tab-local UI state (kept here because stored properties cannot live in
     // the per-tab `extension ContentView` files).
@@ -342,7 +347,30 @@ struct ContentView: View {
             .presentationDragIndicator(.hidden)
             .interactiveDismissDisabled()
         }
+        #if os(macOS)
+        // Sheets present as child windows on Mac, so the pointer leaves the
+        // sidebar's hover region while they're open. Hold the panel open for
+        // their lifetime the same way MusicTabView holds it for its popover.
+        .onChange(of: showSaveDestinationSheet) { _, isPresented in
+            updateMacSheetMenuAdjustment(isPresented, holding: &isHoldingSaveSheetAdjustment)
+        }
+        .onChange(of: appModel.pendingExternalImport != nil) { _, isPresented in
+            updateMacSheetMenuAdjustment(isPresented, holding: &isHoldingImportSheetAdjustment)
+        }
+        #endif
     }
+
+    #if os(macOS)
+    func updateMacSheetMenuAdjustment(_ isPresented: Bool, holding flag: inout Bool) {
+        guard flag != isPresented else { return }
+        flag = isPresented
+        if isPresented {
+            appModel.beginMenuAdjustment()
+        } else {
+            appModel.endMenuAdjustment()
+        }
+    }
+    #endif
 
     private var menuSurfaceFill: Color {
         colorScheme == .dark ? Color.black.opacity(0.8) : Color.white.opacity(0.72)

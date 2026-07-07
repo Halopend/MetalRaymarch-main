@@ -757,7 +757,19 @@ class AppModel {
     }
 
     private func refreshMenuInteractionState() {
+        // `isMenuWindowVisible` tracks the dismissable visionOS ornament window and is
+        // permanently latched to `false` by `dismissMenuWindowForSceneLoad()` the first
+        // time any scene loads (Mac never calls `showMenuWindow()` to reset it — its
+        // panel visibility is unconditional, per the comment on `closeMenuWindow`).
+        // Gating on it here would silently and permanently disable this "hold the
+        // panel open" signal on Mac after the first scene load, breaking every
+        // control that relies on `beginMenuAdjustment()`/`endMenuAdjustment()`
+        // (color pickers, popovers, sheets) for the rest of the session.
+        #if os(macOS)
+        let interacting = isMenuHovering || menuAdjustmentDepth > 0
+        #else
         let interacting = isMenuWindowVisible && (isMenuHovering || menuAdjustmentDepth > 0)
+        #endif
         isMenuInteractionActive = interacting
         renderSettings.isMenuInteractionActive = interacting
         gestureController?.suppressParameterGestures = interacting

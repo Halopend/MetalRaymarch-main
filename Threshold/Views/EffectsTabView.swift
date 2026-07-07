@@ -7,11 +7,18 @@
 //
 
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 struct FogColorPickerRow: View {
     let title: String
     @Binding var color: SIMD3<Float>
     let onChanged: () -> Void
+    #if os(macOS)
+    @Environment(\.menuAdjustmentActions) private var menuAdjustmentActions
+    @State private var isHoldingColorPanelAdjustment = false
+    #endif
 
     var body: some View {
         HStack {
@@ -39,6 +46,28 @@ struct FogColorPickerRow: View {
             )
             .labelsHidden()
         }
+        #if os(macOS)
+        // ColorPicker opens the shared NSColorPanel as a separate child window,
+        // so the pointer leaves the sidebar's hover region while the panel is
+        // up — without this, the sidebar auto-hides out from under the color
+        // panel. Hold it open the same way MusicTabView holds it for its
+        // "Add Control" popover.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            guard note.object is NSColorPanel, !isHoldingColorPanelAdjustment else { return }
+            isHoldingColorPanelAdjustment = true
+            menuAdjustmentActions.begin()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
+            guard note.object is NSColorPanel, isHoldingColorPanelAdjustment else { return }
+            isHoldingColorPanelAdjustment = false
+            menuAdjustmentActions.end()
+        }
+        .onDisappear {
+            guard isHoldingColorPanelAdjustment else { return }
+            isHoldingColorPanelAdjustment = false
+            menuAdjustmentActions.end()
+        }
+        #endif
     }
 }
 

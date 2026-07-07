@@ -1135,6 +1135,14 @@ extension ContentView {
             // no dismiss control and could get stuck on visionOS/macOS.
             ShareSheet(activityItems: [item.url])
         }
+        #if os(macOS)
+        // NSSharingServicePicker presents as a child window, pulling the
+        // pointer off the sidebar's hover region — hold the panel open while
+        // it's up, same as the other Mac sheets/popovers.
+        .onChange(of: exportShareItem != nil) { _, isPresented in
+            updateMacSheetMenuAdjustment(isPresented, holding: &isHoldingExportSheetAdjustment)
+        }
+        #endif
     }
 
     private func formatRow(ext: String, desc: String) -> some View {
