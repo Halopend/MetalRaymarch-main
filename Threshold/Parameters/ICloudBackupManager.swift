@@ -184,33 +184,33 @@ final class ICloudBackupManager {
             // ── Scenes (Fractal Presets) ────────────────────────────────
             let scenesDir = folder.appendingPathComponent(scenesSubdir, isDirectory: true)
             try fm.createDirectory(at: scenesDir, withIntermediateDirectories: true)
-            var keepSceneFiles = Set<String>()
             for preset in presets {
                 let hasMusic = !(preset.musicReactiveMappings?.isEmpty ?? true)
                 let ext = ThresholdExportFormat.preset(hasMusic: hasMusic).ext
                 let fileName = sanitizedFileName(preset.name, id: preset.id, ext: ext)
-                keepSceneFiles.insert(fileName)
                 let url = scenesDir.appendingPathComponent(fileName)
                 let data = try encoder.encode(preset)
                 try data.write(to: url, options: .atomic)
             }
-            pruneFiles(in: scenesDir, keep: keepSceneFiles,
-                       extensions: ThresholdExportFormat.extensions(in: .preset))
+            // NON-DESTRUCTIVE sync: we intentionally do NOT prune cloud files that are
+            // absent from the local set. The old blind mirror let a stale/empty local
+            // list (a failed decode falling back to an older backup) or a second device
+            // silently DELETE presets from the cloud. Deletions will propagate via
+            // tombstones, not by wiping whatever isn't local at this instant.
+            // (Full merge + tombstones is being built incrementally; this is step 1.)
 
             // ── Animations ───────────────────────────────────────────────
             let animDir = folder.appendingPathComponent(animationsSubdir, isDirectory: true)
             try fm.createDirectory(at: animDir, withIntermediateDirectories: true)
-            var keepAnimFiles = Set<String>()
             for scene in scenes {
                 let ext = ThresholdExportFormat.animation(hasSong: scene.attachedSong != nil).ext
                 let fileName = sanitizedFileName(scene.name, id: scene.id, ext: ext)
-                keepAnimFiles.insert(fileName)
                 let url = animDir.appendingPathComponent(fileName)
                 let data = try encoder.encode(scene)
                 try data.write(to: url, options: .atomic)
             }
-            pruneFiles(in: animDir, keep: keepAnimFiles,
-                       extensions: ThresholdExportFormat.extensions(in: .animation))
+            // Non-destructive (see the presets block above): no prune of cloud-only
+            // animation files. Deletions will come via tombstones, not a blind mirror.
 
             // ── Metadata ─────────────────────────────────────────────────
             let meta = BackupMetadata(date: Date(),
@@ -372,20 +372,10 @@ final class ICloudBackupManager {
         return "\(trimmed)_\(shortID).\(ext)"
     }
 
-    /// Removes files in `dir` (matching any of `extensions`) whose names are
-    /// not in the `keep` set. Used to mirror local deletions to the cloud.
-    private nonisolated static func pruneFiles(in dir: URL,
-                                                keep: Set<String>,
-                                                extensions: [String]) {
-        let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
-        for url in contents {
-            guard extensions.contains(url.pathExtension) else { continue }
-            if !keep.contains(url.lastPathComponent) {
-                try? fm.removeItem(at: url)
-            }
-        }
-    }
+    // NOTE: `pruneFiles` (blind "delete every cloud file not in the local set") was
+    // removed — it was the mechanism that could silently wipe presets across devices
+    // or after a stale/empty local load. Deletions will be reintroduced as targeted,
+    // tombstone-driven removals once the merge is built.
 
     private nonisolated static func decodeAll<T: Decodable>(in dir: URL,
                                                             extensions: [String],
