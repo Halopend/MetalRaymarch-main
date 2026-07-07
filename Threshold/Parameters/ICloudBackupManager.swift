@@ -8,13 +8,17 @@
 //  subfolders so they are browseable in Files.app on iOS/visionOS and in
 //  Finder on macOS — even on devices that do not have the app installed.
 //
+//  The subfolders mirror the app's internal Threshold/Examples layout.
+//
 //      iCloud Drive/
 //        └── Threshold/
 //            ├── Settings/
 //            │   └── settings.json
-//            ├── Scenes/
+//            ├── Scenes/            (plain presets, .threshscene)
 //            │   ├── Bright_Preset.threshscene
 //            │   └── Cosmic_Drift.threshscene
+//            ├── Music Presets/     (music-reactive presets, .threshmp)
+//            │   └── Legendary_Kid.threshmp
 //            └── Animations/
 //                ├── Demo_Loop.threshanim
 //                └── Music_Video.threshanimv
@@ -57,9 +61,14 @@ final class ICloudBackupManager {
     // MARK: - Constants
 
     private nonisolated static let folderName       = "Threshold"
-    private nonisolated static let settingsSubdir   = "Settings"
-    private nonisolated static let scenesSubdir     = "Scenes"
-    private nonisolated static let animationsSubdir = "Animations"
+    // Subfolder names mirror the app's internal Threshold/Examples layout so the
+    // iCloud "Threshold" folder browses the same way (Scenes / Music Presets /
+    // Animations). Plain presets go in Scenes, music-reactive presets (.threshmp)
+    // in Music Presets.
+    private nonisolated static let settingsSubdir     = "Settings"
+    private nonisolated static let scenesSubdir       = "Scenes"
+    private nonisolated static let musicPresetsSubdir = "Music Presets"
+    private nonisolated static let animationsSubdir   = "Animations"
     private nonisolated static let settingsFile     = "settings.json"
     private nonisolated static let metadataFile     = ".metadata.json"
 
@@ -113,7 +122,7 @@ final class ICloudBackupManager {
         let docs = containerURL.appendingPathComponent("Documents", isDirectory: true)
         try? FileManager.default.createDirectory(at: docs, withIntermediateDirectories: true)
         // Pre-create subfolders so they always appear, even when empty.
-        for sub in [settingsSubdir, scenesSubdir, animationsSubdir] {
+        for sub in [settingsSubdir, scenesSubdir, musicPresetsSubdir, animationsSubdir] {
             let subURL = docs.appendingPathComponent(sub, isDirectory: true)
             try? FileManager.default.createDirectory(at: subURL, withIntermediateDirectories: true)
         }
@@ -181,14 +190,17 @@ final class ICloudBackupManager {
             try settingsData.write(to: settingsDir.appendingPathComponent(settingsFile),
                                    options: .atomic)
 
-            // ── Scenes (Fractal Presets) ────────────────────────────────
+            // ── Presets (mirrors Examples layout: Scenes / Music Presets) ──
             let scenesDir = folder.appendingPathComponent(scenesSubdir, isDirectory: true)
+            let musicPresetsDir = folder.appendingPathComponent(musicPresetsSubdir, isDirectory: true)
             try fm.createDirectory(at: scenesDir, withIntermediateDirectories: true)
+            try fm.createDirectory(at: musicPresetsDir, withIntermediateDirectories: true)
             for preset in presets {
                 let hasMusic = !(preset.musicReactiveMappings?.isEmpty ?? true)
-                let ext = ThresholdExportFormat.preset(hasMusic: hasMusic).ext
-                let fileName = sanitizedFileName(preset.name, id: preset.id, ext: ext)
-                let url = scenesDir.appendingPathComponent(fileName)
+                let format = ThresholdExportFormat.preset(hasMusic: hasMusic)
+                let dir = hasMusic ? musicPresetsDir : scenesDir
+                let fileName = sanitizedFileName(preset.name, id: preset.id, ext: format.ext)
+                let url = dir.appendingPathComponent(fileName)
                 let data = try encoder.encode(preset)
                 try data.write(to: url, options: .atomic)
             }
@@ -299,11 +311,21 @@ final class ICloudBackupManager {
                 restoredSettings = try decoder.decode(SettingsBackupPayload.self, from: data)
             }
 
-            // ── Scenes (Presets) ────────────────────────────────────────
+            // ── Presets ─────────────────────────────────────────────────
+            // Read both "Scenes/" and "Music Presets/". "Scenes/" is also scanned for
+            // .threshmp so presets backed up before the Music Presets split (legacy
+            // flat layout) still restore. De-dupe by id keeping the newest updatedAt
+            // (a preset can appear in both places mid-migration).
             let scenesDir = folder.appendingPathComponent(scenesSubdir, isDirectory: true)
-            let presets: [FractalPreset] = decodeAll(in: scenesDir,
-                                                     extensions: ThresholdExportFormat.extensions(in: .preset),
-                                                     decoder: decoder)
+            let musicPresetsDir = folder.appendingPathComponent(musicPresetsSubdir, isDirectory: true)
+            let rawPresets: [FractalPreset] =
+                decodeAll(in: scenesDir, extensions: ThresholdExportFormat.extensions(in: .preset), decoder: decoder)
+                + decodeAll(in: musicPresetsDir, extensions: ThresholdExportFormat.extensions(in: .preset), decoder: decoder)
+            var presetsByID: [UUID: FractalPreset] = [:]
+            for p in rawPresets where (presetsByID[p.id]?.updatedAt ?? .distantPast) < p.updatedAt {
+                presetsByID[p.id] = p
+            }
+            let presets = Array(presetsByID.values)
 
             // ── Animations ───────────────────────────────────────────────
             let animDir = folder.appendingPathComponent(animationsSubdir, isDirectory: true)
