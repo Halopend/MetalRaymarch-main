@@ -319,7 +319,7 @@
   "linearRailEffect" : {
     "amplitude" : 0.7,
     "axis" : "z",
-    "enabled" : true,
+    "enabled" : false,
     "multiplier" : 1,
     "orbitAmount" : 0,
     "orbitSpeed" : 0.18,

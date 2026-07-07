@@ -108,16 +108,17 @@ enum ShapeRailSection: String, CaseIterable {
 }
 
 enum PerformanceRailSection: String, CaseIterable {
-    // Budget first: it's the default landing section for the Performance tab
-    // (the rail renders allCases in this order, so the default-selected section
-    // also sits at the top).
-    case budget = "Budget"
-    case acceleration = "Acceleration"
+    // Overview first: the read-only live dashboard is the default landing section
+    // for the Performance tab (the rail renders allCases in this order, so the
+    // default-selected section also sits at the top). Tuning holds every knob —
+    // the iteration/ray-step budget plus the march-acceleration techniques.
+    case overview = "Overview"
+    case tuning = "Tuning"
 
     var icon: String {
         switch self {
-        case .budget: return "slider.horizontal.3"
-        case .acceleration: return "bolt.fill"
+        case .overview: return "gauge"
+        case .tuning: return "slider.horizontal.3"
         }
     }
 }

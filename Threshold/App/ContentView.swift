@@ -35,9 +35,10 @@ struct ContentView: View {
     // Default to Budget. Key bumped to ".v2" so the new default actually lands
     // for anyone who already had a different section persisted — the tab writes
     // this on every open, so a plain default change wouldn't take effect. The old
-    // Metrics section was merged into Acceleration; a stale "Metrics" raw value no
-    // longer decodes to a case, so AppStorage falls back to this default.
-    @AppStorage("ContentView.performanceRailSection.v2") var performanceRailSection: PerformanceRailSection = .budget
+    // Budget/Acceleration were merged into Tuning and the live dashboard split out
+    // into Overview; stale raw values no longer decode, so AppStorage falls back to
+    // this default (Overview is the landing section).
+    @AppStorage("ContentView.performanceRailSection.v3") var performanceRailSection: PerformanceRailSection = .overview
     @AppStorage("ContentView.skipOuterNavigationSync") private var skipOuterNavigationSync = false
     // Persist last-selected tab and sub-tabs across launches.
     @AppStorage("ContentView.selectedTab") var selectedTab: SidebarTab = .fractal
@@ -1093,7 +1094,7 @@ struct ContentView: View {
             case .shapeBounding:
                 activateShapeSection(.bounding)
             case .shapePerformance:
-                activatePerformanceSection(.acceleration)
+                activatePerformanceSection(.tuning)
             case .visualizationsColor:
                 activateVisualizationsSection(.color)
             case .visualizationsMapping:

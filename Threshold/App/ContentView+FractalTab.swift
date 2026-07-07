@@ -751,18 +751,11 @@ extension ContentView {
     /// own Shape rail tab — these are shape/framing choices, not perf knobs.
     var fractalBoundingContent: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Scrunch to Surroundings first — the most-reached-for mode in Mixed
-            // immersion, so it's surfaced at the very top of the tab.
-            scrunchToSurroundingsSection
-
-            Divider().padding(.vertical, 2)
-
-            // Containment — the headline framing over the two grounding modes
-            // (Bounding shape vs Scrunch to Surroundings). The top-bar picker is
-            // MUTUALLY EXCLUSIVE: Bounded / Surroundings / Free each set a single
-            // canonical combo. The individual side toggles below are independent
-            // and can override that (e.g. both on) — when they do, the picker
-            // shows a fourth, read-only "Custom" segment. The mode is derived
+            // Containment — the headline 4-way framing, so it sits at the very top
+            // of the tab. The MUTUALLY EXCLUSIVE picker sets a single canonical combo
+            // (Bounded / Surroundings / Free); the individual side toggles below are
+            // independent and can override it (e.g. both on) — when they do, the
+            // picker shows a fourth, read-only "Custom" segment. The mode is derived
             // from the same enable flags.
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
@@ -787,6 +780,11 @@ extension ContentView {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            Divider().padding(.vertical, 2)
+
+            // Scrunch to Surroundings — the most-reached-for mode in Mixed immersion.
+            scrunchToSurroundingsSection
 
             Divider().padding(.vertical, 2)
 
@@ -1009,7 +1007,7 @@ extension ContentView {
                 Text(status).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("Clears the specialized pipeline cache (rebuilds on the next frames) and recompiles the active custom .threshfx formula from source. Built-in fractals have no runtime source, so for them this only rebuilds pipeline states.")
+            Text("Rebuilds pipeline states and recompiles the active custom .threshfx formula from source.")
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -1017,16 +1015,16 @@ extension ContentView {
         .background(Color.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    // MARK: - Performance tab (rail sub-tabs: Budget / Acceleration — Acceleration
-    // also hosts the live metrics readout and the render-quality controls)
+    // MARK: - Performance tab (rail sub-tabs: Overview / Tuning — Overview hosts the
+    // live metrics readout and Force Recompile; Tuning holds every knob)
 
     /// Dispatches the Performance tab's content based on the selected rail
     /// sub-section, so each panel is short instead of one long dense scroll.
     @ViewBuilder
     var performanceTabContent: some View {
         switch performanceRailSection {
-        case .acceleration: performanceAccelerationContent
-        case .budget:       performanceBudgetContent
+        case .overview: performanceOverviewContent
+        case .tuning:   performanceTuningContent
         }
     }
 
@@ -1040,12 +1038,121 @@ extension ContentView {
         }
     }
 
-    private var performanceAccelerationContent: some View {
+    /// Overview — the live performance dashboard plus the developer Force Recompile
+    /// control. Read-only readouts and a one-shot rebuild; every tunable knob lives
+    /// in the Tuning sub-tab.
+    private var performanceOverviewContent: some View {
         VStack(spacing: 12) {
-            performanceSectionHeader("Acceleration", systemImage: AppIcons.boltFill)
+            performanceSectionHeader("Overview", systemImage: "gauge")
 
-            // ── Live metrics (merged in from the former Metrics sub-tab) ──
             PerformanceMetricsView(cache: cache)
+
+            shaderRecompileSection
+        }
+    }
+
+    /// Tuning — every performance knob in one place: the iteration/ray-step budget,
+    /// renderer mode, render quality, and the march-acceleration techniques. (The
+    /// live readout and Force Recompile moved to the Overview sub-tab.)
+    private var performanceTuningContent: some View {
+        VStack(spacing: 12) {
+            performanceSectionHeader("Tuning", systemImage: "slider.horizontal.3")
+
+            // ── Target Condition (presets vs freeform) ──
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Target Condition")
+                    Spacer()
+                    Picker("Budget Goal", selection: Binding(
+                        get: { qualityGoalPreference },
+                        set: { newValue in
+                            qualityGoalPreferenceRaw = newValue.rawValue
+                        }
+                    )) {
+                        ForEach(QualityGoalPreference.allCases, id: \.rawValue) { goal in
+                            Text(goal.displayName).tag(goal)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 340)
+                }
+                Text("Simplified uses curated presets. Advanced unlocks free-form sliders.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            // ── Iteration Budget ──
+            Text("Iteration Budget")
+                .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if qualityGoalPreference != .advanced {
+                HStack(spacing: 8) {
+                    ForEach(QualityPreset.allCases, id: \.rawValue) { preset in
+                        Button {
+                            let values = preset.values(for: cache.fractalType)
+                            cache.quality.baseFractalIterations = values.fractalIterations
+                            cache.quality.baseMaxRaySteps = values.raySteps
+                            cache.push(\.baseFractalIterations, value: values.fractalIterations)
+                            cache.push(\.baseMaxRaySteps, value: values.raySteps)
+                            appModel.animationManager?.markIterationBudgetUserOverridden()
+                            appModel.preparePipeline(iterations: values.fractalIterations, raySteps: values.raySteps)
+                        } label: {
+                            VStack(spacing: 2) {
+                                Image(systemName: preset.icon).font(.caption)
+                                Text(preset.displayName).font(.caption2)
+                            }
+                            .frame(maxWidth: .infinity).padding(.vertical, 6)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(QualityPreset.detect(
+                            fractalIterations: cache.quality.baseFractalIterations,
+                            raySteps: cache.quality.baseMaxRaySteps,
+                            fractalType: cache.fractalType
+                        ) == preset ? .blue : .secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack { Text("Fractal Iterations"); Spacer(); Text("\(cache.quality.baseFractalIterations)").fontWeight(.bold).monospacedDigit() }
+                        Slider(value: Binding(
+                            get: { Float(cache.quality.baseFractalIterations) },
+                            set: {
+                                cache.quality.baseFractalIterations = Int($0)
+                                cache.push(\.baseFractalIterations, value: Int($0))
+                                appModel.animationManager?.markIterationBudgetUserOverridden()
+                            }
+                        ), in: 4...32, step: 1, onEditingChanged: { isEditing in
+                            guard !isEditing else { return }
+                            appModel.preparePipeline(
+                                iterations: cache.quality.baseFractalIterations,
+                                raySteps: cache.quality.baseMaxRaySteps
+                            )
+                        })
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack { Text("Max Ray Steps"); Spacer(); Text("\(cache.quality.baseMaxRaySteps)").fontWeight(.bold).monospacedDigit() }
+                        Slider(value: Binding(
+                            get: { Float(cache.quality.baseMaxRaySteps) },
+                            set: {
+                                cache.quality.baseMaxRaySteps = Int($0)
+                                cache.push(\.baseMaxRaySteps, value: Int($0))
+                                appModel.animationManager?.markIterationBudgetUserOverridden()
+                            }
+                        ), in: 32...200, step: 8, onEditingChanged: { isEditing in
+                            guard !isEditing else { return }
+                            appModel.preparePipeline(
+                                iterations: cache.quality.baseFractalIterations,
+                                raySteps: cache.quality.baseMaxRaySteps
+                            )
+                        })
+                    }
+                }
+            }
+
+            Divider().padding(.vertical, 2)
 
             // ── Renderer Mode ──
             VStack(alignment: .leading, spacing: 8) {
@@ -1085,9 +1192,6 @@ extension ContentView {
 
             // ── Render Quality (resolution / framerate headroom) ──
             performanceQualityControls
-
-            // (Render Distance slider removed 2026-07-01: measured to have almost
-            // no perf effect — the multiplier is hardcoded to 1× in the renderers.)
 
             // ── Acceleration (the gamut of march speedup techniques) ──
             fractalAccelerationSection
@@ -1214,116 +1318,15 @@ extension ContentView {
                 }
             ))
             .tint(.cyan)
-            .help("When the frame rate sags, the compositor's render quality steps down to recover headroom, then climbs back toward your slider setting (the ceiling) once FPS is comfortable. Adjustments are infrequent and the compositor tweens between them, so the change reads as a gentle ramp.")
+            .help("When FPS sags, render quality steps down to recover headroom, then climbs back toward your slider setting (the ceiling).")
 
-            Text("Vision Pro: the compositor's native, gaze-foveated resolution. The slider sets the sharpest quality (the ceiling, a memory/quality balance); lower trades crispness for GPU headroom with a smoothed transition. Very low values probe max framerate.")
+            Text("Vision Pro's native, gaze-foveated resolution. The slider sets the sharpest quality (the ceiling); lower trades crispness for GPU headroom.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
         #endif
     }
 
-    private var performanceBudgetContent: some View {
-        VStack(spacing: 12) {
-            performanceSectionHeader("Budget", systemImage: "slider.horizontal.3")
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Target Condition")
-                    Spacer()
-                    Picker("Budget Goal", selection: Binding(
-                        get: { qualityGoalPreference },
-                        set: { newValue in
-                            qualityGoalPreferenceRaw = newValue.rawValue
-                        }
-                    )) {
-                        ForEach(QualityGoalPreference.allCases, id: \.rawValue) { goal in
-                            Text(goal.displayName).tag(goal)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 340)
-                }
-                Text("Simplified uses curated presets. Advanced unlocks free-form sliders for fine-tuning.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            Text("Iteration Budget")
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if qualityGoalPreference != .advanced {
-                HStack(spacing: 8) {
-                    ForEach(QualityPreset.allCases, id: \.rawValue) { preset in
-                        Button {
-                            let values = preset.values(for: cache.fractalType)
-                            cache.quality.baseFractalIterations = values.fractalIterations
-                            cache.quality.baseMaxRaySteps = values.raySteps
-                            cache.push(\.baseFractalIterations, value: values.fractalIterations)
-                            cache.push(\.baseMaxRaySteps, value: values.raySteps)
-                            appModel.animationManager?.markIterationBudgetUserOverridden()
-                            appModel.preparePipeline(iterations: values.fractalIterations, raySteps: values.raySteps)
-                        } label: {
-                            VStack(spacing: 2) {
-                                Image(systemName: preset.icon).font(.caption)
-                                Text(preset.displayName).font(.caption2)
-                            }
-                            .frame(maxWidth: .infinity).padding(.vertical, 6)
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(QualityPreset.detect(
-                            fractalIterations: cache.quality.baseFractalIterations,
-                            raySteps: cache.quality.baseMaxRaySteps,
-                            fractalType: cache.fractalType
-                        ) == preset ? .blue : .secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                VStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Fractal Iterations"); Spacer(); Text("\(cache.quality.baseFractalIterations)").fontWeight(.bold).monospacedDigit() }
-                        Slider(value: Binding(
-                            get: { Float(cache.quality.baseFractalIterations) },
-                            set: {
-                                cache.quality.baseFractalIterations = Int($0)
-                                cache.push(\.baseFractalIterations, value: Int($0))
-                                appModel.animationManager?.markIterationBudgetUserOverridden()
-                            }
-                        ), in: 4...32, step: 1, onEditingChanged: { isEditing in
-                            guard !isEditing else { return }
-                            appModel.preparePipeline(
-                                iterations: cache.quality.baseFractalIterations,
-                                raySteps: cache.quality.baseMaxRaySteps
-                            )
-                        })
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Max Ray Steps"); Spacer(); Text("\(cache.quality.baseMaxRaySteps)").fontWeight(.bold).monospacedDigit() }
-                        Slider(value: Binding(
-                            get: { Float(cache.quality.baseMaxRaySteps) },
-                            set: {
-                                cache.quality.baseMaxRaySteps = Int($0)
-                                cache.push(\.baseMaxRaySteps, value: Int($0))
-                                appModel.animationManager?.markIterationBudgetUserOverridden()
-                            }
-                        ), in: 32...200, step: 8, onEditingChanged: { isEditing in
-                            guard !isEditing else { return }
-                            appModel.preparePipeline(
-                                iterations: cache.quality.baseFractalIterations,
-                                raySteps: cache.quality.baseMaxRaySteps
-                            )
-                        })
-                    }
-                }
-            }
-
-            // ── Force Recompile (developer/debug) ──
-            shaderRecompileSection
-        }
-    }
-    
     private func setDetailScale(_ value: Float) {
         let clamped = max(0.05, min(20.0, value))
         appModel.renderSettings.detailScale = clamped
