@@ -290,17 +290,19 @@ class PresetManager {
     }
 
     /// One-time-per-store setup: migrate the legacy blob into per-file layout, and
-    /// seed bundled defaults that have never been seeded into THIS store. Seeding
-    /// is keyed by a persisted seeded-id set (not "present right now"), so deleting
-    /// a default doesn't resurrect it, while a genuinely new bundled preset in a
-    /// future build still seeds exactly once.
+    /// seed bundled defaults exactly once per store.
+    ///
+    /// Seeding is gated on the marker file's EXISTENCE, not its contents. The store
+    /// lives in iCloud, where the marker can be an un-downloaded placeholder whose
+    /// read fails; if we treated a failed read as "never seeded" we'd re-write every
+    /// bundled default and RESURRECT any default the user deleted (the store's files
+    /// are the source of truth). Existence survives the placeholder, so once seeded
+    /// we never seed again and a deleted default stays deleted.
     private func migrateAndSeedIfNeeded(root: URL) {
         let marker = root.appendingPathComponent(".seeded-bundled.json")
-        var seededIDs: Set<UUID> = []
-        if let data = try? Data(contentsOf: marker),
-           let ids = try? presetDecoder.decode([UUID].self, from: data) { seededIDs = Set(ids) }
+        try? FileManager.default.startDownloadingUbiquitousItem(at: marker)
+        let alreadySeeded = FileManager.default.fileExists(atPath: marker.path)
 
-        var didChange = false
         var present = Set(scanStorePresets(root: root).map(\.id))
 
         // Legacy migration runs once, globally (the blob only exists in the old
@@ -314,17 +316,21 @@ class PresetManager {
                 print("📦 Migrated \(legacy.count) preset(s) from legacy presets.json")
             }
             UserDefaults.standard.set(true, forKey: legacyMigratedKey)
-            didChange = true
         }
 
-        for preset in Self.bundledPresets() where !seededIDs.contains(preset.id) {
-            if !present.contains(preset.id) { writePresetFile(preset, root: root); present.insert(preset.id) }
-            seededIDs.insert(preset.id)
-            didChange = true
+        // Seed bundled defaults ONCE per store. `!present` keeps any migrated/edited
+        // copy; the marker then locks seeding off forever for this store. (A brand
+        // new bundled preset in a future build won't auto-seed into an already-seeded
+        // store — the correct trade for never resurrecting a user deletion.)
+        guard !alreadySeeded else { return }
+        for preset in Self.bundledPresets() where !present.contains(preset.id) {
+            writePresetFile(preset, root: root)
         }
-        if didChange, let data = try? presetEncoder.encode(Array(seededIDs)) {
+        let seededIDs = Self.bundledPresets().map(\.id)
+        if let data = try? presetEncoder.encode(seededIDs) {
             try? data.write(to: marker, options: .atomic)
         }
+        print("🌱 Seeded \(seededIDs.count) bundled preset(s) into store")
     }
 
     // MARK: - Folder store: per-file write / remove
