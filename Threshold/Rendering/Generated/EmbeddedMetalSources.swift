@@ -1073,6 +1073,8 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
 //
 //  Distance estimator for the Menger Sponge fractal.
 //  params[0]=Scale, [1-3]=Offset
+//  Classic Menger sponge — numerically identical to ReferenceDEs.menger
+//  (plus the app's per-iteration rotation, applied after the fold).
 //
 //  Requires: FractalFormulaCommon.h
 //
@@ -1083,8 +1085,8 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
 FORCE_INLINE float DE_Menger(float3 pos, FormulaParams fp, float3x3 rot,
                              int iterations, int colorIterations,
                             thread OrbitData& orbit) {
-    float scale  = fp.params[0];
-    float3 offset = float3(fp.params[1], fp.params[2], fp.params[3]);
+    const float scale = fp.params[0];
+    const float3 offset = float3(fp.params[1], fp.params[2], fp.params[3]);
 
     float3 z = pos;
     float dr = 1.0f;
@@ -1094,23 +1096,16 @@ FORCE_INLINE float DE_Menger(float3 pos, FormulaParams fp, float3x3 rot,
     int i = 0;
 
     for (; i < iterations; ++i) {
-        // Fold into positive octant
         z = abs(z);
-        // Sort components so z.x >= z.y >= z.z
-        float sum = z.x + z.y + z.z;
-        float min_xy = min(z.x, z.y);
-        float max_xy = max(z.x, z.y);
-        float min_z = min(min_xy, z.z);
-        float max_z = max(max_xy, z.z);
-        z.x = max_z;
-        z.z = min_z;
-        z.y = sum - (max_z + min_z);
+        if (z.x < z.y) { float t = z.x; z.x = z.y; z.y = t; }
+        if (z.x < z.z) { float t = z.x; z.x = z.z; z.z = t; }
+        if (z.y < z.z) { float t = z.y; z.y = z.z; z.z = t; }
 
         float3 offsetScaled = offset * (scale - 1.0f);
         z = z * scale - offsetScaled;
-        
-        float foldZ = -0.5f * offsetScaled.z;
-        z.z += (z.z < foldZ) ? offsetScaled.z : 0.0f;
+        if (z.z < -0.5f * offsetScaled.z) {
+            z.z += offsetScaled.z;
+        }
 
         z = rot * z;
         dr = dr * abs(scale) + 1.0f;
@@ -1125,39 +1120,34 @@ FORCE_INLINE float DE_Menger(float3 pos, FormulaParams fp, float3x3 rot,
     orbit.finalP = z;
     orbit.iterationsUsed = i;
 
-    float r = fast::length(z);
-    return (r - 1.0f) / dr;
+    return (length(z) - 1.0f) / dr;
 }
 
 // Lean distance-only: no orbit tracking, no struct writes.
 FORCE_INLINE float DE_Menger_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {
-    float scale  = fp.params[0];
-    float3 offset = float3(fp.params[1], fp.params[2], fp.params[3]);
-    float3 offsetScaled = offset * (scale - 1.0f);
-    float halfOffsetZn = -0.5f * offsetScaled.z;
+    const float scale = fp.params[0];
+    const float3 offset = float3(fp.params[1], fp.params[2], fp.params[3]);
 
     float3 z = pos;
     float dr = 1.0f;
 
     for (int i = 0; i < iterations; ++i) {
         z = abs(z);
-        float sum = z.x + z.y + z.z;
-        float min_xy = min(z.x, z.y);
-        float max_xy = max(z.x, z.y);
-        float min_z = min(min_xy, z.z);
-        float max_z = max(max_xy, z.z);
-        z.x = max_z;
-        z.z = min_z;
-        z.y = sum - (max_z + min_z);
+        if (z.x < z.y) { float t = z.x; z.x = z.y; z.y = t; }
+        if (z.x < z.z) { float t = z.x; z.x = z.z; z.z = t; }
+        if (z.y < z.z) { float t = z.y; z.y = z.z; z.z = t; }
 
+        float3 offsetScaled = offset * (scale - 1.0f);
         z = z * scale - offsetScaled;
-        z.z += (z.z < halfOffsetZn) ? offsetScaled.z : 0.0f;
+        if (z.z < -0.5f * offsetScaled.z) {
+            z.z += offsetScaled.z;
+        }
 
         z = rot * z;
         dr = dr * abs(scale) + 1.0f;
     }
 
-    return (fast::length(z) - 1.0f) / dr;
+    return (length(z) - 1.0f) / dr;
 }
 
 #endif /* DE_Menger_h */
