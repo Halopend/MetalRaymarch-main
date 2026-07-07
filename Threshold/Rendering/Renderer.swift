@@ -1034,7 +1034,8 @@ actor Renderer {
         let settingsUpdateStart = CACurrentMediaTime()
         settings.interpolateToTargets(deltaTime: cachedDeltaTime)
         settings.updateLimitFlash(deltaTime: cachedDeltaTime)
-        settings.updateColorSchemeTransition(deltaTime: cachedDeltaTime)
+        settings.updateColorSchemeTransition(deltaTime: cachedDeltaTime,
+                                             mixedImmersionActive: appModel.immersionStyleForRenderer == .mixed)
         frameBreakdown.settingsUpdateMs = (CACurrentMediaTime() - settingsUpdateStart) * 1000.0
         
         // === AUDIO PIPELINE ===
@@ -1711,9 +1712,10 @@ actor Renderer {
             boundSpaceSize: settingsSnapshot.boundSpaceSize,
             boundAmbientStrength: settingsSnapshot.boundAmbientStrength,
             modelToWorldMatrix: framePreparation.modelMatrix,
-            envScrunch: framePreparation.envScrunch
+            envScrunch: framePreparation.envScrunch,
+            boundingShapeType: settingsSnapshot.boundingShapeType
         )
-        
+
         // Copy uniforms to buffer (pointer cached by caller across both eyes)
         let uniformOffset = MemoryLayout<TileUniforms>.stride * viewIndex
         memcpy(bufferContents.advanced(by: uniformOffset), &tileUniforms, MemoryLayout<TileUniforms>.size)
@@ -2175,7 +2177,8 @@ actor Renderer {
                 boundSpaceSize: settingsSnapshot.boundSpaceSize,
                 boundAmbientStrength: settingsSnapshot.boundAmbientStrength,
                 modelToWorldMatrix: framePreparation.modelMatrix,
-                envScrunch: framePreparation.envScrunch
+                envScrunch: framePreparation.envScrunch,
+                boundingShapeType: settingsSnapshot.boundingShapeType
             )
 
             let uniformOffset = MemoryLayout<TileUniforms>.stride * viewIndex

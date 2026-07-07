@@ -1092,6 +1092,18 @@ FORCE_INLINE float safetyBubbleDistance(float3 pos, float3 bubbleCenter, float b
     }
 }
 
+// The Bounding ray-skip / tile cull uses a cheap enclosing SPHERE. For any
+// non-sphere Bounding shape (the sphere→cube morph, or a platonic solid) the
+// shape circumscribes a LARGER sphere than its `radius` param — a cube's corners
+// reach radius·√3 — so a same-radius cull sphere clips inside the shape and masks
+// it, making every shape read as a sphere. Inflate the cull sphere to safely
+// enclose every supported shape (√3 ≈ 1.73 is the worst case; 1.8 adds margin);
+// the shape SDF (boundFade) then defines the actual silhouette. Pure sphere
+// (shapeType 0) is left exact so its tight cull still culls maximum background.
+FORCE_INLINE float boundingCullSphereRadius(float radius, float shapeType) {
+    return (shapeType <= 0.001f) ? radius : radius * 1.8f;
+}
+
 // === SAFETY BUBBLE CSG APPLICATION ===
 // Applies safety bubble as CSG subtraction with optional smooth fade.
 // Hard mode:  d = max(d, -bubbleDist)  — sharp edge at bubble boundary
@@ -3334,7 +3346,8 @@ kernel void adaptiveHierarchical8x8(
                 float3 bsRd = normalize(bsModelPoint - marchOrigin);
                 bool rayDead = false;
                 if (uniforms.boundingSphereRadius > 0.0) {
-                    float bsT = rayIntersectBoundingSphere(marchOrigin, bsRd, float3(0.0), uniforms.boundingSphereRadius);
+                    float cullR = boundingCullSphereRadius(uniforms.boundingSphereRadius, uniforms.boundingShapeType);
+                    float bsT = rayIntersectBoundingSphere(marchOrigin, bsRd, float3(0.0), cullR);
                     rayDead = (bsT < 0.0);
                 }
                 if (!rayDead && uniforms.boundToSpaceMode != 0) {
@@ -3524,7 +3537,7 @@ kernel void adaptiveHierarchical8x8(
             sceneResult.steps = 0;
         } else {
             sceneResult = SceneWithCache(marchOrigin, marchDir, pixelCenter, 1.0, maxSteps,
-                             uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, marchEndT, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff, marchStartT);
+                             uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), boundingCullSphereRadius(uniforms.boundingSphereRadius, uniforms.boundingShapeType), uniforms.stepMultiplier, marchEndT, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff, marchStartT);
         }
     }
 
@@ -3536,6 +3549,19 @@ kernel void adaptiveHierarchical8x8(
     if (uniforms.boundToSpaceMode != 0 && sceneResult.distGlow.x < kRayMissThreshold) {
         float3 hitWorld = (uniforms.modelToWorldMatrix * float4(marchOrigin + sceneResult.distGlow.x * marchDir, 1.0f)).xyz;
         if (spaceBoundsDistance(hitWorld, uniforms.boundSpaceSize, uniforms.boundToSpaceMode) > 0.01f) {
+            sceneResult.distGlow.x = kRayMissThreshold + 100.0f;
+        }
+    }
+
+    // Bounding Shape: reclassify hits outside the selected shape as misses (hard
+    // clip). The compute tile path has no per-hit edge fade like the fragment
+    // path, so this reclassify IS the shape's silhouette on visionOS — without it
+    // only the sphere-shaped ray-skip above was ever visible. The cull sphere is
+    // inflated to enclose the shape, so real shape hits survive the march to here.
+    if (uniforms.boundingSphereRadius > 0.0f && sceneResult.distGlow.x < kRayMissThreshold) {
+        float3 hitModel = marchOrigin + sceneResult.distGlow.x * marchDir;
+        float shapeDist = safetyBubbleDistance(hitModel, float3(0.0f), uniforms.boundingSphereRadius, uniforms.boundingShapeType);
+        if (shapeDist > 0.0f) {
             sceneResult.distGlow.x = kRayMissThreshold + 100.0f;
         }
     }
@@ -3992,7 +4018,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             sceneResult.cache = makeEmptyOrbitCache();
             sceneResult.steps = 0;
         } else {
-            sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, marchEndT, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff, marchStartT, uniforms.coneCoverageAAEnabled, uniforms.pixelFootprintPerDist, &uniforms.distCache);
+            sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), boundingCullSphereRadius(uniforms.boundingSphereRadius, uniforms.boundingShapeType), uniforms.stepMultiplier, marchEndT, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff, marchStartT, uniforms.coneCoverageAAEnabled, uniforms.pixelFootprintPerDist, &uniforms.distCache);
         }
     }
     ret = sceneResult.distGlow;

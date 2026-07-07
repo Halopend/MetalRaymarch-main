@@ -606,6 +606,12 @@ typedef struct
     matrix_float4x4 modelToWorldMatrix; // march/model space → world meters
 
     EnvScrunchParams envScrunch;        // scanned-environment scrunch field (grid via bindless address)
+    // Bounding Shape family/preset — same encoding as Uniforms.boundingShapeType /
+    // safetyBubbleShape (0...1 sphere→cube morph, 2...6 platonic solids). The
+    // compute tile path has no per-hit edge fade, so it HARD-clips hits outside
+    // this shape (see the reclassify in adaptiveHierarchical8x8). Only meaningful
+    // while boundingSphereRadius > 0.
+    float boundingShapeType;
 } TileUniforms;
 
 // Include Buddhabrot types so they're visible through the bridging header
@@ -624,7 +630,9 @@ typedef struct
 // Mac fragment path), 1936 → 1984. TileUniforms unchanged.
 static_assert(sizeof(Uniforms) <= 1984,
               "Uniforms grew — bump this bound consciously (TECH_DEBT.md #8d)");
-static_assert(sizeof(TileUniforms) <= 1968,
+// 2026-07-06: +16 B — TileUniforms gained boundingShapeType so the visionOS
+// compute tile path can hard-clip non-sphere Bounding shapes, 1968 → 1984.
+static_assert(sizeof(TileUniforms) <= 1984,
               "TileUniforms grew — bump this bound consciously (TECH_DEBT.md #8d)");
 static_assert(sizeof(FormulaParams) <= 176,
               "FormulaParams grew — bump this bound consciously (TECH_DEBT.md #8d)");
