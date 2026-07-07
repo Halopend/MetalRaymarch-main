@@ -584,6 +584,56 @@ class AppModel {
         SettingsPersistence.saveAll(from: renderSettings)
     }
 
+    // MARK: - Storage Location
+
+    /// Switch the active storage location (On This Device ⇄ iCloud Drive), merging
+    /// both stores newest-wins so nothing is lost either way. A safety backup of the
+    /// current data is taken first. For iCloud the container resolves asynchronously,
+    /// so the merge runs once the new root is ready.
+    func switchStorageMode(to newMode: StorageMode) {
+        guard newMode != StorageLocation.shared.mode else { return }
+
+        // Snapshot the CURRENT store's data + take a safety backup before re-pointing.
+        let oldPresets = presetManager.presets
+        let oldScenes = animationManager?.userScenes ?? []
+        presetManager.backupCurrentPresetsNow()
+        animationManager?.backupCurrentScenesNow()
+
+        StorageLocation.shared.setMode(newMode)
+
+        // Explicitly reload the managers from the NEW store, then union the old
+        // store's items in (newest-wins). Done here rather than relying on the
+        // managers' own reload observers so ordering can't race the merge.
+        let doMerge: @MainActor () -> Void = { [weak self] in
+            guard let self else { return }
+            self.presetManager.loadPresets()
+            self.animationManager?.reloadUserScenesFromStore()
+
+            let mergedPresets = BackupMerge.newestWins(
+                local: oldPresets, cloud: self.presetManager.presets, timestamp: { $0.updatedAt })
+            self.presetManager.replaceAll(with: mergedPresets)
+
+            let mergedScenes = BackupMerge.newestWins(
+                local: oldScenes, cloud: self.animationManager?.userScenes ?? [], timestamp: { $0.modifiedAt })
+            self.animationManager?.replaceUserScenes(with: mergedScenes)
+
+            print("🔀 Storage → \(StorageLocation.shared.mode.displayName): merged \(mergedPresets.count) presets, \(mergedScenes.count) user scenes")
+        }
+
+        if StorageLocation.shared.activeRoot != nil {
+            doMerge()
+        } else {
+            // iCloud not resolved yet — merge once its root becomes available (one-shot).
+            var token: NSObjectProtocol?
+            token = NotificationCenter.default.addObserver(
+                forName: StorageLocation.rootResolvedNotification, object: nil, queue: .main
+            ) { _ in
+                if let token { NotificationCenter.default.removeObserver(token) }
+                MainActor.assumeIsolated { doMerge() }
+            }
+        }
+    }
+
     // External-file import (open / preview / commit / cancel / restore) lives in
     // AppModel+ExternalImport.swift.
 

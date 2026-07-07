@@ -69,8 +69,12 @@ final class StorageLocation {
     // MARK: - State
 
     private nonisolated static let modeKey = "Storage.mode"
+    private nonisolated static let hasChosenKey = "Storage.hasChosenMode"
 
     private(set) var mode: StorageMode
+    /// Whether the user has made an explicit first-run storage choice yet.
+    /// Drives the one-time choice prompt at launch.
+    private(set) var hasChosenMode: Bool = UserDefaults.standard.bool(forKey: hasChosenKey)
     /// Resolved iCloud store root (nil until the container is discovered / when unavailable).
     private(set) var iCloudRoot: URL?
     private(set) var isICloudAvailable = false
@@ -120,7 +124,16 @@ final class StorageLocation {
     /// container if needed and notifies observers so the managers can re-point.
     /// Migration/merge between stores is handled by the caller (AppModel) so the
     /// data move can take a pre-switch Backups snapshot first.
+    /// Record that the user made an explicit storage choice (even if they kept the
+    /// default), so the first-run prompt doesn't reappear.
+    func markModeChosen() {
+        guard !hasChosenMode else { return }
+        hasChosenMode = true
+        UserDefaults.standard.set(true, forKey: Self.hasChosenKey)
+    }
+
     func setMode(_ newMode: StorageMode) {
+        markModeChosen()
         guard newMode != mode else { return }
         mode = newMode
         UserDefaults.standard.set(newMode.rawValue, forKey: Self.modeKey)

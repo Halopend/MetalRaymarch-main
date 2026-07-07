@@ -53,6 +53,8 @@ struct ContentView: View {
     @AppStorage("ContentView.pinnedRailControls") private var pinnedRailControlsRaw: String = ""
     @State var showStopsPopover = false
     @State private var showSaveDestinationSheet = false
+    /// One-time first-run prompt to choose local vs iCloud storage.
+    @State private var showStorageChoice = false
     @State private var didLongPressPinnedRailControl: PinnedRailControl?
     #if os(macOS)
     @State var isHoldingSaveSheetAdjustment = false
@@ -248,6 +250,10 @@ struct ContentView: View {
             appModel.setMenuHovering(hovering)
         }
         .onAppear {
+            // First-run: prompt once for the storage location (local vs iCloud).
+            if !StorageLocation.shared.hasChosenMode {
+                showStorageChoice = true
+            }
             appModel.openShapeMenuHandler = {
                 withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) {
                     activateShapeSection(.parameters)
@@ -307,6 +313,17 @@ struct ContentView: View {
             if shouldGateRendererNavigation, !isReady, topDockTab != .explore {
                 withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) { activateTopDock(.explore) }
             }
+        }
+        .sheet(isPresented: $showStorageChoice) {
+            StorageModeChoiceSheet { chosen in
+                if chosen != StorageLocation.shared.mode {
+                    appModel.switchStorageMode(to: chosen)
+                } else {
+                    StorageLocation.shared.markModeChosen()
+                }
+                showStorageChoice = false
+            }
+            .interactiveDismissDisabled(true)
         }
         .sheet(isPresented: $showSaveDestinationSheet) {
             SaveDestinationSheet(

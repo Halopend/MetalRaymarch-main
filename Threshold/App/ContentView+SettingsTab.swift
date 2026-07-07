@@ -676,9 +676,56 @@ extension ContentView {
     /// without enabling sharing.
     private var settingsSharingContent: some View {
         VStack(spacing: 12) {
+            storageLocationSection
             communitySharingSection
-            iCloudDriveSection
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // MARK: Storage Location (On This Device / iCloud Drive)
+    // ─────────────────────────────────────────────────────────────────
+
+    @ViewBuilder
+    private var storageLocationSection: some View {
+        let mode = StorageLocation.shared.mode
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Storage Location", systemImage: AppIcons.folder).font(.headline)
+                Spacer()
+                if mode == .iCloud && !StorageLocation.shared.isICloudAvailable {
+                    ProgressView().controlSize(.small)
+                }
+            }
+
+            Text("Where your scenes, animations, and presets live. Pick **iCloud Drive** to browse them in Files and sync across your devices; **On This Device** keeps them private to this device. A local safety backup is always kept either way, and switching merges both stores so nothing is lost.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Picker("Storage", selection: Binding(
+                get: { StorageLocation.shared.mode },
+                set: { newMode in appModel.switchStorageMode(to: newMode) }
+            )) {
+                ForEach(StorageMode.allCases, id: \.self) { m in
+                    Label(m.displayName, systemImage: m.iconName).tag(m)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            if mode == .iCloud {
+                if StorageLocation.shared.isICloudAvailable {
+                    Text("Browse in Files → iCloud Drive → **Threshold**.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Text("iCloud Drive isn't available yet — sign in to iCloud in System Settings. Your data stays on this device until it resolves.")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+        .padding(DS.Spacing.md)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.cyan.opacity(0.07)))
     }
 
     private var communitySharingSection: some View {
