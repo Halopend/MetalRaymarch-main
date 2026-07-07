@@ -479,15 +479,18 @@ final class UsageAnalytics {
         presetLoadCounts[name, default: 0] += 1
     }
     
-    /// Track preset save with full preset data for analysis
-    /// This uploads the complete preset to CloudKit so you can see what users are creating
+    /// Track that a preset was saved (local aggregate count only).
+    ///
+    /// Historically this ALSO uploaded the preset's name + full JSON to the PUBLIC
+    /// CloudKit database on every save — user-authored content, world-readable,
+    /// opt-out. That upload is DISABLED pending a real accounts-based community /
+    /// sharing feature: publishing user content to a public DB needs actual identity
+    /// and explicit per-preset consent, not a silent opt-out telemetry push.
+    /// `uploadPresetSnapshot` is retained (unused) so it can be re-wired behind that
+    /// feature once accounts exist.
     func trackPresetSaved(preset: FractalPreset) {
         guard analyticsEnabled else { return }
         presetsSaved += 1
-        
-        Task {
-            await uploadPresetSnapshot(preset)
-        }
     }
     
     // MARK: - Preset Snapshot Upload
