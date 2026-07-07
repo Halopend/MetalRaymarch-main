@@ -389,28 +389,6 @@ class PresetManager {
         _ = Self.bundledPresets(forceRefresh: true)
         loadPresets()
     }
-
-    /// Attempt to load the most recent backup if the main file is missing or corrupt
-    private func loadLatestBackupPresets() -> [FractalPreset] {
-        do {
-            let backups = try FileManager.default.contentsOfDirectory(at: backupsDirectory, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles)
-            let latest = backups.max { (a, b) -> Bool in
-                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                return da < db
-            }
-            guard let url = latest else {
-                return []
-            }
-            let data = try Data(contentsOf: url)
-            let loaded = try presetDecoder.decode([FractalPreset].self, from: data)
-            print("✅ Loaded presets from backup: \(url.lastPathComponent)")
-            return loaded
-        } catch {
-            print("Failed to load presets backup: \(error)")
-            return []
-        }
-    }
     
     /// Snapshot the CURRENT preset set as one timestamped backup blob — the safety
     /// net. Debounced so a burst of edits produces a single snapshot.

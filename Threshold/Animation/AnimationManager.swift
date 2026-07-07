@@ -545,25 +545,7 @@ final class AnimationManager {
         }
     }
 
-    /// Most-recent backup scenes, used when the main file is missing or corrupt.
-    private func loadLatestBackupScenes() -> [AnimationScene] {
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: scenesBackupsDirectory,
-            includingPropertiesForKeys: [.contentModificationDateKey],
-            options: .skipsHiddenFiles
-        ) else { return [] }
-        let latest = files.max { a, b in
-            let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            return da < db
-        }
-        guard let url = latest,
-              let data = try? Data(contentsOf: url),
-              let scenes = try? sceneDecoder.decode([AnimationScene].self, from: data) else { return [] }
-        print("✅ Recovered \(scenes.count) user scenes from backup: \(url.lastPathComponent)")
-        return scenes
-    }
-    
+
     // ═══════════════════════════════════════════════════════════════════════════
     // INITIALIZATION
     // ═══════════════════════════════════════════════════════════════════════════
