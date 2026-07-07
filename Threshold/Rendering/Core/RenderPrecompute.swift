@@ -221,4 +221,26 @@ enum RenderPrecompute {
             color: SIMD4<Float>(settings.fogColor.x, settings.fogColor.y, settings.fogColor.z, 0.0)
         )
     }
+
+    /// Zoom fog compensation (Settings toggle, default off). Fog operates on
+    /// MODEL-space march distance, so on zoom-out the fog sphere's world radius
+    /// shrinks with the model and washes out the fractal. Scaling intensity by
+    /// `effectiveScale` holds the fog's WORLD radius constant at its scale==1
+    /// value across the whole zoom-out range — a no-op at scale >= 1, when the
+    /// toggle is off, or when fog intensity is ~0. Previously hand-copied verbatim
+    /// into all three render paths (Mac fragment, visionOS compute, Quick Look).
+    static func applyZoomFogCompensation(_ fog: PrecomputedFog,
+                                         enabled: Bool,
+                                         effectiveScale: Float) -> PrecomputedFog {
+        guard enabled else { return fog }
+        let baseFog = fog.fog.x
+        guard baseFog > 1e-6 else { return fog }
+        let fogScale = min(1.0, max(effectiveScale, 1e-4))
+        let fogIntensity = baseFog * fogScale
+        let invFog = fogIntensity > 1e-6 ? 1.0 / fogIntensity : 0.0
+        return PrecomputedFog(
+            fog: SIMD4<Float>(fogIntensity, invFog, 0.0, 0.0),
+            color: fog.color
+        )
+    }
 }

@@ -1664,15 +1664,10 @@ final class ThresholdMacRenderer {
         // scale >= 1 (zoom-in keeps its original, uncompensated look). (Was
         // previously hardcoded on for the Kleinian family only, and briefly keyed
         // to the unrelated 0.15 horizon-lift floor.)
-        if settings.zoomFogCompensationEnabled {
-            let baseFog = precomputedFog.fog.x
-            if baseFog > 1e-6 {
-                let fogScale = min(1.0, max(effectiveScale, 1e-4))
-                let fogIntensity = baseFog * fogScale
-                let inverseFog = fogIntensity > 1e-6 ? 1.0 / fogIntensity : 0.0
-                precomputedFog = PrecomputedFog(fog: SIMD4<Float>(fogIntensity, inverseFog, 0.0, 0.0), color: precomputedFog.color)
-            }
-        }
+        precomputedFog = RenderPrecompute.applyZoomFogCompensation(
+            precomputedFog,
+            enabled: settings.zoomFogCompensationEnabled,
+            effectiveScale: effectiveScale)
         // Zoom-out epsilon/LOD rescale (both 1.0 at scale >= 0.15 → byte-identical):
         // the hit threshold must loosen ∝ 1/scale to track the constant world-space
         // pixel footprint (this also bounds step cost over the lifted horizon), and

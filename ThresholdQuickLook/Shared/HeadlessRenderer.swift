@@ -113,15 +113,10 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
     // radius constant on zoom-out for the whole range below scale 1 (no-op at
     // scale >= 1; mirrors RaymarchRenderView — was previously hardcoded on for
     // Kleinian only, and briefly keyed to the unrelated 0.15 horizon-lift floor).
-    if settings.zoomFogCompensationEnabled {
-        let baseFog = precomputedFog.fog.x
-        if baseFog > 1e-6 {
-            let fogScale = min(1.0, max(effectiveScale, 1e-4))
-            let fogIntensity = baseFog * fogScale
-            let inverseFog = fogIntensity > 1e-6 ? 1.0 / fogIntensity : 0.0
-            precomputedFog = PrecomputedFog(fog: SIMD4<Float>(fogIntensity, inverseFog, 0.0, 0.0), color: precomputedFog.color)
-        }
-    }
+    precomputedFog = RenderPrecompute.applyZoomFogCompensation(
+        precomputedFog,
+        enabled: settings.zoomFogCompensationEnabled,
+        effectiveScale: effectiveScale)
 
     let lightingWave = sin(elapsedTime * 1.2)
     let animatedColorMix = settings.lightingPlay ? min(max(settings.colorMix + lightingWave * 0.08, 0.0), 1.0) : settings.colorMix

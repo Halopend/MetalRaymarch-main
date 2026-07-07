@@ -31,4 +31,8 @@ extension Renderer {
     static func makePrecomputedFog(from settings: RenderSettingsSnapshot) -> PrecomputedFog {
         RenderPrecompute.makePrecomputedFog(from: settings)
     }
+
+    static func applyZoomFogCompensation(_ fog: PrecomputedFog, enabled: Bool, effectiveScale: Float) -> PrecomputedFog {
+        RenderPrecompute.applyZoomFogCompensation(fog, enabled: enabled, effectiveScale: effectiveScale)
+    }
 }
