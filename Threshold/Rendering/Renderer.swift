@@ -1716,7 +1716,10 @@ actor Renderer {
             boundAmbientStrength: settingsSnapshot.boundAmbientStrength,
             modelToWorldMatrix: framePreparation.modelMatrix,
             envScrunch: framePreparation.envScrunch,
-            boundingShapeType: settingsSnapshot.boundingShapeType
+            boundingShapeType: settingsSnapshot.boundingShapeType,
+            // Pin the Bounding Shape while the Linear Rail slides content through
+            // it (0 when the rail is off).
+            boundingShapeCenter: settingsSnapshot.boundingShapeCenterModel(modelMatrix: framePreparation.modelMatrix)
         )
 
         // Copy uniforms to buffer (pointer cached by caller across both eyes)
@@ -2181,7 +2184,10 @@ actor Renderer {
                 boundAmbientStrength: settingsSnapshot.boundAmbientStrength,
                 modelToWorldMatrix: framePreparation.modelMatrix,
                 envScrunch: framePreparation.envScrunch,
-                boundingShapeType: settingsSnapshot.boundingShapeType
+                boundingShapeType: settingsSnapshot.boundingShapeType,
+                // Pin the Bounding Shape while the Linear Rail slides content
+                // through it (0 when the rail is off).
+                boundingShapeCenter: settingsSnapshot.boundingShapeCenterModel(modelMatrix: framePreparation.modelMatrix)
             )
 
             let uniformOffset = MemoryLayout<TileUniforms>.stride * viewIndex

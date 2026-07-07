@@ -483,7 +483,10 @@ extension Renderer {
                             envScrunch: envScrunchParams,
                             // Fractal distance cache is a Mac fragment-path prototype;
                             // inert (disabled) on the visionOS fragment path.
-                            distCache: DistanceCacheParams())
+                            distCache: DistanceCacheParams(),
+                            // Pin the Bounding Shape while the Linear Rail slides
+                            // content through it (0 when the rail is off).
+                            boundingShapeCenter: settingsSnapshot.boundingShapeCenterModel(modelMatrix: modelMatrix))
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)

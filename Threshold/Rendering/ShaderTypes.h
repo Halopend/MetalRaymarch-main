@@ -478,6 +478,12 @@ typedef struct
     // Conservative fractal distance cache (grid via bindless address).
     // Mac fragment path only for now; zero/disabled elsewhere.
     DistanceCacheParams distCache;
+
+    // Model-space center of the Bounding Shape clip test (default 0). The Linear
+    // Rail translates the whole model (camera+fractal+shape) via the model
+    // matrix; this cancels the rail's translation for the shape ONLY, pinning the
+    // shape in place so content slides through it. Zero when the rail is off.
+    vector_float3 boundingShapeCenter;
 } Uniforms;
 
 typedef struct
@@ -612,6 +618,10 @@ typedef struct
     // this shape (see the reclassify in adaptiveHierarchical8x8). Only meaningful
     // while boundingSphereRadius > 0.
     float boundingShapeType;
+    // Model-space center of the Bounding Shape clip test (default 0). Mirrors
+    // Uniforms.boundingShapeCenter — pins the shape while the Linear Rail slides
+    // content past it. Zero when the rail is off.
+    vector_float3 boundingShapeCenter;
 } TileUniforms;
 
 // Include Buddhabrot types so they're visible through the bridging header
@@ -628,11 +638,12 @@ typedef struct
 // (containMode/Feather + 3× grid-space float3), 112 → 160 B.
 // 2026-07-05: Uniforms +48 B — DistanceCacheParams (fractal distance cache,
 // Mac fragment path), 1936 → 1984. TileUniforms unchanged.
-static_assert(sizeof(Uniforms) <= 1984,
+// 2026-07-06: both +16 B — boundingShapeCenter (vector_float3) so the Linear
+// Rail moves content INSIDE a pinned Bounding Shape instead of dragging the
+// shape along, 1984 → 2048 bound.
+static_assert(sizeof(Uniforms) <= 2048,
               "Uniforms grew — bump this bound consciously (TECH_DEBT.md #8d)");
-// 2026-07-06: +16 B — TileUniforms gained boundingShapeType so the visionOS
-// compute tile path can hard-clip non-sphere Bounding shapes, 1968 → 1984.
-static_assert(sizeof(TileUniforms) <= 1984,
+static_assert(sizeof(TileUniforms) <= 2048,
               "TileUniforms grew — bump this bound consciously (TECH_DEBT.md #8d)");
 static_assert(sizeof(FormulaParams) <= 176,
               "FormulaParams grew — bump this bound consciously (TECH_DEBT.md #8d)");

@@ -8,6 +8,11 @@ struct RenderSettingsSnapshot {
     let minDistance: Float
     let scale: Float
     let position: SIMD3<Float>
+    // World-space translation the Linear Rail animation added on top of the base
+    // position this frame (position already includes it). Kept separately so the
+    // Bounding Shape can be pinned in place while the rail slides content past it
+    // — see boundingShapeCenterModel(modelMatrix:). Zero when the rail is off.
+    let linearRailWorldOffset: SIMD3<Float>
     let fractalScale: Float
     let fractalIterations: Int
     let maxRaySteps: Int
@@ -131,6 +136,21 @@ extension RenderSettingsSnapshot {
     /// values deliberately clip the fractal (e.g. for Mixed-immersion scenes).
     var estimatedBoundingSphereRadius: Float {
         boundingSphereSkipEnabled ? boundingShapeRadius : 0.0
+    }
+
+    /// Model-space center for the Bounding Shape's clip test. The shape is a
+    /// fixed "vitrine": the Linear Rail translates the whole model (camera +
+    /// fractal + shape all move together via the model matrix), so to keep the
+    /// shape visually anchored while only the CONTENT drifts, we shift the clip
+    /// center by the rail's translation expressed in model space. Cancels exactly
+    /// the rail's world offset (direction transform through the model matrix
+    /// inverse = (1/scale)·Rᵀ·offset), leaving the shape where it sat before the
+    /// rail moved. Returns .zero when the rail is off → byte-identical to before.
+    func boundingShapeCenterModel(modelMatrix: matrix_float4x4) -> SIMD3<Float> {
+        let o = linearRailWorldOffset
+        if o == .zero { return .zero }
+        let v = modelMatrix.inverse * SIMD4<Float>(o.x, o.y, o.z, 0)
+        return SIMD3<Float>(-v.x, -v.y, -v.z)
     }
 
     /// Shader-facing Bound to Space mode: 0 = off; otherwise the user mode

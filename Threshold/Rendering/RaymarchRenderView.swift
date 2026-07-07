@@ -1791,7 +1791,10 @@ final class ThresholdMacRenderer {
                             surfaceMinWorld: macEnvGrid?.surfaceMinWorld ?? .zero,
                             surfaceMaxWorld: macEnvGrid?.surfaceMaxWorld ?? .zero,
                             farClampMeters: EnvironmentSDFGrid.clampFar),
-                        distCache: distCacheParams)
+                        distCache: distCacheParams,
+                        // Pin the Bounding Shape while the Linear Rail slides
+                        // content through it (0 when the rail is off).
+                        boundingShapeCenter: settings.boundingShapeCenterModel(modelMatrix: modelMatrix))
     }
 
     private static func buildRenderPipeline(device: MTLDevice,

@@ -2822,11 +2822,15 @@ final class RenderSettings: @unchecked Sendable {
             }
 
             let railPosition = linearRailPositionLocked(from: _position)
+            // Rail's own translation this frame (position carries it; kept apart
+            // so the Bounding Shape can stay pinned while content slides past it).
+            let railOffset = railPosition - _position
 
             return RenderSettingsSnapshot(
                 minDistance: _minDistance,
                 scale: _scale,
                 position: railPosition,
+                linearRailWorldOffset: railOffset,
                 fractalScale: _fractalScale,
                 fractalIterations: _fractalIterations,
                 maxRaySteps: _maxRaySteps,

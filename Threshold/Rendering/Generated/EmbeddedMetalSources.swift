@@ -494,6 +494,12 @@ typedef struct
     // Conservative fractal distance cache (grid via bindless address).
     // Mac fragment path only for now; zero/disabled elsewhere.
     DistanceCacheParams distCache;
+
+    // Model-space center of the Bounding Shape clip test (default 0). The Linear
+    // Rail translates the whole model (camera+fractal+shape) via the model
+    // matrix; this cancels the rail's translation for the shape ONLY, pinning the
+    // shape in place so content slides through it. Zero when the rail is off.
+    vector_float3 boundingShapeCenter;
 } Uniforms;
 
 typedef struct
@@ -628,6 +634,10 @@ typedef struct
     // this shape (see the reclassify in adaptiveHierarchical8x8). Only meaningful
     // while boundingSphereRadius > 0.
     float boundingShapeType;
+    // Model-space center of the Bounding Shape clip test (default 0). Mirrors
+    // Uniforms.boundingShapeCenter — pins the shape while the Linear Rail slides
+    // content past it. Zero when the rail is off.
+    vector_float3 boundingShapeCenter;
 } TileUniforms;
 
 // Include Buddhabrot types so they're visible through the bridging header
@@ -644,11 +654,12 @@ typedef struct
 // (containMode/Feather + 3× grid-space float3), 112 → 160 B.
 // 2026-07-05: Uniforms +48 B — DistanceCacheParams (fractal distance cache,
 // Mac fragment path), 1936 → 1984. TileUniforms unchanged.
-static_assert(sizeof(Uniforms) <= 1984,
+// 2026-07-06: both +16 B — boundingShapeCenter (vector_float3) so the Linear
+// Rail moves content INSIDE a pinned Bounding Shape instead of dragging the
+// shape along, 1984 → 2048 bound.
+static_assert(sizeof(Uniforms) <= 2048,
               "Uniforms grew — bump this bound consciously (TECH_DEBT.md #8d)");
-// 2026-07-06: +16 B — TileUniforms gained boundingShapeType so the visionOS
-// compute tile path can hard-clip non-sphere Bounding shapes, 1968 → 1984.
-static_assert(sizeof(TileUniforms) <= 1984,
+static_assert(sizeof(TileUniforms) <= 2048,
               "TileUniforms grew — bump this bound consciously (TECH_DEBT.md #8d)");
 static_assert(sizeof(FormulaParams) <= 176,
               "FormulaParams grew — bump this bound consciously (TECH_DEBT.md #8d)");
@@ -4513,7 +4524,7 @@ FORCE_INLINE bool smartStepUpdate(float h,
 }
 
 // Raymarch that caches orbit state on hit for reuse in normals/colors
-FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float boundingSphereRadius = 0.0, float stepMultiplier = 1.0, float maxRayDistance = kMaxRayDistanceDefault, bool smartAdvance = false, float epsilonScale = 1.0f, float coneMarchScale = 0.0f, float distanceLODFalloff = 0.0f, float warmStartT = -1.0f, int coneCoverageAA = 0, float pixelFootprintPerDist = 0.0f, constant DistanceCacheParams* distCache = nullptr)
+FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float boundingSphereRadius = 0.0, float3 boundingCenter = float3(0.0), float stepMultiplier = 1.0, float maxRayDistance = kMaxRayDistanceDefault, bool smartAdvance = false, float epsilonScale = 1.0f, float coneMarchScale = 0.0f, float distanceLODFalloff = 0.0f, float warmStartT = -1.0f, int coneCoverageAA = 0, float pixelFootprintPerDist = 0.0f, constant DistanceCacheParams* distCache = nullptr)
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
@@ -4547,7 +4558,7 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
     // When boundingSphereRadius > 0, ray-sphere intersect jumps t to the
     // sphere entry point, saving dozens of wasted Map() evaluations in void.
     if (boundingSphereRadius > 0.0) {
-        float sphereT = rayIntersectBoundingSphere(rO, rD, float3(0.0), boundingSphereRadius);
+        float sphereT = rayIntersectBoundingSphere(rO, rD, boundingCenter, boundingSphereRadius);
         if (sphereT < 0.0) {
             // Ray misses bounding sphere entirely — no fractal geometry possible
             result.distGlow = float2(kRayMissThreshold + 100.0, 0.0);
@@ -5443,7 +5454,7 @@ kernel void adaptiveHierarchical8x8(
                 bool rayDead = false;
                 if (uniforms.boundingSphereRadius > 0.0) {
                     float cullR = boundingCullSphereRadius(uniforms.boundingSphereRadius, uniforms.boundingShapeType);
-                    float bsT = rayIntersectBoundingSphere(marchOrigin, bsRd, float3(0.0), cullR);
+                    float bsT = rayIntersectBoundingSphere(marchOrigin, bsRd, uniforms.boundingShapeCenter, cullR);
                     rayDead = (bsT < 0.0);
                 }
                 if (!rayDead && uniforms.boundToSpaceMode != 0) {
@@ -5633,7 +5644,7 @@ kernel void adaptiveHierarchical8x8(
             sceneResult.steps = 0;
         } else {
             sceneResult = SceneWithCache(marchOrigin, marchDir, pixelCenter, 1.0, maxSteps,
-                             uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), boundingCullSphereRadius(uniforms.boundingSphereRadius, uniforms.boundingShapeType), uniforms.stepMultiplier, marchEndT, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff, marchStartT);
+                             uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), boundingCullSphereRadius(uniforms.boundingSphereRadius, uniforms.boundingShapeType), uniforms.boundingShapeCenter, uniforms.stepMultiplier, marchEndT, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff, marchStartT);
         }
     }
 
@@ -5656,7 +5667,7 @@ kernel void adaptiveHierarchical8x8(
     // inflated to enclose the shape, so real shape hits survive the march to here.
     if (uniforms.boundingSphereRadius > 0.0f && sceneResult.distGlow.x < kRayMissThreshold) {
         float3 hitModel = marchOrigin + sceneResult.distGlow.x * marchDir;
-        float shapeDist = safetyBubbleDistance(hitModel, float3(0.0f), uniforms.boundingSphereRadius, uniforms.boundingShapeType);
+        float shapeDist = safetyBubbleDistance(hitModel, uniforms.boundingShapeCenter, uniforms.boundingSphereRadius, uniforms.boundingShapeType);
         if (shapeDist > 0.0f) {
             sceneResult.distGlow.x = kRayMissThreshold + 100.0f;
         }
@@ -6114,7 +6125,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             sceneResult.cache = makeEmptyOrbitCache();
             sceneResult.steps = 0;
         } else {
-            sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), boundingCullSphereRadius(uniforms.boundingSphereRadius, uniforms.boundingShapeType), uniforms.stepMultiplier, marchEndT, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff, marchStartT, uniforms.coneCoverageAAEnabled, uniforms.pixelFootprintPerDist, &uniforms.distCache);
+            sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), boundingCullSphereRadius(uniforms.boundingSphereRadius, uniforms.boundingShapeType), uniforms.boundingShapeCenter, uniforms.stepMultiplier, marchEndT, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff, marchStartT, uniforms.coneCoverageAAEnabled, uniforms.pixelFootprintPerDist, &uniforms.distCache);
         }
     }
     ret = sceneResult.distGlow;
@@ -6217,7 +6228,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         // below. Mode 2 (Inner Shadow) uses an adjustable band
         // (boundingShadowDepth) and stays opaque.
         if (uniforms.boundingSphereRadius > 0.0f) {
-            float shapeDist = safetyBubbleDistance(p, float3(0.0f), uniforms.boundingSphereRadius, uniforms.boundingShapeType);
+            float shapeDist = safetyBubbleDistance(p, uniforms.boundingShapeCenter, uniforms.boundingSphereRadius, uniforms.boundingShapeType);
             if (uniforms.boundingFogEnabled == 2) {
                 float depth = clamp(uniforms.boundingShadowDepth, 0.02f, 0.95f);
                 boundFade = half(1.0f - smoothstep(-uniforms.boundingSphereRadius * depth, 0.0f, shapeDist));

@@ -230,7 +230,10 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
                     boundAmbientStrength: 0.0,
                     modelToWorldMatrix: modelMatrix,
                     envScrunch: EnvScrunchParams(),
-                    distCache: DistanceCacheParams())
+                    distCache: DistanceCacheParams(),
+                    // Pin the Bounding Shape while the Linear Rail slides content
+                    // through it (0 when the rail is off).
+                    boundingShapeCenter: settings.boundingShapeCenterModel(modelMatrix: modelMatrix))
 }
 
 // MARK: - Headless Metal render harness
