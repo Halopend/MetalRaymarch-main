@@ -51,6 +51,22 @@ struct FractalPreset: Codable, Identifiable {
     // Performance settings (optional to save)
     var resolutionScale: Float?
     var tileSize: Int?
+
+    // === PER-SCENE PERFORMANCE PROFILE ===
+    // Author HINTS about how this scene renders best. Both optional/backward-
+    // compatible: older files decode to nil and apply() falls back to the safe
+    // default (compatible / no quality opinion). Unlike the rest of the Quality
+    // domain these DO travel with the scene, because they only ever gate or REQUEST
+    // MORE quality — never force a device-local perf technique on (see
+    // RenderSettings.applyRecommendedQuality / the cone-march snapshot gate).
+    //   coneMarchCompatible: nil/true = the device's Cone Marching setting applies
+    //     as usual; false suppresses cone marching for this scene (scenes where it
+    //     inflates silhouettes badly). Never turns cone marching ON.
+    var coneMarchCompatible: Bool?
+    //   recommendedQuality: the render RESOLUTION tier to aim for. high/ultra raise
+    //     resolutionScale (Mac) / renderQuality (visionOS) toward the target and lift
+    //     the adaptive governor's floor so the scene resists downscaling.
+    var recommendedQuality: SceneQualityTarget?
     
     // Orientation & detail zoom
     var worldRotationX: Float?
@@ -180,6 +196,7 @@ struct FractalPreset: Codable, Identifiable {
         case minDistance, fractalScale, foldingLimit, sphereRadius, formulaParamValues
         case worldRotationX, worldRotationY, worldRotationZ, worldRotationW, detailScale
         case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape, safetyBubbleBlend
+        case coneMarchCompatible, recommendedQuality  // per-scene performance profile
         // Space module (domain transforms)
         case sphericalInversionMode, sphericalInversionRadius
         case sphereProjectionEnabled, sphereProjectionBlend, sphereProjectionRadius
@@ -283,6 +300,8 @@ struct FractalPreset: Codable, Identifiable {
         resolutionScale = try container.decodeIfPresent(Float.self, forKey: .resolutionScale)
         let decodedTileSize = try container.decodeIfPresent(Int.self, forKey: .tileSize)
         tileSize = decodedTileSize == 2 ? nil : decodedTileSize  // Old "Quad Shared" mode removed → degrade to fragment
+        coneMarchCompatible = try container.decodeIfPresent(Bool.self, forKey: .coneMarchCompatible)
+        recommendedQuality = try container.decodeIfPresent(SceneQualityTarget.self, forKey: .recommendedQuality)
         worldRotationX = try container.decodeIfPresent(Float.self, forKey: .worldRotationX)
         worldRotationY = try container.decodeIfPresent(Float.self, forKey: .worldRotationY)
         worldRotationZ = try container.decodeIfPresent(Float.self, forKey: .worldRotationZ)
@@ -449,6 +468,8 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(formulaParamValues, forKey: .formulaParamValues)
         try container.encodeIfPresent(resolutionScale, forKey: .resolutionScale)
         try container.encodeIfPresent(tileSize, forKey: .tileSize)
+        try container.encodeIfPresent(coneMarchCompatible, forKey: .coneMarchCompatible)
+        try container.encodeIfPresent(recommendedQuality, forKey: .recommendedQuality)
         try container.encodeIfPresent(worldRotationX, forKey: .worldRotationX)
         try container.encodeIfPresent(worldRotationY, forKey: .worldRotationY)
         try container.encodeIfPresent(worldRotationZ, forKey: .worldRotationZ)
@@ -653,6 +674,9 @@ struct FractalPreset: Codable, Identifiable {
         preset.maxRaySteps = qual.baseMaxRaySteps
         preset.resolutionScale = qual.resolutionScale
         preset.tileSize = qual.tileSize
+        // Per-scene performance profile (live scene-load state, not part of QualityConfig).
+        preset.coneMarchCompatible = settings.sceneConeMarchCompatible
+        preset.recommendedQuality = settings.recommendedQuality
 
         // ── Color domain (1 lock acquisition) ──
         let col = settings.colorConfig
@@ -848,7 +872,19 @@ struct FractalPreset: Codable, Identifiable {
                 settings.tileSize = tileSize
             }
         }
-        
+
+        // Per-scene performance profile — AUTHORITATIVE (applies on every load,
+        // including the scene-switch path where includePerformance is false, so the
+        // gate/floor can't leak from the previously loaded scene):
+        //   • Cone-march gate — absent/true means "compatible" (device setting
+        //     applies); only an explicit false suppresses it for this scene.
+        //   • Recommended quality — high/ultra raise resolution toward target + lift
+        //     the governor floor; nil/standard reset the floor to the global minimum.
+        // Ordered AFTER the resolutionScale restore above so the Mac quality raise
+        // composes on top of the scene's own saved resolution.
+        settings.sceneConeMarchCompatible = coneMarchCompatible ?? true
+        settings.applyRecommendedQuality(recommendedQuality)
+
         // The safety bubble is user-owned comfort state: users can disable it,
         // scenes cannot. A scene that uses the bubble as part of its authored
         // look applies its full bubble state, but a scene saved without it
@@ -879,14 +915,10 @@ struct FractalPreset: Codable, Identifiable {
         }
 
         // Hand Attraction: scene-authored interaction feel — restore the whole
-        // config when the scene saved one (older scenes leave the user's
-        // current config untouched).
+        // config (including its enabled state) when the scene saved one. Older
+        // scenes without a config leave the user's current config untouched.
         if let handAttraction = handAttraction {
-            var cfg = handAttraction
-            // Beta gate: scene-authored hand config keeps its tuning, but the
-            // effect stays off until the user opts into Hand Effects (Beta).
-            if !HandAttractionConfig.betaEnabled { cfg.enabled = false }
-            settings.handAttractionConfig = cfg
+            settings.handAttractionConfig = handAttraction
         }
 
         // Space module (domain transforms) — AUTHORITATIVE like the sphere
@@ -939,9 +971,12 @@ struct FractalPreset: Codable, Identifiable {
         }
         settings.boundingShapeShadowDepth = boundingShapeShadowDepth ?? 0.35
         settings.boundingShapeType = boundingShapeType ?? 0.0
-        // Bound to Space — AUTHORITATIVE: a scene without the room clip means
-        // OFF with default dims, never the previous scene's room.
-        settings.boundToSpaceEnabled = boundToSpaceEnabled ?? false
+        // Bound to Space (the removed "Irregular Shape Bound" feature) — the UI
+        // and enable paths are gone, so it always loads OFF regardless of any
+        // value an older scene saved. The dim fields stay at defaults (inert
+        // while disabled); the CodingKeys are kept only for save-file
+        // compatibility so old scenes still decode.
+        settings.boundToSpaceEnabled = false
         settings.boundToSpaceMode = boundToSpaceMode ?? 0
         settings.boundSpaceWidth = boundSpaceWidth ?? 4.0
         settings.boundSpaceDepth = boundSpaceDepth ?? 4.0
@@ -958,14 +993,19 @@ struct FractalPreset: Codable, Identifiable {
         settings.envScrunchContain = envScrunchContain ?? 0
         settings.envScrunchContainFeather = envScrunchContainFeather ?? 0.1
 
-        // Mixed-immersion scene (visionOS): switch the presentation style to
-        // Mixed when the scene was authored for it. Never switches *away* from
-        // Mixed — that stays a user choice in the immersion picker.
+        // Scene-driven immersion (visionOS): the presentation style follows the
+        // scene — Mixed scenes present in Mixed (passthrough), everything else
+        // presents Immersive. The scene apply above is authoritative for the
+        // bounding fields, so the didSet coupling is suppressed for this switch
+        // (immersionChangeIsSceneDriven); the picker keeps working live afterward.
         #if os(visionOS)
-        if mixedModeScene == true {
-            Task { @MainActor in
-                AppModel.shared?.immersionStylePreference = .mixed
-            }
+        let sceneStyle: AppModel.ImmersionStylePreference =
+            (mixedModeScene == true) ? .mixed : .immersive
+        Task { @MainActor in
+            guard let app = AppModel.shared else { return }
+            app.immersionChangeIsSceneDriven = true
+            app.immersionStylePreference = sceneStyle
+            app.immersionChangeIsSceneDriven = false
         }
         #endif
 
@@ -980,7 +1020,10 @@ struct FractalPreset: Codable, Identifiable {
         settings.pulseEffect = pulseEffect ?? .off
         settings.glowEffect = glowEffect ?? .off
         settings.bloomEffect = bloomEffect ?? .off
-        settings.fogEffect = fogEffect ?? FogEffect(enabled: true, intensity: 0.32)
+        // Fog is opt-in: a scene must explicitly save it enabled. Absent a
+        // saved fogEffect, load with fog OFF so it never persists from the
+        // previously-live scene (matches every other effect defaulting to .off).
+        settings.fogEffect = fogEffect ?? .off
         settings.gradientCycleEffect = gradientCycleEffect ?? .off
         settings.linearRailEffect = linearRailEffect ?? .off
         settings.lightVariationRate = lightVariationRate ?? 0.5

@@ -40,6 +40,21 @@ enum FractalFormulaOrder {
                 }
             }
     }
+
+    /// Distinct custom (`.threshfx`-embedded) base formulas found across every
+    /// known scene preset, deduplicated by source hash. Space-warp-kind embedded
+    /// payloads modify an existing formula rather than replacing it, so they're
+    /// excluded here — they belong with Transformations, not the Formula picker.
+    static func customFormulas(in presets: [FractalPreset]) -> [EmbeddedFormula] {
+        var seenHashes = Set<String>()
+        var result: [EmbeddedFormula] = []
+        for preset in presets {
+            guard let formula = preset.embeddedFormula, formula.effectKind == .fractal else { continue }
+            guard seenHashes.insert(formula.shortHash).inserted else { continue }
+            result.append(formula)
+        }
+        return result.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
 }
 
 private enum FractalSceneSelection: Equatable {
@@ -666,25 +681,118 @@ struct FractalGridCell: View {
 // MARK: - Formula Grid
 
 /// Reusable formula picker grid. Used both inside the Browse tab's Formulas
-/// section and inside the Shape tab's Formula sub-tab.
+/// section and inside the Shape tab's Formula sub-tab. Built-in formulas are
+/// always shown; a "Custom" section appears below whenever any loaded scene
+/// (bundled or user-saved) carries an embedded distance-estimator formula.
 struct FractalFormulaGrid: View {
     var cache: UISettingsCache
     let gestureController: GestureController?
+    let presetManager: PresetManager?
 
     private let columns = Array(repeating: GridItem(.flexible(minimum: 120), spacing: 8), count: 3)
     private let orderedTypes: [FractalModelType] = FractalFormulaOrder.orderedTypes
 
+    private var customFormulas: [EmbeddedFormula] {
+        FractalFormulaOrder.customFormulas(in: presetManager?.presets ?? [])
+    }
+
     var body: some View {
-        LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(orderedTypes, id: \.self) { type in
-                FractalGridCell(
-                    type: type,
-                    isSelected: type == cache.fractalType
-                ) {
-                    cache.fractalType = type
-                    cache.pushFractalType(type, gestureController: gestureController)
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                formulaSectionLabel("Built-in")
+                LazyVGrid(columns: columns, spacing: 8) {
+                    ForEach(orderedTypes, id: \.self) { type in
+                        FractalGridCell(
+                            type: type,
+                            isSelected: type == cache.fractalType && cache.activeCustomFormulaHash == nil
+                        ) {
+                            cache.fractalType = type
+                            cache.pushFractalType(type, gestureController: gestureController)
+                        }
+                    }
+                }
+            }
+
+            if !customFormulas.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    formulaSectionLabel("Custom")
+                    Text("Formulas embedded in your scenes.")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                    LazyVGrid(columns: columns, spacing: 8) {
+                        ForEach(customFormulas, id: \.shortHash) { formula in
+                            FractalCustomFormulaCell(
+                                formula: formula,
+                                isSelected: cache.fractalType == .custom && cache.activeCustomFormulaHash == formula.shortHash
+                            ) {
+                                cache.pushCustomFormula(formula, gestureController: gestureController)
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
+
+    private func formulaSectionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(.tertiary)
+            .textCase(.uppercase)
+    }
+}
+
+/// Grid cell for a custom (`.threshfx`-embedded) formula — mirrors
+/// `FractalGridCell` but keys off the formula's own name/category/author
+/// rather than a `FractalModelType` descriptor.
+struct FractalCustomFormulaCell: View {
+    let formula: EmbeddedFormula
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
+                    Image(systemName: AppIcons.chevronLeftForwardslashChevronRight)
+                        .font(.caption)
+                        .frame(width: 14)
+                        .foregroundStyle(isSelected ? Color.blue : .secondary)
+                    Text(formula.name)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if isSelected {
+                        Image(systemName: AppIcons.checkmarkCircleFill)
+                            .font(.caption2)
+                            .foregroundStyle(.blue)
+                    }
+                }
+                Text(formula.category ?? "Custom")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                if let author = formula.author {
+                    Text(author)
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.secondary.opacity(0.6))
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? Color.blue.opacity(0.18) : Color.white.opacity(0.05))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(isSelected ? Color.blue.opacity(0.5) : Color.secondary.opacity(0.12), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(formula.name)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

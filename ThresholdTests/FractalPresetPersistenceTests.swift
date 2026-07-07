@@ -99,38 +99,32 @@ struct FractalPresetPersistenceTests {
         #expect(abs(fresh.safetyBubbleFadeWidth - 0.4) < 1e-5)
     }
 
-    @Test("Bound to Space (assumed-room clip) survives fromSettings → encode → decode → apply")
-    func boundToSpaceRoundTrip() throws {
+    @Test("Bound to Space (removed 'Irregular Shape Bound') always loads OFF, even if a scene saved it on")
+    func boundToSpaceLoadsDisabled() throws {
+        // The feature was removed 2026-07-06: its UI and enable paths are gone.
+        // The CodingKeys are kept for save-file compatibility (old scenes still
+        // decode), but apply() force-disables it regardless of the saved value.
         let settings = RenderSettings()
         settings.fractalType = .mandelbox
-        settings.boundToSpaceEnabled = true               // default false
+        settings.boundToSpaceEnabled = true               // an old scene had it on
         settings.boundToSpaceMode = BoundToSpaceMode.ceilingOpen.rawValue
-        settings.boundSpaceWidth = 5.5                    // default 4.0
-        settings.boundSpaceDepth = 3.5                    // default 4.0
-        settings.boundSpaceHeight = 3.0                   // default 2.5
+        settings.boundSpaceWidth = 5.5
 
         let preset = FractalPreset.fromSettings(settings, name: "Room")
-        let data = try JSONEncoder().encode(preset)
-        let decoded = try JSONDecoder().decode(FractalPreset.self, from: data)
+        let decoded = try JSONDecoder().decode(
+            FractalPreset.self, from: try JSONEncoder().encode(preset))
 
+        // Fields still decode (format compatibility with older saves).
         #expect(decoded.boundToSpaceEnabled == true)
-        #expect(decoded.boundToSpaceMode == BoundToSpaceMode.ceilingOpen.rawValue)
-        #expect(abs((decoded.boundSpaceWidth ?? -1) - 5.5) < 1e-5)
-        #expect(abs((decoded.boundSpaceDepth ?? -1) - 3.5) < 1e-5)
-        #expect(abs((decoded.boundSpaceHeight ?? -1) - 3.0) < 1e-5)
 
         let fresh = RenderSettings()
         fresh.fractalType = .mandelbox
+        fresh.boundToSpaceEnabled = true                  // a stale live value
         decoded.apply(to: fresh)
 
-        #expect(fresh.boundToSpaceEnabled == true)
-        #expect(fresh.boundToSpaceMode == BoundToSpaceMode.ceilingOpen.rawValue)
-        #expect(abs(fresh.boundSpaceWidth - 5.5) < 1e-5)
-        #expect(abs(fresh.boundSpaceDepth - 3.5) < 1e-5)
-        #expect(abs(fresh.boundSpaceHeight - 3.0) < 1e-5)
-
-        // The shader-facing resolved mode shifts up by one (0 = off).
-        #expect(fresh.snapshot().resolvedBoundToSpaceMode == 2)
+        // …but the removed feature always loads OFF.
+        #expect(fresh.boundToSpaceEnabled == false)
+        #expect(fresh.snapshot().resolvedBoundToSpaceMode == 0)
     }
 
     @Test("Bounding SHAPE (size + Inner Shadow depth + fog mode + enable) survives fromSettings → encode → decode → scene-load apply")
@@ -210,6 +204,52 @@ struct FractalPresetPersistenceTests {
         bare.apply(to: user, includePerformance: false)
         #expect(user.envScrunchEnabled == false)
         #expect(abs(user.envScrunchStrength - 0.8) < 1e-5)
+    }
+
+    @Test("Containment mode round-trips: a Surroundings scene stays UNBOUNDED on load")
+    func containmentModeRoundTrip() throws {
+        // The Containment concept (MixedContainment) is derived from two saved
+        // flags — boundingShapeEnabled (Bounded) and envScrunchEnabled
+        // (Surroundings). This pins the intent the picker exists for: a scene
+        // deliberately authored UNBOUNDED (Surroundings — bounding off, scrunch
+        // on) must NOT be forced back to Bounded on load. The bounding-shape
+        // apply defaults an ABSENT flag to `mixedModeScene == true`, so the
+        // saved explicit `false` is what keeps a Mixed scene unbounded.
+        let surroundings = RenderSettings()
+        surroundings.fractalType = .mandelbox
+        surroundings.boundingSphereSkipEnabled = false   // no bounding shape
+        surroundings.envScrunchEnabled = true            // grounded to the room
+        surroundings.envScrunchContain = 2               // Blend
+
+        let preset = FractalPreset.fromSettings(surroundings, name: "Grounded")
+        let decoded = try JSONDecoder().decode(
+            FractalPreset.self, from: try JSONEncoder().encode(preset))
+
+        // Explicit false is saved (not nil) so load can't fall back to the
+        // Mixed→Bounded default.
+        #expect(decoded.boundingShapeEnabled == false)
+        #expect(decoded.envScrunchEnabled == true)
+
+        let fresh = RenderSettings()
+        fresh.fractalType = .mandelbox
+        fresh.boundingSphereSkipEnabled = true           // a Bounded scene was live before
+        decoded.apply(to: fresh, includePerformance: false)
+
+        #expect(fresh.boundingSphereSkipEnabled == false, "Surroundings scene must load unbounded, not forced back to Bounded")
+        #expect(fresh.envScrunchEnabled == true)
+        #expect(fresh.envScrunchContain == 2)
+
+        // And a Bounded scene loading afterward flips it back — no leak.
+        let bounded = RenderSettings()
+        bounded.fractalType = .mandelbox
+        bounded.boundingSphereSkipEnabled = true
+        bounded.envScrunchEnabled = false
+        let boundedDecoded = try JSONDecoder().decode(
+            FractalPreset.self, from: try JSONEncoder().encode(
+                FractalPreset.fromSettings(bounded, name: "Held")))
+        boundedDecoded.apply(to: fresh, includePerformance: false)
+        #expect(fresh.boundingSphereSkipEnabled == true)
+        #expect(fresh.envScrunchEnabled == false)
     }
 
     @Test("Scene apply is ORDER-INDEPENDENT: loading A then B equals loading B fresh")
@@ -668,6 +708,71 @@ struct FractalPresetPersistenceTests {
         #expect(settings.cellShadingEnabled == false)          // default
         #expect(abs(settings.lightVariationRate - 0.5) < 1e-5) // default
         #expect(settings.boundToSpaceEnabled == false)         // default
+        // The new per-scene performance profile also decodes to nil for older files.
+        #expect(preset.coneMarchCompatible == nil)
+        #expect(preset.recommendedQuality == nil)
+    }
+
+    @Test("Per-scene performance profile (cone-march gate + quality target) round-trips through the scene-load path")
+    func performanceProfileRoundTrip() throws {
+        let settings = RenderSettings()
+        settings.fractalType = .mandelbox
+        settings.sceneConeMarchCompatible = false          // default true → this scene opts OUT
+        settings.applyRecommendedQuality(.high)            // records target + lifts the governor floor
+
+        let preset = FractalPreset.fromSettings(settings, name: "Profile")
+        #expect(preset.coneMarchCompatible == false)
+        #expect(preset.recommendedQuality == .high)
+
+        let decoded = try JSONDecoder().decode(
+            FractalPreset.self, from: try JSONEncoder().encode(preset))
+        #expect(decoded.coneMarchCompatible == false)
+        #expect(decoded.recommendedQuality == .high)
+
+        // Restore through the SCENE-SWITCH path (includePerformance: false) — the
+        // profile applies there too, so a scene switch honors the gate + floor.
+        let fresh = RenderSettings()
+        fresh.fractalType = .mandelbox
+        decoded.apply(to: fresh, includePerformance: false)
+        #expect(fresh.sceneConeMarchCompatible == false)
+        #expect(fresh.recommendedQuality == .high)
+        #expect(abs(fresh.sceneRenderQualityFloor - SceneQualityTarget.high.visionRenderQualityFloor) < 1e-6)
+    }
+
+    @Test("Cone-march gate zeroes the EFFECTIVE march strength for an incompatible scene (device setting untouched)")
+    func coneMarchGateSuppressesStrength() {
+        let settings = RenderSettings()
+        settings.fractalType = .mandelbox
+        settings.coneMarchStrength = 0.8                    // user's device setting
+
+        settings.sceneConeMarchCompatible = true
+        #expect(abs(settings.snapshot().coneMarchStrength - 0.8) < 1e-6)   // compatible → passes through
+
+        settings.sceneConeMarchCompatible = false
+        #expect(settings.snapshot().coneMarchStrength == 0.0)             // incompatible → suppressed
+
+        // Only the effective (snapshot) value is gated; the user's setting is intact.
+        #expect(abs(settings.coneMarchStrength - 0.8) < 1e-6)
+    }
+
+    @Test("Per-scene profile is AUTHORITATIVE: a plain scene resets the gate + governor floor (no leak)")
+    func performanceProfileAuthoritativeReset() {
+        // A live "ultra, cone-march-incompatible" scene…
+        let live = RenderSettings()
+        live.fractalType = .mandelbox
+        live.sceneConeMarchCompatible = false
+        live.applyRecommendedQuality(.ultra)
+        #expect(abs(live.sceneRenderQualityFloor - SceneQualityTarget.ultra.visionRenderQualityFloor) < 1e-6)
+
+        // …then a plain scene carrying neither field must reset both, not inherit them.
+        let plain = FractalPreset(name: "Plain")
+        #expect(plain.coneMarchCompatible == nil)
+        #expect(plain.recommendedQuality == nil)
+        plain.apply(to: live, includePerformance: false)
+
+        #expect(live.sceneConeMarchCompatible == true)     // reset to compatible
+        #expect(live.recommendedQuality == nil)
+        #expect(abs(live.sceneRenderQualityFloor - QualityConfig.visionMinRenderQuality) < 1e-6)  // floor back to global min
     }
 }
 

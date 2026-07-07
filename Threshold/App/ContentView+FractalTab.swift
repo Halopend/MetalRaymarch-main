@@ -157,7 +157,7 @@ extension ContentView {
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            FractalFormulaGrid(cache: cache, gestureController: appModel.gestureController)
+            FractalFormulaGrid(cache: cache, gestureController: appModel.gestureController, presetManager: appModel.presetManager)
         }
     }
 
@@ -327,7 +327,7 @@ extension ContentView {
     // ripple / Coxeter), reorderable + stackable — its own "Transform" rail section.
     private var fractalTransformContent: some View {
         VStack(spacing: 12) {
-            TransformationsSection(renderSettings: appModel.renderSettings)
+            TransformationsSection(renderSettings: appModel.renderSettings, cache: cache)
         }
     }
 
@@ -498,11 +498,9 @@ extension ContentView {
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.07)))
 #endif
 
-            sphericalInversionSection
-
-            sphereProjectionSection
-
-            // (Transformations stack moved to its own rail section → fractalTransformContent.)
+            // (Spherical Inversion + Sphere Projection moved to the Transformations
+            // section → fractalTransformContent, where they show as active cards and
+            // are add-able alongside the warp stack.)
 
             // ── Detail (Grab Gesture Transform) ──────────────────────────────
             VStack(spacing: 8) {
@@ -592,52 +590,10 @@ extension ContentView {
         }
     }
 
-    private var sphericalInversionSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("Spherical Inversion", systemImage: AppIcons.circleDashedInsetFilled)
-                    .font(.headline)
-                Spacer()
-            }
-
-            Text("Warp space around a radius before the fractal is sampled. Useful for folded-inside-out spatial compositions.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-
-            Picker("Spherical Inversion", selection: Binding(
-                get: { cache.display.sphericalInversionMode },
-                set: { newValue in
-                    cache.display.sphericalInversionMode = newValue
-                    cache.commitSphericalInversion()
-                }
-            )) {
-                ForEach(SphericalInversionMode.allCases, id: \.rawValue) { mode in
-                    Text(mode.displayName).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            if cache.display.sphericalInversionMode != .off {
-                EffectSliderRow(icon: "circle", label: "Inversion Radius",
-                    value: Binding(get: { cache.display.sphericalInversionRadius }, set: { cache.display.sphericalInversionRadius = $0 }),
-                    range: ControlCatalog.sphericalInversionRadius.range,
-                    enabled: Binding(get: { cache.display.sphericalInversionMode != .off }, set: { isEnabled in
-                        cache.display.sphericalInversionMode = isEnabled ? .outwardIn : .off
-                        cache.commitSphericalInversion()
-                    }),
-                    onChanged: { cache.commitSphericalInversion() })
-            }
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.06)))
-    }
-
-    // Data-driven (Stage 4): these boxes render SpaceModule's params at its route
-    // via the shared `ModuleSectionView`, replacing the hand-written scaffolding.
-    // The section content lives as data in ModuleSectionView.swift.
-    private var sphereProjectionSection: some View {
-        ModuleSectionView(section: .sphereProjection(cache: cache))
-    }
+    // Spherical Inversion + Sphere Projection now render inside the Transformations
+    // section (Shape → Transform) as active "SPACE" cards, add-able from its ✚ menu.
+    // See `TransformationsSection.sphericalInversionCard` / `sphereProjectionCard`.
+    // The `ModuleUISection.sphereProjection(cache:)` factory is retained there.
 
     /// Custom space warp (the cross-platform space-module seam). The built-in
     /// default is a "Twist" about the vertical axis; a loaded `.threshfx`

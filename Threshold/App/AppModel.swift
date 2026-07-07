@@ -151,15 +151,29 @@ class AppModel {
         didSet {
             UserDefaults.standard.set(immersionStylePreference.rawValue, forKey: "immersionStylePreference")
             immersionStyleForRenderer = immersionStylePreference
-            // Bounding follows immersion: Mixed = bounded (the fractal is an
-            // object in the room), Full = unbounded (you're inside it). This
-            // just flips the setting on style change — the user can still
-            // override the toggle at any time afterward.
-            if oldValue != immersionStylePreference {
-                renderSettings.boundingSphereSkipEnabled = (immersionStylePreference == .mixed)
+            // Containment follows immersion. Entering Mixed resets to the safe,
+            // pre-gated default — Bounded (bounding shape on, Scrunch off) — so a
+            // fractal doesn't dump unbounded into the room. Entering Immersive
+            // means you're inside the fractal, so drop all containment (bounding
+            // shape and Scrunch). This only flips
+            // on a manual style change — the user can re-pick a containment mode
+            // afterward, and scene loads set these authoritatively themselves so
+            // they suppress the coupling via immersionChangeIsSceneDriven.
+            if oldValue != immersionStylePreference && !immersionChangeIsSceneDriven {
+                if immersionStylePreference == .mixed {
+                    renderSettings.boundingSphereSkipEnabled = true
+                    renderSettings.envScrunchEnabled = false
+                } else {
+                    renderSettings.boundingSphereSkipEnabled = false
+                    renderSettings.envScrunchEnabled = false
+                }
             }
         }
     }
+
+    /// True while a scene load is driving `immersionStylePreference`, so the
+    /// didSet doesn't clobber the bounding fields the scene apply just set.
+    @ObservationIgnored var immersionChangeIsSceneDriven = false
 
     /// Mirror of `immersionStylePreference` readable from the render loop off
     /// the MainActor (same pattern as runtimeViewModeForRenderer).

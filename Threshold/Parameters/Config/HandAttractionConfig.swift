@@ -71,11 +71,6 @@ struct HandAttractionConfig: Codable, Equatable, Sendable {
         forearmRadius = try c.decodeIfPresent(Float.self, forKey: .forearmRadius) ?? 0.06
     }
 
-    // MARK: - Beta gate
-
-    static let betaUserDefaultsKey = "handEffectsBeta"
-    static var betaEnabled: Bool { UserDefaults.standard.bool(forKey: betaUserDefaultsKey) }
-
     // MARK: - Validation
 
     mutating func clamp() {

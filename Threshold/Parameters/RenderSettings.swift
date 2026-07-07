@@ -198,6 +198,20 @@ final class RenderSettings: @unchecked Sendable {
     private var _adaptiveRenderQualityEnabled: Bool = loadBool("adaptiveRenderQualityEnabled", default: true)  // visionOS: auto-lower compositor Render Quality to hold FPS (slider = ceiling)
     private var _coneMarchStrength: Float = loadFloat("coneMarchStrength", default: 0.0)  // 0 = off; scales the distance-growing hit threshold (projected pixel footprint, ConeMarchingPen)
     private var _coneCoverageAAEnabled: Bool = loadBool("coneCoverageAAEnabled", default: false)  // CTSS-lite silhouette AA from the cone footprint (fragment path); lets Cone Marching run harder without blobby edges
+    // ── Per-scene performance PROFILE (set by FractalPreset.apply on scene load;
+    // NOT part of the device-local Quality domain / never persisted to UserDefaults).
+    // These let a scene HINT at how it renders best without ever forcing a
+    // device-local perf technique on:
+    //   • _sceneConeMarchCompatible — false suppresses cone marching for the loaded
+    //     scene (the snapshot zeroes the effective strength). true/unset = the
+    //     device's Cone Marching setting applies as usual. It only gates/forbids;
+    //     it never turns cone marching ON.
+    //   • _recommendedQuality / _sceneRenderQualityFloor — a high/ultra scene lifts
+    //     the visionOS adaptive-governor floor (and raises the resolution toward the
+    //     target) so it resists FPS-driven downscaling. See applyRecommendedQuality.
+    private var _sceneConeMarchCompatible: Bool = true
+    private var _recommendedQuality: SceneQualityTarget? = nil
+    private var _sceneRenderQualityFloor: Float = QualityConfig.visionMinRenderQuality
     private var _overRelaxationMax: Float = loadFloat("overRelaxationMax", default: 1.4)  // Keinert over-relaxation ceiling the auto-ramp may reach (1.0 = conservative)
     private var _distanceLODStrength: Float = loadFloat("distanceLODStrength", default: 0.0)  // 0 = off; drops fractal iterations on faraway samples
     private var _shadowsEnabled: Bool = loadBool("shadowsEnabled", default: true)  // false skips the two per-pixel shadow marches
@@ -296,9 +310,9 @@ final class RenderSettings: @unchecked Sendable {
 
     // Hand Attraction: a per-hand interaction sphere (visionOS only) that pulls
     // the fractal surface toward each tracked palm — the inverse of the safety
-    // bubble's push-away carve. BETA: off by default (opt-in via Settings →
-    // "Hand Effects (Beta)"). Defaults mirror HandAttractionConfig (tuned 2026-07-02).
-    private var _handAttractionEnabled: Bool = false
+    // bubble's push-away carve. ON by default (out of beta 2026-07-06). Defaults
+    // mirror HandAttractionConfig (tuned 2026-07-02).
+    private var _handAttractionEnabled: Bool = true
     private var _handAttractionRadius: Float = 0.36
     private var _handAttractionStrength: Float = 0.39
     private var _handAttractionPocketEnabled: Bool = true
@@ -355,7 +369,13 @@ final class RenderSettings: @unchecked Sendable {
     private var _pulseEffect: PulseEffect = .off
     private var _glowEffect: GlowEffect = .off
     private var _bloomEffect: BloomEffect = .off
-    private var _fogEffect: FogEffect = FogEffect(enabled: true, intensity: 0.32)
+    private var _fogEffect: FogEffect = .off
+    /// Eased mixed-immersion fog attenuation applied at pack time (1.0 = full
+    /// authored fog). Fog reads heavy against passthrough, so in .mixed the
+    /// packed intensity is scaled down by a band-based factor. Not persisted —
+    /// re-derived each frame by `updateMixedFogMultiplierLocked`.
+    private var _mixedFogMultiplier: Float = 1.0
+    private var _mixedFogMultiplierPrimed = false
     private var _gradientCycleEffect: GradientCycleEffect = .off
     private var _linearRailEffect: LinearRailEffect = .off
     private var _polarRotationEffect: PolarRotationEffect = .off
@@ -1329,6 +1349,62 @@ final class RenderSettings: @unchecked Sendable {
             withLock { _coneMarchStrength = max(0.0, min(1.0, newValue)) }
             persistQuality()
         }
+    }
+
+    /// Per-scene cone-marching compatibility gate (set on scene load). `false`
+    /// suppresses cone marching for the loaded scene — the render snapshot zeroes
+    /// the effective strength — so a scene that looks bad under cone marching opts
+    /// itself out without touching the user's device-local Cone Marching setting.
+    /// `true` (the default / unmarked) lets that setting apply as usual. It NEVER
+    /// turns cone marching on. Not persisted to the Quality domain.
+    var sceneConeMarchCompatible: Bool {
+        get { withLock { _sceneConeMarchCompatible } }
+        set { withLock { _sceneConeMarchCompatible = newValue } }
+    }
+
+    /// The loaded scene's declared render-quality target (nil = no opinion).
+    /// Round-trips through FractalPreset; the visual effect is applied by
+    /// `applyRecommendedQuality`.
+    var recommendedQuality: SceneQualityTarget? {
+        get { withLock { _recommendedQuality } }
+        set { withLock { _recommendedQuality = newValue } }
+    }
+
+    /// Lowest compositor Render Quality the visionOS adaptive governor may drop the
+    /// loaded scene to (see `AdaptiveRenderQualityController`). A high/ultra scene
+    /// lifts this above the global minimum; a standard/absent scene leaves it there.
+    var sceneRenderQualityFloor: Float {
+        get { withLock { _sceneRenderQualityFloor } }
+        set {
+            withLock {
+                _sceneRenderQualityFloor = max(QualityConfig.visionMinRenderQuality,
+                                               min(QualityConfig.visionMaxRenderQuality, newValue))
+            }
+        }
+    }
+
+    /// Apply a scene's declared render-quality target on load.
+    ///
+    /// AUTHORITATIVE for the governor floor: it is reset every load (so a previous
+    /// high scene's floor never leaks into the next). A high/ultra target also
+    /// raises the render resolution toward its target — `max(current, target)`, so
+    /// it can only ask for MORE sharpness ("aim for at least this"), never less, and
+    /// never past the user's own ceiling on visionOS. `nil`/`.standard` resets the
+    /// floor to the global minimum and leaves resolution untouched.
+    ///
+    /// This only ever RAISES quality, so it can't force a device into a heavier perf
+    /// technique — consistent with the rest of the Quality domain staying device-local.
+    func applyRecommendedQuality(_ target: SceneQualityTarget?) {
+        recommendedQuality = target
+        sceneRenderQualityFloor = target?.visionRenderQualityFloor ?? QualityConfig.visionMinRenderQuality
+        guard let target, target.raisesQuality else { return }
+        #if os(visionOS)
+        // Lift the ceiling toward the target so the scene can actually reach the
+        // higher quality; the governor still sheds it under load, down to the floor.
+        renderQuality = max(renderQuality, target.visionRenderQuality)
+        #else
+        resolutionScale = max(resolutionScale, target.macResolutionScale)
+        #endif
     }
 
     /// Over-relaxation ceiling (Keinert enhanced sphere tracing). The largest
@@ -2404,7 +2480,11 @@ final class RenderSettings: @unchecked Sendable {
     }
     
     /// Update color scheme transitions and animation time. Call once per frame.
-    func updateColorSchemeTransition(deltaTime: Float) {
+    /// `mixedImmersionActive` drives the eased mixed-mode fog attenuation; the
+    /// render loop passes `immersionStyleForRenderer == .mixed`. Defaults to
+    /// false so non-app callers (e.g. the QuickLook headless renderer, which
+    /// has no AppModel) leave fog at full authored strength.
+    func updateColorSchemeTransition(deltaTime: Float, mixedImmersionActive: Bool = false) {
         withLock {
             if _animationKillSwitchActive {
                 _animationKillSwitchRemaining = max(0.0, _animationKillSwitchRemaining - deltaTime)
@@ -2427,6 +2507,11 @@ final class RenderSettings: @unchecked Sendable {
             _colorAnimTime += deltaTime * _animationActivityFactor
             let lightStep = deltaTime * _animationActivityFactor * _lightVariationRate
             _lightAnimTime += lightStep
+
+            // Ease mixed-immersion fog attenuation toward its target every frame.
+            // Uses raw deltaTime (not lightStep) so it animates even when colour
+            // animation is paused — this is a mode transition, not a flashy cycle.
+            updateMixedFogMultiplierLocked(deltaTime: deltaTime, mixedActive: mixedImmersionActive)
 
             // Integrate cycle phases from the *current* speeds (and audio coupling) rather
             // than multiplying an accumulated clock by a live speed. This is the fix for
@@ -2499,6 +2584,48 @@ final class RenderSettings: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    // === MIXED-IMMERSION FOG ATTENUATION ===
+    // Fog reads heavy against video passthrough, so in .mixed immersion the
+    // packed fog intensity is scaled down by a band-based factor keyed off the
+    // *authored* intensity — heavier fog is cut more. The percentage is "taken
+    // off" the intensity before it's packed for the shader. Immersive/full and
+    // Mac (no mixed mode) leave fog untouched.
+    private static let mixedFogHeavyThreshold: Float = 0.6    // ≥ this → "heavy"
+    private static let mixedFogMediumThreshold: Float = 0.35  // ≥ this → "medium"
+    private static let mixedFogHeavyMultiplier: Float = 0.34  // heavy: take off 66%
+    private static let mixedFogMediumMultiplier: Float = 0.60 // medium: take off 40%
+    private static let mixedFogLowMultiplier: Float = 0.75    // low: take off 25%
+    private static let mixedFogEaseRate: Float = 3.5          // per-sec ease; higher = snappier
+
+    /// Ease `_mixedFogMultiplier` toward its immersion-driven target. Assumes the
+    /// settings lock is held (called from `updateColorSchemeTransition`). Target is
+    /// 1.0 outside mixed immersion; in .mixed it's the band cut for the authored
+    /// fog intensity. Snaps on the first frame so a cold start already in mixed
+    /// mode doesn't flash full fog before easing down.
+    private func updateMixedFogMultiplierLocked(deltaTime: Float, mixedActive: Bool) {
+        let target: Float
+        if mixedActive && _fogEffect.enabled {
+            let i = _fogEffect.intensity
+            if i >= Self.mixedFogHeavyThreshold {
+                target = Self.mixedFogHeavyMultiplier
+            } else if i >= Self.mixedFogMediumThreshold {
+                target = Self.mixedFogMediumMultiplier
+            } else {
+                target = Self.mixedFogLowMultiplier  // low: take off 25%
+            }
+        } else {
+            target = 1.0
+        }
+
+        if !_mixedFogMultiplierPrimed {
+            _mixedFogMultiplier = target
+            _mixedFogMultiplierPrimed = true
+            return
+        }
+        let alpha = min(1.0, Self.mixedFogEaseRate * max(0.0, deltaTime))
+        _mixedFogMultiplier += (target - _mixedFogMultiplier) * alpha
     }
 
     @inline(__always)
@@ -2738,7 +2865,10 @@ final class RenderSettings: @unchecked Sendable {
                 coarsePrepassWarmStartEnabled: _coarsePrepassWarmStartEnabled,
                 foveationStrength: _foveationStrength,
                 smartAdvanceEnabled: _smartAdvanceEnabled,
-                coneMarchStrength: _coneMarchStrength,
+                // Per-scene gate: a scene marked cone-march-INcompatible zeroes the
+                // effective strength for every render path (single choke point), so
+                // the device's Cone Marching setting simply doesn't apply to it.
+                coneMarchStrength: _sceneConeMarchCompatible ? _coneMarchStrength : 0.0,
                 coneCoverageAAEnabled: _coneCoverageAAEnabled,
                 distanceLODStrength: _distanceLODStrength,
                 shadowsEnabled: _shadowsEnabled,
@@ -2782,7 +2912,7 @@ final class RenderSettings: @unchecked Sendable {
                 colorSchemeParams: makeColorSchemeParamsLocked(),
                 lightingSoftness: _lightingSoftness,
                 fogEnabled: _fogEffect.enabled,
-                fogIntensity: _fogEffect.intensity,
+                fogIntensity: _fogEffect.intensity * _mixedFogMultiplier,
                 fogColor: effectiveFogColorLocked(),
                 worldRotation: _worldRotation,
                 detailScale: _detailScale,

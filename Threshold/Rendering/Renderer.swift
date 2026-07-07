@@ -890,6 +890,9 @@ actor Renderer {
         let effectiveRenderQuality = adaptiveRenderQuality.update(
             smoothedFPS: smoothedFPS,
             ceiling: renderQualityCeiling,
+            // A high/ultra-quality scene lifts the floor so the governor keeps it
+            // sharp under load instead of downscaling it to the global minimum.
+            sceneFloor: appModel.renderSettings.sceneRenderQualityFloor,
             now: CACurrentMediaTime(),
             enabled: appModel.renderSettings.adaptiveRenderQualityEnabled
         )

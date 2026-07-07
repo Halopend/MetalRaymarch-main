@@ -398,10 +398,12 @@ extension PresetManager {
         for ext in sceneExts {
             sceneURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Scenes") ?? []
             sceneURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Mixed") ?? []
+            sceneURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Custom Scene Example") ?? []
             sceneURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: nil) ?? []
         }
         for ext in musicExts {
             musicPresetURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Scenes") ?? []
+            musicPresetURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Mixed") ?? []
             musicPresetURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: nil) ?? []
         }
         // Filter the .json hits down to ones that are actually our preset files.

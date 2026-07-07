@@ -163,11 +163,22 @@ extension ContentView {
 
     private var quickToggleSpaceRows: [QuickToggleRow] {
         [
+            // Sphere Projection now lives in the Transformations section (Shape →
+            // Transform) alongside the warp stack, so long-press jumps there.
             QuickToggleRow("Sphere Projection", "globe.asia.australia",
-                home: .shapeSpace,
+                home: .shapeTransformations,
                 available: { cache.fractalType.supports(.sphereProjection) },
                 get: { cache.display.sphereProjectionEnabled },
                 set: { cache.display.sphereProjectionEnabled = $0; cache.commitSphereProjection() }),
+            QuickToggleRow("Bounding Shape", "circle.dashed", home: .shapeBounding,
+                // Independent toggle — does NOT turn Scrunch off.
+                get: { cache.quality.boundingSphereSkipEnabled },
+                set: { cache.setBoundingShapeEnabled($0) }),
+            QuickToggleRow("Scrunch to Surroundings", "square.3.layers.3d",
+                home: .shapeBounding,
+                // Independent toggle — does NOT turn the Bounding shape off.
+                get: { cache.quality.envScrunchEnabled },
+                set: { cache.setScrunchEnabled($0) }),
         ]
     }
 
@@ -222,9 +233,8 @@ extension ContentView {
             QuickToggleRow("Self-Shadows", "moon", home: .shapePerformance,
                 get: { cache.quality.shadowsEnabled },
                 set: { cache.quality.shadowsEnabled = $0; cache.push(\.shadowsEnabled, value: $0) }),
-            QuickToggleRow("Bounding Shape", "circle.dashed", home: .shapePerformance,
-                get: { cache.quality.boundingSphereSkipEnabled },
-                set: { cache.quality.boundingSphereSkipEnabled = $0; cache.push(\.boundingSphereSkipEnabled, value: $0) }),
+            // Bounding Shape moved to the Space section (it's a containment
+            // control, not a raw perf knob) — see `quickToggleSpaceRows`.
             QuickToggleRow("Zoom Fog Comp", "cloud.fog",
                 get: { cache.quality.zoomFogCompensationEnabled },
                 set: { cache.quality.zoomFogCompensationEnabled = $0; cache.push(\.zoomFogCompensationEnabled, value: $0) }),
@@ -583,26 +593,6 @@ extension ContentView {
                 }
             }
             .tint(.orange)
-
-            Toggle(isOn: $handEffectsBeta) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Hand Effects (Beta)")
-                        .font(.subheadline.weight(.semibold))
-                    Text("Shows the Shape → Hands tab: interaction spheres that attract or repel the fractal surface around your tracked hands (visionOS). Turning this off also disables the effect.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .tint(.orange)
-            .onChange(of: handEffectsBeta) { _, on in
-                if !on {
-                    // Leaving the beta turns the effect off (tuning is kept);
-                    // steer navigation away from the now-hidden tab.
-                    appModel.renderSettings.handAttractionEnabled = false
-                    if shapeInnerTab == .hands { shapeInnerTab = .parameters }
-                }
-            }
 
             Toggle(isOn: Binding(
                 get: { cache.quality.recreateLegacyComputeCacheBug },

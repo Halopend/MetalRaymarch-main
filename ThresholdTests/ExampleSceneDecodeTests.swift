@@ -33,6 +33,10 @@ struct ExampleSceneDecodeTests {
         return repoRoot.appendingPathComponent("Threshold/Examples")
     }
 
+    /// Every Examples subfolder that ships scene/music presets. Mirrors the
+    /// PresetManager bundle scan (Scenes + Mixed + Custom Scene Example).
+    private static let sceneDirs = ["Scenes", "Mixed", "Custom Scene Example"]
+
     private static func files(withExtension ext: String, in subdir: String) -> [URL] {
         let dir = examplesDir.appendingPathComponent(subdir)
         let urls = (try? FileManager.default.contentsOfDirectory(
@@ -44,6 +48,10 @@ struct ExampleSceneDecodeTests {
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
+    private static func files(withExtension ext: String, inAny subdirs: [String]) -> [URL] {
+        subdirs.flatMap { files(withExtension: ext, in: $0) }
+    }
+
     // Mirrors PresetManager.presetDecoder / AnimationManager.sceneDecoder.
     private static func iso8601Decoder() -> JSONDecoder {
         let d = JSONDecoder()
@@ -53,10 +61,10 @@ struct ExampleSceneDecodeTests {
 
     @Test("Examples directory is present and non-empty")
     func examplesDirectoryExists() {
-        let scenes = Self.files(withExtension: "threshscene", in: "Scenes")
-        let music = Self.files(withExtension: "threshmp", in: "Scenes")
+        let scenes = Self.files(withExtension: "threshscene", inAny: Self.sceneDirs)
+        let music = Self.files(withExtension: "threshmp", inAny: Self.sceneDirs)
         let anims = Self.files(withExtension: "threshanim", in: "Animations")
-        let fx = Self.files(withExtension: "threshfx", in: "Scenes")
+        let fx = Self.files(withExtension: "threshfx", in: "Formulas")
         #expect(!scenes.isEmpty, "no .threshscene example files found at \(Self.examplesDir.path)")
         #expect(!music.isEmpty, "no .threshmp example files found")
         #expect(!anims.isEmpty, "no .threshanim example files found")
@@ -66,7 +74,7 @@ struct ExampleSceneDecodeTests {
     @Test("Every .threshscene decodes as a FractalPreset (the .onOpenURL preset path)")
     func threshscenesDecode() throws {
         let decoder = Self.iso8601Decoder()
-        let files = Self.files(withExtension: "threshscene", in: "Scenes")
+        let files = Self.files(withExtension: "threshscene", inAny: Self.sceneDirs)
         for url in files {
             let data = try Data(contentsOf: url)
             #expect(throws: Never.self, "FAILED to decode \(url.lastPathComponent)") {
@@ -78,7 +86,7 @@ struct ExampleSceneDecodeTests {
     @Test("Every .threshmp decodes as a FractalPreset (music-preset path)")
     func threshmpsDecode() throws {
         let decoder = Self.iso8601Decoder()
-        let files = Self.files(withExtension: "threshmp", in: "Scenes")
+        let files = Self.files(withExtension: "threshmp", inAny: Self.sceneDirs)
         for url in files {
             let data = try Data(contentsOf: url)
             #expect(throws: Never.self, "FAILED to decode \(url.lastPathComponent)") {
@@ -101,7 +109,7 @@ struct ExampleSceneDecodeTests {
 
     @Test("Every .threshfx decodes + validates as an EmbeddedFormulaContainer (custom-formula path)")
     func threshfxDecode() throws {
-        let files = Self.files(withExtension: "threshfx", in: "Scenes")
+        let files = Self.files(withExtension: "threshfx", inAny: ["Formulas", "Scenes"])
         for url in files {
             #expect(throws: Never.self, "FAILED to decode/validate \(url.lastPathComponent)") {
                 _ = try EmbeddedFormulaContainer.decode(fromContainerAt: url)

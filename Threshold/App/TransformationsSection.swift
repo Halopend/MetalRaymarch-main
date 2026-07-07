@@ -18,6 +18,10 @@ import simd
 
 struct TransformationsSection: View {
     let renderSettings: RenderSettings
+    /// Live UI store. `UISettingsCache` is `@Observable`, so reading its sphere-system
+    /// flags in `body` auto-subscribes this view — the system cards below track the
+    /// same state the Space tab / quick toggles drive (DisplayConfig, scene-persisted).
+    let cache: UISettingsCache
 
     // RenderSettings is not Observable; bump to force a re-read of the op LIST after
     // structural edits (add / delete / reorder / enable). Slider drags mutate in
@@ -26,6 +30,19 @@ struct TransformationsSection: View {
     @State private var refresh: Int = 0
 
     private var ops: [SpaceWarpOpValue] { renderSettings.spaceWarpStack }
+
+    // ── Space "systems": Spherical Inversion + Sphere Projection ─────────────
+    //
+    // These are NOT reorderable warp-stack ops — they're two standalone,
+    // scene-persisted space transforms (a global pre-raymarch RAY inversion and a
+    // radial domain projection) that used to live only in the Space tab. They're
+    // surfaced here so the Transformations section is the one place that shows every
+    // space transform currently active. Adding one flips its DisplayConfig flag;
+    // removing one turns it off. Their state lives in `cache.display`, not the stack.
+    private enum SpaceSystem { case sphericalInversion, sphereProjection }
+
+    private var sphericalInversionActive: Bool { cache.display.sphericalInversionMode != .off }
+    private var sphereProjectionActive: Bool { cache.display.sphereProjectionEnabled }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -42,12 +59,16 @@ struct TransformationsSection: View {
                 addMenu
             }
 
-            Text("Stack domain transforms applied (top → bottom) before the fractal is drawn. Reorder to change the result; add multiples of the same kind to compound them.")
+            Text("Stack domain transforms applied (top → bottom) before the fractal is drawn. Reorder to change the result; add multiples of the same kind to compound them. Sphere Projection and Spherical Inversion appear here too whenever they're active.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if ops.isEmpty {
+            // Active space systems first (they aren't part of the reorderable stack).
+            if sphericalInversionActive { sphericalInversionCard }
+            if sphereProjectionActive { sphereProjectionCard }
+
+            if ops.isEmpty && !sphericalInversionActive && !sphereProjectionActive {
                 Text("No transformations yet. Use ✚ to add one.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -74,6 +95,18 @@ struct TransformationsSection: View {
                 ForEach(WarpCatalog.recipes) { recipe in
                     Button { apply(recipe) } label: { Label(recipe.name, systemImage: recipe.icon) }
                 }
+            }
+            // Standalone space systems (Spherical Inversion + Sphere Projection) —
+            // not stack ops; adding one flips its DisplayConfig flag on.
+            Section("Space Systems") {
+                Button { addSpaceSystem(.sphericalInversion) } label: {
+                    Label("Spherical Inversion", systemImage: AppIcons.circleDashedInsetFilled)
+                }
+                .disabled(sphericalInversionActive)
+                Button { addSpaceSystem(.sphereProjection) } label: {
+                    Label("Sphere Projection", systemImage: AppIcons.globeAsiaAustralia)
+                }
+                .disabled(sphereProjectionActive || !cache.fractalType.supports(.sphereProjection))
             }
             // Individual transforms, grouped by family so the look-alikes cluster.
             ForEach(WarpFamily.allCases, id: \.self) { family in
@@ -301,7 +334,123 @@ struct TransformationsSection: View {
         }
     }
 
+    // MARK: - Space-system cards
+    //
+    // Rendered only while the system is active. Same card chrome as a stack op but
+    // with no index / reorder chevrons (these apply globally, not in stack order) —
+    // a "SPACE" badge marks them apart, and the trash button turns the system off.
+
+    /// Global Spherical Inversion (pre-raymarch ray transform). Mode is on/off only
+    /// (`.outwardIn`), so the card just exposes the Inversion Radius.
+    @ViewBuilder
+    private var sphericalInversionCard: some View {
+        spaceSystemCard(
+            title: "Spherical Inversion",
+            icon: AppIcons.circleDashedInsetFilled,
+            tagline: "Turn space inside-out through a sphere — global ray warp",
+            remove: {
+                cache.display.sphericalInversionMode = .off
+                cache.commitSphericalInversion()
+                refresh &+= 1
+            }
+        ) {
+            EffectSliderRow(icon: "circle", label: "Inversion Radius",
+                value: Binding(get: { cache.display.sphericalInversionRadius },
+                               set: { cache.display.sphericalInversionRadius = $0 }),
+                range: ControlCatalog.sphericalInversionRadius.range,
+                enabled: .constant(true),
+                onChanged: { cache.commitSphericalInversion() },
+                showToggle: false)
+        }
+    }
+
+    /// Sphere Projection (radial domain warp; capability-gated on `.sphereProjection`).
+    /// Blend + radius are music-drivable (ghost markers via `musicTargetID`).
+    @ViewBuilder
+    private var sphereProjectionCard: some View {
+        spaceSystemCard(
+            title: "Sphere Projection",
+            icon: AppIcons.globeAsiaAustralia,
+            tagline: "Pull this shape's detail onto a spherical shell — domain warp",
+            remove: {
+                cache.display.sphereProjectionEnabled = false
+                cache.commitSphereProjection()
+                refresh &+= 1
+            }
+        ) {
+            EffectSliderRow(icon: "circle.lefthalf.filled", label: "Projection",
+                value: Binding(get: { cache.display.sphereProjectionBlend },
+                               set: { cache.display.sphereProjectionBlend = $0 }),
+                range: ControlCatalog.sphereProjectionBlend.range,
+                enabled: .constant(true),
+                onChanged: { cache.commitSphereProjection() },
+                showToggle: false,
+                musicTargetID: ParameterTargetID.Space.sphereProjectionBlend)
+            EffectSliderRow(icon: "circle", label: "Projection Radius",
+                value: Binding(get: { cache.display.sphereProjectionRadius },
+                               set: { cache.display.sphereProjectionRadius = $0 }),
+                range: ControlCatalog.sphereProjectionRadius.range,
+                enabled: .constant(true),
+                onChanged: { cache.commitSphereProjection() },
+                showToggle: false,
+                musicTargetID: ParameterTargetID.Space.sphereProjectionRadius)
+        }
+    }
+
+    /// Shared chrome for a space-system card: header (name / tagline / "SPACE" badge /
+    /// remove) over the system's own sliders.
+    @ViewBuilder
+    private func spaceSystemCard<Content: View>(
+        title: String, icon: String, tagline: String,
+        remove: @escaping () -> Void,
+        @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Label(title, systemImage: icon)
+                        .font(.subheadline.weight(.medium))
+                    Text(tagline)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Text("SPACE")
+                    .font(.caption2.weight(.heavy))
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(Capsule().fill(.teal.opacity(0.20)))
+                    .foregroundStyle(.teal)
+                    .accessibilityLabel("Global space system")
+                Button(role: .destructive) { remove() } label: { Image(systemName: "trash") }
+                    .buttonStyle(.borderless)
+            }
+            .font(.caption)
+
+            content()
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.teal.opacity(0.08)))
+    }
+
     // MARK: - Mutations
+
+    /// Turn a standalone space system on (its card then appears above the stack).
+    /// Adding an already-active system is a no-op; Sphere Projection is gated by
+    /// fractal capability.
+    private func addSpaceSystem(_ system: SpaceSystem) {
+        switch system {
+        case .sphericalInversion:
+            guard !sphericalInversionActive else { return }
+            cache.display.sphericalInversionMode = .outwardIn
+            cache.commitSphericalInversion()
+        case .sphereProjection:
+            guard !sphereProjectionActive,
+                  cache.fractalType.supports(.sphereProjection) else { return }
+            cache.display.sphereProjectionEnabled = true
+            cache.commitSphereProjection()
+        }
+        refresh &+= 1
+    }
 
     private func add(_ kind: SpaceWarpKind) {
         var arr = renderSettings.spaceWarpStack

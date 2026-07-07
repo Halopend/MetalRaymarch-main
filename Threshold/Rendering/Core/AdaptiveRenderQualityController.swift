@@ -43,10 +43,15 @@ struct AdaptiveRenderQualityController {
     /// - Parameters:
     ///   - smoothedFPS: the renderer's smoothed frame rate (prior-frame value is fine).
     ///   - ceiling: the user's Render Quality slider (the maximum allowed).
+    ///   - sceneFloor: the loaded scene's quality floor (a high/ultra scene lifts
+    ///     this so it resists downscaling). Clamped into the global floor…ceiling
+    ///     band; the global minimum applies when the scene declares none.
     ///   - now: a monotonic timestamp (`CACurrentMediaTime()`).
     ///   - enabled: the user's auto-adjust toggle.
-    mutating func update(smoothedFPS: Double, ceiling: Float, now: CFTimeInterval, enabled: Bool) -> Float {
-        let floor = min(QualityConfig.visionMinRenderQuality, ceiling)
+    mutating func update(smoothedFPS: Double, ceiling: Float, sceneFloor: Float, now: CFTimeInterval, enabled: Bool) -> Float {
+        // The scene may lift the floor above the global minimum, but never above
+        // the user's ceiling — the slider is always the user's hard cap.
+        let floor = min(max(QualityConfig.visionMinRenderQuality, sceneFloor), ceiling)
 
         // Disabled → pass the ceiling through and re-seed, so re-enabling starts
         // from the user's current setting rather than a stale effective value.

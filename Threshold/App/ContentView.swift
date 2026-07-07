@@ -67,7 +67,6 @@ struct ContentView: View {
     @State var renamingGradientIndex: Int? = nil
     @State var renamingGradientName: String = ""
     @AppStorage("allowCustomScenes") var allowCustomScenes: Bool = false
-    @AppStorage(HandAttractionConfig.betaUserDefaultsKey) var handEffectsBeta: Bool = false
     /// Menu text size (Dynamic Type). Index into `DS.textSizeSteps`; the "Text
     /// Size" slider in Settings ▸ Display writes it and the menu body applies it
     /// via `.dynamicTypeSize`. Default is platform-aware (one step up on
@@ -636,8 +635,7 @@ struct ContentView: View {
                         }
                     case .shape:
                         // Performance moved out to its own top-dock tab; drop it here.
-                        // Hands is beta-gated (Settings → Experimental → Hand Effects).
-                        ForEach(ShapeRailSection.allCases.filter { $0 != .performance && ($0 != .hands || handEffectsBeta) }, id: \.self) { section in
+                        ForEach(ShapeRailSection.allCases.filter { $0 != .performance }, id: \.self) { section in
                             railButton(
                                 title: section.rawValue,
                                 systemImage: section.icon,
@@ -1249,6 +1247,10 @@ struct ContentView: View {
             selectedTab = .effects; effectsSubTab = .dynamic
         case .shapeSpace:
             selectedTab = .fractal; fractalSubTab = .space
+        case .shapeTransformations:
+            selectedTab = .fractal; fractalSubTab = .transform
+        case .shapeBounding:
+            selectedTab = .fractal; fractalSubTab = .bounding
         case .shapePerformance:
             selectedTab = .fractal; fractalSubTab = .render
         case .audioReactive:

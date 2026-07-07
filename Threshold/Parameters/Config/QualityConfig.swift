@@ -67,6 +67,66 @@ enum BoundToSpaceMode: Int, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Author-declared "aim for this render quality" hint carried per-scene
+/// (`FractalPreset.recommendedQuality`). Deliberately distinct from iteration
+/// count: it targets the render RESOLUTION (MetalFX input scale on Mac; the
+/// compositor drawable scale on visionOS), never the fractal DE. A high/ultra
+/// scene lifts the adaptive FPS governor's floor so it resists being downscaled,
+/// and raises the resolution toward the target ("aim for AT LEAST this" — it only
+/// ever raises, never lowers). `standard`/absent = no opinion.
+///
+/// This is a HINT the device consults, not a forced setting: it can only ask for
+/// MORE sharpness, never impose a device-local perf technique — the same rule the
+/// rest of the Quality domain follows (a scene must not force cone-march/foveation
+/// onto another device).
+enum SceneQualityTarget: String, Codable, CaseIterable, Sendable {
+    case standard
+    case high
+    case ultra
+
+    var title: String {
+        switch self {
+        case .standard: return "Standard"
+        case .high:     return "High"
+        case .ultra:    return "Ultra"
+        }
+    }
+
+    /// Mac / iOS MetalFX input-scale target (`resolutionScale`, 0.33…1.0).
+    var macResolutionScale: Float {
+        switch self {
+        case .standard: return 0.75   // platform default
+        case .high:     return 1.0    // native input
+        case .ultra:    return 1.0    // Mac tops out at native
+        }
+    }
+
+    /// visionOS compositor drawable-scale target (`renderQuality`), within
+    /// `QualityConfig.visionMin…visionMaxRenderQuality`.
+    var visionRenderQuality: Float {
+        switch self {
+        case .standard: return 0.5
+        case .high:     return 0.7
+        case .ultra:    return QualityConfig.visionMaxRenderQuality  // 0.8
+        }
+    }
+
+    /// Lowest compositor Render Quality the adaptive governor may drop this scene
+    /// to. A high/ultra scene declares it should stay sharp, so its floor is lifted
+    /// above the global minimum — the governor can still shed quality under load,
+    /// just not as far. `standard` keeps the global minimum (no lift).
+    var visionRenderQualityFloor: Float {
+        switch self {
+        case .standard: return QualityConfig.visionMinRenderQuality  // 0.05 (no lift)
+        case .high:     return 0.45
+        case .ultra:    return 0.6
+        }
+    }
+
+    /// Whether this target actually asks for anything beyond the platform default.
+    var raisesQuality: Bool { self != .standard }
+}
+
 struct QualityConfig: Codable, Equatable, Sendable {
     /// visionOS compositor render-quality ceiling. Single source of truth for both
     /// `configuration.maxRenderQuality` (set at layer creation — governs drawable

@@ -54,6 +54,10 @@ final class UISettingsCache {
     // ═══════════════════════════════════════════════════════════════════════════
 
     var fractalType: FractalModelType = .mandelbox
+    /// Short hash of the active `.threshfx` formula when `fractalType == .custom`,
+    /// nil otherwise. `.custom` is a single sentinel type shared by every embedded
+    /// formula, so this is what distinguishes "which one" for UI selection state.
+    var activeCustomFormulaHash: String? = nil
     var fractalScale: Float = 2.0
     var targetMinDistance: Float = 0.8
     var targetFoldingLimit: Float = 1.0
@@ -231,6 +235,7 @@ final class UISettingsCache {
     func pushFractalType(_ type: FractalModelType, gestureController: GestureController?) {
         let oldType = settings?.fractalType
         settings?.fractalType = type
+        activeCustomFormulaHash = nil
         if oldType != type {
             // Clear stale formula parameter layer stacks from the old type
             parameterPipeline?.clearFormulaStacks()
@@ -239,6 +244,26 @@ final class UISettingsCache {
             // Reset now targets the freshly-selected type's defaults (not the
             // previously-loaded scene's type). Snapshot after defaults applied.
             _appModel?.rememberActiveResetPresetFromCurrent()
+        }
+    }
+
+    /// Activate a custom (`.threshfx`-embedded) distance estimator: compiles it
+    /// in the renderer if needed, then switches to `FractalModelType.custom` and
+    /// resets shape parameters to the formula's own defaults — mirroring
+    /// `pushFractalType`'s built-in behavior, but keyed by formula hash since
+    /// `.custom` is a single shared enum case.
+    @MainActor
+    func pushCustomFormula(_ formula: EmbeddedFormula, gestureController: GestureController?) {
+        guard let appModel = _appModel else { return }
+        Task { @MainActor in
+            let result = await appModel.installEmbeddedFormulaIfNeededAndWait(formula)
+            guard result != .failed else { return }
+            settings?.fractalType = .custom
+            activeCustomFormulaHash = formula.shortHash
+            parameterPipeline?.clearFormulaStacks()
+            gestureController?.applyFractalDefaults()
+            loadFromSettings()
+            appModel.rememberActiveResetPresetFromCurrent()
         }
     }
     
@@ -356,6 +381,64 @@ final class UISettingsCache {
 
     func commitPlatformRadius() {
         settings?.platformRadius = display.platformRadius
+    }
+
+    /// The current containment mode, derived from the bounding-shape and scrunch
+    /// enable flags. Bounded/Surroundings/Free are the three canonical single-mode
+    /// combos; `.custom` is the overridden state where BOTH are on at once (only
+    /// reachable via the individual side toggles, never the picker). See
+    /// `MixedContainment`.
+    var mixedContainment: MixedContainment {
+        let bounded = quality.boundingSphereSkipEnabled
+        let scrunch = quality.envScrunchEnabled
+        switch (bounded, scrunch) {
+        case (true, true):   return .custom
+        case (true, false):  return .bounded
+        case (false, true):  return .surroundings
+        case (false, false): return .free
+        }
+    }
+
+    /// Apply a canonical containment mode from the top-bar picker: sets the
+    /// bounding-shape and scrunch flags MUTUALLY EXCLUSIVELY. Entering
+    /// `.surroundings` also defaults Contain to Blend when it was still Off —
+    /// without Contain the scrunch mirrors past scanned walls (the room scan is
+    /// an unsigned distance field). `.custom` is a derived, read-only state, so
+    /// it's a no-op here (there's no canonical combo to set). Every flag touched
+    /// is scene-persisted (FractalPreset), so the mode is captured on save.
+    func applyMixedContainment(_ mode: MixedContainment) {
+        guard mode != .custom else { return }
+        let bounded = (mode == .bounded)
+        let scrunch = (mode == .surroundings)
+        quality.boundingSphereSkipEnabled = bounded
+        push(\.boundingSphereSkipEnabled, value: bounded)
+        quality.envScrunchEnabled = scrunch
+        push(\.envScrunchEnabled, value: scrunch)
+        if scrunch && quality.envScrunchContain == 0 {
+            quality.envScrunchContain = 2
+            push(\.envScrunchContain, value: 2)
+        }
+    }
+
+    /// Toggle the bounding shape INDEPENDENTLY — the individual side/quick
+    /// toggle, which does not touch Scrunch. Leaving both bounding and scrunch
+    /// on moves the Containment picker to `.custom`.
+    func setBoundingShapeEnabled(_ on: Bool) {
+        quality.boundingSphereSkipEnabled = on
+        push(\.boundingSphereSkipEnabled, value: on)
+    }
+
+    /// Toggle Scrunch INDEPENDENTLY — the individual side/quick toggle, which
+    /// does not touch the bounding shape. Turning it on defaults Contain to
+    /// Blend when it was still Off (same reason as the picker path). Leaving
+    /// both on moves the Containment picker to `.custom`.
+    func setScrunchEnabled(_ on: Bool) {
+        quality.envScrunchEnabled = on
+        push(\.envScrunchEnabled, value: on)
+        if on && quality.envScrunchContain == 0 {
+            quality.envScrunchContain = 2
+            push(\.envScrunchContain, value: 2)
+        }
     }
 
     func commitGradientCycleEffect() {

@@ -294,11 +294,54 @@ enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic Color", `stat
 /// Where a Quick Toggles tile's full controls live. Long-pressing a tile
 /// navigates to the matching tab/sub-tab via `ContentView.openQuickToggleHome(_:)`.
 enum QuickToggleHome {
-    case effectsAtmosphere   // Glow, Bloom, Fog
-    case effectsDynamic      // Hue Rotation, Pulse, Gradient Cycle, Linear Rail, Polar Rotation, Julia Drift, Beat Flash
-    case shapeSpace          // Sphere Projection
-    case shapePerformance    // Smart Advance, Coherent Packet, Self-Shadows, Bounding Sphere Skip
-    case audioReactive       // Audio Reactive + bass/mid/treble/beat
+    case effectsAtmosphere      // Glow, Bloom, Fog
+    case effectsDynamic         // Hue Rotation, Pulse, Gradient Cycle, Linear Rail, Polar Rotation, Julia Drift, Beat Flash
+    case shapeSpace             // Spherical Inversion, Safety Bubble, Detail
+    case shapeTransformations   // Sphere Projection, Spherical Inversion, warp stack
+    case shapeBounding          // Containment: Bounding Shape, Scrunch to Surroundings, Bound to Space
+    case shapePerformance       // Smart Advance, Coherent Packet, Self-Shadows, Bounding Sphere Skip
+    case audioReactive          // Audio Reactive + bass/mid/treble/beat
+}
+
+/// How a scene is contained in the room — the headline framing over the two
+/// mutually-exclusive grounding modes (Bounding Shape vs Scrunch to
+/// Surroundings). This is the concept that distinguishes an intentionally
+/// *unbounded* Mixed scene from a bounded one:
+///
+///  - `.bounded`      — a bounding shape holds the fractal. The safe default:
+///                      big/overwhelming fractals stay pre-gated behind a shape.
+///  - `.surroundings` — no bounding shape; the fractal conforms to the scanned
+///                      room (Scrunch), grounding it to real surfaces. Best in
+///                      Mixed immersion.
+///  - `.free`         — no containment; the fractal fills the space unbounded.
+///
+/// Derived from the underlying enable flags (both scene-persisted), so it needs
+/// no separate saved field — a scene records its mode simply by saving its
+/// Bounding Shape / Scrunch toggles.
+enum MixedContainment: String, CaseIterable, Identifiable {
+    case bounded = "Bounded"
+    case surroundings = "Surroundings"
+    case free = "Free"
+    /// Derived, read-only override state: BOTH a bounding shape and Scrunch are
+    /// on at once. Only reachable by flipping the individual side/quick toggles
+    /// (the top-bar picker is mutually exclusive); tapping it in the picker is a
+    /// no-op. Pick Bounded/Surroundings/Free to snap back to a single mode.
+    case custom = "Custom"
+
+    var id: String { rawValue }
+
+    var help: String {
+        switch self {
+        case .bounded:
+            return "The fractal is held inside a bounding shape — the safe default. Big or busy fractals stay gated behind the shape instead of filling your space."
+        case .surroundings:
+            return "No bounding shape — the fractal conforms to your scanned surroundings (Scrunch), grounding it to the real room. Best in Mixed immersion."
+        case .free:
+            return "No containment — the fractal fills the space unbounded. Most immersive, least predictable."
+        case .custom:
+            return "A manual mix — both a bounding shape and Scrunch are on at once, set from the toggles below. Pick Bounded, Surroundings, or Free to snap back to a single mode."
+        }
+    }
 }
 /// Inner tabs of the Settings panel. Drives the segmented picker in
 /// `ContentView.settingsTabContent` and the corresponding switch dispatch.

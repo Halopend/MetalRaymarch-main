@@ -95,6 +95,7 @@
   "colorSchemeShadows" : -0.018,
   "colorSchemeTransitionDuration" : 2,
   "colorSchemeVibrance" : 0.8,
+  "coneMarchCompatible" : true,
   "createdAt" : "2026-06-16T03:17:25Z",
   "detailScale" : 1.6574181,
   "fogEffect" : {
@@ -123,7 +124,7 @@
     0,
     0
   ],
-  "fractalIterations" : 9,
+  "fractalIterations" : 7,
   "fractalScale" : 2.8,
   "fractalType" : "mandelboxSphereProjection",
   "glowEffect" : {
@@ -309,6 +310,7 @@
     "speed" : 1
   },
   "rating" : 0,
+  "recommendedQuality" : "high",
   "resolutionScale" : 1,
   "safetyBubbleBlend" : 1,
   "safetyBubbleEnabled" : true,

@@ -8,8 +8,10 @@ import AVKit
 ///   3. Fingers (per-finger actions, read-only) + menu-open gesture picker
 ///   4. Sharing (analytics on by default; user can opt out + username)
 ///
-/// All five navigation icons and back/next buttons update the same
-/// `currentPage` state, so the flow is a single TabView.
+/// Each page scrolls independently; a shared footer pins Back/Next and
+/// the page indicator to the bottom so they stay reachable at any
+/// window size. Deliberately NOT a TabView — on visionOS a TabView
+/// grows a left tab-bar ornament with blank icons.
 struct FirstLaunchWindowView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.colorScheme) private var colorScheme
@@ -29,45 +31,30 @@ struct FirstLaunchWindowView: View {
 
     private let pageCount = 5
 
-    /// One glyph per page, in page order, shown by the page indicator below.
-    private let pageIcons: [String] = [
-        AppIcons.boltTrianglebadgeExclamationmarkFill, // 0: Safety
-        AppIcons.sparkles,                             // 1: Welcome
-        AppIcons.move3d,                                // 2: Movement + Scale
-        AppIcons.handTapFill,                           // 3: Fingers
-        AppIcons.person3Fill                            // 4: Sharing
-    ]
-
     var body: some View {
         VStack(spacing: 0) {
-            // Page indicator (5 icons, current one is accent-filled).
-            HStack(spacing: 10) {
-                ForEach(0..<pageCount, id: \.self) { i in
-                    Image(systemName: pageIcons[i])
-                        .font(.system(size: IconSize.small, weight: .semibold))
-                        .foregroundStyle(i == currentPage ? Color.white : Color.secondary)
-                        .frame(width: 26, height: 26)
-                        .background(
-                            Circle().fill(i == currentPage ? Color.accentColor : Color.secondary.opacity(0.15))
-                        )
-                        .accessibilityLabel("Page \(i + 1) of \(pageCount)")
+            // Scrollable page body — the footer below stays pinned, so
+            // shrinking the window scrolls the content instead of
+            // crushing or clipping it.
+            ScrollView {
+                Group {
+                    switch currentPage {
+                    case 0: safetyPage
+                    case 1: welcomePage
+                    case 2: controlsPage
+                    case 3: fingersPage
+                    default: sharingPage
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.top, 16)
-            .padding(.bottom, 8)
+            .animation(.default, value: currentPage)
 
-            TabView(selection: $currentPage) {
-                safetyPage.tag(0)
-                welcomePage.tag(1)
-                controlsPage.tag(2)
-                fingersPage.tag(3)
-                sharingPage.tag(4)
-            }
-            #if os(visionOS)
-            .tabViewStyle(.automatic)
-            #endif
+            Divider()
+
+            navigationFooter
         }
-        .frame(minWidth: 680, idealWidth: 980, maxWidth: 980, minHeight: 600, idealHeight: 820, maxHeight: 820)
+        .frame(minWidth: 680, idealWidth: 980, maxWidth: .infinity, minHeight: 520, idealHeight: 820, maxHeight: .infinity)
         .background(windowSurfaceFill, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -82,6 +69,55 @@ struct FirstLaunchWindowView: View {
             leftHanded = appModel.renderSettings.leftHandedMode
             menuGestureStyle = MenuGestureStarterStyle.style(for: appModel.renderSettings.menuToggleGestureMode) ?? .palmer
         }
+    }
+
+    // MARK: - Navigation footer
+
+    /// Shared bottom bar: large Back/Next buttons flanking simple page
+    /// dots. Buttons get a generous minimum size so they're easy to hit
+    /// (especially with eye/hand targeting on visionOS).
+    private var navigationFooter: some View {
+        HStack {
+            Button {
+                withAnimation { currentPage -= 1 }
+            } label: {
+                Text("Back")
+                    .frame(minWidth: 80, minHeight: 32)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .opacity(currentPage == 0 ? 0 : 1)
+            .disabled(currentPage == 0)
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                ForEach(0..<pageCount, id: \.self) { i in
+                    Circle()
+                        .fill(i == currentPage ? Color.accentColor : Color.secondary.opacity(0.3))
+                        .frame(width: 8, height: 8)
+                        .accessibilityLabel("Page \(i + 1) of \(pageCount)")
+                }
+            }
+
+            Spacer()
+
+            Button {
+                if currentPage == pageCount - 1 {
+                    completeOnboarding()
+                } else {
+                    withAnimation { currentPage += 1 }
+                }
+            } label: {
+                Text(currentPage == pageCount - 1 ? "Start Exploring" : "Next")
+                    .frame(minWidth: 140, minHeight: 32)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(currentPage == 0 && !acknowledgedFlash)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
     }
 
     private var windowSurfaceFill: Color {
@@ -153,15 +189,6 @@ struct FirstLaunchWindowView: View {
             }
             .tint(.orange)
 #endif
-
-            Spacer()
-
-            HStack {
-                Spacer()
-                Button("Next") { withAnimation { currentPage = 1 } }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!acknowledgedFlash)
-            }
         }
         .padding(20)
     }
@@ -202,16 +229,6 @@ struct FirstLaunchWindowView: View {
             }
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.06)))
-
-            Spacer()
-
-            HStack {
-                Button("Back") { withAnimation { currentPage = 0 } }
-                    .buttonStyle(.bordered)
-                Spacer()
-                Button("Next") { withAnimation { currentPage = 2 } }
-                    .buttonStyle(.borderedProminent)
-            }
         }
         .padding(20)
     }
@@ -275,16 +292,6 @@ struct FirstLaunchWindowView: View {
                     appModel.renderSettings.leftHandedMode = newValue
                 }
             }
-
-            Spacer()
-
-            HStack {
-                Button("Back") { withAnimation { currentPage = 1 } }
-                    .buttonStyle(.bordered)
-                Spacer()
-                Button("Next") { withAnimation { currentPage = 3 } }
-                    .buttonStyle(.borderedProminent)
-            }
         }
         .padding(20)
     }
@@ -341,16 +348,6 @@ struct FirstLaunchWindowView: View {
             }
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.10)))
-
-            Spacer()
-
-            HStack {
-                Button("Back") { withAnimation { currentPage = 2 } }
-                    .buttonStyle(.bordered)
-                Spacer()
-                Button("Next") { withAnimation { currentPage = 4 } }
-                    .buttonStyle(.borderedProminent)
-            }
         }
         .padding(20)
     }
@@ -513,16 +510,6 @@ struct FirstLaunchWindowView: View {
                 RoundedRectangle(cornerRadius: 12)
                     .strokeBorder(Color.blue.opacity(0.15), lineWidth: 1)
             )
-
-            Spacer()
-
-            HStack {
-                Button("Back") { withAnimation { currentPage = 3 } }
-                    .buttonStyle(.bordered)
-                Spacer()
-                Button("Start Exploring", action: completeOnboarding)
-                    .buttonStyle(.borderedProminent)
-            }
         }
         .padding(20)
     }

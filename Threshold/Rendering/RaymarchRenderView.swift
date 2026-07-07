@@ -1218,7 +1218,8 @@ final class ThresholdMacRenderer {
         applyDesktopInput(appModel: appModel, settings: settings, deltaTime: deltaTime)
         settings.interpolateToTargets(deltaTime: Float(deltaTime))
         settings.updateLimitFlash(deltaTime: Float(deltaTime))
-        settings.updateColorSchemeTransition(deltaTime: Float(deltaTime))
+        settings.updateColorSchemeTransition(deltaTime: Float(deltaTime),
+                                             mixedImmersionActive: appModel.immersionStyleForRenderer == .mixed)
 
         let isAudioMode = settings.lightingMode == .audioReactive ||
             settings.lightingMode == .visualizer ||
