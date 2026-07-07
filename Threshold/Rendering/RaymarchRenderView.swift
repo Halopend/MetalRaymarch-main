@@ -691,11 +691,16 @@ final class ThresholdMacRenderer {
             let effectiveScale = adaptiveResolution.currentScale(ceiling: resolutionScale)
             let inputWidth = max(1, Int((Float(drawableWidth) * effectiveScale).rounded()))
             let inputHeight = max(1, Int((Float(drawableHeight) * effectiveScale).rounded()))
-            // MetalFX temporal supports at most 3× per dimension; clamp the
-            // temporal input up to `output / 3` so the lowest slider settings
+            // MetalFX temporal supports at most 3× per dimension and rejects
+            // inputs with a short edge under `minimumInputShortEdge`; clamp the
+            // temporal input up to both floors so the lowest slider settings
             // stay on the temporal path instead of falling back to spatial.
-            let minTemporalWidth = Int((Double(drawableWidth) / MacTemporalUpscaler.maxScaleFactor).rounded(.up))
-            let minTemporalHeight = Int((Double(drawableHeight) / MacTemporalUpscaler.maxScaleFactor).rounded(.up))
+            let minTemporalWidth = min(drawableWidth, max(
+                Int((Double(drawableWidth) / MacTemporalUpscaler.maxScaleFactor).rounded(.up)),
+                MacTemporalUpscaler.minimumInputShortEdge))
+            let minTemporalHeight = min(drawableHeight, max(
+                Int((Double(drawableHeight) / MacTemporalUpscaler.maxScaleFactor).rounded(.up)),
+                MacTemporalUpscaler.minimumInputShortEdge))
             let temporalInputWidth = max(inputWidth, minTemporalWidth)
             let temporalInputHeight = max(inputHeight, minTemporalHeight)
             if motionPipelineState != nil,

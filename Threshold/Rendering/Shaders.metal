@@ -4570,10 +4570,17 @@ fragment float2 macMotionFragment(MacBlitVertexOut in [[stage_in]],
                                    address::clamp_to_edge);
     float depth = depthTex.sample(depthSampler, in.texCoord);
 
-    // No-hit background writes a near-zero depth; reprojecting it yields garbage,
-    // so treat it as static (zero motion → MetalFX keeps the history sample).
+    // No-hit background writes a near-zero depth; reprojecting it directly
+    // yields garbage. But ZERO motion is wrong too: under camera rotation the
+    // sky/fog visibly slides across the screen, and telling MetalFX "this
+    // pixel didn't move" makes it blend history from the wrong direction —
+    // smeared, ghosted silhouettes against the background. Reproject a far
+    // point along this pixel's view ray instead (clamp depth toward the far
+    // plane) so rotation tracks the background and history stays sharp.
+    // (Same policy as ThresholdKit's march_offscreen aux path: a miss uses
+    // the far point along the ray.)
     if (depth < 1e-4) {
-        return float2(0.0);
+        depth = 0.9999;
     }
 
     // texCoord (origin top-left) → NDC.
