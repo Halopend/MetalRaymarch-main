@@ -180,6 +180,8 @@ final class ICloudBackupManager {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
         let fm = FileManager.default
 
         do {
@@ -195,7 +197,15 @@ final class ICloudBackupManager {
             let musicPresetsDir = folder.appendingPathComponent(musicPresetsSubdir, isDirectory: true)
             try fm.createDirectory(at: scenesDir, withIntermediateDirectories: true)
             try fm.createDirectory(at: musicPresetsDir, withIntermediateDirectories: true)
-            for preset in presets {
+            // MERGE with what's already in the cloud (newest-wins) BEFORE writing: a
+            // "Back Up Now" must not overwrite a newer copy another device pushed, nor
+            // drop cloud-only presets. Union — nothing is deleted here (deletions come
+            // via tombstones). Read both folders + legacy flat .threshmp in Scenes/.
+            let cloudPresets: [FractalPreset] =
+                decodeAll(in: scenesDir, extensions: ThresholdExportFormat.extensions(in: .preset), decoder: decoder)
+                + decodeAll(in: musicPresetsDir, extensions: ThresholdExportFormat.extensions(in: .preset), decoder: decoder)
+            let mergedPresets = BackupMerge.newestWins(local: presets, cloud: cloudPresets, timestamp: { $0.updatedAt })
+            for preset in mergedPresets {
                 let hasMusic = !(preset.musicReactiveMappings?.isEmpty ?? true)
                 let format = ThresholdExportFormat.preset(hasMusic: hasMusic)
                 let dir = hasMusic ? musicPresetsDir : scenesDir
@@ -204,30 +214,27 @@ final class ICloudBackupManager {
                 let data = try encoder.encode(preset)
                 try data.write(to: url, options: .atomic)
             }
-            // NON-DESTRUCTIVE sync: we intentionally do NOT prune cloud files that are
-            // absent from the local set. The old blind mirror let a stale/empty local
-            // list (a failed decode falling back to an older backup) or a second device
-            // silently DELETE presets from the cloud. Deletions will propagate via
-            // tombstones, not by wiping whatever isn't local at this instant.
-            // (Full merge + tombstones is being built incrementally; this is step 1.)
 
             // ── Animations ───────────────────────────────────────────────
             let animDir = folder.appendingPathComponent(animationsSubdir, isDirectory: true)
             try fm.createDirectory(at: animDir, withIntermediateDirectories: true)
-            for scene in scenes {
+            // Merge with cloud (newest-wins by modifiedAt) before writing — same
+            // rationale as presets. Union; no deletion.
+            let cloudScenes: [AnimationScene] =
+                decodeAll(in: animDir, extensions: ThresholdExportFormat.extensions(in: .animation), decoder: decoder)
+            let mergedScenes = BackupMerge.newestWins(local: scenes, cloud: cloudScenes, timestamp: { $0.modifiedAt })
+            for scene in mergedScenes {
                 let ext = ThresholdExportFormat.animation(hasSong: scene.attachedSong != nil).ext
                 let fileName = sanitizedFileName(scene.name, id: scene.id, ext: ext)
                 let url = animDir.appendingPathComponent(fileName)
                 let data = try encoder.encode(scene)
                 try data.write(to: url, options: .atomic)
             }
-            // Non-destructive (see the presets block above): no prune of cloud-only
-            // animation files. Deletions will come via tombstones, not a blind mirror.
 
             // ── Metadata ─────────────────────────────────────────────────
             let meta = BackupMetadata(date: Date(),
-                                      presetsCount: presets.count,
-                                      scenesCount: scenes.count)
+                                      presetsCount: mergedPresets.count,
+                                      scenesCount: mergedScenes.count)
             let metaData = try encoder.encode(meta)
             try metaData.write(to: folder.appendingPathComponent(metadataFile),
                                options: .atomic)
@@ -274,16 +281,25 @@ final class ICloudBackupManager {
                     payload.apply(to: settings)
                     SettingsPersistence.saveAll(from: settings)
                 }
+                // MERGE cloud into local (newest-wins) rather than replacing, so a
+                // restore never drops presets/scenes that exist only on this device
+                // (not yet backed up). Union — no deletion.
                 if !restored.presets.isEmpty {
-                    presetManager.replaceAll(with: restored.presets)
+                    let merged = BackupMerge.newestWins(local: presetManager.presets,
+                                                        cloud: restored.presets,
+                                                        timestamp: { $0.updatedAt })
+                    presetManager.replaceAll(with: merged)
                 }
-                // Only replace USER scenes from cloud — bundled defaults are
-                // recreated on launch and live as overrides if the user edited
-                // them. Filter out anything matching a default scene ID.
+                // Scenes: merge only USER scenes (bundled defaults are recreated on
+                // launch and live as overrides if the user edited them). Keep
+                // local-only user scenes too.
                 if !restored.scenes.isEmpty {
-                    let userOnly = restored.scenes.filter { !DefaultScenes.isDefault($0.id) }
-                    if !userOnly.isEmpty {
-                        animationManager?.replaceUserScenes(with: userOnly)
+                    let cloudUser = restored.scenes.filter { !DefaultScenes.isDefault($0.id) }
+                    let localUser = (animationManager?.scenes ?? []).filter { !DefaultScenes.isDefault($0.id) }
+                    let merged = BackupMerge.newestWins(local: localUser, cloud: cloudUser,
+                                                        timestamp: { $0.modifiedAt })
+                    if !merged.isEmpty {
+                        animationManager?.replaceUserScenes(with: merged)
                     }
                 }
                 self.lastSyncDate = Date()
