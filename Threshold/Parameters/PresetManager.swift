@@ -40,6 +40,74 @@ enum ThresholdExportFormat: CaseIterable, Sendable {
         case .customFormula: return "Custom formula (standalone shader)"
         }
     }
+
+    // MARK: - Routing
+
+    /// Broad kind used to route imports and group extensions by payload.
+    enum Category { case preset, animation, formula }
+
+    var category: Category {
+        switch self {
+        case .scenePreset, .musicPreset: return .preset
+        case .animationScene, .musicVideoScene: return .animation
+        case .customFormula: return .formula
+        }
+    }
+
+    /// Resolve a format from a filename extension (leading dot optional, any case).
+    /// Returns nil for anything Threshold doesn't recognise.
+    init?(fileExtension: String) {
+        var e = fileExtension.lowercased()
+        if e.hasPrefix(".") { e.removeFirst() }
+        guard let match = Self.allCases.first(where: { $0.ext == e }) else { return nil }
+        self = match
+    }
+
+    /// The preset format for a preset, chosen by whether it carries music mappings:
+    /// `.threshmp` when music-reactive, `.threshscene` otherwise.
+    static func preset(hasMusic: Bool) -> ThresholdExportFormat { hasMusic ? .musicPreset : .scenePreset }
+
+    /// The animation format, chosen by whether the scene has an attached song:
+    /// `.threshanimv` when it does, `.threshanim` otherwise.
+    static func animation(hasSong: Bool) -> ThresholdExportFormat { hasSong ? .musicVideoScene : .animationScene }
+
+    /// Every extension belonging to a category — for directory scans, prune, and decode.
+    static func extensions(in category: Category) -> [String] {
+        allCases.filter { $0.category == category }.map(\.ext)
+    }
+
+    // MARK: - Presentation (import sheet / preset list)
+
+    /// Human-facing name for the format.
+    var displayName: String {
+        switch self {
+        case .scenePreset:     return "Fractal Scene"
+        case .musicPreset:     return "Music Preset"
+        case .animationScene:  return "Animation"
+        case .musicVideoScene: return "Music Video Animation"
+        case .customFormula:   return "Custom Formula"
+        }
+    }
+
+    /// SF Symbol representing the format.
+    var iconName: String {
+        switch self {
+        case .scenePreset:     return "cube.transparent"
+        case .musicPreset:     return "music.note.list"
+        case .animationScene:  return "film.stack"
+        case .musicVideoScene: return "music.note.tv"
+        case .customFormula:   return "function"
+        }
+    }
+
+    /// Accent colour used when presenting the format.
+    var accentColor: Color {
+        switch self {
+        case .scenePreset, .customFormula:       return .purple
+        case .musicPreset:                       return .blue
+        case .animationScene, .musicVideoScene:  return .green
+        }
+    }
 }
 
 /// Runs an export (JSON encode + temp-file write, tens of ms for large

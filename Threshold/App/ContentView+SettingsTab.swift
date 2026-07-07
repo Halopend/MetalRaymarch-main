@@ -979,7 +979,7 @@ extension ContentView {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(preset.name).font(.subheadline.weight(.medium))
                                 HStack(spacing: 6) {
-                                    Text(hasMusic ? ".threshmp" : ".threshscene")
+                                    Text(".\(ThresholdExportFormat.preset(hasMusic: hasMusic).ext)")
                                     if hasMusic {
                                         Label("Music", systemImage: AppIcons.musicNote)
                                     }

@@ -187,7 +187,7 @@ final class ICloudBackupManager {
             var keepSceneFiles = Set<String>()
             for preset in presets {
                 let hasMusic = !(preset.musicReactiveMappings?.isEmpty ?? true)
-                let ext = hasMusic ? "threshmp" : "threshscene"
+                let ext = ThresholdExportFormat.preset(hasMusic: hasMusic).ext
                 let fileName = sanitizedFileName(preset.name, id: preset.id, ext: ext)
                 keepSceneFiles.insert(fileName)
                 let url = scenesDir.appendingPathComponent(fileName)
@@ -195,14 +195,14 @@ final class ICloudBackupManager {
                 try data.write(to: url, options: .atomic)
             }
             pruneFiles(in: scenesDir, keep: keepSceneFiles,
-                       extensions: ["threshscene", "threshmp"])
+                       extensions: ThresholdExportFormat.extensions(in: .preset))
 
             // ── Animations ───────────────────────────────────────────────
             let animDir = folder.appendingPathComponent(animationsSubdir, isDirectory: true)
             try fm.createDirectory(at: animDir, withIntermediateDirectories: true)
             var keepAnimFiles = Set<String>()
             for scene in scenes {
-                let ext = scene.attachedSong != nil ? "threshanimv" : "threshanim"
+                let ext = ThresholdExportFormat.animation(hasSong: scene.attachedSong != nil).ext
                 let fileName = sanitizedFileName(scene.name, id: scene.id, ext: ext)
                 keepAnimFiles.insert(fileName)
                 let url = animDir.appendingPathComponent(fileName)
@@ -210,7 +210,7 @@ final class ICloudBackupManager {
                 try data.write(to: url, options: .atomic)
             }
             pruneFiles(in: animDir, keep: keepAnimFiles,
-                       extensions: ["threshanim", "threshanimv"])
+                       extensions: ThresholdExportFormat.extensions(in: .animation))
 
             // ── Metadata ─────────────────────────────────────────────────
             let meta = BackupMetadata(date: Date(),
@@ -302,13 +302,13 @@ final class ICloudBackupManager {
             // ── Scenes (Presets) ────────────────────────────────────────
             let scenesDir = folder.appendingPathComponent(scenesSubdir, isDirectory: true)
             let presets: [FractalPreset] = decodeAll(in: scenesDir,
-                                                     extensions: ["threshscene", "threshmp"],
+                                                     extensions: ThresholdExportFormat.extensions(in: .preset),
                                                      decoder: decoder)
 
             // ── Animations ───────────────────────────────────────────────
             let animDir = folder.appendingPathComponent(animationsSubdir, isDirectory: true)
             let scenes: [AnimationScene] = decodeAll(in: animDir,
-                                                     extensions: ["threshanim", "threshanimv"],
+                                                     extensions: ThresholdExportFormat.extensions(in: .animation),
                                                      decoder: decoder)
 
             return .success(RestoredData(settings: restoredSettings,
