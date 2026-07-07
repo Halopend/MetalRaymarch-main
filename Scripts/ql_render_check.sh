@@ -16,9 +16,18 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-: "${DEVELOPER_DIR:=/Applications/Xcode-beta 2.app/Contents/Developer}"
-if [[ ! -d "$DEVELOPER_DIR" ]]; then DEVELOPER_DIR="$(xcode-select -p)"; fi
+# Need a full Xcode (Metal toolchain + macOS SDK) — CommandLineTools lacks `metal`.
+# Honor a caller-provided DEVELOPER_DIR; otherwise probe known Xcode locations.
+if [[ -z "${DEVELOPER_DIR:-}" || ! -d "$DEVELOPER_DIR" ]]; then
+  for cand in \
+    /Applications/Xcode-beta.app/Contents/Developer \
+    /Applications/Xcode.app/Contents/Developer \
+    "$(xcode-select -p 2>/dev/null)"; do
+    if [[ -d "$cand" && -x "$cand/usr/bin/xcodebuild" ]]; then DEVELOPER_DIR="$cand"; break; fi
+  done
+fi
 export DEVELOPER_DIR
+echo "==> DEVELOPER_DIR=$DEVELOPER_DIR"
 
 WIRE="$REPO/ThresholdQuickLook/wire_quicklook.rb"
 BUILD="$(mktemp -d)"

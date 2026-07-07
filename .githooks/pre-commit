@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-scripts/check_no_duplicate_suffix.sh
+# Run from the repo root so the checks resolve no matter where git invoked us.
+cd "$(git rev-parse --show-toplevel)"
+
+# Reject accidentally-committed Finder/Xcode "Duplicate" files ("Foo 2.swift",
+# "Bar copy.metal"). Fast, offline, no false positives on legit numbered series.
+Scripts/check_no_duplicate_suffix.sh
+
+# NOTE: heavier gates (full test suite, embed-freshness, Quick Look render, perf)
+# are intentionally NOT run here — they need a clean build and are too slow for a
+# pre-commit. Run them before pushing:  Scripts/build.sh test   (see README).
