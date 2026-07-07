@@ -17,6 +17,11 @@ FORCE_INLINE float DE_MengerSphere(float3 pos, FormulaParams fp, float3x3 rot,
     float scale  = fp.params[0];
     float3 offset = float3(fp.params[1], fp.params[2], fp.params[3]);
     bool spherify = fp.params[4] > 0.5f;
+    // Loop-invariant: hoisted out of the iteration.
+    float3 offsetScaled = offset * (scale - 1.0f);
+    float3 negOffsetScaled = -offsetScaled;
+    float halfOffsetZn = -0.5f * offsetScaled.z;
+    float absScale = abs(scale);
 
     float3 z = pos;
     float dr = 1.0f;
@@ -27,13 +32,15 @@ FORCE_INLINE float DE_MengerSphere(float3 pos, FormulaParams fp, float3x3 rot,
 
     for (; i < iterations; ++i) {
         z = abs(z);
-        if (z.x < z.y) z.xy = z.yx;
-        if (z.x < z.z) z.xz = z.zx;
-        if (z.y < z.z) z.yz = z.zy;
+        // Branchless descending sort (x=max, y=mid, z=min).
+        float sum = z.x + z.y + z.z;
+        float mx = max(max(z.x, z.y), z.z);
+        float mn = min(min(z.x, z.y), z.z);
+        z = float3(mx, sum - mx - mn, mn);
 
-        z = z * scale - offset * (scale - 1.0f);
-        if (z.z < -0.5f * offset.z * (scale - 1.0f))
-            z.z += offset.z * (scale - 1.0f);
+        z = fma(z, scale, negOffsetScaled);
+        if (z.z < halfOffsetZn)
+            z.z += offsetScaled.z;
 
         // Optional sphere mapping (guard near-zero r²)
         if (spherify) {
@@ -46,7 +53,7 @@ FORCE_INLINE float DE_MengerSphere(float3 pos, FormulaParams fp, float3x3 rot,
         }
 
         z = rot * z;
-        dr = dr * abs(scale) + 1.0f;
+        dr = fma(dr, absScale, 1.0f);
 
         float r2 = dot(z, z);
         UpdateTrapMinR2(trap, trapIter, trapPos, r2, i, colorIterations, z);
@@ -68,18 +75,21 @@ FORCE_INLINE float DE_MengerSphere_Dist(float3 pos, FormulaParams fp, float3x3 r
     float3 offset = float3(fp.params[1], fp.params[2], fp.params[3]);
     bool spherify = fp.params[4] > 0.5f;
     float3 offsetScaled = offset * (scale - 1.0f);
+    float3 negOffsetScaled = -offsetScaled;
     float halfOffsetZn = -0.5f * offsetScaled.z;
+    float absScale = abs(scale);
 
     float3 z = pos;
     float dr = 1.0f;
 
     for (int i = 0; i < iterations; ++i) {
         z = abs(z);
-        if (z.x < z.y) z.xy = z.yx;
-        if (z.x < z.z) z.xz = z.zx;
-        if (z.y < z.z) z.yz = z.zy;
+        float sum = z.x + z.y + z.z;
+        float mx = max(max(z.x, z.y), z.z);
+        float mn = min(min(z.x, z.y), z.z);
+        z = float3(mx, sum - mx - mn, mn);
 
-        z = z * scale - offsetScaled;
+        z = fma(z, scale, negOffsetScaled);
         if (z.z < halfOffsetZn)
             z.z += offsetScaled.z;
 
@@ -93,7 +103,7 @@ FORCE_INLINE float DE_MengerSphere_Dist(float3 pos, FormulaParams fp, float3x3 r
         }
 
         z = rot * z;
-        dr = dr * abs(scale) + 1.0f;
+        dr = fma(dr, absScale, 1.0f);
     }
 
     return (fast::length(z) - 1.0f) / dr;

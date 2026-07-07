@@ -127,7 +127,7 @@ final class FractalDistanceCache {
     /// tolerates relaxedOmegaCap 1.6). Log-DE and fudge-factored estimators
     /// can locally OVERESTIMATE, which would break the baked bound.
     private static let eligibleTypes: Set<FractalModelType> = [
-        .mandelbox, .menger, .octahedron, .mengerSphere, .boxSphereFolder,
+        .mandelbox, .menger, .octahedron, .mengerSphere,
     ]
 
     /// Whether the cache may run for this frame's settings. Everything the

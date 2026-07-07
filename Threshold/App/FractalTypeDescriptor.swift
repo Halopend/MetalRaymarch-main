@@ -209,8 +209,6 @@ enum FractalTypeRegistry {
         MengerSphereDescriptor(),
         TheliPseudoKleinianDescriptor(),
         KleinianDescriptor(),
-        BoxSphereFolderDescriptor(),
-        BulatovLimitSetDescriptor(),
         // Placeholder so `.custom` always resolves; real metadata is supplied
         // at scene-load time via `registerCustom(_:)`.
         CustomFractalDescriptor.placeholder,
@@ -507,68 +505,6 @@ private final class KleinianDescriptor: FractalTypeDescriptor, @unchecked Sendab
         fp.params.7 = 0.84
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
-    }
-}
-
-private final class BoxSphereFolderDescriptor: FractalTypeDescriptor, @unchecked Sendable {
-    init() {
-        super.init(rawValue: 20, displayName: "Box Sphere Folder", icon: "cube.transparent",
-                   category: "Hybrid Folds", codableString: "boxSphereFolder", isSelectableInUI: true)
-    }
-    override func primaryEquation() -> String? { "p_{n+1} = fold_box_sphere(p_n) + c" }
-    override func defaultFormulaParams() -> FormulaParams {
-        var fp = Self.baseFormulaParams()
-        fp.params.0 = 1.0   // Offset.x
-        fp.params.1 = 1.0   // Offset.y
-        fp.params.2 = 1.0   // Offset.z
-        fp.params.3 = 1.0   // BoxFold
-        fp.params.4 = 0.25  // MinR2
-        fp.params.5 = 1.0   // MaxR2
-        fp.params.6 = 1.15  // Scale
-        fp.params.7 = 1.2   // ShapeR
-        FormulaCatalog.normalizeRotationFlags(&fp)
-        return fp
-    }
-}
-
-private final class BulatovLimitSetDescriptor: FractalTypeDescriptor, @unchecked Sendable {
-    init() {
-        super.init(rawValue: 22, displayName: "Bulatov Limit Set", icon: "hexagon",
-                   category: "Reflection Groups", codableString: "bulatovLimitSet", isSelectableInUI: true)
-    }
-    override func primaryEquation() -> String? { "p \\mapsto reflect(p)\\ \\text{until}\\ p \\in D;\\quad DE = factor / scale" }
-    override func defaultFormulaParams() -> FormulaParams {
-        // Mirrors Bulatov's "default" octahedral-symmetry preset. (When a
-        // catalog.json entry is present, FormulaCatalog.buildParams supplies these
-        // instead; kept here so the type is self-describing without the catalog.)
-        var fp = Self.baseFormulaParams()
-        fp.params.0  = 0.5       // SizeCube
-        fp.params.1  = 3.1334    // SizeOcta
-        fp.params.2  = 0.57735   // RCube  (1/√3)
-        fp.params.3  = 0.408248  // ROcta  (1/√6)
-        fp.params.4  = 4.0       // AngleCube
-        fp.params.5  = 7.0       // AngleOcta
-        fp.params.6  = 1.0       // Scale
-        fp.params.7  = 0.55555   // ROutside
-        fp.params.8  = 17.0      // MaxReflections
-        fp.params.9  = 0.15      // DistanceFactor — doubles as the step fudge (the DE
-                                 // overestimates far from the set; small = no tunneling)
-        fp.params.10 = 31.0      // GeneratorMask: cube+octa+3 mirrors, no outside sphere
-        FormulaCatalog.normalizeRotationFlags(&fp)
-        return fp
-    }
-    override var defaultViewState: FractalViewDefaults {
-        // Frame the origin-centred octahedral limit set (≈radius 2.2) at the 60°
-        // FOV — a ~4-unit eye distance fills the view. The safety bubble would clip
-        // the delicate filigree, so leave it off.
-        FractalViewDefaults(position: SIMD3<Float>(0, 0, -4.0),
-                            detailScale: 1.0,
-                            safetyBubbleEnabled: false)
-    }
-    override func qualityValues(for preset: QualityPreset) -> (fractalIterations: Int, raySteps: Int)? {
-        // Limit sets are step-heavy (conservative DistanceFactor → many small steps);
-        // give the march comfortable headroom regardless of the global quality tier.
-        (fractalIterations: 12, raySteps: 300)
     }
 }
 

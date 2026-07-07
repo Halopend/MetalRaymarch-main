@@ -83,6 +83,7 @@ class AppModel {
     static let onboardingWindowID = "OnboardingWindow"
     static let fractalBrowserWindowID = "FractalBrowserWindow"
     static let animationEditorWindowID = "AnimationEditorWindow"
+    static let controlsWindowID = "ControlsWindow"
     static let fractalSettingsDidChangeNotification = Notification.Name("AppModel.fractalSettingsDidChange")
 
     /// Posted by AppModel when an external-file import needs the immersive
@@ -120,6 +121,10 @@ class AppModel {
     }
 
     var immersiveSpaceState = ImmersiveSpaceState.closed
+    /// True while the macOS "Breakout Control Window" is open. The main window's
+    /// slide-over sidebar suppresses itself while this is set so the controls
+    /// don't appear twice.
+    var isControlsWindowOpen = false
     var rendererStartupWarmupComplete = false
     var runtimeViewMode: RuntimeViewMode = .raymarch {
         didSet {

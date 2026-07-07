@@ -32,8 +32,9 @@ FORCE_INLINE float DE_Kleinian(float3 pos, FormulaParams fp, float3x3 rot,
     float crossR  = fp.params[7];
     bool hasRotation = hasRot1Precomputed(fp);
 
-    float3 p = pos;
-    float scale = 1.0f;
+    // float4 packing: q.xyz = position, q.w = accumulated scale — the sphere
+    // fold's ×k hits all four lanes in one SIMD multiply.
+    float4 q = float4(pos, 1.0f);
 
     float trap = 1e20f;
     int trapIter = 0;
@@ -43,56 +44,54 @@ FORCE_INLINE float DE_Kleinian(float3 pos, FormulaParams fp, float3x3 rot,
     int i = 0;
     if (hasRotation) {
         for (; i < iterations; ++i) {
-            p = rot * p;
+            q.xyz = rot * q.xyz;
 
             // Box fold: 2 * clamp(p, mins, maxs) - p
-            p = fma(clamp(p, mins, maxs), float3(2.0f), -p);
+            q.xyz = fma(clamp(q.xyz, mins, maxs), float3(2.0f), -q.xyz);
 
             // Sphere fold
-            float r2 = dot(p, p);
+            float r2 = dot(q.xyz, q.xyz);
             float k = max(sphFold / max(r2, 1e-6f), 1.0f);
-            p *= k;
-            scale *= k;
+            q *= k;
 
             // Orbit trap
             if (i < trapIterations) {
-                float r2Trap = dot(p, p);
+                float r2Trap = dot(q.xyz, q.xyz);
                 if (r2Trap < trap) {
                     trap = r2Trap;
                     trapIter = i;
-                    trapPos = p;
+                    trapPos = q.xyz;
                 }
             }
         }
     } else {
         for (; i < iterations; ++i) {
-            p = fma(clamp(p, mins, maxs), float3(2.0f), -p);
+            q.xyz = fma(clamp(q.xyz, mins, maxs), float3(2.0f), -q.xyz);
 
-            float r2 = dot(p, p);
+            float r2 = dot(q.xyz, q.xyz);
             float k = max(sphFold / max(r2, 1e-6f), 1.0f);
-            p *= k;
-            scale *= k;
+            q *= k;
 
             if (i < trapIterations) {
-                float r2Trap = dot(p, p);
+                float r2Trap = dot(q.xyz, q.xyz);
                 if (r2Trap < trap) {
                     trap = r2Trap;
                     trapIter = i;
-                    trapPos = p;
+                    trapPos = q.xyz;
                 }
             }
         }
     }
 
     // Cylindrical cross-section DE
-    float rxy = length(p.xy);
-    float invScale = 1.0f / max(scale, 1e-6f);
-    float de = 0.7f * max(rxy - crossR, rxy * p.z / max(length(p), 1e-6f)) * invScale;
+    float rxy = length(q.xy);
+    float invScale = 1.0f / max(q.w, 1e-6f);
+    float de = 0.7f * max(rxy - crossR, rxy * q.z / max(length(q.xyz), 1e-6f)) * invScale;
 
     orbit.trap = trap;
     orbit.trapIteration = trapIter;
     orbit.trapPosition = trapPos;
-    orbit.finalP = p;
+    orbit.finalP = q.xyz;
     orbit.iterationsUsed = i;
 
     return de;
@@ -108,31 +107,28 @@ FORCE_INLINE float DE_Kleinian_Dist(float3 pos, FormulaParams fp, float3x3 rot, 
     float crossR  = fp.params[7];
     bool hasRotation = hasRot1Precomputed(fp);
 
-    float3 p = pos;
-    float scale = 1.0f;
+    float4 q = float4(pos, 1.0f);
 
     if (hasRotation) {
         for (int i = 0; i < iterations; ++i) {
-            p = rot * p;
-            p = fma(clamp(p, mins, maxs), float3(2.0f), -p);
-            float r2 = dot(p, p);
+            q.xyz = rot * q.xyz;
+            q.xyz = fma(clamp(q.xyz, mins, maxs), float3(2.0f), -q.xyz);
+            float r2 = dot(q.xyz, q.xyz);
             float k = max(sphFold / max(r2, 1e-6f), 1.0f);
-            p *= k;
-            scale *= k;
+            q *= k;
         }
     } else {
         for (int i = 0; i < iterations; ++i) {
-            p = fma(clamp(p, mins, maxs), float3(2.0f), -p);
-            float r2 = dot(p, p);
+            q.xyz = fma(clamp(q.xyz, mins, maxs), float3(2.0f), -q.xyz);
+            float r2 = dot(q.xyz, q.xyz);
             float k = max(sphFold / max(r2, 1e-6f), 1.0f);
-            p *= k;
-            scale *= k;
+            q *= k;
         }
     }
 
-    float rxy = length(p.xy);
-    float invScale = 1.0f / max(scale, 1e-6f);
-    return 0.7f * max(rxy - crossR, rxy * p.z / max(length(p), 1e-6f)) * invScale;
+    float rxy = length(q.xy);
+    float invScale = 1.0f / max(q.w, 1e-6f);
+    return 0.7f * max(rxy - crossR, rxy * q.z / max(length(q.xyz), 1e-6f)) * invScale;
 }
 
 #endif /* DE_Kleinian_h */

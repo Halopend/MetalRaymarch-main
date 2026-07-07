@@ -36,6 +36,20 @@ struct ThresholdMacApp: App {
                 Task { await UsageAnalytics.shared.endSession() }
             }
         }
+        // Breakout controls window — the same control panel that slides over
+        // the render view, hosted in its own window so it can live on another
+        // screen (or beside the render window) without covering the fractal.
+        Window("Threshold Controls", id: AppModel.controlsWindowID) {
+            ContentView()
+                .environment(appModel)
+                .frame(minWidth: 980, minHeight: 576)
+                .background(Color(white: 0.09))
+                .onAppear { appModel.isControlsWindowOpen = true }
+                .onDisappear { appModel.isControlsWindowOpen = false }
+        }
+        .defaultSize(width: 1040, height: 820)
+        .windowResizability(.contentMinSize)
+
         .commands {
             CommandGroup(replacing: .saveItem) {
                 Button("Save Preset…") {
@@ -69,7 +83,10 @@ private struct ThresholdMacRootView: View {
     private let panelAnimation = MenuChrome.panelSpring
 
     private var shouldShowControls: Bool {
-        isControlsPinnedOpen || isHoverVisible || appModel.isMenuInteractionActive || activeMenuTrackingCount > 0
+        // While the controls are broken out into their own window, never show
+        // the slide-over sidebar — otherwise the panel appears twice.
+        guard !appModel.isControlsWindowOpen else { return false }
+        return isControlsPinnedOpen || isHoverVisible || appModel.isMenuInteractionActive || activeMenuTrackingCount > 0
     }
 
     private var motionSensitivePanelAnimation: Animation? {

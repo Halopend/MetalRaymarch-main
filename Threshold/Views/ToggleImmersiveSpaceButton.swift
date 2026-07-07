@@ -13,6 +13,8 @@ struct ToggleImmersiveSpaceButton: View {
 #if os(visionOS)
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
+#elseif os(macOS)
+    @Environment(\.openWindow) private var openWindow
 #endif
 
     var body: some View {
@@ -62,6 +64,17 @@ struct ToggleImmersiveSpaceButton: View {
                 .frame(maxWidth: .infinity, alignment: .center)
         }
         .disabled(appModel.immersiveSpaceState == .inTransition)
+        .animation(.none, value: 0)
+        .fontWeight(.semibold)
+#elseif os(macOS)
+        Button {
+            openWindow(id: AppModel.controlsWindowID)
+        } label: {
+            Text("Breakout Control Window")
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
         .animation(.none, value: 0)
         .fontWeight(.semibold)
 #else

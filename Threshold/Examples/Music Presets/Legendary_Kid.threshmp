@@ -1,0 +1,675 @@
+{
+  "aoStrength" : 0,
+  "audioReactiveConfig" : {
+    "bassSensitivity" : 1.1,
+    "beatSensitivity" : 1.2,
+    "fractalAudioAmount" : 0.62421733,
+    "fractalAudioDamping" : 2.520331,
+    "fractalAudioReactiveEnabled" : true,
+    "fractalBeatPunch" : 0.85,
+    "midSensitivity" : 0.8,
+    "musicReactiveMappings" : [
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "23F5DCC6-6536-4C45-911A-7BD77C41AFC7",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "sinusoidal",
+        "smoothingWindow" : 0.94433755,
+        "source" : "composite",
+        "spaceWarpField" : "strength",
+        "target" : "fractalScale"
+      },
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "FDC0D341-5665-4388-9F73-7A914B4B7362",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "sinusoidal",
+        "smoothingWindow" : 0.9717918,
+        "source" : "bass",
+        "spaceWarpField" : "strength",
+        "target" : "formulaParam0"
+      },
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "442DF677-CDC0-4252-93C1-E78F5BA38A0A",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "pulse",
+        "smoothingWindow" : 0.84788376,
+        "source" : "mid",
+        "spaceWarpField" : "strength",
+        "target" : "formulaParam1"
+      },
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "FFF9C49A-92CF-48FF-BEAA-5EA305B1F343",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "sinusoidal",
+        "smoothingWindow" : 0,
+        "source" : "bass",
+        "spaceWarpField" : "strength",
+        "target" : "formulaParam2"
+      },
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "5EA8AB6E-6881-4EC2-88B1-D24292F39ECF",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "sinusoidal",
+        "smoothingWindow" : 0,
+        "source" : "mid",
+        "spaceWarpField" : "strength",
+        "target" : "formulaParam3"
+      },
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "329B91F4-647C-42A1-8704-7DA3E9418E6F",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "pulse",
+        "smoothingWindow" : 0,
+        "source" : "beat",
+        "spaceWarpField" : "strength",
+        "target" : "glow"
+      },
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "4240C9A1-D2AA-48EF-A602-D8680AD1DBC0",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "pulse",
+        "smoothingWindow" : 0,
+        "source" : "composite",
+        "spaceWarpField" : "strength",
+        "target" : "fog"
+      },
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "ADD636E6-7F2B-4D29-B2FE-B71F95C507ED",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "pulse",
+        "smoothingWindow" : 0,
+        "source" : "beat",
+        "spaceWarpField" : "strength",
+        "target" : "bloom"
+      },
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "E5D4BE90-FE90-42D4-BD74-3DE052B76E24",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "drift",
+        "smoothingWindow" : 0,
+        "source" : "mid",
+        "spaceWarpField" : "strength",
+        "target" : "saturation"
+      },
+      {
+        "amount" : 2.676684,
+        "hybridCombo" : 0.35,
+        "id" : "874A004B-EF12-45EC-B345-E88A6D4D65B7",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "pulse",
+        "smoothingWindow" : 0.00053431146,
+        "source" : "beat",
+        "spaceWarpField" : "strength",
+        "target" : "gradientOffset"
+      }
+    ],
+    "trebleSensitivity" : 0.9,
+    "tripletMusicGains" : {
+
+    }
+  },
+  "beatFlashEffect" : {
+    "enabled" : false,
+    "intensity" : 0
+  },
+  "bloomEffect" : {
+    "enabled" : true,
+    "strength" : 0.116160296
+  },
+  "boundAmbientStrength" : 0.5,
+  "boundSpaceDepth" : 4,
+  "boundSpaceHeight" : 2.5,
+  "boundSpaceWidth" : 4,
+  "boundToSpaceEnabled" : false,
+  "boundToSpaceMode" : 0,
+  "boundingShapeEnabled" : false,
+  "boundingShapeFogMode" : 0,
+  "boundingShapeRadius" : 0.7376933,
+  "boundingShapeShadowDepth" : 0.35,
+  "boundingShapeType" : 0,
+  "cellShadingEnabled" : false,
+  "cellShadingLevels" : 4,
+  "colorIterations" : 8,
+  "colorMix" : 0.55,
+  "colorScheme" : "nebula",
+  "colorSchemeAutoInterval" : 30,
+  "colorSchemeAutoTransition" : false,
+  "colorSchemeContrast" : 1.1,
+  "colorSchemeCurve" : 0,
+  "colorSchemeGamma" : 0.6,
+  "colorSchemeHighlights" : 0,
+  "colorSchemeSaturation" : 2.4247134,
+  "colorSchemeShadows" : 0,
+  "colorSchemeTransitionDuration" : 2,
+  "colorSchemeVibrance" : 0,
+  "coneMarchCompatible" : true,
+  "createdAt" : "2026-07-07T03:52:58Z",
+  "deIterationMismatch" : 0,
+  "detailScale" : 1,
+  "embeddedFormula" : {
+    "author" : "Knighty (Fragmentarium), ported by Threshold",
+    "category" : "Polychora \/ 4D",
+    "defaultColorIterations" : 4,
+    "defaultIterations" : 4,
+    "description" : "Fold-and-cut regular 24-cell polychoron (Knighty 2012), rendered via inverse stereographic projection of 3D space onto the unit 3-sphere. The principal node p is a barycentric blend of four vertex\/edge\/face\/cell centers (U,V,W,T); a 4D boost rotation on the (RotVector, w) plane spins\/dives through the hypersphere, and a fixed 3-pass abs+reflect fold across the cell plane nd=(-.5,-.5,-.5,.5) tiles the 24 cells. Distance is the min of distance-to-vertex and distance-to-edge-segments, each converted from spherical to planar by the magic DDV\/DDS formula using vertex\/segment radii.",
+    "functionStem" : "Polychora24Cell",
+    "id" : "com.puppypower.threshold.embedded.polychora24cell",
+    "metalSource" : "\/\/ === Polychora 24-Cell (fold-and-cut, stereographic) — knighty 2012 ===\n\/\/ Ported from Fragmentarium (polychora-special.frag) to Threshold's embedded-\n\/\/ formula contract. Fragmentarium's init()-computed globals are recomputed per\n\/\/ DE call into Poly24_Globals (Metal has no per-thread mutable globals).\n\/\/ NOTE: uses CIRCULAR cos\/sin (not cosh\/sinh — this is the spherical, not the\n\/\/ hyperbolic, sibling). MSL has no radians()\/degrees(): deg->rad via constant.\n\nstruct Poly24_Globals {\n    float4 p;\n    float cVR, sVR, cSR, sSR, cRA, sRA;\n    float3 rotv;\n};\n\n\/\/ 24-cell's defining reflection plane (baked: this is what makes it a 24-cell).\nconstant float4 kPoly24_nd = float4(-0.5f, -0.5f, -0.5f, 0.5f);\n\n\/\/ Mirrors Fragmentarium init(): principal node p + cos\/sin of radii & boost.\nFORCE_INLINE Poly24_Globals poly24_init(FormulaParams fp) {\n    Poly24_Globals g;\n    float U = fp.params[0];\n    float V = fp.params[1];\n    float W = fp.params[2];\n    float T = fp.params[3];\n    float VRadius = max(fp.params[4], 0.0f);\n    float SRadius = max(fp.params[5], 0.0f);\n    float3 rotVec = float3(fp.params[6], fp.params[7], fp.params[8]);\n    float RotAngle = fp.params[9];\n\n    const float invSqrt2 = 0.70710678118654752f;\n    float4 pabc = float4(0.0f, 0.0f, 0.0f, 1.0f);\n    float4 pbdc = invSqrt2 * float4(1.0f, 0.0f, 0.0f, 1.0f);\n    float4 pcda = invSqrt2 * float4(0.0f, 1.0f, 0.0f, 1.0f);\n    float4 pdba = invSqrt2 * float4(0.0f, 0.0f, 1.0f, 1.0f);\n\n    float4 pp = U * pabc + V * pbdc + W * pcda + T * pdba;\n    g.p = pp \/ max(length(pp), 1e-6f); \/\/ normalize w\/ epsilon guard (degenerate only if U=V=W=T=0)\n\n    g.cVR = cos(VRadius); g.sVR = sin(VRadius);\n    g.cSR = cos(SRadius); g.sSR = sin(SRadius);\n    float ra = RotAngle * 0.017453292519943295f; \/\/ deg -> rad (no radians() in MSL)\n    g.cRA = cos(ra); g.sRA = sin(ra);\n\n    if (dot(rotVec, rotVec) < 1e-12f) rotVec = float3(0.0f, 0.0f, 1.0f);\n    g.rotv = normalize(rotVec);\n    return g;\n}\n\n\/\/ 4D boost on the (rotv, w) plane — Fragmentarium Rotate() with\n\/\/ useCameraAsRotVector baked false. Sign matches the spherical source exactly:\n\/\/   p1.xyz += rv*(vp*(cRA-1) - p.w*sRA);  p1.w += vp*sRA + p.w*(cRA-1).\nFORCE_INLINE float4 poly24_rotate(float4 p, Poly24_Globals g) {\n    float4 p1 = p;\n    float vp = dot(g.rotv, p.xyz);\n    p1.xyz += g.rotv * (vp * (g.cRA - 1.0f) - p.w * g.sRA);\n    p1.w   += vp * g.sRA + p.w * (g.cRA - 1.0f);\n    return p1;\n}\n\n\/\/ Fixed 3-pass abs+reflect fold across nd — tiles the 24 cells.\nFORCE_INLINE float4 poly24_fold(float4 pos) {\n    for (int i = 0; i < 3; ++i) {\n        pos.xyz = abs(pos.xyz);\n        float t = -2.0f * min(0.0f, dot(pos, kPoly24_nd));\n        pos += t * kPoly24_nd;\n    }\n    return pos;\n}\n\n\/\/ Magic spherical->planar distance formula. (cr,sr) = cos\/sin of the tube\n\/\/ radius (VRadius or SRadius); (ca,sa) = cos\/sin of the spherical distance.\n\/\/ Denominators guarded against the r->1 \/ antipodal blow-up.\nFORCE_INLINE float poly24_DD(float cr, float sr, float ca, float sa, float r) {\n    float r2 = r * r;\n    float omr2 = 1.0f - r2;\n    float opr2 = 1.0f + r2;\n    float d1 = (2.0f * r * cr - omr2 * sr) \/ max(omr2 * cr + 2.0f * r * sr + opr2, 1e-6f);\n    float d2 = (2.0f * r * ca - omr2 * sa) \/ max(omr2 * ca + 2.0f * r * sa + opr2, 1e-6f);\n    return d1 - d2;\n}\n\nFORCE_INLINE float poly24_dist2Vertex(float4 z, float r, Poly24_Globals g) {\n    float ca = dot(z, g.p);\n    float sa = 0.5f * length(g.p - z) * length(g.p + z);\n    return poly24_DD(g.cVR, g.sVR, ca, sa, r);\n}\n\nFORCE_INLINE float poly24_dist2Segment(float4 z, float4 n, float r, Poly24_Globals g) {\n    float zn = dot(z, n), zp = dot(z, g.p), np = dot(n, g.p);\n    float alpha = zp - zn * np, beta = zn - zp * np;\n    float4 pm = alpha * g.p + min(0.0f, beta) * n;\n    float4 pmin = pm \/ max(length(pm), 1e-6f); \/\/ normalize w\/ epsilon guard\n    float ca = dot(z, pmin);\n    float sa = 0.5f * length(pmin - z) * length(pmin + z);\n    return poly24_DD(g.cSR, g.sSR, ca, sa, r);\n}\n\nFORCE_INLINE float poly24_dist2Segments(float4 z, float r, Poly24_Globals g) {\n    float da = poly24_dist2Segment(z, float4(1.0f, 0.0f, 0.0f, 0.0f), r, g);\n    float db = poly24_dist2Segment(z, float4(0.0f, 1.0f, 0.0f, 0.0f), r, g);\n    float dc = poly24_dist2Segment(z, float4(0.0f, 0.0f, 1.0f, 0.0f), r, g);\n    float dd = poly24_dist2Segment(z, kPoly24_nd, r, g);\n    return min(min(da, db), min(dc, dd));\n}\n\nFORCE_INLINE float DE_Polychora24Cell(float3 pos, FormulaParams fp, float3x3 rot,\n                                      int iterations, int colorIterations,\n                                      thread OrbitData& orbit) {\n    (void)iterations; (void)colorIterations; \/\/ symmetry is the fixed 3-pass fold\n    Poly24_Globals g = poly24_init(fp);\n    bool hasRotation = hasRot1Precomputed(fp);\n    float3 sp = hasRotation ? (rot * pos) : pos; \/\/ rotation preserves r\n\n    float r = length(sp);\n    float4 z4 = float4(2.0f * sp, 1.0f - r * r) * (1.0f \/ (1.0f + r * r)); \/\/ inverse stereographic\n    z4 = poly24_rotate(z4, g);\n    z4 = poly24_fold(z4);\n\n    orbit.trap = dot(z4, z4);\n    orbit.trapIteration = 0;\n    orbit.trapPosition = z4.xyz;\n    orbit.finalP = z4.xyz;\n    orbit.iterationsUsed = 3;\n\n    return min(poly24_dist2Vertex(z4, r, g), poly24_dist2Segments(z4, r, g));\n}\n\nFORCE_INLINE float DE_Polychora24Cell_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {\n    (void)iterations;\n    Poly24_Globals g = poly24_init(fp);\n    bool hasRotation = hasRot1Precomputed(fp);\n    float3 sp = hasRotation ? (rot * pos) : pos;\n\n    float r = length(sp);\n    float4 z4 = float4(2.0f * sp, 1.0f - r * r) * (1.0f \/ (1.0f + r * r));\n    z4 = poly24_rotate(z4, g);\n    z4 = poly24_fold(z4);\n\n    return min(poly24_dist2Vertex(z4, r, g), poly24_dist2Segments(z4, r, g));\n}\n",
+    "name" : "Polychora 24-Cell",
+    "params" : [
+      {
+        "default" : 1,
+        "index" : 0,
+        "max" : 1,
+        "min" : 0,
+        "name" : "U",
+        "step" : 0.01
+      },
+      {
+        "default" : 0.5045045,
+        "index" : 1,
+        "max" : 1,
+        "min" : 0,
+        "name" : "V",
+        "step" : 0.01
+      },
+      {
+        "default" : 0.5555556,
+        "index" : 2,
+        "max" : 1,
+        "min" : 0,
+        "name" : "W",
+        "step" : 0.01
+      },
+      {
+        "default" : 0,
+        "index" : 3,
+        "max" : 1,
+        "min" : 0,
+        "name" : "T",
+        "step" : 0.01
+      },
+      {
+        "default" : 0.0890411,
+        "index" : 4,
+        "max" : 0.5,
+        "min" : 0,
+        "name" : "VRadius",
+        "step" : 0.001
+      },
+      {
+        "default" : 0.02476,
+        "index" : 5,
+        "max" : 0.1,
+        "min" : 0,
+        "name" : "SRadius",
+        "step" : 0.001
+      },
+      {
+        "default" : 0,
+        "index" : 6,
+        "max" : 1,
+        "min" : 0,
+        "name" : "RotVectorX",
+        "step" : 0.01
+      },
+      {
+        "default" : 0,
+        "index" : 7,
+        "max" : 1,
+        "min" : 0,
+        "name" : "RotVectorY",
+        "step" : 0.01
+      },
+      {
+        "default" : 1,
+        "index" : 8,
+        "max" : 1,
+        "min" : 0,
+        "name" : "RotVectorZ",
+        "step" : 0.01
+      },
+      {
+        "default" : 45,
+        "index" : 9,
+        "max" : 180,
+        "min" : 0,
+        "name" : "RotAngle",
+        "step" : 1
+      }
+    ],
+    "schemaVersion" : 1,
+    "supportedEffectTags" : [
+      "safetyBubble"
+    ]
+  },
+  "envScrunchContain" : 0,
+  "envScrunchContainFeather" : 0.1,
+  "envScrunchEnabled" : false,
+  "envScrunchMode" : 0,
+  "envScrunchReach" : 0.75,
+  "envScrunchStrength" : 0.8,
+  "fogEffect" : {
+    "colorBlue" : 0.02,
+    "colorGreen" : 0.015,
+    "colorRed" : 0.01,
+    "enabled" : true,
+    "hueRotateEnabled" : false,
+    "hueRotateSpeed" : 0.1,
+    "intensity" : 0.0648925
+  },
+  "foldingLimit" : 1,
+  "formulaParamValues" : [
+    2.0614717,
+    1.2396991,
+    0.3738562,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "fractalIterations" : 9,
+  "fractalScale" : 2.1384876,
+  "fractalType" : "custom",
+  "glowEffect" : {
+    "enabled" : true,
+    "intensity" : 0.11616029
+  },
+  "gradientCycleEffect" : {
+    "enabled" : true,
+    "mirrorLoop" : true,
+    "speed" : 0.15
+  },
+  "gradientState" : {
+    "gradient" : {
+      "id" : "529D963D-3220-49EF-BC71-F3437EDB7320",
+      "mappingMode" : 5,
+      "name" : "Classic",
+      "offset" : 0.15546218,
+      "repeatCount" : 1,
+      "smoothing" : 1,
+      "stops" : [
+        {
+          "color" : [
+            0.05,
+            0.02,
+            0.02
+          ],
+          "id" : "6D8C39F5-393D-48CA-89BC-61405DE5581E",
+          "position" : 0
+        },
+        {
+          "color" : [
+            1,
+            0.1,
+            0.1
+          ],
+          "id" : "42EFB066-26CA-40A6-AA9F-CED2036ACD60",
+          "position" : 0.25
+        },
+        {
+          "color" : [
+            0.2,
+            0.4,
+            0.9
+          ],
+          "id" : "1C023367-9516-4C54-A98F-92BD6F800F6D",
+          "position" : 0.5
+        },
+        {
+          "color" : [
+            1,
+            0.8,
+            0
+          ],
+          "id" : "1A65632E-D9D1-4D29-AF21-EE32C27AEF3F",
+          "position" : 0.75
+        },
+        {
+          "color" : [
+            0,
+            0.2,
+            0.8
+          ],
+          "id" : "6FCA093C-D2D2-42D4-8839-CF6AC201DD33",
+          "position" : 1
+        }
+      ]
+    },
+    "gradientPreset" : "classic"
+  },
+  "handAttraction" : {
+    "ballScale" : 0.5,
+    "enabled" : false,
+    "forearmEnabled" : false,
+    "forearmRadius" : 0.06,
+    "pocketEnabled" : true,
+    "pocketSize" : 1.4192361,
+    "pocketSoftness" : 0.48113286,
+    "projectionDistance" : 0.08,
+    "radius" : 0.4380924,
+    "softness" : 0.73,
+    "strength" : -0.26016992
+  },
+  "hueRotationEffect" : {
+    "enabled" : true,
+    "intensity" : 0.8,
+    "speed" : 0.2
+  },
+  "id" : "F704864F-0892-49D8-B261-F1C5BCC21E21",
+  "juliaDriftEffect" : {
+    "enabled" : false,
+    "speed" : 0
+  },
+  "lightVariationRate" : 0.5,
+  "lightingMode" : "audioReactive",
+  "lightingPreset" : "Custom",
+  "lightingSoftness" : 0.35,
+  "linearRailEffect" : {
+    "amplitude" : 0.42193848,
+    "axis" : "z",
+    "enabled" : true,
+    "multiplier" : 1,
+    "orbitAmount" : 0,
+    "orbitSpeed" : 0.18,
+    "speed" : 0.0317371
+  },
+  "maxRaySteps" : 107,
+  "minDistance" : 0.8,
+  "musicReactiveMappings" : [
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "23F5DCC6-6536-4C45-911A-7BD77C41AFC7",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "sinusoidal",
+      "smoothingWindow" : 0.94433755,
+      "source" : "composite",
+      "spaceWarpField" : "strength",
+      "target" : "fractalScale"
+    },
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "FDC0D341-5665-4388-9F73-7A914B4B7362",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "sinusoidal",
+      "smoothingWindow" : 0.9717918,
+      "source" : "bass",
+      "spaceWarpField" : "strength",
+      "target" : "formulaParam0"
+    },
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "442DF677-CDC0-4252-93C1-E78F5BA38A0A",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "pulse",
+      "smoothingWindow" : 0.84788376,
+      "source" : "mid",
+      "spaceWarpField" : "strength",
+      "target" : "formulaParam1"
+    },
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "FFF9C49A-92CF-48FF-BEAA-5EA305B1F343",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "sinusoidal",
+      "smoothingWindow" : 0,
+      "source" : "bass",
+      "spaceWarpField" : "strength",
+      "target" : "formulaParam2"
+    },
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "5EA8AB6E-6881-4EC2-88B1-D24292F39ECF",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "sinusoidal",
+      "smoothingWindow" : 0,
+      "source" : "mid",
+      "spaceWarpField" : "strength",
+      "target" : "formulaParam3"
+    },
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "329B91F4-647C-42A1-8704-7DA3E9418E6F",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "pulse",
+      "smoothingWindow" : 0,
+      "source" : "beat",
+      "spaceWarpField" : "strength",
+      "target" : "glow"
+    },
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "4240C9A1-D2AA-48EF-A602-D8680AD1DBC0",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "pulse",
+      "smoothingWindow" : 0,
+      "source" : "composite",
+      "spaceWarpField" : "strength",
+      "target" : "fog"
+    },
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "ADD636E6-7F2B-4D29-B2FE-B71F95C507ED",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "pulse",
+      "smoothingWindow" : 0,
+      "source" : "beat",
+      "spaceWarpField" : "strength",
+      "target" : "bloom"
+    },
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "E5D4BE90-FE90-42D4-BD74-3DE052B76E24",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "drift",
+      "smoothingWindow" : 0,
+      "source" : "mid",
+      "spaceWarpField" : "strength",
+      "target" : "saturation"
+    },
+    {
+      "amount" : 2.676684,
+      "hybridCombo" : 0.35,
+      "id" : "874A004B-EF12-45EC-B345-E88A6D4D65B7",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "pulse",
+      "smoothingWindow" : 0.00053431146,
+      "source" : "beat",
+      "spaceWarpField" : "strength",
+      "target" : "gradientOffset"
+    }
+  ],
+  "name" : "Legendary Kid",
+  "platformEnabled" : true,
+  "platformRadius" : 1.888,
+  "polarRotationEffect" : {
+    "direction" : "off",
+    "speed" : 0
+  },
+  "position" : [
+    0,
+    0,
+    2.5081093
+  ],
+  "pulseEffect" : {
+    "amount" : 0.5,
+    "enabled" : true,
+    "speed" : 1
+  },
+  "rating" : 0,
+  "resolutionScale" : 0.34,
+  "safetyBubbleBlend" : 1,
+  "safetyBubbleEnabled" : true,
+  "safetyBubbleFadeEnabled" : true,
+  "safetyBubbleFadeWidth" : 0.1,
+  "safetyBubbleRadius" : 0.9785509,
+  "safetyBubbleShape" : 0,
+  "scale" : 1,
+  "sphereProjectionBlend" : 1,
+  "sphereProjectionEnabled" : false,
+  "sphereProjectionRadius" : 1,
+  "sphereRadius" : 0.5,
+  "sphericalInversionMode" : "off",
+  "sphericalInversionRadius" : 2,
+  "tileSize" : 0,
+  "tonemapStrength" : 0,
+  "worldRotationW" : 1,
+  "worldRotationX" : 0,
+  "worldRotationY" : 0,
+  "worldRotationZ" : 0
+}

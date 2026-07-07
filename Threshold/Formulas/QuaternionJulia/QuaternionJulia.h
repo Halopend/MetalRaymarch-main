@@ -35,12 +35,9 @@ FORCE_INLINE float DE_QuaternionJulia(float3 pos, FormulaParams fp, float3x3 rot
         );
 
         // q = q*q + c (quaternion squaring)
-        q = float4(
-            q.x*q.x - q.y*q.y - q.z*q.z - q.w*q.w,
-            2.0f*q.x*q.y,
-            2.0f*q.x*q.z,
-            2.0f*q.x*q.w
-        ) + c;
+        // q² = (x² - |yzw|², 2x·yzw): share the 2x factor across three lanes.
+        float x2 = q.x + q.x;
+        q = float4(q.x*q.x - dot(q.yzw, q.yzw), x2 * q.yzw) + c;
 
         float r2 = dot(q, q);
         UpdateTrapMinR2(trap, trapIter, trapPos, r2, i, colorIterations, q.xyz);
@@ -76,12 +73,9 @@ FORCE_INLINE float DE_QuaternionJulia_Dist(float3 pos, FormulaParams fp, float3x
             q.x*dq.w + q.y*dq.z - q.z*dq.y + q.w*dq.x
         );
 
-        q = float4(
-            q.x*q.x - q.y*q.y - q.z*q.z - q.w*q.w,
-            2.0f*q.x*q.y,
-            2.0f*q.x*q.z,
-            2.0f*q.x*q.w
-        ) + c;
+        // q² = (x² - |yzw|², 2x·yzw): share the 2x factor across three lanes.
+        float x2 = q.x + q.x;
+        q = float4(q.x*q.x - dot(q.yzw, q.yzw), x2 * q.yzw) + c;
 
         if (dot(q, q) > threshold) break;
     }

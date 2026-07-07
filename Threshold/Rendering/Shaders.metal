@@ -2331,7 +2331,6 @@ FORCE_INLINE float relaxedOmegaCap(int type) {
     case FractalTypeMenger:
     case FractalTypeOctahedron:
     case FractalTypeMengerSphere:
-    case FractalTypeBoxSphereFolder:
         // Box/fold DEs tolerate the most over-relaxation; the overstep-failure
         // retreat keeps it hit-safe, so the user's Over-Relaxation slider may push
         // the auto-ramp up to here (default ramp stops at 1.4).
@@ -2340,12 +2339,6 @@ FORCE_INLINE float relaxedOmegaCap(int type) {
     case FractalTypeMandelbulbJulia:
     case FractalTypeQuaternionJulia:
         return 1.1f;
-    case FractalTypeBulatovLimitSet:
-        // Reflection-group LIMIT SET: the `factor/scale` estimator OVERESTIMATES
-        // far from the (measure-zero) set, so even plain sphere tracing must not
-        // over-step or rays tunnel clean through the thin filigree (→ blank). The
-        // conservative step lives in the low default DistanceFactor; pin omega to 1.
-        return 1.0f;
     default: // Kleinian family, custom formulas, future types
         return 1.2f;
     }
@@ -3774,8 +3767,7 @@ FORCE_INLINE bool coneSafetyForFamily(int type, thread bool& coneTrusted) {
     coneTrusted = (type == FractalTypeMandelbox)
                || (type == FractalTypeMenger)
                || (type == FractalTypeOctahedron)
-               || (type == FractalTypeMengerSphere)
-               || (type == FractalTypeBoxSphereFolder);
+               || (type == FractalTypeMengerSphere);
     return coneTrusted;
 }
 

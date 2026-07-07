@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 enum FractalBrowseTab: String, CaseIterable {
     case jumpingOff = "Jumping Off"
@@ -689,6 +692,8 @@ struct FractalFormulaGrid: View {
     let gestureController: GestureController?
     let presetManager: PresetManager?
 
+    @State private var exportShareItem: ExportShareItem?
+
     private let columns = Array(repeating: GridItem(.flexible(minimum: 120), spacing: 8), count: 3)
     private let orderedTypes: [FractalModelType] = FractalFormulaOrder.orderedTypes
 
@@ -716,21 +721,28 @@ struct FractalFormulaGrid: View {
             if !customFormulas.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     formulaSectionLabel("Custom")
-                    Text("Formulas embedded in your scenes.")
+                    Text("Formulas embedded in your scenes. Long-press a tile to reveal its .threshfx file.")
                         .font(.system(size: 9))
                         .foregroundStyle(.tertiary)
                     LazyVGrid(columns: columns, spacing: 8) {
                         ForEach(customFormulas, id: \.shortHash) { formula in
                             FractalCustomFormulaCell(
                                 formula: formula,
-                                isSelected: cache.fractalType == .custom && cache.activeCustomFormulaHash == formula.shortHash
-                            ) {
-                                cache.pushCustomFormula(formula, gestureController: gestureController)
-                            }
+                                isSelected: cache.fractalType == .custom && cache.activeCustomFormulaHash == formula.shortHash,
+                                action: {
+                                    cache.pushCustomFormula(formula, gestureController: gestureController)
+                                },
+                                onReveal: {
+                                    revealFormulaFile(formula)
+                                }
+                            )
                         }
                     }
                 }
             }
+        }
+        .sheet(item: $exportShareItem) { item in
+            ShareSheet(activityItems: [item.url])
         }
     }
 
@@ -739,6 +751,21 @@ struct FractalFormulaGrid: View {
             .font(.system(size: 10, weight: .bold))
             .foregroundStyle(.tertiary)
             .textCase(.uppercase)
+    }
+
+    /// Writes the formula out to a standalone `.threshfx` file and hands the
+    /// user straight to it: reveals it in Finder on Mac, or offers the
+    /// share/Save-to-Files sheet on iOS/visionOS (there's no Finder-equivalent
+    /// "reveal" API on those platforms).
+    private func revealFormulaFile(_ formula: EmbeddedFormula) {
+        let container = EmbeddedFormulaContainer(formula: formula)
+        exportOffMain({ container.exportToFile() }) { url in
+            #if os(macOS)
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            #else
+            exportShareItem = ExportShareItem(url: url)
+            #endif
+        }
     }
 }
 
@@ -749,6 +776,7 @@ struct FractalCustomFormulaCell: View {
     let formula: EmbeddedFormula
     let isSelected: Bool
     let action: () -> Void
+    var onReveal: (() -> Void)? = nil
 
     var body: some View {
         Button(action: action) {
@@ -794,5 +822,9 @@ struct FractalCustomFormulaCell: View {
         .buttonStyle(.plain)
         .accessibilityLabel(formula.name)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.6, maximumDistance: 24)
+                .onEnded { _ in onReveal?() }
+        )
     }
 }

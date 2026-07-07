@@ -95,11 +95,13 @@ typedef NS_ENUM(EnumBackingType, FractalType)
     FractalTypeMengerSphere        = 14,
     FractalTypeTheliPseudoKleinian = 15,
     FractalTypeKleinian              = 17,
-    FractalTypeBoxSphereFolder         = 20,
+    // NOTE: 20 was the removed `boxSphereFolder` type (see FractalModelType
+    // back-compat decode). Do not reuse it.
     // NOTE: 21 is reserved — the legacy `mandelboxSphereProjection` type folded
     // into base Mandelbox + the Space-tab Sphere Projection control (see
     // FractalModelType back-compat decode). Do not reuse it.
-    FractalTypeBulatovLimitSet         = 22,
+    // NOTE: 22 was the removed `bulatovLimitSet` type (see FractalModelType
+    // back-compat decode). Do not reuse it.
     // Sentinel for runtime-compiled custom DE formulas (.threshfx).
     // The static dispatch in FractalFormulas.h returns far for this value;
     // custom rendering uses a separately-compiled MTLLibrary.
@@ -838,8 +840,6 @@ struct OrbitData {
 #include "MengerSphere/MengerSphere.h"
 #include "TheliPseudoKleinian/TheliPseudoKleinian.h"
 #include "Kleinian/Kleinian.h"
-#include "BoxSphereFolder/BoxSphereFolder.h"
-#include "BulatovLimitSet/BulatovLimitSet.h"
 
 // ============================================================================
 // DISPATCH — distance only
@@ -861,10 +861,6 @@ FORCE_INLINE float FractalDE_Dispatch(float3 pos, int fractalType, FormulaParams
             return DE_TheliPseudoKleinian_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypeKleinian:
             return DE_Kleinian_Dist(pos, fp, fp.rotMatrix1, iterations);
-        case FractalTypeBoxSphereFolder:
-            return DE_BoxSphereFolder_Dist(pos, fp, fp.rotMatrix1, iterations);
-        case FractalTypeBulatovLimitSet:
-            return DE_BulatovLimitSet_Dist(pos, fp, fp.rotMatrix1, iterations);
         // __CUSTOM_DISPATCH_DIST__
         default:
             return 1e10f; // Unknown type — far away
@@ -893,10 +889,6 @@ FORCE_INLINE float FractalDE_WithOrbit(float3 pos, int fractalType, FormulaParam
             return DE_TheliPseudoKleinian(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypeKleinian:
             return DE_Kleinian(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
-        case FractalTypeBoxSphereFolder:
-            return DE_BoxSphereFolder(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
-        case FractalTypeBulatovLimitSet:
-            return DE_BulatovLimitSet(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         // __CUSTOM_DISPATCH_ORBIT__
         default:
             orbit.trap = 1e20f;
@@ -1086,7 +1078,12 @@ FORCE_INLINE float DE_Menger(float3 pos, FormulaParams fp, float3x3 rot,
                              int iterations, int colorIterations,
                             thread OrbitData& orbit) {
     const float scale = fp.params[0];
+    const float absScale = abs(scale);
     const float3 offset = float3(fp.params[1], fp.params[2], fp.params[3]);
+    // Loop-invariant: hoisted out of the iteration.
+    const float3 offsetScaled = offset * (scale - 1.0f);
+    const float3 negOffsetScaled = -offsetScaled;
+    const float halfOffsetZn = -0.5f * offsetScaled.z;
 
     float3 z = pos;
     float dr = 1.0f;
@@ -1097,18 +1094,20 @@ FORCE_INLINE float DE_Menger(float3 pos, FormulaParams fp, float3x3 rot,
 
     for (; i < iterations; ++i) {
         z = abs(z);
-        if (z.x < z.y) { float t = z.x; z.x = z.y; z.y = t; }
-        if (z.x < z.z) { float t = z.x; z.x = z.z; z.z = t; }
-        if (z.y < z.z) { float t = z.y; z.y = z.z; z.z = t; }
+        // Branchless descending sort (x=max, y=mid, z=min) — same result as
+        // the classic swap chain, no select chains on the critical path.
+        float sum = z.x + z.y + z.z;
+        float mx = max(max(z.x, z.y), z.z);
+        float mn = min(min(z.x, z.y), z.z);
+        z = float3(mx, sum - mx - mn, mn);
 
-        float3 offsetScaled = offset * (scale - 1.0f);
-        z = z * scale - offsetScaled;
-        if (z.z < -0.5f * offsetScaled.z) {
+        z = fma(z, scale, negOffsetScaled);
+        if (z.z < halfOffsetZn) {
             z.z += offsetScaled.z;
         }
 
         z = rot * z;
-        dr = dr * abs(scale) + 1.0f;
+        dr = fma(dr, absScale, 1.0f);
 
         float r2 = dot(z, z);
         UpdateTrapMinR2(trap, trapIter, trapPos, r2, i, colorIterations, z);
@@ -1126,25 +1125,29 @@ FORCE_INLINE float DE_Menger(float3 pos, FormulaParams fp, float3x3 rot,
 // Lean distance-only: no orbit tracking, no struct writes.
 FORCE_INLINE float DE_Menger_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {
     const float scale = fp.params[0];
+    const float absScale = abs(scale);
     const float3 offset = float3(fp.params[1], fp.params[2], fp.params[3]);
+    const float3 offsetScaled = offset * (scale - 1.0f);
+    const float3 negOffsetScaled = -offsetScaled;
+    const float halfOffsetZn = -0.5f * offsetScaled.z;
 
     float3 z = pos;
     float dr = 1.0f;
 
     for (int i = 0; i < iterations; ++i) {
         z = abs(z);
-        if (z.x < z.y) { float t = z.x; z.x = z.y; z.y = t; }
-        if (z.x < z.z) { float t = z.x; z.x = z.z; z.z = t; }
-        if (z.y < z.z) { float t = z.y; z.y = z.z; z.z = t; }
+        float sum = z.x + z.y + z.z;
+        float mx = max(max(z.x, z.y), z.z);
+        float mn = min(min(z.x, z.y), z.z);
+        z = float3(mx, sum - mx - mn, mn);
 
-        float3 offsetScaled = offset * (scale - 1.0f);
-        z = z * scale - offsetScaled;
-        if (z.z < -0.5f * offsetScaled.z) {
+        z = fma(z, scale, negOffsetScaled);
+        if (z.z < halfOffsetZn) {
             z.z += offsetScaled.z;
         }
 
         z = rot * z;
-        dr = dr * abs(scale) + 1.0f;
+        dr = fma(dr, absScale, 1.0f);
     }
 
     return (length(z) - 1.0f) / dr;
@@ -1192,12 +1195,9 @@ FORCE_INLINE float DE_QuaternionJulia(float3 pos, FormulaParams fp, float3x3 rot
         );
 
         // q = q*q + c (quaternion squaring)
-        q = float4(
-            q.x*q.x - q.y*q.y - q.z*q.z - q.w*q.w,
-            2.0f*q.x*q.y,
-            2.0f*q.x*q.z,
-            2.0f*q.x*q.w
-        ) + c;
+        // q² = (x² - |yzw|², 2x·yzw): share the 2x factor across three lanes.
+        float x2 = q.x + q.x;
+        q = float4(q.x*q.x - dot(q.yzw, q.yzw), x2 * q.yzw) + c;
 
         float r2 = dot(q, q);
         UpdateTrapMinR2(trap, trapIter, trapPos, r2, i, colorIterations, q.xyz);
@@ -1233,12 +1233,9 @@ FORCE_INLINE float DE_QuaternionJulia_Dist(float3 pos, FormulaParams fp, float3x
             q.x*dq.w + q.y*dq.z - q.z*dq.y + q.w*dq.x
         );
 
-        q = float4(
-            q.x*q.x - q.y*q.y - q.z*q.z - q.w*q.w,
-            2.0f*q.x*q.y,
-            2.0f*q.x*q.z,
-            2.0f*q.x*q.w
-        ) + c;
+        // q² = (x² - |yzw|², 2x·yzw): share the 2x factor across three lanes.
+        float x2 = q.x + q.x;
+        q = float4(q.x*q.x - dot(q.yzw, q.yzw), x2 * q.yzw) + c;
 
         if (dot(q, q) > threshold) break;
     }
@@ -1271,6 +1268,8 @@ FORCE_INLINE float DE_Octahedron(float3 pos, FormulaParams fp, float3x3 rot,
                                 thread OrbitData& orbit) {
     float scale  = fp.params[0];
     float3 offset = float3(fp.params[1], fp.params[2], fp.params[3]);
+    // Loop-invariant: hoisted out of the iteration.
+    float3 negOffsetScaled = -(offset * (scale - 1.0f));
 
     float3 z = pos;
     float dr = 1.0f;
@@ -1280,15 +1279,16 @@ FORCE_INLINE float DE_Octahedron(float3 pos, FormulaParams fp, float3x3 rot,
     int i = 0;
 
     for (; i < iterations; ++i) {
-        // Octahedral folds (abs + sort = octahedral symmetry)
+        // Octahedral folds (abs + branchless descending sort = octahedral symmetry)
         z = abs(z);
-        if (z.x - z.y < 0.0f) z.xy = z.yx;
-        if (z.x - z.z < 0.0f) z.xz = z.zx;
-        if (z.y - z.z < 0.0f) z.yz = z.zy;
+        float sum = z.x + z.y + z.z;
+        float mx = max(max(z.x, z.y), z.z);
+        float mn = min(min(z.x, z.y), z.z);
+        z = float3(mx, sum - mx - mn, mn);
 
-        z = z * scale - offset * (scale - 1.0f);
+        z = fma(z, scale, negOffsetScaled);
         z = rot * z;
-        dr = dr * scale + 1.0f;
+        dr = fma(dr, scale, 1.0f);
 
         float r2 = dot(z, z);
         UpdateTrapMinR2(trap, trapIter, trapPos, r2, i, colorIterations, z);
@@ -1308,20 +1308,21 @@ FORCE_INLINE float DE_Octahedron(float3 pos, FormulaParams fp, float3x3 rot,
 FORCE_INLINE float DE_Octahedron_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {
     float scale  = fp.params[0];
     float3 offset = float3(fp.params[1], fp.params[2], fp.params[3]);
-    float3 offsetScaled = offset * (scale - 1.0f);
+    float3 negOffsetScaled = -(offset * (scale - 1.0f));
 
     float3 z = pos;
     float dr = 1.0f;
 
     for (int i = 0; i < iterations; ++i) {
         z = abs(z);
-        if (z.x - z.y < 0.0f) z.xy = z.yx;
-        if (z.x - z.z < 0.0f) z.xz = z.zx;
-        if (z.y - z.z < 0.0f) z.yz = z.zy;
+        float sum = z.x + z.y + z.z;
+        float mx = max(max(z.x, z.y), z.z);
+        float mn = min(min(z.x, z.y), z.z);
+        z = float3(mx, sum - mx - mn, mn);
 
-        z = z * scale - offsetScaled;
+        z = fma(z, scale, negOffsetScaled);
         z = rot * z;
-        dr = dr * scale + 1.0f;
+        dr = fma(dr, scale, 1.0f);
     }
 
     return (fast::length(z) - 1.0f) / dr;
@@ -1351,6 +1352,11 @@ FORCE_INLINE float DE_MengerSphere(float3 pos, FormulaParams fp, float3x3 rot,
     float scale  = fp.params[0];
     float3 offset = float3(fp.params[1], fp.params[2], fp.params[3]);
     bool spherify = fp.params[4] > 0.5f;
+    // Loop-invariant: hoisted out of the iteration.
+    float3 offsetScaled = offset * (scale - 1.0f);
+    float3 negOffsetScaled = -offsetScaled;
+    float halfOffsetZn = -0.5f * offsetScaled.z;
+    float absScale = abs(scale);
 
     float3 z = pos;
     float dr = 1.0f;
@@ -1361,13 +1367,15 @@ FORCE_INLINE float DE_MengerSphere(float3 pos, FormulaParams fp, float3x3 rot,
 
     for (; i < iterations; ++i) {
         z = abs(z);
-        if (z.x < z.y) z.xy = z.yx;
-        if (z.x < z.z) z.xz = z.zx;
-        if (z.y < z.z) z.yz = z.zy;
+        // Branchless descending sort (x=max, y=mid, z=min).
+        float sum = z.x + z.y + z.z;
+        float mx = max(max(z.x, z.y), z.z);
+        float mn = min(min(z.x, z.y), z.z);
+        z = float3(mx, sum - mx - mn, mn);
 
-        z = z * scale - offset * (scale - 1.0f);
-        if (z.z < -0.5f * offset.z * (scale - 1.0f))
-            z.z += offset.z * (scale - 1.0f);
+        z = fma(z, scale, negOffsetScaled);
+        if (z.z < halfOffsetZn)
+            z.z += offsetScaled.z;
 
         // Optional sphere mapping (guard near-zero r²)
         if (spherify) {
@@ -1380,7 +1388,7 @@ FORCE_INLINE float DE_MengerSphere(float3 pos, FormulaParams fp, float3x3 rot,
         }
 
         z = rot * z;
-        dr = dr * abs(scale) + 1.0f;
+        dr = fma(dr, absScale, 1.0f);
 
         float r2 = dot(z, z);
         UpdateTrapMinR2(trap, trapIter, trapPos, r2, i, colorIterations, z);
@@ -1402,18 +1410,21 @@ FORCE_INLINE float DE_MengerSphere_Dist(float3 pos, FormulaParams fp, float3x3 r
     float3 offset = float3(fp.params[1], fp.params[2], fp.params[3]);
     bool spherify = fp.params[4] > 0.5f;
     float3 offsetScaled = offset * (scale - 1.0f);
+    float3 negOffsetScaled = -offsetScaled;
     float halfOffsetZn = -0.5f * offsetScaled.z;
+    float absScale = abs(scale);
 
     float3 z = pos;
     float dr = 1.0f;
 
     for (int i = 0; i < iterations; ++i) {
         z = abs(z);
-        if (z.x < z.y) z.xy = z.yx;
-        if (z.x < z.z) z.xz = z.zx;
-        if (z.y < z.z) z.yz = z.zy;
+        float sum = z.x + z.y + z.z;
+        float mx = max(max(z.x, z.y), z.z);
+        float mn = min(min(z.x, z.y), z.z);
+        z = float3(mx, sum - mx - mn, mn);
 
-        z = z * scale - offsetScaled;
+        z = fma(z, scale, negOffsetScaled);
         if (z.z < halfOffsetZn)
             z.z += offsetScaled.z;
 
@@ -1427,7 +1438,7 @@ FORCE_INLINE float DE_MengerSphere_Dist(float3 pos, FormulaParams fp, float3x3 r
         }
 
         z = rot * z;
-        dr = dr * abs(scale) + 1.0f;
+        dr = fma(dr, absScale, 1.0f);
     }
 
     return (fast::length(z) - 1.0f) / dr;
@@ -1688,8 +1699,9 @@ FORCE_INLINE float DE_Kleinian(float3 pos, FormulaParams fp, float3x3 rot,
     float crossR  = fp.params[7];
     bool hasRotation = hasRot1Precomputed(fp);
 
-    float3 p = pos;
-    float scale = 1.0f;
+    // float4 packing: q.xyz = position, q.w = accumulated scale — the sphere
+    // fold's ×k hits all four lanes in one SIMD multiply.
+    float4 q = float4(pos, 1.0f);
 
     float trap = 1e20f;
     int trapIter = 0;
@@ -1699,56 +1711,54 @@ FORCE_INLINE float DE_Kleinian(float3 pos, FormulaParams fp, float3x3 rot,
     int i = 0;
     if (hasRotation) {
         for (; i < iterations; ++i) {
-            p = rot * p;
+            q.xyz = rot * q.xyz;
 
             // Box fold: 2 * clamp(p, mins, maxs) - p
-            p = fma(clamp(p, mins, maxs), float3(2.0f), -p);
+            q.xyz = fma(clamp(q.xyz, mins, maxs), float3(2.0f), -q.xyz);
 
             // Sphere fold
-            float r2 = dot(p, p);
+            float r2 = dot(q.xyz, q.xyz);
             float k = max(sphFold / max(r2, 1e-6f), 1.0f);
-            p *= k;
-            scale *= k;
+            q *= k;
 
             // Orbit trap
             if (i < trapIterations) {
-                float r2Trap = dot(p, p);
+                float r2Trap = dot(q.xyz, q.xyz);
                 if (r2Trap < trap) {
                     trap = r2Trap;
                     trapIter = i;
-                    trapPos = p;
+                    trapPos = q.xyz;
                 }
             }
         }
     } else {
         for (; i < iterations; ++i) {
-            p = fma(clamp(p, mins, maxs), float3(2.0f), -p);
+            q.xyz = fma(clamp(q.xyz, mins, maxs), float3(2.0f), -q.xyz);
 
-            float r2 = dot(p, p);
+            float r2 = dot(q.xyz, q.xyz);
             float k = max(sphFold / max(r2, 1e-6f), 1.0f);
-            p *= k;
-            scale *= k;
+            q *= k;
 
             if (i < trapIterations) {
-                float r2Trap = dot(p, p);
+                float r2Trap = dot(q.xyz, q.xyz);
                 if (r2Trap < trap) {
                     trap = r2Trap;
                     trapIter = i;
-                    trapPos = p;
+                    trapPos = q.xyz;
                 }
             }
         }
     }
 
     // Cylindrical cross-section DE
-    float rxy = length(p.xy);
-    float invScale = 1.0f / max(scale, 1e-6f);
-    float de = 0.7f * max(rxy - crossR, rxy * p.z / max(length(p), 1e-6f)) * invScale;
+    float rxy = length(q.xy);
+    float invScale = 1.0f / max(q.w, 1e-6f);
+    float de = 0.7f * max(rxy - crossR, rxy * q.z / max(length(q.xyz), 1e-6f)) * invScale;
 
     orbit.trap = trap;
     orbit.trapIteration = trapIter;
     orbit.trapPosition = trapPos;
-    orbit.finalP = p;
+    orbit.finalP = q.xyz;
     orbit.iterationsUsed = i;
 
     return de;
@@ -1764,333 +1774,31 @@ FORCE_INLINE float DE_Kleinian_Dist(float3 pos, FormulaParams fp, float3x3 rot, 
     float crossR  = fp.params[7];
     bool hasRotation = hasRot1Precomputed(fp);
 
-    float3 p = pos;
-    float scale = 1.0f;
+    float4 q = float4(pos, 1.0f);
 
     if (hasRotation) {
         for (int i = 0; i < iterations; ++i) {
-            p = rot * p;
-            p = fma(clamp(p, mins, maxs), float3(2.0f), -p);
-            float r2 = dot(p, p);
+            q.xyz = rot * q.xyz;
+            q.xyz = fma(clamp(q.xyz, mins, maxs), float3(2.0f), -q.xyz);
+            float r2 = dot(q.xyz, q.xyz);
             float k = max(sphFold / max(r2, 1e-6f), 1.0f);
-            p *= k;
-            scale *= k;
+            q *= k;
         }
     } else {
         for (int i = 0; i < iterations; ++i) {
-            p = fma(clamp(p, mins, maxs), float3(2.0f), -p);
-            float r2 = dot(p, p);
+            q.xyz = fma(clamp(q.xyz, mins, maxs), float3(2.0f), -q.xyz);
+            float r2 = dot(q.xyz, q.xyz);
             float k = max(sphFold / max(r2, 1e-6f), 1.0f);
-            p *= k;
-            scale *= k;
+            q *= k;
         }
     }
 
-    float rxy = length(p.xy);
-    float invScale = 1.0f / max(scale, 1e-6f);
-    return 0.7f * max(rxy - crossR, rxy * p.z / max(length(p), 1e-6f)) * invScale;
+    float rxy = length(q.xy);
+    float invScale = 1.0f / max(q.w, 1e-6f);
+    return 0.7f * max(rxy - crossR, rxy * q.z / max(length(q.xyz), 1e-6f)) * invScale;
 }
 
 #endif /* DE_Kleinian_h */
-
-"""#
-
-    static let boxSphereFolderH: String = #"""
-//
-//  BoxSphereFolder.h
-//  Threshold
-//
-//  Distance estimator for abs-fold + sphere inversion IFS.
-//  Compact box fold → sphere fold → scale loop with tunable range.
-//
-//  params[0-2]=Offset.xyz, [3]=BoxFold, [4]=MinR2, [5]=MaxR2,
-//  [6]=Scale, [7]=ShapeR, [8]=ColorOfs, [9]=ColorScale
-//
-//  Original GLSL:
-//    vec4 q = vec4(p - 1.0, 1);
-//    for(int i = 0; i < 5; i++) {
-//        q.xyz = abs(q.xyz + 1.0) - 1.0;
-//        q /= clamp(dot(q.xyz, q.xyz), 0.25, 1.0);
-//        q *= 1.15;
-//    }
-//    return (length(q.zy) - 1.2)/q.w;
-//
-//  Requires: FractalFormulaCommon.h
-//
-
-#ifndef DE_BoxSphereFolder_h
-#define DE_BoxSphereFolder_h
-
-// ---------------------------------------------------------------------------
-// Full orbit-tracking version (coloring + normals)
-// ---------------------------------------------------------------------------
-FORCE_INLINE float DE_BoxSphereFolder(float3 pos, FormulaParams fp, float3x3 rot,
-                                      int iterations, int colorIterations,
-                                      thread OrbitData& orbit) {
-    float3 offset = float3(fp.params[0], fp.params[1], fp.params[2]);
-    float boxFold = fp.params[3];
-    float minR2   = max(fp.params[4], 1e-6f);  // Guard: clamp lower bound must be > 0
-    float maxR2   = max(fp.params[5], minR2);   // Ensure maxR2 >= minR2
-    float scale   = fp.params[6];
-    float shapeR  = fp.params[7];
-    bool hasRotation = hasRot1Precomputed(fp);
-
-    float3 p = pos - offset;
-    float w = 1.0f;
-
-    float trap = 1e20f;
-    int trapIter = 0;
-    float3 trapPos = pos;
-    int trapIterations = min(max(colorIterations, 0), iterations);
-
-    int i = 0;
-    for (; i < iterations; ++i) {
-        if (hasRotation) p = rot * p;
-
-        // Box fold: abs(p + boxFold) - boxFold
-        p = abs(p + boxFold) - boxFold;
-
-        // Sphere fold: divide by clamped dot product
-        float r2 = dot(p, p);
-        float k = 1.0f / clamp(r2, minR2, maxR2);
-        p *= k;
-        w *= k;
-
-        // Scale
-        p *= scale;
-        w *= scale;
-
-        // Orbit trap
-        if (i < trapIterations) {
-            float r2Trap = dot(p, p);
-            if (r2Trap < trap) {
-                trap = r2Trap;
-                trapIter = i;
-                trapPos = p;
-            }
-        }
-    }
-
-    // DE: cylindrical cross-section using zy plane
-    float de = (length(p.zy) - shapeR) / max(abs(w), 1e-6f);
-
-    orbit.trap = trap;
-    orbit.trapIteration = trapIter;
-    orbit.trapPosition = trapPos;
-    orbit.finalP = p;
-    orbit.iterationsUsed = i;
-
-    return de;
-}
-
-// ---------------------------------------------------------------------------
-// Lean distance-only (shadows, normals via finite differences)
-// ---------------------------------------------------------------------------
-FORCE_INLINE float DE_BoxSphereFolder_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {
-    float3 offset = float3(fp.params[0], fp.params[1], fp.params[2]);
-    float boxFold = fp.params[3];
-    float minR2   = max(fp.params[4], 1e-6f);  // Guard: clamp lower bound must be > 0
-    float maxR2   = max(fp.params[5], minR2);   // Ensure maxR2 >= minR2
-    float scale   = fp.params[6];
-    float shapeR  = fp.params[7];
-    bool hasRotation = hasRot1Precomputed(fp);
-
-    float3 p = pos - offset;
-    float w = 1.0f;
-
-    if (hasRotation) {
-        for (int i = 0; i < iterations; ++i) {
-            p = rot * p;
-            p = abs(p + boxFold) - boxFold;
-            float r2 = dot(p, p);
-            float k = 1.0f / clamp(r2, minR2, maxR2);
-            p *= k;
-            w *= k;
-            p *= scale;
-            w *= scale;
-        }
-    } else {
-        for (int i = 0; i < iterations; ++i) {
-            p = abs(p + boxFold) - boxFold;
-            float r2 = dot(p, p);
-            float k = 1.0f / clamp(r2, minR2, maxR2);
-            p *= k;
-            w *= k;
-            p *= scale;
-            w *= scale;
-        }
-    }
-
-    return (length(p.zy) - shapeR) / max(abs(w), 1e-6f);
-}
-
-#endif /* DE_BoxSphereFolder_h */
-
-"""#
-
-    static let bulatovLimitSetH: String = #"""
-//
-//  BulatovLimitSet.h
-//  Threshold
-//
-//  Limit set of a hyperbolic reflection group, after Vladimir Bulatov's
-//  "Limit Set of 4D Hyperbolic Reflection Group" (bulatov.org, Dec 2012).
-//
-//  A sample point is repeatedly REFLECTED in a small set of generator spheres
-//  and planes (the "fundamental domain") until it lands inside the domain; the
-//  accumulated conformal-inversion scale gives the distance estimate. This is
-//  the same reflection-group machinery as our Coxeter space-warp (`warpCoxeter`)
-//  — fold a point into a fundamental domain across mirror planes — but with
-//  SPHERE generators (inversions) added to the planes. Those inversions are what
-//  turn a finite polyhedral fold into an infinite fractal limit set (the points
-//  of accumulation of the group action).
-//
-//  The default generators reproduce Bulatov's octahedral-symmetry example:
-//  a cube-corner sphere, an octahedron-face sphere, and three mirror planes
-//  ((1,0,0), (0,-1,1), (-1,1,0)) — with an optional bounding "outside" sphere.
-//
-//  params[0]=SizeCube  [1]=SizeOcta [2]=RCube   [3]=ROcta
-//  params[4]=AngleCube [5]=AngleOcta [6]=Scale  [7]=ROutside
-//  params[8]=MaxReflections [9]=DistanceFactor
-//  params[10]=GeneratorMask  (bit0 cube-corner sphere, 1 octa sphere,
-//             2 mirror X, 3 mirror YZ, 4 mirror XY, 5 outside sphere)
-//
-//  Requires: FractalFormulaCommon.h
-//
-
-#ifndef DE_BulatovLimitSet_h
-#define DE_BulatovLimitSet_h
-
-// One generator of the fundamental domain: a sphere (type 0) or plane (type 1).
-struct BulatovGen {
-    int   type;   // 0 = sphere, 1 = plane
-    float3 c;     // sphere centre, or (normalized) plane normal
-    float d;      // sphere radius (sign carries the inside/outside test), or plane offset
-};
-
-// Fused membership-test + reflection: test whether v lies on the "wrong" side of a
-// generator and, if so, reflect it in one shot — reusing the squared distance so a
-// sphere is never measured twice (the old split test/reflect pair computed |v-c|²
-// once to decide and again to invert). Returns true iff a reflection happened.
-//   sphere → conformal inversion: v ↦ c + (r²/|v-c|²)(v-c)   (scale ×= r²/|v-c|²)
-//   plane  → mirror reflection across the plane (isometry, scale unchanged)
-// Membership: inversion sphere (d<0) folds points INSIDE it; bounding sphere (d>0)
-// folds points OUTSIDE it; a plane folds points behind it (dot(v,n) < offset). For a
-// unit plane normal, that membership value dot(v,n)-offset is exactly the reflection
-// coefficient, so the plane branch computes it only once.
-FORCE_INLINE bool bulatovStep(BulatovGen s, thread float3& v, thread float& scale) {
-    if (s.type == 0) {                                  // sphere
-        float3 d = v - s.c;
-        float len2 = dot(d, d);
-        float r2   = s.d * s.d;
-        bool reflect = (s.d < 0.0f) ? (len2 < r2) : (len2 > r2);
-        if (!reflect) return false;
-        float factor = r2 / max(len2, 1e-12f);
-        v = d * factor + s.c;
-        scale *= factor;
-        return true;
-    }
-    // plane: s.c is a unit normal, so dot(v,c) - d == dot(v - c*d, c)
-    float vn = dot(v, s.c) - s.d;
-    if (vn >= 0.0f) return false;
-    v -= 2.0f * s.c * vn;
-    return true;
-}
-
-// Iterate reflections until the point sits inside the fundamental domain, then
-// turn the accumulated inversion scale into a distance estimate. Returns the DE
-// and reports the folded point + reflection count for coloring.
-FORCE_INLINE float bulatovFold(float3 pos, FormulaParams fp,
-                               thread float3& outP, thread int& reflectionsUsed) {
-    const float pi = 3.1415926f;
-    float sc        = fp.params[0];
-    float so        = fp.params[1];
-    float rc        = fp.params[2];
-    float ro        = fp.params[3];
-    float angleCube = fp.params[4];
-    float angleOcta = fp.params[5];
-    float scale     = fp.params[6];
-    float rOutside  = fp.params[7];
-    int   maxCount  = clamp((int)(fp.params[8] + 0.5f), 0, 256);
-    float distanceFactor = fp.params[9];
-    int   mask      = (int)(fp.params[10] + 0.5f);
-
-    // Pre-normalized mirror normals (normalize(0,-1,1) and normalize(-1,1,0)) as
-    // compile-time constants — no runtime rsqrt per DE call.
-    const float invSqrt2 = 0.70710678118654752f;
-
-    // Sphere radii that make the intersection angle exactly π/n (Bulatov eq.). Only
-    // evaluate the transcendentals when the matching sphere generator is enabled.
-    if ((mask & 1) && angleCube >= 2.0f) rc = 2.0f * sc / sqrt(2.0f * (1.0f + cos(pi / angleCube)));
-    if ((mask & 2) && angleOcta >= 2.0f) ro = so * 1.41421356237f / sqrt(2.0f * (1.0f + cos(pi / angleOcta)));
-
-    sc *= scale; so *= scale; rc *= scale; ro *= scale;
-
-    // Build the fundamental domain (up to 6 generators) from the toggle mask.
-    BulatovGen gens[6];
-    int n = 0;
-    if (mask & 1)  gens[n++] = BulatovGen{ 0, float3(sc, sc, sc), -rc };
-    if (mask & 2)  gens[n++] = BulatovGen{ 0, float3(0.0f, 0.0f, so), -ro };
-    if (mask & 4)  gens[n++] = BulatovGen{ 1, float3(1.0f, 0.0f, 0.0f), 0.0f };
-    if (mask & 8)  gens[n++] = BulatovGen{ 1, float3(0.0f, -invSqrt2, invSqrt2), 0.0f };
-    if (mask & 16) gens[n++] = BulatovGen{ 1, float3(-invSqrt2, invSqrt2, 0.0f), 0.0f };
-    if (mask & 32) gens[n++] = BulatovGen{ 0, float3(0.0f), rOutside * scale };
-
-    float3 p = pos;
-    float  s = 1.0f;
-    int    used = 0;
-    int    count = maxCount;
-    while (count > 0) {
-        bool found = false;
-        for (int i = 0; i < n; ++i) {
-            if (bulatovStep(gens[i], p, s)) found = true;
-        }
-        if (!found) break;          // settled inside the fundamental domain
-        ++used;
-        --count;
-    }
-
-    // One more conformal step to normalize points at infinity, then DE = factor / scale.
-    s *= 2.0f / (1.0f + dot(p, p));
-    outP = p;
-    reflectionsUsed = used;
-    return distanceFactor / max(s, 1e-9f);
-}
-
-// ---------------------------------------------------------------------------
-// Full orbit-tracking version (coloring + normals)
-// ---------------------------------------------------------------------------
-FORCE_INLINE float DE_BulatovLimitSet(float3 pos, FormulaParams fp, float3x3 rot,
-                                      int iterations, int colorIterations,
-                                      thread OrbitData& orbit) {
-    float3 p = rot * pos;                 // identity unless the user rotates the set
-    float3 finalP;
-    int used;
-    float de = bulatovFold(p, fp, finalP, used);
-
-    orbit.trap = dot(finalP, finalP);     // radial trap of the folded point
-    orbit.trapIteration = used;
-    orbit.trapPosition = finalP;
-    orbit.finalP = finalP;
-    orbit.iterationsUsed = used;
-    return de;
-}
-
-// ---------------------------------------------------------------------------
-// Lean distance-only (shadows, normals via finite differences)
-// ---------------------------------------------------------------------------
-FORCE_INLINE float DE_BulatovLimitSet_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {
-    float3 p = rot * pos;
-    float3 finalP;
-    int used;
-    // NOTE (measured 2026-07-01): do NOT cap the reflection loop by `iterations`
-    // here for secondary rays — the fold's `if (!found) break` early-out already
-    // terminates well below the cap, so it saved only ~4% while visibly changing
-    // shading (~13% of pixels). The cost is per-call fixed work, not loop length.
-    return bulatovFold(p, fp, finalP, used);
-}
-
-#endif /* DE_BulatovLimitSet_h */
 
 """#
 
@@ -4428,7 +4136,6 @@ FORCE_INLINE float relaxedOmegaCap(int type) {
     case FractalTypeMenger:
     case FractalTypeOctahedron:
     case FractalTypeMengerSphere:
-    case FractalTypeBoxSphereFolder:
         // Box/fold DEs tolerate the most over-relaxation; the overstep-failure
         // retreat keeps it hit-safe, so the user's Over-Relaxation slider may push
         // the auto-ramp up to here (default ramp stops at 1.4).
@@ -4437,12 +4144,6 @@ FORCE_INLINE float relaxedOmegaCap(int type) {
     case FractalTypeMandelbulbJulia:
     case FractalTypeQuaternionJulia:
         return 1.1f;
-    case FractalTypeBulatovLimitSet:
-        // Reflection-group LIMIT SET: the `factor/scale` estimator OVERESTIMATES
-        // far from the (measure-zero) set, so even plain sphere tracing must not
-        // over-step or rays tunnel clean through the thin filigree (→ blank). The
-        // conservative step lives in the low default DistanceFactor; pin omega to 1.
-        return 1.0f;
     default: // Kleinian family, custom formulas, future types
         return 1.2f;
     }
@@ -5871,8 +5572,7 @@ FORCE_INLINE bool coneSafetyForFamily(int type, thread bool& coneTrusted) {
     coneTrusted = (type == FractalTypeMandelbox)
                || (type == FractalTypeMenger)
                || (type == FractalTypeOctahedron)
-               || (type == FractalTypeMengerSphere)
-               || (type == FractalTypeBoxSphereFolder);
+               || (type == FractalTypeMengerSphere);
     return coneTrusted;
 }
 

@@ -1915,7 +1915,7 @@ actor Renderer {
     /// provably safe. Matches coneSafetyForFamily in Shaders.metal.
     func isBoxFoldFamily(_ type: FractalModelType) -> Bool {
         switch type {
-        case .mandelbox, .menger, .octahedron, .mengerSphere, .boxSphereFolder:
+        case .mandelbox, .menger, .octahedron, .mengerSphere:
             return true
         default:
             return false

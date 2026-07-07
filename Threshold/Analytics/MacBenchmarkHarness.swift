@@ -65,7 +65,7 @@ enum MacBenchmarkHarness {
         var height: Int
         var outPath: String
         /// Formula-param overrides applied AFTER a scene loads, e.g. "8=12" sets
-        /// Bulatov MaxReflections to 12. Used for sensitivity sweeps.
+        /// formula param index 8 to 12. Used for sensitivity sweeps.
         var paramOverride: [(Int, Float)]
         /// If set, one PNG per scene is written here (offscreen frame capture) for
         /// visual-regression checks.

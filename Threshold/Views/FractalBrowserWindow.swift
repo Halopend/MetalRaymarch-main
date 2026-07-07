@@ -286,7 +286,6 @@ enum FractalBrowserCatalog {
             summary: "Conditional folds and inversions for structured hybrids.",
             historicalInfo: "Hybrid fold distance estimators emerged from practical experimentation combining box folds, sphere inversions, and Kleinian-group techniques in shader communities.",
             types: [
-                FractalTypeBrowserInfo(type: .boxSphereFolder, subtitle: "Recursive box/sphere inversion hybrid", historicalInfo: "Sphere inversion techniques connect classical geometry and modern DE fractal workflows.", variants: []),
                 FractalTypeBrowserInfo(type: .theliPseudoKleinian, subtitle: "Fold-based pseudo-Kleinian hybrid", historicalInfo: "Pseudo-Kleinian formulas combine conditional folds and offsets for rich cavity structures.", variants: []),
                 FractalTypeBrowserInfo(type: .kleinian, subtitle: "Classical Kleinian group fold dynamics", historicalInfo: "Kleinian-style systems in raymarched fractals derive from Möbius-transform inspired fold operations.", variants: [])
             ]

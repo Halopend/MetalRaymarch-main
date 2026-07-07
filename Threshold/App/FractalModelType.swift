@@ -18,10 +18,12 @@ enum FractalModelType: Int32, CaseIterable {
     case mengerSphere      = 14
     case theliPseudoKleinian = 15
     case kleinian              = 17
-    case boxSphereFolder         = 20
+    // Note: rawValue 20 was the removed `boxSphereFolder` type; old scenes that
+    // encoded it decode to `.mandelbox` (see the Codable extension below).
     // Note: rawValue 21 is reserved for the legacy `mandelboxSphereProjection`
     // back-compat alias (decodes to `.mandelbox`); see the Codable extension below.
-    case bulatovLimitSet         = 22
+    // rawValue 22 was the removed `bulatovLimitSet` type; old scenes that encoded
+    // it decode to `.mandelbox` (see the Codable extension below).
     /// Sentinel for runtime-compiled DE shaders (.threshfx). Mirrors
     /// `FractalTypeCustom` in ShaderTypes.h. The single active embedded formula
     /// is registered with `FractalTypeRegistry` and `FormulaCatalog` at load time.
@@ -92,6 +94,19 @@ extension FractalModelType: Codable {
             return
         }
         if let raw = try? container.decode(Int32.self), raw == 21 {
+            self = .mandelbox
+            return
+        }
+        // Back-compat: the `bulatovLimitSet` (rawValue 22) and `boxSphereFolder`
+        // (rawValue 20) types were removed. Old scenes/animations/presets that
+        // encoded either (by string or Int32) fall back to `.mandelbox` so they
+        // still load.
+        if let str = try? container.decode(String.self),
+           str == "bulatovLimitSet" || str == "boxSphereFolder" {
+            self = .mandelbox
+            return
+        }
+        if let raw = try? container.decode(Int32.self), raw == 22 || raw == 20 {
             self = .mandelbox
             return
         }

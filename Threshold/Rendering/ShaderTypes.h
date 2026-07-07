@@ -79,11 +79,13 @@ typedef NS_ENUM(EnumBackingType, FractalType)
     FractalTypeMengerSphere        = 14,
     FractalTypeTheliPseudoKleinian = 15,
     FractalTypeKleinian              = 17,
-    FractalTypeBoxSphereFolder         = 20,
+    // NOTE: 20 was the removed `boxSphereFolder` type (see FractalModelType
+    // back-compat decode). Do not reuse it.
     // NOTE: 21 is reserved — the legacy `mandelboxSphereProjection` type folded
     // into base Mandelbox + the Space-tab Sphere Projection control (see
     // FractalModelType back-compat decode). Do not reuse it.
-    FractalTypeBulatovLimitSet         = 22,
+    // NOTE: 22 was the removed `bulatovLimitSet` type (see FractalModelType
+    // back-compat decode). Do not reuse it.
     // Sentinel for runtime-compiled custom DE formulas (.threshfx).
     // The static dispatch in FractalFormulas.h returns far for this value;
     // custom rendering uses a separately-compiled MTLLibrary.

@@ -40,8 +40,6 @@
 #include "MengerSphere/MengerSphere.h"
 #include "TheliPseudoKleinian/TheliPseudoKleinian.h"
 #include "Kleinian/Kleinian.h"
-#include "BoxSphereFolder/BoxSphereFolder.h"
-#include "BulatovLimitSet/BulatovLimitSet.h"
 
 // ============================================================================
 // DISPATCH — distance only
@@ -63,10 +61,6 @@ FORCE_INLINE float FractalDE_Dispatch(float3 pos, int fractalType, FormulaParams
             return DE_TheliPseudoKleinian_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypeKleinian:
             return DE_Kleinian_Dist(pos, fp, fp.rotMatrix1, iterations);
-        case FractalTypeBoxSphereFolder:
-            return DE_BoxSphereFolder_Dist(pos, fp, fp.rotMatrix1, iterations);
-        case FractalTypeBulatovLimitSet:
-            return DE_BulatovLimitSet_Dist(pos, fp, fp.rotMatrix1, iterations);
         // __CUSTOM_DISPATCH_DIST__
         default:
             return 1e10f; // Unknown type — far away
@@ -95,10 +89,6 @@ FORCE_INLINE float FractalDE_WithOrbit(float3 pos, int fractalType, FormulaParam
             return DE_TheliPseudoKleinian(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypeKleinian:
             return DE_Kleinian(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
-        case FractalTypeBoxSphereFolder:
-            return DE_BoxSphereFolder(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
-        case FractalTypeBulatovLimitSet:
-            return DE_BulatovLimitSet(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         // __CUSTOM_DISPATCH_ORBIT__
         default:
             orbit.trap = 1e20f;

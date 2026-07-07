@@ -1,0 +1,590 @@
+{
+  "aoStrength" : 0,
+  "audioReactiveConfig" : {
+    "bassSensitivity" : 1.1,
+    "beatSensitivity" : 1.2,
+    "fractalAudioAmount" : 0.75,
+    "fractalAudioDamping" : 1.4422334,
+    "fractalAudioReactiveEnabled" : true,
+    "fractalBeatPunch" : 0.85,
+    "midSensitivity" : 0.8,
+    "musicReactiveMappings" : [
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "AC81B643-F927-48E7-B9D2-96A683558D21",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "sinusoidal",
+        "smoothingWindow" : 0,
+        "source" : "composite",
+        "spaceWarpField" : "strength",
+        "target" : "fractalScale"
+      },
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "3A861822-B949-4C95-9A9D-046386BF3401",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "sinusoidal",
+        "smoothingWindow" : 0,
+        "source" : "bass",
+        "spaceWarpField" : "strength",
+        "target" : "formulaParam0"
+      },
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "8F8DA890-1676-49C1-8325-F2B580C9562E",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "sinusoidal",
+        "smoothingWindow" : 0,
+        "source" : "mid",
+        "spaceWarpField" : "strength",
+        "target" : "formulaParam1"
+      },
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "93DA2C08-D560-41C2-8695-7C71219E9523",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "sinusoidal",
+        "smoothingWindow" : 0,
+        "source" : "treble",
+        "spaceWarpField" : "strength",
+        "target" : "formulaParam2"
+      },
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "30AEB2F3-1442-41AB-82E5-647936B69032",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "sinusoidal",
+        "smoothingWindow" : 0,
+        "source" : "mid",
+        "spaceWarpField" : "strength",
+        "target" : "formulaParam3"
+      },
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "432A14B7-158F-4D9D-A5BE-0691DD31807D",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "pulse",
+        "smoothingWindow" : 0,
+        "source" : "beat",
+        "spaceWarpField" : "strength",
+        "target" : "glow"
+      },
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "67EB7D0B-677B-4FC5-A7B2-30430758F2B0",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "drift",
+        "smoothingWindow" : 0,
+        "source" : "composite",
+        "spaceWarpField" : "strength",
+        "target" : "fog"
+      },
+      {
+        "amount" : 1,
+        "hybridCombo" : 0.35,
+        "id" : "B712CB81-8E66-4A13-B6CD-B99041D17D1F",
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "pulse",
+        "smoothingWindow" : 0,
+        "source" : "beat",
+        "spaceWarpField" : "strength",
+        "target" : "bloom"
+      }
+    ],
+    "trebleSensitivity" : 0.9,
+    "tripletMusicGains" : {
+
+    }
+  },
+  "beatFlashEffect" : {
+    "enabled" : false,
+    "intensity" : 0
+  },
+  "bloomEffect" : {
+    "enabled" : false,
+    "strength" : 0.19597551
+  },
+  "boundAmbientStrength" : 0.5,
+  "boundSpaceDepth" : 4,
+  "boundSpaceHeight" : 2.5,
+  "boundSpaceWidth" : 4,
+  "boundToSpaceEnabled" : false,
+  "boundToSpaceMode" : 0,
+  "boundingShapeEnabled" : false,
+  "boundingShapeFogMode" : 0,
+  "boundingShapeRadius" : 6,
+  "boundingShapeShadowDepth" : 0.35,
+  "boundingShapeType" : 0,
+  "cellShadingEnabled" : false,
+  "cellShadingLevels" : 4,
+  "colorIterations" : 8,
+  "colorMix" : 0.80321366,
+  "colorScheme" : "classic",
+  "colorSchemeAutoInterval" : 30,
+  "colorSchemeAutoTransition" : false,
+  "colorSchemeContrast" : 1.08,
+  "colorSchemeCurve" : 0,
+  "colorSchemeGamma" : 0.85,
+  "colorSchemeHighlights" : 0.02,
+  "colorSchemeSaturation" : 1.7,
+  "colorSchemeShadows" : -0.018,
+  "colorSchemeTransitionDuration" : 2,
+  "colorSchemeVibrance" : 0.8,
+  "coneMarchCompatible" : true,
+  "createdAt" : "2026-07-07T03:33:40Z",
+  "deIterationMismatch" : 0,
+  "detailScale" : 4095.9995,
+  "embeddedFormula" : {
+    "author" : "Knighty (Fragmentarium), ported by Threshold",
+    "category" : "Kleinian",
+    "defaultColorIterations" : 3,
+    "defaultIterations" : 9,
+    "description" : "Knighty's pseudo-knightyan: a clamp box-fold plus sphere inversion with a cylindrical cross-section distance estimate. The CSize vector sets the per-axis box-fold half-width, Size drives the sphere fold, DEfactor seeds the derivative accumulator (a smooth-blob knob via the +0.05 term), and TwiddleRXY pinches the cylindrical radius. Lives near the origin; orbit-trap colored on the folded position.",
+    "functionStem" : "PseudoKnightyan",
+    "id" : "com.puppypower.threshold.embedded.pseudoknightyan",
+    "metalSource" : "\/\/ Pseudo Knightyan (Knighty) — clamp box-fold + sphere inversion, cylindrical DE.\n\/\/ Source: Fragmentarium PseudoKnightyan.frag (DE only; raytracer extras ignored).\n\/\/ Params: [0-2]=CSize.xyz, [3]=Size, [4]=DEfactor, [5]=TwiddleRXY.\n\/\/ Iter -> iterations, ColorIterations -> colorIterations (NOT params).\n\/\/ NOTE: derivative accumulates as j *= (k + 0.05), seeded by DEfactor; final\n\/\/       DE = max(rxy - TwiddleRXY, abs(rxy*p.z)\/len(p)) \/ j  (no 0.7 fudge).\n\nFORCE_INLINE float DE_PseudoKnightyan(float3 pos, FormulaParams fp, float3x3 rot,\n                                      int iterations, int colorIterations,\n                                      thread OrbitData& orbit) {\n    float3 cSize    = max(abs(float3(fp.params[0], fp.params[1], fp.params[2])), float3(1e-4f));\n    float3 negCSize = -cSize;\n    float  size     = fp.params[3];\n    float  deFactor = fp.params[4];\n    float  twiddle  = fp.params[5];\n    bool hasRotation = hasRot1Precomputed(fp);\n\n    float3 p = pos;\n    float j = (deFactor != 0.0f) ? deFactor : 1.0f;\n\n    float trap = 1e20f;\n    int trapIter = 0;\n    float3 trapPos = pos;\n    int trapIterations = min(max(colorIterations, 0), iterations);\n\n    int n = clamp(iterations, 0, 200);\n    int i = 0;\n    if (hasRotation) {\n        for (; i < n; ++i) {\n            p = rot * p;\n            \/\/ Box fold: 2*clamp(p,-CSize,CSize) - p\n            p = fma(clamp(p, negCSize, cSize), float3(2.0f), -p);\n            \/\/ Sphere fold: k = max(Size\/dot(p,p), 1)\n            float k = max(size \/ max(dot(p, p), 1e-6f), 1.0f);\n            p *= k;\n            j *= k + 0.05f;\n            if (i < trapIterations) {\n                float r2 = dot(p, p);\n                if (r2 < trap) { trap = r2; trapIter = i; trapPos = p; }\n            }\n        }\n    } else {\n        for (; i < n; ++i) {\n            p = fma(clamp(p, negCSize, cSize), float3(2.0f), -p);\n            float k = max(size \/ max(dot(p, p), 1e-6f), 1.0f);\n            p *= k;\n            j *= k + 0.05f;\n            if (i < trapIterations) {\n                float r2 = dot(p, p);\n                if (r2 < trap) { trap = r2; trapIter = i; trapPos = p; }\n            }\n        }\n    }\n\n    float rxy = length(p.xy);\n    float lenP = max(length(p), 1e-6f);\n    float de = max(rxy - twiddle, abs(rxy * p.z) \/ lenP) \/ max(abs(j), 1e-6f);\n\n    orbit.trap = trap;\n    orbit.trapIteration = trapIter;\n    orbit.trapPosition = trapPos;\n    orbit.finalP = p;\n    orbit.iterationsUsed = i;\n\n    return de;\n}\n\nFORCE_INLINE float DE_PseudoKnightyan_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {\n    float3 cSize    = max(abs(float3(fp.params[0], fp.params[1], fp.params[2])), float3(1e-4f));\n    float3 negCSize = -cSize;\n    float  size     = fp.params[3];\n    float  deFactor = fp.params[4];\n    float  twiddle  = fp.params[5];\n    bool hasRotation = hasRot1Precomputed(fp);\n\n    float3 p = pos;\n    float j = (deFactor != 0.0f) ? deFactor : 1.0f;\n\n    int n = clamp(iterations, 0, 200);\n    if (hasRotation) {\n        for (int i = 0; i < n; ++i) {\n            p = rot * p;\n            p = fma(clamp(p, negCSize, cSize), float3(2.0f), -p);\n            float k = max(size \/ max(dot(p, p), 1e-6f), 1.0f);\n            p *= k;\n            j *= k + 0.05f;\n        }\n    } else {\n        for (int i = 0; i < n; ++i) {\n            p = fma(clamp(p, negCSize, cSize), float3(2.0f), -p);\n            float k = max(size \/ max(dot(p, p), 1e-6f), 1.0f);\n            p *= k;\n            j *= k + 0.05f;\n        }\n    }\n\n    float rxy = length(p.xy);\n    float lenP = max(length(p), 1e-6f);\n    return max(rxy - twiddle, abs(rxy * p.z) \/ lenP) \/ max(abs(j), 1e-6f);\n}\n",
+    "name" : "Pseudo Knightyan",
+    "params" : [
+      {
+        "default" : 0.485771,
+        "index" : 0,
+        "max" : 2,
+        "min" : -2,
+        "name" : "CSize X",
+        "step" : 0.001
+      },
+      {
+        "default" : 0.8034414,
+        "index" : 1,
+        "max" : 2,
+        "min" : -2,
+        "name" : "CSize Y",
+        "step" : 0.001
+      },
+      {
+        "default" : 1.062872,
+        "index" : 2,
+        "max" : 2,
+        "min" : -2,
+        "name" : "CSize Z",
+        "step" : 0.001
+      },
+      {
+        "default" : 0.70968,
+        "index" : 3,
+        "max" : 2,
+        "min" : -2,
+        "name" : "Size",
+        "step" : 0.001
+      },
+      {
+        "default" : 1,
+        "index" : 4,
+        "max" : 10,
+        "min" : 0,
+        "name" : "DEfactor",
+        "step" : 0.01
+      },
+      {
+        "default" : 0.8412322,
+        "index" : 5,
+        "max" : 2,
+        "min" : -2,
+        "name" : "TwiddleRXY",
+        "step" : 0.001
+      }
+    ],
+    "schemaVersion" : 1,
+    "supportedEffectTags" : [
+      "safetyBubble"
+    ]
+  },
+  "envScrunchContain" : 0,
+  "envScrunchContainFeather" : 0.1,
+  "envScrunchEnabled" : false,
+  "envScrunchMode" : 0,
+  "envScrunchReach" : 0.75,
+  "envScrunchStrength" : 0.8,
+  "fogEffect" : {
+    "colorBlue" : 0.02,
+    "colorGreen" : 0.015,
+    "colorRed" : 0.01,
+    "enabled" : false,
+    "hueRotateEnabled" : false,
+    "hueRotateSpeed" : 0.1,
+    "intensity" : 0.09365403
+  },
+  "foldingLimit" : 1,
+  "formulaParamValues" : [
+    0.6739771,
+    0.6841991,
+    0.9424399,
+    0.590438,
+    1,
+    0.8412322,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "fractalIterations" : 8,
+  "fractalScale" : 2.879839,
+  "fractalType" : "custom",
+  "glowEffect" : {
+    "enabled" : false,
+    "intensity" : 0.19597562
+  },
+  "gradientCycleEffect" : {
+    "enabled" : false,
+    "mirrorLoop" : true,
+    "speed" : 0
+  },
+  "gradientState" : {
+    "gradient" : {
+      "id" : "B842CEB3-DBF3-47C4-82C9-F8E4E37140A1",
+      "mappingMode" : 5,
+      "name" : "Classic",
+      "offset" : 0,
+      "repeatCount" : 1,
+      "smoothing" : 1,
+      "stops" : [
+        {
+          "color" : [
+            0.05,
+            0.02,
+            0.02
+          ],
+          "id" : "ECEE7610-ADD4-4B2C-9C9F-D65B38836E40",
+          "position" : 0
+        },
+        {
+          "color" : [
+            1,
+            0.1,
+            0.1
+          ],
+          "id" : "E26C8C5A-0D52-4D57-BF30-257E55C15BE9",
+          "position" : 0.25
+        },
+        {
+          "color" : [
+            0.2,
+            0.4,
+            0.9
+          ],
+          "id" : "76587BDC-19E5-40F3-AB5E-683C94AE04A7",
+          "position" : 0.5
+        },
+        {
+          "color" : [
+            1,
+            0.8,
+            0
+          ],
+          "id" : "09770517-F06C-4B3F-8E86-15B081F5E21A",
+          "position" : 0.75
+        },
+        {
+          "color" : [
+            0,
+            0.2,
+            0.8
+          ],
+          "id" : "EF051B26-12A9-4767-B6E0-23D9703283E5",
+          "position" : 1
+        }
+      ]
+    },
+    "gradientPreset" : "classic"
+  },
+  "handAttraction" : {
+    "ballScale" : 0.5,
+    "enabled" : true,
+    "forearmEnabled" : false,
+    "forearmRadius" : 0.06,
+    "pocketEnabled" : true,
+    "pocketSize" : 0.77,
+    "pocketSoftness" : 0.18,
+    "projectionDistance" : 0.08,
+    "radius" : 0.36,
+    "softness" : 0.73,
+    "strength" : 0.39
+  },
+  "hueRotationEffect" : {
+    "enabled" : false,
+    "intensity" : 0,
+    "speed" : 0
+  },
+  "id" : "E781BF28-35CC-4A2C-9B67-B19CC7D6F035",
+  "juliaDriftEffect" : {
+    "enabled" : false,
+    "speed" : 0
+  },
+  "lightVariationRate" : 0.5,
+  "lightingMode" : "visualizer",
+  "lightingPreset" : "Custom",
+  "lightingSoftness" : 0.35,
+  "linearRailEffect" : {
+    "amplitude" : 0,
+    "axis" : "z",
+    "enabled" : false,
+    "multiplier" : 1,
+    "orbitAmount" : 0,
+    "orbitSpeed" : 0.18,
+    "speed" : 0
+  },
+  "maxRaySteps" : 56,
+  "minDistance" : 0.8,
+  "musicReactiveMappings" : [
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "AC81B643-F927-48E7-B9D2-96A683558D21",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "sinusoidal",
+      "smoothingWindow" : 0,
+      "source" : "composite",
+      "spaceWarpField" : "strength",
+      "target" : "fractalScale"
+    },
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "3A861822-B949-4C95-9A9D-046386BF3401",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "sinusoidal",
+      "smoothingWindow" : 0,
+      "source" : "bass",
+      "spaceWarpField" : "strength",
+      "target" : "formulaParam0"
+    },
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "8F8DA890-1676-49C1-8325-F2B580C9562E",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "sinusoidal",
+      "smoothingWindow" : 0,
+      "source" : "mid",
+      "spaceWarpField" : "strength",
+      "target" : "formulaParam1"
+    },
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "93DA2C08-D560-41C2-8695-7C71219E9523",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "sinusoidal",
+      "smoothingWindow" : 0,
+      "source" : "treble",
+      "spaceWarpField" : "strength",
+      "target" : "formulaParam2"
+    },
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "30AEB2F3-1442-41AB-82E5-647936B69032",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "sinusoidal",
+      "smoothingWindow" : 0,
+      "source" : "mid",
+      "spaceWarpField" : "strength",
+      "target" : "formulaParam3"
+    },
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "432A14B7-158F-4D9D-A5BE-0691DD31807D",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "pulse",
+      "smoothingWindow" : 0,
+      "source" : "beat",
+      "spaceWarpField" : "strength",
+      "target" : "glow"
+    },
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "67EB7D0B-677B-4FC5-A7B2-30430758F2B0",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "drift",
+      "smoothingWindow" : 0,
+      "source" : "composite",
+      "spaceWarpField" : "strength",
+      "target" : "fog"
+    },
+    {
+      "amount" : 1,
+      "hybridCombo" : 0.35,
+      "id" : "B712CB81-8E66-4A13-B6CD-B99041D17D1F",
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "pulse",
+      "smoothingWindow" : 0,
+      "source" : "beat",
+      "spaceWarpField" : "strength",
+      "target" : "bloom"
+    }
+  ],
+  "name" : "Mandala PC",
+  "platformEnabled" : true,
+  "platformRadius" : 1.888,
+  "polarRotationEffect" : {
+    "direction" : "off",
+    "speed" : 0
+  },
+  "position" : [
+    0,
+    0,
+    0
+  ],
+  "pulseEffect" : {
+    "amount" : 0,
+    "enabled" : false,
+    "speed" : 0
+  },
+  "rating" : 0,
+  "resolutionScale" : 0.5,
+  "safetyBubbleBlend" : 0.25,
+  "safetyBubbleEnabled" : true,
+  "safetyBubbleFadeEnabled" : true,
+  "safetyBubbleFadeWidth" : 0.1,
+  "safetyBubbleRadius" : 1.8,
+  "safetyBubbleShape" : 0,
+  "scale" : 1,
+  "spaceWarpOps" : [
+    {
+      "axis" : [
+        0,
+        1,
+        0
+      ],
+      "id" : "777FC4DB-772C-47AA-9AFA-A4C54777E14E",
+      "isEnabled" : true,
+      "p1" : 0,
+      "p2" : 0,
+      "strength" : 1.5973077,
+      "type" : 13
+    }
+  ],
+  "sphereProjectionBlend" : 1,
+  "sphereProjectionEnabled" : false,
+  "sphereProjectionRadius" : 1,
+  "sphereRadius" : 0.5,
+  "sphericalInversionMode" : "off",
+  "sphericalInversionRadius" : 2,
+  "tileSize" : 0,
+  "tonemapStrength" : 0,
+  "worldRotationW" : 1,
+  "worldRotationX" : 0,
+  "worldRotationY" : 0,
+  "worldRotationZ" : 0
+}
