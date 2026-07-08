@@ -86,13 +86,19 @@ final class AnimationManager {
 
     /// Delete every store file whose decoded id matches `id`.
     private func removeUserSceneFile(id: UUID) {
-        guard let root = storeRoot else { return }
+        removeUserSceneFiles(ids: [id])
+    }
+
+    /// Delete every store file whose decoded id is in `ids`, in a single directory
+    /// scan (vs one scan per id). Used by the delete site and `replaceUserScenes`.
+    private func removeUserSceneFiles(ids: Set<UUID>) {
+        guard !ids.isEmpty, let root = storeRoot else { return }
         let dir = StorageLocation.animationsDir(root)
         let exts = ThresholdExportFormat.extensions(in: .animation)
         guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
         for url in files where exts.contains(url.pathExtension) {
             if let data = try? Data(contentsOf: url),
-               let scene = try? sceneDecoder.decode(AnimationScene.self, from: data), scene.id == id {
+               let scene = try? sceneDecoder.decode(AnimationScene.self, from: data), ids.contains(scene.id) {
                 try? FileManager.default.removeItem(at: url)
             }
         }
@@ -1515,7 +1521,7 @@ final class AnimationManager {
     /// propagate to every device.
     func replaceUserScenes(with scenes: [AnimationScene]) {
         let droppedIDs = Set(userScenes.map(\.id)).subtracting(scenes.map(\.id))
-        for id in droppedIDs { removeUserSceneFile(id: id) }
+        removeUserSceneFiles(ids: droppedIDs)
         userScenes = scenes
         saveScenes()
     }

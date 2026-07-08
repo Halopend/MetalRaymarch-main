@@ -95,10 +95,20 @@ final class StorageLocation {
         return docs.appendingPathComponent("Threshold", isDirectory: true)
     }
 
+    #if DEBUG
+    /// Test-only override for the active store root. When set, `activeRoot` returns
+    /// it regardless of mode so tests can exercise the real folder-mirroring against
+    /// a temp directory instead of the app sandbox. Never compiled into Release.
+    var testRootOverride: URL?
+    #endif
+
     /// The active store root for the current mode. `nil` when iCloud is chosen but
     /// its container has not resolved yet — callers should fall back or wait for
     /// `rootResolvedNotification`.
     var activeRoot: URL? {
+        #if DEBUG
+        if let testRootOverride { return testRootOverride }
+        #endif
         switch mode {
         case .local:  return localRoot
         case .iCloud: return iCloudRoot

@@ -356,12 +356,19 @@ class PresetManager {
 
     /// Delete every store file (both folders) whose decoded id matches `id`.
     private func removePresetFiles(id: UUID, root: URL) {
+        removePresetFiles(ids: [id], root: root)
+    }
+
+    /// Delete every store file (both folders) whose decoded id is in `ids`, scanning
+    /// each folder once (vs one scan per id). Used by the delete sites and `replaceAll`.
+    private func removePresetFiles(ids: Set<UUID>, root: URL) {
+        guard !ids.isEmpty else { return }
         let exts = ThresholdExportFormat.extensions(in: .preset)
         for dir in [StorageLocation.scenesDir(root), StorageLocation.musicPresetsDir(root)] {
             guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
             for url in files where exts.contains(url.pathExtension) {
                 if let data = try? Data(contentsOf: url),
-                   let preset = try? presetDecoder.decode(FractalPreset.self, from: data), preset.id == id {
+                   let preset = try? presetDecoder.decode(FractalPreset.self, from: data), ids.contains(preset.id) {
                     try? FileManager.default.removeItem(at: url)
                 }
             }
@@ -434,7 +441,7 @@ class PresetManager {
         let droppedIDs = Set(presets.map(\.id)).subtracting(newPresets.map(\.id))
         presets = newPresets
         if let root = storeRoot {
-            for id in droppedIDs { removePresetFiles(id: id, root: root) }
+            removePresetFiles(ids: droppedIDs, root: root)
             for preset in newPresets { writePresetFile(preset, root: root) }
         }
         scheduleBackup()
