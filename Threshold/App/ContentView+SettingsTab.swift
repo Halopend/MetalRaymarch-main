@@ -230,6 +230,9 @@ extension ContentView {
             QuickToggleRow("Coherent Packet", "square.grid.3x3", home: .shapePerformance,
                 get: { appModel.renderSettings.coherentPacketEnabled },
                 set: { appModel.renderSettings.coherentPacketEnabled = $0 }),
+            QuickToggleRow("Depth-Buffer Normals", "square.stack.3d.up", home: .shapePerformance,
+                get: { appModel.renderSettings.depthNormalReconstructionEnabled },
+                set: { appModel.renderSettings.depthNormalReconstructionEnabled = $0 }),
             QuickToggleRow("Self-Shadows", "moon", home: .shapePerformance,
                 get: { cache.quality.shadowsEnabled },
                 set: { cache.quality.shadowsEnabled = $0; cache.push(\.shadowsEnabled, value: $0) }),
@@ -1109,6 +1112,22 @@ extension ContentView {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Coherent Packet")
                     Text("Predict-validate warm-start: a single DE-eval safety probe with a normal-coherence shadow gate. Shows a layer-of-acceptance debug overlay while on (magenta = hit, green = tight, red = rejected, cyan = shadow fallback). 8×8 compute path only.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }.tint(themeColor)
+
+            Divider().opacity(0.4)
+
+            // ── Depth-Buffer Normals — Mac direct/native-res path only ───
+            Toggle(isOn: Binding(
+                get: { appModel.renderSettings.depthNormalReconstructionEnabled },
+                set: { appModel.renderSettings.depthNormalReconstructionEnabled = $0 }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Depth-Buffer Normals")
+                    Text("Reconstructs the surface normal from last frame's depth buffer instead of extra distance-field evaluations — cheaper, at the cost of one frame of lag on fast motion. Mac only, and only while Resolution Scale is at 1.0 (falls back automatically whenever MetalFX up/downscaling is engaged, or history isn't available yet).")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

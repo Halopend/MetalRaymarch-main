@@ -402,6 +402,15 @@ typedef struct
     float distanceLODFalloff;// Distance iteration LOD: fractal iterations dropped per unit ray distance. 0 = off
     int benchCollectSteps;   // 1 = accumulate per-ray march step counts into BufferIndexBenchCounters (benchmark only)
 
+    // Experimental (Mac direct/native-res path only): reconstruct the surface
+    // normal from 4 depth taps per axis against the PREVIOUS frame's depth
+    // buffer (TextureIndexPrevDepth) instead of GetNormal()'s extra DE
+    // evaluations — see ReconstructNormalFromDepthHistory. CPU-gated to 0
+    // whenever history is unavailable (first frame, resize, scene change,
+    // MetalFX up/downscale engaged), so 1 here always means a usable
+    // previousInvViewProjMatrix + depth texture are bound this frame.
+    int depthNormalReconstructionEnabled;
+
     // === CONSERVATIVE CONE COARSE-PREPASS WARM-START ===
     // Raw per-pixel lateral footprint at depth 1: 2·tan(fovY/2)/viewportHeight
     // (= coneMarchScale WITHOUT the LOD-widening s·coneMarchMaxPixels factor).

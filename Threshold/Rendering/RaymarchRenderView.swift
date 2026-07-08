@@ -437,6 +437,33 @@ final class ThresholdMacRenderer {
     private var drawableSize: CGSize = .zero
     private var depthTexture: MTLTexture?
 
+    // Depth-buffer normal reconstruction (experimental, direct/native-res path
+    // only): macOS gets a ping-ponged pair of depth textures so the direct-mode
+    // pass can sample LAST frame's depth (ReconstructNormalFromDepthHistory in
+    // Shaders.metal) while writing this frame's, instead of discarding it as
+    // `depthTexture` above still does for iOS (`.dontCare`/`.memoryless`, which
+    // cannot be sampled after the pass ends). `hasHistoryDepth` / the matrices
+    // below are plain cross-platform state — they simply never go true on iOS.
+    #if os(macOS)
+    private var historyDepthPair: [MTLTexture?] = [nil, nil]
+    private var historyDepthIndex = 0
+    #endif
+    private var hasHistoryDepth = false
+    private var historyPreviousInvViewProj = matrix_identity_float4x4
+    private var historyPreviousViewProj = matrix_identity_float4x4
+    /// Set by `makeRenderPassDescriptor` (direct path only) so the later
+    /// `encodeRaymarch` call this same frame can bind last frame's depth.
+    private var pendingHistoryReadTexture: MTLTexture?
+    private lazy var historyDummyDepthTexture: MTLTexture? = {
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: depthPixelFormat,
+                                                         width: 1, height: 1, mipmapped: false)
+        d.usage = [.renderTarget, .shaderRead]
+        d.storageMode = .private
+        let t = device.makeTexture(descriptor: d)
+        t?.label = "ThresholdMac History Depth Dummy"
+        return t
+    }()
+
     /// Counts down after a GPU command buffer error. While non-zero, draws are
     /// skipped to let the GPU recover before new submissions are attempted.
     /// Reference type so it can be safely captured in the completion handler closure.
@@ -546,7 +573,9 @@ final class ThresholdMacRenderer {
     // MARK: - Headless benchmark support (BenchmarkMode / MacBenchmarkHarness)
 
     private var benchColorTexture: MTLTexture?
-    private var benchDepthTexture: MTLTexture?
+    // Depth uses the shared `directDepthTargets` ping-pong (not a dedicated
+    // bench texture) so depth-buffer normal reconstruction is benchable — see
+    // `encodeBenchmarkPass`.
     /// When set, animation time is pinned to this value for the next frame(s) —
     /// used by `captureBenchmarkBytes` so PNG regression captures are
     /// phase-deterministic. Always nil outside the harness.
@@ -573,7 +602,15 @@ final class ThresholdMacRenderer {
     /// in-kernel step counter as `draw(appModel:)`'s native path — it just bypasses
     /// the CAMetalLayer drawable / MTKView display link / MetalFX so a benchmark
     /// can run continuously with no on-screen window.
-    private func encodeBenchmarkPass(color: MTLTexture, depth: MTLTexture, appModel: AppModel)
+    ///
+    /// `historyRead` threads the SAME depth-history ping-pong the live direct
+    /// path uses (see `directDepthTargets`/`advanceHistoryDepth`) so depth-buffer
+    /// normal reconstruction is benchable — `renderBenchmarkFrame` runs this in a
+    /// tight loop, which is exactly what re-establishes history after the first
+    /// (fallback-to-GetNormal) frame. Every call commits its depth as history for
+    /// the next; safe since the caller passed a texture from `directDepthTargets`.
+    private func encodeBenchmarkPass(color: MTLTexture, depth: MTLTexture,
+                                     historyRead: MTLTexture?, appModel: AppModel)
         -> (gpuMs: Double, cpuEncodeMs: Double, avgSteps: Double)? {
         let cpuStart = CACurrentMediaTime()
         let frameSlot = uniformBufferIndex
@@ -594,14 +631,22 @@ final class ThresholdMacRenderer {
                                          key: key)
         }
         let pipeline = resolveActivePipeline(appModel: appModel)
-        let descriptor = makeOffscreenRenderPassDescriptor(color: color, depth: depth)
+        // storeDepth: true — depth must survive the pass so it becomes next
+        // call's history (see directDepthTargets/advanceHistoryDepth above).
+        let descriptor = makeOffscreenRenderPassDescriptor(color: color, depth: depth, storeDepth: true)
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return nil }
-        encodeRaymarch(into: encoder, pipeline: pipeline, uniformBuffer: uniformBuffer, benchBuffer: benchBuffer)
+        encodeRaymarch(into: encoder, pipeline: pipeline, uniformBuffer: uniformBuffer,
+                      benchBuffer: benchBuffer, prevDepthTexture: historyRead)
         encoder.endEncoding()
         let cpuEncodeMs = (CACurrentMediaTime() - cpuStart) * 1000.0
 
         commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
+        commandBuffer.waitUntilCompleted()   // fully serial — safe to commit history immediately after
+        #if os(macOS)
+        historyPreviousInvViewProj = motionCurrentInvViewProj
+        historyPreviousViewProj = motionCurrentViewProjNoJitter
+        advanceHistoryDepth()
+        #endif
 
         let gpuMs = max(0.0, (commandBuffer.gpuEndTime - commandBuffer.gpuStartTime) * 1000.0)
         var avgSteps = 0.0
@@ -625,15 +670,11 @@ final class ThresholdMacRenderer {
                 pixelFormat: colorPixelFormat, width: width, height: height, mipmapped: false)
             cd.usage = [.renderTarget, .shaderRead]
             cd.storageMode = .private
-            let dd = MTLTextureDescriptor.texture2DDescriptor(
-                pixelFormat: depthPixelFormat, width: width, height: height, mipmapped: false)
-            dd.usage = [.renderTarget]
-            dd.storageMode = .private
             benchColorTexture = device.makeTexture(descriptor: cd)
-            benchDepthTexture = device.makeTexture(descriptor: dd)
         }
-        guard let color = benchColorTexture, let depth = benchDepthTexture else { return nil }
-        return encodeBenchmarkPass(color: color, depth: depth, appModel: appModel)
+        guard let color = benchColorTexture,
+              let history = directDepthTargets(width: width, height: height) else { return nil }
+        return encodeBenchmarkPass(color: color, depth: history.write, historyRead: history.read, appModel: appModel)
     }
 
     /// Visual-verification path: renders one frame into a CPU-readable `.shared`
@@ -652,13 +693,10 @@ final class ThresholdMacRenderer {
             pixelFormat: colorPixelFormat, width: width, height: height, mipmapped: false)
         cd.usage = [.renderTarget, .shaderRead]
         cd.storageMode = .shared
-        let dd = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: depthPixelFormat, width: width, height: height, mipmapped: false)
-        dd.usage = [.renderTarget]
-        dd.storageMode = .private
         guard let color = device.makeTexture(descriptor: cd),
-              let depth = device.makeTexture(descriptor: dd),
-              encodeBenchmarkPass(color: color, depth: depth, appModel: appModel) != nil else { return nil }
+              let history = directDepthTargets(width: width, height: height),
+              encodeBenchmarkPass(color: color, depth: history.write,
+                                  historyRead: history.read, appModel: appModel) != nil else { return nil }
 
         let bytesPerRow = width * 4
         var data = Data(count: bytesPerRow * height)
@@ -922,6 +960,10 @@ final class ThresholdMacRenderer {
             blitEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             blitEncoder.endEncoding()
 
+            // Depth-buffer normal reconstruction only tracks the direct path's
+            // history; a frame spent here leaves it stale for whenever direct
+            // mode resumes.
+            hasHistoryDepth = false
             wasTemporalActive = true
         } else if let spatialPass, let blitPipelineState {
             // 1. Raymarch into the low-resolution offscreen target.
@@ -951,14 +993,28 @@ final class ThresholdMacRenderer {
             blitEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             blitEncoder.endEncoding()
 
+            hasHistoryDepth = false
             wasTemporalActive = false
         } else if let directPassDescriptor {
             guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: directPassDescriptor) else {
                 commandBuffer.commit()
                 return
             }
-            encodeRaymarch(into: encoder, pipeline: activePipeline, uniformBuffer: uniformBuffer, benchBuffer: benchBuffer)
+            encodeRaymarch(into: encoder, pipeline: activePipeline, uniformBuffer: uniformBuffer,
+                          benchBuffer: benchBuffer, prevDepthTexture: pendingHistoryReadTexture)
             encoder.endEncoding()
+
+            // This frame's depth becomes next frame's history; this frame's
+            // (jittered == unjittered here, direct path never jitters) inverse
+            // view-projection is what a depth-buffer normal reconstruction next
+            // frame needs to unproject it. Captured here (not unconditionally in
+            // makeUniforms) so a frame spent in spatial/temporal mode can't leave
+            // stale matrices paired with a stale depth texture.
+            #if os(macOS)
+            historyPreviousInvViewProj = motionCurrentInvViewProj
+            historyPreviousViewProj = motionCurrentViewProjNoJitter
+            advanceHistoryDepth()
+            #endif
 
             wasTemporalActive = false
         }
@@ -972,8 +1028,14 @@ final class ThresholdMacRenderer {
     private func encodeRaymarch(into encoder: MTLRenderCommandEncoder,
                                 pipeline: MTLRenderPipelineState,
                                 uniformBuffer: MTLBuffer,
-                                benchBuffer: MTLBuffer) {
+                                benchBuffer: MTLBuffer,
+                                prevDepthTexture: MTLTexture? = nil) {
         encoder.setRenderPipelineState(pipeline)
+        // fragmentShaderMono always declares this texture (depth-buffer normal
+        // reconstruction); bind a 1x1 dummy when there's no valid history (the
+        // spatial/temporal upscale paths, or the direct path before its first
+        // frame) — `uniforms.depthNormalReconstructionEnabled` gates actual use.
+        encoder.setFragmentTexture(prevDepthTexture ?? historyDummyDepthTexture, index: TextureIndex.prevDepth.rawValue)
         encoder.setDepthStencilState(depthState)
         // The raymarch proxy is a radius-100 ellipsoid drawn from the inside; the
         // camera sits at its center and we shade the far wall it points at. "Zoom"
@@ -1236,41 +1298,74 @@ final class ThresholdMacRenderer {
     }
 
     private func makeRenderPassDescriptor(drawable: CAMetalDrawable) -> MTLRenderPassDescriptor? {
-        guard let depthTexture = depthTexture(width: drawable.texture.width, height: drawable.texture.height) else {
+        guard let history = directDepthTargets(width: drawable.texture.width, height: drawable.texture.height) else {
             return nil
         }
+        pendingHistoryReadTexture = history.read
 
         let descriptor = MTLRenderPassDescriptor()
         descriptor.colorAttachments[0].texture = drawable.texture
         descriptor.colorAttachments[0].loadAction = .clear
         descriptor.colorAttachments[0].storeAction = .store
         descriptor.colorAttachments[0].clearColor = clearColor
-        descriptor.depthAttachment.texture = depthTexture
+        descriptor.depthAttachment.texture = history.write
         descriptor.depthAttachment.loadAction = .clear
+        #if os(macOS)
+        // Persisted (not `.dontCare`) so next frame's depth-buffer normal
+        // reconstruction can sample it — see `historyDepthPair` above.
+        descriptor.depthAttachment.storeAction = .store
+        #else
         descriptor.depthAttachment.storeAction = .dontCare
+        #endif
         descriptor.depthAttachment.clearDepth = 1.0
         return descriptor
     }
 
-    private func depthTexture(width: Int, height: Int) -> MTLTexture? {
-        if let depthTexture, depthTexture.width == width, depthTexture.height == height {
-            return depthTexture
+    /// Depth target(s) for the direct (native-res) raymarch pass: `write` is
+    /// this frame's depth attachment; `read` is last frame's depth, valid only
+    /// on macOS once `hasHistoryDepth` is set (see `advanceHistoryDepth`).
+    private func directDepthTargets(width: Int, height: Int) -> (write: MTLTexture, read: MTLTexture?)? {
+        let w = max(width, 1), h = max(height, 1)
+        #if os(macOS)
+        if historyDepthPair[0] == nil || historyDepthPair[0]!.width != w || historyDepthPair[0]!.height != h {
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: depthPixelFormat,
+                                                                      width: w, height: h, mipmapped: false)
+            descriptor.usage = [.renderTarget, .shaderRead]
+            descriptor.storageMode = .private
+            historyDepthPair[0] = device.makeTexture(descriptor: descriptor)
+            historyDepthPair[0]?.label = "ThresholdMac History Depth 0"
+            historyDepthPair[1] = device.makeTexture(descriptor: descriptor)
+            historyDepthPair[1]?.label = "ThresholdMac History Depth 1"
+            historyDepthIndex = 0
+            hasHistoryDepth = false
         }
-
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: depthPixelFormat,
-                                                                  width: max(width, 1),
-                                                                  height: max(height, 1),
-                                                                  mipmapped: false)
-        descriptor.usage = .renderTarget
-        #if os(iOS)
-        descriptor.storageMode = .memoryless
+        guard let a = historyDepthPair[0], let b = historyDepthPair[1] else { return nil }
+        let writeTex = historyDepthIndex == 0 ? a : b
+        let readTex = hasHistoryDepth ? (historyDepthIndex == 0 ? b : a) : nil
+        return (writeTex, readTex)
         #else
-        descriptor.storageMode = .private
-        #endif
+        if let depthTexture, depthTexture.width == w, depthTexture.height == h {
+            return (depthTexture, nil)
+        }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: depthPixelFormat,
+                                                                  width: w, height: h, mipmapped: false)
+        descriptor.usage = .renderTarget
+        descriptor.storageMode = .memoryless
         depthTexture = device.makeTexture(descriptor: descriptor)
         depthTexture?.label = "ThresholdMac Depth"
-        return depthTexture
+        guard let depthTexture else { return nil }
+        return (depthTexture, nil)
+        #endif
     }
+
+    #if os(macOS)
+    /// Commit this frame's direct-mode depth as history for the next frame, and
+    /// swap the ping-pong index. Call only after a successful direct-mode encode.
+    private func advanceHistoryDepth() {
+        hasHistoryDepth = true
+        historyDepthIndex = 1 - historyDepthIndex
+    }
+    #endif
 
     private func writeUniforms(to buffer: MTLBuffer, appModel: AppModel) {
         let now = CACurrentMediaTime()
@@ -1328,6 +1423,11 @@ final class ThresholdMacRenderer {
         if let oldKey = temporalInvalidationKey, oldKey != newKey {
             temporalUpscaler.requestReset()
             hasPreviousMotionMatrices = false
+            // A discrete scene/geometry change means last frame's depth no
+            // longer describes the same distance field — the depth-buffer
+            // normal reconstruction must fall back to GetNormal() until the
+            // direct path re-establishes history against the new field.
+            hasHistoryDepth = false
         }
         temporalInvalidationKey = newKey
 
@@ -1772,10 +1872,12 @@ final class ThresholdMacRenderer {
         return Uniforms(projectionMatrix: jitteredProjection,
                         modelViewMatrix: modelView,
                         inverseModelViewMatrix: inverseModelView,
-                        // Warm start is visionOS-only (FC_WARM_START compiled out
-                        // of the Mac pipelines); these stay inert here.
-                        previousViewProjMatrix: matrix_identity_float4x4,
-                        previousInvViewProjMatrix: matrix_identity_float4x4,
+                        // Warm start (march acceleration) is visionOS-only
+                        // (FC_WARM_START compiled out of the Mac pipelines) —
+                        // unrelated to depth-buffer normal reconstruction below,
+                        // which reuses these same matrix fields on Mac.
+                        previousViewProjMatrix: historyPreviousViewProj,
+                        previousInvViewProjMatrix: historyPreviousInvViewProj,
                         time: elapsedTime,
                         minDistance: settings.minDistance,
                         fractalScale: settings.fractalScale,
@@ -1833,6 +1935,13 @@ final class ThresholdMacRenderer {
                         shadowsEnabled: settings.shadowsEnabled ? 1 : 0,
                         distanceLODFalloff: settings.distanceLODStrength * 0.5 * zoomOutLODScale,
                         benchCollectSteps: BenchmarkManager.shared.shouldCollectSteps ? 1 : 0,
+                        // Intent (settings toggle) AND actual availability
+                        // (hasHistoryDepth — false on first frame, after a
+                        // resize, a scene change, or whenever MetalFX up/
+                        // downscale is engaged) both have to hold, so 1 here
+                        // always means a usable previousInvViewProjMatrix +
+                        // TextureIndexPrevDepth are bound this frame.
+                        depthNormalReconstructionEnabled: (settings.depthNormalReconstructionEnabled && hasHistoryDepth) ? 1 : 0,
                         // Conservative cone coarse-prepass: Mac uses fragmentShaderMono,
                         // which never reads the coarse texture (FC off), so these only
                         // keep the shared Uniforms initializer well-formed.
@@ -1848,7 +1957,11 @@ final class ThresholdMacRenderer {
                         springVisible: (settings.springActive || simd_length(settings.springDisplacement) > 0.001) ? 1 : 0,
                         springRestRadius: 0.06,
                         jitterOffset: .zero,
-                        renderResolution: [1, 1],
+                        // Was a [1,1] placeholder (warm-start march acceleration
+                        // is visionOS-only) — depth-buffer normal reconstruction
+                        // also needs this to convert a pixel tap offset to UV.
+                        renderResolution: SIMD2<Float>(Float(max(drawableSize.width, 1)),
+                                                       Float(max(drawableSize.height, 1))),
                         floorPlane: SIMD4<Float>(0, 1, 0, 0),
                         floorCenterRadius: SIMD4<Float>(0, 0, 0, 0),
                         formulaParams: settings.formulaParams,

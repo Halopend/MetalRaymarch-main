@@ -134,6 +134,9 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
     // Zoom-out epsilon/LOD rescale (1.0 at scale >= 0.15; mirrors RaymarchRenderView).
     let zoomOutEpsilonLoosen: Float = max(1.0, 0.15 / max(effectiveScale, 1e-4))
     let zoomOutLODScale: Float = min(1.0, effectiveScale / 0.15)
+    // Depth-buffer normal reconstruction needs cross-frame history a one-shot
+    // thumbnail never has — always off here (GetNormal() as before).
+    let depthNormalReconstructionEnabledVal: Int32 = 0
     let coneMarchScale = RenderPrecompute.coneMarchScale(
         strength: settings.coneMarchStrength,
         projection: projection,
@@ -194,6 +197,7 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
                     shadowsEnabled: settings.shadowsEnabled ? 1 : 0,
                     distanceLODFalloff: settings.distanceLODStrength * 0.5 * zoomOutLODScale,
                     benchCollectSteps: 0,
+                    depthNormalReconstructionEnabled: depthNormalReconstructionEnabledVal,
                     pixelFootprintPerDist: pixelFootprintPerDist,
                     coarseRateMagMax: 1.0,
                     springDisplacementX: settings.springDisplacement.x,
@@ -247,6 +251,11 @@ final class HeadlessRenderer: @unchecked Sendable {
     private let depthState: MTLDepthStencilState
     private let mesh: MTKMesh
     private let vertexDescriptor: MTLVertexDescriptor
+    /// `fragmentShaderMono` always declares a depth-history texture argument
+    /// (Mac's depth-buffer normal reconstruction); this one-shot renderer never
+    /// has cross-frame history (`depthNormalReconstructionEnabled` is always 0
+    /// above) but Metal still requires something bound.
+    private let dummyDepthTexture: MTLTexture
 
     /// Custom (embedded-DE) pipelines compiled on demand from a scene's Metal
     /// source, cached by `EmbeddedFormula.sourceHash` so the interactive view
@@ -333,6 +342,13 @@ final class HeadlessRenderer: @unchecked Sendable {
         mdlMesh.vertexDescriptor = mdlVD
         guard let built = try? MTKMesh(mesh: mdlMesh, device: device) else { throw Failure.badMesh }
         self.mesh = built
+
+        let dtd = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .depth32Float,
+                                                           width: 1, height: 1, mipmapped: false)
+        dtd.usage = [.renderTarget, .shaderRead]
+        dtd.storageMode = .private
+        guard let dummyDepth = device.makeTexture(descriptor: dtd) else { throw Failure.badMesh }
+        self.dummyDepthTexture = dummyDepth
     }
 
     // MARK: Public render entry points
@@ -445,6 +461,7 @@ final class HeadlessRenderer: @unchecked Sendable {
         enc.setVertexBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
         enc.setFragmentBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
         enc.setFragmentBuffer(benchBuffer, offset: 0, index: BufferIndex.benchCounters.rawValue)
+        enc.setFragmentTexture(dummyDepthTexture, index: TextureIndex.prevDepth.rawValue)
         for (i, vb) in mesh.vertexBuffers.enumerated() {
             enc.setVertexBuffer(vb.buffer, offset: vb.offset, index: i)
         }

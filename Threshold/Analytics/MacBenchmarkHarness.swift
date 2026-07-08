@@ -172,6 +172,7 @@ enum MacBenchmarkHarness {
             case "zoomFogCompensationEnabled":   qc.zoomFogCompensationEnabled = v != 0
             case "coarsePrepassWarmStartEnabled": qc.coarsePrepassWarmStartEnabled = v != 0
             case "coherentPacketEnabled":        qc.coherentPacketEnabled = v != 0
+            case "depthNormalReconstructionEnabled": qc.depthNormalReconstructionEnabled = v != 0
             case "foveationStrength":            qc.foveationStrength = v
             case "baseFractalIterations":        qc.baseFractalIterations = Int(v)
             case "baseMaxRaySteps":              qc.baseMaxRaySteps = Int(v)

@@ -47,6 +47,7 @@ struct RenderSettingsSnapshot {
     let tileSize: Int
     let debugHierarchical: Bool
     let coherentPacketEnabled: Bool
+    let depthNormalReconstructionEnabled: Bool
     let computeTemporalReprojectionEnabled: Bool
     let coarsePrepassWarmStartEnabled: Bool
     let foveationStrength: Float

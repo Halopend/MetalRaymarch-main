@@ -161,6 +161,13 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // Experimental: coherent packet predict-validate raymarch path (Stages 0-3)
     var coherentPacketEnabled: Bool = false
 
+    // Experimental: reconstruct the surface normal from the previous frame's
+    // depth buffer (4 taps/axis) instead of GetNormal()'s extra DE evaluations.
+    // Mac direct/native-res render path only — silently falls back to
+    // GetNormal() whenever history isn't available (see RaymarchRenderView's
+    // depth-history ping-pong). Off by default for a correct baseline.
+    var depthNormalReconstructionEnabled: Bool = false
+
     // Compute path (tileSize == 8): temporal reprojection + tile/supertile depth
     // seeding. The path's main speedup, but can blank disoccluded tiles — off by
     // default for a correct baseline.
@@ -300,7 +307,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case baseFractalIterations, baseMaxRaySteps
         case resolutionScale, renderQuality, tileSize
-        case debugHierarchical, coherentPacketEnabled, computeTemporalReprojectionEnabled, coarsePrepassWarmStartEnabled, foveationStrength
+        case debugHierarchical, coherentPacketEnabled, depthNormalReconstructionEnabled, computeTemporalReprojectionEnabled, coarsePrepassWarmStartEnabled, foveationStrength
         case smartAdvanceEnabled, coneMarchStrength, coneCoverageAAEnabled
         case overRelaxationMax, distanceLODStrength, shadowsEnabled, boundingSphereSkipEnabled, boundingShapeRadius
         case boundingShapeFogEnabled  // legacy Bool key, migrated into boundingShapeFogMode on decode
@@ -325,6 +332,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         tileSize              = decodedTileSize == 2 ? 0 : decodedTileSize  // Old "Quad Shared" mode removed → degrade to fragment
         debugHierarchical     = try c.decodeIfPresent(Bool.self,  forKey: .debugHierarchical)     ?? false
         coherentPacketEnabled = try c.decodeIfPresent(Bool.self,  forKey: .coherentPacketEnabled) ?? false
+        depthNormalReconstructionEnabled = try c.decodeIfPresent(Bool.self, forKey: .depthNormalReconstructionEnabled) ?? false
         computeTemporalReprojectionEnabled = try c.decodeIfPresent(Bool.self, forKey: .computeTemporalReprojectionEnabled) ?? false
         coarsePrepassWarmStartEnabled = try c.decodeIfPresent(Bool.self, forKey: .coarsePrepassWarmStartEnabled) ?? false
         foveationStrength     = try c.decodeIfPresent(Float.self, forKey: .foveationStrength)     ?? 0.0
@@ -373,6 +381,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         try c.encode(tileSize, forKey: .tileSize)
         try c.encode(debugHierarchical, forKey: .debugHierarchical)
         try c.encode(coherentPacketEnabled, forKey: .coherentPacketEnabled)
+        try c.encode(depthNormalReconstructionEnabled, forKey: .depthNormalReconstructionEnabled)
         try c.encode(computeTemporalReprojectionEnabled, forKey: .computeTemporalReprojectionEnabled)
         try c.encode(coarsePrepassWarmStartEnabled, forKey: .coarsePrepassWarmStartEnabled)
         try c.encode(foveationStrength, forKey: .foveationStrength)

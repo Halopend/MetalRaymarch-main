@@ -3975,6 +3975,75 @@ FORCE_INLINE half3 compositeSpringBlob(half3 col, float2 uv, Uniforms uniforms) 
     return result;
 }
 
+// === Depth-buffer normal reconstruction (Mac direct/native-res path) ===
+// atyuwen's "Accurate Normal Reconstruction from Depth Buffer": per axis, pick
+// whichever neighbor pair's linear extrapolation lands closest to the actual
+// hit position — the pair NOT straddling a depth discontinuity — then take
+// that pair's position delta as the derivative. An alternative to GetNormal()'s
+// extra Map()/DE evaluations; costs texture taps + matrix math instead.
+//
+// Taps come from the PREVIOUS frame's depth (one frame of lag under motion),
+// so `hitPos` is deliberately THIS frame's real, exact hit position (already
+// known — the full march already found it) rather than re-derived from depth:
+// it's a more accurate anchor than the technique's rasterizer-only origin has
+// access to, and it's free.
+//
+// Sampling happens in the CALLER (fragmentShaderMono), which has the texture;
+// this function is pure math so the texture never has to cross into
+// fragmentMain (shared with visionOS's fragmentShader, which has no use for
+// it). Each tap is (world/model-space position, validity) — see
+// `SampleDepthHistoryTap` below. A default-constructed (all-zero) tap reads as
+// invalid, so omitting every argument here is a correct "no history" case.
+FORCE_INLINE bool ReconstructNormalFromDepthHistory(
+    float3 hitPos, float3 viewDir,
+    float4 hz, float4 hx, float4 hy, float4 hw,
+    float4 vz, float4 vx, float4 vy, float4 vw,
+    thread float3& outNormal)
+{
+    // Left pair (z,x) extrapolated forward vs. right pair (w,y) extrapolated
+    // backward toward the center; smaller error = the side not straddling a
+    // depth discontinuity. A pair with any invalid tap is disqualified
+    // (FLT_MAX), and if only one side is valid it wins automatically.
+    float leftErr  = (hz.w > 0.5f && hx.w > 0.5f) ? length((2.0f * hx.xyz - hz.xyz) - hitPos) : FLT_MAX;
+    float rightErr = (hw.w > 0.5f && hy.w > 0.5f) ? length((2.0f * hy.xyz - hw.xyz) - hitPos) : FLT_MAX;
+    if (leftErr == FLT_MAX && rightErr == FLT_MAX) return false;
+    float3 hDeriv = (leftErr <= rightErr) ? (hitPos - hx.xyz) : (hy.xyz - hitPos);
+
+    float topErr = (vz.w > 0.5f && vx.w > 0.5f) ? length((2.0f * vx.xyz - vz.xyz) - hitPos) : FLT_MAX;
+    float botErr = (vw.w > 0.5f && vy.w > 0.5f) ? length((2.0f * vy.xyz - vw.xyz) - hitPos) : FLT_MAX;
+    if (topErr == FLT_MAX && botErr == FLT_MAX) return false;
+    float3 vDeriv = (topErr <= botErr) ? (hitPos - vx.xyz) : (vy.xyz - hitPos);
+
+    float3 n = cross(hDeriv, vDeriv);
+    if (length_squared(n) < 1e-12f) return false;   // degenerate (coincident taps)
+    n = normalize(n);
+    // Cross-product handedness depends on which pair each axis picked; make
+    // the normal face the camera rather than trust a fixed winding order.
+    if (dot(n, -viewDir) < 0.0f) n = -n;
+    outNormal = n;
+    return true;
+}
+
+// Unprojects one previous-frame depth-history tap to a world/model-space
+// position via `previousInvViewProjMatrix` — same recipe as
+// `computeWarmStartT`/`macMotionFragment` below. `.w` = 1.0 valid / 0.0
+// invalid (screen-edge, a miss/background sample, or a degenerate unproject).
+FORCE_INLINE float4 SampleDepthHistoryTap(float2 fragCoord, float2 offsetPixels, float2 renderResolution,
+                                          constant Uniforms& uniforms, depth2d<float> prevDepthTex)
+{
+    constexpr sampler s(filter::nearest, address::clamp_to_edge);
+    constexpr float kValidDepthMin = 5e-7f;   // matches computeWarmStartT's miss sentinel
+    if (renderResolution.x < 1.0f || renderResolution.y < 1.0f) return float4(0.0f);
+    float2 uv = (fragCoord + offsetPixels) / renderResolution;
+    if (any(uv < 0.0f) || any(uv > 1.0f)) return float4(0.0f);
+    float d = prevDepthTex.sample(s, uv);
+    if (d <= kValidDepthMin) return float4(0.0f);
+    float2 ndc = float2(fma(uv.x, 2.0f, -1.0f), -fma(uv.y, 2.0f, -1.0f));
+    float4 m = uniforms.previousInvViewProjMatrix * float4(ndc, d, 1.0f);
+    if (abs(m.w) <= 1e-6f) return float4(0.0f);
+    return float4(m.xyz / m.w, 1.0f);
+}
+
 // Shared fragment body for Mandelbox rendering
 
 inline FragmentOutput fragmentMain(ColorInOut in,
@@ -3983,7 +4052,14 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                                    float time,
                                    float warmStartT = -1.0f,
                                    device atomic_uint* benchCounters = nullptr,
-                                   float coarseWarmStartT = -1.0f)
+                                   float coarseWarmStartT = -1.0f,
+                                   // Depth-buffer normal reconstruction taps (Mac direct path
+                                   // only); default (all zero, .w=0 = invalid) means "no history"
+                                   // — every other caller falls straight through to GetNormal().
+                                   float4 depthTapHZ = float4(0.0f), float4 depthTapHX = float4(0.0f),
+                                   float4 depthTapHY = float4(0.0f), float4 depthTapHW = float4(0.0f),
+                                   float4 depthTapVZ = float4(0.0f), float4 depthTapVX = float4(0.0f),
+                                   float4 depthTapVY = float4(0.0f), float4 depthTapVW = float4(0.0f))
 {
     FragmentOutput output;
 
@@ -4097,7 +4173,21 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         if (benchAblate == 10) {
             col = half3(0.6h, 0.6h, 0.6h);
         } else {
+        // Depth-buffer normal reconstruction: only attempted when the CPU
+        // confirmed valid history this frame (uniforms flag), never for the
+        // edgeAA silhouette special case (edgePos has no matching depth-history
+        // neighborhood) or spherical inversion (the taps were unprojected in
+        // straight model space, which inversion breaks).
+        float3 depthReconNormal;
+        bool depthReconOK = (benchAblate != 13)
+            && (uniforms.depthNormalReconstructionEnabled != 0)
+            && !edgeAA && (uniforms.sphericalInversionMode == 0)
+            && ReconstructNormalFromDepthHistory(p, marchDir,
+                                                 depthTapHZ, depthTapHX, depthTapHY, depthTapHW,
+                                                 depthTapVZ, depthTapVX, depthTapVY, depthTapVW,
+                                                 depthReconNormal);
         float3 nor = (benchAblate == 13) ? -marchDir
+                   : depthReconOK ? depthReconNormal
                    : GetNormal(p, hitDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, uniforms.formulaParams, hitCache);
 
         {
@@ -4360,17 +4450,39 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
 
 fragment FragmentOutput fragmentShaderMono(ColorInOut in [[stage_in]],
                                constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
-                               device atomic_uint* benchCounters [[buffer(BufferIndexBenchCounters)]])
+                               device atomic_uint* benchCounters [[buffer(BufferIndexBenchCounters)]],
+                               depth2d<float> prevDepthTex [[texture(TextureIndexPrevDepth)]])
 {
     constant Uniforms& uniforms = uniformsArray.uniforms[0];
     float2 fragCoord = in.position.xy;
 
     fragCoord += uniforms.jitterOffset;
 
+    // Depth-buffer normal reconstruction: sample the previous frame's depth
+    // history here (the caller has the texture; fragmentMain is pure math —
+    // see ReconstructNormalFromDepthHistory). The CPU only sets the uniform
+    // when a same-size, same-scene direct-mode frame actually wrote history
+    // last frame, so `prevDepthTex` is a real depth texture whenever this is
+    // true (a 1x1 dummy otherwise, which the flag being 0 means we never read).
+    float4 hz = float4(0.0f), hx = float4(0.0f), hy = float4(0.0f), hw = float4(0.0f);
+    float4 vz = float4(0.0f), vx = float4(0.0f), vy = float4(0.0f), vw = float4(0.0f);
+    if (uniforms.depthNormalReconstructionEnabled != 0) {
+        float2 res = uniforms.renderResolution;
+        hz = SampleDepthHistoryTap(fragCoord, float2(-2.0f, 0.0f), res, uniforms, prevDepthTex);
+        hx = SampleDepthHistoryTap(fragCoord, float2(-1.0f, 0.0f), res, uniforms, prevDepthTex);
+        hy = SampleDepthHistoryTap(fragCoord, float2( 1.0f, 0.0f), res, uniforms, prevDepthTex);
+        hw = SampleDepthHistoryTap(fragCoord, float2( 2.0f, 0.0f), res, uniforms, prevDepthTex);
+        vz = SampleDepthHistoryTap(fragCoord, float2(0.0f, -2.0f), res, uniforms, prevDepthTex);
+        vx = SampleDepthHistoryTap(fragCoord, float2(0.0f, -1.0f), res, uniforms, prevDepthTex);
+        vy = SampleDepthHistoryTap(fragCoord, float2(0.0f,  1.0f), res, uniforms, prevDepthTex);
+        vw = SampleDepthHistoryTap(fragCoord, float2(0.0f,  2.0f), res, uniforms, prevDepthTex);
+    }
+
     // benchCounters is always bound by the Mac renderer; fragmentMain only writes
     // it when uniforms.benchCollectSteps != 0 (step-profiling armed), so normal
     // frames pay nothing. No warm start on the mono path → warmStartT = -1.
-    return fragmentMain(in, uniforms, fragCoord, uniforms.time, -1.0f, benchCounters);
+    return fragmentMain(in, uniforms, fragCoord, uniforms.time, -1.0f, benchCounters, -1.0f,
+                        hz, hx, hy, hw, vz, vx, vy, vw);
 }
 
 // === Format Conversion Shaders for MetalFX ===

@@ -190,6 +190,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _tileSize: Int = 0                   // 0=disabled (fragment), 8=8x8 adaptive hierarchical compute
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
     private var _coherentPacketEnabled: Bool = loadBool("coherentPacketEnabled", default: false)  // Experimental predict-validate raymarch (Stages 0-3)
+    private var _depthNormalReconstructionEnabled: Bool = loadBool("depthNormalReconstructionEnabled", default: false)  // Experimental: reconstruct surface normal from previous-frame depth taps instead of GetNormal()'s extra DE evaluations (Mac direct/native-res path only)
     private var _computeTemporalReprojectionEnabled: Bool = loadBool("computeTemporalReprojectionEnabled", default: false)  // Compute path: temporal reproject + tile/supertile depth seeding. Off = full coarse+fine march every frame (correct baseline; the seeding can blank disoccluded tiles)
     private var _coarsePrepassWarmStartEnabled: Bool = loadBool("coarsePrepassWarmStartEnabled", default: false)  // visionOS fragment path: conservative cone coarse-prepass warm-start. A low-res cone pass writes a provable LOWER BOUND on each 8x8 block's nearest-surface entry distance; the full march raises its start t to it (skip-to-then-full-march). Off = no cone pass, byte-identical to before. Box/fold + un-warped domain only.
     private var _foveationStrength: Float = loadFloat("foveationStrength", default: 0.0)  // Peripheral step reduction on the 8x8 compute path (0 = off)
@@ -1268,6 +1269,18 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _coherentPacketEnabled } }
         set {
             withLock { _coherentPacketEnabled = newValue }
+            persistQuality()
+        }
+    }
+
+    /// Experimental: reconstruct the surface normal from 4 previous-frame depth
+    /// taps per axis instead of GetNormal()'s extra DE evaluations. Mac
+    /// direct/native-res render path only — silently falls back to GetNormal()
+    /// whenever depth history isn't available.
+    var depthNormalReconstructionEnabled: Bool {
+        get { withLock { _depthNormalReconstructionEnabled } }
+        set {
+            withLock { _depthNormalReconstructionEnabled = newValue }
             persistQuality()
         }
     }
@@ -2867,6 +2880,7 @@ final class RenderSettings: @unchecked Sendable {
                 tileSize: _tileSize,
                 debugHierarchical: _debugHierarchical,
                 coherentPacketEnabled: _coherentPacketEnabled,
+                depthNormalReconstructionEnabled: _depthNormalReconstructionEnabled,
                 computeTemporalReprojectionEnabled: _computeTemporalReprojectionEnabled,
                 coarsePrepassWarmStartEnabled: _coarsePrepassWarmStartEnabled,
                 foveationStrength: _foveationStrength,
@@ -4215,6 +4229,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.tileSize = _tileSize
                 c.debugHierarchical = _debugHierarchical
                 c.coherentPacketEnabled = _coherentPacketEnabled
+                c.depthNormalReconstructionEnabled = _depthNormalReconstructionEnabled
                 c.computeTemporalReprojectionEnabled = _computeTemporalReprojectionEnabled
                 c.coarsePrepassWarmStartEnabled = _coarsePrepassWarmStartEnabled
                 c.foveationStrength = _foveationStrength
@@ -4261,6 +4276,7 @@ final class RenderSettings: @unchecked Sendable {
                 _tileSize = newValue.tileSize
                 _debugHierarchical = newValue.debugHierarchical
                 _coherentPacketEnabled = newValue.coherentPacketEnabled
+                _depthNormalReconstructionEnabled = newValue.depthNormalReconstructionEnabled
                 _computeTemporalReprojectionEnabled = newValue.computeTemporalReprojectionEnabled
                 _coarsePrepassWarmStartEnabled = newValue.coarsePrepassWarmStartEnabled
                 _foveationStrength = newValue.foveationStrength

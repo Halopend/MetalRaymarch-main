@@ -444,6 +444,10 @@ extension Renderer {
                             shadowsEnabled: shadowsEnabled,
                             distanceLODFalloff: distanceLODFalloff,
                             benchCollectSteps: benchCollectSteps,
+                            // Depth-buffer normal reconstruction is a Mac-only
+                            // experiment (RaymarchRenderView.swift); visionOS
+                            // keeps GetNormal() unconditionally.
+                            depthNormalReconstructionEnabled: 0,
                             pixelFootprintPerDist: pixelFootprintPerDist,
                             coarseRateMagMax: 1.0,
                             springDisplacementX: settingsSnapshot.springDisplacement.x,
