@@ -35,7 +35,7 @@ private enum GH {
         .ring:   CGPoint(x: 0.93,  y: 0.69),
     ]
 
-    static let stageHeight: CGFloat = 320
+    static let stageHeight: CGFloat = 268
     /// Center gap reserved for the pairing-line chips. Hands fill the rest, so the
     /// channel never collapses regardless of pane width (more robust than a fixed cap).
     static let channelMin: CGFloat = 230
@@ -66,7 +66,7 @@ private enum GH {
 extension ContentView {
 
     var gestureHandConstellationPanel: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             Label("Hand Assignments", systemImage: AppIcons.handPointUpLeftAndText)
                 .font(.subheadline.weight(.semibold))
 
