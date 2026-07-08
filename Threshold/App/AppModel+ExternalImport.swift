@@ -22,8 +22,10 @@ extension AppModel {
         clearExternalPreview(restorePreviewedState: true)
         pendingExternalImport = nil
 
-        switch url.pathExtension.lowercased() {
-        case "threshscene", "threshmp":
+        // Route by the file-type registry's category rather than re-hardcoding the
+        // extension groups here (single source of truth: ThresholdExportFormat).
+        switch ThresholdExportFormat(fileExtension: url.pathExtension)?.category {
+        case .preset:
             do {
                 let preset = try presetManager.decodePreset(from: url)
                 pendingExternalImport = ExternalFileImportRequest(
@@ -36,7 +38,7 @@ extension AppModel {
                 errorReporter.report(.preset(.importFailed("Could not read \(url.lastPathComponent).")))
             }
 
-        case "threshanim", "threshanimv":
+        case .animation:
             do {
                 guard let scene = try animationManager?.decodeScene(from: url) else {
                     errorReporter.report(.animation(.importFailed("Animation manager is unavailable.")))
@@ -52,7 +54,7 @@ extension AppModel {
                 errorReporter.report(.animation(.importFailed("Could not read \(url.lastPathComponent).")))
             }
 
-        case "threshfx":
+        case .formula:
             do {
                 let container = try EmbeddedFormulaContainer.decode(fromContainerAt: url)
                 if container.formula.effectKind == .spaceWarp {
@@ -79,7 +81,7 @@ extension AppModel {
                 errorReporter.report(.preset(.importFailed("Could not read \(url.lastPathComponent): \(error.localizedDescription)")))
             }
 
-        default:
+        case nil:
             errorReporter.report(.preset(.importFailed("Unsupported Threshold file: \(url.lastPathComponent).")))
         }
     }

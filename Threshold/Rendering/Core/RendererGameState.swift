@@ -322,18 +322,10 @@ extension Renderer {
         // zoom-out range — a no-op at scale >= 1 (zoom-in unaffected). (Was
         // previously hardcoded on for the Kleinian family only, and briefly keyed
         // to the unrelated 0.15 horizon-lift floor.)
-        if settingsSnapshot.zoomFogCompensationEnabled {
-            let baseFog = precomputedFog.fog.x
-            if baseFog > 1e-6 {
-                let fogScale = min(1.0, max(effectiveScale, 1e-4))
-                let fogIntensity = baseFog * fogScale
-                let invFog = fogIntensity > 1e-6 ? 1.0 / fogIntensity : 0.0
-                precomputedFog = PrecomputedFog(
-                    fog: SIMD4<Float>(fogIntensity, invFog, 0.0, 0.0),
-                    color: precomputedFog.color
-                )
-            }
-        }
+        precomputedFog = Self.applyZoomFogCompensation(
+            precomputedFog,
+            enabled: settingsSnapshot.zoomFogCompensationEnabled,
+            effectiveScale: effectiveScale)
 
         // Hoist lightingWave out of per-eye loop — sin() is identical for both eyes
         let baseColorMix = settingsSnapshot.colorMix

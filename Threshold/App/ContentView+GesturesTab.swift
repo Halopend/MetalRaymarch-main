@@ -15,36 +15,36 @@ extension ContentView {
 
     var gesturesTabContent: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(spacing: 8) {
-                HStack {
+            VStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Label("Gesture Controls", systemImage: AppIcons.handDraw).font(.headline)
                     Spacer()
+                    Toggle("Enable", isOn: Binding(
+                        get: { appModel.handTrackingEnabled },
+                        set: { appModel.handTrackingEnabled = $0 }
+                    ))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
                 }
 
                 HandTrackingStatusView(state: appModel.handTrackingState)
-                    .padding(.vertical, 2)
-
-                Toggle("Enable Hand Gesture Controls", isOn: Binding(
-                    get: { appModel.handTrackingEnabled },
-                    set: { appModel.handTrackingEnabled = $0 }
-                ))
 
                 gestureAssignmentsSection
 
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     gestureCoreBehaviorSection
-                    Divider().padding(.vertical, 2)
+                    Divider()
                     gestureMenuToggleSection
-                    Divider().padding(.vertical, 2)
+                    Divider()
                     gesturePerFingerTapSection
                 }
                 .disabled(!appModel.handTrackingEnabled)
                 .opacity(appModel.handTrackingEnabled ? 1.0 : 0.6)
             }
-            .padding(10)
+            .padding(8)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
             .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(.vertical, 6)
         }
     }
 
@@ -57,7 +57,7 @@ extension ContentView {
     // ── Core Behavior ──────────────────────────────────────────────────────────
 
     private var gestureCoreBehaviorSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             Label("Core Behavior", systemImage: AppIcons.sliderHorizontal3)
                 .font(.subheadline.weight(.semibold))
 
@@ -65,7 +65,7 @@ extension ContentView {
                 .onChange(of: cache.gesture.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
                 .toggleStyle(.switch)
                 .font(.subheadline)
-            Text("Parameter gestures adjust by how far you move from where you started, instead of jumping to an absolute value.")
+            Text("Adjust by how far you move from where you started, instead of jumping to an absolute value.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
 
@@ -76,7 +76,7 @@ extension ContentView {
             ))
             .toggleStyle(.switch)
             .font(.subheadline)
-            Text("Tilt the laptop to orbit the fractal using the built-in Sudden Motion Sensor. Available on Intel MacBooks only.")
+            Text("Tilt the laptop to orbit the fractal (Sudden Motion Sensor — Intel MacBooks only).")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
             #endif
@@ -86,7 +86,7 @@ extension ContentView {
     // ── Menu Toggle (compact) ──────────────────────────────────────────────────
 
     private var gestureMenuToggleSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             Toggle("Menu Toggle Gesture", isOn: $cache.gesture.menuToggleGestureEnabled)
                 .onChange(of: cache.gesture.menuToggleGestureEnabled) { _, v in
                     cache.push(\.menuToggleGestureEnabled, value: v)
@@ -115,7 +115,7 @@ extension ContentView {
     // ── Per-Finger Tap (compact) ───────────────────────────────────────────────
 
     private var gesturePerFingerTapSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             Toggle("Per-Finger Tap", isOn: $cache.gesture.perFingerTapGestureEnabled)
                 .onChange(of: cache.gesture.perFingerTapGestureEnabled) { _, v in
                     cache.push(\.perFingerTapGestureEnabled, value: v)

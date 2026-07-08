@@ -37,18 +37,6 @@ import AppKit
 import Observation
 import os
 
-/// A selectable capture target. Kept as a tiny model so the existing UI can
-/// display the current whole-system source without app targeting.
-struct SystemAudioSource: Identifiable, Hashable {
-    /// Stable identifier for the whole-system output.
-    let id: String
-    /// User-facing display name.
-    let name: String
-
-    /// Sentinel id used for the "Entire system output" entry.
-    static let systemID = "__threshold_system_output__"
-}
-
 @MainActor
 @Observable
 final class SystemAudioTapCapture {
@@ -454,7 +442,10 @@ private final class TapStreamAccumulator: @unchecked Sendable {
             let dstStart = Int(accumFilled)
 
             for i in 0..<copy {
-                dstPtr[dstStart + i] = sampleAt(consumed + i)
+                // Clamp non-finite samples (NaN/Inf from a malformed SCK buffer
+                // after wake or power restoration) to silence before accumulation.
+                let sample = sampleAt(consumed + i)
+                dstPtr[dstStart + i] = sample.isFinite ? sample : 0.0
             }
 
             accumFilled += AVAudioFrameCount(copy)

@@ -90,11 +90,13 @@ enum RenderPrecompute {
         scale.w = abs(scale.w)
 
         let absScalem1 = abs(settings.fractalScale - 1.0)
-        // deIterationMismatch (δ ≠ 0) deliberately computes this term as if the
-        // fold loop ran `iterations + δ` — the deterministic recreation of the
-        // legacy compute-cache pipeline mismatch ("Accidental Sphere Projection").
+        // absScalePow is the Mandelbox DE normalization, kept at the UNBIASED iteration
+        // count. deIterationMismatch now biases the *geometry fold loop* (FC_FRACTAL_ITERATIONS)
+        // instead of this term, so the geometry under-folds RELATIVE to its normalization —
+        // the faithful recreation of the "Accidental Sphere Projection" (the earlier δ-on-this-term
+        // form never reproduced the look). See Context/ACCIDENTAL_SPHERE_PROJECTION.md.
         let absScalePow = pow(max(abs(settings.fractalScale), 1e-6),
-                              Float(1 - settings.fractalIterations) - settings.deIterationMismatch)
+                              Float(1 - settings.fractalIterations))
         let sphereRadiusSq = settings.sphereRadius * settings.sphereRadius
 
         return PrecomputedFractalParams(
@@ -219,6 +221,28 @@ enum RenderPrecompute {
         return PrecomputedFog(
             fog: SIMD4<Float>(fogIntensity, invFog, 0.0, 0.0),
             color: SIMD4<Float>(settings.fogColor.x, settings.fogColor.y, settings.fogColor.z, 0.0)
+        )
+    }
+
+    /// Zoom fog compensation (Settings toggle, default off). Fog operates on
+    /// MODEL-space march distance, so on zoom-out the fog sphere's world radius
+    /// shrinks with the model and washes out the fractal. Scaling intensity by
+    /// `effectiveScale` holds the fog's WORLD radius constant at its scale==1
+    /// value across the whole zoom-out range — a no-op at scale >= 1, when the
+    /// toggle is off, or when fog intensity is ~0. Previously hand-copied verbatim
+    /// into all three render paths (Mac fragment, visionOS compute, Quick Look).
+    static func applyZoomFogCompensation(_ fog: PrecomputedFog,
+                                         enabled: Bool,
+                                         effectiveScale: Float) -> PrecomputedFog {
+        guard enabled else { return fog }
+        let baseFog = fog.fog.x
+        guard baseFog > 1e-6 else { return fog }
+        let fogScale = min(1.0, max(effectiveScale, 1e-4))
+        let fogIntensity = baseFog * fogScale
+        let invFog = fogIntensity > 1e-6 ? 1.0 / fogIntensity : 0.0
+        return PrecomputedFog(
+            fog: SIMD4<Float>(fogIntensity, invFog, 0.0, 0.0),
+            color: fog.color
         )
     }
 }

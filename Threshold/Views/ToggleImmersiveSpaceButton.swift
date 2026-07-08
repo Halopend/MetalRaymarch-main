@@ -78,7 +78,7 @@ struct ToggleImmersiveSpaceButton: View {
                 openWindow(id: AppModel.controlsWindowID)
             }
         } label: {
-            Text(appModel.isControlsWindowOpen ? "Merge Into Window" : "Open in Separate Window")
+            Text(appModel.isControlsWindowOpen ? "Merge" : "Detach")
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -88,7 +88,7 @@ struct ToggleImmersiveSpaceButton: View {
 #else
         Button {
         } label: {
-            Text("Open in Separate Window")
+            Text("Detach")
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
                 .frame(maxWidth: .infinity, alignment: .center)

@@ -119,6 +119,7 @@ enum AppIcons {
     static let rotate3d = "rotate.3d"
     static let shieldLefthalfFilled = "shield.lefthalf.filled"
     static let shuffle = "shuffle"
+    static let sidebarRight = "sidebar.right"
     static let sliderHorizontal3 = "slider.horizontal.3"
     static let sliderHorizontalBelowRectangle = "slider.horizontal.below.rectangle"
     static let sparkles = "sparkles"

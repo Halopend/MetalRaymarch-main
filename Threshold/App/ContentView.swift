@@ -23,6 +23,7 @@ struct ContentView: View {
     @Environment(AppModel.self) var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openWindow) var openWindow
     @Environment(\.dismissWindow) var dismissWindow
     
@@ -53,6 +54,8 @@ struct ContentView: View {
     @AppStorage("ContentView.pinnedRailControls") private var pinnedRailControlsRaw: String = ""
     @State var showStopsPopover = false
     @State private var showSaveDestinationSheet = false
+    /// One-time first-run prompt to choose local vs iCloud storage.
+    @State private var showStorageChoice = false
     @State private var didLongPressPinnedRailControl: PinnedRailControl?
     #if os(macOS)
     @State var isHoldingSaveSheetAdjustment = false
@@ -62,9 +65,6 @@ struct ContentView: View {
 
     // Tab-local UI state (kept here because stored properties cannot live in
     // the per-tab `extension ContentView` files).
-    @State private var savedGradientToDelete: Int? = nil
-    @State private var showDeleteConfirm = false
-    @State var showICloudRestoreConfirm = false
     @State var renamingGradientIndex: Int? = nil
     @State var renamingGradientName: String = ""
     @AppStorage("allowCustomScenes") var allowCustomScenes: Bool = false
@@ -248,6 +248,10 @@ struct ContentView: View {
             appModel.setMenuHovering(hovering)
         }
         .onAppear {
+            // First-run: prompt once for the storage location (local vs iCloud).
+            if !StorageLocation.shared.hasChosenMode {
+                showStorageChoice = true
+            }
             appModel.openShapeMenuHandler = {
                 withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) {
                     activateShapeSection(.parameters)
@@ -307,6 +311,22 @@ struct ContentView: View {
             if shouldGateRendererNavigation, !isReady, topDockTab != .explore {
                 withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) { activateTopDock(.explore) }
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Returning to the app: re-mirror the store folder so any files added
+            // or deleted while away (e.g. in the Files app) reflect immediately.
+            if phase == .active { appModel.reloadStoresFromDisk() }
+        }
+        .sheet(isPresented: $showStorageChoice) {
+            StorageModeChoiceSheet { chosen in
+                if chosen != StorageLocation.shared.mode {
+                    appModel.switchStorageMode(to: chosen)
+                } else {
+                    StorageLocation.shared.markModeChosen()
+                }
+                showStorageChoice = false
+            }
+            .interactiveDismissDisabled(true)
         }
         .sheet(isPresented: $showSaveDestinationSheet) {
             SaveDestinationSheet(

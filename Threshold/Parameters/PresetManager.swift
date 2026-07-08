@@ -40,6 +40,74 @@ enum ThresholdExportFormat: CaseIterable, Sendable {
         case .customFormula: return "Custom formula (standalone shader)"
         }
     }
+
+    // MARK: - Routing
+
+    /// Broad kind used to route imports and group extensions by payload.
+    enum Category { case preset, animation, formula }
+
+    var category: Category {
+        switch self {
+        case .scenePreset, .musicPreset: return .preset
+        case .animationScene, .musicVideoScene: return .animation
+        case .customFormula: return .formula
+        }
+    }
+
+    /// Resolve a format from a filename extension (leading dot optional, any case).
+    /// Returns nil for anything Threshold doesn't recognise.
+    init?(fileExtension: String) {
+        var e = fileExtension.lowercased()
+        if e.hasPrefix(".") { e.removeFirst() }
+        guard let match = Self.allCases.first(where: { $0.ext == e }) else { return nil }
+        self = match
+    }
+
+    /// The preset format for a preset, chosen by whether it carries music mappings:
+    /// `.threshmp` when music-reactive, `.threshscene` otherwise.
+    static func preset(hasMusic: Bool) -> ThresholdExportFormat { hasMusic ? .musicPreset : .scenePreset }
+
+    /// The animation format, chosen by whether the scene has an attached song:
+    /// `.threshanimv` when it does, `.threshanim` otherwise.
+    static func animation(hasSong: Bool) -> ThresholdExportFormat { hasSong ? .musicVideoScene : .animationScene }
+
+    /// Every extension belonging to a category — for directory scans, prune, and decode.
+    static func extensions(in category: Category) -> [String] {
+        allCases.filter { $0.category == category }.map(\.ext)
+    }
+
+    // MARK: - Presentation (import sheet / preset list)
+
+    /// Human-facing name for the format.
+    var displayName: String {
+        switch self {
+        case .scenePreset:     return "Fractal Scene"
+        case .musicPreset:     return "Music Preset"
+        case .animationScene:  return "Animation"
+        case .musicVideoScene: return "Music Video Animation"
+        case .customFormula:   return "Custom Formula"
+        }
+    }
+
+    /// SF Symbol representing the format.
+    var iconName: String {
+        switch self {
+        case .scenePreset:     return "cube.transparent"
+        case .musicPreset:     return "music.note.list"
+        case .animationScene:  return "film.stack"
+        case .musicVideoScene: return "music.note.tv"
+        case .customFormula:   return "function"
+        }
+    }
+
+    /// Accent colour used when presenting the format.
+    var accentColor: Color {
+        switch self {
+        case .scenePreset, .customFormula:       return .purple
+        case .musicPreset:                       return .blue
+        case .animationScene, .musicVideoScene:  return .green
+        }
+    }
 }
 
 /// Runs an export (JSON encode + temp-file write, tens of ms for large
@@ -72,8 +140,18 @@ class PresetManager {
     @ObservationIgnored private let presetEncoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]  // browseable store files
         return encoder
     }()
+    /// Observers that reload the store when the active root resolves or the mode changes.
+    /// `nonisolated(unsafe)` so the nonisolated deinit can unregister them; the only
+    /// deinit access is removal, and NotificationCenter is thread-safe.
+    @ObservationIgnored nonisolated(unsafe) private var storageObservers: [NSObjectProtocol] = []
+
+    /// Live iCloud folder watcher (reflects external adds/deletes without relaunch).
+    @ObservationIgnored private var iCloudQuery: NSMetadataQuery?
+    @ObservationIgnored nonisolated(unsafe) private var iCloudQueryObservers: [NSObjectProtocol] = []
+    @ObservationIgnored private var watchedPresetDirs: [URL] = []
     private static let backupTimestampFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -101,21 +179,81 @@ class PresetManager {
         return presetsPath
     }
     
-    private var presetsFileURL: URL {
+    /// Legacy single-blob store (pre-folder). Migration SOURCE only.
+    private var legacyPresetsFileURL: URL {
         presetsDirectory.appendingPathComponent("presets.json")
     }
 
-    /// Directory for timestamped backups
+    // MARK: - Folder store (source of truth)
+
+    /// Active store root for the current mode (nil while iCloud is resolving).
+    private var storeRoot: URL? { StorageLocation.shared.activeRoot }
+
+    /// Directory for timestamped safety backups. Always local, independent of the
+    /// active store mode — a recovery net, never the source of truth.
     private var backupsDirectory: URL {
-        let dir = presetsDirectory.appendingPathComponent("Backups", isDirectory: true)
-        if !FileManager.default.fileExists(atPath: dir.path) {
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        }
+        let dir = StorageLocation.shared.backupsRoot.appendingPathComponent("Presets", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
-    
+
+    /// Build `Sanitized_Name_<short-id>.<ext>` so a rename can't collide with
+    /// another item sharing the same display name.
+    private nonisolated static func sanitizedFileName(_ name: String, id: UUID, ext: String) -> String {
+        "\(sanitizedExportFileNameStem(name))_\(id.uuidString.prefix(8)).\(ext)"
+    }
+
     init() {
         loadPresets()
+        // The folder store is the source of truth: reload whenever the active root
+        // resolves (iCloud discovery finishes) or the user switches storage mode,
+        // so files added/removed in the folder mirror into the app.
+        for name in [StorageLocation.rootResolvedNotification, StorageLocation.modeChangedNotification] {
+            let observer = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.loadPresets() }
+            }
+            storageObservers.append(observer)
+        }
+    }
+
+    deinit {
+        storageObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        iCloudQueryObservers.forEach { NotificationCenter.default.removeObserver($0) }
+    }
+
+    // MARK: - Live iCloud watcher
+
+    /// Watch the iCloud Scenes/ + Music Presets/ folders for external changes and
+    /// reload on any add/update/remove. Idempotent for the same dirs.
+    func startWatchingiCloudPresets(scenesDir: URL, musicDir: URL) {
+        let dirs = [scenesDir, musicDir]
+        guard watchedPresetDirs != dirs else { return }
+        stopWatchingiCloudPresets()
+        watchedPresetDirs = dirs
+        loadPresets()   // immediate pass for files already present
+
+        let query = NSMetadataQuery()
+        query.searchScopes = dirs
+        query.predicate = NSPredicate(format: "%K ENDSWITH '.threshscene' OR %K ENDSWITH '.threshmp'",
+                                      NSMetadataItemFSNameKey, NSMetadataItemFSNameKey)
+        query.operationQueue = .main
+        let reload: @Sendable (Notification) -> Void = { [weak self] _ in
+            Task { @MainActor in self?.loadPresets() }
+        }
+        let o1 = NotificationCenter.default.addObserver(forName: .NSMetadataQueryDidFinishGathering, object: query, queue: .main, using: reload)
+        let o2 = NotificationCenter.default.addObserver(forName: .NSMetadataQueryDidUpdate, object: query, queue: .main, using: reload)
+        iCloudQueryObservers = [o1, o2]
+        query.start()
+        iCloudQuery = query
+        print("☁️ Watching iCloud preset folders for changes")
+    }
+
+    func stopWatchingiCloudPresets() {
+        iCloudQuery?.stop()
+        iCloudQuery = nil
+        iCloudQueryObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        iCloudQueryObservers.removeAll()
+        watchedPresetDirs = []
     }
 
     private static func bundledPresets(forceRefresh: Bool = false) -> [FractalPreset] {
@@ -125,119 +263,188 @@ class PresetManager {
         return bundledPresetsCache ?? []
     }
 
-    private func mergedPresets(local localPresets: [FractalPreset], bundled bundledPresets: [FractalPreset]? = nil) -> [FractalPreset] {
-        var mergedByName: [String: FractalPreset] = [:]
-        let resolvedBundledPresets = bundledPresets ?? Self.bundledPresets()
+    // MARK: - Folder store: scan / migrate / seed
 
-        // Seed with bundled presets, then let local presets override by name.
-        for preset in resolvedBundledPresets {
-            mergedByName[preset.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()] = preset
-        }
-        for preset in localPresets {
-            mergedByName[preset.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()] = preset
-        }
-
-        return mergedByName.values.sorted { $0.createdAt > $1.createdAt }
-    }
-    
-    private func loadLocalPresetsFromDisk() -> [FractalPreset] {
-        let fileURL = presetsFileURL
-        var loadedLocalPresets: [FractalPreset] = []
-
-        if FileManager.default.fileExists(atPath: fileURL.path) {
-            do {
-                let data = try Data(contentsOf: fileURL)
-                loadedLocalPresets = try presetDecoder.decode([FractalPreset].self, from: data)
-            } catch {
-                print("Failed to load presets: \(error). Trying latest backup…")
-                loadedLocalPresets = loadLatestBackupPresets()
+    /// Decode every preset file under the store's Scenes/ + Music Presets/ folders.
+    private func scanStorePresets(root: URL) -> [FractalPreset] {
+        let exts = ThresholdExportFormat.extensions(in: .preset)
+        var byID: [UUID: FractalPreset] = [:]
+        for dir in [StorageLocation.scenesDir(root), StorageLocation.musicPresetsDir(root)] {
+            guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
+            for url in files where exts.contains(url.pathExtension) {
+                try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+                guard let data = try? Data(contentsOf: url),
+                      let preset = try? presetDecoder.decode(FractalPreset.self, from: data) else { continue }
+                byID[preset.id] = preset
             }
         }
-
-        return loadedLocalPresets
+        return Array(byID.values)
     }
 
-    /// Load all presets from disk
+    /// Legacy single-blob presets (migration source), or nil if none.
+    private func loadLegacyPresetsBlob() -> [FractalPreset]? {
+        guard FileManager.default.fileExists(atPath: legacyPresetsFileURL.path),
+              let data = try? Data(contentsOf: legacyPresetsFileURL),
+              let arr = try? presetDecoder.decode([FractalPreset].self, from: data) else { return nil }
+        return arr
+    }
+
+    /// One-time-per-store setup: migrate the legacy blob into per-file layout, and
+    /// seed bundled defaults exactly once per store.
+    ///
+    /// Seeding is gated on the marker file's EXISTENCE, not its contents. The store
+    /// lives in iCloud, where the marker can be an un-downloaded placeholder whose
+    /// read fails; if we treated a failed read as "never seeded" we'd re-write every
+    /// bundled default and RESURRECT any default the user deleted (the store's files
+    /// are the source of truth). Existence survives the placeholder, so once seeded
+    /// we never seed again and a deleted default stays deleted.
+    private func migrateAndSeedIfNeeded(root: URL) {
+        let marker = root.appendingPathComponent(".seeded-bundled.json")
+        try? FileManager.default.startDownloadingUbiquitousItem(at: marker)
+        let alreadySeeded = FileManager.default.fileExists(atPath: marker.path)
+
+        var present = Set(scanStorePresets(root: root).map(\.id))
+
+        // Legacy migration runs once, globally (the blob only exists in the old
+        // sandbox location and migrates into whichever store is first active).
+        let legacyMigratedKey = "Preset.legacyMigrated"
+        if !UserDefaults.standard.bool(forKey: legacyMigratedKey) {
+            if let legacy = loadLegacyPresetsBlob() {
+                for preset in legacy where !present.contains(preset.id) {
+                    writePresetFile(preset, root: root); present.insert(preset.id)
+                }
+                print("📦 Migrated \(legacy.count) preset(s) from legacy presets.json")
+            }
+            UserDefaults.standard.set(true, forKey: legacyMigratedKey)
+        }
+
+        // Seed bundled defaults ONCE per store. `!present` keeps any migrated/edited
+        // copy; the marker then locks seeding off forever for this store. (A brand
+        // new bundled preset in a future build won't auto-seed into an already-seeded
+        // store — the correct trade for never resurrecting a user deletion.)
+        guard !alreadySeeded else { return }
+        for preset in Self.bundledPresets() where !present.contains(preset.id) {
+            writePresetFile(preset, root: root)
+        }
+        let seededIDs = Self.bundledPresets().map(\.id)
+        if let data = try? presetEncoder.encode(seededIDs) {
+            try? data.write(to: marker, options: .atomic)
+        }
+        print("🌱 Seeded \(seededIDs.count) bundled preset(s) into store")
+    }
+
+    // MARK: - Folder store: per-file write / remove
+
+    /// Write one preset as its own file, routed by music-reactivity
+    /// (.threshmp → Music Presets/, .threshscene → Scenes/). Removes any prior
+    /// file for the same id first, so a rename or a music-reactivity change can't
+    /// leave an orphan copy.
+    private func writePresetFile(_ preset: FractalPreset, root: URL) {
+        let hasMusic = preset.hasMusicReactiveMappings
+        let dir = hasMusic ? StorageLocation.musicPresetsDir(root) : StorageLocation.scenesDir(root)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        removePresetFiles(id: preset.id, root: root)
+        let ext = ThresholdExportFormat.preset(hasMusic: hasMusic).ext
+        let url = dir.appendingPathComponent(Self.sanitizedFileName(preset.name, id: preset.id, ext: ext))
+        do {
+            let data = try presetEncoder.encode(preset)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            print("Failed to write preset file: \(error)")
+        }
+    }
+
+    /// Delete every store file (both folders) whose decoded id matches `id`.
+    private func removePresetFiles(id: UUID, root: URL) {
+        removePresetFiles(ids: [id], root: root)
+    }
+
+    /// Delete every store file (both folders) whose decoded id is in `ids`, scanning
+    /// each folder once (vs one scan per id). Used by the delete sites and `replaceAll`.
+    private func removePresetFiles(ids: Set<UUID>, root: URL) {
+        guard !ids.isEmpty else { return }
+        let exts = ThresholdExportFormat.extensions(in: .preset)
+        for dir in [StorageLocation.scenesDir(root), StorageLocation.musicPresetsDir(root)] {
+            guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
+            for url in files where exts.contains(url.pathExtension) {
+                if let data = try? Data(contentsOf: url),
+                   let preset = try? presetDecoder.decode(FractalPreset.self, from: data), ids.contains(preset.id) {
+                    try? FileManager.default.removeItem(at: url)
+                }
+            }
+        }
+    }
+
+    /// Persist a single preset to the store (no-op until the root resolves).
+    private func persist(_ preset: FractalPreset) {
+        guard let root = storeRoot else { return }
+        writePresetFile(preset, root: root)
+    }
+
+    /// Load all presets from the active store folder (the source of truth).
+    /// Migrates + seeds on first use of a store, then mirrors its files.
     func loadPresets(forceRefreshBundled: Bool = false) {
-        let loadedLocalPresets = loadLocalPresetsFromDisk()
-        let bundledPresets = Self.bundledPresets(forceRefresh: forceRefreshBundled)
-
-        presets = mergedPresets(local: loadedLocalPresets, bundled: bundledPresets)
-        FractalPreset.clearThumbnailCache()
-    }
-
-    /// Re-scan bundled preset resources while preserving local on-disk overrides.
-    func refreshBundledPresets() {
-        let loadedLocalPresets = loadLocalPresetsFromDisk()
-        let bundledPresets = Self.bundledPresets(forceRefresh: true)
-        presets = mergedPresets(local: loadedLocalPresets, bundled: bundledPresets)
-        FractalPreset.clearThumbnailCache()
-    }
-
-    /// Attempt to load the most recent backup if the main file is missing or corrupt
-    private func loadLatestBackupPresets() -> [FractalPreset] {
-        do {
-            let backups = try FileManager.default.contentsOfDirectory(at: backupsDirectory, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles)
-            let latest = backups.max { (a, b) -> Bool in
-                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                return da < db
-            }
-            guard let url = latest else {
-                return []
-            }
-            let data = try Data(contentsOf: url)
-            let loaded = try presetDecoder.decode([FractalPreset].self, from: data)
-            print("✅ Loaded presets from backup: \(url.lastPathComponent)")
-            return loaded
-        } catch {
-            print("Failed to load presets backup: \(error)")
-            return []
+        if forceRefreshBundled { _ = Self.bundledPresets(forceRefresh: true) }
+        guard let root = storeRoot else {
+            // iCloud chosen but not resolved yet — stay empty; reload on rootResolved.
+            presets = []
+            return
         }
+        StorageLocation.shared.ensureLayout(at: root)
+        migrateAndSeedIfNeeded(root: root)
+        presets = scanStorePresets(root: root).sorted { $0.createdAt > $1.createdAt }
+        FractalPreset.clearThumbnailCache()
+    }
+
+    /// Bundled defaults are seeded once per store; there's nothing to "re-merge"
+    /// anymore, so this just reloads the folder (picking up any external changes).
+    func refreshBundledPresets() {
+        _ = Self.bundledPresets(forceRefresh: true)
+        loadPresets()
     }
     
-    /// Save all presets to disk
-    private func savePresets() {
-        let fileURL = presetsFileURL
-        
-        do {
-            let data = try presetEncoder.encode(presets)
-            try data.write(to: fileURL, options: .atomic)
-            writeBackup(data: data)
-        } catch {
-            print("Failed to save presets: \(error)")
-        }
-    }
-
-    /// Force an immediate timestamped backup of the CURRENT presets, bypassing
-    /// the throttle. Call this before any destructive replace (e.g. iCloud
-    /// restore) so local-only scenes can always be recovered from Backups/.
-    func backupCurrentPresetsNow() {
-        guard !presets.isEmpty else { return }
-        do {
-            let data = try presetEncoder.encode(presets)
-            lastBackupAt = nil // defeat the throttle for this safety snapshot
-            writeBackup(data: data)
-        } catch {
-            print("Failed to write pre-restore safety backup: \(error)")
-        }
-    }
-
-    /// Replace all presets with the given array and persist.
-    func replaceAll(with newPresets: [FractalPreset]) {
-        presets = newPresets
-        savePresets()
-    }
-
-    /// Coalesce frequent save calls into one disk write.
-    private func scheduleSavePresets() {
+    /// Snapshot the CURRENT preset set as one timestamped backup blob — the safety
+    /// net. Debounced so a burst of edits produces a single snapshot.
+    private func scheduleBackup() {
         pendingSaveTask?.cancel()
         pendingSaveTask = Task { [weak self] in
             guard let self else { return }
             try? await Task.sleep(nanoseconds: self.saveDebounceNanoseconds)
             guard !Task.isCancelled else { return }
-            self.savePresets()
+            self.snapshotBackup()
         }
+    }
+
+    private func snapshotBackup() {
+        guard !presets.isEmpty else { return }
+        if let data = try? presetEncoder.encode(presets) { writeBackup(data: data) }
+    }
+
+    /// Force an immediate timestamped backup of the CURRENT presets, bypassing
+    /// the throttle. Call this before any destructive replace so data is always
+    /// recoverable from the Backups folder.
+    func backupCurrentPresetsNow() {
+        guard !presets.isEmpty else { return }
+        lastBackupAt = nil // defeat the throttle for this safety snapshot
+        snapshotBackup()
+    }
+
+    /// Replace all presets and mirror the array into the store folder: write each
+    /// preset's file, and remove files for ids the app is dropping.
+    ///
+    /// Removals are attributed to ids that were in the current in-memory set but
+    /// are absent from `newPresets` — we do NOT infer them by diffing the folder
+    /// scan. A not-yet-downloaded iCloud preset from another device is absent from
+    /// the scan yet must not be deleted, or the delete propagates to every device.
+    /// Mirrors `AnimationManager.replaceUserScenes`.
+    func replaceAll(with newPresets: [FractalPreset]) {
+        let droppedIDs = Set(presets.map(\.id)).subtracting(newPresets.map(\.id))
+        presets = newPresets
+        if let root = storeRoot {
+            removePresetFiles(ids: droppedIDs, root: root)
+            for preset in newPresets { writePresetFile(preset, root: root) }
+        }
+        scheduleBackup()
     }
 
     /// Write a timestamped backup. Retention is currently unlimited:
@@ -282,29 +489,33 @@ class PresetManager {
     func savePreset(name: String, settings: RenderSettings, thumbnailData: Data? = nil, embeddedFormula: EmbeddedFormula? = nil) {
         let preset = FractalPreset.fromSettings(settings, name: name, thumbnailData: thumbnailData, embeddedFormula: embeddedFormula)
         presets.insert(preset, at: 0) // Add to beginning (newest first)
-        scheduleSavePresets()
-        
+        persist(preset)
+        scheduleBackup()
+
         // Track for analytics with full preset data
         UsageAnalytics.shared.trackPresetSaved(preset: preset)
-        
-
     }
-    
-    /// Delete a preset
+
+    /// Delete a preset. Removing its file IS the deletion — under folder-as-truth
+    /// that removal is what propagates (iCloud syncs the delete to other devices).
     func deletePreset(_ preset: FractalPreset) {
         presets.removeAll { $0.id == preset.id }
         FractalPreset.clearThumbnailCache(for: preset.id)
-        scheduleSavePresets()
+        if let root = storeRoot { removePresetFiles(id: preset.id, root: root) }
+        scheduleBackup()
     }
-    
+
     /// Delete preset at index
     func deletePreset(at offsets: IndexSet) {
-        let removedIDs = offsets.compactMap { index in
-            presets.indices.contains(index) ? presets[index].id : nil
+        let removed = offsets.compactMap { index in
+            presets.indices.contains(index) ? presets[index] : nil
         }
         presets.remove(atOffsets: offsets)
-        removedIDs.forEach { FractalPreset.clearThumbnailCache(for: $0) }
-        scheduleSavePresets()
+        for preset in removed {
+            FractalPreset.clearThumbnailCache(for: preset.id)
+            if let root = storeRoot { removePresetFiles(id: preset.id, root: root) }
+        }
+        scheduleBackup()
     }
     
     /// Load a preset's settings
@@ -354,7 +565,8 @@ class PresetManager {
         } else {
             presets.insert(preset, at: 0)
         }
-        savePresets()
+        persist(preset)
+        scheduleBackup()
         FractalPreset.clearThumbnailCache(for: preset.id)
         UsageAnalytics.shared.trackPresetSaved(preset: preset)
         return preset

@@ -319,12 +319,22 @@ final class UsageAnalytics {
     /// `CKContainer.default()` (which aborts with an uncaught ObjC exception when the
     /// entitlement is absent), this probe is non-throwing, so it's safe on unsigned builds.
     private static let hasCloudKitEntitlement: Bool = {
+        #if os(macOS) || os(iOS)
+        // The unsigned-build CloudKit freeze this guards against only happens on the
+        // macOS/iOS local-build workflow (CODE_SIGNING_ALLOWED=NO). SecTask entitlement
+        // introspection exists on those platforms; use it as the non-throwing probe.
         guard let task = SecTaskCreateFromSelf(nil),
               let value = SecTaskCopyValueForEntitlement(
                 task, "com.apple.developer.icloud-container-identifiers" as CFString, nil)
         else { return false }
         if let identifiers = value as? [Any] { return !identifiers.isEmpty }
         return true
+        #else
+        // SecTask APIs aren't available on visionOS/tvOS/etc. Those targets ship as
+        // properly provisioned device builds (the entitlement is present), so there's
+        // no unsigned-build throw to guard against — assume it's available.
+        return true
+        #endif
     }()
 
     private func buildSnapshot() -> UsageSnapshot {
@@ -380,8 +390,11 @@ final class UsageAnalytics {
         let deltaTime = now.timeIntervalSince(lastSampleTime)
         lastSampleTime = now
         
-        // Clamp delta to avoid huge jumps if app was backgrounded
-        let dt = min(deltaTime, 2.0)
+        // Clamp delta to [0, 2]: the upper bound absorbs backgrounding gaps; the
+        // lower bound rejects a NEGATIVE delta from a backward wall-clock jump
+        // (NTP correction, manual clock change, DST edge), which would otherwise
+        // add negative time to every weighted accumulator and corrupt the stats.
+        let dt = max(min(deltaTime, 2.0), 0)
         totalSessionTime += dt
         
         // Accumulate quality time
@@ -466,15 +479,18 @@ final class UsageAnalytics {
         presetLoadCounts[name, default: 0] += 1
     }
     
-    /// Track preset save with full preset data for analysis
-    /// This uploads the complete preset to CloudKit so you can see what users are creating
+    /// Track that a preset was saved (local aggregate count only).
+    ///
+    /// Historically this ALSO uploaded the preset's name + full JSON to the PUBLIC
+    /// CloudKit database on every save — user-authored content, world-readable,
+    /// opt-out. That upload is DISABLED pending a real accounts-based community /
+    /// sharing feature: publishing user content to a public DB needs actual identity
+    /// and explicit per-preset consent, not a silent opt-out telemetry push.
+    /// `uploadPresetSnapshot` is retained (unused) so it can be re-wired behind that
+    /// feature once accounts exist.
     func trackPresetSaved(preset: FractalPreset) {
         guard analyticsEnabled else { return }
         presetsSaved += 1
-        
-        Task {
-            await uploadPresetSnapshot(preset)
-        }
     }
     
     // MARK: - Preset Snapshot Upload

@@ -228,9 +228,10 @@ private struct ThresholdMacRootView: View {
         Button {
             toggleControlsPin()
         } label: {
-            Image(systemName: isControlsPinnedOpen ? AppIcons.pinFill : AppIcons.pin)
+            Image(systemName: AppIcons.sidebarRight)
                 .font(.system(size: 13, weight: .semibold))
                 .frame(width: 28, height: 28)
+                .foregroundStyle(isControlsPinnedOpen ? Color.accentColor : Color.primary)
         }
         .buttonStyle(.plain)
         .help(isControlsPinnedOpen ? "Unpin controls (⌘.)" : "Pin controls open (⌘.)")
@@ -337,27 +338,6 @@ private struct ThresholdMacRootView: View {
             panelPreferredWidth,
             max(contentMinimumSize.width, size.width - minimumVisibleViewportWidth)
         )
-    }
-}
-
-private struct MacWindowMaterialBackground: NSViewRepresentable {
-    let material: NSVisualEffectView.Material
-
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        configure(view)
-        return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        configure(nsView)
-    }
-
-    private func configure(_ view: NSVisualEffectView) {
-        view.material = material
-        view.blendingMode = .withinWindow
-        view.state = .active
-        view.isEmphasized = false
     }
 }
 #endif

@@ -121,7 +121,8 @@ class AppModel {
     }
 
     var immersiveSpaceState = ImmersiveSpaceState.closed
-    /// True while the macOS "Breakout Control Window" is open. The main window's
+    /// True while the controls are broken out into their own macOS window (via the
+    /// "Detach" / "Merge" toggle). The main window's
     /// slide-over sidebar suppresses itself while this is set so the controls
     /// don't appear twice.
     var isControlsWindowOpen = false
@@ -267,9 +268,6 @@ class AppModel {
     /// Drives the on-device performance sweep that writes the per-build perf log.
     let perfSweepRunner = PerfSweepRunner()
 
-    // iCloud Drive backup/restore (presets, scenes, settings)
-    let iCloudBackup = ICloudBackupManager()
-
     // Error reporting for transient banners
     let errorReporter = ErrorReporter()
 
@@ -302,7 +300,7 @@ class AppModel {
 
     @ObservationIgnored var activeRenderLoopTask: Task<Void, Never>?
     @ObservationIgnored var activeRenderLoopID: UUID?
-    @ObservationIgnored nonisolated(unsafe) private var cloudFolderObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var storageWatcherObservers: [NSObjectProtocol] = []
 
     // Render-loop lifecycle (begin/registration, active-task set/cancel,
     // renderer-handler clearing) lives in AppModel+RendererActivation.swift.
@@ -520,14 +518,6 @@ class AppModel {
         gestureController?.onOpenQuickToggles = { [weak self] in
             self?.openQuickTogglesFromGesture()
         }
-        gestureController?.onMenuWindowPullTowardUser = { [weak self] in
-            self?.pullMenuWindowTowardUser()
-        }
-        // Open-palm swipe through the air = the Mac left/right arrow keys:
-        // swipe right → next scene, swipe left → previous.
-        gestureController?.onSceneSwipe = { [weak self] step in
-            self?.cycleJumpingOffScene(forward: step > 0)
-        }
 
         refreshMenuInteractionState()
         
@@ -553,34 +543,94 @@ class AppModel {
         // Configure SharePlay session listener
         shareSession?.configureGroupSessions()
 
-        // Start watching the iCloud Animations/ folder once the container resolves.
-        // iCloudBackup.resolveContainer() runs async; we listen for the notification
-        // it posts when the URL first becomes available, and also do a quick poll
-        // in case resolution happened before we registered the observer.
-        cloudFolderObserver = NotificationCenter.default.addObserver(
-            forName: ICloudBackupManager.cloudFolderResolvedNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let animDir = (notification.object as? URL)?
-                .appendingPathComponent("Animations", isDirectory: true) else { return }
-
-            Task { @MainActor [weak self, animDir] in
-                self?.animationManager?.startWatchingiCloudAnimations(animDir: animDir)
+        // Live-watch the active store folder so external adds/deletes in iCloud
+        // Drive reflect without a relaunch. Re-evaluated when the store root
+        // resolves (async iCloud discovery) or the user switches storage mode.
+        refreshStorageWatcher()
+        for name in [StorageLocation.rootResolvedNotification, StorageLocation.modeChangedNotification] {
+            let observer = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.refreshStorageWatcher() }
             }
+            storageWatcherObservers.append(observer)
         }
-        // Also try immediately in case the container was already resolved.
-        if let animDir = iCloudBackup.cloudFolderURL?
-            .appendingPathComponent("Animations", isDirectory: true) {
-            animationManager?.startWatchingiCloudAnimations(animDir: animDir)
-        }
-
     }
     
     /// Save current state for restore on next launch
     func saveLastState() {
         presetManager.saveLastState(from: renderSettings, embeddedFormula: activeEmbeddedFormula)
         SettingsPersistence.saveAll(from: renderSettings)
+    }
+
+    // MARK: - Storage Location
+
+    /// Switch the active storage location (On This Device ⇄ iCloud Drive), merging
+    /// both stores newest-wins so nothing is lost either way. A safety backup of the
+    /// current data is taken first. For iCloud the container resolves asynchronously,
+    /// so the merge runs once the new root is ready.
+    func switchStorageMode(to newMode: StorageMode) {
+        guard newMode != StorageLocation.shared.mode else { return }
+
+        // Snapshot the CURRENT store's data + take a safety backup before re-pointing.
+        let oldPresets = presetManager.presets
+        let oldScenes = animationManager?.userScenes ?? []
+        presetManager.backupCurrentPresetsNow()
+        animationManager?.backupCurrentScenesNow()
+
+        StorageLocation.shared.setMode(newMode)
+
+        // Explicitly reload the managers from the NEW store, then union the old
+        // store's items in (newest-wins). Done here rather than relying on the
+        // managers' own reload observers so ordering can't race the merge.
+        let doMerge: @MainActor () -> Void = { [weak self] in
+            guard let self else { return }
+            self.presetManager.loadPresets()
+            self.animationManager?.reloadUserScenesFromStore()
+
+            let mergedPresets = BackupMerge.newestWins(
+                local: oldPresets, cloud: self.presetManager.presets, timestamp: { $0.updatedAt })
+            self.presetManager.replaceAll(with: mergedPresets)
+
+            let mergedScenes = BackupMerge.newestWins(
+                local: oldScenes, cloud: self.animationManager?.userScenes ?? [], timestamp: { $0.modifiedAt })
+            self.animationManager?.replaceUserScenes(with: mergedScenes)
+
+            print("🔀 Storage → \(StorageLocation.shared.mode.displayName): merged \(mergedPresets.count) presets, \(mergedScenes.count) user scenes")
+        }
+
+        if StorageLocation.shared.activeRoot != nil {
+            doMerge()
+        } else {
+            // iCloud not resolved yet — merge once its root becomes available (one-shot).
+            var token: NSObjectProtocol?
+            token = NotificationCenter.default.addObserver(
+                forName: StorageLocation.rootResolvedNotification, object: nil, queue: .main
+            ) { _ in
+                if let token { NotificationCenter.default.removeObserver(token) }
+                MainActor.assumeIsolated { doMerge() }
+            }
+        }
+    }
+
+    /// Start/stop live folder watching for the active store. iCloud mode watches
+    /// the store subfolders via NSMetadataQuery so external adds/deletes reflect
+    /// live; local mode relies on `reloadStoresFromDisk()` at foreground (an
+    /// NSMetadataQuery only covers ubiquitous files).
+    func refreshStorageWatcher() {
+        guard StorageLocation.shared.mode == .iCloud, let root = StorageLocation.shared.activeRoot else {
+            animationManager?.stopWatchingiCloudAnimations()
+            presetManager.stopWatchingiCloudPresets()
+            return
+        }
+        animationManager?.startWatchingiCloudAnimations(animDir: StorageLocation.animationsDir(root))
+        presetManager.startWatchingiCloudPresets(scenesDir: StorageLocation.scenesDir(root),
+                                                 musicDir: StorageLocation.musicPresetsDir(root))
+    }
+
+    /// Re-mirror both stores from disk (used on app foreground so a file deleted or
+    /// added in the store folder while the app was backgrounded reflects on return).
+    func reloadStoresFromDisk() {
+        presetManager.loadPresets()
+        animationManager?.reloadUserScenesFromStore()
     }
 
     // External-file import (open / preview / commit / cancel / restore) lives in
@@ -625,14 +675,6 @@ class AppModel {
         } else {
             showMenuWindow(reason: "toggle")
         }
-    }
-
-    func pullMenuWindowTowardUser() {
-        guard !isMenuWindowVisible else {
-            refreshMenuInteractionState()
-            return
-        }
-        showMenuWindow(reason: "pull gesture")
     }
 
     func openShapeMenuFromGesture() {
@@ -957,9 +999,7 @@ class AppModel {
     }
 
     deinit {
-        if let token = cloudFolderObserver {
-            NotificationCenter.default.removeObserver(token)
-        }
+        storageWatcherObservers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
 }

@@ -16,6 +16,10 @@ struct FractalPreset: Codable, Identifiable {
     let id: UUID
     var name: String
     var createdAt: Date
+    /// Last time this preset's content was created or modified. Drives newest-wins
+    /// conflict resolution in the iCloud merge. Decodes to `createdAt` for presets
+    /// saved before this field existed (backward-compatible).
+    var updatedAt: Date
     var thumbnailData: Data?  // PNG image data
     var rating: Int  // 0-5 stars
     
@@ -189,7 +193,7 @@ struct FractalPreset: Codable, Identifiable {
     var safetyBubbleFadeWidth: Float?     // SafetyBubbleConfig — edge fade width
 
     enum CodingKeys: String, CodingKey {
-        case id, name, createdAt, thumbnailData, rating
+        case id, name, createdAt, updatedAt, thumbnailData, rating
         case fractalIterations, maxRaySteps, colorMix, colorIterations, position, scale
         case fractalType, colorScheme, colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
         case colorSchemeVibrance, colorSchemeCurve, colorSchemeShadows, colorSchemeHighlights
@@ -226,10 +230,11 @@ struct FractalPreset: Codable, Identifiable {
         case handAttraction
     }
     
-    init(id: UUID = UUID(), name: String, createdAt: Date = Date(), thumbnailData: Data? = nil) {
+    init(id: UUID = UUID(), name: String, createdAt: Date = Date(), updatedAt: Date? = nil, thumbnailData: Data? = nil) {
         self.id = id
         self.name = name
         self.createdAt = createdAt
+        self.updatedAt = updatedAt ?? createdAt
         self.thumbnailData = thumbnailData
         self.rating = 0
         
@@ -262,6 +267,7 @@ struct FractalPreset: Codable, Identifiable {
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
         thumbnailData = try container.decodeIfPresent(Data.self, forKey: .thumbnailData)
         rating = try container.decodeIfPresent(Int.self, forKey: .rating) ?? 0
         fractalIterations = try container.decode(Int.self, forKey: .fractalIterations)
@@ -444,6 +450,7 @@ struct FractalPreset: Codable, Identifiable {
         try container.encode(id, forKey: .id)
         try container.encode(name, forKey: .name)
         try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
         try container.encodeIfPresent(thumbnailData, forKey: .thumbnailData)
         try container.encode(rating, forKey: .rating)
         try container.encode(fractalIterations, forKey: .fractalIterations)

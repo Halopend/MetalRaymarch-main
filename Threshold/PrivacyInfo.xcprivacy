@@ -51,6 +51,18 @@
                 <string>35F9.1</string>
             </array>
         </dict>
+        <!-- File timestamps: reading contentModificationDate of the app's own
+             preset/animation backup files (PresetManager, AnimationManager) to
+             pick the latest backup / order files. C617.1 = accessing timestamps
+             of files inside the app's own container. -->
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>C617.1</string>
+            </array>
+        </dict>
     </array>
 </dict>
 </plist>

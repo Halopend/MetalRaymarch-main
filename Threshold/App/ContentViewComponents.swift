@@ -282,26 +282,16 @@ struct ExternalFileImportSheet: View {
     let onImport: () -> Void
     let onCancel: () -> Void
 
-    private var fileKind: String {
-        switch request.payload {
-        case .preset: return request.fileExtension == "threshmp" ? "Music Preset" : "Fractal Scene"
-        case .animation: return request.fileExtension == "threshanimv" ? "Music Video Animation" : "Animation"
-        }
+    // Label / colour / icon all derive from the imported file's format, resolved
+    // once through ThresholdExportFormat (the single file-type registry) instead
+    // of hand-checking the extension string in three places.
+    private var format: ThresholdExportFormat? {
+        ThresholdExportFormat(fileExtension: request.fileExtension)
     }
 
-    private var accentColor: Color {
-        switch request.payload {
-        case .preset: return request.fileExtension == "threshmp" ? .blue : .purple
-        case .animation: return .green
-        }
-    }
-
-    private var iconName: String {
-        switch request.payload {
-        case .preset: return request.fileExtension == "threshmp" ? "music.note.list" : "cube.transparent"
-        case .animation: return request.fileExtension == "threshanimv" ? "music.note.tv" : "film.stack"
-        }
-    }
+    private var fileKind: String { format?.displayName ?? "Threshold File" }
+    private var accentColor: Color { format?.accentColor ?? .accentColor }
+    private var iconName: String { format?.iconName ?? "doc" }
 
     private var title: String {
         switch request.payload {

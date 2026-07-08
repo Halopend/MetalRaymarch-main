@@ -629,7 +629,7 @@ extension ContentView {
                     }
                 ), in: -8...8)
                 .tint(.orange)
-                Text("Deterministic version of the legacy bug: the distance estimator's absScalePow term is computed as if the fold loop ran δ extra iterations. 0 = correct DE. Saves with the scene.")
+                Text("δ biases the geometry fold loop (FC_FRACTAL_ITERATIONS) while the distance estimator stays normalized to the base count — the faithful \"Accidental Sphere Projection\" under-fold. Negative → fewer folds → sphere. 0 = off. Saves with the scene.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -676,9 +676,56 @@ extension ContentView {
     /// without enabling sharing.
     private var settingsSharingContent: some View {
         VStack(spacing: 12) {
+            storageLocationSection
             communitySharingSection
-            iCloudDriveSection
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // MARK: Storage Location (On This Device / iCloud Drive)
+    // ─────────────────────────────────────────────────────────────────
+
+    @ViewBuilder
+    private var storageLocationSection: some View {
+        let mode = StorageLocation.shared.mode
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Storage Location", systemImage: AppIcons.folder).font(.headline)
+                Spacer()
+                if mode == .iCloud && !StorageLocation.shared.isICloudAvailable {
+                    ProgressView().controlSize(.small)
+                }
+            }
+
+            Text("Where your scenes, animations, and presets live. Pick **iCloud Drive** to browse them in Files and sync across your devices; **On This Device** keeps them private to this device. A local safety backup is always kept either way, and switching merges both stores so nothing is lost.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Picker("Storage", selection: Binding(
+                get: { StorageLocation.shared.mode },
+                set: { newMode in appModel.switchStorageMode(to: newMode) }
+            )) {
+                ForEach(StorageMode.allCases, id: \.self) { m in
+                    Label(m.displayName, systemImage: m.iconName).tag(m)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            if mode == .iCloud {
+                if StorageLocation.shared.isICloudAvailable {
+                    Text("Browse in Files → iCloud Drive → **Threshold**.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Text("iCloud Drive isn't available yet — sign in to iCloud in System Settings. Your data stays on this device until it resolves.")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+        .padding(DS.Spacing.md)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.cyan.opacity(0.07)))
     }
 
     private var communitySharingSection: some View {
@@ -746,128 +793,6 @@ extension ContentView {
     // / `settingsSharingContent` / `settingsExportContent` /
     // `settingsAdvancedContent` based on the segmented sub-tab picker.)
 
-    // ─────────────────────────────────────────────────────────────────
-    // MARK: iCloud Drive
-    // ─────────────────────────────────────────────────────────────────
-
-    @ViewBuilder
-    private var iCloudDriveSection: some View {
-        let cloud = appModel.iCloudBackup
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("iCloud Drive", systemImage: AppIcons.icloud).font(.headline)
-                Spacer()
-                if cloud.isBusy { ProgressView().controlSize(.small) }
-            }
-
-            if cloud.isAvailable {
-                Text("Sync your scenes, animations, and settings to iCloud Drive. Files are stored in a public **Threshold** folder visible in the Files app and on your Mac in Finder under iCloud Drive.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Toggle("Sync to iCloud Drive", isOn: Binding(
-                    get: { appModel.iCloudBackup.isSyncEnabled },
-                    set: { newValue in
-                        appModel.iCloudBackup.isSyncEnabled = newValue
-                        if newValue {
-                            // Push current state immediately on enable.
-                            appModel.iCloudBackup.syncToCloud(
-                                settings: appModel.renderSettings,
-                                presetManager: appModel.presetManager,
-                                animationManager: appModel.animationManager
-                            )
-                        }
-                    }
-                ))
-                .tint(.cyan)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Folder structure:").font(.caption2).foregroundStyle(.tertiary)
-                    Text("Threshold/Settings/   • settings.json").font(.caption2.monospaced()).foregroundStyle(.tertiary)
-                    Text("Threshold/Scenes/     • <name>.threshscene").font(.caption2.monospaced()).foregroundStyle(.tertiary)
-                    Text("Threshold/Animations/ • <name>.threshanim").font(.caption2.monospaced()).foregroundStyle(.tertiary)
-                }
-                .padding(.vertical, 2)
-
-                HStack(spacing: 8) {
-                    Button {
-                        appModel.iCloudBackup.syncToCloud(
-                            settings: appModel.renderSettings,
-                            presetManager: appModel.presetManager,
-                            animationManager: appModel.animationManager
-                        )
-                    } label: {
-                        Label("Back Up Now", systemImage: AppIcons.arrowUpToLineCompact)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.cyan)
-                    .disabled(cloud.isBusy || !cloud.isSyncEnabled)
-
-                    Button(role: .destructive) {
-                        showICloudRestoreConfirm = true
-                    } label: {
-                        Label("Restore", systemImage: AppIcons.arrowDownToLineCompact)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(cloud.isBusy || !cloud.isSyncEnabled)
-                    .confirmationDialog(
-                        "Restore from iCloud?",
-                        isPresented: $showICloudRestoreConfirm,
-                        titleVisibility: .visible
-                    ) {
-                        Button("Replace Local Scenes", role: .destructive) {
-                            appModel.iCloudBackup.restoreFromCloud(
-                                into: appModel.renderSettings,
-                                presetManager: appModel.presetManager,
-                                animationManager: appModel.animationManager
-                            )
-                        }
-                        Button("Cancel", role: .cancel) { }
-                    } message: {
-                        Text("This replaces your local scenes, animations, and settings with the copy in iCloud. Local-only scenes that aren't backed up will be overwritten. A safety backup of your current scenes is saved first.")
-                    }
-                }
-
-                Button {
-                    appModel.iCloudBackup.openInFilesApp()
-                } label: {
-                    Label("Open Threshold Folder in Files", systemImage: AppIcons.folder)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-
-                if let date = cloud.lastSyncDate {
-                    Text("Last sync: \(date.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                if let error = cloud.lastError {
-                    Text(error)
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            } else {
-                Text("iCloud Drive isn't available. Sign in to iCloud and enable iCloud Drive in System Settings to back up your scenes and animations.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button {
-                    appModel.iCloudBackup.resolveContainer()
-                } label: {
-                    Label("Check Again", systemImage: AppIcons.arrowClockwise)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-            }
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.06)))
-    }
-    
     private var themeColor: Color {
         // Derive theme color from the current gradient preset
         switch cache.color.gradientState.gradientPreset {
@@ -979,7 +904,7 @@ extension ContentView {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(preset.name).font(.subheadline.weight(.medium))
                                 HStack(spacing: 6) {
-                                    Text(hasMusic ? ".threshmp" : ".threshscene")
+                                    Text(".\(ThresholdExportFormat.preset(hasMusic: hasMusic).ext)")
                                     if hasMusic {
                                         Label("Music", systemImage: AppIcons.musicNote)
                                     }

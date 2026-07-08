@@ -34,8 +34,10 @@ struct ExampleSceneDecodeTests {
     }
 
     /// Every Examples subfolder that ships scene/music presets. Mirrors the
-    /// PresetManager bundle scan (Scenes + Mixed + Custom Scene Example).
-    private static let sceneDirs = ["Scenes", "Mixed", "Custom Scene Example"]
+    /// PresetManager bundle scan (Scenes + Mixed + Custom Scene Example), plus
+    /// "Music Presets" where the shipped `.threshmp` examples actually live —
+    /// without it the `.threshmp` non-empty check below never sees them.
+    private static let sceneDirs = ["Scenes", "Mixed", "Custom Scene Example", "Music Presets"]
 
     private static func files(withExtension ext: String, in subdir: String) -> [URL] {
         let dir = examplesDir.appendingPathComponent(subdir)

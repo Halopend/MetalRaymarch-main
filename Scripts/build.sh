@@ -28,9 +28,21 @@ PROJECT="Threshold.xcodeproj"
 
 # --- Toolchain selection -----------------------------------------------------
 # Pin to the Xcode beta this project requires unless the caller overrides it.
-# (Confirmed-good as of 2026-06: "Xcode-beta 2.app" = 27.0.)
-DEFAULT_DEVELOPER_DIR="/Applications/Xcode-beta 2.app/Contents/Developer"
-export DEVELOPER_DIR="${DEVELOPER_DIR:-$DEFAULT_DEVELOPER_DIR}"
+# The beta has been installed under two names on different machines, so pick
+# whichever actually exists rather than hard-coding one (verified 2026-07-07:
+# only "Xcode-beta.app" is present here; the old "Xcode-beta 2.app" default was
+# stale and made a fresh `build.sh` fail the existence check below).
+if [[ -z "${DEVELOPER_DIR:-}" ]]; then
+    for candidate in \
+        "/Applications/Xcode-beta.app/Contents/Developer" \
+        "/Applications/Xcode-beta 2.app/Contents/Developer"; do
+        if [[ -d "$candidate" ]]; then
+            DEVELOPER_DIR="$candidate"
+            break
+        fi
+    done
+fi
+export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}"
 
 if [[ ! -d "$DEVELOPER_DIR" ]]; then
     echo "ERROR: DEVELOPER_DIR does not exist: $DEVELOPER_DIR" >&2

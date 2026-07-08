@@ -29,6 +29,102 @@ final class AnimationManager {
     }()
     @ObservationIgnored private let prettySceneEncoder: JSONEncoder = AnimationManager.makePrettySceneEncoder()
 
+    /// Observers that reload user scenes when the active store root resolves or the
+    /// mode changes. `nonisolated(unsafe)` so the nonisolated deinit can unregister
+    /// them (removal only; NotificationCenter is thread-safe).
+    @ObservationIgnored nonisolated(unsafe) private var storageObservers: [NSObjectProtocol] = []
+
+    // MARK: - Folder store (user scenes are files under <root>/Animations)
+
+    /// Active store root for the current mode (nil while iCloud is resolving).
+    private var storeRoot: URL? { StorageLocation.shared.activeRoot }
+
+    private nonisolated static func sanitizedSceneFileName(_ name: String, id: UUID, ext: String) -> String {
+        let invalid = CharacterSet(charactersIn: "/\\?%*|\"<>:\n\r")
+        let cleaned = name.components(separatedBy: invalid).joined()
+            .replacingOccurrences(of: " ", with: "_")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "._- "))
+        let stem = cleaned.isEmpty ? "Untitled" : String(cleaned.prefix(64))
+        return "\(stem)_\(id.uuidString.prefix(8)).\(ext)"
+    }
+
+    /// Decode user scenes (non-default ids) from the store's Animations/ folder.
+    /// Default scenes are handled by the built-in overlay, so any default files
+    /// present in the folder (e.g. written by a prior sync) are ignored here.
+    private func scanUserScenes() -> [AnimationScene] {
+        guard let root = storeRoot else { return [] }
+        let dir = StorageLocation.animationsDir(root)
+        let exts = ThresholdExportFormat.extensions(in: .animation)
+        guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return [] }
+        var byID: [UUID: AnimationScene] = [:]
+        for url in files where exts.contains(url.pathExtension) {
+            try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+            guard let data = try? Data(contentsOf: url),
+                  let scene = try? sceneDecoder.decode(AnimationScene.self, from: data) else { continue }
+            guard !DefaultScenes.isDefault(scene.id) else { continue }
+            byID[scene.id] = scene
+        }
+        return Array(byID.values)
+    }
+
+    /// Write one user scene as its own file, removing any prior file for that id
+    /// first (a rename or attached-song change can't orphan a copy).
+    private func writeUserSceneFile(_ scene: AnimationScene) {
+        guard let root = storeRoot else { return }
+        let dir = StorageLocation.animationsDir(root)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        removeUserSceneFile(id: scene.id)
+        let ext = ThresholdExportFormat.animation(hasSong: scene.attachedSong != nil).ext
+        let url = dir.appendingPathComponent(Self.sanitizedSceneFileName(scene.name, id: scene.id, ext: ext))
+        do {
+            let data = try prettySceneEncoder.encode(scene)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            print("❌ Failed to write scene file: \(error)")
+        }
+    }
+
+    /// Delete every store file whose decoded id matches `id`.
+    private func removeUserSceneFile(id: UUID) {
+        removeUserSceneFiles(ids: [id])
+    }
+
+    /// Delete every store file whose decoded id is in `ids`, in a single directory
+    /// scan (vs one scan per id). Used by the delete site and `replaceUserScenes`.
+    private func removeUserSceneFiles(ids: Set<UUID>) {
+        guard !ids.isEmpty, let root = storeRoot else { return }
+        let dir = StorageLocation.animationsDir(root)
+        let exts = ThresholdExportFormat.extensions(in: .animation)
+        guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
+        for url in files where exts.contains(url.pathExtension) {
+            if let data = try? Data(contentsOf: url),
+               let scene = try? sceneDecoder.decode(AnimationScene.self, from: data), ids.contains(scene.id) {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+
+    /// Reload user scenes from the store folder (the source of truth) — reflects
+    /// files added or removed in the folder, including external deletes.
+    func reloadUserScenesFromStore() {
+        withSceneRebuildBatch { userScenes = scanUserScenes() }
+    }
+
+    /// One-time migration of the legacy single-blob animation_scenes.json into the
+    /// per-file store layout. Deferred until a store root exists so nothing is lost.
+    private func migrateLegacyUserScenesIfNeeded() {
+        guard storeRoot != nil else { return }
+        let key = "Scene.legacyMigrated"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        if FileManager.default.fileExists(atPath: scenesFileURL.path),
+           let data = try? Data(contentsOf: scenesFileURL),
+           let legacy = try? sceneDecoder.decode([AnimationScene].self, from: data) {
+            for scene in legacy where !DefaultScenes.isDefault(scene.id) { writeUserSceneFile(scene) }
+            print("📦 Migrated \(legacy.count) user scene(s) from legacy animation_scenes.json")
+        }
+        UserDefaults.standard.set(true, forKey: key)
+    }
+
     /// Shared encoder config for scene persistence and (off-main) export.
     nonisolated static func makePrettySceneEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
@@ -335,52 +431,16 @@ final class AnimationManager {
     }
 
     private func handleiCloudQueryUpdate() {
-        guard let animDir = iCloudAnimDir else { return }
-        importScenesFromiCloud(animDir: animDir)
+        // The Animations/ folder is the source of truth — re-mirror it so files
+        // added OR removed in iCloud Drive both reflect (the old additive import
+        // could never reflect a delete).
+        reloadUserScenesFromStore()
     }
 
-    /// Scan `animDir` and import any `.threshanim`/`.threshanimv` files whose
-    /// UUID is not already present in the full merged scene list (defaults,
-    /// edited overrides, and user scenes). All new scenes are bulk-appended
-    /// in one operation so `rebuildScenes()` only fires once per call.
+    /// Re-mirror the store's Animations/ folder into `userScenes`. Kept for the
+    /// watcher's immediate first pass; delegates to `reloadUserScenesFromStore`.
     func importScenesFromiCloud(animDir: URL) {
-        let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(
-            at: animDir,
-                includingPropertiesForKeys: [.ubiquitousItemDownloadingStatusKey],
-            options: .skipsHiddenFiles
-        ) else { return }
-
-        // Build once against the FULL merged list (defaults + overrides + user).
-        // This prevents bundled default scenes that syncToCloud wrote to iCloud
-        // from being re-imported as user scenes, even if DefaultScenes.allIDs
-        // hasn't finished loading yet.
-        var knownIDs = Set(scenes.map(\.id))
-
-        var newScenes: [AnimationScene] = []
-        for url in contents where ["threshanim", "threshanimv"].contains(url.pathExtension) {
-            // Trigger download if the file is only a cloud placeholder.
-            try? fm.startDownloadingUbiquitousItem(at: url)
-
-            guard fm.fileExists(atPath: url.path) else { continue }
-            guard let data = try? Data(contentsOf: url) else { continue }
-            guard let scene = try? sceneDecoder.decode(AnimationScene.self, from: data) else {
-                print("☁️ Skipping undecodable file: \(url.lastPathComponent)")
-                continue
-            }
-            // Guard against two cloud files sharing a UUID (e.g. a renamed copy).
-            guard !knownIDs.contains(scene.id) else { continue }
-
-            newScenes.append(scene)
-            knownIDs.insert(scene.id)   // prevent a duplicate in this same pass
-        }
-
-        guard !newScenes.isEmpty else { return }
-
-        // Bulk-append so userScenes.didSet / rebuildScenes() fires exactly once.
-        userScenes.append(contentsOf: newScenes)
-        saveScenes()
-        print("☁️ Imported \(newScenes.count) scene(s) from iCloud Drive: \(newScenes.map(\.name).joined(separator: ", "))")
+        reloadUserScenesFromStore()
     }
 
     @discardableResult
@@ -426,10 +486,10 @@ final class AnimationManager {
         return documentsPath.appendingPathComponent(scenesFileName)
     }
 
-    /// Timestamped backups of user scenes, mirroring PresetManager's safety net.
+    /// Timestamped backups of user scenes — always local, mode-independent safety
+    /// net (mirrors PresetManager, under the shared Backups root).
     private var scenesBackupsDirectory: URL {
-        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let dir = documentsPath.appendingPathComponent("AnimationSceneBackups", isDirectory: true)
+        let dir = StorageLocation.shared.backupsRoot.appendingPathComponent("Scenes", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -491,25 +551,7 @@ final class AnimationManager {
         }
     }
 
-    /// Most-recent backup scenes, used when the main file is missing or corrupt.
-    private func loadLatestBackupScenes() -> [AnimationScene] {
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: scenesBackupsDirectory,
-            includingPropertiesForKeys: [.contentModificationDateKey],
-            options: .skipsHiddenFiles
-        ) else { return [] }
-        let latest = files.max { a, b in
-            let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            return da < db
-        }
-        guard let url = latest,
-              let data = try? Data(contentsOf: url),
-              let scenes = try? sceneDecoder.decode([AnimationScene].self, from: data) else { return [] }
-        print("✅ Recovered \(scenes.count) user scenes from backup: \(url.lastPathComponent)")
-        return scenes
-    }
-    
+
     // ═══════════════════════════════════════════════════════════════════════════
     // INITIALIZATION
     // ═══════════════════════════════════════════════════════════════════════════
@@ -519,6 +561,18 @@ final class AnimationManager {
         renderSettings?.sceneTransitionDuration = Float(sceneTransitionDuration)
         loadScenes()
         rebuildScenes()
+        // The store folder is the source of truth: reload user scenes when the
+        // active root resolves (iCloud discovery) or the user switches storage mode.
+        for name in [StorageLocation.rootResolvedNotification, StorageLocation.modeChangedNotification] {
+            let observer = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.loadScenes() }
+            }
+            storageObservers.append(observer)
+        }
+    }
+
+    deinit {
+        storageObservers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -577,6 +631,9 @@ final class AnimationManager {
             print("👁️‍🗨️ Hid default scene '\(scene.name)'")
         } else {
             userScenes.removeAll { $0.id == scene.id }
+            // Removing the file IS the deletion — under folder-as-truth that
+            // removal is what propagates (iCloud syncs the delete to other devices).
+            removeUserSceneFile(id: scene.id)
             saveScenes()
             print("🗑️ Deleted scene '\(scene.name)'")
         }
@@ -1377,29 +1434,17 @@ final class AnimationManager {
     
     private func loadScenes() {
         withSceneRebuildBatch {
-            // Load user scenes
-            if FileManager.default.fileExists(atPath: scenesFileURL.path) {
-                do {
-                    let data = try Data(contentsOf: scenesFileURL)
-                    userScenes = try sceneDecoder.decode([AnimationScene].self, from: data)
-                    print("📂 Loaded \(userScenes.count) user scenes")
-                } catch {
-                    // Main file is corrupt — recover from the newest backup
-                    // rather than starting empty (which a later save would
-                    // persist over the only good copy).
-                    print("❌ Failed to load scenes: \(error) — attempting backup recovery")
-                    userScenes = loadLatestBackupScenes()
-                }
+            // User scenes now live as individual files under <root>/Animations.
+            // Migrate the legacy blob once, then mirror the folder (source of truth).
+            migrateLegacyUserScenesIfNeeded()
+            let scanned = scanUserScenes()
+            if scanned.isEmpty, storeRoot == nil {
+                // iCloud store not resolved yet — keep whatever we had; reload fires
+                // on rootResolved. (Don't blank the list on a transient nil root.)
             } else {
-                // No main file: a backup may still exist (e.g. file lost but
-                // backups survived). Recover if so.
-                let recovered = loadLatestBackupScenes()
-                if !recovered.isEmpty {
-                    userScenes = recovered
-                } else {
-                    print("📂 No saved user scenes found")
-                }
+                userScenes = scanned
             }
+            print("📂 Loaded \(userScenes.count) user scenes from store folder")
 
             // Load hidden default IDs
             if let ids = UserDefaults.standard.array(forKey: "hiddenDefaultSceneIDs") as? [String] {
@@ -1426,20 +1471,57 @@ final class AnimationManager {
 
         print("📂 Defaults: \(DefaultScenes.allIDs.count) built-in, \(hiddenDefaultSceneIDs.count) hidden, \(editedDefaultOverrides.count) edited")
     }
-    
+
+    /// Mirror `userScenes` into the store's Animations/ folder in a single pass:
+    /// one directory scan, remove stale renamed copies, write each current scene.
+    /// Also drops a throttled whole-set backup snapshot (the safety net). Default
+    /// files in the folder are left untouched.
+    ///
+    /// Deletions are NOT inferred here by diffing the folder against `userScenes`.
+    /// That was a cross-device data-loss trap: `scanUserScenes` skips not-yet-
+    /// downloaded iCloud files, so a scene another device just added (still a
+    /// dataless placeholder at reload, then materialized moments later) would be
+    /// absent from the in-memory list and get deleted from the shared folder on
+    /// the next routine edit — propagating the delete to every device. A real
+    /// deletion removes its file at the delete site (`removeUserSceneFile`) or via
+    /// `replaceUserScenes`, both of which only ever drop ids the app already knew.
     private func saveScenes() {
-        do {
-            let data = try prettySceneEncoder.encode(userScenes)
-            try data.write(to: scenesFileURL, options: .atomic)
-            writeSceneBackup(data: data)
-            print("💾 Saved \(userScenes.count) user scenes")
-        } catch {
-            print("❌ Failed to save scenes: \(error)")
+        if let root = storeRoot {
+            let dir = StorageLocation.animationsDir(root)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let exts = ThresholdExportFormat.extensions(in: .animation)
+            var existingByID: [UUID: URL] = [:]
+            if let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
+                for url in files where exts.contains(url.pathExtension) {
+                    if let data = try? Data(contentsOf: url),
+                       let scene = try? sceneDecoder.decode(AnimationScene.self, from: data),
+                       !DefaultScenes.isDefault(scene.id) {
+                        existingByID[scene.id] = url
+                    }
+                }
+            }
+            for scene in userScenes {
+                if let old = existingByID[scene.id] { try? FileManager.default.removeItem(at: old) }  // rename-safe
+                let ext = ThresholdExportFormat.animation(hasSong: scene.attachedSong != nil).ext
+                let fileURL = dir.appendingPathComponent(Self.sanitizedSceneFileName(scene.name, id: scene.id, ext: ext))
+                if let data = try? prettySceneEncoder.encode(scene) {
+                    try? data.write(to: fileURL, options: .atomic)
+                }
+            }
         }
+        if let data = try? prettySceneEncoder.encode(userScenes) { writeSceneBackup(data: data) }
+        print("💾 Saved \(userScenes.count) user scenes")
     }
 
-    /// Replace all user scenes with the given array and persist.
+    /// Replace all user scenes with the given array and mirror into the folder.
+    /// Files for ids the app is dropping (present in the current in-memory set,
+    /// absent from the new one) are removed explicitly. We never infer deletions
+    /// by diffing the folder — a not-yet-downloaded iCloud scene from another
+    /// device is absent from memory yet must NOT be deleted, or the delete would
+    /// propagate to every device.
     func replaceUserScenes(with scenes: [AnimationScene]) {
+        let droppedIDs = Set(userScenes.map(\.id)).subtracting(scenes.map(\.id))
+        removeUserSceneFiles(ids: droppedIDs)
         userScenes = scenes
         saveScenes()
     }

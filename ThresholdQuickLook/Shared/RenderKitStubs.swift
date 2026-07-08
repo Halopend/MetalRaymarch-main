@@ -86,10 +86,17 @@ final class FloatParameterNode: @unchecked Sendable {
     let range: ClosedRange<Float> = 0...1
 }
 
+// Minimal stand-in for the per-fractal formula node batch consumed by the
+// formula-range tripwire in validateStartupRouting (never called in QL).
+struct ParameterNodeBatch {
+    let floatNodeByFormulaIndex: [Int: FloatParameterNode] = [:]
+}
+
 final class ParameterNodeRegistry: @unchecked Sendable {
     static let shared = ParameterNodeRegistry()
     let coreNodes: [String: FloatParameterNode] = [:]
     let effectNodes: [String: FloatParameterNode] = [:]
+    func formulaBatch(for type: FractalModelType) -> ParameterNodeBatch { ParameterNodeBatch() }
     func gestureBindableParameters(for type: FractalModelType) -> [GestureBindableParameter] { [] }
     func gestureBindableTriplets(for type: FractalModelType) -> [GestureBindableTriplet] { [] }
     func gestureBindableCoreParameters(for type: FractalModelType) -> [GestureBindableParameter] { [] }
