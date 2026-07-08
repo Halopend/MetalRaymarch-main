@@ -1171,7 +1171,18 @@ FORCE_INLINE float applySafetyBubble(float d, float3 pos, FractalParams params) 
 // carve is applied right at the hand — the surrounding surface still pulls
 // toward the hand, but a pocket is hollowed out where the hand actually is.
 FORCE_INLINE float applyHandAttractionOne(float d, float3 pos, float3 handPos, float radius, float strength, int pocketEnabled, float4 shape) {
-    float dist = length(pos - handPos);
+    // Cheap reject (iquilezles.org/maths/hiddenintersections-style discriminant
+    // check, reduced to a squared-distance compare since we only need hit/miss,
+    // not the entry point): the smooth blend below always resolves to `d` once
+    // pos is well beyond the ball/pocket's combined reach, so skip the sqrt and
+    // saturate/mix math for the common case of a march step nowhere near a hand.
+    // shape.x<=1, shape.y<=2, shape.z<=1.5, shape.w<=1.5 (HandAttractionConfig
+    // clamps) cap the worst-case reach at ~3.75x radius; 4x leaves margin.
+    float distSq = dot(pos - handPos, pos - handPos);
+    float cullReach = radius * 4.0f;
+    if (distSq > cullReach * cullReach) return d;
+
+    float dist = sqrt(distSq);
     // shape.x — ball size as a fraction of the influence radius.
     float ballRadius = max(radius * shape.x, 1e-3f);
     // |strength| scales the DEPTH of the effect: how much of the ball actually
@@ -1224,9 +1235,18 @@ FORCE_INLINE float applyForearmOne(float d, float3 pos, float4 A, float4 B, floa
     float3 pa = pos - A.xyz;
     float3 ba = B.xyz - A.xyz;
     float t = saturate(dot(pa, ba) / max(dot(ba, ba), 1e-6f));
-    float dist = length(pa - ba * t);
-    float capDist = dist - radius;
+    float3 closest = pa - ba * t;
     float k = max(radius * softness, 1e-4f);
+    // Cheap reject, same reasoning as applyHandAttractionOne: beyond the
+    // capsule's blend reach (radius + softness width) the smooth subtraction
+    // always resolves to `d` — skip the sqrt + saturate/mix math. t/closest
+    // are sqrt-free, so this check is nearly free even when it doesn't fire.
+    float cullReach = (radius + k) * 1.5f;
+    float distSq = dot(closest, closest);
+    if (distSq > cullReach * cullReach) return d;
+
+    float dist = sqrt(distSq);
+    float capDist = dist - radius;
     float a = d;
     float b = -capDist;
     float h = saturate(0.5f + 0.5f * (b - a) / k);
