@@ -23,6 +23,16 @@ extension AppModel {
         _ preset: FractalPreset,
         options: StaticSceneLoadOptions = []
     ) {
+        // Exit keyframe-animation mode before loading a static scene. While an
+        // animation is playing, `RenderSettings.isAnimationPlaying` makes the
+        // effective-target getters return the per-frame `animationBase` and the
+        // keyframe loop keeps overwriting it every frame — so a newly loaded
+        // scene never takes hold; the animation "overtakes" it. The in-app grid
+        // browser already tears down here before calling us; doing it centrally
+        // keeps every entry point (keyboard cycle, swipe, external import, App
+        // Intents) in lockstep. Runs synchronously (main-actor) before the async
+        // apply Task so the stop lands immediately on tap/keypress.
+        animationManager?.clearCurrentSceneSelection()
         let source = options.isEmpty ? "keyboard" : "external"
         Task { @MainActor in
             customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene source=\(source) name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")

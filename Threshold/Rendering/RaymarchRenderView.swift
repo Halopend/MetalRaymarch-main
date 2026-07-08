@@ -1014,7 +1014,13 @@ final class ThresholdMacRenderer {
     /// Updates `appModel.isUsingSpecializedPipeline` (drives the bolt indicator).
     private func resolveActivePipeline(appModel: AppModel) -> MTLRenderPipelineState {
         let settings = appModel.renderSettings
-        let iterations = Int32(settings.fractalIterations)
+        // deIterationMismatch biases the baked FC_FRACTAL_ITERATIONS (geometry fold count)
+        // while the DE stays normalized to the unbiased count (RenderPrecompute) — reproduces
+        // the "Accidental Sphere Projection" under-fold. Negative → fewer folds → sphere.
+        // Flows into the cache key below, so each bias gets its own specialized pipeline.
+        // See Context/ACCIDENTAL_SPHERE_PROJECTION.md.
+        let geomIterations = max(0, settings.fractalIterations + Int(settings.deIterationMismatch.rounded()))
+        let iterations = Int32(geomIterations)
         let raySteps = Int32(settings.maxRaySteps)
         let fractalType = settings.fractalType.rawValue
         let colorIterations = Int32(settings.colorIterations)

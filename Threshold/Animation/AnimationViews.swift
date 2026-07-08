@@ -386,6 +386,11 @@ struct SceneRowView: View {
     let onSelect: () -> Void
     var onEdit: (() -> Void)? = nil
     var onPlay: (() -> Void)? = nil
+    /// `true` when this row's scene is the one currently playing back. Swaps the
+    /// green Play button for a red Stop button so a running animation can be
+    /// halted from the same control.
+    var isPlaying: Bool = false
+    var onStop: (() -> Void)? = nil
     var onResetDefault: (() -> Void)? = nil
 
     @State private var isResetButtonPressed = false
@@ -455,7 +460,14 @@ struct SceneRowView: View {
                             }
                     )
                 }
-                if let onPlay {
+                if isPlaying, let onStop {
+                    Button { onStop() } label: {
+                        Image(systemName: AppIcons.stopFill)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                    .help("Stop animation")
+                } else if let onPlay {
                     Button { onPlay() } label: {
                         Image(systemName: AppIcons.playFill)
                     }
