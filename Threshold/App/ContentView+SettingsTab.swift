@@ -594,24 +594,6 @@ extension ContentView {
             }
             .tint(.orange)
 
-            Toggle(isOn: Binding(
-                get: { cache.quality.recreateLegacyComputeCacheBug },
-                set: {
-                    cache.quality.recreateLegacyComputeCacheBug = $0
-                    cache.push(\.recreateLegacyComputeCacheBug, value: $0)
-                }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Legacy Sphere Projection Bug")
-                        .font(.subheadline.weight(.semibold))
-                    Text("Recreates the old \"Accidental Sphere Projection\" artifact look by serving the nearest cached compute pipeline even when iteration/ray-step counts mismatch.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .tint(.orange)
-
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("Sphere Projection Mismatch (δ)")
