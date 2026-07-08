@@ -201,6 +201,158 @@ enum MacBenchmarkHarness {
         FileHandle.standardError.write(Data("🏁 [bench] \(s)\n".utf8))
     }
 
+    // MARK: - Occupancy probe (per-DE register pressure)
+
+    /// Builds the real compute raymarch kernel specialized per fractal type and
+    /// reports `maxTotalThreadsPerThreadgroup` (higher = fewer registers/thread =
+    /// more occupancy headroom), `threadExecutionWidth`, and static threadgroup
+    /// memory. Since `FC_FRACTAL_TYPE` devirtualizes the DE dispatch at compile
+    /// time, each pipeline's register footprint reflects exactly one DE — so this
+    /// ranks the DE functions by occupancy cost. Headless, no rendering.
+    private static func runOccupancyProbe(device: MTLDevice) {
+        guard let library = device.makeDefaultLibrary() else {
+            log("OCCUPANCY FATAL: no default library"); return
+        }
+        let env = ProcessInfo.processInfo.environment
+        // Optional CSV history: THRESHOLD_OCCUPANCY_CSV=/path/occupancy_history.csv
+        // appends one row per (kernel, fractal, iters). THRESHOLD_OCCUPANCY_TAG
+        // labels the run (e.g. "baseline-preA", "leverA-constref") so the history
+        // reads as an experiment log. Header is written once if the file is new.
+        let csvPath = env["THRESHOLD_OCCUPANCY_CSV"]
+        let tag = env["THRESHOLD_OCCUPANCY_TAG"] ?? "adhoc"
+        let iso = ISO8601DateFormatter(); iso.formatOptions = [.withInternetDateTime]
+        let stamp = iso.string(from: Date())
+        let sha = BuildStamp.gitSHA
+        let dirty = BuildStamp.gitDirty ? "dirty" : "clean"
+        var csvRows: [String] = []
+        func csvRecord(kernel: String, fractal: String, iters: Int32,
+                       maxThreads: Int, width: Int, tgm: Int) {
+            csvRows.append("\(stamp),\(sha),\(dirty),\(tag),\(kernel),\(fractal),\(iters),\(maxThreads),\(width),\(tgm)")
+        }
+        // (rawValue, name) — mirrors the FractalType enum in ShaderTypes.h.
+        let types: [(Int32, String)] = [
+            (0,  "Mandelbox"), (1, "Mandelbulb"), (2, "Menger"),
+            (5,  "MandelbulbJulia"), (6, "QuaternionJulia"), (11, "Octahedron"),
+            (14, "MengerSphere"), (15, "TheliPseudoKleinian"), (17, "Kleinian"),
+        ]
+        // Kernels that inline the DE via Map/FractalDE_Dispatch.
+        let kernels = ["adaptiveHierarchical8x8", "coneCoarsePrepass8x8"]
+
+        // Fixed non-type constants so only the DE differs run-to-run. Iteration
+        // count drives loop-unroll register cost, so probe a low and a high count.
+        //
+        // deTailBaked controls FC 3/16/17 (hasSpaceWarp/hasEnvScrunch/hasHandField):
+        //   nil   → left UNDEFINED (not set at all) — this is what
+        //           `buildComputePipeline` produced for every compute pipeline
+        //           BEFORE the selectComputePipeline DE-tail plumbing: the shader's
+        //           is_function_constant_defined(...) fallback makes them default
+        //           ON, so every DE eval pays the full space-warp/env-scrunch/
+        //           hand-field tail regardless of runtime state.
+        //   false → explicitly baked OFF — what selectComputePipeline now bakes
+        //           for a clean scene (no active space warp, env scrunch off,
+        //           hand attraction off), letting the whole tail DCE.
+        // Comparing these two isolates exactly the register/occupancy delta the
+        // fix unlocks, independent of every other function constant (which stay
+        // fixed across both variants).
+        func constants(type: Int32, iterations: Int32, deTailBaked: Bool?) -> MTLFunctionConstantValues {
+            let c = MTLFunctionConstantValues()
+            func setI(_ x: Int32, _ idx: Int) { var t = x; c.setConstantValue(&t, type: .int, index: idx) }
+            func setB(_ x: Bool, _ idx: Int) { var t = x; c.setConstantValue(&t, type: .bool, index: idx) }
+            setI(iterations, 0)   // FC_FRACTAL_ITERATIONS
+            setI(max(iterations - 2, 2), 1) // FC_SHADOW_ITERATIONS
+            setI(1, 4)            // FC_QUALITY_MODE
+            setI(128, 6)          // FC_MAX_RAY_STEPS
+            setI(type, 7)         // FC_FRACTAL_TYPE
+            setB(false, 8)        // FC_NEON_MODE_ENABLED
+            setI(iterations, 9)   // FC_COLOR_ITERATIONS
+            setB(true, 11)        // FC_SHADOWS_ENABLED
+            setB(false, 2)        // FC_SAFETY_BUBBLE_ENABLED
+            setI(8, 12)           // FC_MANDELBULB_POWER
+            if let deTailBaked {
+                setB(deTailBaked, 3)   // FC_HAS_SPACEWARP
+                setB(deTailBaked, 16)  // FC_HAS_ENVSCRUNCH
+                setB(deTailBaked, 17)  // FC_HAS_HANDFIELD
+            }
+            setB(false, 13)       // FC_WARM_START
+            setB(false, 15)       // FC_COARSE_WARM_START
+            setB(false, 14)       // FC_COHERENT_PACKET
+            return c
+        }
+
+        for kernel in kernels {
+            // Only adaptiveHierarchical8x8 is wired to selectComputePipeline's new
+            // DE-tail bakes (coneCoarsePrepass8x8 stays intentionally generic — see
+            // Renderer.swift's "Increment 1" comment — so it has nothing to compare).
+            let compareDETail = kernel == "adaptiveHierarchical8x8"
+            log("── occupancy: \(kernel) (maxThreads/threadgroup — higher = more occupancy) ──")
+            for iters: Int32 in [6, 12] {
+                var line = "  iters=\(iters)  "
+                var undefinedLine = "  iters=\(iters) [FC undefined, pre-fix]  "
+                var bakedOffLine = "  iters=\(iters) [FC baked off, post-fix]  "
+                for (raw, name) in types {
+                    if compareDETail {
+                        do {
+                            let fnU = try library.makeFunction(name: kernel, constantValues: constants(type: raw, iterations: iters, deTailBaked: nil))
+                            let psoU = try device.makeComputePipelineState(function: fnU)
+                            undefinedLine += "\(name)=\(psoU.maxTotalThreadsPerThreadgroup)(tgm\(psoU.staticThreadgroupMemoryLength)) "
+                            csvRecord(kernel: "\(kernel)-fcUndefined", fractal: name, iters: iters,
+                                      maxThreads: psoU.maxTotalThreadsPerThreadgroup,
+                                      width: psoU.threadExecutionWidth,
+                                      tgm: psoU.staticThreadgroupMemoryLength)
+
+                            let fnB = try library.makeFunction(name: kernel, constantValues: constants(type: raw, iterations: iters, deTailBaked: false))
+                            let psoB = try device.makeComputePipelineState(function: fnB)
+                            bakedOffLine += "\(name)=\(psoB.maxTotalThreadsPerThreadgroup)(tgm\(psoB.staticThreadgroupMemoryLength)) "
+                            csvRecord(kernel: "\(kernel)-fcBakedOff", fractal: name, iters: iters,
+                                      maxThreads: psoB.maxTotalThreadsPerThreadgroup,
+                                      width: psoB.threadExecutionWidth,
+                                      tgm: psoB.staticThreadgroupMemoryLength)
+                        } catch {
+                            undefinedLine += "\(name)=ERR "
+                            bakedOffLine += "\(name)=ERR "
+                        }
+                    } else {
+                        do {
+                            let fn = try library.makeFunction(name: kernel, constantValues: constants(type: raw, iterations: iters, deTailBaked: false))
+                            let pso = try device.makeComputePipelineState(function: fn)
+                            line += "\(name)=\(pso.maxTotalThreadsPerThreadgroup)(w\(pso.threadExecutionWidth),tgm\(pso.staticThreadgroupMemoryLength)) "
+                            csvRecord(kernel: kernel, fractal: name, iters: iters,
+                                      maxThreads: pso.maxTotalThreadsPerThreadgroup,
+                                      width: pso.threadExecutionWidth,
+                                      tgm: pso.staticThreadgroupMemoryLength)
+                        } catch {
+                            line += "\(name)=ERR "
+                        }
+                    }
+                }
+                if compareDETail {
+                    log(undefinedLine)
+                    log(bakedOffLine)
+                } else {
+                    log(line)
+                }
+            }
+        }
+
+        if let csvPath {
+            let header = "timestamp,gitSHA,gitState,tag,kernel,fractal,iterations,maxThreadsPerThreadgroup,threadExecutionWidth,threadgroupMemBytes\n"
+            let body = csvRows.joined(separator: "\n") + "\n"
+            let fm = FileManager.default
+            if !fm.fileExists(atPath: csvPath) {
+                try? (header + body).write(toFile: csvPath, atomically: true, encoding: .utf8)
+                log("occupancy CSV created → \(csvPath) (\(csvRows.count) rows, tag=\(tag))")
+            } else if let handle = FileHandle(forWritingAtPath: csvPath) {
+                handle.seekToEndOfFile()
+                handle.write(Data(body.utf8))
+                try? handle.close()
+                log("occupancy CSV appended → \(csvPath) (\(csvRows.count) rows, tag=\(tag))")
+            } else {
+                log("occupancy CSV: could not open \(csvPath)")
+            }
+        }
+        log("occupancy probe done")
+    }
+
     private static func parseSize(_ s: String?, defaultW: Int, defaultH: Int) -> (Int, Int) {
         guard let s, let x = s.firstIndex(of: "x"),
               let w = Int(s[..<x]), let h = Int(s[s.index(after: x)...]) else {
@@ -290,6 +442,16 @@ enum MacBenchmarkHarness {
         try? await Task.sleep(for: .milliseconds(500))
 
         guard let device = MTLCreateSystemDefaultDevice() else { log("FATAL no Metal device"); exit(2) }
+
+        // THRESHOLD_OCCUPANCY_PROBE=1: build the real compute raymarch kernel
+        // (adaptiveHierarchical8x8) specialized per fractal type and report
+        // maxTotalThreadsPerThreadgroup — a headless per-DE register-pressure /
+        // occupancy proxy — then exit. Does not touch the render pipeline.
+        if ProcessInfo.processInfo.environment["THRESHOLD_OCCUPANCY_PROBE"] == "1" {
+            runOccupancyProbe(device: device)
+            exit(0)
+        }
+
         let layer = CAMetalLayer()
         layer.device = device
         layer.pixelFormat = .bgra8Unorm_srgb
@@ -654,6 +816,31 @@ enum MacBenchmarkHarness {
             try data.write(to: URL(fileURLWithPath: cfg.outPath))
         } catch {
             log("FATAL write failed: \(error)")
+        }
+
+        appendPerfCSV(run: run, tag: ProcessInfo.processInfo.environment["THRESHOLD_PERF_TAG"] ?? "adhoc")
+    }
+
+    /// Optional CSV perf history: THRESHOLD_PERF_CSV=/path/perf_history.csv appends
+    /// one row per scene per run, tagged by THRESHOLD_PERF_TAG, so GPU-time history
+    /// reads as an experiment log (companion to the occupancy CSV).
+    private static func appendPerfCSV(run: PerfRunRecord, tag: String) {
+        guard let csvPath = ProcessInfo.processInfo.environment["THRESHOLD_PERF_CSV"] else { return }
+        let dirty = run.gitDirty ? "dirty" : "clean"
+        let rows = run.scenes.map { s in
+            "\(run.capturedAt),\(run.gitSHA),\(dirty),\(tag),\(s.name),\(s.fractalType),"
+            + "\(s.drawableWidth)x\(s.drawableHeight),\(s.renderPath),\(s.iters),"
+            + String(format: "%.3f,%.3f,%.3f,%.2f", s.gpuMsAvg, s.gpuMsP95, s.gpuMsMax, s.iterationsAvg)
+        }
+        let body = rows.joined(separator: "\n") + "\n"
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: csvPath) {
+            let header = "timestamp,gitSHA,gitState,tag,scene,fractalType,size,renderPath,iters,gpuMsAvg,gpuMsP95,gpuMsMax,stepsAvg\n"
+            try? (header + body).write(toFile: csvPath, atomically: true, encoding: .utf8)
+            log("perf CSV created → \(csvPath) (\(rows.count) rows, tag=\(tag))")
+        } else if let h = FileHandle(forWritingAtPath: csvPath) {
+            h.seekToEndOfFile(); h.write(Data(body.utf8)); try? h.close()
+            log("perf CSV appended → \(csvPath) (\(rows.count) rows, tag=\(tag))")
         }
     }
 }

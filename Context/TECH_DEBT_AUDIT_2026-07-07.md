@@ -81,3 +81,32 @@ and (c) a fresh priority ranking + phased plan.
 - **B** — `Scripts/build.sh` now auto-detects whichever `Xcode-beta*.app` exists; added a root `README.md`
   documenting the toolchain pin, embed regen, PSO-archive clear, the unsigned-build CloudKit trap, and the test caveats.
 - (Earlier this session, related: the CloudKit freeze itself was fixed via `UsageAnalytics.hasCloudKitEntitlement`.)
+
+## Update — 2026-07-07 (evening delta, verified against the tree)
+
+Re-scan after the morning audit; the tree advanced by four commits
+(`b09d7341` gestures, `27241def` iCloud delete fix, `2e496e2b` iCloud tests,
+plus the pre-commit repair). Verified deltas:
+
+- **A — now actually activated.** The morning audit created the hook + script but left the
+  one-time `git config core.hooksPath .githooks` un-run (the hook was still dormant — `core.hooksPath`
+  was unset). **Activated this session**; `Scripts/check_no_duplicate_suffix.sh` passes on the current tree.
+  Note: `core.hooksPath` is per-clone local config — it can't be committed into the repo (git forbids
+  repo-controlled hooksPath), so each fresh clone/worktree must re-run it. The README already documents this.
+- **D / storage-delete path — now regression-guarded.** The `27241def` data-loss fix
+  (routine edits pruning other devices' not-yet-downloaded scenes) shipped without a test at first;
+  `2e496e2b` closed that with `ThresholdTests/ICloudStoreDeletionTests.swift` — exercises the real
+  `AnimationManager`/`PresetManager` folder mirroring against a temp root (new DEBUG-only
+  `StorageLocation.testRootOverride` seam) and asserts routine-edit / replace / delete never remove an
+  unknown store file. `routineEditKeepsUnknownStoreFile` is the direct regression. **This is the
+  single highest-risk runtime surface the audit flagged (D) getting its first real test** — the pattern
+  the audit called for (test the paths that bit) applied to storage.
+- **`#18` EnvironmentSDF geometry — close as DONE.** `TECH_DEBT.md` still lists it open (P=24), but
+  `EnvironmentSDFTests.swift` now golden-tests `pointTriangleDistance` (per barycentric region + brute-force
+  fuzz), `parseSynthetic`, and `bakeSynthetic` (voxel + containment AABB). Fold the closure back into the register.
+- **`#2` / item H — narrowed.** The hand-attraction fallback literal is now single-sourced as
+  `HandAttractionConfig.defaultShape` (the old `RaymarchRenderView`/`HeadlessRenderer` hardcodes are gone).
+  The broad "one Uniforms builder across the construction sites" is still open.
+
+Counts moved: `RenderSettings.swift` 4,569 lines (still growing, `#12`/P parked);
+concurrency markers `nonisolated(unsafe)` 67 / `@unchecked Sendable` 46 (`#6` drifting up).

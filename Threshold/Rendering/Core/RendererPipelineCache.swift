@@ -144,12 +144,17 @@ extension Renderer {
     }
 
     /// Scene-stable feature bakes for exact compute-pipeline keys
-    /// (safety bubble + coherent-packet experiment), read from live settings.
+    /// (safety bubble + coherent-packet experiment + the DE-tail trio), read
+    /// from live settings / the preset's own space-warp state.
     @inline(__always)
-    fileprivate func computeSceneKey(for fractalType: FractalModelType) -> String {
+    fileprivate func computeSceneKey(for fractalType: FractalModelType,
+                                     hasSpaceWarp: Bool,
+                                     hasEnvScrunch: Bool,
+                                     hasHandField: Bool) -> String {
         let bubble = effectiveSafetyBubbleEnabled(for: fractalType)
         let packet = appModel.renderSettings.coherentPacketEnabled
-        return "_B\(bubble ? 1 : 0)_CP\(packet ? 1 : 0)"
+        return "_B\(bubble ? 1 : 0)_CP\(packet ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)"
+            + "_ES\(hasEnvScrunch ? 1 : 0)_HF\(hasHandField ? 1 : 0)"
     }
 
     @inline(__always)
@@ -258,10 +263,16 @@ extension Renderer {
         mandelbulbPower: Int32?,
         activeCustomHash: String?,
         bubbleEnabled: Bool,
-        packetEnabled: Bool
+        packetEnabled: Bool,
+        spaceWarpEnabled: Bool,
+        envScrunchEnabled: Bool,
+        handFieldEnabled: Bool
     ) -> MTLComputePipelineState? {
         lastComputeBubble = bubbleEnabled
         lastComputePacket = packetEnabled
+        lastComputeSpaceWarp = spaceWarpEnabled
+        lastComputeEnvScrunch = envScrunchEnabled
+        lastComputeHandField = handFieldEnabled
         lastComputeFT = fractalTypeRawValue
         lastComputeFI = fractalIterations
         lastComputeRS = maxRaySteps
@@ -438,13 +449,18 @@ extension Renderer {
 
             let functionConstants = preset.deriveFunctionConstants()
             let powerKey = functionConstants.mandelbulbPower.map { "P\($0)" } ?? ""
+            // Must match prewarmComputePipeline's own derivation exactly, or this
+            // dedup-set probe key silently drifts from the key it actually prewarms.
             let computeKey = ComputePipelineKeyContext(
                 prefix: customCacheKeyPrefix(),
                 fractalTypeRawValue: Int(preset.fractalType.rawValue),
                 fractalIterations: Int(functionConstants.fractalIterations),
                 maxRaySteps: Int(functionConstants.maxRaySteps),
                 powerKey: powerKey,
-                sceneKey: computeSceneKey(for: preset.fractalType)
+                sceneKey: computeSceneKey(for: preset.fractalType,
+                                         hasSpaceWarp: preset.effectiveHasSpaceWarp,
+                                         hasEnvScrunch: appModel.renderSettings.qualityConfig.envScrunchEnabled,
+                                         hasHandField: appModel.renderSettings.handAttractionEnabled)
             ).exactKey
             if prewarmedComputeKeys.insert(computeKey).inserted {
                 await prewarmComputePipelineDuringStartup(forPreset: preset)
@@ -508,6 +524,26 @@ extension Renderer {
         // same frame — so a `_SW0` pipeline can never be served for a warped scene.
         let hasSpaceWarp = !appModel.renderSettings.spaceWarpStack.isEmpty || activeCustomHash != nil
 
+        // Environment Scrunch and the hand field each add a tail to EVERY DE
+        // evaluation, so even runtime-disabled they inflate the megakernel's
+        // register footprint and slow the whole march (measured ~4 ms + ~6 ms
+        // at 1080p on Mac). Bake them out (FC 16/17 → dead-code elimination)
+        // unless live state needs them, mirroring the FC_HAS_SPACEWARP pattern.
+        // macOS only: on visionOS/iOS the constants stay undefined (shader
+        // defaults ON) so those platforms' pipelines/prewarm are untouched.
+        // `nil` on non-Mac → the DE-tail bakes are Mac-only; the fast-path guard
+        // and cache key below treat nil as "no segment", leaving other platforms
+        // byte-identical to before.
+        #if os(macOS)
+        // Env Scrunch is device-local (never preset state); the hand field
+        // needs hand tracking, which macOS does not have — always off here.
+        let hasEnvScrunch: Bool? = appModel.renderSettings.qualityConfig.envScrunchEnabled
+        let hasHandField: Bool? = false
+        #else
+        let hasEnvScrunch: Bool? = nil
+        let hasHandField: Bool? = nil
+        #endif
+
         // Fast-path: parameters unchanged since last call — skip string alloc + dict lookup
         if iterations == lastSelectIter && raySteps == lastSelectRS &&
            neonMode == lastSelectNeon &&
@@ -516,6 +552,8 @@ extension Renderer {
            activeCustomHash == lastSelectCustomHash &&
            bubbleEnabled == lastSelectBubble &&
            hasSpaceWarp == lastSelectSpaceWarp &&
+           hasEnvScrunch == lastSelectEnvScrunch &&
+           hasHandField == lastSelectHandField &&
            mandelbulbPower == lastSelectPower, let cached = lastSelectedPipeline {
             recordPipelineTelemetry(renderHit: true, renderSource: "fast-path")
             if fractalType == .custom, !lastSelectedIsSpecialized {
@@ -529,12 +567,19 @@ extension Renderer {
         // guard. Set here (not in cacheSelectedRenderPipeline) so every non-fast-path
         // return reflects the current frame; a fast-path HIT above already had it equal.
         lastSelectSpaceWarp = hasSpaceWarp
+        lastSelectEnvScrunch = hasEnvScrunch
+        lastSelectHandField = hasHandField
 
         // Build unified cache key (only on parameter change). The `_SW` segment must
         // stay in lockstep with `FractalPreset.pipelineCacheKey`'s scene segment so a
         // prewarmed/preset pipeline is found once its scene is applied.
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
+        // Mac-only DE-tail bakes append `_ES{0,1}_HF{0,1}`; nil (non-Mac) appends
+        // nothing, so those platforms' keys stay exactly as before. Must match
+        // `FractalPreset.pipelineCacheKey`'s deTailKey.
+        let deTailKey = FractalPreset.deTailCacheKey(hasEnvScrunch: hasEnvScrunch,
+                                                     hasHandField: hasHandField)
         let keyContext = RenderPipelineKeyContext(
             prefix: customCacheKeyPrefix(),
             fractalTypeRawValue: Int(fractalType.rawValue),
@@ -543,7 +588,7 @@ extension Renderer {
             qualityMode: qualityMode,
             colorIterations: colorIterations,
             powerKey: powerKey,
-            sceneKey: "_B\(bubbleEnabled ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)"
+            sceneKey: "_B\(bubbleEnabled ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)\(deTailKey)"
         )
         let cacheKey = keyContext.exactKey(neonEnabled: neonMode)
         if RENDERER_DEBUG,
@@ -583,6 +628,8 @@ extension Renderer {
                 shadowIterations: Int32(max(iterations - 2, 2)),
                 safetyBubbleEnabled: bubbleEnabled,
                 hasSpaceWarp: hasSpaceWarp,   // pair the baked FC with cacheKey's _SW segment
+                hasEnvScrunch: hasEnvScrunch, // nil on non-Mac (FC stays undefined = ON)
+                hasHandField: hasHandField,   // pair the baked FC with cacheKey's _ES/_HF segment
                 qualityMode: Int32(qualityMode),
                 debugHierarchical: false,
                 maxRaySteps: Int32(raySteps),
@@ -792,13 +839,22 @@ extension Renderer {
         let powerKey = functionConstants.mandelbulbPower.map { "P\($0)" } ?? ""
         let bubbleEnabled = effectiveSafetyBubbleEnabled(for: preset.fractalType)
         let packetEnabled = appModel.renderSettings.coherentPacketEnabled
+        // Space warp is preset-embedded (mirrors the preset's own pipelineCacheKey);
+        // env-scrunch/hand-field are device-local live settings, not preset state —
+        // same source `selectComputePipeline` will read once this preset is applied.
+        let spaceWarpEnabled = preset.effectiveHasSpaceWarp
+        let envScrunchEnabled = appModel.renderSettings.qualityConfig.envScrunchEnabled
+        let handFieldEnabled = appModel.renderSettings.handAttractionEnabled
         let keyContext = ComputePipelineKeyContext(
             prefix: customCacheKeyPrefix(),
             fractalTypeRawValue: Int(preset.fractalType.rawValue),
             fractalIterations: Int(functionConstants.fractalIterations),
             maxRaySteps: Int(functionConstants.maxRaySteps),
             powerKey: powerKey,
-            sceneKey: computeSceneKey(for: preset.fractalType)
+            sceneKey: computeSceneKey(for: preset.fractalType,
+                                     hasSpaceWarp: spaceWarpEnabled,
+                                     hasEnvScrunch: envScrunchEnabled,
+                                     hasHandField: handFieldEnabled)
         )
         let exactKey = keyContext.exactKey
 
@@ -812,7 +868,10 @@ extension Renderer {
             maxRaySteps: functionConstants.maxRaySteps,
             mandelbulbPower: functionConstants.mandelbulbPower,
             safetyBubbleEnabled: bubbleEnabled,
-            coherentPacketEnabled: packetEnabled
+            coherentPacketEnabled: packetEnabled,
+            hasSpaceWarp: spaceWarpEnabled,
+            hasEnvScrunch: envScrunchEnabled,
+            hasHandField: handFieldEnabled
         )
     }
 
@@ -833,6 +892,9 @@ extension Renderer {
                                      mandelbulbPower: Int32? = nil,
                                      safetyBubbleEnabled: Bool? = nil,
                                      coherentPacketEnabled: Bool? = nil,
+                                     hasSpaceWarp: Bool? = nil,
+                                     hasEnvScrunch: Bool? = nil,
+                                     hasHandField: Bool? = nil,
                                      archive: PipelineBinaryArchive? = nil) -> MTLComputePipelineState? {
         let constants = MTLFunctionConstantValues()
         var fi = fractalIterations
@@ -852,6 +914,18 @@ extension Renderer {
         }
         if var packet = coherentPacketEnabled {
             constants.setConstantValue(&packet, type: .bool, index: FunctionConstantIndex.coherentPacketEnabled.rawValue)
+        }
+        // DE-tail bakes (FC 3/16/17): every DE evaluation in the hierarchical
+        // march pays the space-warp seam + env-scrunch + hand-field tail unless
+        // these are baked off, mirroring the fragment path's FunctionConstantConfig.
+        if var sw = hasSpaceWarp {
+            constants.setConstantValue(&sw, type: .bool, index: FunctionConstantIndex.hasSpaceWarp.rawValue)
+        }
+        if var es = hasEnvScrunch {
+            constants.setConstantValue(&es, type: .bool, index: FunctionConstantIndex.hasEnvScrunch.rawValue)
+        }
+        if var hf = hasHandField {
+            constants.setConstantValue(&hf, type: .bool, index: FunctionConstantIndex.hasHandField.rawValue)
         }
         constants.setConstantValue(&fi, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
         constants.setConstantValue(&si, type: .int, index: FunctionConstantIndex.shadowIterations.rawValue)
@@ -924,6 +998,20 @@ extension Renderer {
         let powerKey = mbPowerInt.map { "P\($0)" } ?? ""
         let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
         let packetEnabled = appModel.renderSettings.coherentPacketEnabled
+        // DE-tail bakes (FC 3/16/17): mirror selectPipeline's live derivation so the
+        // compute kernel's Map() evaluations get the same space-warp/env-scrunch/
+        // hand-field dead-code elimination the fragment path relies on — every DE
+        // eval pays this tail's register cost unless baked off (see FC_HAS_SPACEWARP/
+        // FC_HAS_ENVSCRUNCH/FC_HAS_HANDFIELD in Shaders.metal). Conservative: any
+        // active transform/hand-tracking state keeps the tail compiled in; only a
+        // clean scene bakes it out. (The global ARKit hand-tracking toggle is
+        // @MainActor-isolated and unreachable from this actor, so this reads only
+        // the "Hand Attraction" feature toggle — a conservative over-approximation
+        // when tracking itself is off, same "costs perf, never correctness" trade
+        // as hasSpaceWarp above.)
+        let hasSpaceWarp = !appModel.renderSettings.spaceWarpStack.isEmpty || activeCustomHash != nil
+        let hasEnvScrunch = appModel.renderSettings.qualityConfig.envScrunchEnabled
+        let hasHandField = appModel.renderSettings.handAttractionEnabled
         let cacheKeyPrefix = customCacheKeyPrefix()
         let keyContext = ComputePipelineKeyContext(
             prefix: cacheKeyPrefix,
@@ -931,7 +1019,10 @@ extension Renderer {
             fractalIterations: fractalIterations,
             maxRaySteps: maxRaySteps,
             powerKey: powerKey,
-            sceneKey: "_B\(bubbleEnabled ? 1 : 0)_CP\(packetEnabled ? 1 : 0)"
+            sceneKey: computeSceneKey(for: fractalType,
+                                     hasSpaceWarp: hasSpaceWarp,
+                                     hasEnvScrunch: hasEnvScrunch,
+                                     hasHandField: hasHandField)
         )
 
         let recreateLegacyBug = appModel.renderSettings.recreateLegacyComputeCacheBug
@@ -939,6 +1030,7 @@ extension Renderer {
         // Fast-path: parameters unchanged since last call
         if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS && fractalType.rawValue == lastComputeFT && activeCustomHash == lastComputeCustomHash && mbPowerInt == lastComputePower,
            bubbleEnabled == lastComputeBubble, packetEnabled == lastComputePacket,
+           hasSpaceWarp == lastComputeSpaceWarp, hasEnvScrunch == lastComputeEnvScrunch, hasHandField == lastComputeHandField,
            recreateLegacyBug == lastComputeLegacyBugMode,
            let cached = lastSelectedComputePipeline {
             recordPipelineTelemetry(computeHit: true, computeSource: "fast-path")
@@ -963,7 +1055,10 @@ extension Renderer {
                 mandelbulbPower: mbPowerInt,
                 activeCustomHash: activeCustomHash,
                 bubbleEnabled: bubbleEnabled,
-                packetEnabled: packetEnabled
+                packetEnabled: packetEnabled,
+                spaceWarpEnabled: hasSpaceWarp,
+                envScrunchEnabled: hasEnvScrunch,
+                handFieldEnabled: hasHandField
             )
         }
 
@@ -982,7 +1077,10 @@ extension Renderer {
                 mandelbulbPower: mbPowerInt,
                 activeCustomHash: activeCustomHash,
                 bubbleEnabled: bubbleEnabled,
-                packetEnabled: packetEnabled
+                packetEnabled: packetEnabled,
+                spaceWarpEnabled: hasSpaceWarp,
+                envScrunchEnabled: hasEnvScrunch,
+                handFieldEnabled: hasHandField
             )
         }
 
@@ -1020,7 +1118,10 @@ extension Renderer {
                     mandelbulbPower: mbPowerInt,
                     activeCustomHash: activeCustomHash,
                     bubbleEnabled: bubbleEnabled,
-                    packetEnabled: packetEnabled
+                    packetEnabled: packetEnabled,
+                    spaceWarpEnabled: hasSpaceWarp,
+                    envScrunchEnabled: hasEnvScrunch,
+                    handFieldEnabled: hasHandField
                 )
             }
         }
@@ -1041,7 +1142,10 @@ extension Renderer {
                     maxRaySteps: Int32(maxRaySteps),
                     mandelbulbPower: mbPowerInt,
                     safetyBubbleEnabled: bubbleEnabled,
-                    coherentPacketEnabled: packetEnabled
+                    coherentPacketEnabled: packetEnabled,
+                    hasSpaceWarp: hasSpaceWarp,
+                    hasEnvScrunch: hasEnvScrunch,
+                    hasHandField: hasHandField
                 )
                 recordPipelineTelemetry(computeHit: false, computeMissKey: exactKey, computeSource: "custom-background-build")
                 customSceneDiagnostic("🔬 [CSDiag] selectComputePipeline FT=custom → enqueued background build, returning NIL (compute prepass declined this frame)")
@@ -1057,7 +1161,10 @@ extension Renderer {
                 mandelbulbPower: mbPowerInt,
                 activeCustomHash: activeCustomHash,
                 bubbleEnabled: bubbleEnabled,
-                packetEnabled: packetEnabled
+                packetEnabled: packetEnabled,
+                spaceWarpEnabled: hasSpaceWarp,
+                envScrunchEnabled: hasEnvScrunch,
+                handFieldEnabled: hasHandField
             )
         }
 
@@ -1069,7 +1176,10 @@ extension Renderer {
             maxRaySteps: Int32(maxRaySteps),
             mandelbulbPower: mbPowerInt,
             safetyBubbleEnabled: bubbleEnabled,
-            coherentPacketEnabled: packetEnabled
+            coherentPacketEnabled: packetEnabled,
+            hasSpaceWarp: hasSpaceWarp,
+            hasEnvScrunch: hasEnvScrunch,
+            hasHandField: hasHandField
         )
 
         // 4. Powerless shared fallback — serve the FI/RS-specialized startup
@@ -1118,7 +1228,10 @@ extension Renderer {
                     mandelbulbPower: mbPowerInt,
                     activeCustomHash: activeCustomHash,
                     bubbleEnabled: bubbleEnabled,
-                    packetEnabled: packetEnabled
+                    packetEnabled: packetEnabled,
+                    spaceWarpEnabled: hasSpaceWarp,
+                    envScrunchEnabled: hasEnvScrunch,
+                    handFieldEnabled: hasHandField
                 )
             }
         }
@@ -1139,7 +1252,10 @@ extension Renderer {
             mandelbulbPower: mbPowerInt,
             activeCustomHash: activeCustomHash,
             bubbleEnabled: bubbleEnabled,
-            packetEnabled: packetEnabled
+            packetEnabled: packetEnabled,
+            spaceWarpEnabled: hasSpaceWarp,
+            envScrunchEnabled: hasEnvScrunch,
+            handFieldEnabled: hasHandField
         )
     }
 
@@ -1306,7 +1422,10 @@ extension Renderer {
         maxRaySteps: Int32,
         mandelbulbPower: Int32?,
         safetyBubbleEnabled: Bool? = nil,
-        coherentPacketEnabled: Bool? = nil
+        coherentPacketEnabled: Bool? = nil,
+        hasSpaceWarp: Bool? = nil,
+        hasEnvScrunch: Bool? = nil,
+        hasHandField: Bool? = nil
     ) {
         if pendingComputePipelineBuildKeys.contains(cacheKey) { return }
         if shouldDelayComputePipelineBuild(forKey: cacheKey) { return }
@@ -1340,6 +1459,9 @@ extension Renderer {
                 mandelbulbPower: mandelbulbPower,
                 safetyBubbleEnabled: safetyBubbleEnabled,
                 coherentPacketEnabled: coherentPacketEnabled,
+                hasSpaceWarp: hasSpaceWarp,
+                hasEnvScrunch: hasEnvScrunch,
+                hasHandField: hasHandField,
                 archive: self.pipelineArchive
             ) {
                 await self.insertBuiltComputePipeline(pipeline, forKey: cacheKey)

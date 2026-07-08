@@ -44,6 +44,23 @@ final class AdaptiveResolutionController: Sendable {
         var underBudgetRatio: Double = 0.80
         /// EMA smoothing factor for the measured GPU time (0…1, higher = snappier).
         var smoothing: Double = 0.15
+        /// Ceiling on the backed-off up-cooldown after repeated bounce-backs (see
+        /// `record(gpuTime:)`). Without a cap a pathological scene could back off
+        /// forever; this bounds the worst case to "recheck at most this often".
+        var maxUpCooldown: Double = 8.0
+        /// A downshift within this long of the last upshift means the upshift
+        /// didn't stick — the true equilibrium sits between two quantized steps
+        /// (very common for a raymarch workload hovering near budget), so
+        /// retrying every `upCooldown` forever just thrashes the render size,
+        /// discarding MetalFX temporal history on each change and keeping the
+        /// image perpetually soft. Treat it as a bounce and back off.
+        var bounceWindow: Double = 2.0
+        /// How long the scale must hold without needing a downshift before the
+        /// backed-off up-cooldown resets to its base value — confirms the
+        /// bounce was a real boundary and not a one-off spike (a stall, a
+        /// transient GC/thermal blip) before letting recovery attempts resume
+        /// at full frequency.
+        var stabilityDecayWindow: Double = 6.0
     }
 
     private struct State {
@@ -52,13 +69,22 @@ final class AdaptiveResolutionController: Sendable {
         var ceiling: Float = 1.0
         var lastChange: Double = 0
         var initialized = false
+        /// When the most recent upshift/downshift happened (`-.infinity` until
+        /// the first one) — used to detect a downshift bouncing off a recent
+        /// upshift, and to know how long the current scale has held.
+        var lastUpshiftTime: Double = -.infinity
+        var lastDownshiftTime: Double = -.infinity
+        /// Current up-cooldown; grows on a detected bounce, decays after
+        /// sustained stability. Starts at the base `Config.upCooldown`.
+        var dynamicUpCooldown: Double
     }
 
     private let config: Config
-    private let state = Mutex(State())
+    private let state: Mutex<State>
 
     init(config: Config = Config()) {
         self.config = config
+        self.state = Mutex(State(dynamicUpCooldown: config.upCooldown))
     }
 
     /// Render thread: the effective render scale to use this frame, clamped to
@@ -94,13 +120,29 @@ final class AdaptiveResolutionController: Sendable {
             if ratio > config.overBudgetRatio,
                s.scale > config.floorScale,
                now - s.lastChange >= config.downCooldown {
+                // A downshift shortly after an upshift means the upshift didn't
+                // stick — the equilibrium sits between two quantized steps, so
+                // retrying at the base cooldown would just thrash forever
+                // (each change resets MetalFX temporal history). Back off.
+                if now - s.lastUpshiftTime < config.bounceWindow {
+                    s.dynamicUpCooldown = min(config.maxUpCooldown, s.dynamicUpCooldown * 2.0)
+                }
                 s.scale = max(config.floorScale, s.scale - config.step)
                 s.lastChange = now
+                s.lastDownshiftTime = now
             } else if ratio < config.underBudgetRatio,
                       s.scale < s.ceiling,
-                      now - s.lastChange >= config.upCooldown {
+                      now - s.lastChange >= s.dynamicUpCooldown {
                 s.scale = min(s.ceiling, s.scale + config.step)
                 s.lastChange = now
+                s.lastUpshiftTime = now
+            } else if s.dynamicUpCooldown > config.upCooldown,
+                      now - s.lastDownshiftTime >= config.stabilityDecayWindow {
+                // Held this scale without needing to shed load for a while —
+                // the earlier bounce likely isn't the steady-state boundary
+                // anymore (scene/settings changed), so let recovery attempts
+                // resume at full frequency instead of staying backed off forever.
+                s.dynamicUpCooldown = config.upCooldown
             }
         }
     }

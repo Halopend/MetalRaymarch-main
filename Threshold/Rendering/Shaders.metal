@@ -160,6 +160,20 @@ constant bool FC_COARSE_WS_ON = is_function_constant_defined(FC_COARSE_WARM_STAR
 constant bool FC_HAS_SPACEWARP [[function_constant(3)]];
 constant bool FC_HAS_SPACEWARP_ON = is_function_constant_defined(FC_HAS_SPACEWARP) ? FC_HAS_SPACEWARP : true;
 
+// Compiles out the Environment Scrunch DE-tail (grid sample + containment) when
+// the device-local toggle is off. Same DEFAULTS-TRUE-when-unset contract as
+// FC_HAS_SPACEWARP: generic/fallback pipelines keep the full path; specialized
+// pipelines bake it off. The scrunch tail runs in every DE evaluation, so even
+// runtime-disabled it costs march-loop registers (measured ~12% GPU on Mac).
+constant bool FC_HAS_ENVSCRUNCH [[function_constant(16)]];
+constant bool FC_HAS_ENVSCRUNCH_ON = is_function_constant_defined(FC_HAS_ENVSCRUNCH) ? FC_HAS_ENVSCRUNCH : true;
+
+// Compiles out the hand-field sculpting tail (hand balls + forearm carves).
+// macOS has no hand tracking and always bakes this off; visionOS keys it off
+// the Hands toggle. Same defaults-true contract (measured ~20% GPU on Mac).
+constant bool FC_HAS_HANDFIELD [[function_constant(17)]];
+constant bool FC_HAS_HANDFIELD_ON = is_function_constant_defined(FC_HAS_HANDFIELD) ? FC_HAS_HANDFIELD : true;
+
 // Include the fractal formula library (non-Mandelbox DE functions + dispatch)
 // Must be after metal_stdlib, ShaderTypes.h, and function constants so that
 // formula headers can reference FC_* constants (e.g. FC_MANDELBULB_POWER).
@@ -1276,6 +1290,7 @@ FORCE_INLINE float envContainBox(float3 pos, constant EnvScrunchParams& es) {
 // sign and cuts it. Single return so containment covers the scrunch early-outs
 // too (a point OUTSIDE the room, far from any wall, must still be clipped).
 FORCE_INLINE float applyEnvScrunch(float d, float3 pos, FractalParams params) {
+    if (!FC_HAS_ENVSCRUNCH_ON) { return d; }   // no-scrunch variant: tail compiled out
     constant EnvScrunchParams* es = params.envScrunch;
     if (es == nullptr || es->enabled == 0 || params.envGrid == nullptr) return d;
     float e = envScrunchSample(pos, *es, params.envGrid);
@@ -1327,6 +1342,7 @@ FORCE_INLINE float applyEnvScrunch(float d, float3 pos, FractalParams params) {
 // Every DE tail calls this, so all fractal types and Map variants get both.
 FORCE_INLINE float applyHandAttraction(float d, float3 pos, FractalParams params) {
     d = applyEnvScrunch(d, pos, params);
+    if (!FC_HAS_HANDFIELD_ON) { return d; }   // no-hands variant: tail compiled out
     // Hand block lives behind a constant pointer (TECH_DEBT.md #8d) — nullptr
     // or disabled is the common case and returns before any field loads.
     constant HandFieldParams* hf = params.handField;
