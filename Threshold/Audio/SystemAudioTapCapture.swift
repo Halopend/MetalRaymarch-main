@@ -442,7 +442,10 @@ private final class TapStreamAccumulator: @unchecked Sendable {
             let dstStart = Int(accumFilled)
 
             for i in 0..<copy {
-                dstPtr[dstStart + i] = sampleAt(consumed + i)
+                // Clamp non-finite samples (NaN/Inf from a malformed SCK buffer
+                // after wake or power restoration) to silence before accumulation.
+                let sample = sampleAt(consumed + i)
+                dstPtr[dstStart + i] = sample.isFinite ? sample : 0.0
             }
 
             accumFilled += AVAudioFrameCount(copy)

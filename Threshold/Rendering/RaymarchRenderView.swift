@@ -412,6 +412,7 @@ final class ThresholdMacRenderer {
     private let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
     private let baseRotationMatrix = matrix4x4_rotation(radians: -.pi / 2, axis: [0, 1, 0])
     private let startTime = CACurrentMediaTime()
+    private let renderLogger = Logger(subsystem: "com.puppypower.Threshold", category: "MacRenderer")
 
     private var uniformBufferIndex = 0
     private var lastFrameTime = CACurrentMediaTime()
@@ -428,6 +429,12 @@ final class ThresholdMacRenderer {
     private var smoothedMaxViewDistance: Float = RenderSettings.maxViewDistance
     private var drawableSize: CGSize = .zero
     private var depthTexture: MTLTexture?
+
+    /// Counts down after a GPU command buffer error. While non-zero, draws are
+    /// skipped to let the GPU recover before new submissions are attempted.
+    /// Reference type so it can be safely captured in the completion handler closure.
+    private let gpuErrorRecovery = OSAllocatedUnfairLock<Int>(initialState: 0)
+    private static let gpuErrorRecoveryFrameCount = 4
 
     // Stage B temporal-upscaling state. Motion vectors reproject world positions
     // (reconstructed from the offscreen depth) through the previous frame's
@@ -662,6 +669,15 @@ final class ThresholdMacRenderer {
             return
         }
 
+        // Skip rendering while recovering from a GPU command buffer error to
+        // prevent `kIOGPUCommandBufferCallbackErrorSubmissionsIgnored` cascades.
+        let recovering = gpuErrorRecovery.withLock { count -> Bool in
+            guard count > 0 else { return false }
+            count -= 1
+            return true
+        }
+        if recovering { return }
+
         // Brackets the whole frame (every return path below) as one Instruments
         // signpost interval; see RenderSignposts.swift.
         let frameTraceState = RenderTrace.begin("Frame")
@@ -800,6 +816,16 @@ final class ThresholdMacRenderer {
             }
             if didUpscale {
                 adaptiveResolution.record(gpuTime: gpuSeconds)
+            }
+        }
+
+        // On a command-buffer error, log and arm the recovery skip so
+        // submission-ignored cascades can drain. (The in-flight semaphore is
+        // signalled by the handler above; this one must not signal again.)
+        commandBuffer.addCompletedHandler { [renderLogger, gpuErrorRecovery] cb in
+            if cb.status == .error {
+                renderLogger.error("Command buffer error: \(cb.error?.localizedDescription ?? "unknown", privacy: .public)")
+                gpuErrorRecovery.withLock { $0 = Self.gpuErrorRecoveryFrameCount }
             }
         }
 
@@ -1449,7 +1475,16 @@ final class ThresholdMacRenderer {
             sourceCount += 1
         }
 
-        guard sourceCount > 0 else {
+        // Guard against non-finite analyzer levels before they can propagate into
+        // RenderSettings and from there into GPU uniforms. AudioAnalyzer already
+        // sanitizes internally, but a race window or future code path could
+        // still produce a non-finite value here.
+        guard sourceCount > 0,
+              totalBass.isFinite, totalMid.isFinite, totalTreble.isFinite,
+              totalBeat.isFinite, totalLevel.isFinite else {
+            if sourceCount > 0 {
+                renderLogger.error("Non-finite analyzer level detected — zeroing audio inputs (bass=\(totalBass) mid=\(totalMid) treble=\(totalTreble) beat=\(totalBeat) level=\(totalLevel))")
+            }
             settings.bassLevel = 0
             settings.midLevel = 0
             settings.trebleLevel = 0
@@ -1478,11 +1513,21 @@ final class ThresholdMacRenderer {
 
         // The aggregation in `updateAudioLevels` produced the per-band levels; the
         // shared engine applies damping, response curves, the LFO overlay, and dispatch.
-        let bandLevels = BandLevels(bass: settings.bassLevel,
-                                    mid: settings.midLevel,
-                                    treble: settings.trebleLevel,
-                                    beat: settings.beatIntensity,
-                                    overall: settings.audioLevel)
+        let bass    = settings.bassLevel
+        let mid     = settings.midLevel
+        let treble  = settings.trebleLevel
+        let beat    = settings.beatIntensity
+        let overall = settings.audioLevel
+
+        // A non-finite band level here means something slipped past the earlier
+        // sanitization; bail out to prevent musicReactiveEngine from amplifying it.
+        guard bass.isFinite, mid.isFinite, treble.isFinite, beat.isFinite, overall.isFinite else {
+            renderLogger.error("Non-finite band level in updateMusicReactiveParameters — skipping engine dispatch")
+            clearMusicReactiveLayersIfNeeded(appModel: appModel, settings: settings)
+            return
+        }
+
+        let bandLevels = BandLevels(bass: bass, mid: mid, treble: treble, beat: beat, overall: overall)
         musicReactiveEngine.process(bandLevels: bandLevels,
                                     settings: settings,
                                     deltaTime: deltaTime,
@@ -1649,13 +1694,22 @@ final class ThresholdMacRenderer {
         hasPreviousMotionMatrices = true
 
         let precomputedFractal = RenderPrecompute.makePrecomputedFractal(from: settings)
+        // Sanitize audio levels before building the lighting and audio precomputes
+        // so non-finite values never reach the GPU uniform buffer. This is the
+        // last defence: the analyzer, RenderSettings setters, and updateAudioLevels
+        // should already have prevented non-finite values from reaching here.
+        let safeAudioLevel   = settings.audioLevel.isFinite   ? settings.audioLevel   : 0
+        let safeBassLevel    = settings.bassLevel.isFinite    ? settings.bassLevel    : 0
+        let safeMidLevel     = settings.midLevel.isFinite     ? settings.midLevel     : 0
+        let safeTrebleLevel  = settings.trebleLevel.isFinite  ? settings.trebleLevel  : 0
+        let safeBeatIntensity = settings.beatIntensity.isFinite ? settings.beatIntensity : 0
         let precomputedLighting = RenderPrecompute.makePrecomputedLighting(time: elapsedTime,
                                                                lightingMode: settings.lightingMode,
-                                                               audioLevel: settings.audioLevel,
-                                                               bassLevel: settings.bassLevel,
-                                                               midLevel: settings.midLevel,
-                                                               trebleLevel: settings.trebleLevel,
-                                                               beatIntensity: settings.beatIntensity,
+                                                               audioLevel: safeAudioLevel,
+                                                               bassLevel: safeBassLevel,
+                                                               midLevel: safeMidLevel,
+                                                               trebleLevel: safeTrebleLevel,
+                                                               beatIntensity: safeBeatIntensity,
                                                                vibrance: settings.colorSchemeParams.vibrance,
                                                                lightingSoftness: settings.lightingSoftness)
         let precomputedAudio = RenderPrecompute.makePrecomputedAudio(from: settings)
