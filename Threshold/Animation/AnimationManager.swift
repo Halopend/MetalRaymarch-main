@@ -1467,9 +1467,18 @@ final class AnimationManager {
     }
 
     /// Mirror `userScenes` into the store's Animations/ folder in a single pass:
-    /// one directory scan, remove user files no longer present (and stale renamed
-    /// copies), write each current scene. Also drops a throttled whole-set backup
-    /// snapshot (the safety net). Default files in the folder are left untouched.
+    /// one directory scan, remove stale renamed copies, write each current scene.
+    /// Also drops a throttled whole-set backup snapshot (the safety net). Default
+    /// files in the folder are left untouched.
+    ///
+    /// Deletions are NOT inferred here by diffing the folder against `userScenes`.
+    /// That was a cross-device data-loss trap: `scanUserScenes` skips not-yet-
+    /// downloaded iCloud files, so a scene another device just added (still a
+    /// dataless placeholder at reload, then materialized moments later) would be
+    /// absent from the in-memory list and get deleted from the shared folder on
+    /// the next routine edit — propagating the delete to every device. A real
+    /// deletion removes its file at the delete site (`removeUserSceneFile`) or via
+    /// `replaceUserScenes`, both of which only ever drop ids the app already knew.
     private func saveScenes() {
         if let root = storeRoot {
             let dir = StorageLocation.animationsDir(root)
@@ -1485,10 +1494,6 @@ final class AnimationManager {
                     }
                 }
             }
-            let keep = Set(userScenes.map(\.id))
-            for (id, url) in existingByID where !keep.contains(id) {
-                try? FileManager.default.removeItem(at: url)   // deleted user scene
-            }
             for scene in userScenes {
                 if let old = existingByID[scene.id] { try? FileManager.default.removeItem(at: old) }  // rename-safe
                 let ext = ThresholdExportFormat.animation(hasSong: scene.attachedSong != nil).ext
@@ -1502,9 +1507,15 @@ final class AnimationManager {
         print("💾 Saved \(userScenes.count) user scenes")
     }
 
-    /// Replace all user scenes with the given array and mirror into the folder
-    /// (saveScenes removes files for ids no longer present).
+    /// Replace all user scenes with the given array and mirror into the folder.
+    /// Files for ids the app is dropping (present in the current in-memory set,
+    /// absent from the new one) are removed explicitly. We never infer deletions
+    /// by diffing the folder — a not-yet-downloaded iCloud scene from another
+    /// device is absent from memory yet must NOT be deleted, or the delete would
+    /// propagate to every device.
     func replaceUserScenes(with scenes: [AnimationScene]) {
+        let droppedIDs = Set(userScenes.map(\.id)).subtracting(scenes.map(\.id))
+        for id in droppedIDs { removeUserSceneFile(id: id) }
         userScenes = scenes
         saveScenes()
     }

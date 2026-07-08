@@ -423,14 +423,18 @@ class PresetManager {
     }
 
     /// Replace all presets and mirror the array into the store folder: write each
-    /// preset's file, and remove store files whose id is no longer present.
+    /// preset's file, and remove files for ids the app is dropping.
+    ///
+    /// Removals are attributed to ids that were in the current in-memory set but
+    /// are absent from `newPresets` — we do NOT infer them by diffing the folder
+    /// scan. A not-yet-downloaded iCloud preset from another device is absent from
+    /// the scan yet must not be deleted, or the delete propagates to every device.
+    /// Mirrors `AnimationManager.replaceUserScenes`.
     func replaceAll(with newPresets: [FractalPreset]) {
+        let droppedIDs = Set(presets.map(\.id)).subtracting(newPresets.map(\.id))
         presets = newPresets
         if let root = storeRoot {
-            let keep = Set(newPresets.map(\.id))
-            for id in scanStorePresets(root: root).map(\.id) where !keep.contains(id) {
-                removePresetFiles(id: id, root: root)
-            }
+            for id in droppedIDs { removePresetFiles(id: id, root: root) }
             for preset in newPresets { writePresetFile(preset, root: root) }
         }
         scheduleBackup()
