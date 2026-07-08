@@ -646,8 +646,42 @@ struct FractalPreset: Codable, Identifiable {
     var pipelineCacheKey: String {
         let fc = deriveFunctionConstants()
         let powerKey = fc.mandelbulbPower.map { "_P\($0)" } ?? ""
-        let sceneKey = "_B\(effectiveSafetyBubbleEnabled ? 1 : 0)_SW\(effectiveHasSpaceWarp ? 1 : 0)"
+        // Presets prewarm the DE-tail-OFF variant on macOS (env-scrunch device
+        // toggle off, hand field absent). nil on other platforms → empty segment,
+        // matching selectPipeline's non-Mac key.
+        let deTailKey = Self.deTailCacheKey(hasEnvScrunch: prewarmEnvScrunch,
+                                            hasHandField: prewarmHandField)
+        let sceneKey = "_B\(effectiveSafetyBubbleEnabled ? 1 : 0)_SW\(effectiveHasSpaceWarp ? 1 : 0)\(deTailKey)"
         return "FT\(fractalType.rawValue)_FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)\(sceneKey)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)_CI\(fc.colorIterations)\(powerKey)"
+    }
+
+    /// The DE-tail cache-key segment (`_ES{0,1}_HF{0,1}`), shared by
+    /// `selectPipeline` and `pipelineCacheKey` so prewarm and live lookup agree.
+    /// A `nil` axis contributes nothing — on non-macOS both are nil, so the
+    /// segment is empty and keys stay byte-identical to before this feature.
+    static func deTailCacheKey(hasEnvScrunch: Bool?, hasHandField: Bool?) -> String {
+        var key = ""
+        if let es = hasEnvScrunch { key += "_ES\(es ? 1 : 0)" }
+        if let hf = hasHandField { key += "_HF\(hf ? 1 : 0)" }
+        return key
+    }
+
+    /// What the prewarm bakes for the DE-tail constants (see
+    /// `FunctionConstantConfig.fromPreset`): macOS prewarms both OFF; other
+    /// platforms leave them undefined (nil → empty key segment).
+    private var prewarmEnvScrunch: Bool? {
+        #if os(macOS)
+        return false
+        #else
+        return nil
+        #endif
+    }
+    private var prewarmHandField: Bool? {
+        #if os(macOS)
+        return false
+        #else
+        return nil
+        #endif
     }
     
     /// Create a preset from current render settings

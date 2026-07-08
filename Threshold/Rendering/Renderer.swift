@@ -65,6 +65,9 @@ actor Renderer {
     var lastComputeCustomHash: String?
     var lastComputeBubble: Bool?
     var lastComputePacket: Bool?
+    var lastComputeSpaceWarp: Bool?
+    var lastComputeEnvScrunch: Bool?
+    var lastComputeHandField: Bool?
     var lastComputeLegacyBugMode: Bool = false
     var lastSelectedComputePipeline: MTLComputePipelineState?
 
@@ -825,6 +828,7 @@ actor Renderer {
     var lastSelectBubble: Bool?
     var lastSelectSpaceWarp: Bool?
     var lastSelectEnvScrunch: Bool?
+    var lastSelectHandField: Bool?
     var lastSelectedPipeline: MTLRenderPipelineState?
     var lastSelectedIsSpecialized: Bool = false
     
