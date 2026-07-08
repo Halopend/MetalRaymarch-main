@@ -123,5 +123,20 @@ enum ParameterRoutingValidation {
                          "ParameterCatalog music facet drift on '\(id)'.")
         }
 #endif
+
+        // Per-fractal FORMULA nodes are dynamic (FormulaCatalog-driven), so they live
+        // outside ParameterCatalog — but bring their ranges under the same drift
+        // tripwire: a node's range must match its authoring FormulaParamDescriptor.
+        // Additive guard, no behavior change; matches buildFormulaBatch by construction.
+        for type in FractalModelType.allCases {
+            guard let descriptor = FormulaCatalog.shared.descriptor(for: type) else { continue }
+            let batch = registry.formulaBatch(for: type)
+            for param in descriptor.params where !(param.isBool ?? false) && !(param.isHidden ?? false) {
+                if let node = batch.floatNodeByFormulaIndex[param.index] {
+                    precondition(node.range == param.min...param.max,
+                                 "Formula range drift: \(type) param '\(param.name)' node \(node.range) != descriptor \(param.min...param.max).")
+                }
+            }
+        }
     }
 }
