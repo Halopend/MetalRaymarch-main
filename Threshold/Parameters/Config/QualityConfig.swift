@@ -107,7 +107,7 @@ enum SceneQualityTarget: String, Codable, CaseIterable, Sendable {
         switch self {
         case .standard: return 0.5
         case .high:     return 0.7
-        case .ultra:    return QualityConfig.visionMaxRenderQuality  // 0.8
+        case .ultra:    return QualityConfig.visionMaxRenderQuality
         }
     }
 
@@ -130,10 +130,12 @@ enum SceneQualityTarget: String, Codable, CaseIterable, Sendable {
 struct QualityConfig: Codable, Equatable, Sendable {
     /// visionOS compositor render-quality ceiling. Single source of truth for both
     /// `configuration.maxRenderQuality` (set at layer creation — governs drawable
-    /// texture memory) and the Render Quality slider's top. 0.8 follows Apple's
-    /// "set max to the minimum your content needs" guidance: it trims drawable
-    /// memory vs 1.0 while staying visually near-native.
-    static let visionMaxRenderQuality: Float = 0.8
+    /// texture memory) and the Render Quality slider's top. 0.7 keeps the compositor
+    /// drawable below the native-memory cliff while staying visually near-native.
+    /// It follows Apple's "set max to the minimum your content needs" guidance:
+    /// trimming drawable memory vs 1.0 is more important than exposing an unsafe
+    /// top-end setting.
+    static let visionMaxRenderQuality: Float = 0.7
 
     /// Lowest compositor Render Quality the slider / adaptive governor may reach.
     /// Below the old 0.1 floor so the FPS-holding governor (and manual probing) can
@@ -146,7 +148,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
 
     // Resolution / tiling
     var resolutionScale: Float = 0.5   // 0.33 - 1.0 (MetalFX spatial upscale input scale)
-    var renderQuality: Float = 0.5     // visionMinRenderQuality - 1.0 (visionOS compositor drawable scale; 1.0 = native). Default 0.5 favors framerate; the floor is for probing max framerate / the adaptive governor.
+    var renderQuality: Float = 0.5     // visionMinRenderQuality...visionMaxRenderQuality (visionOS compositor drawable scale). Default 0.5 favors framerate; the floor is for probing max framerate / the adaptive governor.
     var tileSize: Int = 0              // 0=disabled (fragment), 8=adaptive hierarchical compute
 
     // Vision Pro: auto-lower Render Quality to hold the frame rate, recovering

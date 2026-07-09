@@ -895,6 +895,9 @@ extension ContentView {
                 get: { cache.quality.envScrunchMode },
                 set: { v in
                     cache.quality.envScrunchMode = v; cache.push(\.envScrunchMode, value: v)
+                    if v == 1 {
+                        cache.quality.envScrunchContain = 1; cache.push(\.envScrunchContain, value: 1)
+                    }
             }
         )) {
             Text("Scrunch").tag(0)
@@ -1125,9 +1128,6 @@ extension ContentView {
                         cache.quality.tileSize = newMode.tileSize
                         cache.push(\.tileSize, value: newMode.tileSize)
 
-                        // Default to full detail budget when switching render modes.
-                        cache.quality.resolutionScale = 1.0
-                        cache.push(\.resolutionScale, value: 1.0)
                         appModel.preparePipeline(
                             iterations: cache.quality.baseFractalIterations,
                             raySteps: cache.quality.baseMaxRaySteps
@@ -1151,15 +1151,14 @@ extension ContentView {
         }
     }
 
-    /// Render-quality controls — the quality slider plus the auto-adjust-to-hold-FPS
-    /// toggle. Lives in the Acceleration sub-tab (these are framerate-headroom levers,
-    /// not detail-budget choices). Per-platform: Mac/iOS = MetalFX detail budget,
-    /// visionOS = the compositor's native Render Quality.
+    /// Render-quality controls — compositor drawable quality plus optional MetalFX
+    /// raymarch input scale where supported.
     @ViewBuilder
     private var performanceQualityControls: some View {
         // ── Detail/Framerate Budget ──
-        // visionOS uses the compositor's Render Quality (below) for resolution;
-        // the MetalFX-driven detail budget only applies on Mac/iOS.
+        // Mac/iOS use this as the MetalFX input scale. visionOS uses compositor
+        // Render Quality instead; the separate MetalFX spatial path is disabled
+        // on headset because it looks worse and has caused crashes.
         #if os(macOS) || os(iOS)
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -1239,9 +1238,15 @@ extension ContentView {
         #endif
 
         #if os(visionOS)
-        // ── Render Quality (Vision Pro compositor native resolution) ──
+        // ── Render Quality (Vision Pro compositor drawable resolution) ──
         VStack(alignment: .leading, spacing: 8) {
-            Text("Priority")
+            HStack {
+                Text("Render Quality")
+                Spacer()
+                Text("\(Int((cache.quality.renderQuality * 100).rounded()))%")
+                    .fontWeight(.bold)
+                    .monospacedDigit()
+            }
 
             // Custom layout instead of Slider's built-in min/max value labels:
             // `.lineLimit(1).fixedSize()` guarantees the end labels render at their
@@ -1262,7 +1267,7 @@ extension ContentView {
                         cache.push(\.renderQuality, value: snapped)
                     }
                 ), in: QualityConfig.visionMinRenderQuality...QualityConfig.visionMaxRenderQuality, step: 0.05)
-                .accessibilityLabel(Text("Priority"))
+                .accessibilityLabel(Text("Render Quality"))
                 Text("Sharp")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -1280,7 +1285,7 @@ extension ContentView {
             .tint(.cyan)
             .help("When FPS sags, render quality steps down to recover headroom, then climbs back toward your slider setting (the ceiling).")
 
-            Text("Vision Pro's native, gaze-foveated resolution. The slider sets the sharpest quality (the ceiling); lower trades crispness for GPU headroom.")
+            Text("Vision Pro compositor drawable size. This is the main memory ceiling; lower values reduce drawable memory and GPU cost.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }

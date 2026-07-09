@@ -180,6 +180,8 @@ final class RenderSettings: @unchecked Sendable {
     // to native. The adaptive-resolution controller treats this as a *ceiling*: it
     // renders at or below it under load and recovers up to 0.75 when there's headroom.
     private var _resolutionScale: Float = 0.75      // Mac: MetalFX upscale on by default
+    #elseif os(visionOS)
+    private var _resolutionScale: Float = 1.0       // Vision Pro: unused; compositor Render Quality is the resolution control
     #else
     private var _resolutionScale: Float = 1.0       // Render scale for MetalFX (1.0 = native)
     #endif

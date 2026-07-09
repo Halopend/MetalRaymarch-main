@@ -104,6 +104,40 @@ final class MetalFXManager {
     }
     private var pooledSnapshot: PooledSnapshot?
 
+    private static let pooledTextureBudgetBytes = 160 * 1024 * 1024
+
+    static func estimatedBytesPerPixel(for format: MTLPixelFormat) -> Int {
+        switch format {
+        case .rgba16Float, .rgba16Unorm, .rgba16Snorm, .rgba16Uint, .rgba16Sint:
+            return 8
+        case .rgba32Float, .rgba32Uint, .rgba32Sint:
+            return 16
+        case .r32Float, .r32Uint, .r32Sint,
+             .depth32Float, .depth32Float_stencil8,
+             .bgra8Unorm, .bgra8Unorm_srgb,
+             .rgba8Unorm, .rgba8Unorm_srgb, .rgba8Snorm, .rgba8Uint, .rgba8Sint:
+            return 4
+        case .r16Float, .r16Unorm, .r16Snorm, .r16Uint, .r16Sint,
+             .rg8Unorm, .rg8Snorm, .rg8Uint, .rg8Sint:
+            return 2
+        case .r8Unorm, .r8Snorm, .r8Uint, .r8Sint:
+            return 1
+        default:
+            return 8
+        }
+    }
+
+    private static func estimatedTextureBytes(configuration: Configuration, viewCount: Int) -> Int {
+        let views = max(1, viewCount)
+        let inputPixels = max(1, configuration.inputWidth) * max(1, configuration.inputHeight) * views
+        let outputPixels = max(1, configuration.outputWidth) * max(1, configuration.outputHeight) * views
+        let colorBytes = estimatedBytesPerPixel(for: configuration.colorFormat)
+        let depthBytes = estimatedBytesPerPixel(for: configuration.depthFormat)
+
+        // Input color + two input-depth history textures + output color.
+        return inputPixels * (colorBytes + depthBytes + depthBytes) + outputPixels * colorBytes
+    }
+
     private func captureSnapshot() -> PooledSnapshot {
         PooledSnapshot(
             configuration: configuration,
@@ -177,8 +211,13 @@ final class MetalFXManager {
         }
 
         if resolutionChanged || viewCountChanged {
-            // Stash current state before rebuilding so the next swap may hit.
-            pooledSnapshot = captureSnapshot()
+            // Stash current state before rebuilding so the next swap may hit, but
+            // never keep two large texture sets around on Vision Pro memory paths.
+            let currentBytes = Self.estimatedTextureBytes(configuration: self.configuration, viewCount: self.viewCount)
+            let nextBytes = Self.estimatedTextureBytes(configuration: configuration, viewCount: newViewCount)
+            pooledSnapshot = (currentBytes + nextBytes) <= Self.pooledTextureBudgetBytes
+                ? captureSnapshot()
+                : nil
         }
 
         self.configuration = configuration
