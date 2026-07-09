@@ -33,7 +33,7 @@ enum GestureDefaults {
     // MARK: - Per-finger tap-to-palm gesture layer
     static let perFingerTapGestureEnabled = true
     static let perFingerTapLeftActions: [PerFingerTapAction] = [.none, .none, .none, .openShapeMenu, .openRenderMenu]
-    static let perFingerTapRightActions: [PerFingerTapAction] = [.none, .none, .toggleMenu, .openQuickToggles, .none]
+    static let perFingerTapRightActions: [PerFingerTapAction] = [.none, .none, .none, .openQuickToggles, .none]
     static let perFingerTapActivateThreshold: Float = 0.55
     static let perFingerTapReleaseThreshold: Float = 0.25
     static let perFingerTapHoldDuration: Float = 0.08

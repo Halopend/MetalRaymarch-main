@@ -231,8 +231,8 @@ final class GestureController {
         // Sync per-finger tap engine config from settings each frame
         if let settings = renderSettings {
             perFingerTapEngine.isEnabled = settings.perFingerTapGestureEnabled
-            perFingerTapEngine.leftHandActions = settings.perFingerTapLeftActions
-            perFingerTapEngine.rightHandActions = settings.perFingerTapRightActions
+            perFingerTapEngine.leftHandActions = settings.perFingerTapLeftActions.removingMenuToggleActions
+            perFingerTapEngine.rightHandActions = settings.perFingerTapRightActions.removingMenuToggleActions
             perFingerTapEngine.activateThreshold = settings.perFingerTapActivateThreshold
             perFingerTapEngine.releaseThreshold = settings.perFingerTapReleaseThreshold
             perFingerTapEngine.holdDuration = settings.perFingerTapHoldDuration

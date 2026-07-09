@@ -22,8 +22,6 @@ extension ContentView {
 
                 VStack(alignment: .leading, spacing: 12) {
                     gestureCoreBehaviorSection
-                    Divider().padding(.vertical, 2)
-                    gesturePerFingerTapSection
                 }
             }
             .padding(10)
@@ -93,26 +91,6 @@ extension ContentView {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    // ── Per-Finger Tap (compact) ───────────────────────────────────────────────
-
-    private var gesturePerFingerTapSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Toggle("Per-Finger Tap", isOn: $cache.gesture.perFingerTapGestureEnabled)
-                .onChange(of: cache.gesture.perFingerTapGestureEnabled) { _, v in
-                    cache.push(\.perFingerTapGestureEnabled, value: v)
-                }
-
-            if cache.gesture.perFingerTapGestureEnabled {
-                HStack {
-                    Text("Middle → Menu")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-            }
         }
     }
 
