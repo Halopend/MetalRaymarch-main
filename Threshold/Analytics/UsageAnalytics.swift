@@ -582,10 +582,13 @@ final class UsageAnalytics {
             record["qualityDistribution"] = qualityString
         }
         
-        if let presetString = jsonString(from: snapshot.gradientPresetUsageDistribution) {
-            record["gradientPresetDistribution"] = presetString
-        }
-        
+        // NOTE: gradientPresetUsageDistribution is intentionally NOT uploaded — it
+        // duplicates gradientPresetDistribution (same dt-per-preset accumulation,
+        // differing only by a "custom"/"Custom" default) and previously collided on
+        // the same "gradientPresetDistribution" record key, silently overwriting it.
+        // The authoritative upload is below (snapshot.gradientPresetDistribution).
+        // TECH_DEBT #5 — see dedupe #7 to collapse the two accumulators.
+
         // Parameter averages
         record["avgFractalScale"] = snapshot.avgFractalScale as NSNumber
         record["avgFoldingLimit"] = snapshot.avgFoldingLimit as NSNumber
