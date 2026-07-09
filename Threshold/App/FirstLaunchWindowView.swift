@@ -5,7 +5,7 @@ import AVKit
 ///   0. Safety (photosensitive-epilepsy warning, must acknowledge)
 ///   1. Welcome (what Threshold is, what the app does)
 ///   2. Hand controls (movement video + handedness)
-///   3. Fingers (per-finger actions, read-only) + menu-open gesture picker
+///   3. Menu gesture + compact shortcut summary
 ///   4. Sharing (analytics on by default; user can opt out + username)
 ///
 /// Each page scrolls independently; a shared footer pins Back/Next and
@@ -51,7 +51,7 @@ struct FirstLaunchWindowView: View {
 
             navigationFooter
         }
-        .frame(minWidth: 760, idealWidth: 1040, maxWidth: .infinity, minHeight: 620, idealHeight: 780, maxHeight: .infinity)
+        .frame(minWidth: 720, idealWidth: 940, maxWidth: .infinity, minHeight: 540, idealHeight: 660, maxHeight: .infinity)
         .background(windowSurfaceFill, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -269,7 +269,7 @@ struct FirstLaunchWindowView: View {
         ) {
             movementTutorialVideoPlayer
                 .frame(maxWidth: .infinity)
-                .frame(height: 260)
+                .frame(height: 220)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
@@ -311,73 +311,109 @@ struct FirstLaunchWindowView: View {
         }
     }
 
-    // MARK: - Page 3: Per-Finger Actions (read-only)
+    // MARK: - Page 3: Menu Gesture
 
-    /// Shows the user which finger currently triggers which action, and
-    /// which gesture opens/closes the menu. The chips are read-only here
-    /// — full editing lives in Settings > Gestures. The intro just makes
-    /// the mapping obvious so the user knows what to expect.
+    /// Makes the menu open/close gesture the main choice on this page. Finger
+    /// shortcuts are shown only as compact supporting context so the user does
+    /// not see two different "open menu" systems.
     private var fingersPage: some View {
         OnboardingPageShell(
             icon: "hand.tap.fill",
-            title: "Finger shortcuts",
-            subtitle: "Tap any finger to your palm to trigger its assigned action.",
+            title: "Menu gesture",
+            subtitle: "Pick the gesture that opens and closes the floating controls.",
             accent: .purple
         ) {
-            VStack(spacing: 6) {
-                ForEach(0..<5, id: \.self) { finger in
-                    fingerAssignmentRow(finger: finger)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(MenuGestureStarterStyle.allCases) { style in
+                    menuGestureStyleCard(style)
                 }
             }
         } detail: {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
                     Image(systemName: "hand.raised.fill")
                         .font(.headline)
                         .foregroundStyle(.purple)
-                    Text("How do you want to open the menu?")
+                    Text("What this controls")
                         .font(.headline)
                     Spacer()
                 }
-                ForEach(MenuGestureStarterStyle.allCases) { style in
-                    menuGestureStyleCard(style)
-                }
-                Text("This is the gesture you'll use most. Change it anytime in Settings > Gestures.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                Text(menuGestureStyle.mode.guidance)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                Divider().padding(.vertical, 2)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Other finger shortcuts")
+                        .font(.subheadline.weight(.semibold))
+                    ForEach(activeFingerShortcutRows) { shortcut in
+                        fingerShortcutRow(shortcut)
+                    }
+                }
             }
         }
     }
 
-    /// One row of the per-finger assignment list on Page 3. Shows the
-    /// finger name + icon, then the current action as a small chip.
-    private func fingerAssignmentRow(finger: Int) -> some View {
+    private var activeFingerShortcutRows: [FingerShortcutSummary] {
         let names = ["Thumb", "Index", "Middle", "Ring", "Pinky"]
         let icons = ["hand.thumbsup.fill", "1.circle.fill", "2.circle.fill", "3.circle.fill", "4.circle.fill"]
-        let action = finger < appModel.renderSettings.perFingerTapLeftActions.count
-            ? appModel.renderSettings.perFingerTapLeftActions[finger]
-            : .none
-        return HStack(spacing: 10) {
-            Image(systemName: icons[finger])
-                .font(.title3)
+        func rows(for hand: String, actions: [PerFingerTapAction]) -> [FingerShortcutSummary] {
+            actions.indices.compactMap { finger in
+                let action = actions[finger]
+                guard action != .none, action != .toggleMenu, finger < names.count else { return nil }
+                return FingerShortcutSummary(
+                    hand: hand,
+                    finger: names[finger],
+                    icon: icons[finger],
+                    action: action
+                )
+            }
+        }
+
+        let left = rows(for: "Left", actions: appModel.renderSettings.perFingerTapLeftActions)
+        let right = rows(for: "Right", actions: appModel.renderSettings.perFingerTapRightActions)
+        let ordered = left + right
+        if ordered.isEmpty {
+            return [
+                FingerShortcutSummary(
+                    hand: "",
+                    finger: "No shortcuts",
+                    icon: "hand.raised",
+                    action: .none
+                )
+            ]
+        }
+        return ordered
+    }
+
+    private func fingerShortcutRow(_ shortcut: FingerShortcutSummary) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: shortcut.icon)
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.purple)
-                .frame(width: 28)
-            Text(names[finger])
-                .font(.subheadline.weight(.medium))
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(shortcut.finger)
+                    .font(.caption.weight(.semibold))
+                if !shortcut.hand.isEmpty {
+                    Text(shortcut.hand)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
             Spacer()
-            // The chip uses a low-emphasis background so the user reads
-            // it as a label, not a button.
             HStack(spacing: 4) {
-                Image(systemName: action.icon)
-                Text(action.displayName)
+                Image(systemName: shortcut.action.icon)
+                Text(shortcut.action.displayName)
             }
             .font(.caption.weight(.medium))
-            .foregroundStyle(action == .none ? .secondary : .primary)
+            .foregroundStyle(shortcut.action == .none ? .secondary : .primary)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(
-                Capsule().fill(action == .none
+                Capsule().fill(shortcut.action == .none
                                ? Color.secondary.opacity(0.10)
                                : Color.purple.opacity(0.18))
             )
@@ -541,8 +577,8 @@ private struct OnboardingPageShell<Primary: View, Detail: View>: View {
     @ViewBuilder var detail: Detail
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(accent.opacity(0.16))
@@ -550,7 +586,7 @@ private struct OnboardingPageShell<Primary: View, Detail: View>: View {
                         .font(.system(size: 26, weight: .semibold))
                         .foregroundStyle(accent)
                 }
-                .frame(width: 58, height: 58)
+                .frame(width: 52, height: 52)
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(title)
@@ -562,7 +598,7 @@ private struct OnboardingPageShell<Primary: View, Detail: View>: View {
                 }
             }
 
-            HStack(alignment: .top, spacing: 18) {
+            HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 12) {
                     primary
                 }
@@ -573,12 +609,18 @@ private struct OnboardingPageShell<Primary: View, Detail: View>: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-
-            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, minHeight: 500, alignment: .topLeading)
-        .padding(28)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(24)
     }
+}
+
+private struct FingerShortcutSummary: Identifiable {
+    var id: String { "\(hand)-\(finger)-\(action.rawValue)" }
+    let hand: String
+    let finger: String
+    let icon: String
+    let action: PerFingerTapAction
 }
 
 private struct IntroTipRow: View {
