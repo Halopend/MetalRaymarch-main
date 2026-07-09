@@ -15,31 +15,16 @@ extension ContentView {
 
     var gesturesTabContent: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(spacing: 8) {
-                HStack {
-                    Label("Gesture Controls", systemImage: AppIcons.handDraw).font(.headline)
-                    Spacer()
-                }
-
-                HandTrackingStatusView(state: appModel.handTrackingState)
-                    .padding(.vertical, 2)
-
-                Toggle("Enable Hand Gesture Controls", isOn: Binding(
-                    get: { appModel.handTrackingEnabled },
-                    set: { appModel.handTrackingEnabled = $0 }
-                ))
+            VStack(spacing: 12) {
+                gestureMenuToggleSection
 
                 gestureAssignmentsSection
 
                 VStack(alignment: .leading, spacing: 12) {
                     gestureCoreBehaviorSection
                     Divider().padding(.vertical, 2)
-                    gestureMenuToggleSection
-                    Divider().padding(.vertical, 2)
                     gesturePerFingerTapSection
                 }
-                .disabled(!appModel.handTrackingEnabled)
-                .opacity(appModel.handTrackingEnabled ? 1.0 : 0.6)
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
@@ -86,29 +71,28 @@ extension ContentView {
     // ── Menu Toggle (compact) ──────────────────────────────────────────────────
 
     private var gestureMenuToggleSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Toggle("Menu Toggle Gesture", isOn: $cache.gesture.menuToggleGestureEnabled)
-                .onChange(of: cache.gesture.menuToggleGestureEnabled) { _, v in
-                    cache.push(\.menuToggleGestureEnabled, value: v)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Open Menu With", systemImage: cache.gesture.menuToggleGestureMode.icon)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Picker("", selection: $cache.gesture.menuToggleGestureMode) {
+                    ForEach(MenuToggleGestureMode.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
                 }
-
-            if cache.gesture.menuToggleGestureEnabled {
-                HStack {
-                    Label("Gesture", systemImage: cache.gesture.menuToggleGestureMode.icon)
-                        .font(.subheadline)
-                    Spacer()
-                    Picker("", selection: $cache.gesture.menuToggleGestureMode) {
-                        ForEach(MenuToggleGestureMode.allCases, id: \.self) { mode in
-                            Text(mode.displayName).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .frame(maxWidth: 180)
-                    .onChange(of: cache.gesture.menuToggleGestureMode) { _, v in
-                        cache.push(\.menuToggleGestureMode, value: v)
-                    }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 220)
+                .onChange(of: cache.gesture.menuToggleGestureMode) { _, v in
+                    cache.gesture.menuToggleGestureEnabled = true
+                    cache.push(\.menuToggleGestureEnabled, value: true)
+                    cache.push(\.menuToggleGestureMode, value: v)
                 }
             }
+            Text(cache.gesture.menuToggleGestureMode.guidance)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

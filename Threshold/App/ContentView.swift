@@ -51,6 +51,7 @@ struct ContentView: View {
     @AppStorage("ContentView.effectsSubTab") var effectsSubTab: EffectsSubTab = .dynamic
     @AppStorage("MusicTabContent.innerTab") private var musicPanelTab: MusicPanelTab = .music
     @AppStorage("ContentView.settingsSubTab") var settingsSubTab: SettingsSubTab = .display
+    @AppStorage("ContentView.showPerformanceInMenu") var showPerformanceInMenu: Bool = false
     @AppStorage("ContentView.pinnedRailControls") private var pinnedRailControlsRaw: String = ""
     @State var showStopsPopover = false
     @State private var showSaveDestinationSheet = false
@@ -280,6 +281,8 @@ struct ContentView: View {
                 showSaveDestinationSheet = true
             }
             cache.startSync(with: appModel.renderSettings, appModel: appModel)
+            appModel.handTrackingEnabled = true
+            appModel.renderSettings.menuToggleGestureEnabled = true
             normalizeDesktopSelectionIfNeeded()
             syncNavigationChromeFromLegacySelection()
         }
@@ -396,6 +399,13 @@ struct ContentView: View {
 
     private var menuSurfaceStroke: Color {
         colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.08)
+    }
+
+    var liveFPSColor: Color {
+        let fps = cache.liveFPS
+        if fps >= 85 { return .green }
+        if fps >= 60 { return .yellow }
+        return .red
     }
 
     private func motionSensitiveAnimation(_ animation: Animation) -> Animation? {
@@ -1333,23 +1343,31 @@ struct ContentView: View {
     // MARK: - Bottom Bar
     
     private var bottomBar: some View {
-        HStack(spacing: 12) {
-            if let animationManager = appModel.animationManager {
-                LiveSessionRecordingControl(animationManager: animationManager, compact: true)
-                    .disabled(animationManager.isPlaying)
+        HStack(spacing: 14) {
+            HStack(spacing: 10) {
+                if let animationManager = appModel.animationManager {
+                    LiveSessionRecordingControl(animationManager: animationManager, compact: true)
+                        .disabled(animationManager.isPlaying)
+                }
+
+                ResetControl(onReset: resetCurrentFractalSettings)
             }
+            .frame(minWidth: 220, alignment: .leading)
 
-            ResetControl(onReset: resetCurrentFractalSettings)
-
-            ToggleImmersiveSpaceButton()
-                .frame(minWidth: 260, alignment: .center)
+            HStack(spacing: 10) {
+                ToggleImmersiveSpaceButton()
+                    .frame(width: 132, alignment: .center)
 
 #if os(visionOS)
-            ImmersionStylePicker(showsCaption: false)
-                .frame(width: 260)
+                ImmersionStylePicker(showsCaption: false)
+                    .frame(width: 220)
 #endif
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
 
-            Spacer(minLength: 12)
+            if showPerformanceInMenu {
+                bottomPerformanceStrip
+            }
 
             HStack(spacing: 12) {
                 SaveControl(onAdd: {
@@ -1360,6 +1378,32 @@ struct ContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    private var bottomPerformanceStrip: some View {
+        let metrics = appModel.renderMetrics
+        return HStack(spacing: 10) {
+            bottomMetric("FPS", metrics.fps > 0 ? String(format: "%.0f", metrics.fps) : "—", color: liveFPSColor)
+            bottomMetric("GPU", metrics.gpuFrameMs > 0 ? String(format: "%.1f", metrics.gpuFrameMs) : "—", color: .cyan)
+            bottomMetric("Q", metrics.renderQuality > 0 ? "\(Int((metrics.renderQuality * 100).rounded()))%" : "—", color: .blue)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 36)
+        .background(Capsule().fill(Color.secondary.opacity(0.10)))
+        .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1))
+        .accessibilityLabel("Performance")
+    }
+
+    private func bottomMetric(_ label: String, _ value: String, color: Color) -> some View {
+        VStack(spacing: 0) {
+            Text(value)
+                .font(.caption.weight(.bold).monospacedDigit())
+                .foregroundStyle(color)
+            Text(label)
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        .frame(minWidth: 34)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

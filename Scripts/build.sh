@@ -25,6 +25,12 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 PROJECT="Threshold.xcodeproj"
+GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+if [[ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+    GIT_DIRTY=YES
+else
+    GIT_DIRTY=NO
+fi
 
 # --- Toolchain selection -----------------------------------------------------
 # Pin to the Xcode beta this project requires unless the caller overrides it.
@@ -52,7 +58,7 @@ if [[ ! -d "$DEVELOPER_DIR" ]]; then
 fi
 echo "Using DEVELOPER_DIR=$DEVELOPER_DIR"
 
-COMMON_FLAGS=(-project "$PROJECT" -configuration Debug CODE_SIGNING_ALLOWED=NO)
+COMMON_FLAGS=(-project "$PROJECT" -configuration Debug CODE_SIGNING_ALLOWED=NO THRESHOLD_GIT_SHA="$GIT_SHA" THRESHOLD_GIT_DIRTY="$GIT_DIRTY")
 
 # Why `test` is clean + serial (learned the hard way 2026-06-29):
 #  • clean — the incremental builder has been observed to link ThresholdTests

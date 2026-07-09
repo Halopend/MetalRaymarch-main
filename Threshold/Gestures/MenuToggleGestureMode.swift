@@ -25,6 +25,17 @@ enum MenuToggleGestureMode: Int32, CaseIterable, Codable {
         }
     }
 
+    var guidance: String {
+        switch self {
+        case .middleAndRingToPalm:
+            return "Curl your middle and ring fingers to your palm while keeping index and pinky out."
+        case .wristTap:
+            return "Tap your wrist with your other hand. This is the most deliberate two-handed option."
+        case .middleOrRingToPalm:
+            return "Tap either your middle or ring finger to your palm. This is the most forgiving one-handed option."
+        }
+    }
+
     /// Whether this mode requires both hands to be tracked
     var requiresBothHands: Bool {
         switch self {

@@ -145,7 +145,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
     var baseMaxRaySteps: Int = 64
 
     // Resolution / tiling
-    var resolutionScale: Float = 1.0   // 0.33 - 1.0 (MetalFX spatial upscale input scale)
+    var resolutionScale: Float = 0.5   // 0.33 - 1.0 (MetalFX spatial upscale input scale)
     var renderQuality: Float = 0.5     // visionMinRenderQuality - 1.0 (visionOS compositor drawable scale; 1.0 = native). Default 0.5 favors framerate; the floor is for probing max framerate / the adaptive governor.
     var tileSize: Int = 0              // 0=disabled (fragment), 8=adaptive hierarchical compute
 

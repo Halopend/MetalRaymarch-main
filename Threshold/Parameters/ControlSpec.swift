@@ -236,7 +236,7 @@ enum ControlCatalog {
         name: "Resolution Scale",
         icon: "rectangle.compress.vertical",
         range: 0.33...1.0,
-        defaultValue: 1.0)
+        defaultValue: 0.5)
 
     // Color-grading controls — not drift bugs (setter / ColorConfig.clamp / slider
     // already agreed), folded onto specs so their range lives in ONE place and the

@@ -203,110 +203,87 @@ extension ContentView {
                             return v < 0 ? String(format: "Repel %.0f%%", -v * 100) : String(format: "Attract %.0f%%", v * 100)
                         })
 
-                    // Fine-tuning lives behind Advanced so the everyday
-                    // controls stay to Radius + Strength. Print Settings dumps
-                    // the whole config as JSON for locking values in as defaults.
-                    DisclosureGroup {
-                        VStack(spacing: 8) {
-                            EffectSliderRow(icon: "circle.fill", label: "Ball Size",
-                                value: $cache.handAttraction.ballScale, range: 0.1...1.0,
-                                enabled: .constant(true),
-                                onChanged: { cache.push(\.handAttractionBallScale, value: cache.handAttraction.ballScale) },
-                                showToggle: false,
-                                valueFormat: { v in String(format: "%.0f%% of radius", v * 100) })
+                    EffectSliderRow(icon: "circle.fill", label: "Ball Size",
+                        value: $cache.handAttraction.ballScale, range: 0.1...1.0,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.handAttractionBallScale, value: cache.handAttraction.ballScale) },
+                        showToggle: false,
+                        valueFormat: { v in String(format: "%.0f%% of radius", v * 100) })
 
-                            EffectSliderRow(icon: "aqi.medium", label: "Blend Softness",
-                                value: $cache.handAttraction.softness, range: 0.05...2.0,
+                    EffectSliderRow(icon: "aqi.medium", label: "Blend Softness",
+                        value: $cache.handAttraction.softness, range: 0.05...2.0,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.handAttractionSoftness, value: cache.handAttraction.softness) },
+                        showToggle: false,
+                        valueFormat: { v in String(format: "%.2f\u{00D7}", v) })
+
+                    EffectSliderRow(icon: "arrow.up.forward", label: "Reach Offset",
+                        value: $cache.handAttraction.projectionDistance, range: 0.0...1.0,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.handAttractionProjectionDistance, value: cache.handAttraction.projectionDistance) },
+                        showToggle: false,
+                        valueFormat: { v in v < 0.005 ? "At hand" : String(format: "%.0f cm ahead", v * 100) })
+                    Text("Reach Offset projects the ball outward from your body through the hand, so it floats in front of the palm instead of on it.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Divider()
+                    HStack {
+                        Label("Forearms", systemImage: "figure.wave")
+                            .font(.subheadline)
+                        Spacer()
+                        Toggle("", isOn: $cache.handAttraction.forearmEnabled)
+                            .labelsHidden()
+                            .onChange(of: cache.handAttraction.forearmEnabled) { _, val in
+                                cache.push(\.handAttractionForearmEnabled, value: val)
+                            }
+                    }
+                    Text("Carves empty space along each wrist\u{2192}elbow segment so your real forearm stays visible through the fractal.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if cache.handAttraction.forearmEnabled {
+                        EffectSliderRow(icon: "capsule", label: "Forearm Radius",
+                            value: $cache.handAttraction.forearmRadius, range: 0.02...0.3,
+                            enabled: .constant(true),
+                            onChanged: { cache.push(\.handAttractionForearmRadius, value: cache.handAttraction.forearmRadius) },
+                            showToggle: false,
+                            valueFormat: { v in String(format: "%.0f cm", v * 100) })
+                    }
+
+                    if cache.handAttraction.strength > 0.02 {
+                        Divider()
+                        HStack {
+                            Label("Pocket", systemImage: "circle.circle")
+                                .font(.subheadline)
+                            Spacer()
+                            Toggle("", isOn: $cache.handAttraction.pocketEnabled)
+                                .labelsHidden()
+                                .onChange(of: cache.handAttraction.pocketEnabled) { _, val in
+                                    cache.push(\.handAttractionPocketEnabled, value: val)
+                                }
+                        }
+                        Text("Hollows out a small pocket right at the hand while the wider surface still pulls toward it.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if cache.handAttraction.pocketEnabled {
+                            EffectSliderRow(icon: "circle.circle", label: "Pocket Size",
+                                value: $cache.handAttraction.pocketSize, range: 0.1...1.5,
                                 enabled: .constant(true),
-                                onChanged: { cache.push(\.handAttractionSoftness, value: cache.handAttraction.softness) },
+                                onChanged: { cache.push(\.handAttractionPocketSize, value: cache.handAttraction.pocketSize) },
+                                showToggle: false,
+                                valueFormat: { v in String(format: "%.0f%% of ball", v * 100) })
+
+                            EffectSliderRow(icon: "aqi.low", label: "Pocket Softness",
+                                value: $cache.handAttraction.pocketSoftness, range: 0.1...1.5,
+                                enabled: .constant(true),
+                                onChanged: { cache.push(\.handAttractionPocketSoftness, value: cache.handAttraction.pocketSoftness) },
                                 showToggle: false,
                                 valueFormat: { v in String(format: "%.2f\u{00D7}", v) })
-
-                            EffectSliderRow(icon: "arrow.up.forward", label: "Reach Offset",
-                                value: $cache.handAttraction.projectionDistance, range: 0.0...1.0,
-                                enabled: .constant(true),
-                                onChanged: { cache.push(\.handAttractionProjectionDistance, value: cache.handAttraction.projectionDistance) },
-                                showToggle: false,
-                                valueFormat: { v in v < 0.005 ? "At hand" : String(format: "%.0f cm ahead", v * 100) })
-                            Text("Reach Offset projects the ball outward from your body through the hand, so it floats in front of the palm instead of on it.")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-
-                            Divider()
-                            HStack {
-                                Label("Forearms", systemImage: "figure.wave")
-                                    .font(.subheadline)
-                                Spacer()
-                                Toggle("", isOn: $cache.handAttraction.forearmEnabled)
-                                    .labelsHidden()
-                                    .onChange(of: cache.handAttraction.forearmEnabled) { _, val in
-                                        cache.push(\.handAttractionForearmEnabled, value: val)
-                                    }
-                            }
-                            Text("Carves empty space along each wrist\u{2192}elbow segment so your real forearm stays visible through the fractal \u{2014} the arm shows wherever geometry isn't in front of it.")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                            if cache.handAttraction.forearmEnabled {
-                                EffectSliderRow(icon: "capsule", label: "Forearm Radius",
-                                    value: $cache.handAttraction.forearmRadius, range: 0.02...0.3,
-                                    enabled: .constant(true),
-                                    onChanged: { cache.push(\.handAttractionForearmRadius, value: cache.handAttraction.forearmRadius) },
-                                    showToggle: false,
-                                    valueFormat: { v in String(format: "%.0f cm", v * 100) })
-                            }
-
-                            if cache.handAttraction.strength > 0.02 {
-                                Divider()
-                                HStack {
-                                    Label("Pocket", systemImage: "circle.circle")
-                                        .font(.subheadline)
-                                    Spacer()
-                                    Toggle("", isOn: $cache.handAttraction.pocketEnabled)
-                                        .labelsHidden()
-                                        .onChange(of: cache.handAttraction.pocketEnabled) { _, val in
-                                            cache.push(\.handAttractionPocketEnabled, value: val)
-                                        }
-                                }
-                                Text("Hollows out a small pocket right at the hand while the wider surface still pulls toward it — a place for the hand to sit.")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-
-                                if cache.handAttraction.pocketEnabled {
-                                    EffectSliderRow(icon: "circle.circle", label: "Pocket Size",
-                                        value: $cache.handAttraction.pocketSize, range: 0.1...1.5,
-                                        enabled: .constant(true),
-                                        onChanged: { cache.push(\.handAttractionPocketSize, value: cache.handAttraction.pocketSize) },
-                                        showToggle: false,
-                                        valueFormat: { v in String(format: "%.0f%% of ball", v * 100) })
-
-                                    EffectSliderRow(icon: "aqi.low", label: "Pocket Softness",
-                                        value: $cache.handAttraction.pocketSoftness, range: 0.1...1.5,
-                                        enabled: .constant(true),
-                                        onChanged: { cache.push(\.handAttractionPocketSoftness, value: cache.handAttraction.pocketSoftness) },
-                                        showToggle: false,
-                                        valueFormat: { v in String(format: "%.2f\u{00D7}", v) })
-                                }
-                            }
-
-                            Divider()
-                            Button {
-                                let config = appModel.renderSettings.handAttractionConfig
-                                let encoder = JSONEncoder()
-                                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                                if let data = try? encoder.encode(config),
-                                   let json = String(data: data, encoding: .utf8) {
-                                    print("\u{1F590} HandAttractionConfig — current values (paste into defaults):\n\(json)")
-                                }
-                            } label: {
-                                Label("Print Settings to Console", systemImage: "printer")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.bordered)
                         }
-                        .padding(.top, 6)
-                    } label: {
-                        Label("Advanced", systemImage: "slider.horizontal.3")
-                            .font(.subheadline)
                     }
                 }
             }
@@ -336,9 +313,10 @@ extension ContentView {
 
         return VStack(spacing: 12) {
             // ── Safety Bubble ────────────────────────────────────────────────
-            VStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Label("Safety Bubble", systemImage: AppIcons.shieldLefthalfFilled).font(.headline)
+                    Label("Safety Bubble", systemImage: AppIcons.shieldLefthalfFilled)
+                        .font(.headline)
                     Spacer()
                     Toggle("", isOn: $cache.safetyBubble.enabled)
                         .labelsHidden()
@@ -346,42 +324,18 @@ extension ContentView {
                             cache.push(\.safetyBubbleEnabled, value: val)
                         }
                 }
-                Text("Prevents the camera from entering the fractal geometry. Works with all fractal types.")
+                Text("Prevents the camera from entering fractal geometry.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                if cache.safetyBubble.enabled {
-                    EffectSliderRow(icon: "circle.dashed", label: "Inner Radius",
-                        value: $cache.safetyBubble.radius, range: 0.5...2.5,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.safetyBubbleRadius, value: cache.safetyBubble.radius) },
-                        showToggle: false)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-#if os(visionOS)
-                    HStack {
-                        Label("Shrink in Mixed", systemImage: "arrow.down.right.and.arrow.up.left")
-                            .font(.subheadline)
-                        Spacer()
-                        Toggle("", isOn: $cache.safetyBubble.mixedAutoShrinkEnabled)
-                            .labelsHidden()
-                            .onChange(of: cache.safetyBubble.mixedAutoShrinkEnabled) { _, val in
-                                cache.push(\.safetyBubbleMixedAutoShrink, value: val)
-                            }
-                    }
-                    Text("While Mixed immersion is active, caps the bubble at the radius below — in Mixed you're outside the fractal, so a large bubble mostly hollows it out. Your saved radius returns when you leave Mixed.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    if cache.safetyBubble.mixedAutoShrinkEnabled {
-                        EffectSliderRow(icon: "circle.dashed", label: "Mixed Radius",
-                            value: $cache.safetyBubble.mixedRadius, range: 0.05...1.0,
-                            enabled: .constant(true),
-                            onChanged: { cache.push(\.safetyBubbleMixedRadius, value: cache.safetyBubble.mixedRadius) },
-                            showToggle: false,
-                            valueFormat: { v in String(format: "%.2f m", v) })
-                    }
-#endif
+                if cache.safetyBubble.enabled {
                     let selectedBubbleFamily = SafetyBubbleShapePreset.family(for: cache.safetyBubble.shape)
-                    HStack {
-                        Text("Shape"); Spacer()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Shape")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
                         Picker("Shape", selection: Binding<SafetyBubbleShapeFamily>(
                             get: { selectedBubbleFamily },
                             set: { family in
@@ -395,14 +349,8 @@ extension ContentView {
                             }
                         }
                         .pickerStyle(.segmented)
-                        .frame(maxWidth: 260)
-                    }
-                    if selectedBubbleFamily == .platonic {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Platonic")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
 
+                        if selectedBubbleFamily == .platonic {
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
                                 ForEach(SafetyBubbleShapePreset.platonicOptions) { preset in
                                     let isSelected = SafetyBubbleShapePreset(storedValue: cache.safetyBubble.shape) == preset
@@ -413,7 +361,7 @@ extension ContentView {
                                     } label: {
                                         Text(preset.displayName)
                                             .font(.caption.weight(.semibold))
-                                            .frame(maxWidth: .infinity)
+                                            .frame(maxWidth: .infinity, alignment: .center)
                                             .padding(.horizontal, 10)
                                             .padding(.vertical, 8)
                                     }
@@ -431,23 +379,71 @@ extension ContentView {
                             }
                         }
                     }
-                    
-                    Divider()
-                    
-                    Text("Controls how strongly the bubble masks fractal geometry. Fine control at low values.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    Label("Blend mode cost varies by scene/fractal/zoom — different values can be expensive in different conditions (Mandelbox often runs better with Blend off, but can behave differently when zoomed in).", systemImage: AppIcons.exclamationmarkTriangle)
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                    EffectSliderRow(icon: "circle.righthalf.filled", label: "Blend",
-                        value: Binding<Float>(
-                            get: { 1.0 - UISettingsCache.blendValueToSlider(cache.safetyBubble.strength) },
-                            set: { cache.safetyBubble.strength = UISettingsCache.blendSliderToValue(1.0 - $0) }
-                        ), range: 0.0...1.0,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.safetyBubbleBlend, value: cache.safetyBubble.strength) },
-                        showToggle: false)
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.05)))
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        EffectSliderRow(icon: "circle.dashed", label: "Radius",
+                            value: $cache.safetyBubble.radius, range: 0.5...2.5,
+                            enabled: .constant(true),
+                            onChanged: { cache.push(\.safetyBubbleRadius, value: cache.safetyBubble.radius) },
+                            showToggle: false)
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.05)))
+
+#if os(visionOS)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Label("Shrink in Mixed", systemImage: "arrow.down.right.and.arrow.up.left")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Toggle("", isOn: $cache.safetyBubble.mixedAutoShrinkEnabled)
+                                .labelsHidden()
+                                .onChange(of: cache.safetyBubble.mixedAutoShrinkEnabled) { _, val in
+                                    cache.push(\.safetyBubbleMixedAutoShrink, value: val)
+                                }
+                        }
+                        Text("Caps the bubble while Mixed immersion is active, then restores the saved radius when you leave Mixed.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if cache.safetyBubble.mixedAutoShrinkEnabled {
+                            EffectSliderRow(icon: "circle.dashed", label: "Mixed Radius",
+                                value: $cache.safetyBubble.mixedRadius, range: 0.05...1.0,
+                                enabled: .constant(true),
+                                onChanged: { cache.push(\.safetyBubbleMixedRadius, value: cache.safetyBubble.mixedRadius) },
+                                showToggle: false,
+                                valueFormat: { v in String(format: "%.2f m", v) })
+                        }
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.05)))
+#endif
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Blend")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text("Controls how strongly the bubble masks fractal geometry. Fine control at low values.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Label("Cost varies by scene, fractal, and zoom.", systemImage: AppIcons.exclamationmarkTriangle)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        EffectSliderRow(icon: "circle.righthalf.filled", label: "Blend",
+                            value: Binding<Float>(
+                                get: { 1.0 - UISettingsCache.blendValueToSlider(cache.safetyBubble.strength) },
+                                set: { cache.safetyBubble.strength = UISettingsCache.blendSliderToValue(1.0 - $0) }
+                            ), range: 0.0...1.0,
+                            enabled: .constant(true),
+                            onChanged: { cache.push(\.safetyBubbleBlend, value: cache.safetyBubble.strength) },
+                            showToggle: false)
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.05)))
                 }
             }
             .padding(10)
@@ -749,6 +745,12 @@ extension ContentView {
         }
         .padding()
         .background(Color.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+        .onAppear {
+            if cache.quality.boundingShapeType != SafetyBubbleShapePreset.sphere.storedValue {
+                cache.quality.boundingShapeType = SafetyBubbleShapePreset.sphere.storedValue
+                cache.push(\.boundingShapeType, value: cache.quality.boundingShapeType)
+            }
+        }
     }
 
     // MARK: - Shape tab (rail sub-tab: Bounding)
@@ -796,7 +798,7 @@ extension ContentView {
 
             HStack(spacing: 6) {
                 Image(systemName: "circle.dashed").foregroundStyle(.cyan)
-                Text("Bounding").font(.headline)
+                Text("Shape").font(.headline)
                 Spacer()
                 Toggle("", isOn: Binding(
                     get: { cache.quality.boundingSphereSkipEnabled },
@@ -808,69 +810,30 @@ extension ContentView {
                 .help("Bounds the visible fractal to the shape below: rays that miss it skip the march entirely. Large sizes just cull background; tight sizes deliberately clip the fractal to the shape (nice for Mixed immersion). Independent of Scrunch — turning both on is the Custom containment mode.")
             }
 
-            let selectedBoundingFamily = SafetyBubbleShapePreset.family(for: cache.quality.boundingShapeType)
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("Bounding Shape"); Spacer()
-                    Picker("Bounding Shape", selection: Binding<SafetyBubbleShapeFamily>(
-                        get: { selectedBoundingFamily },
-                        set: { family in
-                            let newValue = SafetyBubbleShapePreset.storedValue(for: family, currentValue: cache.quality.boundingShapeType)
-                            cache.quality.boundingShapeType = newValue
-                            cache.push(\.boundingShapeType, value: newValue)
-                        }
-                    )) {
-                        ForEach(SafetyBubbleShapeFamily.allCases) { family in
-                            Text(family.rawValue).tag(family)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 260)
-                }
-                if selectedBoundingFamily == .platonic {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
-                        ForEach(SafetyBubbleShapePreset.platonicOptions) { preset in
-                            let isSelected = SafetyBubbleShapePreset(storedValue: cache.quality.boundingShapeType) == preset
-
-                            Button {
-                                cache.quality.boundingShapeType = preset.storedValue
-                                cache.push(\.boundingShapeType, value: preset.storedValue)
-                            } label: {
-                                Text(preset.displayName)
-                                    .font(.caption.weight(.semibold))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 8)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(isSelected ? Color.black : Color.primary)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(isSelected ? Color.white.opacity(0.88) : Color.white.opacity(0.08))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(isSelected ? 0.14 : 0.08), lineWidth: 1)
-                            )
-                        }
-                    }
-                }
+                Label("Sphere", systemImage: "circle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text("Only the sphere shape is exposed for now; the other bounding shapes are hidden until their render path is reliable.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .disabled(!cache.quality.boundingSphereSkipEnabled)
             .opacity(cache.quality.boundingSphereSkipEnabled ? 1 : 0.45)
 
-            accelSliderCompact("Bounding Size",
+            accelSliderCompact("Shape Size",
                         value: cache.quality.boundingShapeRadius, range: 0.05...30,
                         display: String(format: "%.1f", cache.quality.boundingShapeRadius),
-                        help: "Size of the bounding shape in model units. Only active while Bounding is on.") { v in
+                        help: "Size of the sphere in model units. Only active while Shape is on.") { v in
                 cache.quality.boundingShapeRadius = v; cache.push(\.boundingShapeRadius, value: v)
             }
             .disabled(!cache.quality.boundingSphereSkipEnabled)
             .opacity(cache.quality.boundingSphereSkipEnabled ? 1 : 0.45)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Bounding Fog").font(.caption)
-                Picker("Bounding Fog", selection: Binding(
+                Text("Fade Effect").font(.caption)
+                Picker("Fade Effect", selection: Binding(
                     get: { BoundingFogMode(rawValue: cache.quality.boundingShapeFogMode) ?? .off },
                     set: { mode in
                         cache.quality.boundingShapeFogMode = mode.rawValue
@@ -906,7 +869,7 @@ extension ContentView {
         .background(Color.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    /// "Scrunch to Surroundings" (Environment Scrunch): the scanned surroundings
+    /// "Surroundings Containment" (Environment Scrunch): the scanned surroundings
     /// (scene reconstruction on visionOS) become a distance field the fractal
     /// scrunches and bulges around — a proximity field like the hands, not a
     /// see-through cut. Surfaced at the top of the Bounding tab.
@@ -914,7 +877,7 @@ extension ContentView {
     private var scrunchToSurroundingsSection: some View {
         HStack(spacing: 6) {
             Image(systemName: "square.3.layers.3d").foregroundStyle(.cyan)
-            Text("Scrunch to Surroundings").font(.headline)
+            Text("Surroundings Containment").font(.headline)
             Spacer()
             Toggle("", isOn: Binding(
                 get: { cache.quality.envScrunchEnabled },
@@ -932,13 +895,13 @@ extension ContentView {
                 get: { cache.quality.envScrunchMode },
                 set: { v in
                     cache.quality.envScrunchMode = v; cache.push(\.envScrunchMode, value: v)
-                }
-            )) {
-                Text("Scrunch").tag(0)
-                Text("Shell").tag(1)
             }
-            .pickerStyle(.segmented)
-            .help("Scrunch: the fractal bulges around nearby real surfaces. Shell: the inverse — the fractal only renders within Reach of walls and objects, coating the room instead of filling it.")
+        )) {
+            Text("Scrunch").tag(0)
+            Text("Shell").tag(1)
+        }
+        .pickerStyle(.segmented)
+            .help("Scrunch: the fractal bulges around nearby real surfaces. Shell: the fractal only renders within Reach of walls and objects, coating the room instead of filling open space.")
             accelSliderCompact("Strength",
                         value: cache.quality.envScrunchStrength, range: 0...1,
                         display: "\(Int((cache.quality.envScrunchStrength * 100).rounded()))%",

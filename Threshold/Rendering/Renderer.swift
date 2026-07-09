@@ -189,6 +189,7 @@ actor Renderer {
     var hasLoggedFoveationAvailability = false
     var hasLoggedWorldTrackingWarning = false
     var hasLoggedDeviceAnchorInfo = false
+    var hasLoggedMissingDeviceAnchor = false
 
 #if canImport(MetalFX)
     var metalFXManager: MetalFXManager?
@@ -956,6 +957,19 @@ actor Renderer {
             // then skip rendering to avoid accumulating latency.
             RenderTrace.event("GPU Stall", "inFlightSemaphore timed out (100ms)")
             if RENDERER_DEBUG { print("⚠️ GPU stall detected: inFlightSemaphore timed out (100ms)") }
+            let timeoutPresentationTime = drawable.frameTiming.presentationTime
+            let timeoutTime = LayerRenderer.Clock.Instant.epoch.duration(to: timeoutPresentationTime).timeInterval
+            let timeoutDeviceAnchor = worldTracking.state == .running
+                ? worldTracking.queryDeviceAnchor(atTimestamp: timeoutTime)
+                : nil
+            guard let timeoutDeviceAnchor else {
+                if !hasLoggedMissingDeviceAnchor {
+                    hasLoggedMissingDeviceAnchor = true
+                    print("⚠️ Device anchor unavailable; skipping immersive frame until world tracking is ready")
+                }
+                return
+            }
+            drawable.deviceAnchor = timeoutDeviceAnchor
             frame.startSubmission()
             defer { frame.endSubmission() }
             if drawableRenderContextRequired {
@@ -985,6 +999,13 @@ actor Renderer {
             deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
         } else {
             deviceAnchor = nil
+        }
+        guard let deviceAnchor else {
+            if !hasLoggedMissingDeviceAnchor {
+                hasLoggedMissingDeviceAnchor = true
+                print("⚠️ Device anchor unavailable; skipping immersive frame until world tracking is ready")
+            }
+            return
         }
 
         drawable.deviceAnchor = deviceAnchor

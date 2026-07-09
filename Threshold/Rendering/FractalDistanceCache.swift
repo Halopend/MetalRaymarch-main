@@ -55,7 +55,7 @@ final class FractalDistanceCache {
         guard let library = device.makeDefaultLibrary(),
               let fn = library.makeFunction(name: "distanceCacheBake"),
               let pso = try? device.makeComputePipelineState(function: fn),
-              let buf = device.makeBuffer(length: count * MemoryLayout<Float16>.stride,
+              let buf = device.makeBuffer(length: count * MemoryLayout<UInt16>.stride,
                                           options: .storageModePrivate) else { return nil }
         buf.label = "FractalDistanceCache grid"
         self.buffer = buf

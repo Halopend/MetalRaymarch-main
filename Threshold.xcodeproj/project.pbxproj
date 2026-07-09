@@ -602,6 +602,7 @@
 				D7D716B42CEAC4B200CEEA51 /* Frameworks */,
 				D7D716B52CEAC4B200CEEA51 /* Resources */,
 				484A83441DFAD497CC97D953 /* Embed App Extensions */,
+				D7B3C4000000000000000002 /* Stamp Git SHA */,
 			);
 			buildRules = (
 			);
@@ -624,6 +625,7 @@
 				D7E0000C2E00000000000001 /* Sources */,
 				D7E0000D2E00000000000001 /* Frameworks */,
 				D7E0000E2E00000000000001 /* Resources */,
+				D7B3C4000000000000000003 /* Stamp Git SHA */,
 			);
 			buildRules = (
 			);
@@ -772,11 +774,70 @@
 			inputFileListPaths = (
 			);
 			inputPaths = (
+				"$(SRCROOT)",
+				"$(SRCROOT)/.git",
+				"$(SRCROOT)/.git/HEAD",
+				"$(SRCROOT)/.git/packed-refs",
+				"$(SRCROOT)/.git/refs",
+				"$(SRCROOT)/Scripts/stamp_git_sha.sh",
 			);
 			name = "Stamp Git SHA";
 			outputFileListPaths = (
 			);
 			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GitStamp.plist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/Scripts/stamp_git_sha.sh\"\n";
+		};
+		D7B3C4000000000000000002 /* Stamp Git SHA */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)",
+				"$(SRCROOT)/.git",
+				"$(SRCROOT)/.git/HEAD",
+				"$(SRCROOT)/.git/packed-refs",
+				"$(SRCROOT)/.git/refs",
+				"$(SRCROOT)/Scripts/stamp_git_sha.sh",
+			);
+			name = "Stamp Git SHA";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GitStamp.plist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/Scripts/stamp_git_sha.sh\"\n";
+		};
+		D7B3C4000000000000000003 /* Stamp Git SHA */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)",
+				"$(SRCROOT)/.git",
+				"$(SRCROOT)/.git/HEAD",
+				"$(SRCROOT)/.git/packed-refs",
+				"$(SRCROOT)/.git/refs",
+				"$(SRCROOT)/Scripts/stamp_git_sha.sh",
+			);
+			name = "Stamp Git SHA";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GitStamp.plist",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -1264,14 +1325,14 @@
 				INFOPLIST_FILE = Threshold/App/ThresholdMacInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
 				INFOPLIST_KEY_CFBundleName = Threshold;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.graphics-design";
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold;
 				PRODUCT_NAME = Threshold;
@@ -1305,14 +1366,14 @@
 				INFOPLIST_FILE = Threshold/App/ThresholdMacInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
 				INFOPLIST_KEY_CFBundleName = Threshold;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.graphics-design";
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold;
 				PRODUCT_NAME = Threshold;
