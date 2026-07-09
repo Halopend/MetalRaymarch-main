@@ -7,8 +7,11 @@ Prioritized performance-debt backlog + phased plan. Companion to
 
 ## Ground truth (measured 2026-07-01, Mac harness + GPU counters)
 
-- Canonical scene = **"Stress test"** (`Threshold/Examples/Scenes/Stress_test.threshscene`),
-  **19.4 ms @ 1080p** on this Mac, byte-identical PNGs across runs.
+- Canonical scene = the named benchmark scene **"Stress test"** (driven by
+  `Scripts/perf-gate.sh` via `THRESHOLD_BENCHMARK_SCENES="Stress test"`; baselined
+  in `Baselines/mac-stress-1080p-accel-{on,off}.json` + `Baselines/png-accel-*/Stress test.png`).
+  There is no `Stress_test.threshscene` file — the harness resolves the scene by
+  name from the bundled presets. **19.4 ms @ 1080p** on this Mac, byte-identical PNGs across runs.
 - Heaviest scene = **Bulatov limit set, ~40 ms**.
 - Both are **ALU-bound (~68–70%** of GPU time in ALU, windowed counters). Not
   bandwidth, not occupancy-starved by buffers — arithmetic + register pressure.
@@ -51,8 +54,8 @@ Priority = (Impact + Risk) × (6 − Effort), each 1–5.
 ## Phased plan (each phase ships alongside feature work)
 
 ### Phase 0 — Lock the baseline (do first, ~1 session)
-Items 2, 1. Commit the harness; write `Scripts/perf-gate.sh` (run harness on
-Stress test, diff `gpuMsAvg` vs `Baselines/mac-stress-1080p.json`, fail > +5%);
+Items 2, 1. Commit the harness; `Scripts/perf-gate.sh` now exists (runs the harness on
+Stress test, diffs `gpuMsAvg` vs `Baselines/mac-stress-1080p-accel-{on,off}.json`, fails > +5%);
 run one Vision Pro sweep and land the first real rows in `PERF_LOG`. Everything
 after this is measured against these two baselines.
 

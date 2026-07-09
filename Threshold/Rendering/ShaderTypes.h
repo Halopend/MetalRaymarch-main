@@ -24,6 +24,17 @@ typedef int32_t EnumBackingType;
 
 #include <simd/simd.h>
 
+#ifndef __METAL_VERSION__
+#ifdef __cplusplus
+extern "C" {
+#endif
+int ThresholdLLVMProfileIsInstrumented(void);
+int ThresholdLLVMProfileWriteFile(void);
+#ifdef __cplusplus
+}
+#endif
+#endif
+
 typedef NS_ENUM(EnumBackingType, BufferIndex)
 {
     BufferIndexMeshPositions = 0,

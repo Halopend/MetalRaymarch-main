@@ -1,75 +1,94 @@
 # Siri Integration for Threshold
 
-This document describes the Siri integration implementation for Threshold, an iOS/macOS/visionOS app that visualizes fractals and serves as a music visualizer.
+How Threshold exposes Siri / App Shortcuts / Spotlight controls, for a fractal
+visualizer that doubles as a music visualizer.
 
-## Overview
+> **Source of truth:** [`AppIntents.swift`](AppIntents.swift). This doc describes
+> the intents that actually ship there. It is kept in sync with that file — if you
+> add or rename an intent, update this doc in the same change.
 
-Threshold now supports Siri controls through App Intents, allowing users to:
-- Toggle animation playback
-- Adjust lighting intensity and mode
-- Control animation tempo and damping
-- Apply mood presets
-- Apply space transformation effects
+## What actually ships
 
-## Siri Commands Available
+The live intents live in **`Threshold/App/AppIntents.swift`** and are registered
+by **`ThresholdAppShortcutsProvider`** (an `AppShortcutsProvider`). They fall into
+four groups:
 
-### 1. Toggle Animation
-- **Phrases**: "Toggle animation", "Play/pause fractal animation", "Start/stop Threshold animation"
-- **Controls**: Play/pause the current fractal animation
-- **Intent**: `ToggleAnimationIntent`
+### Animation transport
+| Intent | Title | Action |
+|--------|-------|--------|
+| `PlayAnimationIntent`  | "Play animation"  | `animationManager?.play()` |
+| `PauseAnimationIntent` | "Pause animation" | `animationManager?.pause()` |
+| `StopAnimationIntent`  | "Stop animation"  | `animationManager?.stop()` |
 
-### 2. Set Lighting Intensity
-- **Phrases**: "Set lighting intensity", "Adjust lights", "Change lighting in Threshold"
-- **Controls**: Adjust lighting intensity (0.0-1.0) and lighting mode
-- **Intent**: `SetLightingIntensityIntent`
+### Audio-reactivity controls
+| Intent | Title | Action |
+|--------|-------|--------|
+| `ToggleAudioReactivityIntent`  | "Toggle audio reactivity"  | flips `renderSettings.fractalAudioReactiveEnabled` |
+| `EnableAudioReactivityIntent`  | "Enable audio reactivity"  | sets it `true` |
+| `DisableAudioReactivityIntent` | "Disable audio reactivity" | sets it `false` |
+| `IncreaseAudioAmountIntent`    | "Increase audio sensitivity" | `fractalAudioAmount += 0.1` (cap 1.0) |
+| `DecreaseAudioAmountIntent`    | "Decrease audio sensitivity" | `fractalAudioAmount -= 0.1` (floor 0.0) |
+| `IncreaseBeatPunchIntent`      | "Increase beat punch"      | `fractalBeatPunch += 0.1` (cap 1.0) |
+| `DecreaseBeatPunchIntent`      | "Decrease beat punch"      | `fractalBeatPunch -= 0.1` (floor 0.0) |
 
-### 3. Adjust Tempo
-- **Phrases**: "Adjust tempo", "Set animation speed", "Change tempo in Threshold"
-- **Controls**: Set animation tempo (0.1-5.0) and damping (0.0-1.0)
-- **Intent**: `AdjustTempoIntent`
+### Music transport (Apple Music / Spotify via `MusicService`)
+| Intent | Title | Action |
+|--------|-------|--------|
+| `ToggleMusicPlaybackIntent` | "Play or pause music" | `musicService.togglePlayPause()` |
+| `NextTrackIntent`           | "Next track"          | `musicService.next()` |
+| `PreviousTrackIntent`       | "Previous track"      | `musicService.previous()` |
+| `NowPlayingIntent`          | "What's playing"      | reads `musicService.nowPlaying` (query-only, does not open the app) |
 
-### 4. Set Mood
-- **Phrases**: "Set mood", "Apply mood preset", "Change mood in Threshold"
-- **Controls**: Apply mood presets (Calm, Energetic, Mysterious, Cosmic, Abstract) with intensity
-- **Intent**: `SetMoodIntent`
+### Parameterized intents
+| Intent | Title | Parameter |
+|--------|-------|-----------|
+| `SwitchFractalTypeIntent`   | "Switch fractal"        | `fractal: FractalTypeAppEnum` |
+| `SetAudioSensitivityIntent` | "Set audio sensitivity" | `percent: Int` (0–100, default 60) |
 
-### 5. Apply Space Effect
-- **Phrases**: "Apply space effect", "Add space transformation", "Apply cosmic effect"
-- **Controls**: Apply various space transformation effects with intensity
-- **Intent**: `ApplySpaceEffectIntent`
+`FractalTypeAppEnum` (an `AppEnum`) is the only app enum that ships. Its cases
+mirror `FractalModelType`'s selectable set (mandelbox, mandelbulb, mandelbulbJulia,
+menger, quaternionJulia, octahedron, mengerSphere, theliPseudoKleinian, kleinian),
+and `.modelType` maps each case back to the engine enum by matching
+`FractalModelType.descriptor.codableString`.
 
-## Implementation Details
+There are **no** `AppEntity` types and **no** `EntityQuery` types in the shipping
+implementation.
 
-### App Intents Structure
+## Registered voice phrases (the 10-shortcut cap)
 
-The implementation includes:
+`AppShortcutsProvider` registers a **maximum of 10** App Shortcuts — anything past
+the 10th is silently dropped. Every intent above is still reachable in the
+Shortcuts app and Spotlight; the provider list is just the curated zero-config
+*voice* set. The current 10 (in order), each phrased with `\(.applicationName)`:
 
-1. **App Entities**:
-   - `SceneEntity`: Represents fractal scenes
-   - `MusicPresetEntity`: Represents music presets
+1. **Play** — `PlayAnimationIntent`
+2. **Pause** — `PauseAnimationIntent`
+3. **Toggle Audio** — `ToggleAudioReactivityIntent`
+4. **Set Sensitivity** — `SetAudioSensitivityIntent` (parameterized)
+5. **Boost Beat** — `IncreaseBeatPunchIntent`
+6. **Switch Fractal** — `SwitchFractalTypeIntent` (parameterized)
+7. **Play/Pause Music** — `ToggleMusicPlaybackIntent`
+8. **Next Track** — `NextTrackIntent`
+9. **Previous Track** — `PreviousTrackIntent`
+10. **Now Playing** — `NowPlayingIntent`
 
-2. **Entity Queries**:
-   - `SceneEntityQuery`: Resolves scene entities
-   - `MusicPresetEntityQuery`: Resolves music preset entities
+If you add a shortcut here, drop or reorder one — the list is at the cap. Lead with
+the highest-value voice commands (parameterized ones especially).
 
-3. **App Enums**:
-   - `AnimationSpeed`: Speed options (slow, normal, fast, turbo)
-   - `LightingMode`: Lighting modes (ambient, directional, point, volumetric)
-   - `MoodPreset`: Mood presets (calm, energetic, mysterious, cosmic, abstract)
+## Implementation notes
 
-4. **Main App Intents**:
-   - `ToggleAnimationIntent`: Play/pause animation
-   - `SetLightingIntensityIntent`: Control lighting
-   - `AdjustTempoIntent`: Control animation speed
-   - `SetMoodIntent`: Apply mood presets
-   - `ApplySpaceEffectIntent`: Apply space effects
+- Every intent's `perform()` is `@MainActor` and guards on `AppModel.shared`
+  (`static nonisolated(unsafe) var shared: AppModel?`), returning a "Threshold app
+  not available" dialog when it's nil.
+- Most intents set `openAppWhenRun = true`; `NowPlayingIntent` sets it `false`
+  (pure query).
+- Music transport intents are **fire-and-forget** — `next`/`previous`/`toggle`
+  run async in the provider, so `nowPlaying` / `isPlaying` still reflect the
+  pre-action state inside `perform()`. The dialogs deliberately report the *action*
+  ("Skipping to the next track"), not a state that may be stale by the time Siri
+  speaks.
 
-5. **App Shortcuts Provider**:
-   - `ThresholdAppShortcuts`: Registers all Siri shortcuts
-
-### Info.plist Changes
-
-The following keys were added to `Info.plist`:
+### Info.plist keys (present in [`Info.plist`](Info.plist))
 
 ```xml
 <key>NSMicrophoneUsageDescription</key>
@@ -80,47 +99,32 @@ The following keys were added to `Info.plist`:
 <true/>
 ```
 
-## Usage
+> Note: the `NSAppIntentsUsageDescription` string still describes an older intent
+> set (lighting/tempo/mood/space). It's user-facing copy, not code — update it to
+> match the shipping intents above when convenient.
 
-### Testing Siri Integration
+## Quarantined WIP — do not use as reference
 
-1. **Build and Run**: Build the app in Xcode
-2. **Test in Shortcuts**: Open the Shortcuts app to test the intents
-3. **Test with Siri**: Use Siri with phrases like "Hey Siri, toggle animation"
+`Threshold/App/Intents/ThresholdAppIntents.swift` contains an **older, unfinished**
+App Intents design (mood presets, lighting/tempo intents, `SceneEntity` /
+`MusicPresetEntity`, `ThresholdAppShortcuts`). It is wrapped in
+`#if ENABLE_WIP_APP_INTENTS` — a flag that is **not defined anywhere**, so none of
+it compiles or registers. It was quarantined 2026-07-01 because its folder is
+auto-included in every target by the synchronized group and its errors were
+breaking all builds. Ignore it unless you intend to finish and un-gate it; the
+shipping surface is entirely in `AppIntents.swift`.
 
-### Development Notes
+## Requirements
 
-- All intents are marked as `async throws` for proper error handling
-- Each intent includes a `parameterSummary` for better Shortcuts UI
-- Intents are registered with descriptive phrases for better Siri recognition
-- The implementation follows App Intents best practices
+- Deployment target **26.0** (macOS 26 / visionOS 26 / iPadOS 26). The codebase
+  uses OS-26 APIs throughout; App Intents themselves predate this, but the app's
+  floor is 26.
+- Microphone usage description (above) for the audio-reactive path.
 
-## Future Enhancements
+## Testing
 
-Potential future Siri features:
-- Voice command recognition for specific fractal types
-- Music-reactive controls (bass, treble, tempo)
-- Scene switching commands
-- Export/share commands
-- Custom gesture voice commands
-
-## Dependencies
-
-This implementation requires:
-- iOS 16+ (for App Intents)
-- Xcode 15+ (for App Intents support)
-- Proper entitlements for microphone access
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Siri not recognizing commands**: Ensure phrases include the app name
-2. **Intents not appearing in Shortcuts**: Check that `NSAppIntentsSupported` is set to `true`
-3. **Permission issues**: Ensure proper usage descriptions are in Info.plist
-
-### Debugging
-
-1. Use Xcode's App Intents preview to test intents
-2. Check Console for App Intents-related errors
-3. Test in the Shortcuts app before using with Siri
+1. Build and run (see [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) for the
+   toolchain pin).
+2. Open the **Shortcuts** app to see all intents (not just the 10 voice phrases).
+3. Try Siri with the app name in the phrase, e.g. "Hey Siri, play music in
+   Threshold" or "Hey Siri, switch fractal in Threshold".

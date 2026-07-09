@@ -118,117 +118,55 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
         enabled: settings.zoomFogCompensationEnabled,
         effectiveScale: effectiveScale)
 
-    let lightingWave = sin(elapsedTime * 1.2)
-    let animatedColorMix = settings.lightingPlay ? min(max(settings.colorMix + lightingWave * 0.08, 0.0), 1.0) : settings.colorMix
-    let baseGlow = settings.colorSchemeParams.glowIntensity
-    let animatedGlow = settings.lightingPlay ? min(max(baseGlow + max(0, lightingWave) * 0.25, 0.0), 2.0) : baseGlow
-    let scaleCorrectedBubbleRadius = settings.safetyBubbleRadius / max(effectiveScale, 0.001)
-    let scaleCorrectedFadeWidth = settings.safetyBubbleFadeWidth / max(effectiveScale, 0.001)
+    // Platform inputs the shared assembler can't derive; the identical field list
+    // + derived math (bubble scaling, epsilon/LOD, spring, animated color/glow)
+    // now live once in makeUniforms (TECH_DEBT.md #2).
+    let platform = UniformsPlatformInputs(
+        projectionMatrix: jitteredProjection,
+        modelViewMatrix: modelView,
+        inverseModelViewMatrix: inverseModelView,
+        modelToWorldMatrix: modelMatrix,
+        previousViewProjMatrix: matrix_identity_float4x4,
+        previousInvViewProjMatrix: matrix_identity_float4x4,
+        maxViewDistance: maxViewDistance,
+        coneMarchScale: RenderPrecompute.coneMarchScale(
+            strength: settings.coneMarchStrength,
+            projection: projection,
+            viewportHeight: Float(drawableSize.height)),
+        pixelFootprintPerDist: RenderPrecompute.pixelFootprintPerDist(
+            projection: projection,
+            viewportHeight: Float(drawableSize.height)),
+        safetyBubbleRadiusMeters: settings.safetyBubbleRadius,
+        // No hand tracking in Quick Look — single-source disabled block.
+        handField: .off,
+        precomputedFractal: precomputedFractal,
+        precomputedLighting: precomputedLighting,
+        precomputedAudio: precomputedAudio,
+        precomputedFog: precomputedFog,
+        colorScheme: settings.colorSchemeParams,
+        floorPlane: SIMD4<Float>(0, 1, 0, 0),
+        floorCenterRadius: SIMD4<Float>(0, 0, 0, 0),
+        renderResolution: SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height)),
+        benchCollectSteps: 0,
+        benchAblate: 0,
+        passthroughBackground: 0,
+        boundingFogEnabled: 0,
+        boundingShadowDepth: 0,
+        boundingShapeType: 0,
+        // Pin the Bounding Shape while the Linear Rail slides content through it.
+        boundingShapeCenter: settings.boundingShapeCenterModel(modelMatrix: modelMatrix),
+        // Bound to Space / Object Cutouts are live-room features; thumbnails
+        // render unclipped.
+        boundToSpaceMode: 0,
+        boundSpaceSize: SIMD3<Float>(4.0, 2.5, 4.0),
+        boundAmbientStrength: 0.0,
+        envScrunch: EnvScrunchParams(),
+        distCache: DistanceCacheParams())
 
-    // Hoisted out of the Uniforms(...) call below: the single-expression init is
-    // large enough that nested calls/ternaries push swiftc's type-checker over its
-    // "reasonable time" limit.
-    let isMandelbulb = settings.fractalType == .mandelbulb
-    let bubbleEnabled: Int32 = isMandelbulb ? 0 : (settings.safetyBubbleEnabled ? 1 : 0)
-    let bubbleStrength: Float = isMandelbulb ? 0.0 : settings.safetyBubbleStrength
-    // Zoom-out epsilon/LOD rescale (1.0 at scale >= 0.15; mirrors RaymarchRenderView).
-    let zoomOutEpsilonLoosen: Float = max(1.0, 0.15 / max(effectiveScale, 1e-4))
-    let zoomOutLODScale: Float = min(1.0, effectiveScale / 0.15)
-    let coneMarchScale = RenderPrecompute.coneMarchScale(
-        strength: settings.coneMarchStrength,
-        projection: projection,
-        viewportHeight: Float(drawableSize.height))
-    let pixelFootprintPerDist = RenderPrecompute.pixelFootprintPerDist(
-        projection: projection,
-        viewportHeight: Float(drawableSize.height))
-    let coneCoverageAA: Int32 = settings.coneCoverageAAEnabled ? 1 : 0
-    let springLen = simd_length(settings.springDisplacement)
-    let springVisible: Int32 = (settings.springActive || springLen > 0.001) ? 1 : 0
-    let renderResolution = SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height))
-
-    return Uniforms(projectionMatrix: jitteredProjection,
-                    modelViewMatrix: modelView,
-                    inverseModelViewMatrix: inverseModelView,
-                    previousViewProjMatrix: matrix_identity_float4x4,
-                    previousInvViewProjMatrix: matrix_identity_float4x4,
-                    time: elapsedTime,
-                    minDistance: settings.minDistance,
-                    fractalScale: settings.fractalScale,
-                    fractalIterations: Int32(settings.fractalIterations),
-                    maxRaySteps: Int32(settings.maxRaySteps),
-                    maxViewDistance: maxViewDistance,
-                    marchEpsilonScale: (1.0 / max(effectiveScale, 1.0)) * zoomOutEpsilonLoosen,
-                    colorMix: animatedColorMix,
-                    glowIntensity: animatedGlow,
-                    foldingLimit: settings.foldingLimit,
-                    sphereRadius: settings.sphereRadius,
-                    safetyBubbleRadius: scaleCorrectedBubbleRadius,
-                    safetyBubbleEnabled: bubbleEnabled,
-                    safetyBubbleShape: settings.safetyBubbleShape,
-                    safetyBubbleFadeEnabled: settings.safetyBubbleFadeEnabled ? 1 : 0,
-                    safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
-                    safetyBubbleStrength: bubbleStrength,
-                    // No hand tracking in Quick Look — single-source disabled block.
-                    handField: .off,
-                    colorIterations: settings.colorIterations,
-                    limitFlash: settings.limitFlash,
-                    activeGesture: Int32(settings.activeGestureIndex),
-                    warmStartEnabled: 0,
-                    fractalType: settings.fractalType.rawValue,
-                    lightingSoftness: settings.lightingSoftness,
-                    sphericalInversionMode: settings.sphericalInversionMode.rawValue,
-                    sphericalInversionRadius: settings.sphericalInversionRadius,
-                    sphereProjectionBlend: settings.sphereProjectionEnabled ? settings.sphereProjectionBlend : 0,
-                    sphereProjectionRadius: settings.sphereProjectionRadius,
-                    spaceWarpStrength: settings.spaceWarpStrength,
-                    spaceWarpParam1: settings.spaceWarpParam1,
-                    spaceWarpParam2: settings.spaceWarpParam2,
-                    spaceWarpParam3: settings.spaceWarpParam3,
-                    spaceWarpAxis: settings.spaceWarpAxis,
-                    spaceWarpStack: settings.spaceWarpStack,
-                    stepMultiplier: settings.stepMultiplier,
-                    boundingSphereRadius: settings.estimatedBoundingSphereRadius,
-                    smartAdvanceEnabled: settings.smartAdvanceEnabled ? 1 : 0,
-                    coneMarchScale: coneMarchScale,
-                    coneCoverageAAEnabled: coneCoverageAA,
-                    shadowsEnabled: settings.shadowsEnabled ? 1 : 0,
-                    distanceLODFalloff: settings.distanceLODStrength * 0.5 * zoomOutLODScale,
-                    benchCollectSteps: 0,
-                    pixelFootprintPerDist: pixelFootprintPerDist,
-                    coarseRateMagMax: 1.0,
-                    springDisplacementX: settings.springDisplacement.x,
-                    springDisplacementY: settings.springDisplacement.y,
-                    springDisplacementZ: settings.springDisplacement.z,
-                    springStretch: springLen,
-                    springAnchorNDC: SIMD2<Float>(0.7, -0.7),
-                    springVisible: springVisible,
-                    springRestRadius: 0.06,
-                    jitterOffset: .zero,
-                    renderResolution: renderResolution,
-                    floorPlane: SIMD4<Float>(0, 1, 0, 0),
-                    floorCenterRadius: SIMD4<Float>(0, 0, 0, 0),
-                    formulaParams: settings.formulaParams,
-                    precomputedFractal: precomputedFractal,
-                    precomputedLighting: precomputedLighting,
-                    precomputedAudio: precomputedAudio,
-                    precomputedFog: precomputedFog,
-                    colorScheme: settings.colorSchemeParams,
-                    benchAblate: 0,
-                    passthroughBackground: 0,
-                    boundingFogEnabled: 0,
-                    boundingShadowDepth: 0,
-                    boundingShapeType: 0,
-                    // Bound to Space / Object Cutouts are live-room features;
-                    // thumbnails render unclipped.
-                    boundToSpaceMode: 0,
-                    boundSpaceSize: SIMD3<Float>(4.0, 2.5, 4.0),
-                    boundAmbientStrength: 0.0,
-                    modelToWorldMatrix: modelMatrix,
-                    envScrunch: EnvScrunchParams(),
-                    distCache: DistanceCacheParams(),
-                    // Pin the Bounding Shape while the Linear Rail slides content
-                    // through it (0 when the rail is off).
-                    boundingShapeCenter: settings.boundingShapeCenterModel(modelMatrix: modelMatrix))
+    return makeUniforms(settings: settings,
+                        effectiveScale: effectiveScale,
+                        time: elapsedTime,
+                        platform: platform)
 }
 
 // MARK: - Headless Metal render harness

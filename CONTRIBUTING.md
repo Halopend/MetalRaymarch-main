@@ -19,9 +19,11 @@ Scripts/build.sh all      # embeds + mac + vision + test
 The command-line `xcodebuild` default toolchain is frequently the **wrong Xcode**
 for this project — it builds against an older SDK and fails or silently misbehaves.
 This project must build with the Xcode **beta** whose SDK matches the code
-(macOS 26 / visionOS 26). `Scripts/build.sh` pins `DEVELOPER_DIR` to
-`/Applications/Xcode-beta 2.app` so you don't have to rediscover this. Override it
-when your beta lives elsewhere:
+(macOS 26 / visionOS 26). `Scripts/build.sh` auto-detects the beta: it sets
+`DEVELOPER_DIR` to the first that exists, preferring
+`/Applications/Xcode-beta.app` and falling back to `/Applications/Xcode-beta 2.app`
+(the old hardcoded `Xcode-beta 2.app` default was stale and broke fresh clones).
+Override it when your beta lives elsewhere:
 
 ```sh
 DEVELOPER_DIR="/Applications/Xcode-beta.app/Contents/Developer" Scripts/build.sh mac

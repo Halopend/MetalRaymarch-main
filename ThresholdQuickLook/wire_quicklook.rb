@@ -30,6 +30,7 @@ SHARED_SOURCES = [
   "Threshold/Parameters/RenderSettingsSnapshot.swift",
   "Threshold/Rendering/Core/RendererMath.swift",
   "Threshold/Rendering/Core/RenderPrecompute.swift",
+  "Threshold/Rendering/Core/UniformsBuilder.swift",
   "Threshold/Rendering/Core/RenderModes.swift",
   "Threshold/App/FractalModelType.swift",
   "Threshold/App/FormulaCatalog.swift",

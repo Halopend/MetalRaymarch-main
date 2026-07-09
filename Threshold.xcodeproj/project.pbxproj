@@ -216,6 +216,7 @@
 		8C5071304A573C4CD0927CB1 /* AudioReactiveConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AudioReactiveConfig.swift; path = Threshold/Parameters/Config/AudioReactiveConfig.swift; sourceTree = SOURCE_ROOT; };
 		8CF999AB55321EF1A29B2E81 /* ColorConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ColorConfig.swift; path = Threshold/Parameters/Config/ColorConfig.swift; sourceTree = SOURCE_ROOT; };
 		8EFB06C7D9CCAAFDC2AEC871 /* CustomShaderCompiler.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CustomShaderCompiler.swift; path = Threshold/Rendering/Core/CustomShaderCompiler.swift; sourceTree = SOURCE_ROOT; };
+		8FC809342FFFD04F00C1D435 /* Threshold.profdata */ = {isa = PBXFileReference; lastKnownFileType = file; path = Threshold.profdata; sourceTree = "<group>"; };
 		91DE710F7BB2749FB8800C0F /* EmbeddedMetalSources.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmbeddedMetalSources.swift; path = Threshold/Rendering/Generated/EmbeddedMetalSources.swift; sourceTree = SOURCE_ROOT; };
 		95CB57512C86EAC0883E044E /* ControlSpec.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlSpec.swift; path = Threshold/Parameters/ControlSpec.swift; sourceTree = SOURCE_ROOT; };
 		9824E07E16D25804B68E737E /* AudioReactiveConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AudioReactiveConfig.swift; path = Threshold/Parameters/Config/AudioReactiveConfig.swift; sourceTree = SOURCE_ROOT; };
@@ -459,6 +460,14 @@
 			name = ThresholdQLThumbnail;
 			sourceTree = "<group>";
 		};
+		8FC809352FFFD04F00C1D435 /* OptimizationProfiles */ = {
+			isa = PBXGroup;
+			children = (
+				8FC809342FFFD04F00C1D435 /* Threshold.profdata */,
+			);
+			path = OptimizationProfiles;
+			sourceTree = "<group>";
+		};
 		ADC2A8ADA575F712DE67BEC1 /* ThresholdQLPreview */ = {
 			isa = PBXGroup;
 			children = (
@@ -527,6 +536,7 @@
 				D7D716922CEAC4B100CEEA51 /* Products */,
 				62E3213337E064001A89C66A /* Frameworks */,
 				E72CDA71C74E275B671D9BEE /* ThresholdQuickLook */,
+				8FC809352FFFD04F00C1D435 /* OptimizationProfiles */,
 			);
 			sourceTree = "<group>";
 		};
@@ -1042,6 +1052,41 @@
 			};
 			name = Debug;
 		};
+		8FC8011D2FFFCBFC00C1D435 /* PGO */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = Threshold;
+			};
+			name = PGO;
+		};
+		8FC8011E2FFFCBFC00C1D435 /* PGO */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = ThresholdiOS;
+			};
+			name = PGO;
+		};
+		8FC8011F2FFFCBFC00C1D435 /* PGO */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = ThresholdTests;
+			};
+			name = PGO;
+		};
+		8FC801202FFFCBFC00C1D435 /* PGO */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = ThresholdQLThumbnail;
+			};
+			name = PGO;
+		};
+		8FC801212FFFCBFC00C1D435 /* PGO */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = ThresholdQLPreview;
+			};
+			name = PGO;
+		};
 		CD9F037926C97D88970A4E27 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1385,6 +1430,126 @@
 			};
 			name = Release;
 		};
+		D7D716C02CEAC4B200CEEA51 /* PGO */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				"CODE_SIGN_ENTITLEMENTS[sdk=xros*]" = Threshold/Threshold.entitlements;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = PMHYFM3SU4;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				MTL_HEADER_SEARCH_PATHS = "$(inherited)";
+				MTL_LANGUAGE_REVISION = Metal31;
+				MTL_OPTIMIZATION_LEVEL = "-O3";
+				SDKROOT = xros;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+				XROS_DEPLOYMENT_TARGET = 2.1;
+			};
+			name = PGO;
+		};
+		D7D716C12CEAC4B200CEEA51 /* PGO */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_USE_OPTIMIZATION_PROFILE = YES;
+				CODE_SIGN_ENTITLEMENTS = Threshold/Threshold.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 22;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = PMHYFM3SU4;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				EXCLUDED_RESOURCE_FILE_NAMES = App/Info.plist;
+				EXCLUDED_SOURCE_FILE_NAMES = App/Info.plist;
+				EXECUTABLE_NAME = Threshold;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"THRESHOLD_PGO_INSTRUMENTED=1",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_PROFILING_CODE = YES;
+				INFOPLIST_FILE = "$(TARGET_NAME)/App/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
+				INFOPLIST_KEY_NSHandsTrackingUsageDescription = "Hand tracking is used to interact with some parameters.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
+				INFOPLIST_KEY_NSWorldSensingUsageDescription = "This app uses world sensing to track hand gestures for controlling the fractal visualization.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1;
+				OTHER_CFLAGS = (
+					"$(inherited)",
+					"-fprofile-instr-generate",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-fprofile-instr-generate",
+				);
+				OTHER_SWIFT_FLAGS = "$(inherited) -profile-generate";
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SUPPORTED_PLATFORMS = "xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "$(TARGET_NAME)/Rendering/ShaderTypes.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 7;
+				XROS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = PGO;
+		};
 		D7E000112E00000000000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1524,6 +1689,7 @@
 			buildConfigurations = (
 				CD9F037926C97D88970A4E27 /* Release */,
 				0CE0253211C3E6FEF3CE330E /* Debug */,
+				8FC801202FFFCBFC00C1D435 /* PGO */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1533,6 +1699,7 @@
 			buildConfigurations = (
 				D62FD293A234F9123AEFA26A /* Release */,
 				3F28FDBD186D40BED1A3967E /* Debug */,
+				8FC801212FFFCBFC00C1D435 /* PGO */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1542,6 +1709,7 @@
 			buildConfigurations = (
 				D7D716AF2CEAC4B200CEEA51 /* Debug */,
 				D7D716B02CEAC4B200CEEA51 /* Release */,
+				D7D716C02CEAC4B200CEEA51 /* PGO */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1551,6 +1719,7 @@
 			buildConfigurations = (
 				D7D716AD2CEAC4B200CEEA51 /* Debug */,
 				D7D716AE2CEAC4B200CEEA51 /* Release */,
+				D7D716C12CEAC4B200CEEA51 /* PGO */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1560,6 +1729,7 @@
 			buildConfigurations = (
 				D7D716B72CEAC4B200CEEA51 /* Debug */,
 				D7D716B82CEAC4B200CEEA51 /* Release */,
+				8FC8011D2FFFCBFC00C1D435 /* PGO */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1569,6 +1739,7 @@
 			buildConfigurations = (
 				D7E000112E00000000000001 /* Debug */,
 				D7E000122E00000000000001 /* Release */,
+				8FC8011E2FFFCBFC00C1D435 /* PGO */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1578,6 +1749,7 @@
 			buildConfigurations = (
 				D8A000092D00000000000001 /* Debug */,
 				D8A0000A2D00000000000001 /* Release */,
+				8FC8011F2FFFCBFC00C1D435 /* PGO */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

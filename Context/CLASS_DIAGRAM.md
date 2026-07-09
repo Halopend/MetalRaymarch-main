@@ -40,10 +40,8 @@ classDiagram
         +gestureController : GestureController?
         +animationManager : AnimationManager?
         +presetManager : PresetManager
-        +iCloudBackup : ICloudBackupManager
         +errorReporter : ErrorReporter
         +shareSession : FractalShareSession?
-        +clock : AppClock
         +renderMetrics : RenderMetrics
         +handTrackingState : HandTrackingState
         +activateEmbeddedFormulaHandler : AsyncFormulaHandler?
@@ -83,9 +81,14 @@ classDiagram
     AppModel *-- MusicService
     AppModel *-- AudioAnalyzer
     AppModel *-- PresetManager
-    AppModel *-- AppClock
+    AppModel ..> StorageLocation : mode switch + BackupMerge.newestWins
     AppModel ..> Renderer : handler closures
 ```
+> Storage refactor (2026-07): `ICloudBackupManager` and `AppClock` were **removed**.
+> iCloud/local persistence now goes through the `StorageLocation.shared` singleton
+> (`StorageMode` local/iCloud, folder-backed store) + the `BackupMerge` enum
+> (`newestWins` reconcile); frame timing is computed inline (see
+> `RendererGameState` "replaces the removed frozen AppClock").
 `RenderMetrics` / `HandTrackingState` are separate `@Observable` sub-containers so high-frequency
 render-thread updates don't invalidate the whole `AppModel`. The `*Handler` closures are set by the
 `Renderer` at startup — the only back-channel from the actor to the main-actor model.
@@ -501,22 +504,27 @@ classDiagram
     }
     class ModuleRegistry {
         <<enumeration>>
-        +space : ModuleDescriptor
-        +lighting : ModuleDescriptor
-        +all : ModuleDescriptor[]
-        +descriptor(forKey) ModuleDescriptor?
+        +all : Module[]  %% [SpaceModule(), LightingModule()]
+        -byKey : Dictionary~ModuleKey, Module~
         +capability(key, param, forType) Bool
         +apply(key, block, to) void
         +applyParam(key, name, value, to) void
     }
-    class ModuleDescriptor {
-        <<struct>>
+    class Module {
+        <<class @unchecked Sendable>>
         +key : ModuleKey
-        +displayName : String
-        +icon : String
-        +route : ModuleRoute
-        +paramNames : String[]
+        +params : ModuleParam[]
+        +capability(param, forFractal) Bool
+        +apply(block, to) void
     }
+    class ModuleParam {
+        <<struct>>
+        +name : String
+        +requires : (FractalModelType)->Bool?
+        +apply : (RenderSettings, ParamValue)->Void
+    }
+    class SpaceModule { <<final class : Module>> }
+    class LightingModule { <<final class : Module>> }
     class ModuleParamBlock {
         <<struct>>
         +enabled : Bool?
@@ -537,7 +545,10 @@ classDiagram
     FractalPreset *-- AudioReactiveConfig
     FractalPreset *-- EmbeddedFormula
     ModuleParamBlock o-- ParamValue
-    ModuleRegistry *-- ModuleDescriptor
+    ModuleRegistry o-- Module
+    Module *-- ModuleParam
+    SpaceModule --|> Module
+    LightingModule --|> Module
     ModuleRegistry ..> RenderSettings : apply
 ```
 
@@ -717,12 +728,6 @@ classDiagram
         -applyPendingWorkHandler : MainActorParamWork
         +scheduleParameterUpdates(updateAnim, updateAudio, dt, time) void
     }
-    class AppClock {
-        -accumulatedTime : TimeInterval
-        -startTime : Date?
-        +speed : Double
-        +time : TimeInterval
-    }
 
     RaymarchRenderView *-- Coordinator
     Coordinator ..> Renderer
@@ -733,7 +738,6 @@ classDiagram
     Renderer ..> AdaptiveResolutionController
     Renderer ..> BenchmarkManager
     Renderer ..> RendererTaskExecutor : runs on
-    Renderer ..> AppClock
     MetalFXManager ..> MacSpatialUpscaler
     MetalFXManager ..> MacTemporalUpscaler
     UIUpdateCoordinator ..> AppModel
@@ -1302,7 +1306,7 @@ classDiagram
     direction TB
 
     class FractalTypeDescriptor {
-        <<protocol>>
+        <<class @unchecked Sendable>>
         +rawValue : Int32
         +displayName : String
         +icon : String
@@ -1321,10 +1325,13 @@ classDiagram
         mandelbox
         mandelbulb
         menger
-        kleinian
+        mandelbulbJulia
         quaternionJulia
+        octahedron
+        mengerSphere
+        theliPseudoKleinian
+        kleinian
         custom
-        more_6_types
         +descriptor : FractalTypeDescriptor
         +supports(tag) Bool
         +supports(transform) Bool
@@ -1339,7 +1346,7 @@ classDiagram
         +unregisterCustom() void
     }
     class MandelboxDescriptor {
-        <<struct>>
+        <<final class : FractalTypeDescriptor>>
         +rawValue : Int32
         +displayName : String
         +category : String
@@ -1348,7 +1355,7 @@ classDiagram
         +defaultFormulaParams() FormulaParams
     }
     class CustomFractalDescriptor {
-        <<struct>>
+        <<final class : FractalTypeDescriptor>>
         +rawValue : Int32
         +displayName : String
         +category : String
@@ -1357,8 +1364,8 @@ classDiagram
         +defaultFormulaParams() FormulaParams
     }
 
-    FractalTypeDescriptor <|.. MandelboxDescriptor
-    FractalTypeDescriptor <|.. CustomFractalDescriptor
+    MandelboxDescriptor --|> FractalTypeDescriptor
+    CustomFractalDescriptor --|> FractalTypeDescriptor
     FractalModelType ..> FractalTypeRegistry : descriptor
     FractalTypeRegistry o-- FractalTypeDescriptor
     FractalTypeRegistry ..> MandelboxDescriptor
@@ -1446,7 +1453,9 @@ classDiagram
   extensions (setup, frame loop, pipeline cache, custom shader, screenshot, math). They are partials of
   one type, so they're modeled as one class.
 - Concrete fractal descriptors: only `MandelboxDescriptor` and `CustomFractalDescriptor` are drawn as
-  representatives — there are ~11 more (`MandelbulbDescriptor`, `MengerDescriptor`, `KleinianDescriptor`,
-  …) all conforming to `FractalTypeDescriptor` identically.
+  representatives — there are 8 more `final class` subclasses (`MandelbulbDescriptor`, `MengerDescriptor`,
+  `MandelbulbJuliaDescriptor`, `QuaternionJuliaDescriptor`, `OctahedronDescriptor`, `MengerSphereDescriptor`,
+  `TheliPseudoKleinianDescriptor`, `KleinianDescriptor`) — 10 subclasses total, all subclassing
+  `FractalTypeDescriptor` identically.
 - Simplified closure type aliases (`VoidHandler`, `AsyncDataHandler`, `PipelineHandler`, …) stand in for
   Swift closure types, which Mermaid can't render in an attribute slot.
