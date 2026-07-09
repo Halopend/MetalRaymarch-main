@@ -613,22 +613,19 @@ extension ContentView {
             .tint(.orange)
 
             VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Sphere Projection Mismatch (δ)")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Text(String(format: "%+.2f", cache.display.deIterationMismatch))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                Slider(value: Binding(
-                    get: { cache.display.deIterationMismatch },
-                    set: {
-                        cache.display.deIterationMismatch = $0
-                        cache.push(\.deIterationMismatch, value: $0)
-                    }
-                ), in: -8...8)
-                .tint(.orange)
+                CompactValueSlider(
+                    title: "Sphere Projection Mismatch (δ)",
+                    value: Binding(
+                        get: { cache.display.deIterationMismatch },
+                        set: {
+                            cache.display.deIterationMismatch = $0
+                            cache.push(\.deIterationMismatch, value: $0)
+                        }
+                    ),
+                    range: -8...8,
+                    display: String(format: "%+.2f", cache.display.deIterationMismatch),
+                    tint: .orange
+                )
                 Text("δ biases the geometry fold loop (FC_FRACTAL_ITERATIONS) while the distance estimator stays normalized to the base count — the faithful \"Accidental Sphere Projection\" under-fold. Negative → fewer folds → sphere. 0 = off. Saves with the scene.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -1137,14 +1134,16 @@ extension ContentView {
 
             // ── Foveation — 8×8 compute path only ────────────────────────
             VStack(alignment: .leading, spacing: 4) {
-                Text("Foveation")
-                Slider(
+                CompactValueSlider(
+                    title: "Foveation",
                     value: Binding(
                         get: { appModel.renderSettings.foveationStrength },
                         set: { appModel.renderSettings.foveationStrength = $0 }
                     ),
-                    in: 0...1
-                ).tint(themeColor)
+                    range: 0...1,
+                    display: appModel.renderSettings.foveationStrength < 0.01 ? "Off" : "\(Int((appModel.renderSettings.foveationStrength * 100).rounded()))%",
+                    tint: themeColor
+                )
                 Text("Peripheral 8×8 tiles march fewer ray steps, ramping from the center outward. 0 = off. Cuts GPU cost where peripheral vision can't resolve detail. 8×8 compute path only.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)

@@ -62,7 +62,7 @@ final class AppleMusicManager {
 
     var progressFraction: Float {
         guard durationSeconds > 0 else { return 0 }
-        return Float(max(0, min(1, playbackTimeSeconds / durationSeconds)))
+        return Float((playbackTimeSeconds / durationSeconds).clamped(to: 0...1))
     }
 
     var currentTimeString: String { formatTime(playbackTimeSeconds) }
@@ -425,11 +425,7 @@ final class AppleMusicManager {
     }
 
     private func formatTime(_ seconds: Double) -> String {
-        guard seconds.isFinite, seconds > 0 else { return "0:00" }
-        let total = Int(seconds)
-        let minutes = total / 60
-        let secs = total % 60
-        return String(format: "%d:%02d", minutes, secs)
+        DisplayFormat.minutesSeconds(seconds)
     }
 
     // ── Playlist Creation ────────────────────────────────────────────────

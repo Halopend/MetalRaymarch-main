@@ -269,7 +269,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // MARK: - Validation
 
     mutating func clamp() {
-        boundingShapeRadius = max(0.05, min(30.0, boundingShapeRadius))
+        boundingShapeRadius = boundingShapeRadius.clamped(to: 0.05...30.0)
         boundingShapeFogMode = boundingShapeFogMode.clamped(to: 0...2)
         boundingShapeShadowDepth = boundingShapeShadowDepth.clamped(to: 0.02...0.95)
         boundingShapeType = boundingShapeType.clamped(to: 0.0...SafetyBubbleShapePreset.maxStoredValue)

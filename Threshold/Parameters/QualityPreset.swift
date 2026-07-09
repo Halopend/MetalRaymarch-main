@@ -9,34 +9,22 @@ enum QualityPreset: String, CaseIterable {
     case high = "High"
     case ultra = "Ultra"
 
-    var fractalIterations: Int {
+    private var defaults: (fractalIterations: Int, raySteps: Int, icon: String) {
         switch self {
-        case .low: return 6
-        case .medium: return 8
-        case .high: return 9
-        case .ultra: return 12
+        case .low: return (6, 68, "hare")
+        case .medium: return (8, 97, "gauge.with.dots.needle.33percent")
+        case .high: return (9, 107, "gauge.with.dots.needle.67percent")
+        case .ultra: return (12, 150, "gauge.with.dots.needle.100percent")
         }
     }
 
-    var raySteps: Int {
-        switch self {
-        case .low: return 68
-        case .medium: return 97
-        case .high: return 107
-        case .ultra: return 150
-        }
-    }
+    var fractalIterations: Int { defaults.fractalIterations }
+
+    var raySteps: Int { defaults.raySteps }
 
     var displayName: String { rawValue }
 
-    var icon: String {
-        switch self {
-        case .low: return "hare"
-        case .medium: return "gauge.with.dots.needle.33percent"
-        case .high: return "gauge.with.dots.needle.67percent"
-        case .ultra: return "gauge.with.dots.needle.100percent"
-        }
-    }
+    var icon: String { defaults.icon }
 
     func values(for fractalType: FractalModelType) -> (fractalIterations: Int, raySteps: Int) {
         // Per-type quality tiers now live on the fractal type (see

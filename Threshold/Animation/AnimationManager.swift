@@ -929,7 +929,7 @@ final class AnimationManager {
         }
 
         let normalized = (fadeStartRemaining - remaining) / max(0.001, fadeDuration)
-        let clamped = max(0.0, min(1.0, normalized))
+        let clamped = normalized.clamped(to: 0.0...1.0)
         let eased = clamped * clamped * (3.0 - 2.0 * clamped) // smoothstep
         attachedSongFadeVelocityScale = 1.0 - (1.0 - minimumAttachedSongFadeVelocityScale) * eased
     }

@@ -9,11 +9,6 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
         self.manager = manager
     }
 
-    let serviceID = "appleMusic"
-    let displayName = "Apple Music"
-    let iconName = "apple.logo"
-    var accentColor: Color { .pink }
-
     var connectionStatus: MusicServiceConnectionStatus {
         switch manager.authorizationStatus {
         case .authorized:
@@ -33,10 +28,6 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
         manager.requestAuthorization()
     }
 
-    func disconnect() {
-        manager.stopMonitoring()
-    }
-
     var nowPlaying: UnifiedTrack? {
         guard !manager.nowPlayingTitle.isEmpty else { return nil }
         return UnifiedTrack(
@@ -49,11 +40,6 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
             durationSeconds: manager.durationSeconds
         )
     }
-
-    var isPlaying: Bool { manager.isPlaying }
-    var progressFraction: Float { manager.progressFraction }
-    var currentTimeString: String { manager.currentTimeString }
-    var totalTimeString: String { manager.totalTimeString }
 
     func togglePlayPause() async { await manager.togglePlayPause() }
     func next() async { await manager.nextTrack() }
@@ -99,9 +85,6 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
             )
         }
     }
-
-    var isLibraryLoading: Bool { manager.libraryLoading }
-    var libraryError: String? { manager.libraryErrorMessage }
 
     func refreshLibrary() async { await manager.refreshLibrary() }
 
@@ -175,12 +158,5 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
         await manager.createPlaylist(name: name, songIDs: trackNativeIDs)
     }
 
-    var bassLevel: Float { manager.bassLevel }
-    var midLevel: Float { manager.midLevel }
-    var trebleLevel: Float { manager.trebleLevel }
-    var beatIntensity: Float { manager.beatIntensity }
-    var overallLevel: Float { manager.overallLevel }
-
-    func updateFrame() { manager.updateFrame() }
 }
 #endif

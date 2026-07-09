@@ -1,4 +1,29 @@
+import Metal
 import simd
+
+enum MetalLibraryCache {
+    nonisolated(unsafe) private static var defaultLibrary: MTLLibrary?
+
+    static func bundledDefaultLibrary(device: MTLDevice) -> MTLLibrary? {
+        if let cached = defaultLibrary { return cached }
+        let library = device.makeDefaultLibrary()
+        defaultLibrary = library
+        return library
+    }
+}
+
+/// Radical-inverse Halton sample in `[0, 1)`.
+func haltonSample(_ index: UInt32, base: UInt32) -> Float {
+    var result: Float = 0
+    var fraction: Float = 1
+    var i = index
+    while i > 0 {
+        fraction /= Float(base)
+        result += fraction * Float(i % base)
+        i /= base
+    }
+    return result
+}
 
 /// Convert a unit quaternion (x, y, z, w) to a 4×4 rotation matrix.
 func matrix4x4_from_quaternion(_ q: simd_quatf) -> matrix_float4x4 {

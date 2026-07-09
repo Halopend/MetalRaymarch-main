@@ -300,8 +300,8 @@ extension Renderer {
         // visionOS path animates ambient time-motion — dither, spring vibration,
         // light-orbit drift — matching the Mac/iOS path (RaymarchRenderView).
         let frameTime = Float(CACurrentMediaTime() - renderStartTime)
-        let precomputedFractal = Self.makePrecomputedFractal(from: settingsSnapshot)
-        let precomputedLighting = Self.makePrecomputedLighting(
+        let precomputedFractal = RenderPrecompute.makePrecomputedFractal(from: settingsSnapshot)
+        let precomputedLighting = RenderPrecompute.makePrecomputedLighting(
             time: frameTime,
             lightingMode: settingsSnapshot.lightingMode,
             audioLevel: settingsSnapshot.audioLevel,
@@ -312,8 +312,8 @@ extension Renderer {
             vibrance: settingsSnapshot.colorSchemeParams.vibrance,
             lightingSoftness: settingsSnapshot.lightingSoftness
         )
-        let precomputedAudio = Self.makePrecomputedAudio(from: settingsSnapshot)
-        var precomputedFog = Self.makePrecomputedFog(from: settingsSnapshot)
+        let precomputedAudio = RenderPrecompute.makePrecomputedAudio(from: settingsSnapshot)
+        var precomputedFog = RenderPrecompute.makePrecomputedFog(from: settingsSnapshot)
         // Zoom fog compensation (Settings toggle, default off): fog operates on
         // MODEL-space march distance, so on zoom-out the fog sphere's world radius
         // shrinks with the model and washes out the fractal — starting as soon as
@@ -322,7 +322,7 @@ extension Renderer {
         // zoom-out range — a no-op at scale >= 1 (zoom-in unaffected). (Was
         // previously hardcoded on for the Kleinian family only, and briefly keyed
         // to the unrelated 0.15 horizon-lift floor.)
-        precomputedFog = Self.applyZoomFogCompensation(
+        precomputedFog = RenderPrecompute.applyZoomFogCompensation(
             precomputedFog,
             enabled: settingsSnapshot.zoomFogCompensationEnabled,
             effectiveScale: effectiveScale)

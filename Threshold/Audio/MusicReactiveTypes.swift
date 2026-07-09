@@ -78,8 +78,8 @@ struct LFOSettings: Codable, Hashable, Sendable {
     var shape: LFOShape = .sine
 
     mutating func sanitizeInPlace() {
-        frequency = max(0.01, min(5.0, frequency))
-        amplitude = max(0.0, min(1.0, amplitude))
+        frequency = frequency.clamped(to: 0.01...5.0)
+        amplitude = amplitude.clamped(to: 0.0...1.0)
     }
 
     static let `default` = LFOSettings()
@@ -480,9 +480,9 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
     }
 
     mutating func sanitizeInPlace() {
-        amount = max(-3.0, min(3.0, amount))
-        smoothingWindow = max(0.0, min(2.0, smoothingWindow))
-        hybridCombo = max(0.0, min(1.0, hybridCombo))
+        amount = amount.clamped(to: -3.0...3.0)
+        smoothingWindow = smoothingWindow.clamped(to: 0.0...2.0)
+        hybridCombo = hybridCombo.clamped(to: 0.0...1.0)
         lfo.sanitizeInPlace()
     }
 

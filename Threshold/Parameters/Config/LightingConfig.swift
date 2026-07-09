@@ -25,31 +25,7 @@ struct LightingConfig: Codable, Equatable, Sendable {
     var polarRotationEffect: PolarRotationEffect = PolarRotationEffect()
     var juliaDriftEffect: JuliaDriftEffect = JuliaDriftEffect()
 
-    init(lightingPreset: LightingPreset = .off,
-         lightVariationRate: Float = 0.5,
-         hueRotationEffect: HueRotationEffect = HueRotationEffect(),
-         pulseEffect: PulseEffect = PulseEffect(),
-         glowEffect: GlowEffect = GlowEffect(),
-         bloomEffect: BloomEffect = BloomEffect(),
-         fogEffect: FogEffect = FogEffect(),
-         gradientCycleEffect: GradientCycleEffect = GradientCycleEffect(),
-         linearRailEffect: LinearRailEffect = LinearRailEffect(),
-         beatFlashEffect: BeatFlashEffect = BeatFlashEffect(),
-         polarRotationEffect: PolarRotationEffect = PolarRotationEffect(),
-         juliaDriftEffect: JuliaDriftEffect = JuliaDriftEffect()) {
-        self.lightingPreset = lightingPreset
-        self.lightVariationRate = lightVariationRate
-        self.hueRotationEffect = hueRotationEffect
-        self.pulseEffect = pulseEffect
-        self.glowEffect = glowEffect
-        self.bloomEffect = bloomEffect
-        self.fogEffect = fogEffect
-        self.gradientCycleEffect = gradientCycleEffect
-        self.linearRailEffect = linearRailEffect
-        self.beatFlashEffect = beatFlashEffect
-        self.polarRotationEffect = polarRotationEffect
-        self.juliaDriftEffect = juliaDriftEffect
-    }
+    init() {}
 
     enum CodingKeys: String, CodingKey {
         case lightingPreset, lightVariationRate, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect

@@ -745,8 +745,8 @@ final class ThresholdMacRenderer {
         // `writeUniforms` so `makeUniforms` can bake it into the projection.
         if temporalPass != nil {
             haltonIndex = haltonIndex &+ 1
-            let jx = Self.halton(haltonIndex, base: 2) - 0.5
-            let jy = Self.halton(haltonIndex, base: 3) - 0.5
+            let jx = haltonSample(haltonIndex, base: 2) - 0.5
+            let jy = haltonSample(haltonIndex, base: 3) - 0.5
             currentJitterPixels = SIMD2<Float>(jx, jy)
             let w = Float(max(temporalUpscaler.inputSize.width, 1))
             let h = Float(max(temporalUpscaler.inputSize.height, 1))
@@ -1018,21 +1018,6 @@ final class ThresholdMacRenderer {
         return descriptor
     }
 
-    /// Mirrors the visionOS `FunctionConstantConfig.specializedMandelbulbPower`:
-    /// returns the integer Mandelbulb power for `fastPowR` dead-code elimination
-    /// when the power is a near-integer from the supported set, else `nil`.
-    private static func specializedMandelbulbPower(fractalType: FractalModelType,
-                                                   formulaParams: FormulaParams) -> Int32? {
-        guard fractalType == .mandelbulb else { return nil }
-        let rawPower = FormulaCatalog.getParam(formulaParams, index: 0)
-        let rounded = roundf(rawPower)
-        guard abs(rawPower - rounded) < 0.01,
-              [2, 3, 4, 5, 6, 8, 10, 12, 16].contains(Int(rounded)) else {
-            return nil
-        }
-        return Int32(rounded)
-    }
-
     /// Picks the function-constant–specialized `fragmentShaderMono` pipeline for
     /// the current settings when available, otherwise the generic pipeline.
     /// Kicks off an async build the first time a configuration is seen so future
@@ -1050,7 +1035,7 @@ final class ThresholdMacRenderer {
         let raySteps = Int32(settings.maxRaySteps)
         let fractalType = settings.fractalType.rawValue
         let colorIterations = Int32(settings.colorIterations)
-        let power = Self.specializedMandelbulbPower(
+        let power = FormulaCatalog.specializedMandelbulbPower(
             fractalType: settings.fractalType,
             formulaParams: settings.formulaParams
         )
@@ -1120,7 +1105,7 @@ final class ThresholdMacRenderer {
         // `case FractalTypeCustom` arm). Built-ins resolve identically against it.
         // `customLibrary` is snapshotted together with the key's hash in
         // resolveActivePipeline, so the pipeline and its `CX{hash}_` key agree.
-        guard let library = customLibrary ?? device.makeDefaultLibrary(),
+        guard let library = customLibrary ?? MetalLibraryCache.bundledDefaultLibrary(device: device),
               let vertexFunction = library.makeFunction(name: "screenshotVertexShader") else {
             cache.failBuild(key)
             return
@@ -1507,7 +1492,7 @@ final class ThresholdMacRenderer {
                                                hasActiveAudioSources: Bool,
                                                deltaTime: Float) {
         guard isAudioMode, hasActiveAudioSources, settings.fractalAudioReactiveEnabled else {
-            clearMusicReactiveLayersIfNeeded(appModel: appModel, settings: settings)
+            musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
             return
         }
 
@@ -1523,7 +1508,7 @@ final class ThresholdMacRenderer {
         // sanitization; bail out to prevent musicReactiveEngine from amplifying it.
         guard bass.isFinite, mid.isFinite, treble.isFinite, beat.isFinite, overall.isFinite else {
             renderLogger.error("Non-finite band level in updateMusicReactiveParameters — skipping engine dispatch")
-            clearMusicReactiveLayersIfNeeded(appModel: appModel, settings: settings)
+            musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
             return
         }
 
@@ -1532,10 +1517,6 @@ final class ThresholdMacRenderer {
                                     settings: settings,
                                     deltaTime: deltaTime,
                                     pipeline: appModel.parameterPipeline)
-    }
-
-    private func clearMusicReactiveLayersIfNeeded(appModel: AppModel, settings: RenderSettings) {
-        musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
     }
 
     /// Reads the Sudden Motion Sensor and injects tilt as orbit input when
@@ -1861,7 +1842,7 @@ final class ThresholdMacRenderer {
                                             colorPixelFormat: MTLPixelFormat,
                                             depthPixelFormat: MTLPixelFormat,
                                             vertexDescriptor: MTLVertexDescriptor) throws -> MTLRenderPipelineState {
-        guard let library = device.makeDefaultLibrary(),
+        guard let library = MetalLibraryCache.bundledDefaultLibrary(device: device),
               let vertexFunction = library.makeFunction(name: "screenshotVertexShader") else {
                         throw SetupError.metalLibraryUnavailable
         }
@@ -1885,7 +1866,7 @@ final class ThresholdMacRenderer {
     /// drawable. Single-view, no vertex/depth attachments — the vertex shader
     /// generates an oversized triangle from `vertex_id`.
     private static func buildBlitPipeline(device: MTLDevice, colorPixelFormat: MTLPixelFormat) -> MTLRenderPipelineState? {
-        guard let library = device.makeDefaultLibrary(),
+        guard let library = MetalLibraryCache.bundledDefaultLibrary(device: device),
               let vertexFunction = library.makeFunction(name: "macBlitVertex"),
               let fragmentFunction = library.makeFunction(name: "macBlitFragment") else {
             return nil
@@ -1904,7 +1885,7 @@ final class ThresholdMacRenderer {
     /// and writes screen-space motion into an `rg16Float` target for the
     /// temporal scaler. No depth attachment.
     private static func buildMotionPipeline(device: MTLDevice) -> MTLRenderPipelineState? {
-        guard let library = device.makeDefaultLibrary(),
+        guard let library = MetalLibraryCache.bundledDefaultLibrary(device: device),
               let vertexFunction = library.makeFunction(name: "macBlitVertex"),
               let fragmentFunction = library.makeFunction(name: "macMotionFragment") else {
             return nil
@@ -1917,20 +1898,6 @@ final class ThresholdMacRenderer {
         descriptor.rasterSampleCount = 1
         descriptor.colorAttachments[0].pixelFormat = MacTemporalUpscaler.motionFormat
         return try? device.makeRenderPipelineState(descriptor: descriptor)
-    }
-
-    /// Radical-inverse Halton sample in `[0, 1)` — sub-pixel jitter sequence for
-    /// temporal upscaling (base 2 for X, base 3 for Y).
-    private static func halton(_ index: UInt32, base: UInt32) -> Float {
-        var result: Float = 0
-        var fraction: Float = 1
-        var i = index
-        while i > 0 {
-            fraction /= Float(base)
-            result += fraction * Float(i % base)
-            i /= base
-        }
-        return result
     }
 
     private static func buildMetalVertexDescriptor() -> MTLVertexDescriptor {

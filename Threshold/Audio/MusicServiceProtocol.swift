@@ -77,8 +77,7 @@ struct UnifiedTrack: Identifiable, Equatable, Hashable {
 
     /// Convenience: formatted duration
     var durationString: String {
-        let total = Int(durationSeconds)
-        return String(format: "%d:%02d", total / 60, total % 60)
+        DisplayFormat.minutesSeconds(durationSeconds)
     }
 
     /// Cross-service identifier that uniquely identifies this track.
@@ -210,6 +209,35 @@ protocol MusicServiceProvider: AnyObject {
 
     /// Called every frame to advance beat-sync / audio analysis.
     func updateFrame()
+}
+
+extension AppleMusicServiceAdapter {
+    var serviceID: String { "appleMusic" }
+    var displayName: String { "Apple Music" }
+    var iconName: String { "apple.logo" }
+    var accentColor: Color { .pink }
+
+    var isPlaying: Bool { manager.isPlaying }
+    var progressFraction: Float { manager.progressFraction }
+    var currentTimeString: String { manager.currentTimeString }
+    var totalTimeString: String { manager.totalTimeString }
+
+    var isLibraryLoading: Bool { manager.libraryLoading }
+    var libraryError: String? { manager.libraryErrorMessage }
+
+    var bassLevel: Float { manager.bassLevel }
+    var midLevel: Float { manager.midLevel }
+    var trebleLevel: Float { manager.trebleLevel }
+    var beatIntensity: Float { manager.beatIntensity }
+    var overallLevel: Float { manager.overallLevel }
+
+    func disconnect() {
+        manager.stopMonitoring()
+    }
+
+    func updateFrame() {
+        manager.updateFrame()
+    }
 }
 
 // MARK: - Default implementations

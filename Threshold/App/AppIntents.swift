@@ -347,7 +347,7 @@ struct SetAudioSensitivityIntent: AppIntent {
             return .result(dialog: "Threshold app not available")
         }
 
-        let clamped = max(0, min(100, percent))
+        let clamped = percent.clamped(to: 0...100)
         appModel.renderSettings.fractalAudioAmount = Float(clamped) / 100.0
         return .result(dialog: "Audio sensitivity set to \(clamped)%")
     }

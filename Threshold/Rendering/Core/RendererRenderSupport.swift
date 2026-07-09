@@ -815,7 +815,7 @@ extension Renderer {
         // skips it entirely. Ramp from 0 the moment any upscale engages
         // (scale=1.0) up to ~0.95 at the most aggressive scale (0.33) so the
         // spatial-upscaled image stays crisp across the whole slider range.
-        let upscaleAmount = max(0.0, min(1.0, (1.0 - resolutionScale) / 0.67))
+        let upscaleAmount = ((1.0 - resolutionScale) / 0.67).clamped(to: 0.0...1.0)
         var params = MetalFXResolveParams()
         params.rcasStrength = upscaleAmount * 0.95
 

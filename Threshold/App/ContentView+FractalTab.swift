@@ -601,27 +601,20 @@ extension ContentView {
     // Defaults reproduce the renderer's prior behavior, so an untouched panel is
     // a no-op.
 
-    /// Compact slider for the 2-column Acceleration grid: title + value on one
-    /// line, slider below. The longer explanation moves to a hover/gaze tooltip
-    /// so the panel stays short.
     private func accelSliderCompact(_ title: String,
                                     value: Float,
                                     range: ClosedRange<Float>,
                                     display: String,
                                     help: String,
                                     onChange: @escaping (Float) -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 4) {
-                Text(title).font(.caption).lineLimit(1).minimumScaleFactor(0.85)
-                Spacer(minLength: 4)
-                Text(display).font(.caption.weight(.bold)).monospacedDigit()
-                    .foregroundStyle(display == "Off" ? Color.secondary : Color.cyan)
-            }
-            Slider(value: Binding(get: { value }, set: onChange), in: range)
-                .tint(.cyan)
-                .controlSize(.small)
-        }
-        .help(help)
+        CompactValueSlider(
+            title: title,
+            value: Binding(get: { value }, set: onChange),
+            range: range,
+            display: display,
+            tint: .cyan,
+            helpText: help
+        )
     }
 
     /// Compact toggle for the horizontal toggle grid. Explanation in a tooltip.
@@ -656,33 +649,53 @@ extension ContentView {
 
             // ── Sliders, two per row. Foveation is Adaptive-Compute-only. ──
             LazyVGrid(columns: twoCol, alignment: .leading, spacing: 10) {
-                accelSliderCompact("Over-Relaxation",
-                            value: cache.quality.overRelaxationMax, range: 1.0...1.6,
-                            display: String(format: "%.2f×", cache.quality.overRelaxationMax),
-                            help: "How big a step the march takes in open space (Keinert enhanced sphere tracing). Higher = faster; lower = sharper on thin features. 1.0 = plain conservative tracing.") { v in
-                    cache.quality.overRelaxationMax = v; cache.push(\.overRelaxationMax, value: v)
-                }
+                CompactValueSlider(
+                    title: "Over-Relaxation",
+                    value: Binding(
+                        get: { cache.quality.overRelaxationMax },
+                        set: { cache.quality.overRelaxationMax = $0; cache.push(\.overRelaxationMax, value: $0) }
+                    ),
+                    range: 1.0...1.6,
+                    display: String(format: "%.2f×", cache.quality.overRelaxationMax),
+                    tint: .cyan,
+                    helpText: "How big a step the march takes in open space (Keinert enhanced sphere tracing). Higher = faster; lower = sharper on thin features. 1.0 = plain conservative tracing."
+                )
 
-                accelSliderCompact("Cone Marching",
-                            value: cache.quality.coneMarchStrength, range: 0...1,
-                            display: cache.quality.coneMarchStrength < 0.01 ? "Off" : "\(Int((cache.quality.coneMarchStrength * 100).rounded()))%",
-                            help: "Stops each ray within its on-screen pixel footprint, so distant geometry needs far fewer steps. Higher = faster, but inflates distant silhouettes.") { v in
-                    cache.quality.coneMarchStrength = v; cache.push(\.coneMarchStrength, value: v)
-                }
+                CompactValueSlider(
+                    title: "Cone Marching",
+                    value: Binding(
+                        get: { cache.quality.coneMarchStrength },
+                        set: { cache.quality.coneMarchStrength = $0; cache.push(\.coneMarchStrength, value: $0) }
+                    ),
+                    range: 0...1,
+                    display: cache.quality.coneMarchStrength < 0.01 ? "Off" : "\(Int((cache.quality.coneMarchStrength * 100).rounded()))%",
+                    tint: .cyan,
+                    helpText: "Stops each ray within its on-screen pixel footprint, so distant geometry needs far fewer steps. Higher = faster, but inflates distant silhouettes."
+                )
 
-                accelSliderCompact("Distance Falloff",
-                            value: cache.quality.distanceLODStrength, range: 0...1,
-                            display: cache.quality.distanceLODStrength < 0.01 ? "Off" : "\(Int((cache.quality.distanceLODStrength * 100).rounded()))%",
-                            help: "Faraway geometry uses fewer fractal iterations, where the lost detail is already sub-pixel. Speeds up deep scenes without inflating silhouettes the way cone marching does.") { v in
-                    cache.quality.distanceLODStrength = v; cache.push(\.distanceLODStrength, value: v)
-                }
+                CompactValueSlider(
+                    title: "Distance Falloff",
+                    value: Binding(
+                        get: { cache.quality.distanceLODStrength },
+                        set: { cache.quality.distanceLODStrength = $0; cache.push(\.distanceLODStrength, value: $0) }
+                    ),
+                    range: 0...1,
+                    display: cache.quality.distanceLODStrength < 0.01 ? "Off" : "\(Int((cache.quality.distanceLODStrength * 100).rounded()))%",
+                    tint: .cyan,
+                    helpText: "Faraway geometry uses fewer fractal iterations, where the lost detail is already sub-pixel. Speeds up deep scenes without inflating silhouettes the way cone marching does."
+                )
 
-                accelSliderCompact("Foveation",
-                            value: cache.quality.foveationStrength, range: 0...1,
-                            display: cache.quality.foveationStrength < 0.01 ? "Off" : "\(Int((cache.quality.foveationStrength * 100).rounded()))%",
-                            help: "Peripheral tiles march fewer steps, ramping from the center outward. Adaptive Compute renderer mode only.") { v in
-                    cache.quality.foveationStrength = v; cache.push(\.foveationStrength, value: v)
-                }
+                CompactValueSlider(
+                    title: "Foveation",
+                    value: Binding(
+                        get: { cache.quality.foveationStrength },
+                        set: { cache.quality.foveationStrength = $0; cache.push(\.foveationStrength, value: $0) }
+                    ),
+                    range: 0...1,
+                    display: cache.quality.foveationStrength < 0.01 ? "Off" : "\(Int((cache.quality.foveationStrength * 100).rounded()))%",
+                    tint: .cyan,
+                    helpText: "Peripheral tiles march fewer steps, ramping from the center outward. Adaptive Compute renderer mode only."
+                )
                 .disabled(!isCompute)
                 .opacity(isCompute ? 1 : 0.45)
             }
@@ -1078,41 +1091,51 @@ extension ContentView {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     VStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack { Text("Fractal Iterations"); Spacer(); Text("\(cache.quality.baseFractalIterations)").fontWeight(.bold).monospacedDigit() }
-                            Slider(value: Binding(
+                        CompactValueSlider(
+                            title: "Fractal Iterations",
+                            value: Binding(
                                 get: { Float(cache.quality.baseFractalIterations) },
                                 set: {
                                     cache.quality.baseFractalIterations = Int($0)
                                     cache.push(\.baseFractalIterations, value: Int($0))
                                     appModel.animationManager?.markIterationBudgetUserOverridden()
                                 }
-                            ), in: 4...32, step: 1, onEditingChanged: { isEditing in
+                            ),
+                            range: 4...32,
+                            step: 1,
+                            display: "\(cache.quality.baseFractalIterations)",
+                            tint: .cyan,
+                            onEditingChanged: { isEditing in
                                 guard !isEditing else { return }
                                 appModel.preparePipeline(
                                     iterations: cache.quality.baseFractalIterations,
                                     raySteps: cache.quality.baseMaxRaySteps
                                 )
-                            })
-                        }
+                            }
+                        )
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack { Text("Max Ray Steps"); Spacer(); Text("\(cache.quality.baseMaxRaySteps)").fontWeight(.bold).monospacedDigit() }
-                            Slider(value: Binding(
+                        CompactValueSlider(
+                            title: "Max Ray Steps",
+                            value: Binding(
                                 get: { Float(cache.quality.baseMaxRaySteps) },
                                 set: {
                                     cache.quality.baseMaxRaySteps = Int($0)
                                     cache.push(\.baseMaxRaySteps, value: Int($0))
                                     appModel.animationManager?.markIterationBudgetUserOverridden()
                                 }
-                            ), in: 32...200, step: 8, onEditingChanged: { isEditing in
+                            ),
+                            range: 32...200,
+                            step: 8,
+                            display: "\(cache.quality.baseMaxRaySteps)",
+                            tint: .cyan,
+                            onEditingChanged: { isEditing in
                                 guard !isEditing else { return }
                                 appModel.preparePipeline(
                                     iterations: cache.quality.baseFractalIterations,
                                     raySteps: cache.quality.baseMaxRaySteps
                                 )
-                            })
-                        }
+                            }
+                        )
                     }
                 }
 
@@ -1222,14 +1245,21 @@ extension ContentView {
             }
 
             if qualityGoalPreference == .advanced {
-                Slider(value: Binding(
-                    get: { cache.quality.resolutionScale },
-                    set: { newValue in
-                        let snapped = (newValue * 100).rounded() / 100
-                        cache.quality.resolutionScale = snapped
-                        cache.push(\.resolutionScale, value: snapped)
-                    }
-                ), in: ControlCatalog.resolutionScale.range, step: 0.01)
+                CompactValueSlider(
+                    title: "Resolution Scale",
+                    value: Binding(
+                        get: { cache.quality.resolutionScale },
+                        set: { newValue in
+                            let snapped = (newValue * 100).rounded() / 100
+                            cache.quality.resolutionScale = snapped
+                            cache.push(\.resolutionScale, value: snapped)
+                        }
+                    ),
+                    range: ControlCatalog.resolutionScale.range,
+                    step: 0.01,
+                    display: "\(Int((cache.quality.resolutionScale * 100).rounded()))%",
+                    tint: .cyan
+                )
                 .disabled(cache.quality.tileSize == 8)
             }
 

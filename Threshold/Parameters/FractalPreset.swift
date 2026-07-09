@@ -11,6 +11,12 @@ import Foundation
 import ImageIO
 import simd
 
+#if os(visionOS) || os(iOS)
+typealias PlatformImage = UIImage
+#elseif os(macOS)
+typealias PlatformImage = NSImage
+#endif
+
 /// Represents a saved preset with all render settings and a preview image
 struct FractalPreset: Codable, Identifiable {
     let id: UUID
@@ -599,12 +605,7 @@ struct FractalPreset: Codable, Identifiable {
         let mandelbulbPower: Int32? = {
             guard fractalType == .mandelbulb,
                   let rawPower = formulaParamValues?.first else { return nil }
-            let rounded = roundf(rawPower)
-            guard abs(rawPower - rounded) < 0.01,
-                  [2, 3, 4, 5, 6, 8, 10, 12, 16].contains(Int(rounded)) else {
-                return nil
-            }
-            return Int32(rounded)
+            return FormulaCatalog.specializedMandelbulbPower(rawPower: rawPower)
         }()
         
         return (
@@ -1079,12 +1080,10 @@ struct FractalPreset: Codable, Identifiable {
         }
     }
     
-    /// Get the thumbnail as a UIImage (visionOS/iOS) or NSImage (macOS)
+    /// Get the thumbnail as a platform image.
     /// Uses ImageIO to downsample to display size, avoiding full-resolution decoding.
     private static let thumbnailMaxPixelSize: CGFloat = 240 // 120pt @2x
-
-    #if os(visionOS) || os(iOS)
-    nonisolated(unsafe) private static let thumbnailCache = NSCache<NSString, UIImage>()
+    nonisolated(unsafe) private static let thumbnailCache = NSCache<NSString, PlatformImage>()
 
     static func clearThumbnailCache(for id: UUID) {
         thumbnailCache.removeObject(forKey: id.uuidString as NSString)
@@ -1094,7 +1093,7 @@ struct FractalPreset: Codable, Identifiable {
         thumbnailCache.removeAllObjects()
     }
 
-    var thumbnailImage: UIImage? {
+    var thumbnailImage: PlatformImage? {
         let cacheKey = id.uuidString as NSString
         guard let data = thumbnailData else {
             Self.thumbnailCache.removeObject(forKey: cacheKey)
@@ -1110,7 +1109,7 @@ struct FractalPreset: Codable, Identifiable {
         return decoded
     }
 
-    private static func downsampledImage(from data: Data) -> UIImage? {
+    private static func downsampledImage(from data: Data) -> PlatformImage? {
         let options: [CFString: Any] = [kCGImageSourceShouldCache: false]
         guard let source = CGImageSourceCreateWithData(data as CFData, options as CFDictionary) else {
             return nil
@@ -1124,52 +1123,12 @@ struct FractalPreset: Codable, Identifiable {
         guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, downsampleOptions as CFDictionary) else {
             return nil
         }
+        #if os(visionOS) || os(iOS)
         return UIImage(cgImage: cgImage)
-    }
-    #elseif os(macOS)
-    nonisolated(unsafe) private static let thumbnailCache = NSCache<NSString, NSImage>()
-
-    static func clearThumbnailCache(for id: UUID) {
-        thumbnailCache.removeObject(forKey: id.uuidString as NSString)
-    }
-
-    static func clearThumbnailCache() {
-        thumbnailCache.removeAllObjects()
-    }
-
-    var thumbnailImage: NSImage? {
-        let cacheKey = id.uuidString as NSString
-        guard let data = thumbnailData else {
-            Self.thumbnailCache.removeObject(forKey: cacheKey)
-            return nil
-        }
-        if let cached = Self.thumbnailCache.object(forKey: cacheKey) {
-            return cached
-        }
-        guard let decoded = Self.downsampledImage(from: data) else {
-            return nil
-        }
-        Self.thumbnailCache.setObject(decoded, forKey: cacheKey)
-        return decoded
-    }
-
-    private static func downsampledImage(from data: Data) -> NSImage? {
-        let options: [CFString: Any] = [kCGImageSourceShouldCache: false]
-        guard let source = CGImageSourceCreateWithData(data as CFData, options as CFDictionary) else {
-            return nil
-        }
-        let downsampleOptions: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceThumbnailMaxPixelSize: thumbnailMaxPixelSize,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceShouldCacheImmediately: true
-        ]
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, downsampleOptions as CFDictionary) else {
-            return nil
-        }
+        #elseif os(macOS)
         return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        #endif
     }
-    #endif
 }
 
 extension FractalPreset {

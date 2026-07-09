@@ -647,7 +647,7 @@ final class GestureController {
                     let op = ParameterOperation(
                         targetID: node.id,
                         source: .gesture,
-                        value: .absolute(newValue),
+                        value: newValue,
                         frameIndex: self.operationFrameCounter,
                         smoothing: ParameterOperationSmoothing(smoothingTime: GestureDefaults.gestureSmoothing)
                     )
@@ -790,7 +790,7 @@ final class GestureController {
             let op = ParameterOperation(
                 targetID: node.id,
                 source: .gesture,
-                value: .absolute(newValue),
+                value: newValue,
                 frameIndex: operationFrameCounter,
                 smoothing: ParameterOperationSmoothing(smoothingTime: GestureDefaults.gestureSmoothing)
             )
@@ -824,7 +824,7 @@ final class GestureController {
             let op = ParameterOperation(
                 targetID: ParameterTargetID.Core.fractalScale,
                 source: .gesture,
-                value: .absolute(newValue),
+                value: newValue,
                 frameIndex: operationFrameCounter
             )
             parameterPipeline.dispatchGesture([op], settings: settings)
@@ -1258,9 +1258,9 @@ final class GestureController {
 
                     let tripletSmoothing = ParameterOperationSmoothing(smoothingTime: GestureDefaults.gestureSmoothing)
                     let ops = [
-                        ParameterOperation(targetID: triplet.xNodeID, source: .gesture, value: .absolute(state.startValues.x), frameIndex: operationFrameCounter, smoothing: tripletSmoothing),
-                        ParameterOperation(targetID: triplet.yNodeID, source: .gesture, value: .absolute(state.startValues.y), frameIndex: operationFrameCounter, smoothing: tripletSmoothing),
-                        ParameterOperation(targetID: triplet.zNodeID, source: .gesture, value: .absolute(state.startValues.z), frameIndex: operationFrameCounter, smoothing: tripletSmoothing),
+                        ParameterOperation(targetID: triplet.xNodeID, source: .gesture, value: state.startValues.x, frameIndex: operationFrameCounter, smoothing: tripletSmoothing),
+                        ParameterOperation(targetID: triplet.yNodeID, source: .gesture, value: state.startValues.y, frameIndex: operationFrameCounter, smoothing: tripletSmoothing),
+                        ParameterOperation(targetID: triplet.zNodeID, source: .gesture, value: state.startValues.z, frameIndex: operationFrameCounter, smoothing: tripletSmoothing),
                     ]
                     parameterPipeline.dispatchGesture(ops, settings: settings)
                     UsageAnalytics.shared.trackHandGestureUsed()
@@ -1311,7 +1311,7 @@ final class GestureController {
                 let op = ParameterOperation(
                     targetID: node.id,
                     source: .gesture,
-                    value: .absolute(state.startValue),
+                    value: state.startValue,
                     frameIndex: operationFrameCounter,
                     smoothing: ParameterOperationSmoothing(smoothingTime: GestureDefaults.gestureSmoothing)
                 )

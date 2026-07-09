@@ -293,7 +293,6 @@
 				Rendering/Core/RendererLoopSupport.swift,
 				Rendering/Core/RendererPipelineCache.swift,
 				Rendering/Core/RendererPipelineHelpers.swift,
-				Rendering/Core/RendererPrecomputeHelpers.swift,
 				Rendering/Core/RendererRenderSupport.swift,
 				Rendering/Core/RendererScreenshot.swift,
 				Rendering/Core/RendererSetupAndSession.swift,
@@ -316,7 +315,6 @@
 				Rendering/Core/RendererLoopSupport.swift,
 				Rendering/Core/RendererPipelineCache.swift,
 				Rendering/Core/RendererPipelineHelpers.swift,
-				Rendering/Core/RendererPrecomputeHelpers.swift,
 				Rendering/Core/RendererRenderSupport.swift,
 				Rendering/Core/RendererScreenshot.swift,
 				Rendering/Core/RendererSetupAndSession.swift,
@@ -1248,6 +1246,7 @@
 		D7D716B72CEAC4B200CEEA51 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD)";
 				ASSETCATALOG_COMPILER_APPICON_NAME = OSX;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdMac.entitlements;
@@ -1287,6 +1286,7 @@
 		D7D716B82CEAC4B200CEEA51 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD)";
 				ASSETCATALOG_COMPILER_APPICON_NAME = OSX;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdMac.entitlements;

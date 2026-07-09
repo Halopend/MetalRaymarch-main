@@ -313,7 +313,7 @@ final class UISettingsCache {
         let op = ParameterOperation(
             targetID: targetID,
             source: .slider,
-            value: .absolute(value),
+            value: value,
             frameIndex: 0
         )
         parameterPipeline?.dispatchUI([op], cache: self)
@@ -483,11 +483,11 @@ final class UISettingsCache {
 
 extension UISettingsCache {
     static func blendValueToSlider(_ value: Float) -> Float {
-        sqrt(max(0.0, min(1.0, value)))
+        sqrt(value.clamped(to: 0.0...1.0))
     }
 
     static func blendSliderToValue(_ slider: Float) -> Float {
-        let clamped = max(0.0, min(1.0, slider))
+        let clamped = slider.clamped(to: 0.0...1.0)
         return clamped * clamped
     }
 }

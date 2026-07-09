@@ -298,7 +298,7 @@ final class MusicReactiveEngine {
                         source: .audio,
                         // The music layer is itself additive, so it must receive the
                         // raw offset to apply on top of the current base value.
-                        value: .absolute(finalOffset),
+                        value: finalOffset,
                         frameIndex: frameIndex,
                         smoothing: ParameterOperationSmoothing(
                             smoothingTime: mapping.smoothingTime
@@ -392,7 +392,7 @@ final class MusicReactiveEngine {
                     spaceWarpSlot: mapping.target.spaceWarpSlot,
                     spaceWarpField: mapping.spaceWarpField,
                     smoothingTime: max(0.02, mapping.smoothingWindow),
-                    hybridCombo: max(0.0, min(1.0, mapping.hybridCombo)),
+                    hybridCombo: mapping.hybridCombo.clamped(to: 0.0...1.0),
                     lfo: mapping.lfo
                 )
             )

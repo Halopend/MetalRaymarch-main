@@ -794,9 +794,6 @@ actor Renderer {
         return mtlVertexDescriptor
     }
 
-    /// Cached Metal library for static pipeline builds — avoids redundant `makeDefaultLibrary()` calls.
-    nonisolated(unsafe) static var _cachedLibrary: MTLLibrary?
-
     // Pipeline cache telemetry (debug-only logging in selection paths)
     var renderPipelineCacheHits: Int = 0
     var renderPipelineCacheMisses: Int = 0

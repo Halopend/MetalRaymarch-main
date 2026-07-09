@@ -97,7 +97,7 @@ extension Renderer {
         // dispatch arm; the cone family gate excludes them anyway. Keep it simple.
         guard fractalType != .custom else { return nil }
         let formulaParams = request?.formulaParams ?? appModel.renderSettings.formulaParams
-        let mandelbulbPower = FunctionConstantConfig.specializedMandelbulbPower(
+        let mandelbulbPower = FormulaCatalog.specializedMandelbulbPower(
             fractalType: fractalType,
             formulaParams: formulaParams
         )
@@ -159,6 +159,8 @@ extension Renderer {
                                              computeMissKey: String? = nil,
                                              renderSource: String? = nil,
                                              computeSource: String? = nil) {
+        guard RENDERER_DEBUG else { return }
+
         if let renderHit {
             if renderHit { renderPipelineCacheHits += 1 } else { renderPipelineCacheMisses += 1 }
         }
@@ -178,7 +180,6 @@ extension Renderer {
             computePipelineSelectionCounts[computeSource, default: 0] += 1
         }
 
-        guard RENDERER_DEBUG else { return }
         let now = CFAbsoluteTimeGetCurrent()
 
         if now - lastPipelineTelemetryLogTime >= 5.0 {
@@ -330,7 +331,7 @@ extension Renderer {
             return pipelineState
         }
 
-        let mandelbulbPower = FunctionConstantConfig.specializedMandelbulbPower(
+        let mandelbulbPower = FormulaCatalog.specializedMandelbulbPower(
             fractalType: fractalType,
             formulaParams: appModel.renderSettings.formulaParams
         )
@@ -487,7 +488,7 @@ extension Renderer {
         let fractalType = request?.fractalType ?? appModel.renderSettings.fractalType
         let formulaParams = request?.formulaParams ?? appModel.renderSettings.formulaParams
         let activeCustomHash = fractalType == .custom ? customShaderHash : nil
-        let mandelbulbPower = FunctionConstantConfig.specializedMandelbulbPower(
+        let mandelbulbPower = FormulaCatalog.specializedMandelbulbPower(
             fractalType: fractalType,
             formulaParams: formulaParams
         )
@@ -908,19 +909,10 @@ extension Renderer {
         let fractalType = request?.fractalType ?? appModel.renderSettings.fractalType
         let formulaParams = request?.formulaParams ?? appModel.renderSettings.formulaParams
         let activeCustomHash = fractalType == .custom ? customShaderHash : nil
-        // Extract Mandelbulb integer power for compile-time specialization
-        let mbPowerRaw = fractalType == .mandelbulb
-            ? FormulaCatalog.getParam(formulaParams, index: 0)
-            : Float(0)
-        let mbPowerInt: Int32? = {
-            let rounded = roundf(mbPowerRaw)
-            // Only bake integer powers that fastPowR has explicit fast paths for
-            if abs(mbPowerRaw - rounded) < 0.01,
-               [2,3,4,5,6,8,10,12,16].contains(Int(rounded)) {
-                return Int32(rounded)
-            }
-            return nil
-        }()
+        let mbPowerInt = FormulaCatalog.specializedMandelbulbPower(
+            fractalType: fractalType,
+            formulaParams: formulaParams
+        )
         let powerKey = mbPowerInt.map { "P\($0)" } ?? ""
         let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
         let packetEnabled = appModel.renderSettings.coherentPacketEnabled
