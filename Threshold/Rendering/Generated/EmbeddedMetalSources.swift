@@ -303,6 +303,10 @@ typedef struct
     vector_float3 containMinGrid; // room AABB min, grid texel coords
     vector_float3 containMaxGrid; // room AABB max, grid texel coords
     vector_float3 cellModel;      // model units per grid cell, per axis (metric box SDF)
+    // Headset/camera position in model space. Shell mode uses this to keep the
+    // shell on the viewer-visible side of scanned surfaces instead of the
+    // mirrored "outside" side of the unsigned distance field.
+    vector_float3 viewerModel;
 } EnvScrunchParams;
 
 // === FRACTAL DISTANCE CACHE (conservative distance-field grid) ===
@@ -3069,6 +3073,19 @@ FORCE_INLINE float envContainBox(float3 pos, constant EnvScrunchParams& es) {
     return length(max(q, float3(0.0f))) + min(max(q.x, max(q.y, q.z)), 0.0f);
 }
 
+FORCE_INLINE float3 envScrunchGradient(float3 pos, constant EnvScrunchParams& es, device const half* grid) {
+    float h = max(min(es.cellModel.x, min(es.cellModel.y, es.cellModel.z)), 1e-3f);
+    float dx = envScrunchSample(pos + float3(h, 0, 0), es, grid)
+             - envScrunchSample(pos - float3(h, 0, 0), es, grid);
+    float dy = envScrunchSample(pos + float3(0, h, 0), es, grid)
+             - envScrunchSample(pos - float3(0, h, 0), es, grid);
+    float dz = envScrunchSample(pos + float3(0, 0, h), es, grid)
+             - envScrunchSample(pos - float3(0, 0, h), es, grid);
+    float3 g = float3(dx, dy, dz);
+    float len2 = dot(g, g);
+    return (len2 > 1e-8f) ? g * rsqrt(len2) : float3(0.0f, 1.0f, 0.0f);
+}
+
 // Environment Scrunch: pulls the fractal into a shell that hugs the scanned
 // real-world surfaces (smooth union at a small standoff above them) while
 // keeping the surfaces themselves clear (smooth subtraction inside the
@@ -3089,11 +3106,16 @@ FORCE_INLINE float applyEnvScrunch(float d, float3 pos, FractalParams params) {
 
     if (es->mode == 1) {
         // SHELL: the fractal exists ONLY within the reach band of real
-        // surfaces — the inverse of Scrunch. Smooth intersection with the
-        // offset surface (e - band), so everything farther than Reach from a
-        // wall/object is cut away and the fractal coats the room; the same
-        // clearance carve keeps the surfaces themselves visible.
-        float cut = e - es->bandModel;              // > 0 outside the shell
+        // surfaces, and only on the viewer-visible side of those surfaces.
+        // The room scan is unsigned, so the raw band appears on both sides of
+        // a wall. Use the local distance-gradient to estimate the nearest
+        // surface and keep the side shared with the headset/camera.
+        float3 grad = envScrunchGradient(pos, *es, params.envGrid);
+        float viewerSide = dot(grad, es->viewerModel - pos) + e;
+        float sideCut = -viewerSide;                // > 0 on the hidden/back side
+        float bandCut = e - es->bandModel;          // > 0 outside the shell band
+        float ch = saturate(0.5f + 0.5f * (sideCut - bandCut) / k);
+        float cut = mix(bandCut, sideCut, ch) + k * ch * (1.0f - ch); // smax
         float h = saturate(0.5f + 0.5f * (cut - d) / k);
         float sc = mix(d, cut, h) + k * h * (1.0f - h);   // smax(d, cut)
         float b = es->carveModel - e;

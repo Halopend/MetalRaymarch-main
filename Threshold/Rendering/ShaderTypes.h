@@ -287,6 +287,10 @@ typedef struct
     vector_float3 containMinGrid; // room AABB min, grid texel coords
     vector_float3 containMaxGrid; // room AABB max, grid texel coords
     vector_float3 cellModel;      // model units per grid cell, per axis (metric box SDF)
+    // Headset/camera position in model space. Shell mode uses this to keep the
+    // shell on the viewer-visible side of scanned surfaces instead of the
+    // mirrored "outside" side of the unsigned distance field.
+    vector_float3 viewerModel;
 } EnvScrunchParams;
 
 // === FRACTAL DISTANCE CACHE (conservative distance-field grid) ===

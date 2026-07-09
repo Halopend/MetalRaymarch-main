@@ -274,7 +274,8 @@ extension Renderer {
         )
         let envScrunchParams = makeEnvScrunchParams(
             settingsSnapshot: settingsSnapshot,
-            modelMatrix: modelMatrix
+            modelMatrix: modelMatrix,
+            deviceTransform: deviceTransform
         )
 
         // One-time logging of device anchor to verify position tracking is working
@@ -509,12 +510,19 @@ extension Renderer {
     /// bake has been published yet.
     private func makeEnvScrunchParams(
         settingsSnapshot: RenderSettingsSnapshot,
-        modelMatrix: matrix_float4x4
+        modelMatrix: matrix_float4x4,
+        deviceTransform: matrix_float4x4
     ) -> EnvScrunchParams {
         guard settingsSnapshot.envScrunchEnabled,
               let grid = environmentSDF.withLock({ $0 }) else { return EnvScrunchParams() }
+        let viewerWorld = SIMD3<Float>(
+            deviceTransform.columns.3.x,
+            deviceTransform.columns.3.y,
+            deviceTransform.columns.3.z
+        )
         return settingsSnapshot.makeEnvScrunchParams(
             modelToWorld: modelMatrix,
+            viewerWorld: viewerWorld,
             gridOrigin: grid.originWorld,
             gridCell: grid.cellSize,
             gridAddress: grid.gpuAddress,

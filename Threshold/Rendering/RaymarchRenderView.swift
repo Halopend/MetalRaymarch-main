@@ -1826,6 +1826,7 @@ final class ThresholdMacRenderer {
                         // verification of the scrunch path.
                         envScrunch: settings.makeEnvScrunchParams(
                             modelToWorld: modelMatrix,
+                            viewerWorld: SIMD3<Float>(0, 0, 3),
                             gridOrigin: macEnvGrid?.originWorld ?? .zero,
                             gridCell: macEnvGrid?.cellSize ?? .zero,
                             gridAddress: macEnvGrid?.gpuAddress ?? 0,

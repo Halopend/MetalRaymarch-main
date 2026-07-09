@@ -167,6 +167,7 @@ extension RenderSettingsSnapshot {
     /// multiply; hug/carve/soft are fixed world-scale constants chosen to sit
     /// comfortably above the grid's cell size.
     func makeEnvScrunchParams(modelToWorld: matrix_float4x4,
+                              viewerWorld: SIMD3<Float>,
                               gridOrigin: SIMD3<Float>,
                               gridCell: SIMD3<Float>,
                               gridAddress: UInt64,
@@ -190,6 +191,8 @@ extension RenderSettingsSnapshot {
         p.hugModel = 0.15 * metersToModel    // bulge-shell standoff, meters
         p.carveModel = 0.08 * metersToModel  // clearance kept empty, meters
         p.metersToModel = metersToModel
+        let viewerModel4 = modelToWorld.inverse * SIMD4<Float>(viewerWorld.x, viewerWorld.y, viewerWorld.z, 1.0)
+        p.viewerModel = SIMD3<Float>(viewerModel4.x, viewerModel4.y, viewerModel4.z)
         // Bake far-clamp in model units — the shader's out-of-grid return.
         // Passed in from EnvironmentSDFGrid.clampFar by the callers so the
         // shader and the bake can never drift (TECH_DEBT.md #19).

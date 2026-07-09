@@ -203,6 +203,7 @@ struct EnvironmentSDFTests {
         func make(modelToWorld: matrix_float4x4 = matrix_identity_float4x4,
                   contain: SIMD3<Float> = SIMD3(1, 1, 1)) -> EnvScrunchParams {
             snap.makeEnvScrunchParams(modelToWorld: modelToWorld,
+                                      viewerWorld: .zero,
                                       gridOrigin: gridOrigin, gridCell: gridCell,
                                       gridAddress: 0xDEAD_BEEF,
                                       surfaceMinWorld: -contain, surfaceMaxWorld: contain,
@@ -239,6 +240,7 @@ struct EnvironmentSDFTests {
         settings.envScrunchContain = 0
         let p0 = settings.snapshot().makeEnvScrunchParams(
             modelToWorld: matrix_identity_float4x4,
+            viewerWorld: .zero,
             gridOrigin: gridOrigin, gridCell: gridCell, gridAddress: 0xDEAD_BEEF,
             surfaceMinWorld: SIMD3(-1, -1, -1), surfaceMaxWorld: SIMD3(1, 1, 1),
             farClampMeters: EnvironmentSDFGrid.clampFar)
@@ -247,6 +249,7 @@ struct EnvironmentSDFTests {
         // Grid address 0 → whole feature disabled (never dereferenced).
         let poff = settings.snapshot().makeEnvScrunchParams(
             modelToWorld: matrix_identity_float4x4,
+            viewerWorld: .zero,
             gridOrigin: gridOrigin, gridCell: gridCell, gridAddress: 0,
             surfaceMinWorld: SIMD3(-1, -1, -1), surfaceMaxWorld: SIMD3(1, 1, 1),
             farClampMeters: EnvironmentSDFGrid.clampFar)
