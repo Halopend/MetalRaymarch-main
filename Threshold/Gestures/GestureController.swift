@@ -363,7 +363,7 @@ final class GestureController {
     // MARK: - Special Gesture Processing
     
     private func processWindowPullGesture(deltaTime: Float) {
-        guard let settings = renderSettings else { return }
+        guard renderSettings != nil else { return }
 
         if windowPullState.cooldown > 0 {
             windowPullState.cooldown = max(0, windowPullState.cooldown - deltaTime)

@@ -73,12 +73,18 @@ build_ios()      { xcodebuild build "${COMMON_FLAGS[@]}" -scheme ThresholdiOS  -
 run_tests()      { xcodebuild clean test "${COMMON_FLAGS[@]}" "${TEST_FLAGS[@]}" -scheme ThresholdMac -destination 'platform=macOS'; }
 run_tests_fast() { xcodebuild test       "${COMMON_FLAGS[@]}" "${TEST_FLAGS[@]}" -scheme ThresholdMac -destination 'platform=macOS'; }
 regen_embeds()   { "$REPO_ROOT/Scripts/generate_metal_embeds.sh"; }
+check_embeds()   { "$REPO_ROOT/Scripts/generate_metal_embeds.sh" --check; }
+
+build_mac_checked()    { check_embeds; build_mac; }
+build_vision_checked() { check_embeds; build_vision; }
+build_ios_checked()    { check_embeds; build_ios; }
+run_tests_checked()    { check_embeds; run_tests; }
 
 case "${1:-mac}" in
-    mac)      build_mac ;;
-    vision)   build_vision ;;
-    ios)      build_ios ;;
-    test)     run_tests ;;
+    mac)      build_mac_checked ;;
+    vision)   build_vision_checked ;;
+    ios)      build_ios_checked ;;
+    test)     run_tests_checked ;;
     testfast) run_tests_fast ;;
     embeds)   regen_embeds ;;
     all)      regen_embeds && build_mac && build_vision && run_tests ;;

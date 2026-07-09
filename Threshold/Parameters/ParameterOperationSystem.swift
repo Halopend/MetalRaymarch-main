@@ -194,7 +194,6 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         let formulaBatch = ParameterNodeRegistry.shared.formulaBatch(for: cache.fractalType)
         if let node = formulaBatch.floatNodes.first(where: { $0.id == operation.targetID }) {
             node.bootstrapBaseIfNeeded(from: node.readValue(cache), timestamp: timestamp)
-            let current = node.resolvedValue(timestamp: timestamp)
             let incoming = operation.value
             let resolved = node.applyLayer(layer, value: incoming, smoothingTime: operation.smoothing.smoothingTime, timestamp: timestamp)
             node.writeValue(cache, resolved)
@@ -211,7 +210,6 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         }
 
         if let boolNode = formulaBatch.boolNodes.first(where: { $0.id == operation.targetID }) {
-            let current = boolNode.readValue(cache) ? 1 as Float : 0 as Float
             let newValue = operation.value
             boolNode.writeValue(cache, newValue >= 0.5)
             if debugTraceEnabled {
@@ -296,7 +294,6 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
             var stack = state.coreStacks[operation.targetID] ?? ParameterLayerStack(defaultValue: base, range: spec.range, timestamp: operation.timestamp)
             stack.setBaseIfNeeded(base, timestamp: operation.timestamp)
 
-            let current = stack.resolvedValue(at: operation.timestamp)
             let incoming = operation.value
             let effectiveSmoothTime = smoothingTime(for: spec.motionStrategy, requested: operation.smoothing.smoothingTime)
             let resolved = stack.apply(layer: layer, value: incoming, smoothingTime: effectiveSmoothTime, timestamp: operation.timestamp)

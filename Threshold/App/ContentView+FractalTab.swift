@@ -609,7 +609,7 @@ extension ContentView {
                                     onChange: @escaping (Float) -> Void) -> some View {
         CompactValueSlider(
             title: title,
-            value: Binding(get: { value }, set: onChange),
+            value: Binding(get: { value }, set: { newValue in onChange(newValue) }),
             range: range,
             display: display,
             tint: .cyan,
@@ -622,7 +622,7 @@ extension ContentView {
                                     isOn: Bool,
                                     help: String,
                                     onChange: @escaping (Bool) -> Void) -> some View {
-        Toggle(isOn: Binding(get: { isOn }, set: onChange)) {
+        Toggle(isOn: Binding(get: { isOn }, set: { newValue in onChange(newValue) })) {
             Text(title).font(.caption).lineLimit(1).minimumScaleFactor(0.85)
         }
         .toggleStyle(.switch)

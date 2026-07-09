@@ -824,6 +824,45 @@ struct SpaceWarpMusicFieldTests {
         #expect(op3.axis.y == 1.0)                  // clamped to axis range upper
     }
 
+    @Test("MusicReactiveMapping sanitizes runtime modulation inputs")
+    func mappingSanitizesAmountsAndSmoothing() {
+        var mapping = MusicReactiveMapping(
+            target: .glow,
+            source: .bass,
+            amount: 99,
+            isEnabled: true,
+            smoothingWindow: 9,
+            hybridCombo: -2
+        )
+
+        #expect(mapping.amount == 3.0)
+        #expect(mapping.smoothingWindow == 2.0)
+        #expect(mapping.hybridCombo == 0.0)
+
+        mapping.amount = -99
+        mapping.smoothingWindow = -9
+        mapping.hybridCombo = 9
+        mapping.sanitizeInPlace()
+
+        #expect(mapping.amount == -3.0)
+        #expect(mapping.smoothingWindow == 0.0)
+        #expect(mapping.hybridCombo == 1.0)
+    }
+
+    @Test("RenderSettings music mappings drop duplicate targets during assignment")
+    func renderSettingsMusicMappingsAreDeduplicated() {
+        let settings = RenderSettings()
+        settings.musicReactiveMappings = [
+            MusicReactiveMapping(target: .glow, source: .bass, amount: 1, isEnabled: true),
+            MusicReactiveMapping(target: .glow, source: .treble, amount: 2, isEnabled: true),
+            MusicReactiveMapping(target: .fog, source: .mid, amount: 1, isEnabled: false)
+        ]
+
+        let mappings = settings.musicReactiveMappings
+        #expect(mappings.map(\.target) == [.glow, .fog])
+        #expect(mappings.first?.source == .bass)
+    }
+
     @Test("musicFields exposes exactly the fields each transform actually has")
     func musicFieldsMatchTransform() {
         #expect(SpaceWarpKind.mirror.musicFields == [.strength])                       // no params, no axis

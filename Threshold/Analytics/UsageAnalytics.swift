@@ -304,8 +304,8 @@ final class UsageAnalytics {
         //     as "the whole app hangs / is completely laggy". Reading our own signed
         //     entitlements is the only reliable, non-throwing way to detect this.
         //  2. A user is signed into iCloud (token non-nil).
-        guard Self.hasCloudKitEntitlement,
-              FileManager.default.ubiquityIdentityToken != nil else {
+        guard Self.canUseCloudKit(hasEntitlement: Self.hasCloudKitEntitlement,
+                                  ubiquityIdentityToken: FileManager.default.ubiquityIdentityToken) else {
             return nil
         }
 
@@ -336,6 +336,10 @@ final class UsageAnalytics {
         return true
         #endif
     }()
+
+    nonisolated static func canUseCloudKit(hasEntitlement: Bool, ubiquityIdentityToken: Any?) -> Bool {
+        hasEntitlement && ubiquityIdentityToken != nil
+    }
 
     private func buildSnapshot() -> UsageSnapshot {
         let duration = totalSessionTime

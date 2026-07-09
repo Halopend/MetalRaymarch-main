@@ -46,7 +46,7 @@ final class MacSpecializedPipelineCache: Sendable {
     }
 
     func failBuild(_ key: String) {
-        state.withLock { $0.pending.remove(key) }
+        _ = state.withLock { $0.pending.remove(key) }
     }
 
     /// Drop every cached pipeline (and any in-flight build) whose key starts with

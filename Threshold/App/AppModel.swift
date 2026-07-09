@@ -609,11 +609,17 @@ class AppModel {
             doMerge()
         } else {
             // iCloud not resolved yet — merge once its root becomes available (one-shot).
-            var token: NSObjectProtocol?
-            token = NotificationCenter.default.addObserver(
+            final class OneShotObserverBox: @unchecked Sendable {
+                var token: NSObjectProtocol?
+            }
+            let observerBox = OneShotObserverBox()
+            observerBox.token = NotificationCenter.default.addObserver(
                 forName: StorageLocation.rootResolvedNotification, object: nil, queue: .main
-            ) { _ in
-                if let token { NotificationCenter.default.removeObserver(token) }
+            ) { [observerBox] _ in
+                if let token = observerBox.token {
+                    NotificationCenter.default.removeObserver(token)
+                    observerBox.token = nil
+                }
                 MainActor.assumeIsolated { doMerge() }
             }
         }

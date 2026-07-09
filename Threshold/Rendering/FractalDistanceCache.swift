@@ -22,7 +22,7 @@
 //
 
 import Foundation
-import Metal
+@preconcurrency import Metal
 import simd
 
 final class FractalDistanceCache {

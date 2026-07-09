@@ -1,5 +1,5 @@
 #if os(macOS) || os(iOS)
-import Metal
+@preconcurrency import Metal
 @preconcurrency import MetalKit
 import ModelIO
 import QuartzCore
