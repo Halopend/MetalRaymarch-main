@@ -484,6 +484,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         try c.encode(fractalScale, forKey: .fractalScale)
         try c.encode(baseFractalIterations, forKey: .baseFractalIterations)
         try c.encode(baseMaxRaySteps, forKey: .baseMaxRaySteps)
+        try c.encode(scale, forKey: .scale)
         try c.encode(positionX, forKey: .positionX)
         try c.encode(positionY, forKey: .positionY)
         try c.encode(positionZ, forKey: .positionZ)

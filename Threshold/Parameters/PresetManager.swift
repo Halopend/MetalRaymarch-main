@@ -549,7 +549,12 @@ class PresetManager {
 
     @discardableResult
     func importPreset(_ preset: FractalPreset) -> FractalPreset {
+        var preset = preset
         if let existingIndex = presets.firstIndex(where: { $0.id == preset.id }) {
+            // Overwriting an existing id is a content change — advance the merge
+            // clock so the iCloud newest-wins reconcile favors this edit. (Not on
+            // the merge/reconcile path itself, so no ping-pong.) TECH_DEBT #6.
+            preset.updatedAt = Date()
             presets[existingIndex] = preset
         } else {
             presets.insert(preset, at: 0)
