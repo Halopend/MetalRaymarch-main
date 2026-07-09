@@ -478,6 +478,15 @@ struct FractalGridView: View {
         selectedStaticSceneID = nil
         animationManager.currentScene = scene
         onLoadAnimationScene?(scene)
+#if os(visionOS)
+        if AppModel.shared?.immersiveSpaceState != .open {
+            NotificationCenter.default.post(
+                name: AppModel.requestOpenImmersiveSpaceNotification,
+                object: nil,
+                userInfo: ["sceneID": scene.id.uuidString]
+            )
+        }
+#endif
 
         if scene.keyframes.count == 1 {
             animationManager.jumpToKeyframe(0)

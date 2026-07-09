@@ -667,6 +667,13 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     var safetyBubbleRadius: Float?
     var safetyBubbleShape: Float?
     var safetyBubbleBlend: Float?
+
+    /// Scene-level domain transforms. Missing/nil means "no transforms" so
+    /// animation playback does not inherit the previous scene's transform stack.
+    var spaceWarpOps: [SpaceWarpOpValue]?
+
+    /// visionOS immersion intent. `true` = Mixed; nil/false = Immersive.
+    var mixedModeScene: Bool?
     
     /// Optional song that auto-plays when this scene starts
     var attachedSong: SongAttachment?
@@ -704,6 +711,7 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         case colorSchemeVibrance, colorSchemeCurve, colorSchemeShadows, colorSchemeHighlights
         case lightingSoftness
         case safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape, safetyBubbleBlend
+        case spaceWarpOps, mixedModeScene
         case attachedSong, playbackSpeedOverride, songFadeOutDuration, songFadeOutOffset
         case embeddedFormula
     }
@@ -722,6 +730,8 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         self.playbackMode = .forward
         self.createdAt = Date()
         self.modifiedAt = Date()
+        self.spaceWarpOps = nil
+        self.mixedModeScene = nil
     }
     
     /// Create scene with initial keyframe from current settings
@@ -734,6 +744,8 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         self.createdAt = Date()
         self.modifiedAt = Date()
         self.fractalType = fractalType
+        self.spaceWarpOps = nil
+        self.mixedModeScene = nil
     }
 
     // Custom Codable for backward compatibility: old saved scenes without
@@ -801,6 +813,8 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         safetyBubbleRadius    = try c.decodeIfPresent(Float.self, forKey: .safetyBubbleRadius)
         safetyBubbleShape     = try c.decodeIfPresent(Float.self, forKey: .safetyBubbleShape)
         safetyBubbleBlend     = try c.decodeIfPresent(Float.self, forKey: .safetyBubbleBlend)
+        spaceWarpOps          = try c.decodeIfPresent([SpaceWarpOpValue].self, forKey: .spaceWarpOps)
+        mixedModeScene        = try c.decodeIfPresent(Bool.self, forKey: .mixedModeScene)
         attachedSong          = try c.decodeIfPresent(SongAttachment.self, forKey: .attachedSong)
         playbackSpeedOverride = try c.decodeIfPresent(Double.self, forKey: .playbackSpeedOverride)
         songFadeOutDuration   = try c.decodeIfPresent(TimeInterval.self, forKey: .songFadeOutDuration)

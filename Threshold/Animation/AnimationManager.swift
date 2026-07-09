@@ -740,11 +740,22 @@ final class AnimationManager {
             // Scenes own their music-reactive state. Start from defaults so a
             // previous scene's audio settings don't leak into this one.
             settings.audioReactiveConfig = AudioReactiveConfig()
+            // Animated scenes are authoritative for domain transforms just like
+            // static scenes: missing/empty means clear whatever was active before.
+            settings.spaceWarpStack = scene.spaceWarpOps ?? []
 
             if isStartingFromBeginning,
                let speedOverride = scene.playbackSpeedOverride {
                 playbackSpeed = max(0.1, min(4.0, speedOverride))
             }
+
+            #if os(visionOS)
+            if let app = AppModel.shared {
+                app.immersionChangeIsSceneDriven = true
+                app.immersionStylePreference = (scene.mixedModeScene == true) ? .mixed : .immersive
+                app.immersionChangeIsSceneDriven = false
+            }
+            #endif
 
             if let enabled = scene.safetyBubbleEnabled {
                 settings.safetyBubbleEnabled = enabled

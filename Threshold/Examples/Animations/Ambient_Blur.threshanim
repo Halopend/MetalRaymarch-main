@@ -610,9 +610,13 @@
       "worldRotationZ" : 0.0012432374
     }
   ],
+  "mixedModeScene" : false,
   "name" : "Ambient blur",
   "safetyBubbleBlend" : 0.097609855,
   "safetyBubbleEnabled" : true,
   "safetyBubbleRadius" : 1.3608453,
-  "safetyBubbleShape" : 0.5
+  "safetyBubbleShape" : 0.5,
+  "spaceWarpOps" : [
+
+  ]
 }
