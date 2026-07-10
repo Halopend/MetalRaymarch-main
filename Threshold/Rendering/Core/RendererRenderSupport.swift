@@ -170,7 +170,7 @@ extension Renderer {
     var passthroughBackgroundActive: Bool {
         guard drawableRenderContextRequired else { return false }
         switch appModel.immersionStyleForRenderer {
-        case .immersive: return false
+        case .immersive, .window: return false
         case .mixed: return true
         }
     }

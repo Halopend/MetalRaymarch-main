@@ -102,8 +102,8 @@ struct ToggleImmersiveSpaceButton: View {
 
 #if os(visionOS)
 /// Immersion style picker: Immersive (takes over the whole view; the Digital
-/// Crown dials it down to a third, and the bottom of the dial hands off to
-/// Mixed) or Mixed (no portal — the fractal floats in the real room over
+/// Crown dials it down to a window), Window (a persistent portal), or Mixed
+/// (no portal — the fractal floats in the real room over
 /// passthrough). Requires visionOS 26 (CompositorServices portal render
 /// context) — renders nothing on earlier systems.
 struct ImmersionStylePicker: View {
@@ -116,12 +116,13 @@ struct ImmersionStylePicker: View {
             VStack(spacing: 4) {
                 Picker("Immersion", selection: $appModel.immersionStylePreference) {
                     Text("Immersive").tag(AppModel.ImmersionStylePreference.immersive)
+                    Text("Window").tag(AppModel.ImmersionStylePreference.window)
                     Text("Mixed").tag(AppModel.ImmersionStylePreference.mixed)
                 }
                 .pickerStyle(.segmented)
 
-                if showsCaption && appModel.immersionStylePreference == .immersive {
-                    Text("Digital Crown dials immersion — all the way down switches to Mixed")
+                if showsCaption && appModel.immersionStylePreference != .mixed {
+                    Text("Digital Crown smoothly sizes the window")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

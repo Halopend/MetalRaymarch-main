@@ -143,20 +143,24 @@ class AppModel {
     @ObservationIgnored nonisolated(unsafe) var runtimeViewModeForRenderer: RuntimeViewMode = .raymarch
 
     /// Immersive-space presentation style.
-    /// - `.immersive`: progressive style that starts fully immersed
-    ///   (initialAmount 1.0); the Digital Crown dials the portal down to a
-    ///   third, and dialing to the bottom of the range hands off to Mixed
-    ///   (see MetalProjectApp's onImmersionChange).
+    /// - `.immersive`: progressive style that starts fully immersed; the
+    ///   Digital Crown continuously reduces it to the window-sized aperture.
+    /// - `.window`: a persistent, crown-adjustable portal into the fractal.
     /// - `.mixed`: no portal — the fractal floats in the real room and the
     ///   background is fully transparent (passthrough).
     enum ImmersionStylePreference: String, CaseIterable {
         case immersive
+        case window
         case mixed
 
         /// Decodes persisted values, mapping the legacy "full"/"progressive"
         /// styles onto `.immersive`.
         static func fromPersisted(_ raw: String?) -> ImmersionStylePreference {
-            raw == ImmersionStylePreference.mixed.rawValue ? .mixed : .immersive
+            switch raw {
+            case ImmersionStylePreference.window.rawValue: return .window
+            case ImmersionStylePreference.mixed.rawValue: return .mixed
+            default: return .immersive
+            }
         }
     }
 
@@ -174,7 +178,7 @@ class AppModel {
             // afterward, and scene loads set these authoritatively themselves so
             // they suppress the coupling via immersionChangeIsSceneDriven.
             if oldValue != immersionStylePreference && !immersionChangeIsSceneDriven {
-                if immersionStylePreference == .mixed {
+                if immersionStylePreference != .immersive {
                     renderSettings.boundingSphereSkipEnabled = true
                     renderSettings.envScrunchEnabled = false
                 } else {
