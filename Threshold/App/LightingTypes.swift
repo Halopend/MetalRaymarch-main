@@ -181,6 +181,30 @@ struct BloomEffect: LightingEffect {
     }
 }
 
+/// Screen-space edge detector. The fragment path uses a local luminance
+/// gradient, so this is a lightweight convolution-style outline pass.
+struct EdgeDetectionEffect: LightingEffect {
+    var enabled: Bool = false
+    var strength: Float = 0.0
+    var threshold: Float = 0.12
+    var softness: Float = 0.08
+    var windowRadius: Int = 1
+
+    var primaryValue: Float {
+        get { strength }
+        set { strength = newValue }
+    }
+    static let primaryLabel = "Strength"
+
+    static var off: EdgeDetectionEffect {
+        EdgeDetectionEffect(enabled: false, strength: 0.0)
+    }
+
+    static var outline: EdgeDetectionEffect {
+        EdgeDetectionEffect(enabled: true, strength: 0.8, threshold: 0.10, softness: 0.06, windowRadius: 1)
+    }
+}
+
 /// Fog effect - distance-based atmospheric fog
 struct FogEffect: LightingEffect {
     var enabled: Bool = true
@@ -561,6 +585,7 @@ enum LightingPreset: String, CaseIterable, Codable {
     case dynamic = "Dynamic"
     case psychedelic = "Psychedelic"
     case atmospheric = "Atmospheric"
+    case edgeDetection = "Edge Detection"
     case custom = "Custom"
     
     var displayName: String { rawValue }
@@ -572,6 +597,7 @@ enum LightingPreset: String, CaseIterable, Codable {
         case .dynamic: return "sparkle"
         case .psychedelic: return "wand.and.rays"
         case .atmospheric: return "cloud.fog"
+        case .edgeDetection: return "lines.measurement.horizontal"
         case .custom: return "slider.horizontal.3"
         }
     }
@@ -583,31 +609,35 @@ enum LightingPreset: String, CaseIterable, Codable {
         case .dynamic: return "Moderate animation"
         case .psychedelic: return "Maximum visual intensity"
         case .atmospheric: return "Moody fog and glow"
+        case .edgeDetection: return "Outline surfaces with a manual luminance edge detector"
         case .custom: return "Manual control"
         }
     }
     
     /// Get the effect bundle for this preset
-    func effects() -> (hue: HueRotationEffect, pulse: PulseEffect, glow: GlowEffect, bloom: BloomEffect, fog: FogEffect, gradientCycle: GradientCycleEffect, linearRail: LinearRailEffect) {
+    func effects() -> (hue: HueRotationEffect, pulse: PulseEffect, glow: GlowEffect, bloom: BloomEffect, edge: EdgeDetectionEffect, fog: FogEffect, gradientCycle: GradientCycleEffect, linearRail: LinearRailEffect) {
         switch self {
         case .off:
-            return (.off, .off, .off, .off, .off, .off, .off)
+            return (.off, .off, .off, .off, .off, .off, .off, .off)
             
         case .subtle:
-            return (.subtle, .off, .subtle, .subtle, .subtle, .off, .off)
+            return (.subtle, .off, .subtle, .subtle, .off, .subtle, .off, .off)
             
         case .dynamic:
-            return (.medium, .medium, .medium, .medium, .medium, .slow, .slow)
+            return (.medium, .medium, .medium, .medium, .off, .medium, .slow, .slow)
             
         case .psychedelic:
-            return (.intense, .intense, .intense, .intense, .medium, .medium, .medium)
+            return (.intense, .intense, .intense, .intense, .off, .medium, .medium, .medium)
             
         case .atmospheric:
-            return (.off, .subtle, .medium, .subtle, .dense, .off, .off)
+            return (.off, .subtle, .medium, .subtle, .off, .dense, .off, .off)
+
+        case .edgeDetection:
+            return (.off, .off, .subtle, .off, .outline, .off, .off, .off)
             
         case .custom:
             // Return current settings unchanged
-            return (.off, .off, .off, .off, .off, .off, .off)
+            return (.off, .off, .off, .off, .off, .off, .off, .off)
         }
     }
 }

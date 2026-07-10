@@ -40,6 +40,17 @@ typedef int32_t EnumBackingType;
 
 #include <simd/simd.h>
 
+#ifndef __METAL_VERSION__
+#ifdef __cplusplus
+extern "C" {
+#endif
+int ThresholdLLVMProfileIsInstrumented(void);
+int ThresholdLLVMProfileWriteFile(void);
+#ifdef __cplusplus
+}
+#endif
+#endif
+
 typedef NS_ENUM(EnumBackingType, BufferIndex)
 {
     BufferIndexMeshPositions = 0,
@@ -187,6 +198,13 @@ typedef struct
     // Bloom Effect - bright areas bleed
     int bloomEnabled;                 // 0 = off, 1 = on
     float bloomStrength;              // Bloom intensity (0-1)
+
+    // Screen-space edge detector (fragment path; compute path remains unchanged)
+    int edgeDetectionEnabled;         // 0 = off, 1 = on
+    float edgeDetectionStrength;      // Outline blend amount (0-1)
+    float edgeDetectionThreshold;     // Luminance gradient threshold
+    float edgeDetectionSoftness;       // Threshold transition width
+    int edgeDetectionWindowRadius;     // Sliding-window radius: 1...3
     
     // Beat Flash Effect - music-driven edge glow
     int beatFlashEnabled;             // 0 = off, 1 = on
@@ -6011,6 +6029,17 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
     col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), glow);
 
+    // Manual screen-space edge detector. Derivatives provide a 2x2 local
+    // convolution without allocating an intermediate texture.
+    if (uniforms.colorScheme.edgeDetectionEnabled != 0) {
+        half luma = dot(col, half3(0.2126h, 0.7152h, 0.0722h));
+        half gradient = length(half2(dfdx(luma), dfdy(luma)));
+        half threshold = half(uniforms.colorScheme.edgeDetectionThreshold);
+        half softness = max(half(uniforms.colorScheme.edgeDetectionSoftness), 0.001h);
+        half edge = smoothstep(threshold, threshold + softness, gradient);
+        col = mix(col, half3(0.0h), edge * half(uniforms.colorScheme.edgeDetectionStrength));
+    }
+
     // Bounding Fog: applied before the floor circle / spring blob composite so
     // those overlays stay at full strength. Fades to black in Full immersion;
     // combined with the alpha fade below it fades to passthrough in
@@ -6051,6 +6080,51 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     }
     output.color = float4(float3(col), outAlpha);
     return output;
+}
+
+FORCE_INLINE float edgeLumaAt(texture2d_array<float, access::read> texture,
+                              int2 q,
+                              uint eye)
+{
+    int x = clamp(q.x, 0, int(texture.get_width()) - 1);
+    int y = clamp(q.y, 0, int(texture.get_height()) - 1);
+    float3 c = texture.read(uint2(x, y), eye).rgb;
+    return dot(c, float3(0.2126f, 0.7152f, 0.0722f));
+}
+
+// Sliding-window luminance edge pass for the adaptive compute renderer.
+// The window radius is user-controlled (1...3). We read completed color from
+// one texture and write into a separate texture so there is no read/write race.
+kernel void edgeDetectSlidingWindow(
+    uint3 gid [[thread_position_in_grid]],
+    constant TileUniforms& uniforms [[buffer(0)]],
+    texture2d_array<float, access::read> sourceTexture [[texture(0)]],
+    texture2d_array<float, access::write> destinationTexture [[texture(1)]])
+{
+    uint2 viewportPixel = gid.xy;
+    uint2 viewportSize = uint2(uniforms.resolution);
+    if (viewportPixel.x >= viewportSize.x || viewportPixel.y >= viewportSize.y) return;
+
+    uint2 p = uint2(uniforms.viewportOrigin) + viewportPixel;
+    uint eye = uniforms.eyeIndex;
+    int radius = max(1, min(3, uniforms.colorScheme.edgeDetectionWindowRadius));
+
+    float gx = 0.0f;
+    float gy = 0.0f;
+    float sampleCount = 0.0f;
+    for (int offset = -3; offset <= 3; ++offset) {
+        if (abs(offset) > radius) continue;
+        gx += edgeLumaAt(sourceTexture, int2(p) + int2(radius, offset), eye) - edgeLumaAt(sourceTexture, int2(p) - int2(radius, offset), eye);
+        gy += edgeLumaAt(sourceTexture, int2(p) + int2(offset, radius), eye) - edgeLumaAt(sourceTexture, int2(p) - int2(offset, radius), eye);
+        sampleCount += 2.0f;
+    }
+    float gradient = length(float2(gx, gy)) / max(sampleCount, 1.0f);
+    float threshold = uniforms.colorScheme.edgeDetectionThreshold;
+    float softness = max(uniforms.colorScheme.edgeDetectionSoftness, 0.001f);
+    float edge = smoothstep(threshold, threshold + softness, gradient);
+    float3 source = sourceTexture.read(p, eye).rgb;
+    float3 result = mix(source, float3(0.0f), edge * uniforms.colorScheme.edgeDetectionStrength);
+    destinationTexture.write(float4(result, sourceTexture.read(p, eye).a), p, eye);
 }
 
 // Reproject this pixel's ray into the previous frame's depth buffer and return

@@ -350,6 +350,11 @@ final class UISettingsCache {
         }
     }
 
+    func commitEdgeDetectionEffect() {
+        guard let settings else { return }
+        settings.edgeDetectionEffect = lighting.edgeDetectionEffect
+    }
+
     func commitFogEffect() {
         guard let settings else { return }
         if settings.isAnimationPlaying {
