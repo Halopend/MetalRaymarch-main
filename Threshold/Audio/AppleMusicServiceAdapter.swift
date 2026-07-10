@@ -21,12 +21,6 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
         self.manager = manager
     }
 
-    // ── Identity ─────────────────────────────────────────────────────────
-    let serviceID   = "appleMusic"
-    let displayName = "Apple Music"
-    let iconName    = "apple.logo"
-    var accentColor: Color { .pink }
-
     // ── Connection ───────────────────────────────────────────────────────
     var connectionStatus: MusicServiceConnectionStatus {
         switch manager.authorizationStatus {
@@ -40,11 +34,6 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
 
     func connect() {
         manager.requestAuthorization()
-    }
-
-    func disconnect() {
-        // Apple Music doesn't have a disconnect — revoked via Settings.
-        manager.stopMonitoring()
     }
 
     // ── Now Playing ──────────────────────────────────────────────────────
@@ -62,12 +51,6 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
             durationSeconds: manager.durationSeconds
         )
     }
-
-    var isPlaying: Bool { manager.isPlaying }
-
-    var progressFraction: Float { manager.progressFraction }
-    var currentTimeString: String { manager.currentTimeString }
-    var totalTimeString: String { manager.totalTimeString }
 
     // ── Transport ────────────────────────────────────────────────────────
     func togglePlayPause() async { manager.togglePlayPause() }
@@ -120,9 +103,6 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
             )
         }
     }
-
-    var isLibraryLoading: Bool { manager.libraryLoading }
-    var libraryError: String? { manager.libraryErrorMessage }
 
     func refreshLibrary() async {
         manager.refreshLibrary()
@@ -199,12 +179,4 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
         await manager.createPlaylist(name: name, songIDs: trackNativeIDs.compactMap { UInt64($0) })
     }
 
-    // ── Audio Levels ─────────────────────────────────────────────────────
-    var bassLevel: Float     { manager.bassLevel }
-    var midLevel: Float      { manager.midLevel }
-    var trebleLevel: Float   { manager.trebleLevel }
-    var beatIntensity: Float { manager.beatIntensity }
-    var overallLevel: Float  { manager.overallLevel }
-
-    func updateFrame() { manager.updateFrame() }
 }

@@ -7,6 +7,14 @@
 
 import SwiftUI
 
+enum DisplayFormat {
+    static func minutesSeconds(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds > 0 else { return "0:00" }
+        let total = Int(seconds)
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
 enum AdvancedTestScene {
     static func create(startPosition: SIMD3<Float>) -> AnimationScene {
         var scene = AnimationScene(name: "Dev Test")
@@ -181,6 +189,44 @@ struct EffectSliderRow: View {
     }
 }
 
+/// Compact label/value slider used in dense settings grids.
+struct CompactValueSlider: View {
+    let title: String
+    @Binding var value: Float
+    let range: ClosedRange<Float>
+    var step: Float?
+    let display: String
+    var tint: Color = .accentColor
+    var helpText: String?
+    var onEditingChanged: (Bool) -> Void = { _ in }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                Spacer(minLength: 4)
+                Text(display)
+                    .font(.caption.weight(.bold))
+                    .monospacedDigit()
+                    .foregroundStyle(display == "Off" ? Color.secondary : tint)
+            }
+            if let step {
+                Slider(value: $value, in: range, step: step, onEditingChanged: onEditingChanged)
+                    .tint(tint)
+                    .controlSize(.small)
+            } else {
+                Slider(value: $value, in: range, onEditingChanged: onEditingChanged)
+                    .tint(tint)
+                    .controlSize(.small)
+            }
+        }
+        .help(helpText ?? "")
+    }
+}
+
 struct FlashingLightIndicator: View {
     @State private var isLit = false
 
@@ -233,4 +279,3 @@ struct StatBox: View {
         .accessibilityLabel("\(label): \(value)")
     }
 }
-

@@ -539,6 +539,7 @@ class AppModel {
         // Restore domain config structs (new persistence format, overlays legacy per-key values)
         SettingsPersistence.restoreAll(into: renderSettings)
         migrateDistinctWindowGestureDefaultsIfNeeded()
+        migrateMenuGestureOwnershipIfNeeded()
         
         // Configure SharePlay session listener
         shareSession?.configureGroupSessions()
@@ -601,11 +602,17 @@ class AppModel {
             doMerge()
         } else {
             // iCloud not resolved yet — merge once its root becomes available (one-shot).
-            var token: NSObjectProtocol?
-            token = NotificationCenter.default.addObserver(
+            final class OneShotObserverBox: @unchecked Sendable {
+                var token: NSObjectProtocol?
+            }
+            let observerBox = OneShotObserverBox()
+            observerBox.token = NotificationCenter.default.addObserver(
                 forName: StorageLocation.rootResolvedNotification, object: nil, queue: .main
-            ) { _ in
-                if let token { NotificationCenter.default.removeObserver(token) }
+            ) { [observerBox] _ in
+                if let token = observerBox.token {
+                    NotificationCenter.default.removeObserver(token)
+                    observerBox.token = nil
+                }
                 MainActor.assumeIsolated { doMerge() }
             }
         }
@@ -991,6 +998,28 @@ class AppModel {
         var rightActions = renderSettings.perFingerTapRightActions
         if rightActions.count == 5, rightActions[3] == .none {
             rightActions[3] = .openQuickToggles
+            renderSettings.perFingerTapRightActions = rightActions
+            GestureDefaults.savePerFingerTapActions(rightActions, keyPrefix: "perFingerTapRight")
+        }
+
+        UserDefaults.standard.set(true, forKey: migrationKey)
+    }
+
+    /// Keep menu open/close controlled by the explicit menu gesture picker.
+    /// Earlier builds also mapped right-middle per-finger tap to Toggle Menu,
+    /// which made changing "Open Menu With" look ineffective.
+    private func migrateMenuGestureOwnershipIfNeeded() {
+        let migrationKey = "gestureMenuToggleOwnership.v1"
+        guard UserDefaults.standard.bool(forKey: migrationKey) == false else { return }
+
+        let leftActions = renderSettings.perFingerTapLeftActions.removingMenuToggleActions
+        if leftActions != renderSettings.perFingerTapLeftActions {
+            renderSettings.perFingerTapLeftActions = leftActions
+            GestureDefaults.savePerFingerTapActions(leftActions, keyPrefix: "perFingerTapLeft")
+        }
+
+        let rightActions = renderSettings.perFingerTapRightActions.removingMenuToggleActions
+        if rightActions != renderSettings.perFingerTapRightActions {
             renderSettings.perFingerTapRightActions = rightActions
             GestureDefaults.savePerFingerTapActions(rightActions, keyPrefix: "perFingerTapRight")
         }

@@ -1719,10 +1719,7 @@ struct LiveSessionRecordingControl: View {
     }
 
     private func formatTime(_ time: TimeInterval) -> String {
-        let totalSeconds = max(0, Int(time.rounded(.down)))
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return String(format: "%d:%02d", minutes, seconds)
+        DisplayFormat.minutesSeconds(time)
     }
 }
 

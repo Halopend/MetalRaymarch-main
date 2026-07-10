@@ -279,7 +279,8 @@ extension Renderer {
         )
         let envScrunchParams = makeEnvScrunchParams(
             settingsSnapshot: settingsSnapshot,
-            modelMatrix: modelMatrix
+            modelMatrix: modelMatrix,
+            deviceTransform: deviceTransform
         )
 
         // One-time logging of device anchor to verify position tracking is working
@@ -305,8 +306,8 @@ extension Renderer {
         // visionOS path animates ambient time-motion — dither, spring vibration,
         // light-orbit drift — matching the Mac/iOS path (RaymarchRenderView).
         let frameTime = Float(CACurrentMediaTime() - renderStartTime)
-        let precomputedFractal = Self.makePrecomputedFractal(from: settingsSnapshot)
-        let precomputedLighting = Self.makePrecomputedLighting(
+        let precomputedFractal = RenderPrecompute.makePrecomputedFractal(from: settingsSnapshot)
+        let precomputedLighting = RenderPrecompute.makePrecomputedLighting(
             time: frameTime,
             lightingMode: settingsSnapshot.lightingMode,
             audioLevel: settingsSnapshot.audioLevel,
@@ -317,8 +318,8 @@ extension Renderer {
             vibrance: settingsSnapshot.colorSchemeParams.vibrance,
             lightingSoftness: settingsSnapshot.lightingSoftness
         )
-        let precomputedAudio = Self.makePrecomputedAudio(from: settingsSnapshot)
-        var precomputedFog = Self.makePrecomputedFog(from: settingsSnapshot)
+        let precomputedAudio = RenderPrecompute.makePrecomputedAudio(from: settingsSnapshot)
+        var precomputedFog = RenderPrecompute.makePrecomputedFog(from: settingsSnapshot)
         // Zoom fog compensation (Settings toggle, default off): fog operates on
         // MODEL-space march distance, so on zoom-out the fog sphere's world radius
         // shrinks with the model and washes out the fractal — starting as soon as
@@ -327,7 +328,7 @@ extension Renderer {
         // zoom-out range — a no-op at scale >= 1 (zoom-in unaffected). (Was
         // previously hardcoded on for the Kleinian family only, and briefly keyed
         // to the unrelated 0.15 horizon-lift floor.)
-        precomputedFog = Self.applyZoomFogCompensation(
+        precomputedFog = RenderPrecompute.applyZoomFogCompensation(
             precomputedFog,
             enabled: settingsSnapshot.zoomFogCompensationEnabled,
             effectiveScale: effectiveScale)
@@ -339,14 +340,6 @@ extension Renderer {
         let animatedColorMix = settingsSnapshot.lightingPlay ? min(max(baseColorMix + lightingWave * 0.08, 0.0), 1.0) : baseColorMix
         let animatedGlow = settingsSnapshot.lightingPlay ? min(max(baseGlow + max(0, lightingWave) * 0.25, 0.0), 2.0) : baseGlow
 
-        let boundingSphereRadius = settingsSnapshot.estimatedBoundingSphereRadius
-        // Zoom-out epsilon/LOD rescale (both 1.0 at scale >= 0.15 → byte-identical):
-        // the hit threshold must loosen ∝ 1/scale to track the constant world-space
-        // pixel footprint (this also bounds step cost over the lifted horizon), and
-        // distance-LOD reads model-space t, so its falloff shrinks with scale to
-        // avoid collapsing iterations everywhere on zoom-out.
-        let zoomOutEpsilonLoosen: Float = max(1.0, 0.15 / max(effectiveScale, 1e-4))
-        let zoomOutLODScale: Float = min(1.0, effectiveScale / 0.15)
         var preparedEyeStates = Array(repeating: RendererPreparedEyeState(), count: drawable.views.count)
 
         func uniforms(forViewIndex viewIndex: Int) -> Uniforms {
@@ -367,15 +360,13 @@ extension Renderer {
 
             let colorSchemeParams = settingsSnapshot.colorSchemeParams
 
-            // Scale-relative safety bubble: divide radius by effectiveScale so it stays
-            // constant in user/world space regardless of detail zoom level.
-            // Mixed immersion: cap the comfort bubble to the mixed radius —
-            // you're "outside" the fractal there, a big bubble just hollows it.
+            // Scale-relative safety bubble in METERS (the shared builder applies the
+            // /effectiveScale correction). Mixed immersion: cap the comfort bubble to
+            // the mixed radius — you're "outside" the fractal there, a big bubble just
+            // hollows it.
             let bubbleRadiusMeters = (appModel.immersionStyleForRenderer == .mixed && settingsSnapshot.safetyBubbleMixedAutoShrink)
                 ? min(settingsSnapshot.safetyBubbleRadius, settingsSnapshot.safetyBubbleMixedRadius)
                 : settingsSnapshot.safetyBubbleRadius
-            let scaleCorrectedBubbleRadius = bubbleRadiusMeters / max(effectiveScale, 0.001)
-            let scaleCorrectedFadeWidth = settingsSnapshot.safetyBubbleFadeWidth / max(effectiveScale, 0.001)
 
             // Previous frame's view-proj (model → prev clip) for the temporal
             // depth warm-start. updateGameState runs before finishFragmentPass
@@ -384,106 +375,50 @@ extension Renderer {
                 ? previousViewProjMatrices[viewIndex]
                 : matrix_identity_float4x4
 
-            // Break up the large Uniforms initializer to help the type-checker
-            let marchEpsilonScale: Float = (1.0 / max(effectiveScale, 1.0)) * zoomOutEpsilonLoosen
-            let safetyBubbleEnabled: Int32 = (settingsSnapshot.fractalType == .mandelbulb) ? 0 : (settingsSnapshot.safetyBubbleEnabled ? 1 : 0)
-            let safetyBubbleFadeEnabled: Int32 = settingsSnapshot.safetyBubbleFadeEnabled ? 1 : 0
-            let safetyBubbleStrength: Float = (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength
-            let sphereProjectionBlend: Float = settingsSnapshot.sphereProjectionEnabled ? settingsSnapshot.sphereProjectionBlend : 0
-            let smartAdvanceEnabled: Int32 = settingsSnapshot.smartAdvanceEnabled ? 1 : 0
-            let coneCoverageAAEnabled: Int32 = settingsSnapshot.coneCoverageAAEnabled ? 1 : 0
-            let shadowsEnabled: Int32 = settingsSnapshot.shadowsEnabled ? 1 : 0
-            let distanceLODFalloff: Float = settingsSnapshot.distanceLODStrength * 0.5 * zoomOutLODScale
-            let benchCollectSteps: Int32 = BenchmarkManager.shared.collectIterations ? 1 : 0
             let viewportHeight: Float = Float(view.textureMap.viewport.height)
-            let coneMarchScale: Float = RenderPrecompute.coneMarchScale(strength: settingsSnapshot.coneMarchStrength, projection: projection, viewportHeight: viewportHeight)
-            let pixelFootprintPerDist: Float = RenderPrecompute.pixelFootprintPerDist(projection: projection, viewportHeight: viewportHeight)
-            let springStretch: Float = simd_length(settingsSnapshot.springDisplacement)
-            let springVisible: Int32 = (settingsSnapshot.springActive || springStretch > 0.001) ? 1 : 0
-            let passthroughBackground: Int32 = passthroughBackgroundActive ? 1 : 0
 
-            return Uniforms(projectionMatrix: projection,
-                            modelViewMatrix: modelView,
-                            inverseModelViewMatrix: inverseModelView,
-                            previousViewProjMatrix: prevViewProj,
-                            previousInvViewProjMatrix: prevViewProj.inverse,
-                            time: frameTime,
-                            minDistance: settingsSnapshot.minDistance,
-                            fractalScale: settingsSnapshot.fractalScale,
-                            fractalIterations: Int32(settingsSnapshot.fractalIterations),
-                            maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
-                            maxViewDistance: maxViewDistance,
-                            marchEpsilonScale: marchEpsilonScale,
-                            colorMix: animatedColorMix,
-                            glowIntensity: animatedGlow,
-                            foldingLimit: settingsSnapshot.foldingLimit,
-                            sphereRadius: settingsSnapshot.sphereRadius,
-                            safetyBubbleRadius: scaleCorrectedBubbleRadius,
-                            safetyBubbleEnabled: safetyBubbleEnabled,
-                            safetyBubbleShape: settingsSnapshot.safetyBubbleShape,
-                            safetyBubbleFadeEnabled: safetyBubbleFadeEnabled,
-                            safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
-                            safetyBubbleStrength: safetyBubbleStrength,
-                            handField: handAttraction.asHandFieldParams,
-                            colorIterations: settingsSnapshot.colorIterations,
-                            limitFlash: settingsSnapshot.limitFlash,
-                            activeGesture: Int32(settingsSnapshot.activeGestureIndex),
-                            warmStartEnabled: 0,
-                            fractalType: settingsSnapshot.fractalType.rawValue,
-                            lightingSoftness: settingsSnapshot.lightingSoftness,
-                            sphericalInversionMode: settingsSnapshot.sphericalInversionMode.rawValue,
-                            sphericalInversionRadius: settingsSnapshot.sphericalInversionRadius,
-                            sphereProjectionBlend: sphereProjectionBlend,
-                            sphereProjectionRadius: settingsSnapshot.sphereProjectionRadius,
-                            spaceWarpStrength: settingsSnapshot.spaceWarpStrength,
-                            spaceWarpParam1: settingsSnapshot.spaceWarpParam1,
-                            spaceWarpParam2: settingsSnapshot.spaceWarpParam2,
-                            spaceWarpParam3: settingsSnapshot.spaceWarpParam3,
-                            spaceWarpAxis: settingsSnapshot.spaceWarpAxis,
-                            spaceWarpStack: settingsSnapshot.spaceWarpStack,
-                            stepMultiplier: settingsSnapshot.stepMultiplier,
-                            boundingSphereRadius: boundingSphereRadius,
-                            smartAdvanceEnabled: smartAdvanceEnabled,
-                            coneMarchScale: coneMarchScale,
-                            coneCoverageAAEnabled: coneCoverageAAEnabled,
-                            shadowsEnabled: shadowsEnabled,
-                            distanceLODFalloff: distanceLODFalloff,
-                            benchCollectSteps: benchCollectSteps,
-                            pixelFootprintPerDist: pixelFootprintPerDist,
-                            coarseRateMagMax: 1.0,
-                            springDisplacementX: settingsSnapshot.springDisplacement.x,
-                            springDisplacementY: settingsSnapshot.springDisplacement.y,
-                            springDisplacementZ: settingsSnapshot.springDisplacement.z,
-                            springStretch: springStretch,
-                            springAnchorNDC: SIMD2<Float>(0.7, -0.7),
-                            springVisible: springVisible,
-                            springRestRadius: 0.06,
-                            jitterOffset: .zero,
-                            renderResolution: [1, 1],
-                            floorPlane: floorCircle.plane,
-                            floorCenterRadius: floorCircle.centerRadius,
-                            formulaParams: settingsSnapshot.formulaParams,
-                            precomputedFractal: precomputedFractal,
-                            precomputedLighting: precomputedLighting,
-                            precomputedAudio: precomputedAudio,
-                            precomputedFog: precomputedFog,
-                            colorScheme: colorSchemeParams,
-                            benchAblate: 0,
-                            passthroughBackground: passthroughBackground,
-                            boundingFogEnabled: Int32(settingsSnapshot.boundingShapeFogMode),
-                            boundingShadowDepth: settingsSnapshot.boundingShapeShadowDepth,
-                            boundingShapeType: settingsSnapshot.boundingShapeType,
-                            boundToSpaceMode: settingsSnapshot.resolvedBoundToSpaceMode,
-                            boundSpaceSize: settingsSnapshot.boundSpaceSize,
-                            boundAmbientStrength: settingsSnapshot.boundAmbientStrength,
-                            modelToWorldMatrix: modelMatrix,
-                            envScrunch: envScrunchParams,
-                            // Fractal distance cache is a Mac fragment-path prototype;
-                            // inert (disabled) on the visionOS fragment path.
-                            distCache: DistanceCacheParams(),
-                            // Pin the Bounding Shape while the Linear Rail slides
-                            // content through it (0 when the rail is off).
-                            boundingShapeCenter: settingsSnapshot.boundingShapeCenterModel(modelMatrix: modelMatrix))
+            // Shared assembler (TECH_DEBT.md #2): the ~76-field list + the derived
+            // math (bubble scaling, epsilon/LOD, spring, animated color/glow) live
+            // once in makeUniforms; only the visionOS-specific inputs are named here.
+            let platform = UniformsPlatformInputs(
+                projectionMatrix: projection,
+                modelViewMatrix: modelView,
+                inverseModelViewMatrix: inverseModelView,
+                modelToWorldMatrix: modelMatrix,
+                previousViewProjMatrix: prevViewProj,
+                previousInvViewProjMatrix: prevViewProj.inverse,
+                maxViewDistance: maxViewDistance,
+                coneMarchScale: RenderPrecompute.coneMarchScale(strength: settingsSnapshot.coneMarchStrength, projection: projection, viewportHeight: viewportHeight),
+                pixelFootprintPerDist: RenderPrecompute.pixelFootprintPerDist(projection: projection, viewportHeight: viewportHeight),
+                safetyBubbleRadiusMeters: bubbleRadiusMeters,
+                handField: handAttraction.asHandFieldParams,
+                precomputedFractal: precomputedFractal,
+                precomputedLighting: precomputedLighting,
+                precomputedAudio: precomputedAudio,
+                precomputedFog: precomputedFog,
+                colorScheme: colorSchemeParams,
+                floorPlane: floorCircle.plane,
+                floorCenterRadius: floorCircle.centerRadius,
+                renderResolution: [1, 1],
+                benchCollectSteps: BenchmarkManager.shared.collectIterations ? 1 : 0,
+                benchAblate: 0,
+                passthroughBackground: passthroughBackgroundActive ? 1 : 0,
+                boundingFogEnabled: Int32(settingsSnapshot.boundingShapeFogMode),
+                boundingShadowDepth: settingsSnapshot.boundingShapeShadowDepth,
+                boundingShapeType: settingsSnapshot.boundingShapeType,
+                // Pin the Bounding Shape while the Linear Rail slides content through it.
+                boundingShapeCenter: settingsSnapshot.boundingShapeCenterModel(modelMatrix: modelMatrix),
+                boundToSpaceMode: settingsSnapshot.resolvedBoundToSpaceMode,
+                boundSpaceSize: settingsSnapshot.boundSpaceSize,
+                boundAmbientStrength: settingsSnapshot.boundAmbientStrength,
+                envScrunch: envScrunchParams,
+                // Fractal distance cache is a Mac fragment-path prototype; inert here.
+                distCache: DistanceCacheParams())
+
+            return makeUniforms(settings: settingsSnapshot,
+                                effectiveScale: effectiveScale,
+                                time: frameTime,
+                                platform: platform)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
@@ -514,12 +449,19 @@ extension Renderer {
     /// bake has been published yet.
     private func makeEnvScrunchParams(
         settingsSnapshot: RenderSettingsSnapshot,
-        modelMatrix: matrix_float4x4
+        modelMatrix: matrix_float4x4,
+        deviceTransform: matrix_float4x4
     ) -> EnvScrunchParams {
         guard settingsSnapshot.envScrunchEnabled,
               let grid = environmentSDF.withLock({ $0 }) else { return EnvScrunchParams() }
+        let viewerWorld = SIMD3<Float>(
+            deviceTransform.columns.3.x,
+            deviceTransform.columns.3.y,
+            deviceTransform.columns.3.z
+        )
         return settingsSnapshot.makeEnvScrunchParams(
             modelToWorld: modelMatrix,
+            viewerWorld: viewerWorld,
             gridOrigin: grid.originWorld,
             gridCell: grid.cellSize,
             gridAddress: grid.gpuAddress,

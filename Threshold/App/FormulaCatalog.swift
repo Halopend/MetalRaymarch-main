@@ -61,6 +61,25 @@ final class FormulaCatalog: @unchecked Sendable {
     private init() {
         load()
     }
+
+    private static let specializedMandelbulbPowers: Set<Int> = [2, 3, 4, 5, 6, 8, 10, 12, 16]
+
+    /// Returns the integer Mandelbulb power that the shaders have explicit fast
+    /// paths for, or nil when the current value should stay runtime-driven.
+    static func specializedMandelbulbPower(rawPower: Float) -> Int32? {
+        let rounded = roundf(rawPower)
+        guard abs(rawPower - rounded) < 0.01,
+              specializedMandelbulbPowers.contains(Int(rounded)) else {
+            return nil
+        }
+        return Int32(rounded)
+    }
+
+    static func specializedMandelbulbPower(fractalType: FractalModelType,
+                                           formulaParams: FormulaParams) -> Int32? {
+        guard fractalType == .mandelbulb else { return nil }
+        return specializedMandelbulbPower(rawPower: getParam(formulaParams, index: 0))
+    }
     
     // MARK: - Loading
     

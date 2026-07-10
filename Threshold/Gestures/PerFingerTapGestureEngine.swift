@@ -213,6 +213,16 @@ enum PerFingerTapAction: Int32, CaseIterable, Codable, Hashable, Sendable {
     }
 }
 
+extension Array where Element == PerFingerTapAction {
+    /// The configurable menu gesture owns menu open/close. Older installs may
+    /// still have `.toggleMenu` persisted in the per-finger shortcut layer; keep
+    /// decoding that value for compatibility, but do not let it compete with the
+    /// selected menu gesture mode.
+    var removingMenuToggleActions: [PerFingerTapAction] {
+        map { $0 == .toggleMenu ? .none : $0 }
+    }
+}
+
 /// Mutable state tracked per hand for the tap-to-palm engine.
 private struct PerHandTapState {
     var isActive: [Bool] = Array(repeating: false, count: 5)

@@ -16,16 +16,16 @@ import Foundation
 // MARK: - Build identity
 
 /// Runtime build identity for stamping perf records. `gitSHA`/`gitDirty` come
-/// from Info.plist keys written by the "Stamp Git SHA" build phase; they read
-/// "unknown" if that phase hasn't run (e.g. a plain `xcodebuild` without it).
+/// from the bundled GitStamp.plist resource written by the "Stamp Git SHA" build
+/// phase, with Info.plist as a compatibility fallback.
 enum BuildStamp {
     static var gitSHA: String {
-        (Bundle.main.object(forInfoDictionaryKey: "GitSHA") as? String).flatMap {
+        (stampValue("GitSHA") ?? Bundle.main.object(forInfoDictionaryKey: "GitSHA") as? String).flatMap {
             $0.isEmpty ? nil : $0
         } ?? "unknown"
     }
     static var gitDirty: Bool {
-        (Bundle.main.object(forInfoDictionaryKey: "GitDirty") as? String) == "YES"
+        (stampValue("GitDirty") ?? Bundle.main.object(forInfoDictionaryKey: "GitDirty") as? String) == "YES"
     }
     static var marketingVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
@@ -45,6 +45,16 @@ enum BuildStamp {
     static var osVersion: String {
         let v = ProcessInfo.processInfo.operatingSystemVersion
         return "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
+    }
+
+    private static func stampValue(_ key: String) -> String? {
+        guard let url = Bundle.main.url(forResource: "GitStamp", withExtension: "plist"),
+              let data = try? Data(contentsOf: url),
+              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+              let dict = plist as? [String: String] else {
+            return nil
+        }
+        return dict[key]
     }
 }
 

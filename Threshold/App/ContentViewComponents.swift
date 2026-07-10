@@ -110,11 +110,11 @@ struct PresetPreviewCard: View {
         return stops.map { stop in
             Gradient.Stop(
                 color: Color(
-                    red: Double(max(0, min(1, stop.color.x))),
-                    green: Double(max(0, min(1, stop.color.y))),
-                    blue: Double(max(0, min(1, stop.color.z)))
+                    red: Double(stop.color.x.clamped(to: 0...1)),
+                    green: Double(stop.color.y.clamped(to: 0...1)),
+                    blue: Double(stop.color.z.clamped(to: 0...1))
                 ),
-                location: CGFloat(max(0, min(1, stop.position)))
+                location: CGFloat(stop.position.clamped(to: 0...1))
             )
         }
     }

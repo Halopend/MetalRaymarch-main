@@ -13,7 +13,7 @@ import Foundation
 import os
 
 final class BenchmarkManager: @unchecked Sendable {
-    nonisolated(unsafe) static let shared = BenchmarkManager()
+    static let shared = BenchmarkManager()
 
     /// Cheap, lock-free gate checked on the hot path so a normal (non-benchmark)
     /// frame never takes the lock. Racy by design — correctness comes from the

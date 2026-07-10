@@ -28,13 +28,13 @@ enum MetalFXTextureSupport {
                                                                   mipmapped: false)
         descriptor.usage = usage
         descriptor.storageMode = .private
+        #if os(iOS)
         // A render-only depth target (never sampled) can stay in tile memory on
         // iOS, avoiding a system-memory allocation.
         if format == depthFormat, !usage.contains(.shaderRead) {
-            #if os(iOS)
             descriptor.storageMode = .memoryless
-            #endif
         }
+        #endif
         let texture = device.makeTexture(descriptor: descriptor)
         texture?.label = label
         return texture

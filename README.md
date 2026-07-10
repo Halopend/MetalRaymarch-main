@@ -28,7 +28,7 @@ Local builds run with `CODE_SIGNING_ALLOWED=NO` (no provisioning needed).
 
 ## Gotchas that will bite you (keep these in muscle memory)
 
-1. **Edited a shader? Regenerate the embeds.** After changing `Shaders.metal`, `ShaderTypes.h`, or any `Threshold/Formulas/**/*.h`, run `Scripts/generate_metal_embeds.sh` (or `Scripts/build.sh embeds`). `Threshold/Rendering/Generated/EmbeddedMetalSources.swift` is a **hand-regenerated** verbatim copy used by the runtime `.threshfx` compiler — it is *not* rebuilt automatically. A forgotten regen ships stale runtime shaders; `ThresholdTests/EmbedFreshnessTests` catches it, but only when tests run.
+1. **Edited a shader? Regenerate the embeds.** After changing `Shaders.metal`, `ShaderTypes.h`, or any `Threshold/Formulas/**/*.h`, run `Scripts/generate_metal_embeds.sh` (or `Scripts/build.sh embeds`). `Threshold/Rendering/Generated/EmbeddedMetalSources.swift` is a **hand-regenerated** verbatim copy used by the runtime `.threshfx` compiler — it is *not* rebuilt automatically. A forgotten regen ships stale runtime shaders; `Scripts/build.sh mac|vision|ios|test` now fails fast when the generated file drifts, and `ThresholdTests/EmbedFreshnessTests` still catches it inside the test suite.
 
 2. **Edited a shader? Also clear the pipeline cache.** Dev builds reuse a stale PSO archive across shader changes:
    ```sh

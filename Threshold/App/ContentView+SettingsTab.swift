@@ -32,7 +32,7 @@ extension ContentView {
             // can replay the onboarding from settings.
             HStack(spacing: 12) {
                 Picker("Settings section", selection: $settingsSubTab) {
-                    ForEach(SettingsSubTab.allCases) { tab in
+                    ForEach(SettingsSubTab.visibleCases) { tab in
                         Label(tab.rawValue, systemImage: tab.icon).tag(tab)
                     }
                 }
@@ -60,7 +60,7 @@ extension ContentView {
                 Group {
                     switch settingsSubTab {
                     case .display:   settingsDisplayContent
-                    case .gestures:  settingsGesturesContent
+                    case .gestures:  settingsDisplayContent
                     case .sharing:   settingsSharingContent
                     case .export:    settingsExportContent
                     case .advanced:  settingsAdvancedContent
@@ -170,11 +170,11 @@ extension ContentView {
                 available: { cache.fractalType.supports(.sphereProjection) },
                 get: { cache.display.sphereProjectionEnabled },
                 set: { cache.display.sphereProjectionEnabled = $0; cache.commitSphereProjection() }),
-            QuickToggleRow("Bounding Shape", "circle.dashed", home: .shapeBounding,
+            QuickToggleRow("Shape", "circle.dashed", home: .shapeBounding,
                 // Independent toggle — does NOT turn Scrunch off.
                 get: { cache.quality.boundingSphereSkipEnabled },
                 set: { cache.setBoundingShapeEnabled($0) }),
-            QuickToggleRow("Scrunch to Surroundings", "square.3.layers.3d",
+            QuickToggleRow("Surroundings Containment", "square.3.layers.3d",
                 home: .shapeBounding,
                 // Independent toggle — does NOT turn the Bounding shape off.
                 get: { cache.quality.envScrunchEnabled },
@@ -613,22 +613,19 @@ extension ContentView {
             .tint(.orange)
 
             VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Sphere Projection Mismatch (δ)")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Text(String(format: "%+.2f", cache.display.deIterationMismatch))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                Slider(value: Binding(
-                    get: { cache.display.deIterationMismatch },
-                    set: {
-                        cache.display.deIterationMismatch = $0
-                        cache.push(\.deIterationMismatch, value: $0)
-                    }
-                ), in: -8...8)
-                .tint(.orange)
+                CompactValueSlider(
+                    title: "Sphere Projection Mismatch (δ)",
+                    value: Binding(
+                        get: { cache.display.deIterationMismatch },
+                        set: {
+                            cache.display.deIterationMismatch = $0
+                            cache.push(\.deIterationMismatch, value: $0)
+                        }
+                    ),
+                    range: -8...8,
+                    display: String(format: "%+.2f", cache.display.deIterationMismatch),
+                    tint: .orange
+                )
                 Text("δ biases the geometry fold loop (FC_FRACTAL_ITERATIONS) while the distance estimator stays normalized to the base count — the faithful \"Accidental Sphere Projection\" under-fold. Negative → fewer folds → sphere. 0 = off. Saves with the scene.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -640,32 +637,6 @@ extension ContentView {
     }
 
     // MARK: - Gestures sub-view
-
-    /// Gestures sub-view. Hands off to the dedicated gestures tab for
-    /// the full per-finger / per-hand editor; this surface only shows a
-    /// pointer to where the user can find it. A future iteration can
-    /// inline the most-used controls here.
-    private var settingsGesturesContent: some View {
-        VStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 10) {
-                Label("Gesture editor lives in its own tab", systemImage: AppIcons.handDrawFill)
-                    .font(.headline)
-                Text("Per-hand, per-finger, and gesture-sensitivity controls are grouped in the dedicated Gestures tab. Use the tab bar to jump there directly.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button {
-                    selectedTab = .gestures
-                } label: {
-                    Label("Open Gestures Tab", systemImage: AppIcons.handDraw)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.07)))
-        }
-    }
 
     // MARK: - Sharing sub-view
 
@@ -816,12 +787,6 @@ extension ContentView {
 
 
     
-    private var fpsColor: Color {
-        // Use cache.liveFPS for the settings panel to avoid observation of RenderMetrics
-        let fps = cache.liveFPS
-        if fps >= 85 { return .green }; if fps >= 60 { return .yellow }; return .red
-    }
-
     // MARK: - Export & Share Tab
 
     private var settingsExportContent: some View {
@@ -1137,14 +1102,16 @@ extension ContentView {
 
             // ── Foveation — 8×8 compute path only ────────────────────────
             VStack(alignment: .leading, spacing: 4) {
-                Text("Foveation")
-                Slider(
+                CompactValueSlider(
+                    title: "Foveation",
                     value: Binding(
                         get: { appModel.renderSettings.foveationStrength },
                         set: { appModel.renderSettings.foveationStrength = $0 }
                     ),
-                    in: 0...1
-                ).tint(themeColor)
+                    range: 0...1,
+                    display: appModel.renderSettings.foveationStrength < 0.01 ? "Off" : "\(Int((appModel.renderSettings.foveationStrength * 100).rounded()))%",
+                    tint: themeColor
+                )
                 Text("Peripheral 8×8 tiles march fewer ray steps, ramping from the center outward. 0 = off. Cuts GPU cost where peripheral vision can't resolve detail. 8×8 compute path only.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -1159,42 +1126,24 @@ extension ContentView {
         @Bindable var appModel = appModel
         return VStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                HStack { Image(systemName: AppIcons.gaugeWithDotsNeedle67percent).foregroundStyle(themeColor); Text("Pipeline Profiler").font(.headline) }
                 HStack {
-                    Button {
-                        isProfilerRunning = true; appModel.runProfiler()
-                        Task { try? await Task.sleep(for: .seconds(3)); await MainActor.run { isProfilerRunning = false } }
-                    } label: {
-                        HStack {
-                            if isProfilerRunning { ProgressView().scaleEffect(0.7).frame(width: 16, height: 16) } else { Image(systemName: AppIcons.playFill) }
-                            Text(isProfilerRunning ? "Profiling..." : "Run Profiler")
-                        }
-                    }.buttonStyle(.borderedProminent).tint(themeColor).disabled(isProfilerRunning)
+                    Image(systemName: AppIcons.chartBarFill).foregroundStyle(themeColor)
+                    Text("Performance in Menu").font(.headline)
+                    Spacer()
+                    Toggle("Show", isOn: $showPerformanceInMenu)
+                        .labelsHidden()
                 }
-            }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack { Image(systemName: AppIcons.chartBarFill).foregroundStyle(themeColor); Text("Live Stats").font(.headline) }
+                Text("Keeps compact FPS, GPU frame time, and render quality visible in the bottom menu bar.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    StatBox(label: "FPS", value: String(format: "%.0f", cache.liveFPS), color: fpsColor)
+                    StatBox(label: "FPS", value: String(format: "%.0f", cache.liveFPS), color: liveFPSColor)
                     StatBox(label: "Iterations", value: "\(cache.liveFractalIterations)", color: themeColor)
                     StatBox(label: "Ray Steps", value: "\(cache.liveMaxRaySteps)", color: themeColor.opacity(0.8))
                     StatBox(label: "Scale", value: String(format: "%.2f", cache.liveFractalScale), color: themeColor.opacity(0.6))
                 }
             }.padding().background(themeColor.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
-            
-            VStack(alignment: .leading, spacing: 8) {
-                HStack { Image(systemName: AppIcons.filmFill).foregroundStyle(themeColor); Text("Animation Test").font(.headline) }
-                Button {
-                    if isTestAnimationPlaying { appModel.animationManager?.stop(); isTestAnimationPlaying = false }
-                    else if let mgr = appModel.animationManager {
-                        mgr.currentScene = AdvancedTestScene.create(startPosition: cache.livePosition)
-                        mgr.play(); isTestAnimationPlaying = true
-                    }
-                } label: {
-                    HStack { Image(systemName: isTestAnimationPlaying ? AppIcons.stopFill : AppIcons.playFill); Text(isTestAnimationPlaying ? "Stop" : "Play Test") }
-                }.buttonStyle(.borderedProminent).tint(isTestAnimationPlaying ? .red : themeColor)
-            }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
 
             // Raymarcher acceleration toggles — Smart Advance, Coherent Packet,
             // and Foveation grouped into one card (see `raymarcherSection`).

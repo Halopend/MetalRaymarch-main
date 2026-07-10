@@ -3,10 +3,7 @@ import Metal
 
 extension Renderer {
     static func bundledDefaultLibrary(device: MTLDevice) -> MTLLibrary? {
-        if let cached = _cachedLibrary { return cached }
-        let library = device.makeDefaultLibrary()
-        _cachedLibrary = library
-        return library
+        MetalLibraryCache.bundledDefaultLibrary(device: device)
     }
 
     static func buildRenderPipelineWithDevice(device: MTLDevice,
@@ -95,18 +92,6 @@ extension Renderer {
         var shadowsEnabled: Bool?          // FC index 11 - GMT-fractals: compile-out shadows entirely
         var mandelbulbPower: Int32?        // FC index 12 - bakes integer power for fastPowR optimization
         var coherentPacketEnabled: Bool?   // FC index 14 - compute kernel only; compiles out packet experiment
-
-            static func specializedMandelbulbPower(fractalType: FractalModelType,
-                                   formulaParams: FormulaParams) -> Int32? {
-                guard fractalType == .mandelbulb else { return nil }
-                let rawPower = FormulaCatalog.getParam(formulaParams, index: 0)
-                let rounded = roundf(rawPower)
-                guard abs(rawPower - rounded) < 0.01,
-                  [2, 3, 4, 5, 6, 8, 10, 12, 16].contains(Int(rounded)) else {
-                return nil
-                }
-                return Int32(rounded)
-            }
 
         /// Creates MTLFunctionConstantValues from this config
         func toMTLConstants() -> MTLFunctionConstantValues {

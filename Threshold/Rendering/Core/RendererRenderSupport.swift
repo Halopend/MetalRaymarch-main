@@ -39,7 +39,11 @@ extension Renderer {
         var metalFXBundle: RendererMetalFXBundle?
 
         if metalFXActive {
-            if let updated = updateMetalFXManager(
+            if canAllocateVisionMetalFXTextures(
+                drawable: drawable,
+                settingsSnapshot: settingsSnapshot,
+                framePath: framePath
+            ), let updated = updateMetalFXManager(
                 drawable: drawable,
                 settingsSnapshot: settingsSnapshot,
                 rasterizationRateMap: rasterizationRateMap
@@ -519,10 +523,9 @@ extension Renderer {
     /// be routed through MetalFX in a future phase once depth ownership and
     /// tile-shared history semantics are designed.
     /// Minimum scale is clamped to 0.33 by `RenderSettings.resolutionScale`.
-    /// MetalFX-spatial upscaling on visionOS is retired in favour of the
-    /// compositor's native `renderQuality` resolution control
-    /// (applyRenderQualityIfNeeded): foveation-aware, smoothed, and free of the
-    /// resolution double-dip. Flip this to re-enable the old MetalFX path.
+    /// Disabled on visionOS: MetalFX spatial upscaling has worse visual quality
+    /// than compositor Render Quality here, adds extra offscreen texture memory,
+    /// and has caused headset crashes under high settings.
     static let visionMetalFXSpatialEnabled = false
 
     func isMetalFXActive(for settingsSnapshot: RenderSettingsSnapshot, framePath: RenderFramePath) -> Bool {
@@ -560,6 +563,44 @@ extension Renderer {
     /// predictable upscale rather than a closed-loop dynamic resolution.
     func effectiveResolutionScale(_ settingsSnapshot: RenderSettingsSnapshot) -> Float {
         min(settingsSnapshot.resolutionScale, Renderer.visionResolutionCeiling)
+    }
+
+    func estimatedVisionMetalFXBytes(drawable: LayerRenderer.Drawable, scale: Float) -> Int {
+        let viewCount = max(1, drawable.views.count)
+        let outWidth = max(1, drawable.colorTextures[0].width)
+        let outHeight = max(1, drawable.colorTextures[0].height)
+        let inputWidth = max(1, Int((Float(outWidth) * scale).rounded()))
+        let inputHeight = max(1, Int((Float(outHeight) * scale).rounded()))
+
+        // Input color + two input-depth history slices + output color.
+        let colorBytes = MetalFXManager.estimatedBytesPerPixel(for: drawable.colorTextures[0].pixelFormat)
+        let depthBytes = MetalFXManager.estimatedBytesPerPixel(for: drawable.depthTextures[0].pixelFormat)
+        let inputPixels = inputWidth * inputHeight * viewCount
+        let outputPixels = outWidth * outHeight * viewCount
+        return inputPixels * (colorBytes + depthBytes + depthBytes) + outputPixels * colorBytes
+    }
+
+    func canAllocateVisionMetalFXTextures(
+        drawable: LayerRenderer.Drawable,
+        settingsSnapshot: RenderSettingsSnapshot,
+        framePath: RenderFramePath
+    ) -> Bool {
+        guard Renderer.visionMetalFXSpatialEnabled else { return false }
+        guard framePath == .fragment else { return false }
+        let scale = effectiveResolutionScale(settingsSnapshot)
+        guard scale < 0.999 else { return false }
+
+        let estimatedBytes = estimatedVisionMetalFXBytes(drawable: drawable, scale: scale)
+        let budgetBytes = 128 * 1024 * 1024
+        if estimatedBytes <= budgetBytes { return true }
+
+        if RENDERER_DEBUG {
+            let mb = Double(estimatedBytes) / (1024.0 * 1024.0)
+            print("⚠️ MetalFX spatial skipped: offscreen textures would use \(Int(mb.rounded())) MB")
+        }
+        metalFXManager = nil
+        warmStartGate.invalidate()
+        return false
     }
     #endif
 }
@@ -815,7 +856,7 @@ extension Renderer {
         // skips it entirely. Ramp from 0 the moment any upscale engages
         // (scale=1.0) up to ~0.95 at the most aggressive scale (0.33) so the
         // spatial-upscaled image stays crisp across the whole slider range.
-        let upscaleAmount = max(0.0, min(1.0, (1.0 - resolutionScale) / 0.67))
+        let upscaleAmount = ((1.0 - resolutionScale) / 0.67).clamped(to: 0.0...1.0)
         var params = MetalFXResolveParams()
         params.rcasStrength = upscaleAmount * 0.95
 

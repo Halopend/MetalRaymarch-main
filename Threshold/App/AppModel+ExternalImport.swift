@@ -111,7 +111,7 @@ extension AppModel {
             // the same eased transition + gesture overrides as keyboard loads.
             // Guard against stale previews being applied if the user has already
             // moved on to a different import request.
-            Task { @MainActor in
+            Task { @MainActor [self] in
                 guard activeExternalPreviewID == request.id else { return }
                 loadStaticScene(preset, options: [])
             }
@@ -154,9 +154,9 @@ extension AppModel {
                         // Renderer never came up within the wait: queue the
                         // apply behind the activation handler instead of
                         // silently dropping the preview.
-                        queueSceneApplyAfterFormulaActivation(formulaHash: formula.shortHash) { [weak self] in
-                            guard let self, self.activeExternalPreviewID == request.id else { return }
-                            self.animationManager?.currentScene = scene
+                        queueSceneApplyAfterFormulaActivation(formulaHash: formula.shortHash) { [self] in
+                            guard activeExternalPreviewID == request.id else { return }
+                            animationManager?.currentScene = scene
                         }
                         return
                     }
@@ -203,7 +203,7 @@ extension AppModel {
                 ensureWindowContentVisible()
                 return
             }
-            Task { @MainActor in
+            Task { @MainActor [self] in
                 let installResult = await activateEmbeddedFormulaForSceneLoad(formula)
                 let ready: Bool
                 switch installResult {
@@ -221,8 +221,8 @@ extension AppModel {
                         self.clearExternalPreview(restorePreviewedState: false)
                         self.pendingExternalImport = nil
                         self.ensureWindowContentVisible()
-                        queueSceneApplyAfterFormulaActivation(formulaHash: formula.shortHash) { [weak self] in
-                            self?.animationManager?.currentScene = importedScene
+                        queueSceneApplyAfterFormulaActivation(formulaHash: formula.shortHash) { [self] in
+                            animationManager?.currentScene = importedScene
                         }
                         return
                     }

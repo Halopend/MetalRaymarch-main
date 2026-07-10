@@ -1,5 +1,5 @@
 #if os(macOS) || os(iOS)
-import Metal
+@preconcurrency import Metal
 @preconcurrency import MetalKit
 import ModelIO
 import QuartzCore
@@ -745,8 +745,8 @@ final class ThresholdMacRenderer {
         // `writeUniforms` so `makeUniforms` can bake it into the projection.
         if temporalPass != nil {
             haltonIndex = haltonIndex &+ 1
-            let jx = Self.halton(haltonIndex, base: 2) - 0.5
-            let jy = Self.halton(haltonIndex, base: 3) - 0.5
+            let jx = haltonSample(haltonIndex, base: 2) - 0.5
+            let jy = haltonSample(haltonIndex, base: 3) - 0.5
             currentJitterPixels = SIMD2<Float>(jx, jy)
             let w = Float(max(temporalUpscaler.inputSize.width, 1))
             let h = Float(max(temporalUpscaler.inputSize.height, 1))
@@ -1018,21 +1018,6 @@ final class ThresholdMacRenderer {
         return descriptor
     }
 
-    /// Mirrors the visionOS `FunctionConstantConfig.specializedMandelbulbPower`:
-    /// returns the integer Mandelbulb power for `fastPowR` dead-code elimination
-    /// when the power is a near-integer from the supported set, else `nil`.
-    private static func specializedMandelbulbPower(fractalType: FractalModelType,
-                                                   formulaParams: FormulaParams) -> Int32? {
-        guard fractalType == .mandelbulb else { return nil }
-        let rawPower = FormulaCatalog.getParam(formulaParams, index: 0)
-        let rounded = roundf(rawPower)
-        guard abs(rawPower - rounded) < 0.01,
-              [2, 3, 4, 5, 6, 8, 10, 12, 16].contains(Int(rounded)) else {
-            return nil
-        }
-        return Int32(rounded)
-    }
-
     /// Picks the function-constant–specialized `fragmentShaderMono` pipeline for
     /// the current settings when available, otherwise the generic pipeline.
     /// Kicks off an async build the first time a configuration is seen so future
@@ -1050,7 +1035,7 @@ final class ThresholdMacRenderer {
         let raySteps = Int32(settings.maxRaySteps)
         let fractalType = settings.fractalType.rawValue
         let colorIterations = Int32(settings.colorIterations)
-        let power = Self.specializedMandelbulbPower(
+        let power = FormulaCatalog.specializedMandelbulbPower(
             fractalType: settings.fractalType,
             formulaParams: settings.formulaParams
         )
@@ -1132,7 +1117,7 @@ final class ThresholdMacRenderer {
         // `case FractalTypeCustom` arm). Built-ins resolve identically against it.
         // `customLibrary` is snapshotted together with the key's hash in
         // resolveActivePipeline, so the pipeline and its `CX{hash}_` key agree.
-        guard let library = customLibrary ?? device.makeDefaultLibrary(),
+        guard let library = customLibrary ?? MetalLibraryCache.bundledDefaultLibrary(device: device),
               let vertexFunction = library.makeFunction(name: "screenshotVertexShader") else {
             cache.failBuild(key)
             return
@@ -1526,7 +1511,7 @@ final class ThresholdMacRenderer {
                                                hasActiveAudioSources: Bool,
                                                deltaTime: Float) {
         guard isAudioMode, hasActiveAudioSources, settings.fractalAudioReactiveEnabled else {
-            clearMusicReactiveLayersIfNeeded(appModel: appModel, settings: settings)
+            musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
             return
         }
 
@@ -1542,7 +1527,7 @@ final class ThresholdMacRenderer {
         // sanitization; bail out to prevent musicReactiveEngine from amplifying it.
         guard bass.isFinite, mid.isFinite, treble.isFinite, beat.isFinite, overall.isFinite else {
             renderLogger.error("Non-finite band level in updateMusicReactiveParameters — skipping engine dispatch")
-            clearMusicReactiveLayersIfNeeded(appModel: appModel, settings: settings)
+            musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
             return
         }
 
@@ -1551,10 +1536,6 @@ final class ThresholdMacRenderer {
                                     settings: settings,
                                     deltaTime: deltaTime,
                                     pipeline: appModel.parameterPipeline)
-    }
-
-    private func clearMusicReactiveLayersIfNeeded(appModel: AppModel, settings: RenderSettings) {
-        musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
     }
 
     /// Reads the Sudden Motion Sensor and injects tilt as orbit input when
@@ -1747,140 +1728,75 @@ final class ThresholdMacRenderer {
             precomputedFog,
             enabled: settings.zoomFogCompensationEnabled,
             effectiveScale: effectiveScale)
-        // Zoom-out epsilon/LOD rescale (both 1.0 at scale >= 0.15 → byte-identical):
-        // the hit threshold must loosen ∝ 1/scale to track the constant world-space
-        // pixel footprint (this also bounds step cost over the lifted horizon), and
-        // distance-LOD reads model-space t, so its falloff shrinks with scale to
-        // avoid collapsing iterations everywhere on zoom-out.
-        let zoomOutEpsilonLoosen: Float = max(1.0, 0.15 / max(effectiveScale, 1e-4))
-        let zoomOutLODScale: Float = min(1.0, effectiveScale / 0.15)
+        // Env Scrunch (Mac): synthetic room only, injected via THRESHOLD_SYNTHETIC_ENV.
+        let envScrunch = settings.makeEnvScrunchParams(
+            modelToWorld: modelMatrix,
+            viewerWorld: SIMD3<Float>(0, 0, 3),
+            gridOrigin: macEnvGrid?.originWorld ?? .zero,
+            gridCell: macEnvGrid?.cellSize ?? .zero,
+            gridAddress: macEnvGrid?.gpuAddress ?? 0,
+            surfaceMinWorld: macEnvGrid?.surfaceMinWorld ?? .zero,
+            surfaceMaxWorld: macEnvGrid?.surfaceMaxWorld ?? .zero,
+            farClampMeters: EnvironmentSDFGrid.clampFar)
 
-        let lightingWave = sin(elapsedTime * 1.2)
-        let animatedColorMix = settings.lightingPlay ? min(max(settings.colorMix + lightingWave * 0.08, 0.0), 1.0) : settings.colorMix
-        let baseGlow = settings.colorSchemeParams.glowIntensity
-        let animatedGlow = settings.lightingPlay ? min(max(baseGlow + max(0, lightingWave) * 0.25, 0.0), 2.0) : baseGlow
-        let scaleCorrectedBubbleRadius = settings.safetyBubbleRadius / max(effectiveScale, 0.001)
-        let scaleCorrectedFadeWidth = settings.safetyBubbleFadeWidth / max(effectiveScale, 0.001)
+        // Shared assembler (TECH_DEBT.md #2): the ~76-field list + the derived math
+        // (bubble scaling, epsilon/LOD, spring, animated color/glow) live once in
+        // makeUniforms; only the Mac-specific inputs are named here.
+        let platform = UniformsPlatformInputs(
+            projectionMatrix: jitteredProjection,
+            modelViewMatrix: modelView,
+            inverseModelViewMatrix: inverseModelView,
+            modelToWorldMatrix: modelMatrix,
+            // Warm start is visionOS-only (FC_WARM_START compiled out of the Mac
+            // pipelines); these stay inert here.
+            previousViewProjMatrix: matrix_identity_float4x4,
+            previousInvViewProjMatrix: matrix_identity_float4x4,
+            maxViewDistance: maxViewDistance,
+            // Native drawable height by design (see the long note previously here):
+            // strictly conservative under MetalFX dynamic resolution.
+            coneMarchScale: RenderPrecompute.coneMarchScale(
+                strength: settings.coneMarchStrength,
+                projection: projection,
+                viewportHeight: Float(drawableSize.height)),
+            pixelFootprintPerDist: RenderPrecompute.pixelFootprintPerDist(
+                projection: projection,
+                viewportHeight: Float(drawableSize.height)),
+            safetyBubbleRadiusMeters: settings.safetyBubbleRadius,
+            // Hand Attraction needs ARKit hand tracking — visionOS only.
+            handField: .off,
+            precomputedFractal: precomputedFractal,
+            precomputedLighting: precomputedLighting,
+            precomputedAudio: precomputedAudio,
+            precomputedFog: precomputedFog,
+            colorScheme: benchStableColorScheme(settings.colorSchemeParams),
+            floorPlane: SIMD4<Float>(0, 1, 0, 0),
+            floorCenterRadius: SIMD4<Float>(0, 0, 0, 0),
+            renderResolution: [1, 1],
+            benchCollectSteps: BenchmarkManager.shared.shouldCollectSteps ? 1 : 0,
+            benchAblate: Self.benchAblateMode,
+            passthroughBackground: 0,
+            boundingFogEnabled: Int32(settings.boundingShapeFogMode),
+            boundingShadowDepth: settings.boundingShapeShadowDepth,
+            boundingShapeType: settings.boundingShapeType,
+            // Pin the Bounding Shape while the Linear Rail slides content through it.
+            boundingShapeCenter: settings.boundingShapeCenterModel(modelMatrix: modelMatrix),
+            boundToSpaceMode: settings.resolvedBoundToSpaceMode,
+            boundSpaceSize: settings.boundSpaceSize,
+            boundAmbientStrength: settings.boundAmbientStrength,
+            envScrunch: envScrunch,
+            distCache: distCacheParams)
 
-        return Uniforms(projectionMatrix: jitteredProjection,
-                        modelViewMatrix: modelView,
-                        inverseModelViewMatrix: inverseModelView,
-                        // Warm start is visionOS-only (FC_WARM_START compiled out
-                        // of the Mac pipelines); these stay inert here.
-                        previousViewProjMatrix: matrix_identity_float4x4,
-                        previousInvViewProjMatrix: matrix_identity_float4x4,
-                        time: elapsedTime,
-                        minDistance: settings.minDistance,
-                        fractalScale: settings.fractalScale,
-                        fractalIterations: Int32(settings.fractalIterations),
-                        maxRaySteps: Int32(settings.maxRaySteps),
-                        maxViewDistance: maxViewDistance,
-                        // Infinite zoom: tighten the march hit-threshold floor as we zoom in
-                        // so fine detail keeps resolving (1.0 at base → byte-identical);
-                        // loosen it past the zoom-out floor (see zoomOutEpsilonLoosen).
-                        marchEpsilonScale: (1.0 / max(effectiveScale, 1.0)) * zoomOutEpsilonLoosen,
-                        colorMix: animatedColorMix,
-                        glowIntensity: animatedGlow,
-                        foldingLimit: settings.foldingLimit,
-                        sphereRadius: settings.sphereRadius,
-                        safetyBubbleRadius: scaleCorrectedBubbleRadius,
-                        safetyBubbleEnabled: settings.fractalType == .mandelbulb ? 0 : (settings.safetyBubbleEnabled ? 1 : 0),
-                        safetyBubbleShape: settings.safetyBubbleShape,
-                        safetyBubbleFadeEnabled: settings.safetyBubbleFadeEnabled ? 1 : 0,
-                        safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
-                        safetyBubbleStrength: settings.fractalType == .mandelbulb ? 0.0 : settings.safetyBubbleStrength,
-                        // Hand Attraction needs ARKit hand tracking — visionOS only.
-                        handField: .off,
-                        colorIterations: settings.colorIterations,
-                        limitFlash: settings.limitFlash,
-                        activeGesture: Int32(settings.activeGestureIndex),
-                        warmStartEnabled: 0,
-                        fractalType: settings.fractalType.rawValue,
-                        lightingSoftness: settings.lightingSoftness,
-                        sphericalInversionMode: settings.sphericalInversionMode.rawValue,
-                        sphericalInversionRadius: settings.sphericalInversionRadius,
-                        sphereProjectionBlend: settings.sphereProjectionEnabled ? settings.sphereProjectionBlend : 0,
-                        sphereProjectionRadius: settings.sphereProjectionRadius,
-                        spaceWarpStrength: settings.spaceWarpStrength,
-                        spaceWarpParam1: settings.spaceWarpParam1,
-                        spaceWarpParam2: settings.spaceWarpParam2,
-                        spaceWarpParam3: settings.spaceWarpParam3,
-                        spaceWarpAxis: settings.spaceWarpAxis,
-                        spaceWarpStack: settings.spaceWarpStack,
-                        stepMultiplier: settings.stepMultiplier,
-                        boundingSphereRadius: settings.estimatedBoundingSphereRadius,
-                        smartAdvanceEnabled: settings.smartAdvanceEnabled ? 1 : 0,
-                        // Native drawable height by design: when MetalFX dynamic
-                        // resolution renders the march at a smaller offscreen size,
-                        // using the native height yields a slightly smaller cone
-                        // than ideal — strictly conservative (finer stop, never
-                        // skips visible detail; sharper pre-upscale, just less of
-                        // the speedup). Not worth threading the per-frame input
-                        // height through the resolution branches for an off-by-
-                        // default control. visionOS paths use the true viewport.
-                        coneMarchScale: RenderPrecompute.coneMarchScale(
-                            strength: settings.coneMarchStrength,
-                            projection: projection,
-                            viewportHeight: Float(drawableSize.height)),
-                        coneCoverageAAEnabled: settings.coneCoverageAAEnabled ? 1 : 0,
-                        shadowsEnabled: settings.shadowsEnabled ? 1 : 0,
-                        distanceLODFalloff: settings.distanceLODStrength * 0.5 * zoomOutLODScale,
-                        benchCollectSteps: BenchmarkManager.shared.shouldCollectSteps ? 1 : 0,
-                        // Conservative cone coarse-prepass: Mac uses fragmentShaderMono,
-                        // which never reads the coarse texture (FC off), so these only
-                        // keep the shared Uniforms initializer well-formed.
-                        pixelFootprintPerDist: RenderPrecompute.pixelFootprintPerDist(
-                            projection: projection,
-                            viewportHeight: Float(drawableSize.height)),
-                        coarseRateMagMax: 1.0,
-                        springDisplacementX: settings.springDisplacement.x,
-                        springDisplacementY: settings.springDisplacement.y,
-                        springDisplacementZ: settings.springDisplacement.z,
-                        springStretch: simd_length(settings.springDisplacement),
-                        springAnchorNDC: SIMD2<Float>(0.7, -0.7),
-                        springVisible: (settings.springActive || simd_length(settings.springDisplacement) > 0.001) ? 1 : 0,
-                        springRestRadius: 0.06,
-                        jitterOffset: .zero,
-                        renderResolution: [1, 1],
-                        floorPlane: SIMD4<Float>(0, 1, 0, 0),
-                        floorCenterRadius: SIMD4<Float>(0, 0, 0, 0),
-                        formulaParams: settings.formulaParams,
-                        precomputedFractal: precomputedFractal,
-                        precomputedLighting: precomputedLighting,
-                        precomputedAudio: precomputedAudio,
-                        precomputedFog: precomputedFog,
-                        colorScheme: benchStableColorScheme(settings.colorSchemeParams),
-                        benchAblate: Self.benchAblateMode,
-                        passthroughBackground: 0,
-                        boundingFogEnabled: Int32(settings.boundingShapeFogMode),
-                        boundingShadowDepth: settings.boundingShapeShadowDepth,
-                        boundingShapeType: settings.boundingShapeType,
-                        boundToSpaceMode: settings.resolvedBoundToSpaceMode,
-                        boundSpaceSize: settings.boundSpaceSize,
-                        boundAmbientStrength: settings.boundAmbientStrength,
-                        modelToWorldMatrix: modelMatrix,
-                        // Mac has no room sensing; a synthetic environment can be
-                        // injected via THRESHOLD_SYNTHETIC_ENV for headless/dev
-                        // verification of the scrunch path.
-                        envScrunch: settings.makeEnvScrunchParams(
-                            modelToWorld: modelMatrix,
-                            gridOrigin: macEnvGrid?.originWorld ?? .zero,
-                            gridCell: macEnvGrid?.cellSize ?? .zero,
-                            gridAddress: macEnvGrid?.gpuAddress ?? 0,
-                            surfaceMinWorld: macEnvGrid?.surfaceMinWorld ?? .zero,
-                            surfaceMaxWorld: macEnvGrid?.surfaceMaxWorld ?? .zero,
-                            farClampMeters: EnvironmentSDFGrid.clampFar),
-                        distCache: distCacheParams,
-                        // Pin the Bounding Shape while the Linear Rail slides
-                        // content through it (0 when the rail is off).
-                        boundingShapeCenter: settings.boundingShapeCenterModel(modelMatrix: modelMatrix))
+        return makeUniforms(settings: settings,
+                            effectiveScale: effectiveScale,
+                            time: elapsedTime,
+                            platform: platform)
     }
 
     private static func buildRenderPipeline(device: MTLDevice,
                                             colorPixelFormat: MTLPixelFormat,
                                             depthPixelFormat: MTLPixelFormat,
                                             vertexDescriptor: MTLVertexDescriptor) throws -> MTLRenderPipelineState {
-        guard let library = device.makeDefaultLibrary(),
+        guard let library = MetalLibraryCache.bundledDefaultLibrary(device: device),
               let vertexFunction = library.makeFunction(name: "screenshotVertexShader") else {
                         throw SetupError.metalLibraryUnavailable
         }
@@ -1904,7 +1820,7 @@ final class ThresholdMacRenderer {
     /// drawable. Single-view, no vertex/depth attachments — the vertex shader
     /// generates an oversized triangle from `vertex_id`.
     private static func buildBlitPipeline(device: MTLDevice, colorPixelFormat: MTLPixelFormat) -> MTLRenderPipelineState? {
-        guard let library = device.makeDefaultLibrary(),
+        guard let library = MetalLibraryCache.bundledDefaultLibrary(device: device),
               let vertexFunction = library.makeFunction(name: "macBlitVertex"),
               let fragmentFunction = library.makeFunction(name: "macBlitFragment") else {
             return nil
@@ -1923,7 +1839,7 @@ final class ThresholdMacRenderer {
     /// and writes screen-space motion into an `rg16Float` target for the
     /// temporal scaler. No depth attachment.
     private static func buildMotionPipeline(device: MTLDevice) -> MTLRenderPipelineState? {
-        guard let library = device.makeDefaultLibrary(),
+        guard let library = MetalLibraryCache.bundledDefaultLibrary(device: device),
               let vertexFunction = library.makeFunction(name: "macBlitVertex"),
               let fragmentFunction = library.makeFunction(name: "macMotionFragment") else {
             return nil
@@ -1936,20 +1852,6 @@ final class ThresholdMacRenderer {
         descriptor.rasterSampleCount = 1
         descriptor.colorAttachments[0].pixelFormat = MacTemporalUpscaler.motionFormat
         return try? device.makeRenderPipelineState(descriptor: descriptor)
-    }
-
-    /// Radical-inverse Halton sample in `[0, 1)` — sub-pixel jitter sequence for
-    /// temporal upscaling (base 2 for X, base 3 for Y).
-    private static func halton(_ index: UInt32, base: UInt32) -> Float {
-        var result: Float = 0
-        var fraction: Float = 1
-        var i = index
-        while i > 0 {
-            fraction /= Float(base)
-            result += fraction * Float(i % base)
-            i /= base
-        }
-        return result
     }
 
     private static func buildMetalVertexDescriptor() -> MTLVertexDescriptor {

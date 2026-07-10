@@ -4,8 +4,7 @@ import simd
 /// Cross-platform CPU precomputation of frame-uniform shader values.
 ///
 /// These pure functions are shared by every rendering backend — the visionOS
-/// `Renderer` (via the `Renderer` extension in `RendererPrecomputeHelpers.swift`)
-/// and the macOS/iOS `ThresholdMacRenderer` (in `RaymarchRenderView.swift`). The
+/// `Renderer` and the macOS/iOS `ThresholdMacRenderer`. The
 /// `Precomputed*` result types come from the shared `ShaderTypes.h` bridging
 /// header, so this file compiles unchanged on all targets and is the single
 /// source of truth for the math. Computing these once per frame on the CPU
@@ -54,7 +53,7 @@ enum RenderPrecompute {
     static func coneMarchScale(strength: Float,
                                projection: matrix_float4x4,
                                viewportHeight: Float) -> Float {
-        let s = max(0.0, min(1.0, strength))
+        let s = strength.clamped(to: 0.0...1.0)
         guard s > 0, viewportHeight > 1 else { return 0 }
         let cotHalfFovY = abs(projection.columns.1.y)   // = 1 / tan(fovY/2)
         guard cotHalfFovY > 1e-5 else { return 0 }

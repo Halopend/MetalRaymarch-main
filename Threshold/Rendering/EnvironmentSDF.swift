@@ -46,7 +46,7 @@ final class EnvironmentSDFGrid: @unchecked Sendable {
 
     private init?(device: MTLDevice, originWorld: SIMD3<Float>, sizeWorld: SIMD3<Float>) {
         let count = Self.dim * Self.dim * Self.dim
-        guard let buf = device.makeBuffer(length: count * MemoryLayout<Float16>.stride,
+        guard let buf = device.makeBuffer(length: count * MemoryLayout<UInt16>.stride,
                                           options: .storageModeShared) else { return nil }
         self.buffer = buf
         self.originWorld = originWorld
@@ -55,8 +55,8 @@ final class EnvironmentSDFGrid: @unchecked Sendable {
         self.surfaceMaxWorld = originWorld + sizeWorld
     }
 
-    private var values: UnsafeMutablePointer<Float16> {
-        buffer.contents().assumingMemoryBound(to: Float16.self)
+    private var values: UnsafeMutablePointer<UInt16> {
+        buffer.contents().assumingMemoryBound(to: UInt16.self)
     }
 
     // MARK: - Synthetic bake (Mac/dev)
@@ -147,7 +147,7 @@ final class EnvironmentSDFGrid: @unchecked Sendable {
                     let p = originWorld + (SIMD3<Float>(Float(x), Float(y), Float(z)) + 0.5) * cell
                     var d = clampFar
                     for prim in primitives { d = min(d, abs(prim.distance(to: p))) }
-                    v[(z * dim + y) * dim + x] = Float16(max(d, 0))
+                    v[(z * dim + y) * dim + x] = Self.floatToHalfBits(max(d, 0))
                 }
             }
         }
@@ -179,7 +179,7 @@ final class EnvironmentSDFGrid: @unchecked Sendable {
         grid.surfaceMaxWorld = hi
         let cell = grid.cellSize
         let v = grid.values
-        for i in 0..<(dim * dim * dim) { v[i] = Float16(clampFar) }
+        for i in 0..<(dim * dim * dim) { v[i] = Self.floatToHalfBits(clampFar) }
 
         let triCount = triangles.count / 3
         for t in 0..<triCount {
@@ -196,7 +196,9 @@ final class EnvironmentSDFGrid: @unchecked Sendable {
                         let idx = (z * dim + y) * dim + x
                         let p = originWorld + (SIMD3<Float>(Float(x), Float(y), Float(z)) + 0.5) * cell
                         let d = pointTriangleDistance(p, a, b, c)
-                        if d < Float(v[idx]) { v[idx] = Float16(max(d, 0)) }
+                        if d < Self.halfBitsToFloat(v[idx]) {
+                            v[idx] = Self.floatToHalfBits(max(d, 0))
+                        }
                     }
                 }
             }
@@ -237,5 +239,55 @@ final class EnvironmentSDFGrid: @unchecked Sendable {
         let denom = 1.0 / (va + vb + vc)
         let closest = a + ab * (vb * denom) + ac * (vc * denom)
         return simd_length(p - closest)
+    }
+
+    private static func floatToHalfBits(_ value: Float) -> UInt16 {
+        let bits = value.bitPattern
+        let sign = UInt16((bits >> 16) & 0x8000)
+        let exponent = Int((bits >> 23) & 0xff) - 127 + 15
+        let mantissa = bits & 0x7fffff
+
+        if exponent <= 0 {
+            guard exponent >= -10 else { return sign }
+            let shifted = (mantissa | 0x800000) >> UInt32(1 - exponent)
+            return sign | UInt16((shifted + 0x1000) >> 13)
+        }
+        if exponent >= 31 {
+            return sign | 0x7c00
+        }
+
+        var roundedMantissa = (mantissa + 0x1000) >> 13
+        var roundedExponent = exponent
+        if roundedMantissa == 0x400 {
+            roundedMantissa = 0
+            roundedExponent += 1
+            if roundedExponent >= 31 {
+                return sign | 0x7c00
+            }
+        }
+        return sign | UInt16(roundedExponent << 10) | UInt16(roundedMantissa)
+    }
+
+    private static func halfBitsToFloat(_ bits: UInt16) -> Float {
+        let sign = UInt32(bits & 0x8000) << 16
+        var exponent = Int((bits >> 10) & 0x1f)
+        var mantissa = UInt32(bits & 0x03ff)
+
+        if exponent == 0 {
+            if mantissa == 0 {
+                return Float(bitPattern: sign)
+            }
+            while (mantissa & 0x0400) == 0 {
+                mantissa <<= 1
+                exponent -= 1
+            }
+            exponent += 1
+            mantissa &= 0x03ff
+        } else if exponent == 31 {
+            return Float(bitPattern: sign | 0x7f800000 | (mantissa << 13))
+        }
+
+        let floatExponent = UInt32(exponent + (127 - 15)) << 23
+        return Float(bitPattern: sign | floatExponent | (mantissa << 13))
     }
 }

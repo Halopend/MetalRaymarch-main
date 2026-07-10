@@ -313,7 +313,7 @@ final class UISettingsCache {
         let op = ParameterOperation(
             targetID: targetID,
             source: .slider,
-            value: .absolute(value),
+            value: value,
             frameIndex: 0
         )
         parameterPipeline?.dispatchUI([op], cache: self)
@@ -394,7 +394,7 @@ final class UISettingsCache {
         switch (bounded, scrunch) {
         case (true, true):   return .custom
         case (true, false):  return .bounded
-        case (false, true):  return .surroundings
+        case (false, true):  return quality.envScrunchMode == 1 ? .environment : .surroundings
         case (false, false): return .free
         }
     }
@@ -409,12 +409,20 @@ final class UISettingsCache {
     func applyMixedContainment(_ mode: MixedContainment) {
         guard mode != .custom else { return }
         let bounded = (mode == .bounded)
-        let scrunch = (mode == .surroundings)
+        let scrunch = (mode == .surroundings || mode == .environment)
         quality.boundingSphereSkipEnabled = bounded
         push(\.boundingSphereSkipEnabled, value: bounded)
         quality.envScrunchEnabled = scrunch
         push(\.envScrunchEnabled, value: scrunch)
-        if scrunch && quality.envScrunchContain == 0 {
+        if mode == .surroundings || mode == .environment {
+            let envMode = mode == .environment ? 1 : 0
+            quality.envScrunchMode = envMode
+            push(\.envScrunchMode, value: envMode)
+        }
+        if mode == .environment {
+            quality.envScrunchContain = 1
+            push(\.envScrunchContain, value: 1)
+        } else if scrunch && quality.envScrunchContain == 0 {
             quality.envScrunchContain = 2
             push(\.envScrunchContain, value: 2)
         }
@@ -426,6 +434,10 @@ final class UISettingsCache {
     func setBoundingShapeEnabled(_ on: Bool) {
         quality.boundingSphereSkipEnabled = on
         push(\.boundingSphereSkipEnabled, value: on)
+        if on && quality.boundingShapeType != SafetyBubbleShapePreset.sphere.storedValue {
+            quality.boundingShapeType = SafetyBubbleShapePreset.sphere.storedValue
+            push(\.boundingShapeType, value: quality.boundingShapeType)
+        }
     }
 
     /// Toggle Scrunch INDEPENDENTLY — the individual side/quick toggle, which
@@ -483,11 +495,11 @@ final class UISettingsCache {
 
 extension UISettingsCache {
     static func blendValueToSlider(_ value: Float) -> Float {
-        sqrt(max(0.0, min(1.0, value)))
+        sqrt(value.clamped(to: 0.0...1.0))
     }
 
     static func blendSliderToValue(_ slider: Float) -> Float {
-        let clamped = max(0.0, min(1.0, slider))
+        let clamped = slider.clamped(to: 0.0...1.0)
         return clamped * clamped
     }
 }

@@ -12,7 +12,7 @@
 import Foundation
 import Metal
 
-enum RenderFramePath {
+enum RenderFramePath: Equatable {
     case adaptiveCompute
     case fragment
 }

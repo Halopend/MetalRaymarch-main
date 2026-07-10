@@ -99,6 +99,7 @@ actor Renderer {
 
     // Dedicated compute output texture (has .shaderWrite flag that drawable textures lack)
     var computeOutputTexture: MTLTexture?
+    private var hasLoggedComputeMemoryFallback = false
 
     // ═══════════════════════════════════════════════════════════════════════════
     // TEMPORAL REPROJECTION STATE
@@ -192,6 +193,7 @@ actor Renderer {
     var hasLoggedFoveationAvailability = false
     var hasLoggedWorldTrackingWarning = false
     var hasLoggedDeviceAnchorInfo = false
+    var hasLoggedMissingDeviceAnchor = false
 
 #if canImport(MetalFX)
     var metalFXManager: MetalFXManager?
@@ -797,9 +799,6 @@ actor Renderer {
         return mtlVertexDescriptor
     }
 
-    /// Cached Metal library for static pipeline builds — avoids redundant `makeDefaultLibrary()` calls.
-    nonisolated(unsafe) static var _cachedLibrary: MTLLibrary?
-
     // Pipeline cache telemetry (debug-only logging in selection paths)
     var renderPipelineCacheHits: Int = 0
     var renderPipelineCacheMisses: Int = 0
@@ -882,6 +881,15 @@ actor Renderer {
 
         frame.endUpdate()
 
+        // After a drawable request, every early exit must still close the
+        // submission phase. Returning repeatedly while world tracking warms up
+        // leaves frames in flight and trips the compositor's client assertion.
+        // Before requesting a drawable, however, ending submission is invalid.
+        func finishSkippedFrameAfterDrawableRequest() {
+            frame.startSubmission()
+            frame.endSubmission()
+        }
+
         // Drive the compositor's runtime render quality before querying the
         // drawable, so the drawable is sized for the requested quality. This is the
         // visionOS-native (and foveation-aware) resolution control — see
@@ -902,12 +910,30 @@ actor Renderer {
         )
         applyRenderQualityIfNeeded(renderQuality: effectiveRenderQuality)
 
-        guard let timing = frame.predictTiming() else { return }
+        guard let timing = frame.predictTiming() else {
+            return
+        }
         let clockWaitStart = CACurrentMediaTime()
         let clockWaitTraceState = RenderTrace.begin("Clock Wait")
         LayerRenderer.Clock().wait(until: timing.optimalInputTime)
         RenderTrace.end("Clock Wait", clockWaitTraceState)
         frameBreakdown.clockWaitMs = (CACurrentMediaTime() - clockWaitStart) * 1000.0
+
+        let presentationTime = timing.presentationTime
+        let time = LayerRenderer.Clock.Instant.epoch.duration(to: presentationTime).timeInterval
+        let deviceAnchor: DeviceAnchor?
+        if worldTracking.state == .running {
+            deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
+        } else {
+            deviceAnchor = nil
+        }
+        guard let deviceAnchor else {
+            if !hasLoggedMissingDeviceAnchor {
+                hasLoggedMissingDeviceAnchor = true
+                print("⚠️ Device anchor unavailable; skipping immersive frame until world tracking is ready")
+            }
+            return
+        }
 
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
             if RENDERER_DEBUG { print("⚠️ Failed to create command buffer; skipping frame") }
@@ -930,10 +956,16 @@ actor Renderer {
         let drawable: LayerRenderer.Drawable
         if #available(visionOS 26.0, *) {
             let drawables = frame.queryDrawables()
-            guard let selectedDrawable = selectDrawable(from: drawables) else { return }
+            guard let selectedDrawable = selectDrawable(from: drawables) else {
+                finishSkippedFrameAfterDrawableRequest()
+                return
+            }
             drawable = selectedDrawable
         } else {
-            guard let legacyDrawable = frame.queryDrawable() else { return }
+            guard let legacyDrawable = frame.queryDrawable() else {
+                finishSkippedFrameAfterDrawableRequest()
+                return
+            }
             drawable = legacyDrawable
         }
 
@@ -963,6 +995,7 @@ actor Renderer {
             // then skip rendering to avoid accumulating latency.
             RenderTrace.event("GPU Stall", "inFlightSemaphore timed out (100ms)")
             if RENDERER_DEBUG { print("⚠️ GPU stall detected: inFlightSemaphore timed out (100ms)") }
+            drawable.deviceAnchor = deviceAnchor
             frame.startSubmission()
             defer { frame.endSubmission() }
             if drawableRenderContextRequired {
@@ -982,17 +1015,6 @@ actor Renderer {
 
         // CPU work timing excludes the explicit clock wait + in-flight wait.
         let cpuEncodeStart = CACurrentMediaTime()
-
-        let presentationTime = drawable.frameTiming.presentationTime
-        let time = LayerRenderer.Clock.Instant.epoch.duration(to: presentationTime).timeInterval
-        
-        // Only query device anchor if world tracking is actually running
-        let deviceAnchor: DeviceAnchor?
-        if worldTracking.state == .running {
-            deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
-        } else {
-            deviceAnchor = nil
-        }
 
         drawable.deviceAnchor = deviceAnchor
 
@@ -1808,6 +1830,34 @@ actor Renderer {
         if RENDERER_DEBUG { print("📐 Created compute output texture: \(width)×\(height) × \(viewCount) layers") }
         return texture
     }
+
+    private func estimatedAdaptiveComputeAuxiliaryBytes(for drawable: LayerRenderer.Drawable) -> Int {
+        let width = drawable.colorTextures[0].width
+        let height = drawable.colorTextures[0].height
+        let viewCount = max(1, drawable.views.count)
+        let pixelCount = width * height * viewCount
+
+        // Adaptive compute needs one shader-writable color target plus two r32Float
+        // depth-history textures. At high compositor renderQuality these auxiliary
+        // textures can exceed the memory saved by foveation and push the process over
+        // the headset's working set. Keep the estimate conservative: common color
+        // formats here are 4 bytes/pixel, and depth is 4 bytes/pixel.
+        return pixelCount * (4 + 4 + 4)
+    }
+
+    private func canAllocateAdaptiveComputeAuxiliaryTextures(for drawable: LayerRenderer.Drawable) -> Bool {
+        let estimatedBytes = estimatedAdaptiveComputeAuxiliaryBytes(for: drawable)
+        let budgetBytes = 160 * 1024 * 1024
+        if estimatedBytes <= budgetBytes { return true }
+
+        if !hasLoggedComputeMemoryFallback {
+            hasLoggedComputeMemoryFallback = true
+            let mb = Double(estimatedBytes) / (1024.0 * 1024.0)
+            let budgetMB = Double(budgetBytes) / (1024.0 * 1024.0)
+            print("⚠️ Adaptive compute disabled for this drawable: auxiliary textures would use \(Int(mb.rounded())) MB (budget \(Int(budgetMB)) MB). Falling back to fragment rendering.")
+        }
+        return false
+    }
     
     /// Creates or resizes the double-buffered temporal depth textures for reprojection.
     /// Returns (previousRead, currentWrite) texture pair.
@@ -2232,6 +2282,14 @@ actor Renderer {
         guard computePipeline != nil else { return false }
         guard let uniformBuffer = tileUniformBuffer else { return false }
         let bufferContents = uniformBuffer.contents()
+
+        guard canAllocateAdaptiveComputeAuxiliaryTextures(for: drawable) else {
+            computeOutputTexture = nil
+            temporalDepthTextures = [nil, nil]
+            temporalDepthIndex = 0
+            temporalFrameCount = 0
+            return false
+        }
         
         // Track textures created this frame for batched residency update
         let prevComputeOutput = computeOutputTexture

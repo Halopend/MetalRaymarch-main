@@ -8,16 +8,6 @@ enum ParameterOperationSource: String, Codable, Sendable {
     case audio
 }
 
-enum ParameterOperationValue: Codable, Sendable {
-    case absolute(Float)
-
-    func resolved(from current: Float) -> Float {
-        switch self {
-        case .absolute(let value): return value
-        }
-    }
-}
-
 struct ParameterOperationSmoothing: Codable, Sendable {
     var smoothingTime: Float?
 
@@ -30,14 +20,14 @@ struct ParameterOperation: Codable, Sendable, Identifiable {
     let id: UUID
     let targetID: String
     let source: ParameterOperationSource
-    let value: ParameterOperationValue
+    let value: Float
     let timestamp: TimeInterval
     let frameIndex: UInt64
     let smoothing: ParameterOperationSmoothing
 
     init(targetID: String,
          source: ParameterOperationSource,
-         value: ParameterOperationValue,
+         value: Float,
          timestamp: TimeInterval = CFAbsoluteTimeGetCurrent(),
          frameIndex: UInt64,
          smoothing: ParameterOperationSmoothing = .init()) {
@@ -204,8 +194,7 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         let formulaBatch = ParameterNodeRegistry.shared.formulaBatch(for: cache.fractalType)
         if let node = formulaBatch.floatNodes.first(where: { $0.id == operation.targetID }) {
             node.bootstrapBaseIfNeeded(from: node.readValue(cache), timestamp: timestamp)
-            let current = node.resolvedValue(timestamp: timestamp)
-            let incoming = operation.value.resolved(from: current)
+            let incoming = operation.value
             let resolved = node.applyLayer(layer, value: incoming, smoothingTime: operation.smoothing.smoothingTime, timestamp: timestamp)
             node.writeValue(cache, resolved)
             if operation.source == .slider {
@@ -221,8 +210,7 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         }
 
         if let boolNode = formulaBatch.boolNodes.first(where: { $0.id == operation.targetID }) {
-            let current = boolNode.readValue(cache) ? 1 as Float : 0 as Float
-            let newValue = operation.value.resolved(from: current)
+            let newValue = operation.value
             boolNode.writeValue(cache, newValue >= 0.5)
             if debugTraceEnabled {
                 print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(newValue >= 0.5)")
@@ -254,7 +242,7 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
             let outcome = _state.withLock { state -> (resolved: Float, base: Float) in
                 var stack = state.formulaStacks[operation.targetID] ?? ParameterLayerStack(defaultValue: current, range: nodeRange, timestamp: timestamp)
                 stack.setBaseIfNeeded(current, timestamp: timestamp)
-                let incoming = operation.value.resolved(from: stack.resolvedValue(at: timestamp))
+                let incoming = operation.value
                 let strategy = ParameterNodeRegistry.shared
                     .node(for: fractalType, formulaIndex: formulaIndex)?
                     .motionStrategy ?? .layerLerp
@@ -306,8 +294,7 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
             var stack = state.coreStacks[operation.targetID] ?? ParameterLayerStack(defaultValue: base, range: spec.range, timestamp: operation.timestamp)
             stack.setBaseIfNeeded(base, timestamp: operation.timestamp)
 
-            let current = stack.resolvedValue(at: operation.timestamp)
-            let incoming = operation.value.resolved(from: current)
+            let incoming = operation.value
             let effectiveSmoothTime = smoothingTime(for: spec.motionStrategy, requested: operation.smoothing.smoothingTime)
             let resolved = stack.apply(layer: layer, value: incoming, smoothingTime: effectiveSmoothTime, timestamp: operation.timestamp)
             let anchor = stack.baseRawValue ?? base

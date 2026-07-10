@@ -5,7 +5,7 @@ import AVKit
 ///   0. Safety (photosensitive-epilepsy warning, must acknowledge)
 ///   1. Welcome (what Threshold is, what the app does)
 ///   2. Hand controls (movement video + handedness)
-///   3. Fingers (per-finger actions, read-only) + menu-open gesture picker
+///   3. Menu gesture + compact shortcut summary
 ///   4. Sharing (analytics on by default; user can opt out + username)
 ///
 /// Each page scrolls independently; a shared footer pins Back/Next and
@@ -33,9 +33,6 @@ struct FirstLaunchWindowView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Scrollable page body — the footer below stays pinned, so
-            // shrinking the window scrolls the content instead of
-            // crushing or clipping it.
             ScrollView {
                 Group {
                     switch currentPage {
@@ -54,7 +51,7 @@ struct FirstLaunchWindowView: View {
 
             navigationFooter
         }
-        .frame(minWidth: 680, idealWidth: 980, maxWidth: .infinity, minHeight: 520, idealHeight: 820, maxHeight: .infinity)
+        .frame(minWidth: 720, idealWidth: 940, maxWidth: .infinity, minHeight: 540, idealHeight: 660, maxHeight: .infinity)
         .background(windowSurfaceFill, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -77,26 +74,34 @@ struct FirstLaunchWindowView: View {
     /// dots. Buttons get a generous minimum size so they're easy to hit
     /// (especially with eye/hand targeting on visionOS).
     private var navigationFooter: some View {
-        HStack {
+        HStack(spacing: 16) {
             Button {
                 withAnimation { currentPage -= 1 }
             } label: {
-                Text("Back")
-                    .frame(minWidth: 80, minHeight: 32)
+                Image(systemName: "chevron.left")
+                    .font(.headline.weight(.semibold))
+                    .frame(width: 44, height: 36)
             }
             .buttonStyle(.bordered)
-            .controlSize(.large)
+            .controlSize(.regular)
             .opacity(currentPage == 0 ? 0 : 1)
             .disabled(currentPage == 0)
+            .accessibilityLabel("Previous page")
 
             Spacer()
 
-            HStack(spacing: 8) {
-                ForEach(0..<pageCount, id: \.self) { i in
-                    Circle()
-                        .fill(i == currentPage ? Color.accentColor : Color.secondary.opacity(0.3))
-                        .frame(width: 8, height: 8)
-                        .accessibilityLabel("Page \(i + 1) of \(pageCount)")
+            VStack(spacing: 6) {
+                Text(onboardingStepLabel)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    ForEach(0..<pageCount, id: \.self) { i in
+                        Capsule()
+                            .fill(i == currentPage ? Color.accentColor : Color.secondary.opacity(0.25))
+                            .frame(width: i == currentPage ? 24 : 8, height: 7)
+                            .animation(.spring(response: 0.28, dampingFraction: 0.82), value: currentPage)
+                            .accessibilityLabel("Page \(i + 1) of \(pageCount)")
+                    }
                 }
             }
 
@@ -109,15 +114,30 @@ struct FirstLaunchWindowView: View {
                     withAnimation { currentPage += 1 }
                 }
             } label: {
-                Text(currentPage == pageCount - 1 ? "Start Exploring" : "Next")
-                    .frame(minWidth: 140, minHeight: 32)
+                HStack(spacing: 8) {
+                    Text(currentPage == pageCount - 1 ? "Start" : "Continue")
+                    Image(systemName: currentPage == pageCount - 1 ? "sparkles" : "chevron.right")
+                }
+                .font(.headline.weight(.semibold))
+                .frame(minWidth: 128, minHeight: 36)
             }
             .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .controlSize(.regular)
             .disabled(currentPage == 0 && !acknowledgedFlash)
+            .accessibilityLabel(currentPage == pageCount - 1 ? "Start exploring" : "Next page")
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
+    }
+
+    private var onboardingStepLabel: String {
+        switch currentPage {
+        case 0: "Safety"
+        case 1: "Overview"
+        case 2: "Movement"
+        case 3: "Gestures"
+        default: "Sharing"
+        }
     }
 
     private var windowSurfaceFill: Color {
@@ -131,19 +151,32 @@ struct FirstLaunchWindowView: View {
     // MARK: - Page 0: Safety
 
     private var safetyPage: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                Label("Heads up: flashing lights", systemImage: AppIcons.boltTrianglebadgeExclamationmarkFill)
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(.primary)
-                Text("Some Threshold scenes contain rapidly changing colors, gradients, and audio-driven flashes that may be uncomfortable for people sensitive to flashing or strobing light.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+        OnboardingPageShell(
+            icon: AppIcons.boltTrianglebadgeExclamationmarkFill,
+            title: "Flashing lights",
+            subtitle: "Some scenes contain rapidly changing colors, gradients, and audio-driven flashes.",
+            accent: .orange
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                IntroTipRow(
+                    icon: "waveform.path.ecg",
+                    title: "Audio-reactive flashes",
+                    detail: "Bass hits and beat onsets can drive lights in time with the audio."
+                )
+                IntroTipRow(
+                    icon: "slider.horizontal.3",
+                    title: "You stay in control",
+                    detail: "Lower audio amounts, reduce bloom, or disable reactive mappings if the scene feels uncomfortable."
+                )
+                IntroTipRow(
+                    icon: "eye.trianglebadge.exclamationmark",
+                    title: "Stop immediately",
+                    detail: "Stop using Threshold if you feel dizziness, nausea, vision changes, twitching, or disorientation."
+                )
             }
-
-            // Big, unmistakable warning panel.
-            HStack(alignment: .top, spacing: 12) {
+        } detail: {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 12) {
                 FlashingLightIndicator()
                     .font(.system(size: 36))
                 VStack(alignment: .leading, spacing: 4) {
@@ -155,26 +188,10 @@ struct FirstLaunchWindowView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.10)))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
-            )
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 14).fill(Color.orange.opacity(0.12)))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.orange.opacity(0.35), lineWidth: 1))
 
-            // The music-reactive system can also produce rapid flashes at
-            // high audio levels. Make this explicit so the user knows it's
-            // not only the visuals.
-            IntroTipRow(
-                icon: "waveform.path.ecg",
-                title: "Audio-reactive flashes",
-                detail: "When music-reactive mappings are enabled, bass hits and beat onsets can drive the lights to flash in time with the audio. Lower the audio amount or disable the mapping if this is uncomfortable."
-            )
-
-            // Acknowledgement gate. The Next button is disabled until this
-            // is checked, so the user can't skip the warning. Use a real
-            // checkbox on macOS (where `ToggleStyle.checkbox` exists) and
-            // a prominent toggle on every other platform.
 #if os(macOS)
             Toggle(isOn: $acknowledgedFlash) {
                 Text("I understand that some scenes may contain flashing lights and audio-driven flashes.")
@@ -189,23 +206,20 @@ struct FirstLaunchWindowView: View {
             }
             .tint(.orange)
 #endif
+            }
         }
-        .padding(20)
     }
 
     // MARK: - Page 1: Welcome
 
     private var welcomePage: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Welcome to Threshold")
-                    .font(.title2.weight(.bold))
-                Text("Explore infinite fractal worlds in spatial computing.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
+        OnboardingPageShell(
+            icon: "cube.transparent.fill",
+            title: "Threshold",
+            subtitle: "Explore infinite fractal worlds in spatial computing.",
+            accent: .blue
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
                 IntroTipRow(
                     icon: "cube.transparent.fill",
                     title: "Raymarched Fractals",
@@ -227,33 +241,41 @@ struct FirstLaunchWindowView: View {
                     detail: "Threshold can share your settings with the community so they can become future collections. You can opt out anytime in Settings > Sharing."
                 )
             }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.06)))
+        } detail: {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Start with curated scenes, then shape them with hands, audio, and parameter controls.")
+                    .font(.title3.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("You can always return to this window from Settings.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    IntroPill(icon: "square.grid.2x2.fill", title: "Scenes")
+                    IntroPill(icon: "hand.raised.fingers.spread", title: "Hands")
+                    IntroPill(icon: "waveform", title: "Music")
+                }
+            }
         }
-        .padding(20)
     }
 
     // MARK: - Page 2: Hand Controls + Handedness
 
     private var controlsPage: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Movement and Scale")
-                    .font(.title2.weight(.bold))
-                Text("Use your hands to translate, scale, and orbit through fractal space.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
+        OnboardingPageShell(
+            icon: "move.3d",
+            title: "Movement and scale",
+            subtitle: "Use both hands to translate, scale, and orbit through fractal space.",
+            accent: .green
+        ) {
             movementTutorialVideoPlayer
                 .frame(maxWidth: .infinity)
-                .frame(height: 200)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .frame(height: 220)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: 14)
                         .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
                 )
-
+        } detail: {
             VStack(alignment: .leading, spacing: 8) {
                 IntroTipRow(
                     icon: "move.3d",
@@ -271,13 +293,7 @@ struct FirstLaunchWindowView: View {
                     detail: "Some per-finger tap defaults are mirrored for left-handed users. You can change this anytime in Settings > Display."
                 )
             }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.green.opacity(0.06)))
 
-            // Handedness picker. Sets `RenderSettings.leftHandedMode`
-            // immediately on toggle (not just on completion), so the
-            // Settings tab reflects the user's choice if they bail out
-            // and re-open it.
             HStack(spacing: 12) {
                 Image(systemName: leftHanded ? AppIcons.handRaisedFingersSpread : AppIcons.handRaisedFingersSpreadFill)
                     .font(.title3)
@@ -293,93 +309,111 @@ struct FirstLaunchWindowView: View {
                 }
             }
         }
-        .padding(20)
     }
 
-    // MARK: - Page 3: Per-Finger Actions (read-only)
+    // MARK: - Page 3: Menu Gesture
 
-    /// Shows the user which finger currently triggers which action, and
-    /// which gesture opens/closes the menu. The chips are read-only here
-    /// — full editing lives in Settings > Gestures. The intro just makes
-    /// the mapping obvious so the user knows what to expect.
+    /// Makes the menu open/close gesture the main choice on this page. Finger
+    /// shortcuts are shown only as compact supporting context so the user does
+    /// not see two different "open menu" systems.
     private var fingersPage: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Each finger is its own shortcut")
-                    .font(.title2.weight(.bold))
-                Text("Tap any finger to your palm to trigger its assigned action. Below are your current assignments — change them anytime in Settings > Gestures.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            // The five left-hand fingers, in tap-to-palm order. Names
-            // and icons mirror those used by the per-finger gesture editor
-            // in Settings > Gestures for visual consistency.
-            VStack(spacing: 6) {
-                ForEach(0..<5, id: \.self) { finger in
-                    fingerAssignmentRow(finger: finger)
+        OnboardingPageShell(
+            icon: "hand.tap.fill",
+            title: "Menu gesture",
+            subtitle: "Pick the gesture that opens and closes the floating controls.",
+            accent: .purple
+        ) {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(MenuGestureStarterStyle.allCases) { style in
+                    menuGestureStyleCard(style)
                 }
             }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.06)))
-
-            // Menu toggle — let the user pick how they open the menu from the
-            // supported set. Selecting a card writes the mode straight to
-            // RenderSettings (like the handedness picker), so it sticks even if
-            // the user bails out of onboarding. The same picker lives in
-            // Settings > Gestures.
-            VStack(alignment: .leading, spacing: 8) {
+        } detail: {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
                     Image(systemName: "hand.raised.fill")
                         .font(.headline)
                         .foregroundStyle(.purple)
-                    Text("How do you want to open the menu?")
+                    Text("What this controls")
                         .font(.headline)
                     Spacer()
                 }
-                ForEach(MenuGestureStarterStyle.allCases) { style in
-                    menuGestureStyleCard(style)
-                }
-                Text("This is the gesture you'll use most. Change it anytime in Settings > Gestures.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                Text(menuGestureStyle.mode.guidance)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                Divider().padding(.vertical, 2)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Other finger shortcuts")
+                        .font(.subheadline.weight(.semibold))
+                    ForEach(activeFingerShortcutRows) { shortcut in
+                        fingerShortcutRow(shortcut)
+                    }
+                }
             }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.10)))
         }
-        .padding(20)
     }
 
-    /// One row of the per-finger assignment list on Page 3. Shows the
-    /// finger name + icon, then the current action as a small chip.
-    private func fingerAssignmentRow(finger: Int) -> some View {
+    private var activeFingerShortcutRows: [FingerShortcutSummary] {
         let names = ["Thumb", "Index", "Middle", "Ring", "Pinky"]
         let icons = ["hand.thumbsup.fill", "1.circle.fill", "2.circle.fill", "3.circle.fill", "4.circle.fill"]
-        let action = finger < appModel.renderSettings.perFingerTapLeftActions.count
-            ? appModel.renderSettings.perFingerTapLeftActions[finger]
-            : .none
-        return HStack(spacing: 10) {
-            Image(systemName: icons[finger])
-                .font(.title3)
+        func rows(for hand: String, actions: [PerFingerTapAction]) -> [FingerShortcutSummary] {
+            actions.indices.compactMap { finger in
+                let action = actions[finger]
+                guard action != .none, action != .toggleMenu, finger < names.count else { return nil }
+                return FingerShortcutSummary(
+                    hand: hand,
+                    finger: names[finger],
+                    icon: icons[finger],
+                    action: action
+                )
+            }
+        }
+
+        let left = rows(for: "Left", actions: appModel.renderSettings.perFingerTapLeftActions)
+        let right = rows(for: "Right", actions: appModel.renderSettings.perFingerTapRightActions)
+        let ordered = left + right
+        if ordered.isEmpty {
+            return [
+                FingerShortcutSummary(
+                    hand: "",
+                    finger: "No shortcuts",
+                    icon: "hand.raised",
+                    action: .none
+                )
+            ]
+        }
+        return ordered
+    }
+
+    private func fingerShortcutRow(_ shortcut: FingerShortcutSummary) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: shortcut.icon)
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.purple)
-                .frame(width: 28)
-            Text(names[finger])
-                .font(.subheadline.weight(.medium))
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(shortcut.finger)
+                    .font(.caption.weight(.semibold))
+                if !shortcut.hand.isEmpty {
+                    Text(shortcut.hand)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
             Spacer()
-            // The chip uses a low-emphasis background so the user reads
-            // it as a label, not a button.
             HStack(spacing: 4) {
-                Image(systemName: action.icon)
-                Text(action.displayName)
+                Image(systemName: shortcut.action.icon)
+                Text(shortcut.action.displayName)
             }
             .font(.caption.weight(.medium))
-            .foregroundStyle(action == .none ? .secondary : .primary)
+            .foregroundStyle(shortcut.action == .none ? .secondary : .primary)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(
-                Capsule().fill(action == .none
+                Capsule().fill(shortcut.action == .none
                                ? Color.secondary.opacity(0.10)
                                : Color.purple.opacity(0.18))
             )
@@ -445,16 +479,12 @@ struct FirstLaunchWindowView: View {
     // MARK: - Page 4: Sharing (opt-out)
 
     private var sharingPage: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Sharing is on by default")
-                    .font(.title2.weight(.bold))
-                Text("Threshold can share your settings so they may be added to future community collections. No account, no email, no location. You can turn this off below or anytime in Settings > Sharing.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
+        OnboardingPageShell(
+            icon: shareAnalytics ? AppIcons.person3Fill : AppIcons.personSlash,
+            title: "Community sharing",
+            subtitle: "Threshold can share settings snapshots for future community collections. No account, email, or location.",
+            accent: .blue
+        ) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
                     Image(systemName: shareAnalytics ? AppIcons.person3Fill : AppIcons.personSlash)
@@ -488,6 +518,9 @@ struct FirstLaunchWindowView: View {
                         .foregroundStyle(.tertiary)
                 }
 
+            }
+        } detail: {
+            VStack(alignment: .leading, spacing: 8) {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("What you're sharing:", systemImage: AppIcons.checkmarkCircle)
                         .font(.caption.weight(.semibold))
@@ -504,14 +537,7 @@ struct FirstLaunchWindowView: View {
                         .foregroundStyle(.tertiary)
                 }
             }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.06)))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.blue.opacity(0.15), lineWidth: 1)
-            )
         }
-        .padding(20)
     }
 
     // MARK: - Tutorial Video Player
@@ -540,6 +566,61 @@ struct FirstLaunchWindowView: View {
         openWindow(id: appModel.menuWindowID)
         dismissWindow(id: AppModel.onboardingWindowID)
     }
+}
+
+private struct OnboardingPageShell<Primary: View, Detail: View>: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    let accent: Color
+    @ViewBuilder var primary: Primary
+    @ViewBuilder var detail: Detail
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(accent.opacity(0.16))
+                    Image(systemName: icon)
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(accent)
+                }
+                .frame(width: 52, height: 52)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(title)
+                        .font(.title.weight(.bold))
+                    Text(subtitle)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 12) {
+                    primary
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    detail
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(24)
+    }
+}
+
+private struct FingerShortcutSummary: Identifiable {
+    var id: String { "\(hand)-\(finger)-\(action.rawValue)" }
+    let hand: String
+    let finger: String
+    let icon: String
+    let action: PerFingerTapAction
 }
 
 private struct IntroTipRow: View {
@@ -577,6 +658,20 @@ private enum OnboardingTutorialClip {
         case .movementAndScale:
             return "movement_and_scale"
         }
+    }
+}
+
+private struct IntroPill: View {
+    let icon: String
+    let title: String
+
+    var body: some View {
+        Label(title, systemImage: icon)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.secondary.opacity(0.10)))
     }
 }
 

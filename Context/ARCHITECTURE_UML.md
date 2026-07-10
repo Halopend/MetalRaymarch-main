@@ -35,7 +35,6 @@ classDiagram
         +musicService: MusicService
         +audioAnalyzer: AudioAnalyzer
         +presetManager: PresetManager
-        +clock: AppClock
         +renderMetrics / handTrackingState
         +handlers ..> Renderer
     }
@@ -50,7 +49,7 @@ classDiagram
     class AudioAnalyzer
     class MusicService
     class PresetManager
-    class AppClock
+    class StorageLocation { <<singleton — local/iCloud root>> }
     class FractalTypeRegistry { <<formulas>> }
 
     AppModel *-- RenderSettings
@@ -60,7 +59,7 @@ classDiagram
     AppModel *-- MusicService
     AppModel *-- AudioAnalyzer
     AppModel *-- PresetManager
-    AppModel *-- AppClock
+    AppModel ..> StorageLocation : mode switch + merge
     AppModel ..> Renderer : sets handlers
 
     RaymarchRenderView ..> AppModel
@@ -80,16 +79,16 @@ classDiagram
 ```mermaid
 classDiagram
     direction LR
-    class MetalProjectApp { <<visionOS — multi-window + ImmersiveSpace>> }
+    class MetalProjectTestApp { <<visionOS @main — multi-window + ImmersiveSpace>> }
     class ThresholdMacApp { <<macOS — single window>> }
     class ThresholdiOSApp { <<iOS — inspector layout>> }
     class AppModel
     class ContentView { <<root UI — Fractal/Coloring/Effects/Animate/Gestures/Settings tabs>> }
 
-    MetalProjectApp *-- AppModel
+    MetalProjectTestApp *-- AppModel
     ThresholdMacApp *-- AppModel
     ThresholdiOSApp *-- AppModel
-    MetalProjectApp ..> ContentView
+    MetalProjectTestApp ..> ContentView
     ThresholdMacApp ..> ContentView
     ThresholdiOSApp ..> ContentView
     ContentView ..> AppModel : @Environment
@@ -130,7 +129,6 @@ classDiagram
     class MacTemporalUpscaler
     class AdaptiveResolutionController
     class BuddhabrotRenderer
-    class AppClock { <<pausable time>> }
     class TiltMotionSensor { <<protocol>> }
     class MacMotionSensor
     class IOSTiltMotionSensor
@@ -146,7 +144,6 @@ classDiagram
     Renderer ..> MetalFXManager
     Renderer ..> AdaptiveResolutionController
     Renderer ..> BuddhabrotRenderer : optional volume path
-    Renderer ..> AppClock
 
     MetalFXManager ..> MacSpatialUpscaler
     MetalFXManager ..> MacTemporalUpscaler
@@ -257,28 +254,37 @@ classDiagram
     class FractalPreset { <<struct Codable>> }
     class ModuleParamBlock { <<struct>> }
     class ParamValue { <<enum>> }
-    class ICloudBackupManager
+    class StorageLocation { <<singleton — local/iCloud root>> }
+    class BackupMerge { <<enum — newestWins>> }
 
     PresetManager o-- FractalPreset
     FractalPreset o-- ModuleParamBlock : modules[ModuleKey]
     ModuleParamBlock o-- ParamValue
-    PresetManager ..> ICloudBackupManager
+    PresetManager ..> StorageLocation : activeRoot / folder watch
+    AppModel ..> BackupMerge : newestWins on mode switch
 ```
+
+> Storage was refactored (2026-07): the old `ICloudBackupManager` blob-backup path
+> was deleted. `StorageLocation.shared` resolves the active local/iCloud folder root
+> (`StorageMode`), the preset/animation folders ARE the store, and `BackupMerge.newestWins`
+> reconciles on a mode switch (`AppModel.switchStorageMode`).
 
 ---
 
 ## 4. Formulas subsystem
 
-A protocol-oriented registry. Each fractal is a `struct` conforming to `FractalTypeDescriptor`;
-`FractalTypeRegistry` resolves them by `rawValue`, with a lock-protected overlay for runtime-loaded
-custom formulas (`EmbeddedFormula` → `CustomFractalDescriptor`).
+A class-based registry. `FractalTypeDescriptor` is a base **class** (`@unchecked Sendable`);
+each fractal is a `final class` subclass. `FractalTypeRegistry` resolves them by `rawValue`,
+with a lock-protected overlay for runtime-loaded custom formulas (`EmbeddedFormula` →
+`CustomFractalDescriptor`). (It was a protocol until 2026-07; converted to a class — see
+the `FractalTypeDescriptor.swift` header.)
 
 ```mermaid
 classDiagram
     direction TB
 
     class FractalTypeDescriptor {
-        <<protocol Sendable>>
+        <<class @unchecked Sendable>>
         displayName, icon, category
         defaultFormulaParams()
         gestureRanges / bindings
@@ -298,19 +304,27 @@ classDiagram
         metalSource, params, sourceHash
     }
 
-    class MandelboxDescriptor
-    class MandelbulbDescriptor
-    class MengerDescriptor
-    class KleinianDescriptor
-    class QuaternionJuliaDescriptor
-    class CustomFractalDescriptor
+    class MandelboxDescriptor { <<final class>> }
+    class MandelbulbDescriptor { <<final class>> }
+    class MengerDescriptor { <<final class>> }
+    class MandelbulbJuliaDescriptor { <<final class>> }
+    class QuaternionJuliaDescriptor { <<final class>> }
+    class OctahedronDescriptor { <<final class>> }
+    class MengerSphereDescriptor { <<final class>> }
+    class TheliPseudoKleinianDescriptor { <<final class>> }
+    class KleinianDescriptor { <<final class>> }
+    class CustomFractalDescriptor { <<final class>> }
 
-    MandelboxDescriptor ..|> FractalTypeDescriptor
-    MandelbulbDescriptor ..|> FractalTypeDescriptor
-    MengerDescriptor ..|> FractalTypeDescriptor
-    KleinianDescriptor ..|> FractalTypeDescriptor
-    QuaternionJuliaDescriptor ..|> FractalTypeDescriptor
-    CustomFractalDescriptor ..|> FractalTypeDescriptor
+    MandelboxDescriptor --|> FractalTypeDescriptor
+    MandelbulbDescriptor --|> FractalTypeDescriptor
+    MengerDescriptor --|> FractalTypeDescriptor
+    MandelbulbJuliaDescriptor --|> FractalTypeDescriptor
+    QuaternionJuliaDescriptor --|> FractalTypeDescriptor
+    OctahedronDescriptor --|> FractalTypeDescriptor
+    MengerSphereDescriptor --|> FractalTypeDescriptor
+    TheliPseudoKleinianDescriptor --|> FractalTypeDescriptor
+    KleinianDescriptor --|> FractalTypeDescriptor
+    CustomFractalDescriptor --|> FractalTypeDescriptor
 
     FractalTypeRegistry o-- FractalTypeDescriptor
     FractalModelType ..> FractalTypeRegistry : .descriptor

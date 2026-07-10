@@ -24,6 +24,17 @@ typedef int32_t EnumBackingType;
 
 #include <simd/simd.h>
 
+#ifndef __METAL_VERSION__
+#ifdef __cplusplus
+extern "C" {
+#endif
+int ThresholdLLVMProfileIsInstrumented(void);
+int ThresholdLLVMProfileWriteFile(void);
+#ifdef __cplusplus
+}
+#endif
+#endif
+
 typedef NS_ENUM(EnumBackingType, BufferIndex)
 {
     BufferIndexMeshPositions = 0,
@@ -287,6 +298,10 @@ typedef struct
     vector_float3 containMinGrid; // room AABB min, grid texel coords
     vector_float3 containMaxGrid; // room AABB max, grid texel coords
     vector_float3 cellModel;      // model units per grid cell, per axis (metric box SDF)
+    // Headset/camera position in model space. Shell mode uses this to keep the
+    // shell on the viewer-visible side of scanned surfaces instead of the
+    // mirrored "outside" side of the unsigned distance field.
+    vector_float3 viewerModel;
 } EnvScrunchParams;
 
 // === FRACTAL DISTANCE CACHE (conservative distance-field grid) ===

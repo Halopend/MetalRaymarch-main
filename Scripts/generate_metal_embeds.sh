@@ -16,6 +16,13 @@ cd "$REPO_ROOT"
 
 OUT_DIR="Threshold/Rendering/Generated"
 OUT_FILE="$OUT_DIR/EmbeddedMetalSources.swift"
+CHECK_ONLY=0
+if [[ "${1:-}" == "--check" ]]; then
+    CHECK_ONLY=1
+elif [[ "${1:-}" != "" ]]; then
+    echo "usage: $0 [--check]" >&2
+    exit 2
+fi
 mkdir -p "$OUT_DIR"
 
 emit_block() {
@@ -32,6 +39,9 @@ emit_block() {
     cat "$file"
     printf '\n"""#\n\n'
 }
+
+TMP_FILE="$(mktemp "${TMPDIR:-/tmp}/EmbeddedMetalSources.XXXXXX")"
+trap 'rm -f "$TMP_FILE"' EXIT
 
 {
     cat <<'HEADER'
@@ -70,6 +80,17 @@ HEADER
     cat <<'FOOTER'
 }
 FOOTER
-} > "$OUT_FILE"
+} > "$TMP_FILE"
+
+if [[ "$CHECK_ONLY" == "1" ]]; then
+    if ! cmp -s "$TMP_FILE" "$OUT_FILE"; then
+        echo "ERROR: $OUT_FILE is stale. Run Scripts/generate_metal_embeds.sh after editing Metal sources." >&2
+        exit 1
+    fi
+    echo "$OUT_FILE is fresh"
+    exit 0
+fi
+
+mv "$TMP_FILE" "$OUT_FILE"
 
 echo "Wrote $OUT_FILE ($(wc -l < "$OUT_FILE") lines)"
