@@ -16,6 +16,14 @@ import CoreGraphics
 final class RenderMetrics {
     var fps: Double = 0
 
+    /// Rolling presentation-gap percentiles from CAMetalDrawable callbacks.
+    /// These include CPU stalls, GPU overruns, and drawable starvation that a
+    /// render-callback FPS average would hide.
+    var frameGapP95Ms: Double = 0
+    var frameGapP99Ms: Double = 0
+    var maximumFrameGapMs: Double = 0
+    var hitchCount: Int = 0
+
     /// Smoothed GPU time per frame in milliseconds (Mac fragment path). Unlike
     /// `fps`, which is quantized by vsync (60 → 30 → 20…), this is continuous, so
     /// it reveals whether an acceleration setting actually reduced GPU cost even
@@ -590,10 +598,10 @@ class AppModel {
         // Explicitly reload the managers from the NEW store, then union the old
         // store's items in (newest-wins). Done here rather than relying on the
         // managers' own reload observers so ordering can't race the merge.
-        let doMerge: @MainActor () -> Void = { [weak self] in
+        let doMerge: @MainActor () async -> Void = { [weak self] in
             guard let self else { return }
-            self.presetManager.loadPresets()
-            self.animationManager?.reloadUserScenesFromStore()
+            await self.presetManager.loadPresetsNow()
+            await self.animationManager?.reloadUserScenesFromStoreNow()
 
             let mergedPresets = BackupMerge.newestWins(
                 local: oldPresets, cloud: self.presetManager.presets, timestamp: { $0.updatedAt })
@@ -607,7 +615,7 @@ class AppModel {
         }
 
         if StorageLocation.shared.activeRoot != nil {
-            doMerge()
+            Task { @MainActor in await doMerge() }
         } else {
             // iCloud not resolved yet — merge once its root becomes available (one-shot).
             final class OneShotObserverBox: @unchecked Sendable {
@@ -621,7 +629,7 @@ class AppModel {
                     NotificationCenter.default.removeObserver(token)
                     observerBox.token = nil
                 }
-                MainActor.assumeIsolated { doMerge() }
+                Task { @MainActor in await doMerge() }
             }
         }
     }

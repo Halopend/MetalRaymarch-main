@@ -445,6 +445,9 @@ struct FPSIndicatorView: View {
 
     private var fps: Double { appModel.renderMetrics.fps }
     private var gpuMs: Double { appModel.renderMetrics.gpuFrameMs }
+    private var p95GapMs: Double { appModel.renderMetrics.frameGapP95Ms }
+    private var p99GapMs: Double { appModel.renderMetrics.frameGapP99Ms }
+    private var hitchCount: Int { appModel.renderMetrics.hitchCount }
 
     private var fpsColor: Color {
         if fps >= 85 { return .green }
@@ -480,6 +483,12 @@ struct FPSIndicatorView: View {
                     .font(.caption.bold()).monospacedDigit()
                     .foregroundStyle(gpuColor)
                     .help("GPU time per frame. Lower = faster; this moves continuously as you tune the acceleration settings even when the FPS number is pinned by vsync. Under ~16.6 ms is needed for 60 fps.")
+            }
+            if p99GapMs > 0 {
+                Text("p95 \(p95GapMs, specifier: "%.1f") · p99 \(p99GapMs, specifier: "%.1f") ms · \(hitchCount) hitch\(hitchCount == 1 ? "" : "es")")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(p99GapMs > 33.3 ? .orange : .secondary)
+                    .help("Rolling presented-frame gap percentiles and cumulative gaps over 33.3 ms (or twice the recent median).")
             }
         }
         .padding(.horizontal, DS.Spacing.sm)

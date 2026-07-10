@@ -143,6 +143,38 @@ class PresetManager {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]  // browseable store files
         return encoder
     }()
+
+    private struct PresetFileSignature: Equatable, Sendable {
+        let fileSize: Int?
+        let modificationDate: Date?
+    }
+
+    /// FractalPreset is a value graph. A detached scan owns each value until the
+    /// completed result is transferred back to MainActor exactly once.
+    private struct CachedPresetFile: @unchecked Sendable {
+        let signature: PresetFileSignature
+        let preset: FractalPreset
+    }
+
+    private struct PresetScanRequest: @unchecked Sendable {
+        let root: URL
+        let cachedFiles: [URL: CachedPresetFile]
+    }
+
+    private struct PresetScanResult: @unchecked Sendable {
+        let presets: [FractalPreset]
+        let cachedFiles: [URL: CachedPresetFile]
+        let fileCount: Int
+        let decodedCount: Int
+        let reusedCount: Int
+        let pendingDownloadCount: Int
+        let cancelled: Bool
+    }
+
+    @ObservationIgnored private var presetFileCache: [URL: CachedPresetFile] = [:]
+    @ObservationIgnored private var presetReloadTask: Task<Void, Never>?
+    @ObservationIgnored private var presetReloadGeneration: UInt64 = 0
+    private static let presetReloadDebounce: Duration = .milliseconds(350)
     /// Observers that reload the store when the active root resolves or the mode changes.
     /// `nonisolated(unsafe)` so the nonisolated deinit can unregister them; the only
     /// deinit access is removal, and NotificationCenter is thread-safe.
@@ -204,7 +236,7 @@ class PresetManager {
     }
 
     init() {
-        loadPresets()
+        loadPresets(immediate: true)
         // The folder store is the source of truth: reload whenever the active root
         // resolves (iCloud discovery finishes) or the user switches storage mode,
         // so files added/removed in the folder mirror into the app.
@@ -230,7 +262,7 @@ class PresetManager {
         guard watchedPresetDirs != dirs else { return }
         stopWatchingiCloudPresets()
         watchedPresetDirs = dirs
-        loadPresets()   // immediate pass for files already present
+        loadPresets()   // coalesced pass for files already present
 
         let query = NSMetadataQuery()
         query.searchScopes = dirs
@@ -265,20 +297,102 @@ class PresetManager {
 
     // MARK: - Folder store: scan / migrate / seed
 
-    /// Decode every preset file under the store's Scenes/ + Music Presets/ folders.
-    private func scanStorePresets(root: URL) -> [FractalPreset] {
+    /// Decode changed preset files under Scenes/ + Music Presets/. Directory I/O,
+    /// iCloud hydration checks, reads, and JSON decoding all run off MainActor.
+    private nonisolated static func scanStorePresets(_ request: PresetScanRequest) -> PresetScanResult {
         let exts = ThresholdExportFormat.extensions(in: .preset)
+        let resourceKeys: Set<URLResourceKey> = [
+            .contentModificationDateKey,
+            .fileSizeKey,
+            .isUbiquitousItemKey,
+            .ubiquitousItemDownloadingStatusKey
+        ]
         var byID: [UUID: FractalPreset] = [:]
-        for dir in [StorageLocation.scenesDir(root), StorageLocation.musicPresetsDir(root)] {
-            guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
-            for url in files where exts.contains(url.pathExtension) {
-                try? FileManager.default.startDownloadingUbiquitousItem(at: url)
-                guard let data = try? Data(contentsOf: url),
-                      let preset = try? presetDecoder.decode(FractalPreset.self, from: data) else { continue }
-                byID[preset.id] = preset
-            }
+        var allURLs: [URL] = []
+        for dir in [StorageLocation.scenesDir(request.root), StorageLocation.musicPresetsDir(request.root)] {
+            guard let files = try? FileManager.default.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: Array(resourceKeys),
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+            allURLs.append(contentsOf: files.filter { exts.contains($0.pathExtension) })
         }
-        return Array(byID.values)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var newCache: [URL: CachedPresetFile] = [:]
+        var decodedCount = 0
+        var reusedCount = 0
+        var pendingDownloadCount = 0
+        let presetURLs = allURLs.sorted { $0.path < $1.path }
+
+        for rawURL in presetURLs {
+            if Task.isCancelled {
+                return PresetScanResult(
+                    presets: [], cachedFiles: request.cachedFiles, fileCount: presetURLs.count,
+                    decodedCount: decodedCount, reusedCount: reusedCount,
+                    pendingDownloadCount: pendingDownloadCount, cancelled: true
+                )
+            }
+
+            let url = rawURL.standardizedFileURL
+            let values = try? url.resourceValues(forKeys: resourceKeys)
+            let signature = PresetFileSignature(
+                fileSize: values?.fileSize,
+                modificationDate: values?.contentModificationDate
+            )
+            let cached = request.cachedFiles[url]
+
+            // File Provider can block a synchronous read for seconds. Request
+            // hydration, preserve any last-good cached value, and let the next
+            // coalesced metadata update perform the decode once it is current.
+            if values?.isUbiquitousItem == true,
+               values?.ubiquitousItemDownloadingStatus != .current {
+                try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+                pendingDownloadCount += 1
+                if let cached {
+                    newCache[url] = cached
+                    byID[cached.preset.id] = cached.preset
+                    reusedCount += 1
+                }
+                continue
+            }
+
+            if let cached, cached.signature == signature {
+                newCache[url] = cached
+                byID[cached.preset.id] = cached.preset
+                reusedCount += 1
+                continue
+            }
+
+            guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
+                  let preset = try? decoder.decode(FractalPreset.self, from: data) else {
+                // An external atomic replace can race the scan. Retain the last
+                // good value until the next metadata callback rather than making
+                // the item briefly disappear from the UI.
+                if let cached {
+                    newCache[url] = cached
+                    byID[cached.preset.id] = cached.preset
+                    reusedCount += 1
+                }
+                continue
+            }
+
+            decodedCount += 1
+            let entry = CachedPresetFile(signature: signature, preset: preset)
+            newCache[url] = entry
+            byID[preset.id] = preset
+        }
+
+        return PresetScanResult(
+            presets: byID.values.sorted { $0.createdAt > $1.createdAt },
+            cachedFiles: newCache,
+            fileCount: presetURLs.count,
+            decodedCount: decodedCount,
+            reusedCount: reusedCount,
+            pendingDownloadCount: pendingDownloadCount,
+            cancelled: false
+        )
     }
 
     /// Legacy single-blob presets (migration source), or nil if none.
@@ -298,12 +412,16 @@ class PresetManager {
     /// bundled default and RESURRECT any default the user deleted (the store's files
     /// are the source of truth). Existence survives the placeholder, so once seeded
     /// we never seed again and a deleted default stays deleted.
-    private func migrateAndSeedIfNeeded(root: URL) {
+    @discardableResult
+    private func migrateAndSeedIfNeeded(root: URL, presentPresetIDs: Set<UUID>) -> Bool {
         let marker = root.appendingPathComponent(".seeded-bundled.json")
-        try? FileManager.default.startDownloadingUbiquitousItem(at: marker)
         let alreadySeeded = FileManager.default.fileExists(atPath: marker.path)
 
-        var present = Set(scanStorePresets(root: root).map(\.id))
+        // The off-main scan supplies the IDs actually present in this root. Do not
+        // use the currently displayed array here: during a storage-mode switch it
+        // still belongs to the previous root.
+        var present = presentPresetIDs
+        var wroteFiles = false
 
         // Legacy migration runs once, globally (the blob only exists in the old
         // sandbox location and migrates into whichever store is first active).
@@ -311,7 +429,9 @@ class PresetManager {
         if !UserDefaults.standard.bool(forKey: legacyMigratedKey) {
             if let legacy = loadLegacyPresetsBlob() {
                 for preset in legacy where !present.contains(preset.id) {
-                    writePresetFile(preset, root: root); present.insert(preset.id)
+                    writeNewPresetFile(preset, root: root)
+                    present.insert(preset.id)
+                    wroteFiles = true
                 }
                 print("📦 Migrated \(legacy.count) preset(s) from legacy presets.json")
             }
@@ -322,15 +442,17 @@ class PresetManager {
         // copy; the marker then locks seeding off forever for this store. (A brand
         // new bundled preset in a future build won't auto-seed into an already-seeded
         // store — the correct trade for never resurrecting a user deletion.)
-        guard !alreadySeeded else { return }
+        guard !alreadySeeded else { return wroteFiles }
         for preset in Self.bundledPresets() where !present.contains(preset.id) {
-            writePresetFile(preset, root: root)
+            writeNewPresetFile(preset, root: root)
+            wroteFiles = true
         }
         let seededIDs = Self.bundledPresets().map(\.id)
         if let data = try? presetEncoder.encode(seededIDs) {
             try? data.write(to: marker, options: .atomic)
         }
         print("🌱 Seeded \(seededIDs.count) bundled preset(s) into store")
+        return wroteFiles
     }
 
     // MARK: - Folder store: per-file write / remove
@@ -340,10 +462,16 @@ class PresetManager {
     /// file for the same id first, so a rename or a music-reactivity change can't
     /// leave an orphan copy.
     private func writePresetFile(_ preset: FractalPreset, root: URL) {
+        removePresetFiles(id: preset.id, root: root)
+        writeNewPresetFile(preset, root: root)
+    }
+
+    /// Write a known-absent preset without scanning the store first. Used by
+    /// migration/seeding after the detached scan has already established IDs.
+    private func writeNewPresetFile(_ preset: FractalPreset, root: URL) {
         let hasMusic = preset.hasMusicReactiveMappings
         let dir = hasMusic ? StorageLocation.musicPresetsDir(root) : StorageLocation.scenesDir(root)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        removePresetFiles(id: preset.id, root: root)
         let ext = ThresholdExportFormat.preset(hasMusic: hasMusic).ext
         let url = dir.appendingPathComponent(Self.sanitizedFileName(preset.name, id: preset.id, ext: ext))
         do {
@@ -374,25 +502,106 @@ class PresetManager {
         writePresetFile(preset, root: root)
     }
 
-    /// Load all presets from the active store folder (the source of truth).
-    /// Migrates + seeds on first use of a store, then mirrors its files.
-    func loadPresets(forceRefreshBundled: Bool = false) {
+    /// Schedule a folder mirror. Watcher, foreground, and startup bursts are
+    /// debounced into a single detached scan.
+    func loadPresets(forceRefreshBundled: Bool = false, immediate: Bool = false) {
         if forceRefreshBundled { _ = Self.bundledPresets(forceRefresh: true) }
         guard let root = storeRoot else {
             // iCloud chosen but not resolved yet — stay empty; reload on rootResolved.
+            presetReloadGeneration &+= 1
+            presetReloadTask?.cancel()
+            presetFileCache = [:]
             presets = []
             return
         }
         StorageLocation.shared.ensureLayout(at: root)
-        migrateAndSeedIfNeeded(root: root)
-        presets = scanStorePresets(root: root).sorted { $0.createdAt > $1.createdAt }
-        FractalPreset.clearThumbnailCache()
+        schedulePresetReload(root: root, reason: immediate ? "initial" : "coalesced", immediate: immediate)
+    }
+
+    /// Immediate off-main reload for storage-mode merges, where the merge must
+    /// consume the newly selected store before writing the union back.
+    func loadPresetsNow(forceRefreshBundled: Bool = false) async {
+        if forceRefreshBundled { _ = Self.bundledPresets(forceRefresh: true) }
+        presetReloadGeneration &+= 1
+        presetReloadTask?.cancel()
+        guard let root = storeRoot else {
+            presetFileCache = [:]
+            presets = []
+            return
+        }
+        StorageLocation.shared.ensureLayout(at: root)
+        let result = await performPresetScan(.init(root: root, cachedFiles: presetFileCache))
+        guard !result.cancelled else { return }
+        applyPresetScanResult(result, root: root, reason: "immediate")
+    }
+
+    private func schedulePresetReload(root: URL, reason: String, immediate: Bool) {
+        presetReloadGeneration &+= 1
+        let generation = presetReloadGeneration
+        presetReloadTask?.cancel()
+        let request = PresetScanRequest(root: root, cachedFiles: presetFileCache)
+        presetReloadTask = Task { [weak self] in
+            if !immediate {
+                do {
+                    try await Task.sleep(for: Self.presetReloadDebounce)
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled, let self else { return }
+            let result = await self.performPresetScan(request)
+            guard !Task.isCancelled, !result.cancelled,
+                  generation == self.presetReloadGeneration else { return }
+            self.applyPresetScanResult(result, root: root, reason: reason)
+        }
+    }
+
+    private func performPresetScan(_ request: PresetScanRequest) async -> PresetScanResult {
+        let worker = Task.detached(priority: .utility) {
+            Self.scanStorePresets(request)
+        }
+        return await withTaskCancellationHandler {
+            await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
+    }
+
+    private func applyPresetScanResult(_ result: PresetScanResult, root: URL, reason: String) {
+        let cacheChanged = presetFileCache.count != result.cachedFiles.count ||
+            result.cachedFiles.contains { url, entry in
+                presetFileCache[url]?.signature != entry.signature
+            }
+        presetFileCache = result.cachedFiles
+        if cacheChanged {
+            presets = result.presets
+            FractalPreset.clearThumbnailCache()
+        }
+        print(
+            "📂 Preset scan [\(reason)]: files=\(result.fileCount), " +
+            "decoded=\(result.decodedCount), reused=\(result.reusedCount), " +
+            "pending=\(result.pendingDownloadCount)"
+        )
+
+        // Migration/seeding is evaluated only after the detached scan, so its
+        // presence checks never perform a second synchronous directory decode.
+        let wroteFiles = migrateAndSeedIfNeeded(
+            root: root,
+            presentPresetIDs: Set(result.presets.map(\.id))
+        )
+        if wroteFiles {
+            presetFileCache = [:]
+            schedulePresetReload(root: root, reason: "post-migration", immediate: true)
+        }
     }
 
     /// Bundled defaults are seeded once per store; there's nothing to "re-merge"
     /// anymore, so this just reloads the folder (picking up any external changes).
     func refreshBundledPresets() {
-        _ = Self.bundledPresets(forceRefresh: true)
+        // Bundle resources are immutable for the lifetime of this process. Keep
+        // the decoded overlay hot across foreground and view-appearance events;
+        // forcing 94 resource reads here caused its own avoidable UI hitch.
+        _ = Self.bundledPresets()
         loadPresets()
     }
     
@@ -428,10 +637,11 @@ class PresetManager {
         presets = newPresets
         if let root = storeRoot {
             let keep = Set(newPresets.map(\.id))
-            for id in scanStorePresets(root: root).map(\.id) where !keep.contains(id) {
+            for id in Set(presetFileCache.values.map { $0.preset.id }) where !keep.contains(id) {
                 removePresetFiles(id: id, root: root)
             }
             for preset in newPresets { writePresetFile(preset, root: root) }
+            presetFileCache = [:]
         }
         scheduleBackup()
     }

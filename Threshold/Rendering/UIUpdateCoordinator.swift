@@ -20,6 +20,10 @@ final class UIUpdateCoordinator: Sendable {
         var pendingFPSUpdate: Double?
         var pendingGPUMs: Double?
         var pendingAvgSteps: Double?
+        var pendingFrameGapP95Ms: Double?
+        var pendingFrameGapP99Ms: Double?
+        var pendingMaximumFrameGapMs: Double?
+        var pendingHitchCount: Int?
         var pendingAnalyticsFPS: Double?
         var hasPendingAnalyticsUpdate = false
         var isMainActorDispatchScheduled = false
@@ -29,6 +33,10 @@ final class UIUpdateCoordinator: Sendable {
         let fps: Double?
         let gpuMs: Double?
         let avgStepsPerPixel: Double?
+        let frameGapP95Ms: Double?
+        let frameGapP99Ms: Double?
+        let maximumFrameGapMs: Double?
+        let hitchCount: Int?
         let analyticsFPS: Double?
         let shouldUpdateAnalytics: Bool
     }
@@ -58,6 +66,19 @@ final class UIUpdateCoordinator: Sendable {
                 appModel.renderMetrics.avgStepsPerPixel = steps
             }
 
+            if let p95 = pendingWork.frameGapP95Ms {
+                appModel.renderMetrics.frameGapP95Ms = p95
+            }
+            if let p99 = pendingWork.frameGapP99Ms {
+                appModel.renderMetrics.frameGapP99Ms = p99
+            }
+            if let maximum = pendingWork.maximumFrameGapMs {
+                appModel.renderMetrics.maximumFrameGapMs = maximum
+            }
+            if let hitchCount = pendingWork.hitchCount {
+                appModel.renderMetrics.hitchCount = hitchCount
+            }
+
             if pendingWork.shouldUpdateAnalytics,
                UsageAnalytics.persistedAnalyticsEnabled {
                 let settings = appModel.renderSettings
@@ -77,7 +98,16 @@ final class UIUpdateCoordinator: Sendable {
     }
     
     /// Called from render thread — schedules UI updates without blocking.
-    nonisolated func scheduleUIUpdate(fps: Double, gpuMs: Double? = nil, avgStepsPerPixel: Double? = nil, currentTime: TimeInterval) {
+    nonisolated func scheduleUIUpdate(
+        fps: Double,
+        gpuMs: Double? = nil,
+        avgStepsPerPixel: Double? = nil,
+        frameGapP95Ms: Double? = nil,
+        frameGapP99Ms: Double? = nil,
+        maximumFrameGapMs: Double? = nil,
+        hitchCount: Int? = nil,
+        currentTime: TimeInterval
+    ) {
         let shouldDispatch = _state.withLock { state -> Bool in
             let shouldUpdateFPS = currentTime - state.lastFPSScheduleTime >= fpsUpdateInterval
             let shouldUpdateAnalytics = currentTime - state.lastAnalyticsScheduleTime >= analyticsInterval
@@ -86,6 +116,10 @@ final class UIUpdateCoordinator: Sendable {
                 state.pendingFPSUpdate = fps
                 state.pendingGPUMs = gpuMs
                 state.pendingAvgSteps = avgStepsPerPixel
+                state.pendingFrameGapP95Ms = frameGapP95Ms
+                state.pendingFrameGapP99Ms = frameGapP99Ms
+                state.pendingMaximumFrameGapMs = maximumFrameGapMs
+                state.pendingHitchCount = hitchCount
                 state.lastFPSScheduleTime = currentTime
             }
 
@@ -118,6 +152,10 @@ final class UIUpdateCoordinator: Sendable {
                 state.pendingFPSUpdate = nil
                 state.pendingGPUMs = nil
                 state.pendingAvgSteps = nil
+                state.pendingFrameGapP95Ms = nil
+                state.pendingFrameGapP99Ms = nil
+                state.pendingMaximumFrameGapMs = nil
+                state.pendingHitchCount = nil
                 state.pendingAnalyticsFPS = nil
                 state.hasPendingAnalyticsUpdate = false
                 state.isMainActorDispatchScheduled = false
@@ -127,6 +165,10 @@ final class UIUpdateCoordinator: Sendable {
                 fps: state.pendingFPSUpdate,
                 gpuMs: state.pendingGPUMs,
                 avgStepsPerPixel: state.pendingAvgSteps,
+                frameGapP95Ms: state.pendingFrameGapP95Ms,
+                frameGapP99Ms: state.pendingFrameGapP99Ms,
+                maximumFrameGapMs: state.pendingMaximumFrameGapMs,
+                hitchCount: state.pendingHitchCount,
                 analyticsFPS: state.pendingAnalyticsFPS,
                 shouldUpdateAnalytics: state.hasPendingAnalyticsUpdate
             )

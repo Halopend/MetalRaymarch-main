@@ -34,6 +34,38 @@ final class AnimationManager {
     /// them (removal only; NotificationCenter is thread-safe).
     @ObservationIgnored nonisolated(unsafe) private var storageObservers: [NSObjectProtocol] = []
 
+    private struct SceneFileSignature: Equatable, Sendable {
+        let fileSize: Int?
+        let modificationDate: Date?
+    }
+
+    /// AnimationScene is a value graph. It is immutable while the detached scan
+    /// owns it and is transferred to MainActor exactly once when the scan ends.
+    private struct CachedSceneFile: @unchecked Sendable {
+        let signature: SceneFileSignature
+        let scene: AnimationScene
+    }
+
+    private struct SceneScanRequest: @unchecked Sendable {
+        let root: URL
+        let cachedFiles: [URL: CachedSceneFile]
+    }
+
+    private struct SceneScanResult: @unchecked Sendable {
+        let scenes: [AnimationScene]
+        let cachedFiles: [URL: CachedSceneFile]
+        let fileCount: Int
+        let decodedCount: Int
+        let reusedCount: Int
+        let pendingDownloadCount: Int
+        let cancelled: Bool
+    }
+
+    @ObservationIgnored private var sceneFileCache: [URL: CachedSceneFile] = [:]
+    @ObservationIgnored private var userSceneReloadTask: Task<Void, Never>?
+    @ObservationIgnored private var userSceneReloadGeneration: UInt64 = 0
+    private static let sceneReloadDebounce: Duration = .milliseconds(350)
+
     // MARK: - Folder store (user scenes are files under <root>/Animations)
 
     /// Active store root for the current mode (nil while iCloud is resolving).
@@ -51,20 +83,111 @@ final class AnimationManager {
     /// Decode user scenes (non-default ids) from the store's Animations/ folder.
     /// Default scenes are handled by the built-in overlay, so any default files
     /// present in the folder (e.g. written by a prior sync) are ignored here.
-    private func scanUserScenes() -> [AnimationScene] {
-        guard let root = storeRoot else { return [] }
-        let dir = StorageLocation.animationsDir(root)
+    private nonisolated static func scanUserScenes(_ request: SceneScanRequest) -> SceneScanResult {
+        let dir = StorageLocation.animationsDir(request.root)
         let exts = ThresholdExportFormat.extensions(in: .animation)
-        guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return [] }
+        let resourceKeys: Set<URLResourceKey> = [
+            .contentModificationDateKey,
+            .fileSizeKey,
+            .isUbiquitousItemKey,
+            .ubiquitousItemDownloadingStatusKey
+        ]
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: Array(resourceKeys),
+            options: [.skipsHiddenFiles]
+        ) else {
+            return SceneScanResult(
+                scenes: [], cachedFiles: [:], fileCount: 0, decodedCount: 0,
+                reusedCount: 0, pendingDownloadCount: 0, cancelled: false
+            )
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
         var byID: [UUID: AnimationScene] = [:]
-        for url in files where exts.contains(url.pathExtension) {
-            try? FileManager.default.startDownloadingUbiquitousItem(at: url)
-            guard let data = try? Data(contentsOf: url),
-                  let scene = try? sceneDecoder.decode(AnimationScene.self, from: data) else { continue }
+        var newCache: [URL: CachedSceneFile] = [:]
+        var decodedCount = 0
+        var reusedCount = 0
+        var pendingDownloadCount = 0
+        let sceneURLs = files
+            .filter { exts.contains($0.pathExtension) }
+            .sorted { $0.path < $1.path }
+
+        for rawURL in sceneURLs {
+            if Task.isCancelled {
+                return SceneScanResult(
+                    scenes: [], cachedFiles: request.cachedFiles, fileCount: sceneURLs.count,
+                    decodedCount: decodedCount, reusedCount: reusedCount,
+                    pendingDownloadCount: pendingDownloadCount, cancelled: true
+                )
+            }
+
+            let url = rawURL.standardizedFileURL
+            let values = try? url.resourceValues(forKeys: resourceKeys)
+            let signature = SceneFileSignature(
+                fileSize: values?.fileSize,
+                modificationDate: values?.contentModificationDate
+            )
+            let cached = request.cachedFiles[url]
+
+            // Request an iCloud download and return immediately. Reading here
+            // would synchronously block until File Provider hydrated the file.
+            // NSMetadataQuery sends another coalesced update when it is ready.
+            if values?.isUbiquitousItem == true,
+               values?.ubiquitousItemDownloadingStatus != .current {
+                try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+                pendingDownloadCount += 1
+                if let cached {
+                    newCache[url] = cached
+                    byID[cached.scene.id] = cached.scene
+                    reusedCount += 1
+                }
+                continue
+            }
+
+            if let cached, cached.signature == signature {
+                newCache[url] = cached
+                byID[cached.scene.id] = cached.scene
+                reusedCount += 1
+                continue
+            }
+
+            guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
+                  let scene = try? decoder.decode(AnimationScene.self, from: data),
+                  !DefaultScenes.isDefault(scene.id) else {
+                // Keep the last known-good value if a coordinated external write
+                // was observed between directory enumeration and the read.
+                if let cached {
+                    newCache[url] = cached
+                    byID[cached.scene.id] = cached.scene
+                    reusedCount += 1
+                }
+                continue
+            }
+
+            decodedCount += 1
+            let entry = CachedSceneFile(signature: signature, scene: scene)
+            newCache[url] = entry
             guard !DefaultScenes.isDefault(scene.id) else { continue }
             byID[scene.id] = scene
         }
-        return Array(byID.values)
+
+        let scenes = byID.values.sorted {
+            if $0.name != $1.name {
+                return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+        return SceneScanResult(
+            scenes: scenes,
+            cachedFiles: newCache,
+            fileCount: sceneURLs.count,
+            decodedCount: decodedCount,
+            reusedCount: reusedCount,
+            pendingDownloadCount: pendingDownloadCount,
+            cancelled: false
+        )
     }
 
     /// Write one user scene as its own file, removing any prior file for that id
@@ -101,7 +224,75 @@ final class AnimationManager {
     /// Reload user scenes from the store folder (the source of truth) — reflects
     /// files added or removed in the folder, including external deletes.
     func reloadUserScenesFromStore() {
-        withSceneRebuildBatch { userScenes = scanUserScenes() }
+        scheduleUserSceneReload(reason: "explicit")
+    }
+
+    /// An immediate off-main reload for workflows that need the new snapshot
+    /// before continuing (notably storage-mode merge). Regular watcher and
+    /// foreground notifications should use the debounced method above.
+    func reloadUserScenesFromStoreNow() async {
+        userSceneReloadGeneration &+= 1
+        userSceneReloadTask?.cancel()
+        guard let request = makeSceneScanRequest() else {
+            applySceneScanResult(.init(
+                scenes: [], cachedFiles: [:], fileCount: 0, decodedCount: 0,
+                reusedCount: 0, pendingDownloadCount: 0, cancelled: false
+            ), reason: "immediate")
+            return
+        }
+        let result = await performSceneScan(request)
+        guard !result.cancelled else { return }
+        applySceneScanResult(result, reason: "immediate")
+    }
+
+    private func scheduleUserSceneReload(reason: String, immediate: Bool = false) {
+        userSceneReloadGeneration &+= 1
+        let generation = userSceneReloadGeneration
+        userSceneReloadTask?.cancel()
+
+        userSceneReloadTask = Task { [weak self] in
+            if !immediate {
+                do {
+                    try await Task.sleep(for: Self.sceneReloadDebounce)
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled, let self,
+                  let request = self.makeSceneScanRequest() else { return }
+            let result = await self.performSceneScan(request)
+            guard !Task.isCancelled, !result.cancelled,
+                  generation == self.userSceneReloadGeneration else { return }
+            self.applySceneScanResult(result, reason: reason)
+        }
+    }
+
+    private func makeSceneScanRequest() -> SceneScanRequest? {
+        guard let root = storeRoot else { return nil }
+        return SceneScanRequest(root: root, cachedFiles: sceneFileCache)
+    }
+
+    private func performSceneScan(_ request: SceneScanRequest) async -> SceneScanResult {
+        let worker = Task.detached(priority: .utility) {
+            Self.scanUserScenes(request)
+        }
+        return await withTaskCancellationHandler {
+            await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
+    }
+
+    private func applySceneScanResult(_ result: SceneScanResult, reason: String) {
+        sceneFileCache = result.cachedFiles
+        if userScenes != result.scenes {
+            withSceneRebuildBatch { userScenes = result.scenes }
+        }
+        print(
+            "📂 Scene scan [\(reason)]: files=\(result.fileCount), " +
+            "decoded=\(result.decodedCount), reused=\(result.reusedCount), " +
+            "pending=\(result.pendingDownloadCount)"
+        )
     }
 
     /// One-time migration of the legacy single-blob animation_scenes.json into the
@@ -428,13 +619,13 @@ final class AnimationManager {
         // The Animations/ folder is the source of truth — re-mirror it so files
         // added OR removed in iCloud Drive both reflect (the old additive import
         // could never reflect a delete).
-        reloadUserScenesFromStore()
+        scheduleUserSceneReload(reason: "iCloud metadata")
     }
 
     /// Re-mirror the store's Animations/ folder into `userScenes`. Kept for the
     /// watcher's immediate first pass; delegates to `reloadUserScenesFromStore`.
     func importScenesFromiCloud(animDir: URL) {
-        reloadUserScenesFromStore()
+        scheduleUserSceneReload(reason: "iCloud watcher start")
     }
 
     @discardableResult
@@ -1442,14 +1633,6 @@ final class AnimationManager {
             // User scenes now live as individual files under <root>/Animations.
             // Migrate the legacy blob once, then mirror the folder (source of truth).
             migrateLegacyUserScenesIfNeeded()
-            let scanned = scanUserScenes()
-            if scanned.isEmpty, storeRoot == nil {
-                // iCloud store not resolved yet — keep whatever we had; reload fires
-                // on rootResolved. (Don't blank the list on a transient nil root.)
-            } else {
-                userScenes = scanned
-            }
-            print("📂 Loaded \(userScenes.count) user scenes from store folder")
 
             // Load hidden default IDs
             if let ids = UserDefaults.standard.array(forKey: "hiddenDefaultSceneIDs") as? [String] {
@@ -1473,6 +1656,11 @@ final class AnimationManager {
                 }
             }
         }
+
+        // File enumeration and JSON decoding can involve hundreds of megabytes
+        // of iCloud-backed data. Schedule it after the synchronous defaults and
+        // overrides are ready so app launch never waits for the store.
+        scheduleUserSceneReload(reason: "manager load", immediate: true)
 
         print("📂 Defaults: \(DefaultScenes.allIDs.count) built-in, \(hiddenDefaultSceneIDs.count) hidden, \(editedDefaultOverrides.count) edited")
     }

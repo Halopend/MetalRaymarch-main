@@ -416,7 +416,9 @@ final class ThresholdMacRenderer {
 
     private var uniformBufferIndex = 0
     private var lastFrameTime = CACurrentMediaTime()
-    private var smoothedFPS: Double = 0
+    /// Updated only by drawable presentation callbacks, so it measures what the
+    /// user actually saw rather than how often MTKView attempted to draw.
+    private let framePacingTracker = OSAllocatedUnfairLock(initialState: FramePacingTracker())
     // GPU time per frame, smoothed. Written on the command-buffer completion
     // thread, read on the render thread — hence the lock. Surfaces the real,
     // vsync-independent render cost to the perf HUD.
@@ -859,6 +861,13 @@ final class ThresholdMacRenderer {
             avgStepsHolder.withLock { $0 = avg }
         }
 
+        let framePacingTracker = self.framePacingTracker
+        drawable.addPresentedHandler { drawable in
+            framePacingTracker.withLock { tracker in
+                _ = tracker.recordPresentation(at: drawable.presentedTime)
+            }
+        }
+
         let activePipeline = resolveActivePipeline(appModel: appModel)
 
         if let temporalPass, let blitPipelineState, let motionPipelineState {
@@ -1264,10 +1273,14 @@ final class ThresholdMacRenderer {
                                       hasActiveAudioSources: hasActiveAudioSources,
                                       deltaTime: Float(deltaTime))
 
-        updateFPS(deltaTime: deltaTime)
-        uiUpdateCoordinator.scheduleUIUpdate(fps: smoothedFPS,
+        let framePacing = framePacingTracker.withLock { $0.snapshot() }
+        uiUpdateCoordinator.scheduleUIUpdate(fps: framePacing.fps,
                                              gpuMs: gpuFrameMsHolder.withLock { $0 },
                                              avgStepsPerPixel: avgStepsHolder.withLock { $0 },
+                                             frameGapP95Ms: framePacing.frameGapP95Ms,
+                                             frameGapP99Ms: framePacing.frameGapP99Ms,
+                                             maximumFrameGapMs: framePacing.maximumFrameGapMs,
+                                             hitchCount: framePacing.hitchCount,
                                              currentTime: now)
 
         let snapshot = settings.snapshot()
@@ -1573,13 +1586,6 @@ final class ThresholdMacRenderer {
         settings.resetDetailTransform()
         // Discard temporal history so the camera jump doesn't smear.
         temporalUpscaler.requestReset()
-    }
-
-    private func updateFPS(deltaTime: TimeInterval) {
-        guard deltaTime > 0 else { return }
-        let instantFPS = 1.0 / deltaTime
-        let smoothFactor = 1.0 - exp(-10.0 * deltaTime)
-        smoothedFPS += (instantFPS - smoothedFPS) * smoothFactor
     }
 
     private func makeUniforms(settings: RenderSettingsSnapshot, elapsedTime: Float, deltaTime: Float) -> Uniforms {
