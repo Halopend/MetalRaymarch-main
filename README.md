@@ -22,13 +22,13 @@ Scripts/build.sh mac       # ThresholdMac (fastest iteration; fragment render pa
 Scripts/build.sh vision    # Threshold (visionOS; compute render path)
 Scripts/build.sh ios       # ThresholdiOS
 Scripts/build.sh test      # clean test — the ONLY trustworthy test run (see below)
-Scripts/build.sh embeds    # regenerate the embedded Metal sources (see gotchas)
+Scripts/build.sh embeds    # generate an inspection copy of the embedded Metal sources
 ```
 Local builds run with `CODE_SIGNING_ALLOWED=NO` (no provisioning needed).
 
 ## Gotchas that will bite you (keep these in muscle memory)
 
-1. **Edited a shader? Regenerate the embeds.** After changing `Shaders.metal`, `ShaderTypes.h`, or any `Threshold/Formulas/**/*.h`, run `Scripts/generate_metal_embeds.sh` (or `Scripts/build.sh embeds`). `Threshold/Rendering/Generated/EmbeddedMetalSources.swift` is a **hand-regenerated** verbatim copy used by the runtime `.threshfx` compiler — it is *not* rebuilt automatically. A forgotten regen ships stale runtime shaders; `Scripts/build.sh mac|vision|ios|test` now fails fast when the generated file drifts, and `ThresholdTests/EmbedFreshnessTests` still catches it inside the test suite.
+1. **Shader embeds are automatic.** Each app and Quick Look target generates `EmbeddedMetalSources.swift` into its own Derived Sources directory before Swift compilation. Editing `Shaders.metal`, `ShaderTypes.h`, or a built-in formula header therefore updates both the static Metal build and runtime `.threshfx` compiler input in the same build. `Scripts/build.sh embeds` remains available only to inspect the generated Swift under `.build/Generated`.
 
 2. **Edited a shader? Also clear the pipeline cache.** Dev builds reuse a stale PSO archive across shader changes:
    ```sh

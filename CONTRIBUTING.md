@@ -65,15 +65,16 @@ deployment target.
 
 ## After editing shaders
 
-Any change to `Threshold/Rendering/Shaders.metal`, `ShaderTypes.h`, or a built-in
-formula header **must** be followed by:
+Each app and Quick Look target automatically regenerates its embedded Metal
+sources when `Threshold/Rendering/Shaders.metal`, `ShaderTypes.h`, or a built-in
+formula header changes. To generate an inspection copy manually, run:
 
 ```sh
-Scripts/build.sh embeds   # regenerates Threshold/Rendering/Generated/EmbeddedMetalSources.swift
+Scripts/build.sh embeds   # generates an inspection copy under .build/Generated
 ```
 
-That generated file embeds the Metal sources so the runtime shader compiler can
-build self-contained `.threshfx` formulas; it must mirror the static build.
+The target-local generated file lets the runtime shader compiler build
+self-contained `.threshfx` formulas while staying in sync with the static build.
 
 ## Known quirks
 

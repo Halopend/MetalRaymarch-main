@@ -33,6 +33,9 @@ WIRE="$REPO/ThresholdQuickLook/wire_quicklook.rb"
 BUILD="$(mktemp -d)"
 trap 'rm -rf "$BUILD"' EXIT
 
+echo "==> generating target-local embedded Metal source"
+"$REPO/Scripts/generate_metal_embeds.sh" --output "$BUILD/EmbeddedMetalSources.swift"
+
 echo "==> building metallib from Shaders.metal"
 ( cd "$REPO/Threshold" \
   && xcrun -sdk macosx metal -c Rendering/Shaders.metal -o "$BUILD/shaders.air" \
@@ -48,6 +51,7 @@ while IFS= read -r p; do FILES+=("$REPO/$p"); done < <(
   awk 'f && /^\]/ {exit} /SHARED_SOURCES *= *\[/ {f=1} f' "$WIRE" \
     | grep -oE '"(Threshold|ThresholdQuickLook)/[^"]+\.swift"' | tr -d '"' | sort -u
 )
+FILES+=("$BUILD/EmbeddedMetalSources.swift")
 FILES+=("$REPO/ThresholdQuickLook/Tests/RenderCheckMain.swift")
 echo "    ${#FILES[@]} swift files"
 [[ ${#FILES[@]} -ge 30 ]] || { echo "closure too small (${#FILES[@]}) — SHARED_SOURCES parse failed"; exit 2; }

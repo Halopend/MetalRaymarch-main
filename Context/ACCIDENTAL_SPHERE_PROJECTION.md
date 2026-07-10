@@ -65,8 +65,7 @@ The plumbing already exists — reuse it, change only the application point.
 3. Wire δ → `FC_ITER_BIAS = round(deIterationMismatch)` at pipeline creation, alongside the other
    iteration constants in the pipeline-cache specialization (`RendererPipelineCache`). The cache
    already keys on iteration constants, so this adds ≤17 variants (δ ∈ −8…8) — acceptable.
-4. **Regenerate `EmbeddedMetalSources.swift` from `Shaders.metal`** (it's hand-regenerated, no
-   build phase — TECH_DEBT item F) and **clear the PSO archive**
+4. `EmbeddedMetalSources.swift` regenerates automatically from `Shaders.metal`; **clear the PSO archive**
    (`rm -rf ~/Library/Application\ Support/ThresholdPipelineArchive`) before testing, or the old
    pipeline is reused and the change appears to "do nothing."
 5. **Only the user can confirm the look** — dial the (now loop-affecting) slider on a Mandelbox

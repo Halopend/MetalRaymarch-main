@@ -120,7 +120,7 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
 
     // Platform inputs the shared assembler can't derive; the identical field list
     // + derived math (bubble scaling, epsilon/LOD, spring, animated color/glow)
-    // now live once in makeUniforms (TECH_DEBT.md #2).
+    // now live once in assembleUniforms (TECH_DEBT.md #2).
     let platform = UniformsPlatformInputs(
         projectionMatrix: jitteredProjection,
         modelViewMatrix: modelView,
@@ -163,10 +163,10 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
         envScrunch: EnvScrunchParams(),
         distCache: DistanceCacheParams())
 
-    return makeUniforms(settings: settings,
-                        effectiveScale: effectiveScale,
-                        time: elapsedTime,
-                        platform: platform)
+    return assembleUniforms(settings: settings,
+                            effectiveScale: effectiveScale,
+                            time: elapsedTime,
+                            platform: platform)
 }
 
 // MARK: - Headless Metal render harness

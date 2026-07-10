@@ -4,16 +4,12 @@
 //
 //  TECH_DEBT.md #1 — the embed-freshness gate.
 //
-//  `EmbeddedMetalSources.swift` is a generated copy of ShaderTypes.h, the
-//  formula headers, and Shaders.metal, used by CustomShaderCompiler to build
-//  runtime `.threshfx` libraries. Regeneration (Scripts/generate_metal_embeds.sh
-//  / `build.sh embeds`) is manual, and a stale copy fails SILENTLY: the static
-//  pipelines use the new struct layouts while every runtime-compiled formula
-//  uses the old ones — mis-laid-out uniforms, not a compile error. This bit
-//  live on 2026-07-01 (`benchAblate`) and needed 4 hand-regens on 2026-07-02.
+//  `EmbeddedMetalSources.swift` is generated into each target's Derived Sources
+//  directory from ShaderTypes.h, the formula headers, and Shaders.metal. It is
+//  used by CustomShaderCompiler to build runtime `.threshfx` libraries.
 //
-//  These tests pin every embedded block byte-for-byte to its on-disk source,
-//  so a stale regen is a red test instead of a corrupted render.
+//  These tests pin the build phase and generator contract byte-for-byte so a
+//  wiring regression cannot silently corrupt runtime-compiled shaders.
 //
 //  Generator contract this relies on (generate_metal_embeds.sh): each block is
 //  emitted as `#"""` + newline + file bytes + newline + `"""#` with the closing
@@ -64,9 +60,8 @@ struct EmbedFreshnessTests {
                 Issue.record("""
                     STALE EMBED: \(block.name) no longer matches \(block.path) \
                     (first difference at line \(firstDiff); embedded \(embeddedLines.count) \
-                    vs on-disk \(diskLines.count) lines). Run Scripts/generate_metal_embeds.sh \
-                    (or Scripts/build.sh embeds) and commit the result — a stale embed silently \
-                    mis-lays-out structs for every runtime-compiled .threshfx formula.
+                    vs on-disk \(diskLines.count) lines). The Generate Metal Embeds build \
+                    phase is stale or miswired; clean the build and verify its input list.
                     """)
             }
         }

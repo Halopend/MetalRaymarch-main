@@ -1767,10 +1767,10 @@ final class ThresholdMacRenderer {
             envScrunch: envScrunch,
             distCache: distCacheParams)
 
-        return makeUniforms(settings: settings,
-                            effectiveScale: effectiveScale,
-                            time: elapsedTime,
-                            platform: platform)
+        return assembleUniforms(settings: settings,
+                                effectiveScale: effectiveScale,
+                                time: elapsedTime,
+                                platform: platform)
     }
 
     private static func buildRenderPipeline(device: MTLDevice,

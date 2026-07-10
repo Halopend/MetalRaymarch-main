@@ -62,7 +62,6 @@ SHARED_SOURCES = [
   "Threshold/Parameters/Module.swift",
   # --- embedded distance-estimator runtime compile (custom .threshfx DEs) ---
   "Threshold/Rendering/Core/CustomShaderCompiler.swift",
-  "Threshold/Rendering/Generated/EmbeddedMetalSources.swift",
   # --- metal (compiled into each appex's own default.metallib) ---
   "Threshold/Rendering/Shaders.metal",
   # --- new shared glue (lives under ThresholdQuickLook/Shared) ---
@@ -187,6 +186,19 @@ EXTS.each do |e|
     ref = source_root_ref(proj, grp, p)
     target.source_build_phase.add_file_reference(ref, true)
   end
+
+  # The runtime compiler's Swift source is generated per target so the repository
+  # never carries a second 6.5k-line copy of the Metal sources. A target-local
+  # DERIVED_FILE_DIR also avoids races when both extensions build in parallel.
+  generated = grp.new_reference("EmbeddedMetalSources.swift")
+  generated.source_tree = "DERIVED_FILE_DIR"
+  target.source_build_phase.add_file_reference(generated, true)
+  generate = target.new_shell_script_build_phase("Generate Metal Embeds")
+  generate.input_file_list_paths = ["$(SRCROOT)/Scripts/metal_embed_inputs.xcfilelist"]
+  generate.output_paths = ["$(DERIVED_FILE_DIR)/EmbeddedMetalSources.swift"]
+  generate.shell_script = '"${SRCROOT}/Scripts/generate_metal_embeds.sh" --output "${DERIVED_FILE_DIR}/EmbeddedMetalSources.swift"'
+  target.build_phases.delete(generate)
+  target.build_phases.insert(0, generate)
 
   # Frameworks.
   e[:frameworks].each do |fw|

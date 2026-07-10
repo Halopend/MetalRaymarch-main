@@ -10,7 +10,7 @@
 //  bundled headers. To produce a self-contained Metal source we concatenate every
 //  header that the static build relies on (`ShaderTypes.h`, `FractalFormulaCommon.h`,
 //  every per-formula header, and `Shaders.metal`) — these source bodies live in the
-//  generated `EmbeddedMetalSources` enum (refresh via `Scripts/generate_metal_embeds.sh`).
+//  build-generated `EmbeddedMetalSources` enum.
 //  The user's DE source from `EmbeddedFormula.metalSource` is spliced in before
 //  `FractalFormulas.h`, and the dispatch switches gain a `case FractalTypeCustom`
 //  arm via the marker comments `// __CUSTOM_DISPATCH_DIST__` and
@@ -32,7 +32,7 @@ enum CustomShaderCompilerError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .missingDispatchMarker(let m):
-            return "Embedded shader template is missing dispatch marker '\(m)'. Run Scripts/generate_metal_embeds.sh."
+            return "Embedded shader template is missing dispatch marker '\(m)'. Verify the Generate Metal Embeds build phase."
         case .metalCompileFailed(let name, let detail):
             return "Custom shader '\(name)' failed to compile: \(detail)"
         case .libraryUnavailable:

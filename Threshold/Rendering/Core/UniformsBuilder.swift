@@ -97,10 +97,10 @@ struct UniformsPlatformInputs {
 /// All fields that are a pure function of `(settings, effectiveScale, time)` are
 /// computed here — including the derived math that used to be pasted at all three
 /// sites — so they can never silently diverge again.
-func makeUniforms(settings: RenderSettingsSnapshot,
-                  effectiveScale: Float,
-                  time: Float,
-                  platform: UniformsPlatformInputs) -> Uniforms {
+func assembleUniforms(settings: RenderSettingsSnapshot,
+                      effectiveScale: Float,
+                      time: Float,
+                      platform: UniformsPlatformInputs) -> Uniforms {
     // ── Shared derived math (was duplicated verbatim at all three call sites) ──
 
     // Infinite-zoom epsilon / LOD rescale — both 1.0 at scale >= 0.15 so they are

@@ -1,29 +1,25 @@
 #!/usr/bin/env bash
-# Regenerates Threshold/Rendering/Generated/EmbeddedMetalSources.swift from the
-# Metal headers and Shaders.metal. The generated file embeds each source body as
-# a Swift raw-string constant so `CustomShaderCompiler` can stitch a self-contained
-# Metal source for runtime-compiled `.threshfx` formulas.
+# Generates EmbeddedMetalSources.swift from the Metal headers and Shaders.metal.
+# Xcode invokes this into each target's DERIVED_FILE_DIR before Swift compilation;
+# the generated file is intentionally not checked into the repository.
 #
-# Run from the repo root:   ./Scripts/generate_metal_embeds.sh
-#
-# Re-run whenever ShaderTypes.h, Shaders.metal, or any built-in formula header
-# changes — the embedded sources must mirror the static build.
+# Standalone inspection: ./Scripts/generate_metal_embeds.sh
+# Explicit destination:  ./Scripts/generate_metal_embeds.sh --output /path/file.swift
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-OUT_DIR="Threshold/Rendering/Generated"
-OUT_FILE="$OUT_DIR/EmbeddedMetalSources.swift"
-CHECK_ONLY=0
-if [[ "${1:-}" == "--check" ]]; then
-    CHECK_ONLY=1
-elif [[ "${1:-}" != "" ]]; then
-    echo "usage: $0 [--check]" >&2
+DEFAULT_OUT_DIR="${DERIVED_FILE_DIR:-$REPO_ROOT/.build/Generated}"
+OUT_FILE="$DEFAULT_OUT_DIR/EmbeddedMetalSources.swift"
+if [[ "${1:-}" == "--output" && -n "${2:-}" && -z "${3:-}" ]]; then
+    OUT_FILE="$2"
+elif [[ -n "${1:-}" ]]; then
+    echo "usage: $0 [--output /path/EmbeddedMetalSources.swift]" >&2
     exit 2
 fi
-mkdir -p "$OUT_DIR"
+mkdir -p "$(dirname "$OUT_FILE")"
 
 emit_block() {
     # $1 = property name, $2 = file path
@@ -82,15 +78,9 @@ HEADER
 FOOTER
 } > "$TMP_FILE"
 
-if [[ "$CHECK_ONLY" == "1" ]]; then
-    if ! cmp -s "$TMP_FILE" "$OUT_FILE"; then
-        echo "ERROR: $OUT_FILE is stale. Run Scripts/generate_metal_embeds.sh after editing Metal sources." >&2
-        exit 1
-    fi
+if [[ -f "$OUT_FILE" ]] && cmp -s "$TMP_FILE" "$OUT_FILE"; then
     echo "$OUT_FILE is fresh"
-    exit 0
+else
+    mv "$TMP_FILE" "$OUT_FILE"
+    echo "Wrote $OUT_FILE ($(wc -l < "$OUT_FILE") lines)"
 fi
-
-mv "$TMP_FILE" "$OUT_FILE"
-
-echo "Wrote $OUT_FILE ($(wc -l < "$OUT_FILE") lines)"

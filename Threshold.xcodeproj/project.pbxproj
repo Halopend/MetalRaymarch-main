@@ -11,6 +11,11 @@
 		099D69EE64114830CE6B54E2 /* QuickLookThumbnailing.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C2C60FE2AC612DBC45321348 /* QuickLookThumbnailing.framework */; };
 		0C78E8AD4745827B432CF743 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0CD407A50A4FE37188F833F4 /* Cocoa.framework */; };
 		0CDCD3CEB3039B4A09D19E2C /* EmbeddedMetalSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91DE710F7BB2749FB8800C0F /* EmbeddedMetalSources.swift */; };
+		A1B2C3D4E5F6000000000001 /* EmbeddedMetalSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91DE710F7BB2749FB8800C0F /* EmbeddedMetalSources.swift */; };
+		A1B2C3D4E5F6000000000002 /* EmbeddedMetalSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91DE710F7BB2749FB8800C0F /* EmbeddedMetalSources.swift */; };
+		A1B2C3D4E5F6000000000003 /* EmbeddedMetalSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91DE710F7BB2749FB8800C0F /* EmbeddedMetalSources.swift */; };
+		A1B2C3D4E5F6000000000004 /* UniformsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000021 /* UniformsBuilder.swift */; };
+		A1B2C3D4E5F6000000000005 /* UniformsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000022 /* UniformsBuilder.swift */; };
 		0D518F892C60D595AFAE2A2D /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2D9C0FCEA23C2A00B886BC75 /* Metal.framework */; };
 		11261C08D81602E020D17A9E /* GeometryConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33032499041741A6DAF070F8 /* GeometryConfig.swift */; };
 		12F0366CA391F2B1BB85989A /* AudioReactiveConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C5071304A573C4CD0927CB1 /* AudioReactiveConfig.swift */; };
@@ -180,7 +185,7 @@
 		13E0E291C71A2ACF08D9B125 /* MenuToggleGestureMode.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MenuToggleGestureMode.swift; path = Threshold/Gestures/MenuToggleGestureMode.swift; sourceTree = SOURCE_ROOT; };
 		1D7A3D65630F4A3C1CADC20B /* ParameterTargetID.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ParameterTargetID.swift; path = Threshold/Parameters/ParameterTargetID.swift; sourceTree = SOURCE_ROOT; };
 		2120938DEF53F1E5EBDA1AEA /* RenderSettingsSnapshot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderSettingsSnapshot.swift; path = Threshold/Parameters/RenderSettingsSnapshot.swift; sourceTree = SOURCE_ROOT; };
-		267AB8DEF708B1DC20911B9C /* EmbeddedMetalSources.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmbeddedMetalSources.swift; path = Threshold/Rendering/Generated/EmbeddedMetalSources.swift; sourceTree = SOURCE_ROOT; };
+		267AB8DEF708B1DC20911B9C /* EmbeddedMetalSources.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmbeddedMetalSources.swift; path = EmbeddedMetalSources.swift; sourceTree = DERIVED_FILE_DIR; };
 		2D9C0FCEA23C2A00B886BC75 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		33032499041741A6DAF070F8 /* GeometryConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GeometryConfig.swift; path = Threshold/Parameters/Config/GeometryConfig.swift; sourceTree = SOURCE_ROOT; };
 		37D3A3272F51BBE19A3CDAD7 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
@@ -217,13 +222,15 @@
 		8CF999AB55321EF1A29B2E81 /* ColorConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ColorConfig.swift; path = Threshold/Parameters/Config/ColorConfig.swift; sourceTree = SOURCE_ROOT; };
 		8EFB06C7D9CCAAFDC2AEC871 /* CustomShaderCompiler.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CustomShaderCompiler.swift; path = Threshold/Rendering/Core/CustomShaderCompiler.swift; sourceTree = SOURCE_ROOT; };
 		8FC809342FFFD04F00C1D435 /* Threshold.profdata */ = {isa = PBXFileReference; lastKnownFileType = file; path = Threshold.profdata; sourceTree = "<group>"; };
-		91DE710F7BB2749FB8800C0F /* EmbeddedMetalSources.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmbeddedMetalSources.swift; path = Threshold/Rendering/Generated/EmbeddedMetalSources.swift; sourceTree = SOURCE_ROOT; };
+		91DE710F7BB2749FB8800C0F /* EmbeddedMetalSources.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmbeddedMetalSources.swift; path = EmbeddedMetalSources.swift; sourceTree = DERIVED_FILE_DIR; };
 		95CB57512C86EAC0883E044E /* ControlSpec.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlSpec.swift; path = Threshold/Parameters/ControlSpec.swift; sourceTree = SOURCE_ROOT; };
 		9824E07E16D25804B68E737E /* AudioReactiveConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AudioReactiveConfig.swift; path = Threshold/Parameters/Config/AudioReactiveConfig.swift; sourceTree = SOURCE_ROOT; };
 		9B0A7A32EE19CCC9BA56E223 /* GestureConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GestureConfig.swift; path = Threshold/Parameters/Config/GestureConfig.swift; sourceTree = SOURCE_ROOT; };
 		9B5411800B6D0D91693D68E1 /* QualityPreset.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = QualityPreset.swift; path = Threshold/Parameters/QualityPreset.swift; sourceTree = SOURCE_ROOT; };
 		9DC470B49675A8F177223BDE /* FractalTypeDescriptor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FractalTypeDescriptor.swift; path = Threshold/App/FractalTypeDescriptor.swift; sourceTree = SOURCE_ROOT; };
 		A0FD07C8F2A32EDA66397083 /* LightingTypes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LightingTypes.swift; path = Threshold/App/LightingTypes.swift; sourceTree = SOURCE_ROOT; };
+		A1B2C3D4E5F6000000000021 /* UniformsBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = UniformsBuilder.swift; path = Threshold/Rendering/Core/UniformsBuilder.swift; sourceTree = SOURCE_ROOT; };
+		A1B2C3D4E5F6000000000022 /* UniformsBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = UniformsBuilder.swift; path = Threshold/Rendering/Core/UniformsBuilder.swift; sourceTree = SOURCE_ROOT; };
 		A2ABDB6BC0435A12CEF659CF /* FractalModelType.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FractalModelType.swift; path = Threshold/App/FractalModelType.swift; sourceTree = SOURCE_ROOT; };
 		A6098FB1FAC140F981B15B41 /* GestureDefaults.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GestureDefaults.swift; path = Threshold/Parameters/Config/GestureDefaults.swift; sourceTree = SOURCE_ROOT; };
 		A612D1E79204F9301A256B4F /* HeadlessRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HeadlessRenderer.swift; path = ThresholdQuickLook/Shared/HeadlessRenderer.swift; sourceTree = SOURCE_ROOT; };
@@ -417,6 +424,7 @@
 				2120938DEF53F1E5EBDA1AEA /* RenderSettingsSnapshot.swift */,
 				DD376B9356FEEDCA283E292E /* RendererMath.swift */,
 				EA33AD011BE4346D3B183E03 /* RenderPrecompute.swift */,
+				A1B2C3D4E5F6000000000021 /* UniformsBuilder.swift */,
 				71859076C8DB47B09E21D82A /* RenderModes.swift */,
 				A2ABDB6BC0435A12CEF659CF /* FractalModelType.swift */,
 				FCC942C32813788F2922D732 /* FormulaCatalog.swift */,
@@ -476,6 +484,7 @@
 				D817943CBDDDB5B502840504 /* RenderSettingsSnapshot.swift */,
 				F769728D520A7B9927A98F93 /* RendererMath.swift */,
 				CD844B88A8CCBD847794B2AB /* RenderPrecompute.swift */,
+				A1B2C3D4E5F6000000000022 /* UniformsBuilder.swift */,
 				C25693012876FFF4B8B66CA3 /* RenderModes.swift */,
 				EDAC6A707202A0F62AF31B93 /* FractalModelType.swift */,
 				0A3899E6341BEADA0FA5D0C8 /* FormulaCatalog.swift */,
@@ -569,6 +578,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 1189741466D855DF9475D518 /* Build configuration list for PBXNativeTarget "ThresholdQLThumbnail" */;
 			buildPhases = (
+				A1B2C3D4E5F6000000000014 /* Generate Metal Embeds */,
 				F5D51F8FB1736178E1BEDAB9 /* Sources */,
 				1C4D652D7F63AFA8812753D4 /* Frameworks */,
 				59A78E4D39BD79B9058EFA18 /* Resources */,
@@ -587,6 +597,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = D7D716AC2CEAC4B200CEEA51 /* Build configuration list for PBXNativeTarget "Threshold" */;
 			buildPhases = (
+				A1B2C3D4E5F6000000000011 /* Generate Metal Embeds */,
 				D7D7168D2CEAC4B100CEEA51 /* Sources */,
 				D7D7168E2CEAC4B100CEEA51 /* Frameworks */,
 				D7D7168F2CEAC4B100CEEA51 /* Resources */,
@@ -608,6 +619,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = D7D716B92CEAC4B200CEEA51 /* Build configuration list for PBXNativeTarget "ThresholdMac" */;
 			buildPhases = (
+				A1B2C3D4E5F6000000000012 /* Generate Metal Embeds */,
 				D7D716B32CEAC4B200CEEA51 /* Sources */,
 				D7D716B42CEAC4B200CEEA51 /* Frameworks */,
 				D7D716B52CEAC4B200CEEA51 /* Resources */,
@@ -632,6 +644,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = D7E000102E00000000000001 /* Build configuration list for PBXNativeTarget "ThresholdiOS" */;
 			buildPhases = (
+				A1B2C3D4E5F6000000000013 /* Generate Metal Embeds */,
 				D7E0000C2E00000000000001 /* Sources */,
 				D7E0000D2E00000000000001 /* Frameworks */,
 				D7E0000E2E00000000000001 /* Resources */,
@@ -673,6 +686,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 6276185C7F1F322BFC465AA3 /* Build configuration list for PBXNativeTarget "ThresholdQLPreview" */;
 			buildPhases = (
+				A1B2C3D4E5F6000000000015 /* Generate Metal Embeds */,
 				53FBA8BCE2F72B9B2DED4EAA /* Sources */,
 				A0F5B4C10B1F141B0DDE0464 /* Frameworks */,
 				BDB1106CD96B735C6A31BE28 /* Resources */,
@@ -775,6 +789,106 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		A1B2C3D4E5F6000000000011 /* Generate Metal Embeds */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"$(SRCROOT)/Scripts/metal_embed_inputs.xcfilelist",
+			);
+			inputPaths = (
+			);
+			name = "Generate Metal Embeds";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/EmbeddedMetalSources.swift",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/Scripts/generate_metal_embeds.sh\" --output \"${DERIVED_FILE_DIR}/EmbeddedMetalSources.swift\"\n";
+		};
+		A1B2C3D4E5F6000000000012 /* Generate Metal Embeds */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"$(SRCROOT)/Scripts/metal_embed_inputs.xcfilelist",
+			);
+			inputPaths = (
+			);
+			name = "Generate Metal Embeds";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/EmbeddedMetalSources.swift",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/Scripts/generate_metal_embeds.sh\" --output \"${DERIVED_FILE_DIR}/EmbeddedMetalSources.swift\"\n";
+		};
+		A1B2C3D4E5F6000000000013 /* Generate Metal Embeds */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"$(SRCROOT)/Scripts/metal_embed_inputs.xcfilelist",
+			);
+			inputPaths = (
+			);
+			name = "Generate Metal Embeds";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/EmbeddedMetalSources.swift",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/Scripts/generate_metal_embeds.sh\" --output \"${DERIVED_FILE_DIR}/EmbeddedMetalSources.swift\"\n";
+		};
+		A1B2C3D4E5F6000000000014 /* Generate Metal Embeds */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"$(SRCROOT)/Scripts/metal_embed_inputs.xcfilelist",
+			);
+			inputPaths = (
+			);
+			name = "Generate Metal Embeds";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/EmbeddedMetalSources.swift",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/Scripts/generate_metal_embeds.sh\" --output \"${DERIVED_FILE_DIR}/EmbeddedMetalSources.swift\"\n";
+		};
+		A1B2C3D4E5F6000000000015 /* Generate Metal Embeds */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"$(SRCROOT)/Scripts/metal_embed_inputs.xcfilelist",
+			);
+			inputPaths = (
+			);
+			name = "Generate Metal Embeds";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/EmbeddedMetalSources.swift",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/Scripts/generate_metal_embeds.sh\" --output \"${DERIVED_FILE_DIR}/EmbeddedMetalSources.swift\"\n";
+		};
 		D7B3C4000000000000000001 /* Stamp Git SHA */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -865,6 +979,7 @@
 				9CF76941F4529CE0CF2D3610 /* RenderSettingsSnapshot.swift in Sources */,
 				9F0F14D9860FB847DC472B38 /* RendererMath.swift in Sources */,
 				6BE08E77294210BF2D7BB808 /* RenderPrecompute.swift in Sources */,
+				A1B2C3D4E5F6000000000005 /* UniformsBuilder.swift in Sources */,
 				B3B10A08624C8235966A1502 /* RenderModes.swift in Sources */,
 				FF839A449C97E5F4B0C2E334 /* FractalModelType.swift in Sources */,
 				C7EC1C4AB7FDCD9B54A5402B /* FormulaCatalog.swift in Sources */,
@@ -909,6 +1024,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1B2C3D4E5F6000000000001 /* EmbeddedMetalSources.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -916,6 +1032,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1B2C3D4E5F6000000000002 /* EmbeddedMetalSources.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -923,6 +1040,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1B2C3D4E5F6000000000003 /* EmbeddedMetalSources.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -942,6 +1060,7 @@
 				2E27E2A522572433F35321CF /* RenderSettingsSnapshot.swift in Sources */,
 				39FBD24CC9D19C69E3F0921F /* RendererMath.swift in Sources */,
 				733A87C2E0B8F8F07EA3E2AB /* RenderPrecompute.swift in Sources */,
+				A1B2C3D4E5F6000000000004 /* UniformsBuilder.swift in Sources */,
 				CD73E29F1A58F4F38FB12DD6 /* RenderModes.swift in Sources */,
 				F638B6C567B1055C7031DE49 /* FractalModelType.swift in Sources */,
 				AAD15F51E358FB97079A964D /* FormulaCatalog.swift in Sources */,

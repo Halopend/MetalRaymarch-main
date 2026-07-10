@@ -649,7 +649,7 @@ typedef struct
 // space (not by-value), so the concern is growth awareness + keeping the
 // Swift/Metal layout in lockstep — growing one is fine, but must be a
 // conscious act. If you added a field on purpose, bump the bound in the same
-// commit (and regenerate EmbeddedMetalSources.swift). The by-value
+// commit. EmbeddedMetalSources.swift is regenerated automatically. The by-value
 // FractalParams gate lives next to its definition in Shaders.metal.
 // 2026-07-04: +48 B in both — EnvScrunchParams gained the containment box
 // (containMode/Feather + 3× grid-space float3), 112 → 160 B.

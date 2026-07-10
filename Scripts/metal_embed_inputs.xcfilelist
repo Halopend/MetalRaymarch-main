@@ -1,0 +1,12 @@
+$(SRCROOT)/Scripts/generate_metal_embeds.sh
+$(SRCROOT)/Threshold/Rendering/ShaderTypes.h
+$(SRCROOT)/Threshold/Formulas/FractalFormulaCommon.h
+$(SRCROOT)/Threshold/Formulas/FractalFormulas.h
+$(SRCROOT)/Threshold/Formulas/Mandelbulb/Mandelbulb.h
+$(SRCROOT)/Threshold/Formulas/Menger/Menger.h
+$(SRCROOT)/Threshold/Formulas/QuaternionJulia/QuaternionJulia.h
+$(SRCROOT)/Threshold/Formulas/Octahedron/Octahedron.h
+$(SRCROOT)/Threshold/Formulas/MengerSphere/MengerSphere.h
+$(SRCROOT)/Threshold/Formulas/TheliPseudoKleinian/TheliPseudoKleinian.h
+$(SRCROOT)/Threshold/Formulas/Kleinian/Kleinian.h
+$(SRCROOT)/Threshold/Rendering/Shaders.metal

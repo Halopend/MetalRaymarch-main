@@ -410,10 +410,10 @@ extension Renderer {
                 // Fractal distance cache is a Mac fragment-path prototype; inert here.
                 distCache: DistanceCacheParams())
 
-            return makeUniforms(settings: settingsSnapshot,
-                                effectiveScale: effectiveScale,
-                                time: frameTime,
-                                platform: platform)
+            return assembleUniforms(settings: settingsSnapshot,
+                                    effectiveScale: effectiveScale,
+                                    time: frameTime,
+                                    platform: platform)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
