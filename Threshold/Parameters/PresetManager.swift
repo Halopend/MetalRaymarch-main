@@ -295,6 +295,14 @@ class PresetManager {
         return bundledPresetsCache ?? []
     }
 
+    /// Stable, process-local bundled catalog for deterministic headless runs.
+    /// Benchmarking must not depend on whether File Provider has hydrated the
+    /// seeded copies in the active store; user/store entries are overlaid by ID
+    /// in `MacBenchmarkHarness` so edited presets still take precedence.
+    static func bundledPresetsForBenchmark() -> [FractalPreset] {
+        bundledPresets()
+    }
+
     // MARK: - Folder store: scan / migrate / seed
 
     /// Decode changed preset files under Scenes/ + Music Presets/. Directory I/O,

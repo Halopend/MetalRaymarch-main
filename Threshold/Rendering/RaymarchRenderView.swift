@@ -1048,6 +1048,12 @@ final class ThresholdMacRenderer {
             fractalType: settings.fractalType,
             formulaParams: settings.formulaParams
         )
+        // Match the values written to the per-frame uniforms so feature-off
+        // variants can dead-code-eliminate their hot-path branches. Mandelbulb
+        // always disables the safety bubble in UniformsBuilder.
+        let safetyBubbleEnabled = settings.fractalType != .mandelbulb && settings.safetyBubbleEnabled
+        let shadowsEnabled = settings.shadowsEnabled
+        let sphereProjectionEnabled = settings.sphereProjectionEnabled && settings.sphereProjectionBlend > 0
 
         let powerKey = power.map { "_P\($0)" } ?? ""
         // Atomic (library, hash) read so the cache-key hash and the build library
@@ -1072,7 +1078,7 @@ final class ThresholdMacRenderer {
         // first transform flips the key → cache miss → the generic pipeline (FC unset
         // → defaults ON) renders correctly while the new variant compiles.
         let hasSpaceWarp = !settings.spaceWarpStack.isEmpty || custom.hash != nil
-        let key = customPrefix + "FT\(fractalType)_FI\(iterations)_RS\(raySteps)_CI\(colorIterations)\(powerKey)_SW\(hasSpaceWarp ? 1 : 0)"
+        let key = customPrefix + "FT\(fractalType)_FI\(iterations)_RS\(raySteps)_CI\(colorIterations)\(powerKey)_B\(safetyBubbleEnabled ? 1 : 0)_SH\(shadowsEnabled ? 1 : 0)_SP\(sphereProjectionEnabled ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)"
 
         if let specialized = specializedPipelineCache.pipeline(for: key) {
             appModel.isUsingSpecializedPipeline = true
@@ -1089,6 +1095,9 @@ final class ThresholdMacRenderer {
                 fractalType: fractalType,
                 colorIterations: colorIterations,
                 power: power,
+                safetyBubbleEnabled: safetyBubbleEnabled,
+                shadowsEnabled: shadowsEnabled,
+                sphereProjectionEnabled: sphereProjectionEnabled,
                 hasSpaceWarp: hasSpaceWarp,
                 customLibrary: custom.library
             )
@@ -1106,6 +1115,9 @@ final class ThresholdMacRenderer {
                                           fractalType: Int32,
                                           colorIterations: Int32,
                                           power: Int32?,
+                                          safetyBubbleEnabled: Bool,
+                                          shadowsEnabled: Bool,
+                                          sphereProjectionEnabled: Bool,
                                           hasSpaceWarp: Bool,
                                           customLibrary: MTLLibrary?) {
         let cache = specializedPipelineCache
@@ -1123,7 +1135,9 @@ final class ThresholdMacRenderer {
         // Metal function-constant indices (mirrors the visionOS
         // `FunctionConstantIndex`, which is unavailable on macOS because it
         // lives in a CompositorServices-only file): 0=fractalIterations,
-        // 6=maxRaySteps, 7=fractalType, 9=colorIterations, 12=mandelbulbPower.
+        // 2=safetyBubble, 3=hasSpaceWarp, 6=maxRaySteps, 7=fractalType,
+        // 9=colorIterations, 11=shadows, 12=mandelbulbPower,
+        // 17=sphereProjection.
         let constants = MTLFunctionConstantValues()
         var fi = iterations
         constants.setConstantValue(&fi, type: .int, index: 0)
@@ -1136,6 +1150,15 @@ final class ThresholdMacRenderer {
         if var p = power {
             constants.setConstantValue(&p, type: .int, index: 12)
         }
+        // These values are paired with `_B` / `_SH` in the cache key. Disabled
+        // variants compile out the safety-bubble distance work in every primary
+        // DE call and the complete shadow march, respectively.
+        var bubble = safetyBubbleEnabled
+        constants.setConstantValue(&bubble, type: .bool, index: 2)
+        var shadows = shadowsEnabled
+        constants.setConstantValue(&shadows, type: .bool, index: 11)
+        var sphereProjection = sphereProjectionEnabled
+        constants.setConstantValue(&sphereProjection, type: .bool, index: 17)
         // FC_HAS_SPACEWARP (index 3): bake the space-warp seam in/out. Baked false only
         // for scenes provably without any transform, letting the whole warp path DCE.
         var sw = hasSpaceWarp

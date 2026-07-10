@@ -148,6 +148,13 @@ constant bool FC_COHERENT_PACKET [[function_constant(14)]];
 constant bool FC_COARSE_WARM_START [[function_constant(15)]];
 constant bool FC_COARSE_WS_ON = is_function_constant_defined(FC_COARSE_WARM_START) ? FC_COARSE_WARM_START : false;
 
+// Sphere-projection presence gate. Undefined pipelines retain the runtime blend
+// check; exact scene pipelines bake false for the common unprojected case so the
+// projection loop and its extra normalization/mix work disappear from the DE.
+constant bool FC_SPHERE_PROJECTION_ENABLED [[function_constant(17)]];
+constant bool FC_SPHERE_PROJECTION_ON = is_function_constant_defined(FC_SPHERE_PROJECTION_ENABLED)
+    ? FC_SPHERE_PROJECTION_ENABLED : true;
+
 // Space-warp (Transformations) presence gate (index 3 was free). When baked FALSE
 // on a scene that has NO transforms (empty stack, no custom warp), the whole
 // space-warp seam — the applyWarpOp switch, the per-op loop, the SpaceWarpOp array
@@ -1432,7 +1439,7 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
     // and the compiler will automatically unroll the loop.
     const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
 
-    if (params.sphereProjBlend > 0.0f) {
+    if (FC_SPHERE_PROJECTION_ON && params.sphereProjBlend > 0.0f) {
         for (int i = 0; i < loopCount; i++) {
             MAP_ITERATION_PROJ(p, p0, foldingLimit, params, invSphereRadiusSq, params.sphereProjBlend, params.sphereProjRadius);
         }
@@ -1466,7 +1473,7 @@ FORCE_INLINE float MapDistOnly(float3 pos, FractalParams params, float foldingLi
     
     const int loopCount = is_function_constant_defined(FC_SHADOW_ITERATIONS) ? FC_SHADOW_ITERATIONS : iterations;
     
-    if (params.sphereProjBlend > 0.0f) {
+    if (FC_SPHERE_PROJECTION_ON && params.sphereProjBlend > 0.0f) {
         for (int i = 0; i < loopCount; i++) {
             MAP_ITERATION_PROJ(p, p0, foldingLimit, params, invSphereRadiusSq, params.sphereProjBlend, params.sphereProjRadius);
         }
@@ -1521,7 +1528,7 @@ FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float folding
     // Coarse pass must mirror the fine Map's sphere projection, else the
     // over-relaxed marcher seeds startT from the un-projected (box) silhouette
     // and tunnels through the projected surface.
-    bool useProj = params.sphereProjBlend > 0.0f;
+    bool useProj = FC_SPHERE_PROJECTION_ON && params.sphereProjBlend > 0.0f;
     half hProjBlend = half(params.sphereProjBlend);
     half hProjRadius = half(params.sphereProjRadius);
 
@@ -1603,9 +1610,11 @@ FORCE_INLINE SpaceTransform applySpaceTransforms(float3 pos, int type, FractalPa
     r.deScale = 1.0f;
     if (type != FractalTypeMandelbox) {
         // One fused sphere-projection eval (point + DE divisor) instead of two calls.
-        SpaceTransform sp = sphereProjectionTransform(pos, params.sphereProjBlend, params.sphereProjRadius);
-        r.deScale *= sp.deScale;
-        r.point    = sp.point;
+        if (FC_SPHERE_PROJECTION_ON) {
+            SpaceTransform sp = sphereProjectionTransform(pos, params.sphereProjBlend, params.sphereProjRadius);
+            r.deScale *= sp.deScale;
+            r.point    = sp.point;
+        }
     }
     // ONE fused warp sweep (point + DE divisor together) instead of a divisor-walk
     // followed by an identical point-walk — halves applyWarpOp on the hot path.
@@ -2001,7 +2010,7 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
     // GetNormal falls back to finite differences over THIS now-projected map —
     // keeping normals/colors consistent with the rendered silhouette. The
     // no-projection path is byte-for-byte unchanged (same Jacobian, zero cost).
-    bool useProj = params.sphereProjBlend > 0.0f;
+    bool useProj = FC_SPHERE_PROJECTION_ON && params.sphereProjBlend > 0.0f;
     if (useProj) {
         float projBlend = params.sphereProjBlend;
         float projRadius = params.sphereProjRadius;

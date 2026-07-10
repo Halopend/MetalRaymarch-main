@@ -287,7 +287,10 @@ enum MacBenchmarkHarness {
 
     static func run(appModel: AppModel) async {
         appModel.presetManager.refreshBundledPresets()
-        try? await Task.sleep(for: .milliseconds(500))
+        // Benchmark scene resolution must not race the app's debounced startup
+        // reload. Await the same off-main scan explicitly so every plan sees a
+        // deterministic catalog without putting file I/O back on MainActor.
+        await appModel.presetManager.loadPresetsNow()
 
         guard let device = MTLCreateSystemDefaultDevice() else { log("FATAL no Metal device"); exit(2) }
         let layer = CAMetalLayer()
@@ -335,6 +338,19 @@ enum MacBenchmarkHarness {
 
     // MARK: - Plan mode (one launch, scene × config matrix)
 
+    private static func benchmarkPresetCatalog(_ manager: PresetManager) -> [FractalPreset] {
+        let store = manager.presets.filter { $0.name != "__lastState__" }
+        let storeIDs = Set(store.map(\.id))
+        let storeNames = Set(store.map(\.name))
+        let bundledFallbacks = PresetManager.bundledPresetsForBenchmark().filter {
+            !storeIDs.contains($0.id) && !storeNames.contains($0.name)
+        }
+        // PresetManager keeps the hydrated store newest-first. Preserve that
+        // ordering so duplicate user names resolve exactly as they did before;
+        // immutable bundle entries are fallback-only.
+        return store + bundledFallbacks
+    }
+
     private static func runPlan(path: String, appModel: AppModel,
                                 renderer: ThresholdMacRenderer, settings: RenderSettings) async {
         let plan: BenchPlan
@@ -349,7 +365,9 @@ enum MacBenchmarkHarness {
         let pngDir = env["THRESHOLD_BENCHMARK_PNG_DIR"] ?? plan.pngDir
             ?? (outPath as NSString).deletingLastPathComponent + "/png"
 
-        let all = appModel.presetManager.presets.filter { $0.name != "__lastState__" }
+        // The active iCloud store may legitimately contain unhydrated placeholders.
+        // Use immutable bundled scenes only as fallbacks for missing store entries.
+        let all = benchmarkPresetCatalog(appModel.presetManager)
         let allSceneNames = all.filter { $0.isKeyboardSwitchableStaticPreset }.map { $0.name }
         let jobs = resolveJobs(plan, allScenes: allSceneNames)
         guard !jobs.isEmpty else { log("FATAL plan has no runnable jobs"); exit(4) }
@@ -534,7 +552,7 @@ enum MacBenchmarkHarness {
             + "frames=\(cfg.frames) warmup=\(cfg.warmup) size=\(cfg.width)x\(cfg.height)")
 
         // Resolve requested scenes by exact name.
-        let all = appModel.presetManager.presets.filter { $0.name != "__lastState__" }
+        let all = benchmarkPresetCatalog(appModel.presetManager)
         var targets: [FractalPreset] = []
         if cfg.scenes.isEmpty {
             targets = all.filter { $0.isKeyboardSwitchableStaticPreset }
