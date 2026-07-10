@@ -33,21 +33,21 @@ extension ContentView {
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "light.max", label: "Glow",
                     value: Binding(get: { cache.lighting.glowEffect.intensity }, set: { cache.lighting.glowEffect.intensity = $0 }),
-                    range: 0...1,
+                    range: ControlCatalog.glow.range,
                     enabled: Binding(get: { cache.lighting.glowEffect.enabled }, set: { cache.lighting.glowEffect.enabled = $0 }),
                     onChanged: { cache.commitGlowEffect() },
                     musicTargetID: ParameterTargetID.Effect.glow)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "sun.max.fill", label: "Bloom",
                     value: Binding(get: { cache.lighting.bloomEffect.strength }, set: { cache.lighting.bloomEffect.strength = $0 }),
-                    range: 0...1,
+                    range: ControlCatalog.bloom.range,
                     enabled: Binding(get: { cache.lighting.bloomEffect.enabled }, set: { cache.lighting.bloomEffect.enabled = $0 }),
                     onChanged: { cache.commitBloomEffect() },
                     musicTargetID: ParameterTargetID.Effect.bloom)
                 Divider().padding(.leading, 114)
                 EffectSliderRow(icon: "cloud.fog.fill", label: "Fog",
                     value: Binding(get: { cache.lighting.fogEffect.intensity }, set: { cache.lighting.fogEffect.intensity = $0 }),
-                    range: 0...1,
+                    range: ControlCatalog.fog.range,
                     enabled: Binding(get: { cache.lighting.fogEffect.enabled }, set: { cache.lighting.fogEffect.enabled = $0 }),
                     onChanged: { cache.commitFogEffect() },
                     musicTargetID: ParameterTargetID.Effect.fog)
@@ -101,7 +101,7 @@ extension ContentView {
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "paintpalette.fill", label: "Hue Rotation",
                     value: Binding(get: { cache.lighting.hueRotationEffect.speed }, set: { cache.lighting.hueRotationEffect.speed = $0 }),
-                    range: 0...0.5,
+                    range: ControlCatalog.hueSpeed.range,
                     enabled: Binding(get: { cache.lighting.hueRotationEffect.enabled }, set: { cache.lighting.hueRotationEffect.enabled = $0 }),
                     onChanged: { cache.commitHueRotationEffect() })
                 EffectSliderRow(icon: "circle.lefthalf.filled", label: "Hue Intensity",

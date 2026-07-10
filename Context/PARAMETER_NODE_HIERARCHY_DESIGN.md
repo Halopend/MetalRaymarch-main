@@ -1,5 +1,10 @@
 # Vertically-Integrated ParameterNode / ParameterCatalog — Final Design
 
+> **Implementation status (2026-07-10):** routed nodes, dispatcher bindings,
+> gesture lists, and music facets now project from `ParameterCatalog`. Historical
+> slice instructions below retain names of deleted migration scaffolding such as
+> `coreAndEffect` and `routableDescriptorTargetIDs` for context.
+
 > Goal (user): "simplify this with a class hierarchy of parameternode with different layers
 > handling different areas like ui and feature enablement. the more we simplify and contain
 > these vertically integrated nodes the more we can simplify the codebase."

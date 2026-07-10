@@ -34,18 +34,6 @@ struct ParameterCatalogTests {
                 "Catalog/spec id set mismatch — extra: \(descriptorIDs.subtracting(specIDs)), missing: \(specIDs.subtracting(descriptorIDs))")
     }
 
-    @Test("Each descriptor's spec IS the canonical ControlCatalog spec (range/default/motion/name)")
-    func descriptorSpecsMatchCatalog() {
-        for descriptor in ParameterCatalog.routedDescriptors {
-            let spec = ControlCatalog.spec(descriptor.id)
-            #expect(spec != nil, "No ControlCatalog spec for routed descriptor \(descriptor.id)")
-            if let spec {
-                // ControlSpec is Equatable — full structural equality.
-                #expect(descriptor.spec == spec, "Descriptor spec drifted from catalog for \(descriptor.id)")
-            }
-        }
-    }
-
     @Test("byID is complete and collision-free")
     func byIDComplete() {
         #expect(ParameterCatalog.byID.count == ParameterCatalog.routedDescriptors.count,
@@ -53,11 +41,6 @@ struct ParameterCatalogTests {
         for descriptor in ParameterCatalog.routedDescriptors {
             #expect(ParameterCatalog.byID[descriptor.id]?.id == descriptor.id)
         }
-    }
-
-    @Test("ParameterTargetID.coreAndEffect derives from the catalog")
-    func coreAndEffectDerivesFromCatalog() {
-        #expect(Set(ParameterTargetID.coreAndEffect) == Set(ParameterCatalog.routedDescriptors.map(\.id)))
     }
 
     @Test("settingsBinding(for:) resolves for every routed id and is nil for unknown ids")

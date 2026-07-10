@@ -36,11 +36,6 @@ enum ParameterTargetID {
         static func opStrength(slot: Int) -> String { "spacewarp.\(slot).strength" }
     }
 
-    /// Routed core/effect/space ids — DERIVED from the authored `ParameterCatalog`
-    /// (Slice 2). Order matches `routedDescriptors` declaration order, which matches
-    /// the former hand-listed order. Only ever consumed as a `Set`, so order is moot.
-    static var coreAndEffect: [String] { ParameterCatalog.routedDescriptors.map(\.id) }
-
     static func formula(fractalType: FractalModelType, formulaIndex: Int, name: String) -> String {
         "formula.\(fractalType.rawValue).\(formulaIndex).\(name)"
     }
@@ -65,12 +60,9 @@ enum ParameterRoutingValidation {
         let specIDs = Set(ControlCatalog.allSpecs.map(\.id))
         let mappedMusicTargets = Set(MusicReactiveTarget.availableCases.compactMap(\.parameterTargetID))
 
-        // Slice 2: `coreAndEffect` / `routableDescriptorTargetIDs` now DERIVE from
-        // ParameterCatalog, so the former dispatcher==nodes and per-id-count checks
-        // would be tautological. Anchor the tripwire on `ControlCatalog.allSpecs` —
-        // the hand-authored range source, which is NOT derived from the node list —
-        // with BIDIRECTIONAL equality, catching a spec without a node AND a node
-        // without a spec.
+        // ControlCatalog.allSpecs remains an independently enumerated completeness
+        // list, so bidirectional equality catches a spec without a descriptor/node
+        // and a descriptor/node omitted from the list.
         precondition(specIDs == nodeIDs,
                      "Routed spec/node set mismatch: specs \(specIDs.sorted()) != nodes \(nodeIDs.sorted()).")
         precondition(mappedMusicTargets.isSubset(of: nodeIDs),
@@ -91,38 +83,6 @@ enum ParameterRoutingValidation {
                              "Range drift: music target for '\(spec.id)' \(target.allowedRange) != ControlCatalog \(spec.range).")
             }
         }
-
-#if DEBUG
-        // ── Parameter-hierarchy Slice 1 golden net ─────────────────────────────
-        // Prove the new `ParameterCatalog` mirrors the live registries before any
-        // later slice makes a registry DERIVE from it. Nothing consumes the catalog
-        // yet; these asserts only confirm equality, so the migration stays reversible.
-        // (The `catalogIDs == coreAndEffect` check is gone — coreAndEffect now derives
-        // from the catalog, so it would be tautological. Validate the catalog directly
-        // against the independently-built nodes instead.)
-        let catalogIDs = Set(ParameterCatalog.routedDescriptors.map(\.id))
-        precondition(catalogIDs == nodeIDs,
-                     "ParameterCatalog/node id set mismatch.")
-        for descriptor in ParameterCatalog.routedDescriptors {
-            guard let spec = ControlCatalog.spec(descriptor.id) else {
-                preconditionFailure("ParameterCatalog descriptor '\(descriptor.id)' has no ControlCatalog spec.")
-            }
-            precondition(descriptor.spec.range == spec.range
-                         && descriptor.spec.motionStrategy == spec.motionStrategy,
-                         "ParameterCatalog spec drift on '\(descriptor.id)'.")
-        }
-        // Music facets must equal the MusicReactiveTarget switch results, so the
-        // §3.5 switch-body deletion in a later slice is provably byte-stable.
-        for target in MusicReactiveTarget.availableCases {
-            guard let id = target.parameterTargetID,
-                  let facet = ParameterCatalog.byID[id]?.music else { continue }
-            precondition(facet.category == target.category
-                         && facet.defaultSource == target.defaultSource
-                         && facet.defaultResponseCurve == target.defaultResponseCurve
-                         && facet.hasFlashingRisk == target.hasFlashingRisk,
-                         "ParameterCatalog music facet drift on '\(id)'.")
-        }
-#endif
 
         // Per-fractal FORMULA nodes are dynamic (FormulaCatalog-driven), so they live
         // outside ParameterCatalog — but bring their ranges under the same drift

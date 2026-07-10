@@ -254,7 +254,6 @@ classDiagram
         +Core_fractalScale : String
         +Core_colorMix : String
         +Effect_glow : String
-        +coreAndEffect : String[]
         +formula(type, index, name) String
         +parseFormulaID(id) FormulaRef?
     }

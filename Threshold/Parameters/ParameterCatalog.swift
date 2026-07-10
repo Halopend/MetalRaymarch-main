@@ -2,23 +2,12 @@
 //  ParameterCatalog.swift
 //  Threshold
 //
-//  Slice 1 of the parameter-node hierarchy migration
-//  (Context/PARAMETER_NODE_HIERARCHY_DESIGN.md).
+//  Canonical parameter registry for routed core/effect/space controls.
 //
-//  Authors ONE `ParameterDescriptor` per routed core/effect/space control,
-//  co-locating the metadata that today lives in 6 parallel registries kept in
-//  lockstep by a runtime tripwire:
-//    • ControlSpec/ControlCatalog        — range/default/name/icon/motion
-//    • ParameterTargetID.coreAndEffect   — the routed id list
-//    • ParameterOperationDispatcher.coreDescriptors — off-main RenderSettings binding
-//    • buildCoreAndEffectNodes           — @MainActor UISettingsCache binding + gesture flag
-//    • MusicReactiveTarget switches       — music defaults (category/source/curve/flashing)
-//
-//  In Slice 1 this catalog merely COEXISTS: nothing reads it yet. A DEBUG golden
-//  net in `validateStartupRouting` proves every descriptor equals its live source
-//  before any later slice makes a registry DERIVE from the catalog. The descriptor
-//  is a non-Codable runtime facade (like FractalTypeDescriptor over FractalModelType)
-//  and is never serialized.
+//  Authors one `ParameterDescriptor` per routed control. Runtime nodes,
+//  dispatcher bindings, gesture lists, and music metadata derive from these
+//  descriptors; ControlCatalog supplies their shared static presentation/range
+//  values. The descriptor is a non-Codable runtime facade and is never serialized.
 //
 
 import Foundation
@@ -115,7 +104,7 @@ struct ParameterDescriptor: Sendable, Identifiable {
 // MARK: - The authored catalog
 
 /// The single authored surface for routed core/effect/space controls. Declaration
-/// order matches `ControlCatalog.allSpecs` / `ParameterTargetID.coreAndEffect`.
+/// Declaration order matches `ControlCatalog.allSpecs`.
 enum ParameterCatalog {
 
     static let routedDescriptors: [ParameterDescriptor] = [
@@ -394,9 +383,6 @@ enum ParameterCatalog {
     /// Routed descriptors keyed by id.
     static let byID: [String: ParameterDescriptor] =
         Dictionary(uniqueKeysWithValues: routedDescriptors.map { ($0.id, $0) })
-
-    /// Routed + (future) unrouted long-tail. Identical to `routedDescriptors` today.
-    static let allDescriptors: [ParameterDescriptor] = routedDescriptors
 
     /// Narrowed off-main projection: the dispatch path looks up ONLY the `@Sendable`
     /// settings pair, never the full descriptor (which carries the @MainActor ui pair).

@@ -192,7 +192,7 @@ extension ModuleUISection {
             controls: [
                 ModuleSliderControl(
                     label: "Twist", icon: "tornado",
-                    range: 0.0...2.0,
+                    range: ControlCatalog.spaceWarpStrength.range,
                     get: { renderSettings.spaceWarpStrength },
                     set: { renderSettings.spaceWarpStrength = $0 }),
             ],

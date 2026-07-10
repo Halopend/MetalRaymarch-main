@@ -113,10 +113,6 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         _liveValues.withLock { $0[targetID] = LiveValue(base: base, resolved: resolved) }
     }
 
-    // Slice 2: derive directly from the authored catalog (was Set(coreAndEffect),
-    // which now derives from the same source).
-    static let routableDescriptorTargetIDs: Set<String> = Set(ParameterCatalog.routedDescriptors.map(\.id))
-
     private let sourcePolicy: SourcePolicy
     var debugTraceEnabled = false
 
