@@ -453,6 +453,9 @@ struct MacRadialTabMenu: View {
     /// exit/enter between pills, so only the owning pill's exit may cancel —
     /// a trailing exit from the pill just left must not kill the new dwell.
     @State private var pendingHoverNodeID: String?
+    /// The layer currently under the pointer. A receded parent layer returns
+    /// to full strength while the user moves back through it.
+    @State private var hoveredRingDepth: Int?
 
     /// Hovering a branch pill this long commits the selection. Long enough that
     /// sweeping across a pill en route to another does not thrash the deeper
@@ -649,6 +652,11 @@ struct MacRadialTabMenu: View {
         ForEach(Array(ring.nodes.enumerated()), id: \.element.id) { index, node in
             let position = ring.positions[index]
             let transitionDirection: CGFloat = position.x < anchor.x ? 1 : -1
+            let selectedPathID = path.indices.contains(ring.depth) ? path[ring.depth] : nil
+            let isSelectedPathNode = selectedPathID == node.id
+            let recedesBehindChildRing = selectedPathID != nil
+                && !isSelectedPathNode
+                && hoveredRingDepth != ring.depth
 
             Group {
                 if let slider = node.slider {
@@ -667,6 +675,7 @@ struct MacRadialTabMenu: View {
                         fixedWidth: width,
                         sceneAccent: sceneAccent,
                         onHoverChanged: { hovering in
+                            updateHoveredRing(ring.depth, hovering: hovering)
                             if hovering {
                                 hoveredSlider = MacRadialActiveSlider(id: node.id, frame: hitFrame)
                             } else if hoveredSlider?.id == node.id {
@@ -696,13 +705,21 @@ struct MacRadialTabMenu: View {
                             }
                         },
                         onHoverChanged: { hovering in
+                            updateHoveredRing(ring.depth, hovering: hovering)
                             handleNodeHover(node, depth: ring.depth, hovering: hovering)
                         }
                     )
                     .focused($focusedItemID, equals: node.id)
                 }
             }
+            // Once this layer opens a child arc, fade its siblings back while
+            // keeping the chosen parent fully lit. The resulting bright chain
+            // makes the active route through a deep hierarchy immediately clear.
+            .opacity(recedesBehindChildRing ? 0.24 : 1)
+            .saturation(recedesBehindChildRing ? 0.42 : 1)
+            .scaleEffect(recedesBehindChildRing ? 0.97 : 1)
             .position(position)
+            .animation(.easeOut(duration: 0.16), value: recedesBehindChildRing)
             .transition(
                 .offset(x: transitionDirection * (ring.depth == 0 ? 48 : 62))
                     .combined(with: .scale(scale: 0.82, anchor: .trailing))
@@ -712,6 +729,14 @@ struct MacRadialTabMenu: View {
     }
 
     // MARK: Hover navigation
+
+    private func updateHoveredRing(_ depth: Int, hovering: Bool) {
+        if hovering {
+            hoveredRingDepth = depth
+        } else if hoveredRingDepth == depth {
+            hoveredRingDepth = nil
+        }
+    }
 
     /// Hover enter on a branch pill schedules the selection after a dwell.
     /// Leaves never re-navigate on hover — only their own click acts — so a
@@ -968,6 +993,7 @@ private struct MacRadialTabButton: View {
     @State private var isHovering = false
     @State private var hoverOffset: CGFloat = 0
     @State private var hoverSequence = 0
+    @State private var shimmerProgress: CGFloat = -1
 
     private var isEmphasized: Bool { item.isSelected || isHovering || isFocused }
     private var shouldWiggle: Bool { !reduceMotion && !item.isSelected && !isHovering && !isFocused }
@@ -1024,6 +1050,18 @@ private struct MacRadialTabButton: View {
             .background(tabFill, in: Capsule())
             .overlay(
                 Capsule()
+                    .inset(by: 1)
+                    .stroke(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.24), Color.clear, sceneAccent.opacity(0.16)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.7
+                    )
+            )
+            .overlay(
+                Capsule()
                     .strokeBorder(
                         isEmphasized ? emphasisAccent.opacity(0.78) : Color.white.opacity(0.10),
                         lineWidth: isEmphasized ? 1.2 : 0.8
@@ -1037,6 +1075,7 @@ private struct MacRadialTabButton: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(isEmphasized ? Color.white : Color.white.opacity(0.68))
+        .shadow(color: isEmphasized ? Color.white.opacity(0.34) : .clear, radius: 2.5)
         .shadow(
             color: isEmphasized ? emphasisAccent.opacity(0.44) : Color.black.opacity(0.28),
             radius: isEmphasized ? 11 : 4,
@@ -1051,6 +1090,15 @@ private struct MacRadialTabButton: View {
             onHoverChanged(hovering)
             hoverSequence &+= 1
             let sequence = hoverSequence
+
+            if hovering && !reduceMotion {
+                shimmerProgress = -1
+                withAnimation(.linear(duration: 0.92).repeatForever(autoreverses: false)) {
+                    shimmerProgress = 1
+                }
+            } else {
+                shimmerProgress = -1
+            }
 
             guard hovering, !reduceMotion else {
                 withAnimation(.easeOut(duration: 0.08)) {
@@ -1077,16 +1125,17 @@ private struct MacRadialTabButton: View {
     }
 
     private var tabFill: LinearGradient {
-        LinearGradient(
+        let depthLift = min(CGFloat(depth) * 0.025, 0.07)
+        return LinearGradient(
             colors: isEmphasized
                 ? [
-                    Color(red: 0.10, green: 0.015, blue: 0.17).opacity(0.98),
-                    Color(red: 0.45, green: 0.08, blue: 0.67).opacity(0.97),
-                    Color(red: 0.76, green: 0.22, blue: 0.98).opacity(0.96)
+                    Color(red: 0.08 + depthLift, green: 0.012, blue: 0.15 + depthLift).opacity(0.99),
+                    Color(red: 0.38 + depthLift, green: 0.055, blue: 0.60 + depthLift).opacity(0.98),
+                    sceneAccent.opacity(0.94)
                 ]
                 : [
-                    Color(red: 0.055, green: 0.012, blue: 0.09).opacity(0.96),
-                    Color(red: 0.25, green: 0.04, blue: 0.38).opacity(0.94)
+                    Color(red: 0.035 + depthLift, green: 0.008, blue: 0.075 + depthLift).opacity(0.97),
+                    Color(red: 0.18 + depthLift, green: 0.025, blue: 0.31 + depthLift).opacity(0.95)
                 ],
             startPoint: .leading,
             endPoint: .trailing
@@ -1096,34 +1145,27 @@ private struct MacRadialTabButton: View {
     @ViewBuilder
     private var shimmerOverlay: some View {
         if isHovering {
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { timeline in
-                GeometryReader { proxy in
-                    let bandWidth = max(34, proxy.size.width * 0.26)
-                    let cycleDuration = 1.25
-                    let elapsed = timeline.date.timeIntervalSinceReferenceDate
-                    let progress = reduceMotion
-                        ? 0.5
-                        : elapsed.truncatingRemainder(dividingBy: cycleDuration) / cycleDuration
-                    let travel = proxy.size.width + bandWidth * 2
+            GeometryReader { proxy in
+                let bandWidth = max(30, proxy.size.width * 0.22)
+                let travel = proxy.size.width + bandWidth * 2
 
-                    LinearGradient(
-                        colors: [
-                            Color.clear,
-                            Color.white.opacity(0.05),
-                            sceneAccent.opacity(0.82),
-                            Color.white.opacity(0.08),
-                            Color.clear
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(width: bandWidth, height: proxy.size.height * 2.2)
-                    .rotationEffect(.degrees(18))
-                    .offset(
-                        x: -bandWidth + travel * progress,
-                        y: -proxy.size.height * 0.6
-                    )
-                }
+                LinearGradient(
+                    colors: [
+                        Color.clear,
+                        Color.white.opacity(0.08),
+                        sceneAccent.opacity(0.90),
+                        Color.white.opacity(0.16),
+                        Color.clear
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(width: bandWidth, height: proxy.size.height * 2.2)
+                .rotationEffect(.degrees(18))
+                .offset(
+                    x: -bandWidth + travel * ((shimmerProgress + 1) * 0.5),
+                    y: -proxy.size.height * 0.6
+                )
             }
             .clipShape(Capsule())
             .blendMode(.screen)
