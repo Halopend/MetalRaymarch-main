@@ -325,8 +325,15 @@ final class ThresholdMacRenderer {
             )
         }
 
+        // 1000x (0.001 precision) matches `RenderSettings.geometrySettleThreshold`
+        // — the app's own definition of "close enough to be visually stable".
+        // The previous 10_000x (0.0001) was 10x finer than that, so a value
+        // asymptotically easing/spring-damping toward its target kept registering
+        // as "changed" for many frames after the app itself considered it settled,
+        // forcing a full MetalFX temporal-history reset every one of those frames
+        // and keeping the upscaled image soft far longer than necessary.
         private static func quantize(_ value: Float) -> Int32 {
-            Int32(clamping: Int((value * 10_000).rounded()))
+            Int32(clamping: Int((value * 1_000).rounded()))
         }
     }
 

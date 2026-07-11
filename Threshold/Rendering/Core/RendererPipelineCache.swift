@@ -1017,18 +1017,14 @@ extension Renderer {
                                      hasHandField: hasHandField)
         )
 
-        let recreateLegacyBug = appModel.renderSettings.recreateLegacyComputeCacheBug
-
         // Fast-path: parameters unchanged since last call
         if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS && fractalType.rawValue == lastComputeFT && activeCustomHash == lastComputeCustomHash && mbPowerInt == lastComputePower,
            bubbleEnabled == lastComputeBubble, packetEnabled == lastComputePacket,
            hasSpaceWarp == lastComputeSpaceWarp, hasEnvScrunch == lastComputeEnvScrunch, hasHandField == lastComputeHandField,
-           recreateLegacyBug == lastComputeLegacyBugMode,
            let cached = lastSelectedComputePipeline {
             recordPipelineTelemetry(computeHit: true, computeSource: "fast-path")
             return cached
         }
-        lastComputeLegacyBugMode = recreateLegacyBug
 
         let exactKey = keyContext.exactKey
 
@@ -1076,49 +1072,7 @@ extension Renderer {
             )
         }
 
-        // Legacy bug mode ("Accidental Sphere Projection"): serve the NEAREST
-        // cached FI/RS pipeline even though its baked FC_FRACTAL_ITERATIONS
-        // mismatches the CPU-precomputed absScalePow — intentionally recreating
-        // the historical artifact look. Built-ins only; a custom library's
-        // pipelines aren't interchangeable.
-        if recreateLegacyBug, fractalType != .custom {
-            let nearest = computePipelineCache
-                .compactMap { entry -> (key: String, pipeline: MTLComputePipelineState, score: Int)? in
-                    let key = entry.key
-                    guard let fiRange = key.range(of: "FI"),
-                          let rsRange = key.range(of: "_RS", range: fiRange.upperBound..<key.endIndex) else { return nil }
-                    let fiText = String(key[fiRange.upperBound..<rsRange.lowerBound])
-                    let rsSuffix = key[rsRange.upperBound...]
-                    let rsText = rsSuffix.prefix { $0.isNumber }
-                    guard let fi = Int(fiText), let rs = Int(rsText) else { return nil }
-                    let score = abs(fi - fractalIterations) * 1000 + abs(rs - maxRaySteps)
-                    return (key: key, pipeline: entry.value, score: score)
-                }
-                .min { $0.score < $1.score }
-
-            if let nearest {
-                recordPipelineTelemetry(computeHit: true, computeSource: "legacy-nearest")
-                if RENDERER_DEBUG && lastComputePipelineKey != "legacyNearest_\(nearest.key)" {
-                    print("🪲 [ComputeCache] Legacy bug mode: nearest fallback \(nearest.key) for requested FT=\(fractalType.rawValue) FI=\(fractalIterations) RS=\(maxRaySteps)")
-                    lastComputePipelineKey = "legacyNearest_\(nearest.key)"
-                }
-                return cacheSelectedComputePipeline(
-                    nearest.pipeline,
-                    fractalTypeRawValue: fractalType.rawValue,
-                    fractalIterations: fractalIterations,
-                    maxRaySteps: maxRaySteps,
-                    mandelbulbPower: mbPowerInt,
-                    activeCustomHash: activeCustomHash,
-                    bubbleEnabled: bubbleEnabled,
-                    packetEnabled: packetEnabled,
-                    spaceWarpEnabled: hasSpaceWarp,
-                    envScrunchEnabled: hasEnvScrunch,
-                    handFieldEnabled: hasHandField
-                )
-            }
-        }
-
-        // 3. Kick off a background build for this exact configuration. Built-in
+        // 2. Kick off a background build for this exact configuration. Built-in
         //    fractals can serve the current frame from the bundled generic
         //    compute pipeline; custom formulas cannot, because their dispatch arm
         //    exists only in the runtime-compiled library. For custom misses,
@@ -1174,7 +1128,7 @@ extension Renderer {
             hasHandField: hasHandField
         )
 
-        // 4. Powerless shared fallback — serve the FI/RS-specialized startup
+        // 3. Powerless shared fallback — serve the FI/RS-specialized startup
         //    pipeline THIS frame while the exact build (enqueued above) runs.
         //    A baked Mandelbulb power makes `sharedKey` carry "P{n}", but the
         //    startup shared tier is keyed plain "FI{fi}_RS{rs}" with power /
@@ -1228,7 +1182,7 @@ extension Renderer {
             }
         }
 
-        // 5. Ultimate fallback — generic pipeline with NO function constants.
+        // 4. Ultimate fallback — generic pipeline with NO function constants.
         //    Shader reads iterations from uniforms at runtime, matching absScalePow.
         if RENDERER_DEBUG && lastComputePipelineKey != "fallback" {
             print("⚠️ [ComputeCache] Using fallback generic compute pipeline")

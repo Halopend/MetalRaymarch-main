@@ -191,7 +191,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()  // Generic formula params
     private var _tileSize: Int = 0                   // 0=disabled (fragment), 8=8x8 adaptive hierarchical compute
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
-    private var _recreateLegacyComputeCacheBug: Bool = false  // Intentionally allow nearest-pipeline mismatch ("Accidental Sphere Projection" legacy look)
     private var _coherentPacketEnabled: Bool = loadBool("coherentPacketEnabled", default: false)  // Experimental predict-validate raymarch (Stages 0-3)
     private var _computeTemporalReprojectionEnabled: Bool = loadBool("computeTemporalReprojectionEnabled", default: false)  // Compute path: temporal reproject + tile/supertile depth seeding. Off = full coarse+fine march every frame (correct baseline; the seeding can blank disoccluded tiles)
     private var _coarsePrepassWarmStartEnabled: Bool = loadBool("coarsePrepassWarmStartEnabled", default: false)  // visionOS fragment path: conservative cone coarse-prepass warm-start. A low-res cone pass writes a provable LOWER BOUND on each 8x8 block's nearest-surface entry distance; the full march raises its start t to it (skip-to-then-full-march). Off = no cone pass, byte-identical to before. Box/fold + un-warped domain only.
@@ -570,22 +569,24 @@ final class RenderSettings: @unchecked Sendable {
     /// Base fractal iterations set by user
     var baseFractalIterations: Int {
         get { withLock { _baseFractalIterations } }
-        set { 
-            withLock { 
+        set {
+            withLock {
                 _baseFractalIterations = newValue
                 _fractalIterations = newValue  // Also update current
-            } 
+            }
+            persistQuality()
         }
     }
-    
+
     /// Base ray steps set by user
     var baseMaxRaySteps: Int {
         get { withLock { _baseMaxRaySteps } }
-        set { 
-            withLock { 
+        set {
+            withLock {
                 _baseMaxRaySteps = newValue
                 _maxRaySteps = newValue  // Also update current
-            } 
+            }
+            persistQuality()
         }
     }
     
@@ -1031,7 +1032,10 @@ final class RenderSettings: @unchecked Sendable {
         // Min 0.33 (33%) for expanded low-resolution budget options
         // Max 1.0 (100%) - no upscaling needed
         // Sweet spot is 0.67-0.75 for best quality/performance balance
-        set { withLock { _resolutionScale = ControlCatalog.resolutionScale.clamp(newValue) } }
+        set {
+            withLock { _resolutionScale = ControlCatalog.resolutionScale.clamp(newValue) }
+            persistQuality()
+        }
     }
 
     /// visionOS-only: drives `layerRenderer.renderQuality`, the compositor's
@@ -1041,7 +1045,10 @@ final class RenderSettings: @unchecked Sendable {
     /// scale) — this is the preferred sharpness/perf lever on Vision Pro.
     var renderQuality: Float {
         get { withLock { _renderQuality } }
-        set { withLock { _renderQuality = max(QualityConfig.visionMinRenderQuality, min(QualityConfig.visionMaxRenderQuality, newValue)) } }
+        set {
+            withLock { _renderQuality = max(QualityConfig.visionMinRenderQuality, min(QualityConfig.visionMaxRenderQuality, newValue)) }
+            persistQuality()
+        }
     }
 
     /// visionOS-only: when on, the renderer auto-lowers the applied compositor
@@ -1245,20 +1252,15 @@ final class RenderSettings: @unchecked Sendable {
     // 8 = 8x8 adaptive hierarchical (3-8x speedup, best performance)
     var tileSize: Int {
         get { withLock { _tileSize } }
-        set { withLock { _tileSize = newValue } }
+        set {
+            withLock { _tileSize = newValue }
+            persistQuality()
+        }
     }
     
     var debugHierarchical: Bool {
         get { withLock { _debugHierarchical } }
         set { withLock { _debugHierarchical = newValue } }
-    }
-
-    /// Intentionally reenables the legacy nearest-pipeline fallback in the
-    /// compute cache to reproduce the historical "Accidental Sphere Projection"
-    /// artifact look (FC_FRACTAL_ITERATIONS / absScalePow mismatch).
-    var recreateLegacyComputeCacheBug: Bool {
-        get { withLock { _recreateLegacyComputeCacheBug } }
-        set { withLock { _recreateLegacyComputeCacheBug = newValue } }
     }
 
     /// Experimental: enable coherent-packet predict-validate raymarch path.
@@ -4233,7 +4235,6 @@ final class RenderSettings: @unchecked Sendable {
                 c.renderQuality = _renderQuality
                 c.tileSize = _tileSize
                 c.debugHierarchical = _debugHierarchical
-                c.recreateLegacyComputeCacheBug = _recreateLegacyComputeCacheBug
                 c.coherentPacketEnabled = _coherentPacketEnabled
                 c.computeTemporalReprojectionEnabled = _computeTemporalReprojectionEnabled
                 c.coarsePrepassWarmStartEnabled = _coarsePrepassWarmStartEnabled
@@ -4280,7 +4281,6 @@ final class RenderSettings: @unchecked Sendable {
                 _renderQuality = max(QualityConfig.visionMinRenderQuality, min(QualityConfig.visionMaxRenderQuality, newValue.renderQuality))
                 _tileSize = newValue.tileSize
                 _debugHierarchical = newValue.debugHierarchical
-                _recreateLegacyComputeCacheBug = newValue.recreateLegacyComputeCacheBug
                 _coherentPacketEnabled = newValue.coherentPacketEnabled
                 _computeTemporalReprojectionEnabled = newValue.computeTemporalReprojectionEnabled
                 _coarsePrepassWarmStartEnabled = newValue.coarsePrepassWarmStartEnabled

@@ -68,7 +68,6 @@ actor Renderer {
     var lastComputeSpaceWarp: Bool?
     var lastComputeEnvScrunch: Bool?
     var lastComputeHandField: Bool?
-    var lastComputeLegacyBugMode: Bool = false
     var lastSelectedComputePipeline: MTLComputePipelineState?
 
     // === UI UPDATE COORDINATION ===

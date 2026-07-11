@@ -159,9 +159,6 @@ struct QualityConfig: Codable, Equatable, Sendable {
 
     // Debug
     var debugHierarchical: Bool = false
-    // Legacy "Accidental Sphere Projection" look: allow nearest cached compute
-    // pipeline even when FI/RS mismatch (the old artifact-producing behavior).
-    var recreateLegacyComputeCacheBug: Bool = false
 
     // Experimental: coherent packet predict-validate raymarch path (Stages 0-3)
     var coherentPacketEnabled: Bool = false
@@ -305,7 +302,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case baseFractalIterations, baseMaxRaySteps
         case resolutionScale, renderQuality, tileSize
-        case debugHierarchical, recreateLegacyComputeCacheBug, coherentPacketEnabled, computeTemporalReprojectionEnabled, coarsePrepassWarmStartEnabled, foveationStrength
+        case debugHierarchical, coherentPacketEnabled, computeTemporalReprojectionEnabled, coarsePrepassWarmStartEnabled, foveationStrength
         case smartAdvanceEnabled, coneMarchStrength, coneCoverageAAEnabled
         case overRelaxationMax, distanceLODStrength, shadowsEnabled, boundingSphereSkipEnabled, boundingShapeRadius
         case boundingShapeFogEnabled  // legacy Bool key, migrated into boundingShapeFogMode on decode
@@ -329,7 +326,6 @@ struct QualityConfig: Codable, Equatable, Sendable {
         let decodedTileSize   = try c.decodeIfPresent(Int.self,   forKey: .tileSize)              ?? 0
         tileSize              = decodedTileSize == 2 ? 0 : decodedTileSize  // Old "Quad Shared" mode removed → degrade to fragment
         debugHierarchical     = try c.decodeIfPresent(Bool.self,  forKey: .debugHierarchical)     ?? false
-        recreateLegacyComputeCacheBug = try c.decodeIfPresent(Bool.self, forKey: .recreateLegacyComputeCacheBug) ?? false
         coherentPacketEnabled = try c.decodeIfPresent(Bool.self,  forKey: .coherentPacketEnabled) ?? false
         computeTemporalReprojectionEnabled = try c.decodeIfPresent(Bool.self, forKey: .computeTemporalReprojectionEnabled) ?? false
         coarsePrepassWarmStartEnabled = try c.decodeIfPresent(Bool.self, forKey: .coarsePrepassWarmStartEnabled) ?? false
@@ -378,7 +374,6 @@ struct QualityConfig: Codable, Equatable, Sendable {
         try c.encode(renderQuality, forKey: .renderQuality)
         try c.encode(tileSize, forKey: .tileSize)
         try c.encode(debugHierarchical, forKey: .debugHierarchical)
-        try c.encode(recreateLegacyComputeCacheBug, forKey: .recreateLegacyComputeCacheBug)
         try c.encode(coherentPacketEnabled, forKey: .coherentPacketEnabled)
         try c.encode(computeTemporalReprojectionEnabled, forKey: .computeTemporalReprojectionEnabled)
         try c.encode(coarsePrepassWarmStartEnabled, forKey: .coarsePrepassWarmStartEnabled)

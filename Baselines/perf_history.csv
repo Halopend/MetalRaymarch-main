@@ -1,0 +1,8 @@
+timestamp,gitSHA,gitState,tag,scene,fractalType,size,renderPath,iters,gpuMsAvg,gpuMsP95,gpuMsMax,stepsAvg
+2026-07-08T17:26:12Z,unknown,clean,postA-reverted-accel-on,Stress test,17,1920x1080,mac-offscreen,6,22.834,23.476,23.890,17.07
+2026-07-08T17:26:50Z,unknown,clean,postA-reverted-accel-off,Stress test,17,1920x1080,mac-offscreen,6,59.774,61.247,66.795,44.01
+2026-07-08T18:19:53Z,unknown,clean,fragfix-fixed-scrunch-off,Stress test,17,1920x1080,mac-offscreen,6,22.325,22.468,23.715,17.07
+2026-07-08T18:20:36Z,unknown,clean,fragfix-fixed-scrunch-on-synth,Stress test,17,1920x1080,mac-offscreen,6,34.701,34.879,36.564,19.54
+2026-07-08T18:22:10Z,unknown,clean,fragfix-reverted-scrunch-off,Stress test,17,1920x1080,mac-offscreen,6,32.796,34.354,34.828,17.07
+2026-07-08T18:22:49Z,unknown,clean,fragfix-reverted-scrunch-off-rerun,Stress test,17,1920x1080,mac-offscreen,6,32.779,34.234,35.044,17.07
+2026-07-08T18:23:48Z,unknown,clean,fragfix-fixed-scrunch-off-rerun,Stress test,17,1920x1080,mac-offscreen,6,24.446,25.549,26.604,17.07
