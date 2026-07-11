@@ -153,6 +153,9 @@ final class ThresholdMacInputController: Sendable {
 /// viewport input callbacks. Orbit (drag), pan (option/right/middle drag), zoom
 /// (scroll + magnify), WASD movement, and scene/playback shortcuts.
 final class ThresholdMacInteractiveView: MTKView {
+    static let didClickViewportNotification = Notification.Name("ThresholdMacInteractiveView.didClickViewport")
+    static let clickLocationUserInfoKey = "locationInWindow"
+
     private enum DragMode {
         case orbit
         case pan
@@ -160,6 +163,9 @@ final class ThresholdMacInteractiveView: MTKView {
 
     weak var inputDelegate: (any ThresholdMacViewportInputDelegate)?
     private var dragMode: DragMode?
+    private var primaryMouseDownLocation: CGPoint?
+    private var primaryDragDistance: CGFloat = 0
+    private let clickMovementTolerance: CGFloat = 4
 
     // When the window is dragged fully off-screen (or hidden/minimized) on a
     // single-display setup, AppKit clears `.visible` from the window's
@@ -232,15 +238,29 @@ final class ThresholdMacInteractiveView: MTKView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        primaryMouseDownLocation = event.locationInWindow
+        primaryDragDistance = 0
         beginInteraction(mode: event.modifierFlags.contains(.option) ? .pan : .orbit)
     }
 
     override func mouseDragged(with event: NSEvent) {
+        primaryDragDistance += hypot(event.deltaX, event.deltaY)
         handleDrag(event, fallbackMode: .orbit)
     }
 
     override func mouseUp(with event: NSEvent) {
         dragMode = nil
+        defer {
+            primaryMouseDownLocation = nil
+            primaryDragDistance = 0
+        }
+        guard primaryMouseDownLocation != nil,
+              primaryDragDistance <= clickMovementTolerance else { return }
+        NotificationCenter.default.post(
+            name: Self.didClickViewportNotification,
+            object: window,
+            userInfo: [Self.clickLocationUserInfoKey: NSValue(point: event.locationInWindow)]
+        )
     }
 
     override func rightMouseDown(with event: NSEvent) {

@@ -51,6 +51,9 @@ struct ContentView: View {
     @AppStorage("ContentView.effectsSubTab") var effectsSubTab: EffectsSubTab = .dynamic
     @AppStorage("MusicTabContent.innerTab") private var musicPanelTab: MusicPanelTab = .music
     @AppStorage("ContentView.settingsSubTab") var settingsSubTab: SettingsSubTab = .display
+#if os(macOS)
+    @AppStorage("MacTabLauncher.enabled") var isMacTabLauncherEnabled = true
+#endif
     @AppStorage("ContentView.showPerformanceInMenu") var showPerformanceInMenu: Bool = false
     @AppStorage("ContentView.pinnedRailControls") private var pinnedRailControlsRaw: String = ""
     @State var showStopsPopover = false

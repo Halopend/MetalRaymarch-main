@@ -427,12 +427,31 @@ extension ContentView {
             touchIndicatorsSection
 #endif
 
+#if os(macOS)
+            macLauncherSection
+#endif
+
             // Experimental display features (kept here, not in Advanced,
             // because they're visual toggles the user can flip while the
             // scene is running).
             experimentalDisplaySection
         }
     }
+
+#if os(macOS)
+    private var macLauncherSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Viewport Control Launcher", systemImage: "circle.grid.cross")
+                .font(.headline)
+            Toggle("Enable radial and grid launcher", isOn: $isMacTabLauncherEnabled)
+            Text("When enabled, click the viewport or push right at the screen edge to reveal the launcher. Disable it to use the standard controls sidebar only.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+    }
+#endif
 
     /// VisionOS-only glass-floor platform settings. Mirrors the
     /// `ContentView+FractalTab` block but is the canonical home for these
