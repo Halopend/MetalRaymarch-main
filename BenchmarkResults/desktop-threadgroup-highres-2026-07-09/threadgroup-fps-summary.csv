@@ -1,0 +1,21 @@
+path,tileSize,resolution,width,height,frames,warmup,runs,threadsPerThreadgroup,maxThreadsPerThreadgroup,threadExecutionWidth,threadgroupMemBytes,occupancyRatioThreadsOverMax,fpsMean,fpsStdev,fpsBestRun,fpsWorstRun,gpuMsMean,gpuMsStdev,winnerWithinResolution,note
+compute,16,1440p,2560,1440,180,120,3,256,NA,NA,NA,,23.486,0.141,23.618,23.337,42.580,0.256,best_compute_tile,
+compute,4,1440p,2560,1440,180,120,3,16,NA,NA,NA,,11.143,0.438,11.559,10.685,89.837,3.559,,
+compute,8,1440p,2560,1440,180,120,3,64,NA,NA,NA,,17.900,5.250,22.292,12.085,59.787,20.183,,
+fragment,NA,1440p,2560,1440,180,120,3,NA,NA,NA,NA,,25.305,0.658,25.773,24.552,39.537,1.043,,fragment baseline; not a threadgroup-sizing option
+compute,16,1620p,2880,1620,180,120,3,256,NA,NA,NA,,15.928,2.985,19.142,13.242,64.233,11.656,best_compute_tile,
+compute,4,1620p,2880,1620,180,120,3,16,NA,NA,NA,,8.000,1.315,8.908,6.492,127.520,23.046,,
+compute,8,1620p,2880,1620,180,120,3,64,NA,NA,NA,,14.800,2.787,18.018,13.165,69.040,11.727,,
+fragment,NA,1620p,2880,1620,180,120,3,NA,NA,NA,NA,,20.218,0.523,20.730,19.685,49.483,1.282,,fragment baseline; not a threadgroup-sizing option
+compute,16,1800p,3200,1800,180,120,3,256,NA,NA,NA,,13.719,2.545,15.865,10.908,74.743,15.022,best_compute_tile,
+compute,4,1800p,3200,1800,180,120,3,16,NA,NA,NA,,6.095,1.174,7.432,5.231,167.877,29.613,,
+compute,8,1800p,3200,1800,180,120,3,64,NA,NA,NA,,13.278,1.901,15.451,11.920,76.280,10.177,,
+fragment,NA,1800p,3200,1800,180,120,3,NA,NA,NA,NA,,16.413,0.689,17.033,15.672,61.000,2.589,,fragment baseline; not a threadgroup-sizing option
+compute,16,2160p,3840,2160,180,120,3,256,NA,NA,NA,,8.677,1.662,10.595,7.660,117.837,20.338,,
+compute,4,2160p,3840,2160,180,120,3,16,NA,NA,NA,,4.758,0.614,5.274,4.079,212.673,28.966,,
+compute,8,2160p,3840,2160,180,120,3,64,NA,NA,NA,,9.666,1.675,10.942,7.770,105.767,20.073,best_compute_tile,
+fragment,NA,2160p,3840,2160,180,120,3,NA,NA,NA,NA,,12.277,0.277,12.596,12.092,81.480,1.818,,fragment baseline; not a threadgroup-sizing option
+compute,16,2880p,5120,2880,180,120,3,256,NA,NA,NA,,5.536,1.003,6.499,4.497,184.800,34.713,best_compute_tile,
+compute,4,2880p,5120,2880,180,120,3,16,NA,NA,NA,,2.566,0.367,2.846,2.151,395.480,60.917,,
+compute,8,2880p,5120,2880,180,120,3,64,NA,NA,NA,,5.127,0.752,5.951,4.478,197.763,27.871,,
+fragment,NA,2880p,5120,2880,180,120,3,NA,NA,NA,NA,,7.147,0.170,7.295,6.961,139.973,3.354,,fragment baseline; not a threadgroup-sizing option

@@ -166,11 +166,8 @@ enum MacBenchmarkHarness {
             switch key {
             case "coneMarchStrength":            qc.coneMarchStrength = v
             case "distanceLODStrength":          qc.distanceLODStrength = v
-            case "overRelaxationMax":            qc.overRelaxationMax = v
-            case "smartAdvanceEnabled":          qc.smartAdvanceEnabled = v != 0
             case "boundingSphereSkipEnabled":    qc.boundingSphereSkipEnabled = v != 0
             case "zoomFogCompensationEnabled":   qc.zoomFogCompensationEnabled = v != 0
-            case "coarsePrepassWarmStartEnabled": qc.coarsePrepassWarmStartEnabled = v != 0
             case "coherentPacketEnabled":        qc.coherentPacketEnabled = v != 0
             case "foveationStrength":            qc.foveationStrength = v
             case "baseFractalIterations":        qc.baseFractalIterations = Int(v)

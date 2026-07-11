@@ -81,146 +81,19 @@ extension Renderer {
         fractalType != .mandelbulb && appModel.renderSettings.safetyBubbleEnabled
     }
 
-    /// Selects a fragment pipeline that bakes FC_COARSE_WARM_START=true (the
-    /// conservative cone coarse-prepass consumer). Mirrors selectPipeline's exact
-    /// specialization for the current config, but lives in its OWN cache so the
-    /// main pipeline cache stays byte-identical (always FC_COARSE_WARM_START off).
-    /// Built synchronously on a cache miss — this is an opt-in feature, so the
-    /// one-time compile per config only happens while the user has the toggle on.
-    /// Returns nil on build failure; the caller then keeps the base (FC-off)
-    /// pipeline and the cone texture is simply never sampled.
-    func selectCoarseWarmStartPipeline(forIterations iterations: Int, raySteps: Int,
-                                       neonMode: Bool = false,
-                                       request: RenderPipelineRequest? = nil) -> MTLRenderPipelineState? {
-        let fractalType = request?.fractalType ?? appModel.renderSettings.fractalType
-        // Custom formulas need a separately-compiled library + the FractalTypeCustom
-        // dispatch arm; the cone family gate excludes them anyway. Keep it simple.
-        guard fractalType != .custom else { return nil }
-        let formulaParams = request?.formulaParams ?? appModel.renderSettings.formulaParams
-        let mandelbulbPower = FormulaCatalog.specializedMandelbulbPower(
-            fractalType: fractalType,
-            formulaParams: formulaParams
-        )
-        let colorIterations = Int32(request?.colorIterations ?? appModel.renderSettings.colorIterations)
-        let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
-        let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
-        let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
-
-        let cacheKey = "CWS_FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_Q\(qualityMode)_CI\(colorIterations)\(powerKey)_N\(neonMode ? 1 : 0)_B\(bubbleEnabled ? 1 : 0)"
-        if let cached = coarseWarmStartPipelineCache[cacheKey] {
-            return cached
-        }
-
-        let config = FunctionConstantConfig(
-            fractalIterations: Int32(iterations),
-            shadowIterations: Int32(max(iterations - 2, 2)),
-            safetyBubbleEnabled: bubbleEnabled,
-            qualityMode: Int32(qualityMode),
-            debugHierarchical: false,
-            maxRaySteps: Int32(raySteps),
-            fractalType: fractalType.rawValue,
-            neonModeEnabled: neonMode,
-            colorIterations: colorIterations,
-            mandelbulbPower: mandelbulbPower
-        )
-        do {
-            let pipeline = try Renderer.buildSpecializedPipeline(
-                device: device,
-                layerRenderer: layerRenderer,
-                rasterSampleCount: rasterSampleCount,
-                mtlVertexDescriptor: mtlVertexDescriptor,
-                config: config,
-                fragmentFunctionName: "fragmentShader",
-                coarseWarmStart: true,
-                library: nil,
-                archive: renderPipelineArchive
-            )
-            coarseWarmStartPipelineCache[cacheKey] = pipeline
-            return pipeline
-        } catch {
-            if RENDERER_DEBUG { print("⚠️ [ConeWarmStart] pipeline build failed: \(error)") }
-            return nil
-        }
-    }
-
-    /// Scene-stable feature bakes for exact compute-pipeline keys
-    /// (safety bubble + coherent-packet experiment), read from live settings.
+    /// Scene-stable feature bakes for exact compute-pipeline keys. Preset
+    /// prewarming can supply its authored DE-tail states; live selection reads
+    /// the current settings.
     @inline(__always)
-    fileprivate func computeSceneKey(for fractalType: FractalModelType) -> String {
-        let bubble = effectiveSafetyBubbleEnabled(for: fractalType)
+    fileprivate func computeSceneKey(for fractalType: FractalModelType,
+                                     bubbleEnabled: Bool? = nil,
+                                     hasEnvScrunch: Bool? = nil,
+                                     hasHandField: Bool? = nil) -> String {
+        let bubble = bubbleEnabled ?? effectiveSafetyBubbleEnabled(for: fractalType)
         let packet = appModel.renderSettings.coherentPacketEnabled
-        return "_B\(bubble ? 1 : 0)_CP\(packet ? 1 : 0)"
-    }
-
-    @inline(__always)
-    fileprivate func recordPipelineTelemetry(renderHit: Bool? = nil,
-                                             computeHit: Bool? = nil,
-                                             renderMissKey: String? = nil,
-                                             computeMissKey: String? = nil,
-                                             renderSource: String? = nil,
-                                             computeSource: String? = nil) {
-        guard RENDERER_DEBUG else { return }
-
-        if let renderHit {
-            if renderHit { renderPipelineCacheHits += 1 } else { renderPipelineCacheMisses += 1 }
-        }
-        if let computeHit {
-            if computeHit { computePipelineCacheHits += 1 } else { computePipelineCacheMisses += 1 }
-        }
-        if let renderMissKey {
-            renderPipelineMissKeyCounts[renderMissKey, default: 0] += 1
-        }
-        if let computeMissKey {
-            computePipelineMissKeyCounts[computeMissKey, default: 0] += 1
-        }
-        if let renderSource {
-            renderPipelineSelectionCounts[renderSource, default: 0] += 1
-        }
-        if let computeSource {
-            computePipelineSelectionCounts[computeSource, default: 0] += 1
-        }
-
-        let now = CFAbsoluteTimeGetCurrent()
-
-        if now - lastPipelineTelemetryLogTime >= 5.0 {
-            lastPipelineTelemetryLogTime = now
-
-            let renderTotal = renderPipelineCacheHits + renderPipelineCacheMisses
-            let computeTotal = computePipelineCacheHits + computePipelineCacheMisses
-            let renderHitRate = renderTotal > 0 ? (Double(renderPipelineCacheHits) / Double(renderTotal)) * 100.0 : 0.0
-            let computeHitRate = computeTotal > 0 ? (Double(computePipelineCacheHits) / Double(computeTotal)) * 100.0 : 0.0
-            let topRenderSources = renderPipelineSelectionCounts
-                .sorted { $0.value > $1.value }
-                .prefix(5)
-                .map { "\($0.key):\($0.value)" }
-                .joined(separator: ", ")
-            let topComputeSources = computePipelineSelectionCounts
-                .sorted { $0.value > $1.value }
-                .prefix(5)
-                .map { "\($0.key):\($0.value)" }
-                .joined(separator: ", ")
-
-            print("📊 [PipelineTelemetry] render hitRate=\(String(format: "%.1f", renderHitRate))% (H:\(renderPipelineCacheHits) M:\(renderPipelineCacheMisses)) sources=[\(topRenderSources.isEmpty ? "none" : topRenderSources)] | compute hitRate=\(String(format: "%.1f", computeHitRate))% (H:\(computePipelineCacheHits) M:\(computePipelineCacheMisses)) sources=[\(topComputeSources.isEmpty ? "none" : topComputeSources)]")
-        }
-
-        if now - lastPipelineMissHistogramLogTime >= 10.0 {
-            lastPipelineMissHistogramLogTime = now
-
-            let topRenderMisses = renderPipelineMissKeyCounts
-                .sorted { $0.value > $1.value }
-                .prefix(5)
-                .map { "\($0.key):\($0.value)" }
-                .joined(separator: ", ")
-            let topComputeMisses = computePipelineMissKeyCounts
-                .sorted { $0.value > $1.value }
-                .prefix(5)
-                .map { "\($0.key):\($0.value)" }
-                .joined(separator: ", ")
-
-            if !topRenderMisses.isEmpty || !topComputeMisses.isEmpty {
-                print("🧪 [PipelineMissTop] render=[\(topRenderMisses.isEmpty ? "none" : topRenderMisses)] | compute=[\(topComputeMisses.isEmpty ? "none" : topComputeMisses)]")
-            }
-        }
+        let env = hasEnvScrunch ?? appModel.renderSettings.envScrunchEnabled
+        let hand = hasHandField ?? appModel.renderSettings.handAttractionEnabled
+        return "_B\(bubble ? 1 : 0)_CP\(packet ? 1 : 0)_ES\(env ? 1 : 0)_HF\(hand ? 1 : 0)"
     }
 
     @inline(__always)
@@ -259,10 +132,14 @@ extension Renderer {
         mandelbulbPower: Int32?,
         activeCustomHash: String?,
         bubbleEnabled: Bool,
-        packetEnabled: Bool
+        packetEnabled: Bool,
+        hasEnvScrunch: Bool,
+        hasHandField: Bool
     ) -> MTLComputePipelineState? {
         lastComputeBubble = bubbleEnabled
         lastComputePacket = packetEnabled
+        lastComputeEnvScrunch = hasEnvScrunch
+        lastComputeHandField = hasHandField
         lastComputeFT = fractalTypeRawValue
         lastComputeFI = fractalIterations
         lastComputeRS = maxRaySteps
@@ -282,11 +159,9 @@ extension Renderer {
         let library = renderingLibrary()
 
         if preset.fractalType == .custom {
-            customSceneDiagnostic("🔬 [CSDiag] getPipeline(forPreset) FT=custom name='\(preset.name)' libraryPresent=\(library != nil) hash=\(customShaderHash ?? "nil") key=\(cacheKey) cacheHit=\(pipelineCache[cacheKey] != nil)")
         }
 
         if preset.fractalType == .custom, library == nil {
-            customSceneDiagnostic("🔬 [CSDiag] ⚠️ getPipeline(forPreset) returning DEFAULT pipelineState — custom library missing — key=\(cacheKey)")
             return pipelineState
         }
 
@@ -297,7 +172,6 @@ extension Renderer {
 
         // Build new specialized pipeline
         let config = FunctionConstantConfig.fromPreset(preset)
-        if RENDERER_DEBUG { print("🔧 [ShaderCompilation] Building NEW pipeline for: \(preset.name) [\(cacheKey)]") }
 
         do {
             let pipeline = try Renderer.buildSpecializedPipeline(
@@ -311,10 +185,8 @@ extension Renderer {
                 archive: renderPipelineArchive
             )
             pipelineCache[cacheKey] = pipeline  // Store in unified cache
-            if RENDERER_DEBUG { print("✅ [ShaderCompilation] SUCCESS: Built pipeline [\(cacheKey)]") }
             return pipeline
         } catch {
-            if RENDERER_DEBUG { print("❌ [ShaderCompilation] FAILED to build preset pipeline [\(cacheKey)]: \(error)") }
             return pipelineState
         }
     }
@@ -339,6 +211,9 @@ extension Renderer {
         let qualityMode: Int32 = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
         let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
+        let hasSpaceWarp = !appModel.renderSettings.spaceWarpStack.isEmpty || customShaderHash != nil
+        let hasEnvScrunch = appModel.renderSettings.envScrunchEnabled
+        let hasHandField = appModel.renderSettings.handAttractionEnabled
         let keyContext = RenderPipelineKeyContext(
             prefix: customCacheKeyPrefix(),
             fractalTypeRawValue: Int(fractalType.rawValue),
@@ -347,7 +222,7 @@ extension Renderer {
             qualityMode: Int(qualityMode),
             colorIterations: colorIterations,
             powerKey: powerKey,
-            sceneKey: "_B\(bubbleEnabled ? 1 : 0)"
+            sceneKey: "_B\(bubbleEnabled ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)_ES\(hasEnvScrunch ? 1 : 0)_HF\(hasHandField ? 1 : 0)"
         )
         let cacheKey = keyContext.exactKey(neonEnabled: neon == 1)
 
@@ -361,6 +236,9 @@ extension Renderer {
             fractalIterations: Int32(iterations),
             shadowIterations: Int32(max(iterations - 2, 2)),
             safetyBubbleEnabled: bubbleEnabled,  // Baked; toggle changes the cache key and rebuilds async
+            hasSpaceWarp: hasSpaceWarp,
+            hasEnvScrunch: hasEnvScrunch,
+            hasHandField: hasHandField,
             qualityMode: qualityMode,
             debugHierarchical: false,
             maxRaySteps: Int32(raySteps),
@@ -370,7 +248,6 @@ extension Renderer {
             mandelbulbPower: mandelbulbPower
         )
 
-        if RENDERER_DEBUG { print("🔧 [ShaderCompilation] Building pipeline for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps)...") }
 
         do {
             let pipeline = try Renderer.buildSpecializedPipeline(
@@ -384,10 +261,8 @@ extension Renderer {
                 archive: renderPipelineArchive
             )
             pipelineCache[cacheKey] = pipeline
-            if RENDERER_DEBUG { print("✅ [ShaderCompilation] Ready: FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps)") }
             return pipeline
         } catch {
-            if RENDERER_DEBUG { print("❌ [ShaderCompilation] FAILED for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps): \(error)") }
             return pipelineState
         }
     }
@@ -401,7 +276,6 @@ extension Renderer {
         }
 
         guard !presets.isEmpty else {
-            if RENDERER_DEBUG { print("🔧 [ShaderCompilation] No saved presets to precompile") }
             return
         }
 
@@ -411,29 +285,17 @@ extension Renderer {
         var compiledCount = 0
         var computePrewarmCount = 0
 
-        if RENDERER_DEBUG { print("🔧 [ShaderCompilation] Starting preset pipeline precompilation for \(presets.count) presets...") }
 
         for preset in presets {
             if preset.fractalType == .custom {
-                if RENDERER_DEBUG {
-                    print("  ⏭️  Skipping \(preset.name) - custom presets require an activated embedded formula")
-                }
                 continue
             }
             let key = preset.pipelineCacheKey
             guard !compiledKeys.contains(key) else {
-                if RENDERER_DEBUG { print("  ⏭️  Skipping \(preset.name) - duplicate config [\(key)]") }
                 continue  // Skip duplicate configurations
             }
             compiledKeys.insert(key)
 
-            if RENDERER_DEBUG {
-                let fc = preset.deriveFunctionConstants()
-                print("  🔨 Compiling: \(preset.name)")
-                print("      Key: \(key)")
-                print("      FractalIters=\(fc.fractalIterations), RaySteps=\(fc.maxRaySteps), Shadow=\(fc.shadowIterations)")
-                print("      Neon=\(fc.neonModeEnabled), Quality=\(fc.qualityMode)")
-            }
 
             _ = getPipeline(forPreset: preset)
 
@@ -445,7 +307,12 @@ extension Renderer {
                 fractalIterations: Int(functionConstants.fractalIterations),
                 maxRaySteps: Int(functionConstants.maxRaySteps),
                 powerKey: powerKey,
-                sceneKey: computeSceneKey(for: preset.fractalType)
+                sceneKey: computeSceneKey(
+                    for: preset.fractalType,
+                    bubbleEnabled: preset.effectiveSafetyBubbleEnabled,
+                    hasEnvScrunch: preset.effectiveHasEnvScrunch,
+                    hasHandField: preset.effectiveHasHandField
+                )
             ).exactKey
             if prewarmedComputeKeys.insert(computeKey).inserted {
                 await prewarmComputePipelineDuringStartup(forPreset: preset)
@@ -455,11 +322,6 @@ extension Renderer {
             compiledCount += 1
         }
 
-        if RENDERER_DEBUG {
-            print("✅ [ShaderCompilation] Precompiled \(compiledCount) unique preset pipelines (from \(presets.count) presets)")
-            print("   Prewarmed \(computePrewarmCount) unique compute pipelines")
-            print("   Unified cache now contains \(pipelineCache.count) pipelines")
-        }
     }
 
     private func prewarmComputePipelineDuringStartup(forPreset preset: FractalPreset) async {
@@ -492,13 +354,6 @@ extension Renderer {
             fractalType: fractalType,
             formulaParams: formulaParams
         )
-        if RENDERER_DEBUG,
-           fractalType == .mandelbulb,
-           mandelbulbPower != lastSelectPower {
-            let previousPower = lastSelectPower.map { String($0) } ?? "runtime"
-            let nextPower = mandelbulbPower.map { String($0) } ?? "runtime"
-            print("🔀 [Pipeline] Mandelbulb power changed: \(previousPower) → \(nextPower)")
-        }
                 let colorIterations = Int32(request?.colorIterations ?? appModel.renderSettings.colorIterations)
         let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
         // Live, authoritative per-frame derivation of whether the space-warp seam is
@@ -508,6 +363,8 @@ extension Renderer {
         // this reads the LIVE stack, adding the first transform flips it to true the
         // same frame — so a `_SW0` pipeline can never be served for a warped scene.
         let hasSpaceWarp = !appModel.renderSettings.spaceWarpStack.isEmpty || activeCustomHash != nil
+        let hasEnvScrunch = appModel.renderSettings.envScrunchEnabled
+        let hasHandField = appModel.renderSettings.handAttractionEnabled
 
         // Fast-path: parameters unchanged since last call — skip string alloc + dict lookup
         if iterations == lastSelectIter && raySteps == lastSelectRS &&
@@ -517,10 +374,10 @@ extension Renderer {
            activeCustomHash == lastSelectCustomHash &&
            bubbleEnabled == lastSelectBubble &&
            hasSpaceWarp == lastSelectSpaceWarp &&
+           hasEnvScrunch == lastSelectEnvScrunch &&
+           hasHandField == lastSelectHandField &&
            mandelbulbPower == lastSelectPower, let cached = lastSelectedPipeline {
-            recordPipelineTelemetry(renderHit: true, renderSource: "fast-path")
             if fractalType == .custom, !lastSelectedIsSpecialized {
-                customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectPipeline FAST-PATH on .custom returning NON-SPECIALIZED pipeline — hash=\(activeCustomHash ?? "nil")")
             }
             appModel.isUsingSpecializedPipeline = lastSelectedIsSpecialized
             return cached
@@ -530,6 +387,8 @@ extension Renderer {
         // guard. Set here (not in cacheSelectedRenderPipeline) so every non-fast-path
         // return reflects the current frame; a fast-path HIT above already had it equal.
         lastSelectSpaceWarp = hasSpaceWarp
+        lastSelectEnvScrunch = hasEnvScrunch
+        lastSelectHandField = hasHandField
 
         // Build unified cache key (only on parameter change). The `_SW` segment must
         // stay in lockstep with `FractalPreset.pipelineCacheKey`'s scene segment so a
@@ -544,29 +403,15 @@ extension Renderer {
             qualityMode: qualityMode,
             colorIterations: colorIterations,
             powerKey: powerKey,
-            sceneKey: "_B\(bubbleEnabled ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)"
+            sceneKey: "_B\(bubbleEnabled ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)_ES\(hasEnvScrunch ? 1 : 0)_HF\(hasHandField ? 1 : 0)"
         )
         let cacheKey = keyContext.exactKey(neonEnabled: neonMode)
-        if RENDERER_DEBUG,
-           fractalType == .mandelbulb,
-           mandelbulbPower != lastSelectPower {
-            print("🔀 [Pipeline] Mandelbulb requested key: \(cacheKey)")
-        }
 
         let result: MTLRenderPipelineState
         var isSpecialized = true
 
         // 1. Check unified cache (includes both quality presets and saved presets)
         if let pipeline = pipelineCache[cacheKey] {
-            recordPipelineTelemetry(renderHit: true, renderSource: "exact")
-            if RENDERER_DEBUG && lastLoggedPipelineKey != cacheKey {
-                print("🎯 [Pipeline] Using cached pipeline: \(cacheKey)")
-                lastLoggedPipelineKey = cacheKey
-            }
-            if fractalType == .custom, lastLoggedPipelineKey != cacheKey + "_csdiag" {
-                customSceneDiagnostic("🔬 [CSDiag] ✅ selectPipeline FT=custom CACHE HIT — key=\(cacheKey)")
-                lastLoggedPipelineKey = cacheKey + "_csdiag"
-            }
             result = pipeline
         }
         // 2. Cache miss: kick off a background build for the exact config and
@@ -577,13 +422,14 @@ extension Renderer {
         //    compilation is thread-safe; we build off-actor and hop back to the
         //    Renderer actor to insert into `pipelineCache` so next frame hits.
         else {
-            recordPipelineTelemetry(renderHit: false, renderMissKey: cacheKey)
 
             let exactConfig = FunctionConstantConfig(
                 fractalIterations: Int32(iterations),
                 shadowIterations: Int32(max(iterations - 2, 2)),
                 safetyBubbleEnabled: bubbleEnabled,
                 hasSpaceWarp: hasSpaceWarp,   // pair the baked FC with cacheKey's _SW segment
+                hasEnvScrunch: hasEnvScrunch,
+                hasHandField: hasHandField,
                 qualityMode: Int32(qualityMode),
                 debugHierarchical: false,
                 maxRaySteps: Int32(raySteps),
@@ -594,11 +440,8 @@ extension Renderer {
             )
 
             if fractalType == .custom {
-                customSceneDiagnostic("🔬 [CSDiag] selectPipeline FT=custom CACHE MISS — hash=\(activeCustomHash ?? "nil") libraryPresent=\(renderingLibrary() != nil) key=\(cacheKey)")
                 guard let library = renderingLibrary() else {
-                    recordPipelineTelemetry(renderSource: "custom-missing-library")
                     print("⚠️ [CustomScene] Missing active custom shader library for render pipeline build")
-                    customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectPipeline FT=custom → returning DEFAULT pipelineState (library == nil) — this WILL render as fog/sky only because FractalDE_Dispatch lacks FractalTypeCustom arm in default library")
                     // Self-heal: re-activate the registered formula so this
                     // sky-only state lasts frames, not forever (any ordering
                     // race between preset apply and activation lands here).
@@ -646,9 +489,6 @@ extension Renderer {
                         cacheKey: cacheKey,
                         config: exactConfig
                     )
-                    recordPipelineTelemetry(renderSource: "custom-async-near-match")
-                    lastLoggedPipelineKey = cacheKey
-                    customSceneDiagnostic("🔬 [CSDiag] selectPipeline FT=custom ASYNC enqueued, serving same-formula near-match — key=\(cacheKey)")
                     return cacheSelectedRenderPipeline(
                         nearMatch,
                         iterations: iterations,
@@ -678,10 +518,7 @@ extension Renderer {
                         archive: renderPipelineArchive
                     )
                     pipelineCache[cacheKey] = pipeline
-                    lastLoggedPipelineKey = cacheKey
                     result = pipeline
-                    recordPipelineTelemetry(renderSource: "custom-exact-build-sync-first")
-                    customSceneDiagnostic("🔬 [CSDiag] ✅ selectPipeline FT=custom built specialized pipeline (sync, first build) — key=\(cacheKey)")
                     return cacheSelectedRenderPipeline(
                         result,
                         iterations: iterations,
@@ -696,7 +533,6 @@ extension Renderer {
                     )
                 } catch {
                     print("❌ [CustomScene] Exact render pipeline build failed: \(error)")
-                    customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectPipeline FT=custom build FAILED → falling through to default-library fallback chain (will render fog/sky only) — error=\(error)")
                 }
             } else {
                 enqueueBackgroundPipelineBuild(
@@ -708,13 +544,7 @@ extension Renderer {
             // 3. Try FT-specific neon=off quality-preset fallback.
             let fallbackKey = keyContext.exactKey(neonEnabled: false)
             if let pipeline = pipelineCache[fallbackKey] {
-                recordPipelineTelemetry(renderSource: "exact-neon-off")
-                if RENDERER_DEBUG && lastLoggedPipelineKey != fallbackKey {
-                    print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: \(cacheKey))")
-                    lastLoggedPipelineKey = fallbackKey
-                }
                 if fractalType == .custom {
-                    customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectPipeline FT=custom served via exact-neon-off fallback — key=\(fallbackKey) (DEFAULT-library pipeline, no FractalTypeCustom dispatch)")
                 }
                 result = pipeline
             }
@@ -722,13 +552,7 @@ extension Renderer {
                 // 4. Try shared quality key (built at startup without FC_FRACTAL_TYPE)
                 let sharedExactKey = keyContext.sharedKey(neonEnabled: neonMode)
                 if let pipeline = pipelineCache[sharedExactKey] {
-                    recordPipelineTelemetry(renderSource: "shared-exact")
-                    if RENDERER_DEBUG && lastLoggedPipelineKey != sharedExactKey {
-                        print("🎯 [Pipeline] Using shared quality pipeline: \(sharedExactKey) for FT=\(fractalType.rawValue)")
-                        lastLoggedPipelineKey = sharedExactKey
-                    }
                     if fractalType == .custom {
-                        customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectPipeline FT=custom served via shared-exact fallback — key=\(sharedExactKey) (DEFAULT-library)")
                     }
                     result = pipeline
                 }
@@ -736,25 +560,13 @@ extension Renderer {
                 else {
                     let sharedFallbackKey = keyContext.sharedKey(neonEnabled: false)
                     if sharedFallbackKey != sharedExactKey, let pipeline = pipelineCache[sharedFallbackKey] {
-                        recordPipelineTelemetry(renderSource: "shared-neon-off")
-                        if RENDERER_DEBUG && lastLoggedPipelineKey != sharedFallbackKey {
-                            print("🎯 [Pipeline] Using shared neon-off quality pipeline: \(sharedFallbackKey) for FT=\(fractalType.rawValue)")
-                            lastLoggedPipelineKey = sharedFallbackKey
-                        }
                         if fractalType == .custom {
-                            customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectPipeline FT=custom served via shared-neon-off fallback — key=\(sharedFallbackKey) (DEFAULT-library)")
                         }
                         result = pipeline
                     }
                     // 6. Ultimate fallback to generic pipeline
                     else {
-                        recordPipelineTelemetry(renderSource: "generic-fallback")
-                        if RENDERER_DEBUG && lastLoggedPipelineKey != "fallback" {
-                            print("⚠️ [Pipeline] Using FALLBACK generic pipeline (no cache hit for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps))")
-                            lastLoggedPipelineKey = "fallback"
-                        }
                         if fractalType == .custom {
-                            customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectPipeline FT=custom served via generic-fallback — DEFAULT pipelineState (fog/sky only)")
                         }
                         isSpecialized = false
                         result = pipelineState
@@ -791,7 +603,7 @@ extension Renderer {
 
         let functionConstants = preset.deriveFunctionConstants()
         let powerKey = functionConstants.mandelbulbPower.map { "P\($0)" } ?? ""
-        let bubbleEnabled = effectiveSafetyBubbleEnabled(for: preset.fractalType)
+        let bubbleEnabled = preset.effectiveSafetyBubbleEnabled
         let packetEnabled = appModel.renderSettings.coherentPacketEnabled
         let keyContext = ComputePipelineKeyContext(
             prefix: customCacheKeyPrefix(),
@@ -799,7 +611,12 @@ extension Renderer {
             fractalIterations: Int(functionConstants.fractalIterations),
             maxRaySteps: Int(functionConstants.maxRaySteps),
             powerKey: powerKey,
-            sceneKey: computeSceneKey(for: preset.fractalType)
+            sceneKey: computeSceneKey(
+                for: preset.fractalType,
+                bubbleEnabled: preset.effectiveSafetyBubbleEnabled,
+                hasEnvScrunch: preset.effectiveHasEnvScrunch,
+                hasHandField: preset.effectiveHasHandField
+            )
         )
         let exactKey = keyContext.exactKey
 
@@ -813,7 +630,9 @@ extension Renderer {
             maxRaySteps: functionConstants.maxRaySteps,
             mandelbulbPower: functionConstants.mandelbulbPower,
             safetyBubbleEnabled: bubbleEnabled,
-            coherentPacketEnabled: packetEnabled
+            coherentPacketEnabled: packetEnabled,
+            hasEnvScrunch: preset.effectiveHasEnvScrunch,
+            hasHandField: preset.effectiveHasHandField
         )
     }
 
@@ -834,6 +653,8 @@ extension Renderer {
                                      mandelbulbPower: Int32? = nil,
                                      safetyBubbleEnabled: Bool? = nil,
                                      coherentPacketEnabled: Bool? = nil,
+                                     hasEnvScrunch: Bool? = nil,
+                                     hasHandField: Bool? = nil,
                                      archive: PipelineBinaryArchive? = nil) -> MTLComputePipelineState? {
         let constants = MTLFunctionConstantValues()
         var fi = fractalIterations
@@ -854,6 +675,12 @@ extension Renderer {
         if var packet = coherentPacketEnabled {
             constants.setConstantValue(&packet, type: .bool, index: FunctionConstantIndex.coherentPacketEnabled.rawValue)
         }
+        if var env = hasEnvScrunch {
+            constants.setConstantValue(&env, type: .bool, index: FunctionConstantIndex.hasEnvScrunch.rawValue)
+        }
+        if var hand = hasHandField {
+            constants.setConstantValue(&hand, type: .bool, index: FunctionConstantIndex.hasHandField.rawValue)
+        }
         constants.setConstantValue(&fi, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
         constants.setConstantValue(&si, type: .int, index: FunctionConstantIndex.shadowIterations.rawValue)
         constants.setConstantValue(&rs, type: .int, index: FunctionConstantIndex.maxRaySteps.rawValue)
@@ -861,7 +688,6 @@ extension Renderer {
         constants.setConstantValue(&neon, type: .bool, index: FunctionConstantIndex.neonModeEnabled.rawValue)
 
         guard let function = try? library.makeFunction(name: kernelName, constantValues: constants) else {
-            if RENDERER_DEBUG { print("⚠️ [ComputeCache] Failed to specialize \(kernelName) with FI=\(fi) RS=\(rs)") }
             return nil
         }
 
@@ -882,7 +708,6 @@ extension Renderer {
                                                        options: [],
                                                        reflection: nil)
         } catch {
-            if RENDERER_DEBUG { print("⚠️ [ComputeCache] Failed to build compute pipeline: \(error)") }
             return nil
         }
     }
@@ -916,6 +741,8 @@ extension Renderer {
         let powerKey = mbPowerInt.map { "P\($0)" } ?? ""
         let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
         let packetEnabled = appModel.renderSettings.coherentPacketEnabled
+        let hasEnvScrunch = appModel.renderSettings.envScrunchEnabled
+        let hasHandField = appModel.renderSettings.handAttractionEnabled
         let cacheKeyPrefix = customCacheKeyPrefix()
         let keyContext = ComputePipelineKeyContext(
             prefix: cacheKeyPrefix,
@@ -923,30 +750,21 @@ extension Renderer {
             fractalIterations: fractalIterations,
             maxRaySteps: maxRaySteps,
             powerKey: powerKey,
-            sceneKey: "_B\(bubbleEnabled ? 1 : 0)_CP\(packetEnabled ? 1 : 0)"
+            sceneKey: "_B\(bubbleEnabled ? 1 : 0)_CP\(packetEnabled ? 1 : 0)_ES\(hasEnvScrunch ? 1 : 0)_HF\(hasHandField ? 1 : 0)"
         )
-
-        let recreateLegacyBug = appModel.renderSettings.recreateLegacyComputeCacheBug
 
         // Fast-path: parameters unchanged since last call
         if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS && fractalType.rawValue == lastComputeFT && activeCustomHash == lastComputeCustomHash && mbPowerInt == lastComputePower,
            bubbleEnabled == lastComputeBubble, packetEnabled == lastComputePacket,
-           recreateLegacyBug == lastComputeLegacyBugMode,
+           hasEnvScrunch == lastComputeEnvScrunch,
+           hasHandField == lastComputeHandField,
            let cached = lastSelectedComputePipeline {
-            recordPipelineTelemetry(computeHit: true, computeSource: "fast-path")
             return cached
         }
-        lastComputeLegacyBugMode = recreateLegacyBug
-
         let exactKey = keyContext.exactKey
 
         // 1. Exact match — FC values match precomputed absScalePow
         if let pipeline = computePipelineCache[exactKey] {
-            recordPipelineTelemetry(computeHit: true, computeSource: "exact")
-            if RENDERER_DEBUG && lastComputePipelineKey != exactKey {
-                print("🎯 [ComputeCache] Exact hit: \(exactKey)")
-                lastComputePipelineKey = exactKey
-            }
             return cacheSelectedComputePipeline(
                 pipeline,
                 fractalTypeRawValue: fractalType.rawValue,
@@ -955,17 +773,14 @@ extension Renderer {
                 mandelbulbPower: mbPowerInt,
                 activeCustomHash: activeCustomHash,
                 bubbleEnabled: bubbleEnabled,
-                packetEnabled: packetEnabled
+                packetEnabled: packetEnabled,
+                hasEnvScrunch: hasEnvScrunch,
+                hasHandField: hasHandField
             )
         }
 
         let sharedKey = keyContext.sharedKey
         if let pipeline = computePipelineCache[sharedKey] {
-            recordPipelineTelemetry(computeHit: true, computeSource: "shared")
-            if RENDERER_DEBUG && lastComputePipelineKey != sharedKey {
-                print("🎯 [ComputeCache] Shared quality hit: \(sharedKey) for FT=\(fractalType.rawValue)")
-                lastComputePipelineKey = sharedKey
-            }
             return cacheSelectedComputePipeline(
                 pipeline,
                 fractalTypeRawValue: fractalType.rawValue,
@@ -974,47 +789,10 @@ extension Renderer {
                 mandelbulbPower: mbPowerInt,
                 activeCustomHash: activeCustomHash,
                 bubbleEnabled: bubbleEnabled,
-                packetEnabled: packetEnabled
+                packetEnabled: packetEnabled,
+                hasEnvScrunch: hasEnvScrunch,
+                hasHandField: hasHandField
             )
-        }
-
-        // Legacy bug mode ("Accidental Sphere Projection"): serve the NEAREST
-        // cached FI/RS pipeline even though its baked FC_FRACTAL_ITERATIONS
-        // mismatches the CPU-precomputed absScalePow — intentionally recreating
-        // the historical artifact look. Built-ins only; a custom library's
-        // pipelines aren't interchangeable.
-        if recreateLegacyBug, fractalType != .custom {
-            let nearest = computePipelineCache
-                .compactMap { entry -> (key: String, pipeline: MTLComputePipelineState, score: Int)? in
-                    let key = entry.key
-                    guard let fiRange = key.range(of: "FI"),
-                          let rsRange = key.range(of: "_RS", range: fiRange.upperBound..<key.endIndex) else { return nil }
-                    let fiText = String(key[fiRange.upperBound..<rsRange.lowerBound])
-                    let rsSuffix = key[rsRange.upperBound...]
-                    let rsText = rsSuffix.prefix { $0.isNumber }
-                    guard let fi = Int(fiText), let rs = Int(rsText) else { return nil }
-                    let score = abs(fi - fractalIterations) * 1000 + abs(rs - maxRaySteps)
-                    return (key: key, pipeline: entry.value, score: score)
-                }
-                .min { $0.score < $1.score }
-
-            if let nearest {
-                recordPipelineTelemetry(computeHit: true, computeSource: "legacy-nearest")
-                if RENDERER_DEBUG && lastComputePipelineKey != "legacyNearest_\(nearest.key)" {
-                    print("🪲 [ComputeCache] Legacy bug mode: nearest fallback \(nearest.key) for requested FT=\(fractalType.rawValue) FI=\(fractalIterations) RS=\(maxRaySteps)")
-                    lastComputePipelineKey = "legacyNearest_\(nearest.key)"
-                }
-                return cacheSelectedComputePipeline(
-                    nearest.pipeline,
-                    fractalTypeRawValue: fractalType.rawValue,
-                    fractalIterations: fractalIterations,
-                    maxRaySteps: maxRaySteps,
-                    mandelbulbPower: mbPowerInt,
-                    activeCustomHash: activeCustomHash,
-                    bubbleEnabled: bubbleEnabled,
-                    packetEnabled: packetEnabled
-                )
-            }
         }
 
         // 3. Kick off a background build for this exact configuration. Built-in
@@ -1023,7 +801,6 @@ extension Renderer {
         //    exists only in the runtime-compiled library. For custom misses,
         //    decline adaptive compute for this frame so the fragment path can run.
         if fractalType == .custom {
-            customSceneDiagnostic("🔬 [CSDiag] selectComputePipeline FT=custom miss — libraryPresent=\(renderingLibrary() != nil) hash=\(activeCustomHash ?? "nil") key=\(exactKey)")
             if renderingLibrary() != nil {
                 enqueueBackgroundComputePipelineBuild(
                     cacheKey: exactKey,
@@ -1033,13 +810,11 @@ extension Renderer {
                     maxRaySteps: Int32(maxRaySteps),
                     mandelbulbPower: mbPowerInt,
                     safetyBubbleEnabled: bubbleEnabled,
-                    coherentPacketEnabled: packetEnabled
+                    coherentPacketEnabled: packetEnabled,
+                    hasEnvScrunch: hasEnvScrunch,
+                    hasHandField: hasHandField
                 )
-                recordPipelineTelemetry(computeHit: false, computeMissKey: exactKey, computeSource: "custom-background-build")
-                customSceneDiagnostic("🔬 [CSDiag] selectComputePipeline FT=custom → enqueued background build, returning NIL (compute prepass declined this frame)")
             } else {
-                recordPipelineTelemetry(computeHit: false, computeMissKey: exactKey, computeSource: "custom-missing-library")
-                customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectComputePipeline FT=custom → library MISSING, compute prepass disabled")
             }
             return cacheSelectedComputePipeline(
                 nil,
@@ -1049,7 +824,9 @@ extension Renderer {
                 mandelbulbPower: mbPowerInt,
                 activeCustomHash: activeCustomHash,
                 bubbleEnabled: bubbleEnabled,
-                packetEnabled: packetEnabled
+                packetEnabled: packetEnabled,
+                hasEnvScrunch: hasEnvScrunch,
+                hasHandField: hasHandField
             )
         }
 
@@ -1061,7 +838,9 @@ extension Renderer {
             maxRaySteps: Int32(maxRaySteps),
             mandelbulbPower: mbPowerInt,
             safetyBubbleEnabled: bubbleEnabled,
-            coherentPacketEnabled: packetEnabled
+            coherentPacketEnabled: packetEnabled,
+            hasEnvScrunch: hasEnvScrunch,
+            hasHandField: hasHandField
         )
 
         // 4. Powerless shared fallback — serve the FI/RS-specialized startup
@@ -1097,11 +876,6 @@ extension Renderer {
             assert(powerlessSharedKey == "FI\(fractalIterations)_RS\(maxRaySteps)",
                    "Powerless shared probe drifted from the startup compute key format (Renderer.init ~:492); re-check that the shared tier still omits power/scene bakes before trusting this fallback.")
             if let shared = computePipelineCache[powerlessSharedKey] {
-                recordPipelineTelemetry(computeHit: false, computeMissKey: exactKey, computeSource: "shared-powerless")
-                if RENDERER_DEBUG && lastComputePipelineKey != powerlessSharedKey {
-                    print("🎯 [ComputeCache] Powerless shared fallback: \(powerlessSharedKey) (exact \(exactKey) building)")
-                    lastComputePipelineKey = powerlessSharedKey
-                }
                 return cacheSelectedComputePipeline(
                     shared,
                     fractalTypeRawValue: fractalType.rawValue,
@@ -1110,18 +884,15 @@ extension Renderer {
                     mandelbulbPower: mbPowerInt,
                     activeCustomHash: activeCustomHash,
                     bubbleEnabled: bubbleEnabled,
-                    packetEnabled: packetEnabled
+                    packetEnabled: packetEnabled,
+                    hasEnvScrunch: hasEnvScrunch,
+                    hasHandField: hasHandField
                 )
             }
         }
 
         // 5. Ultimate fallback — generic pipeline with NO function constants.
         //    Shader reads iterations from uniforms at runtime, matching absScalePow.
-        if RENDERER_DEBUG && lastComputePipelineKey != "fallback" {
-            print("⚠️ [ComputeCache] Using fallback generic compute pipeline")
-            lastComputePipelineKey = "fallback"
-        }
-        recordPipelineTelemetry(computeHit: false, computeMissKey: exactKey, computeSource: "generic-fallback")
         let fallback = adaptiveHierarchicalPipeline8x8
         return cacheSelectedComputePipeline(
             fallback,
@@ -1131,7 +902,9 @@ extension Renderer {
             mandelbulbPower: mbPowerInt,
             activeCustomHash: activeCustomHash,
             bubbleEnabled: bubbleEnabled,
-            packetEnabled: packetEnabled
+            packetEnabled: packetEnabled,
+            hasEnvScrunch: hasEnvScrunch,
+            hasHandField: hasHandField
         )
     }
 
@@ -1161,14 +934,12 @@ extension Renderer {
         backgroundRenderPipelineBuildTasks.removeValue(forKey: key)
         renderPipelineBuildRetryStates.removeValue(forKey: key)
         guard acceptsCompletedCustomPipelineBuild(forKey: key) else {
-            if RENDERER_DEBUG { print("⏭️ [Pipeline] Dropped stale async custom render pipeline: \(key)") }
             return
         }
         pipelineCache[key] = pipeline
         // Nudge the fast-path so the next frame picks the specialized pipeline
         // immediately instead of remembering the previous fallback.
         lastSelectedPipeline = nil
-        if RENDERER_DEBUG { print("✅ [Pipeline] Async-built and cached: \(key)") }
         // The render PSO was captured into the archive inside buildSpecializedPipeline;
         // persist it once this burst of interaction-driven builds settles.
         scheduleArchiveSerialize()
@@ -1192,12 +963,10 @@ extension Renderer {
         backgroundComputePipelineBuildTasks.removeValue(forKey: key)
         computePipelineBuildRetryStates.removeValue(forKey: key)
         guard acceptsCompletedCustomPipelineBuild(forKey: key) else {
-            if RENDERER_DEBUG { print("⏭️ [Compute] Dropped stale async custom compute pipeline: \(key)") }
             return
         }
         computePipelineCache[key] = pipeline
         lastSelectedComputePipeline = nil
-        if RENDERER_DEBUG { print("✅ [Compute] Async-built and cached: \(key)") }
         // The just-built PSO was added to the archive inside buildComputePipeline;
         // persist it once this burst of interaction-driven builds settles.
         scheduleArchiveSerialize()
@@ -1278,9 +1047,6 @@ extension Renderer {
                 )
                 await self?.insertBuiltRenderPipeline(pipeline, forKey: cacheKey)
             } catch {
-                if RENDERER_DEBUG {
-                    print("❌ [Pipeline] Background build failed for \(cacheKey): \(error)")
-                }
                 await self?.markPipelineBuildFailed(forKey: cacheKey)
             }
         }
@@ -1298,7 +1064,9 @@ extension Renderer {
         maxRaySteps: Int32,
         mandelbulbPower: Int32?,
         safetyBubbleEnabled: Bool? = nil,
-        coherentPacketEnabled: Bool? = nil
+        coherentPacketEnabled: Bool? = nil,
+        hasEnvScrunch: Bool? = nil,
+        hasHandField: Bool? = nil
     ) {
         if pendingComputePipelineBuildKeys.contains(cacheKey) { return }
         if shouldDelayComputePipelineBuild(forKey: cacheKey) { return }
@@ -1332,6 +1100,8 @@ extension Renderer {
                 mandelbulbPower: mandelbulbPower,
                 safetyBubbleEnabled: safetyBubbleEnabled,
                 coherentPacketEnabled: coherentPacketEnabled,
+                hasEnvScrunch: hasEnvScrunch,
+                hasHandField: hasHandField,
                 archive: self.pipelineArchive
             ) {
                 await self.insertBuiltComputePipeline(pipeline, forKey: cacheKey)

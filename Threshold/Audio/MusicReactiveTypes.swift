@@ -78,7 +78,7 @@ struct LFOSettings: Codable, Hashable, Sendable {
     var shape: LFOShape = .sine
 
     mutating func sanitizeInPlace() {
-        frequency = frequency.clamped(to: 0.01...5.0)
+        frequency = frequency.clamped(to: 0.001...5.0)
         amplitude = amplitude.clamped(to: 0.0...1.0)
     }
 
@@ -527,6 +527,231 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
             result.append(mapping)
         }
         return result
+    }
+}
+
+// MARK: - Music-driven preset-bank sequencing
+
+/// Ordered scene collections available to the music-driven preset sequencer.
+///
+/// These deliberately reuse the same classifications as the Explore browser.
+/// Custom-formula and Mixed-immersion scenes are excluded from every bank: a
+/// beat-driven switch must not start shader compilation or change immersion
+/// mode on the render path.
+enum MusicPresetBank: String, CaseIterable, Codable, Sendable {
+    case musicReactive
+    case jumpingOff
+    case allStatic
+
+    var displayName: String {
+        switch self {
+        case .musicReactive: return "Music Reactive"
+        case .jumpingOff: return "Jumping Off"
+        case .allStatic: return "All Static"
+        }
+    }
+
+    var shortDisplayName: String {
+        switch self {
+        case .musicReactive: return "Music"
+        case .jumpingOff: return "Jumping Off"
+        case .allStatic: return "All"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .musicReactive: return "waveform"
+        case .jumpingOff: return "sparkles"
+        case .allStatic: return "square.stack.3d.up"
+        }
+    }
+
+    /// Return this bank's presets in the stable order supplied by PresetManager.
+    /// Duplicate IDs are ignored defensively so wraparound can never oscillate
+    /// between two copies of the same stored scene.
+    func presets(from candidates: [FractalPreset]) -> [FractalPreset] {
+        var seen = Set<UUID>()
+        return candidates.filter { preset in
+            guard preset.name != "__lastState__",
+                  !preset.isCustomScenePreset,
+                  preset.mixedModeScene != true,
+                  seen.insert(preset.id).inserted else {
+                return false
+            }
+
+            switch self {
+            case .musicReactive:
+                return !preset.isJumpingOffPreset
+            case .jumpingOff:
+                return preset.isJumpingOffPreset
+            case .allStatic:
+                return true
+            }
+        }
+    }
+}
+
+/// Persistent, library-level configuration for switching full visual presets
+/// from detected music Drops. This is intentionally not part of
+/// AudioReactiveConfig: loading a scene replaces that scene-authored config,
+/// which would otherwise disable its own sequencer after the first switch.
+struct MusicPresetBankEffect: Codable, Equatable, Sendable {
+    static let supportedDropCadences = [1, 2, 4, 8, 16]
+
+    var isEnabled: Bool
+    var bank: MusicPresetBank
+    var dropsPerChange: Int
+    var minimumInterval: TimeInterval
+
+    init(
+        isEnabled: Bool = false,
+        bank: MusicPresetBank = .musicReactive,
+        dropsPerChange: Int = 8,
+        minimumInterval: TimeInterval = 8
+    ) {
+        self.isEnabled = isEnabled
+        self.bank = bank
+        self.dropsPerChange = dropsPerChange
+        self.minimumInterval = minimumInterval
+        normalizeInPlace()
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case isEnabled, bank, dropsPerChange, minimumInterval
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isEnabled = (try? container.decode(Bool.self, forKey: .isEnabled)) ?? false
+        bank = (try? container.decode(MusicPresetBank.self, forKey: .bank)) ?? .musicReactive
+        dropsPerChange = (try? container.decode(Int.self, forKey: .dropsPerChange)) ?? 8
+        minimumInterval = (try? container.decode(TimeInterval.self, forKey: .minimumInterval)) ?? 8
+        normalizeInPlace()
+    }
+
+    mutating func normalizeInPlace() {
+        dropsPerChange = min(32, max(1, dropsPerChange))
+        minimumInterval = minimumInterval.isFinite
+            ? min(60, max(2, minimumInterval))
+            : 8
+    }
+
+    var normalized: MusicPresetBankEffect {
+        var copy = self
+        copy.normalizeInPlace()
+        return copy
+    }
+}
+
+/// Combines the unscaled Drop signals used by the preset-bank sequencer. Scene
+/// presets are allowed to author their own beat sensitivity (including zero),
+/// so sequencing must listen before that scene-local multiplier is applied.
+enum MusicPresetBankDropEnvelope {
+    static func merged(
+        analyzerOnset: Float,
+        analyzerIsActive: Bool,
+        playbackBeat: Float,
+        playbackIsActive: Bool
+    ) -> Float {
+        var level: Float = 0
+        if analyzerIsActive, analyzerOnset.isFinite {
+            level = max(level, analyzerOnset)
+        }
+        if playbackIsActive, playbackBeat.isFinite {
+            level = max(level, playbackBeat)
+        }
+        return min(1, max(0, level))
+    }
+}
+
+/// Rising-edge/hysteresis detector for the Drop envelope. The audio analyzer's
+/// onset remains high for several frames, so level-based triggering would load
+/// the same scene repeatedly. A low rearm threshold plus a short edge debounce
+/// turns each pulse into exactly one counted Drop.
+struct MusicPresetBankTrigger: Sendable {
+    static let triggerThreshold: Float = 0.65
+    static let rearmThreshold: Float = 0.25
+    static let minimumDropInterval: TimeInterval = 0.20
+
+    private(set) var detectedDropCount = 0
+    private var isDropLatched = false
+    private var lastAcceptedDropTime: TimeInterval?
+    private var lastChangeTime: TimeInterval?
+
+    mutating func update(
+        beatIntensity: Float,
+        configuration: MusicPresetBankEffect,
+        hasActiveSource: Bool,
+        now: TimeInterval
+    ) -> Bool {
+        let configuration = configuration.normalized
+        guard configuration.isEnabled, hasActiveSource else {
+            reset()
+            return false
+        }
+
+        let level = beatIntensity.isFinite ? max(0, min(1, beatIntensity)) : 0
+        if level <= Self.rearmThreshold {
+            isDropLatched = false
+            return false
+        }
+
+        guard level >= Self.triggerThreshold, !isDropLatched else { return false }
+        isDropLatched = true
+
+        let timestamp = now.isFinite ? now : 0
+        if let lastAcceptedDropTime,
+           timestamp - lastAcceptedDropTime < Self.minimumDropInterval {
+            return false
+        }
+        lastAcceptedDropTime = timestamp
+        detectedDropCount = min(configuration.dropsPerChange, detectedDropCount + 1)
+
+        guard detectedDropCount >= configuration.dropsPerChange else { return false }
+        if let lastChangeTime,
+           timestamp - lastChangeTime < configuration.minimumInterval {
+            // Keep the cadence satisfied; the next Drop after the cooldown
+            // advances immediately instead of making the user count again.
+            return false
+        }
+
+        detectedDropCount = 0
+        lastChangeTime = timestamp
+        return true
+    }
+
+    mutating func reset() {
+        detectedDropCount = 0
+        isDropLatched = false
+        lastAcceptedDropTime = nil
+        lastChangeTime = nil
+    }
+}
+
+/// Pure wraparound selection shared by keyboard scene switching and the music
+/// sequencer. Callers compare the returned ID with the current ID so an
+/// already-selected singleton never causes an unnecessary reload.
+enum MusicPresetBankCycler {
+    static func nextPreset(
+        in candidates: [FractalPreset],
+        after currentID: UUID?,
+        forward: Bool = true
+    ) -> FractalPreset? {
+        var seen = Set<UUID>()
+        let presets = candidates.filter { seen.insert($0.id).inserted }
+        guard !presets.isEmpty else { return nil }
+
+        guard let currentID,
+              let currentIndex = presets.firstIndex(where: { $0.id == currentID }) else {
+            return forward ? presets.first : presets.last
+        }
+        guard presets.count > 1 else { return presets[currentIndex] }
+
+        let offset = forward ? 1 : -1
+        let count = presets.count
+        let nextIndex = ((currentIndex + offset) % count + count) % count
+        return presets[nextIndex]
     }
 }
 

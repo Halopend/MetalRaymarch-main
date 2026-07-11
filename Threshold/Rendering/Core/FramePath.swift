@@ -3,8 +3,8 @@
 //  Threshold
 //
 //  Render-path selection value types: which path a frame takes (compute vs
-//  fragment), the fragment pass plan, the optional MetalFX upscale bundle, and
-//  the per-frame phase-timing breakdown. Extracted from RendererRenderSupport.swift
+//  fragment), the fragment pass plan, and the per-frame phase-timing breakdown.
+//  Extracted from RendererRenderSupport.swift
 //  to give these types a focused home; the selection logic (Renderer.selectFramePath)
 //  stays with the Renderer extension. Pure relocation — no behavior change.
 //
@@ -17,21 +17,10 @@ enum RenderFramePath: Equatable {
     case fragment
 }
 
-#if canImport(MetalFX)
-struct RendererMetalFXBundle {
-    let manager: MetalFXManager
-    let inputWidth: Int
-    let inputHeight: Int
-}
-#endif
-
 struct RendererFragmentPassPlan {
     let renderPassDescriptor: MTLRenderPassDescriptor
     let viewports: [MTLViewport]
     let resolutionScale: Float
-#if canImport(MetalFX)
-    let metalFXBundle: RendererMetalFXBundle?
-#endif
 }
 
 struct FramePhaseBreakdown {

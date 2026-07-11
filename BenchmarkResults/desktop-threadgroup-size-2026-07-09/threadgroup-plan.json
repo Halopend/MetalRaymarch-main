@@ -1,0 +1,15 @@
+{
+  "defaults": {
+    "scene": "Start",
+    "frames": 120,
+    "warmup": 30,
+    "settleSeconds": 0.5,
+    "shadows": true
+  },
+  "out": "/tmp/threshold-threadgroup-plan.json",
+  "jobs": [
+    { "name": "720p", "size": "1280x720" },
+    { "name": "1080p", "size": "1920x1080" },
+    { "name": "1440p", "size": "2560x1440" }
+  ]
+}

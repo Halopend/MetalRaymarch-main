@@ -25,21 +25,15 @@
 
 ## 1. Executive Summary
 
-Threshold is a real-time fractal raymarcher whose performance strategy rests on three pillars: **(1) function-constant pipeline specialization** that bakes iteration counts, fractal type, ray-step budgets and Mandelbulb power into per-variant shaders so the Metal compiler fully unrolls and devirtualizes the dominant `Map()` distance-estimator loop; **(2) an orbit cache + analytic-Jacobian shading path** that captures the surface hit state exactly once and reconstructs normals/colors without re-iterating the fractal (eliminating ~70% of redundant inner loops, and for Mandelbox replacing finite-difference normals with zero extra `Map()` calls); and **(3) relaxed (over-relaxed) sphere tracing** with overstep-failure recovery that takes larger-than-conservative march steps to cut DE evaluations on the hot path of every live render.** On top of these, the renderer leans on CPU-precompute of frame-uniform transcendentals, half-precision shading math, early ray/tile termination, and shared shadow evaluation.
+Threshold is a real-time fractal raymarcher whose performance strategy rests on two pillars: **(1) function-constant pipeline specialization** that bakes iteration counts, fractal type, ray-step budgets and Mandelbulb power into per-variant shaders so the Metal compiler fully unrolls and devirtualizes the dominant `Map()` distance-estimator loop; and **(2) an orbit cache + analytic-Jacobian shading path** that captures the surface hit state exactly once and reconstructs normals/colors without re-iterating the fractal (eliminating ~70% of redundant inner loops, and for Mandelbox replacing finite-difference normals with zero extra `Map()` calls).** On top of these, the renderer leans on CPU-precompute of frame-uniform transcendentals, half-precision shading math, early ray/tile termination, and shared shadow evaluation.
 
-Critically, the verification pass reveals that **the most-advertised "exotic" optimizations are largely dormant in the default configuration**: the entire hierarchical 8×8 compute raymarcher (with its temporal reprojection, foveation, coherent-packet, and tile-empty skip) only runs when `tileSize==8`, which no default or bundled scene selects. Likewise MetalFX upscaling, the TAA accumulation kernel, and fragment warm-start all require `resolutionScale < 0.999`, which is not the default. So the **default live path is the per-pixel fragment shader** (`fragmentShaderMono` on Mac, `fragmentShader` on visionOS), where the active levers are pipeline specialization, orbit cache, relaxed tracing, CPU precompute, half-precision shading, early miss-skip, and (on visionOS) hardware foveation via the rasterization rate map. The Buddhabrot subsystem is a separate progressive Monte-Carlo renderer with its own bounded ring-buffer + GPU radix-sort splat pipeline.
+Critically, the verification pass reveals that **the most-advertised "exotic" optimizations are largely dormant in the default configuration**: the entire hierarchical 8×8 compute raymarcher (with its temporal reprojection, foveation, coherent-packet, and tile-empty skip) only runs when `tileSize==8`, which no default or bundled scene selects. The **default live path is the per-pixel fragment shader** (`fragmentShaderMono` on Mac, `fragmentShader` on visionOS), where the active levers are pipeline specialization, orbit cache, relaxed tracing, CPU precompute, half-precision shading, early miss-skip, and (on visionOS) hardware foveation via the rasterization rate map. The Buddhabrot subsystem is a separate progressive Monte-Carlo renderer with its own bounded ring-buffer + GPU radix-sort splat pipeline.
 
 ---
 
 ## 2. Technique Catalog
 
 ### GPU Shader — Algorithmic
-
-**Relaxed (over-relaxed) sphere tracing + overstep-failure retreat** — `Shaders.metal:1200-1214,1282-1312,1346-1374` — Keinert enhanced sphere tracing: `stepLen = h*omega` with `omega=clamp(stepMultiplier,1,cap)`; `relaxedStepUpdate()` detects when unbounding spheres stop overlapping and retreats, pinning `omega=1`. — Fewer `Map()` evals per ray in open space without tunneling thin features. — **STATUS: ✅ active** (all live paths; `stepMultiplier` ramps to 1.4 once geometry settles, briefly inert at `omega==1` cold start).
-
-**Over-relaxation hit-registration guard (`!sorFail`)** — `Shaders.metal:1299,1361` — hit test is `UNLIKELY(h<threshold) && !sorFail`; suppresses false hits on overstepped gaps so the speedup stays artifact-free. — Makes relaxed tracing safe (its absence would force disabling the whole technique). — **STATUS: ✅ active.**
-
-**Per-fractal-type over-relaxation ceiling (`relaxedOmegaCap`)** — `Shaders.metal:1224-1240` — caps `omega` at 1.4 for box/fold DEs, 1.1 for log-DE Mandelbulb/Julia, 1.2 for Kleinian/custom; folds to a constant when `FC_FRACTAL_TYPE` baked. — Lets safe DE families overstep aggressively while keeping unsafe ones correct. — **STATUS: ✅ active.**
 
 **Adaptive distance-scaled hit threshold + early ray termination** — `Shaders.metal:1289-1307,1352-1369,1180` — threshold grows with `t` via `fma(t,0.0008,0.0005)`; hit returns immediately under `UNLIKELY`. — Distant samples accept hits sooner; early-out ends the march at first surface contact. — **STATUS: ✅ active.** *(The `(1-quality)` widening term is dead — `quality` is hardcoded 1.0 at every call site; only the `fma(t,…)` distance term does work.)*
 
@@ -113,8 +107,6 @@ Critically, the verification pass reveals that **the most-advertised "exotic" op
 
 **FC_SHARE_SHADOWS forced-on (quad-shared)** — `Shaders.metal:96,2151,2836`; `RendererPipelineHelpers.swift:42-49` — force-set true only for `fragmentShaderQuadShared`. — Guarantees 1 shadow eval per 2×2 quad with no per-pixel branch. — **STATUS: 🟡 conditional** — active within the quad-shared path (`tileSize==2`), dormant by default.
 
-**FC_WARM_START fragment warm-start specialization** — `Shaders.metal:108-109,2566-2580,2727`; `RendererPipelineHelpers.swift:50-57` — force-baked true for the visionOS `fragmentShader` pipeline; function-constant-gated prev-depth texture argument is stripped on Mac/screenshot. — Compiles in the warm-start path + texture binding only where used. — **STATUS: 🟡 conditional** — FC compiled into the default visionOS pipeline (texture-arg cost-avoidance real), but the actual warm-march only triggers when MetalFX is active (`resolutionScale<0.999`) + geometry stable. Fully compiled out on Mac.
-
 **FC_COHERENT_PACKET compute bake** — `Shaders.metal:116,1846-1847`; `RendererPipelineCache.swift:735-737` — bakes the predict-validate vs legacy branch on exact compute keys. — DCEs the unused branch. — **STATUS: ⛔ disabled** — set only on the compute kernel (off by default, `tileSize≠8`) AND `coherentPacketEnabled` defaults false. Doubly off.
 
 **FC_DEBUG_HIERARCHICAL compile-out** — `Shaders.metal:2258-2287` — debug tint + packet overlay DCE'd when baked false. — Removes per-pixel debug branching in release. — **STATUS: 🟡 conditional** — `debug=false` baked on specialized compute pipelines; the generic empty-constants fallback keeps it a runtime branch (still false).
@@ -137,29 +129,19 @@ Critically, the verification pass reveals that **the most-advertised "exotic" op
 
 ### Resolution & Upscaling
 
-**Sub-native render + MetalFX spatial upscale (visionOS stereo)** — `MetalFXManager.swift:196-216`; `RendererRenderSupport.swift:785-786` — fragment renders to reduced `type2DArray`, per-eye `MTLFXSpatialScaler` reconstructs to drawable via cached views. — Raymarch cost ~scale²; the primary GPU saving when engaged. — **STATUS: 🟡 conditional** — gated on `resolutionScale < 0.999` (default 1.0). Wired and functional; not the default.
-
 **MetalFX temporal upscaling preferred over spatial (Mac/iOS)** — `MacTemporalUpscaler.swift:163-192`; `RaymarchRenderView.swift:393-411` — motion-vector pass + `MTLFXTemporalScaler` accumulates Halton-jittered history using depth + per-pixel motion; spatial is fallback. — Better stability/detail than spatial at the same low scale → push render resolution lower. — **STATUS: 🟡 conditional** — `resolutionScale < 0.985` (default 1.0), Mac/iOS only.
 
 **Closed-loop GPU-time dynamic resolution** — `AdaptiveResolutionController.swift:82-106`; `RaymarchRenderView.swift:383,449-455` — EMA-smoothed measured GPU time steps scale ±0.05 with hysteresis (1.05/0.80 band) and asymmetric cooldowns (0.30s down / 0.90s up), floor 0.34, ceiling = user slider; `record()` only on upscaled frames. — Holds a 60fps GPU budget by shedding input pixels. — **STATUS: 🟡 conditional** — Mac/iOS only; engages only when `resolutionScale < 0.985`. visionOS has no equivalent.
 
 **Temporal input clamped to output/3** — `MacTemporalUpscaler.swift:22-24,73-80` — floors temporal input at `ceil(output/3)` so the lowest slider settings stay on the temporal (not spatial) path. — Keeps aggressive downscales on the higher-quality path. — **STATUS: 🟡 conditional** (temporal path only).
 
-**RCAS sharpening fused into the resolve pass + adaptive strength** — `Shaders.metal:2938-2984,3027-3032`; `RendererRenderSupport.swift:671-679` — 5-tap noise-adaptive sharpen inline in the MetalFX resolve; host ramps `rcasStrength = clamp((1-scale)/0.67)*0.95`; shader early-outs to a single nearest tap when 0. — Recovers upscale detail in an existing pass; skips the 5-tap when nothing to sharpen. — **STATUS: 🟡 conditional** — runs only on the MetalFX resolve path (`resolutionScale<0.999`); near native it is skipped (MetalFX off anyway).
-
-**16-px input bucketing + near-native (≥95%) skip** — `RendererRenderSupport.swift:809-838` — snaps MetalFX input to 16-px buckets; drops MetalFX entirely when input ≥95% of native. — Prevents per-slider-tick texture/scaler rebuilds and a no-benefit near-1× copy. — **STATUS: ✅ active as a guard** (runs whenever the upscale subsystem is evaluated).
-
-**2-slot snapshot pool for slider oscillation** — `MetalFXManager.swift:95-132,159-192` — swaps a stashed `PooledSnapshot` (textures+scalers+views) instead of rebuilding both eyes when adjacent buckets ping-pong; re-primes depth history. — Eliminates per-drag reallocation hitches. — **STATUS: 🟡 conditional** (only exercised under active sub-native dragging).
-
-**Per-eye scaler + texture-view caching** — `MetalFXManager.swift:88-89,207-208,286-309` — views/scalers built once, reassigned (not reallocated) each frame. — Per-frame encode cost → pointer assignment. — **STATUS: 🟡 conditional** (MetalFX engaged only).
-
 **MetalFX texture/scaler reuse across frames** — `MacTemporalUpscaler.swift:85-98`; `MacSpatialUpscaler.swift:61-67` — `prepare()` early-returns when sizes match; only size changes rebuild. — Avoids allocation churn on the steady-state upscale path. — **STATUS: 🟡 conditional** (upscale path only).
 
-**Largest-drawable selection (visionOS 26)** — `RendererRenderSupport.swift:299-352` — picks the largest-area candidate from `queryDrawables()` so the app's `resolutionScale`+MetalFX is the single quality lever (no compositor double-downscale). — Avoids stacking two quality reductions. — **STATUS: ✅ active** on visionOS 26+ (call is on the hot path; benefit only when >1 candidate returned).
+**Largest-drawable selection (visionOS 26)** — `RendererRenderSupport.swift:299-352` — picks the largest-area candidate from `queryDrawables()` so compositor Render Quality remains the single visionOS resolution lever. — Avoids stacking two quality reductions. — **STATUS: ✅ active** on visionOS 26+ (call is on the hot path; benefit only when >1 candidate returned).
 
 ### Foveation
 
-**Hardware foveated rasterization rate map (fragment/raster + resolve)** — `RendererRenderSupport.swift:250-258,699,748`; `MetalProjectApp.swift:18` — attaches `drawable.rasterizationRateMaps.first` to the direct render, MetalFX-input, and resolve descriptors; foveation requested in `ContentStageConfiguration`. — Gaze-tracked variable-rate shading reduces peripheral fragment invocations — **the single biggest GPU lever active by default on the visionOS fragment path.** — **STATUS: ✅ active** on visionOS fragment/raster (system rate map exists, sizes match). Deliberately **not** wired to the compute encoder (Metal compute can't take a rate map).
+**Hardware foveated rasterization rate map (fragment/raster + resolve)** — `RendererRenderSupport.swift:250-258,699,748`; `MetalProjectApp.swift:18` — attaches `drawable.rasterizationRateMaps.first` to the direct render descriptor; foveation requested in `ContentStageConfiguration`. — Gaze-tracked variable-rate shading reduces peripheral fragment invocations — **the single biggest GPU lever active by default on the visionOS fragment path.** — **STATUS: ✅ active** on visionOS fragment/raster (system rate map exists, sizes match). Deliberately **not** wired to the compute encoder (Metal compute can't take a rate map).
 
 **In-kernel foveated step-budget reduction (compute)** — `Shaders.metal:1741-1750` — per-tile factor from the tile-center radius ramps `maxSteps` to 0.5× at corners beyond `r=0.35`, scaled by `foveationStrength`; fixed-center, not gaze-tracked, divergence-free. — Up to ~2× fewer peripheral fine-march steps. — **STATUS: ⛔ disabled** — doubly gated: requires `tileSize==8` (off by default) AND `foveationStrength>0` (defaults 0.0). When `strength==0` the block is skipped (`factor==1`). This is the known foveation-compute-gap.
 
@@ -169,21 +151,7 @@ Critically, the verification pass reveals that **the most-advertised "exotic" op
 
 **Per-pixel temporal reprojection warm-start (compute)** — `Shaders.metal:1762-1821,2105-2124` — reprojects each pixel into the previous frame, samples prev-depth, refines once, sets `startT = prevDepth*0.9`; `SceneWithCacheFromStart` marches a tight window with 0.25× budget. — ~288-step fine march → ~30 for ~95% of static pixels. — **STATUS: 🟡 conditional** — compute kernel only (`tileSize==8`, off by default); within that path, active after frame 0.
 
-**Fragment-path temporal depth warm-start (`computeWarmStartT`)** — `Shaders.metal:2566-2580,2679-2722` — reprojects into prev-frame depth, marches a narrow window via `SceneWithCacheFromStart`; window-miss falls back to full march (never changes *what* is hit). — Several-hundred-step fragment march → ~5-10 for stable pixels. — **STATUS: 🟡 conditional** — visionOS `fragmentShader` only, and only when MetalFX active (`resolutionScale<0.999`) + geometry stable + no spherical inversion. Compiled out on Mac.
-
-**Per-frame warm-start runtime gate (`warmStartEnabled`)** — `Shaders.metal:2687`; `Renderer.swift:1084-1089` — returns -1 unless `warmStartEnabled==1`, set only when MetalFX depth history is valid and the geometry `WarmStartGate` allows; discrete changes hard-disable for a frame. — Prevents stale-history full-march fallbacks. — **STATUS: 🟡 conditional** (rides the MetalFX fragment path).
-
-**`SceneWithCacheFromStart` tight-window step-budget scaling** — `Shaders.metal:1320-1379` — `stepScale=0.25` for temporal starts (>1.0) vs 0.5 for coarse, `endT=startT+2`, floor 8. — ~5-10 steps for reprojected pixels vs 30-60. — **STATUS: ✅ active** (reached on the live quad-shared + compute paths every frame geometry is found, and the visionOS fragment warm-start path).
-
-**Custom visionOS TAA accumulation (`taaResolve`)** — `Shaders.metal:2327-2441`; `VisionOSTAAManager.swift:103-148` — reprojects an rgba16F ping-pong history through prev VP using true per-pixel depth, variance-clamps, `mix(history,current,blend)`; accumulates Halton jitter for free super-sampling. — Super-sampling-quality detail at low render scale for one compute pass. — **STATUS: 🟡 conditional** — runs only when MetalFX active (`resolutionScale<0.999`); not the default.
-
-**Adaptive TAA blend factor by geometry state** — `Shaders.metal:2426-2437`; `RendererRenderSupport.swift:154-160` — blend 0.1 stable / 0.3 settling / 0.5 dynamic, forced 1.0 on reset/disocclusion. — Max history reuse when static, discards stale history in motion. — **STATUS: 🟡 conditional** (TAA path only).
-
-**Cooperative threadgroup tile load (sRGB-decode once)** — `Shaders.metal:2321-2355` — 16×16 group loads its 18×18 halo into threadgroup memory, decoding each texel once instead of ~9× per variance window. — ~9× fewer sRGB decodes + texture reads in the TAA pass. — **STATUS: 🟡 conditional** (TAA path only).
-
-**Closest-depth (reverse-Z) dilation for reprojection** — `Shaders.metal:2391-2403` — 5-tap cross keeps the nearest surface so silhouette pixels reproject with foreground motion and survive variance clamp. — Preserves edge history (avoids shimmer/re-march). — **STATUS: 🟡 conditional** (TAA path only).
-
-**True-depth reprojection (head-translation correct)** — `Shaders.metal:2384-2421` — unprojects at real written depth UV→NDC→view→model→prev clip; validity-gated. — More pixels reuse history under head translation. — **STATUS: 🟡 conditional** (TAA path only).
+**`SceneWithCacheFromStart` tight-window step-budget scaling** — `Shaders.metal:1320-1379` — `stepScale=0.25` for temporal starts (>1.0) vs 0.5 for coarse, `endT=startT+2`, floor 8. — ~5-10 steps for reprojected pixels vs 30-60. — **STATUS: ✅ active** (reached on the live quad-shared + compute paths every frame geometry is found, ).
 
 **32×32 supertile + 8×8 tile temporal depth seeds** — `Shaders.metal:1949-2005` — 9-tap (≥5 hits) / 5-tap (≥3 hits) prev-depth reads seed `tileStartT=0.6×nearest`, skipping the `SceneCoarse` march; gated on `temporalReprojectionEnabled && blendFactor<0.6`. — Avoids ~50 Map evals/tile when frame-to-frame history is coherent. — **STATUS: 🟡 conditional** — compute path (`tileSize==8`) only, when not mid-gesture.
 
@@ -195,15 +163,11 @@ Critically, the verification pass reveals that **the most-advertised "exotic" op
 
 **Halton (2,3) sub-pixel jitter** — `RaymarchRenderView.swift:414-428`; `Shaders.metal:1722-1723,2736-2779` — sub-pixel offset advanced per frame, baked into projection (Mac) or added to `fragCoord` (visionOS) for temporal accumulation. — Distinct sub-pixel coverage drives detail reconstruction above render resolution. — **STATUS: 🟡 conditional** — the add executes every frame but `jitterOffset` is .zero unless TAA (visionOS, scale<0.999) or the Mac temporal scaler is active. **Compute path `jitterOffset` is hardcoded zero (latent there).** `fragmentShaderMono` add is latent-dead on Mac (Mac jitters via the projection matrix).
 
-**TAA history ping-pong + warm-start validity gating; reset on engage/cut/param change** — `VisionOSTAAManager.swift:29-41,117-118`; `MacTemporalUpscaler.swift:49-51,172-175` — two histories alternate read/write; `needsReset`/`forceReset` discard accumulation after discontinuities (reset assigned before textures per newer SDK semantics). — Prevents reads of uninitialized/stale history (flashing/ghosting). — **STATUS: 🟡 conditional** (temporal/TAA paths).
-
-**Direct-render fallback invalidates warm-start** — `RendererRenderSupport.swift:135-140`; `RendererCoreTypes.swift:117-131` — `WarmStartGate.invalidate()` on any non-depth-writing path (direct render, Buddhabrot, compute, MetalFX failure); MetalFX path records depth + advances history. — Keeps warm-start correct across path switches. — **STATUS: ✅ active** — this guard runs every frame on the default direct-render path (even though the warm-start *benefit* it protects is conditional).
+**TAA history ping-pong; reset on engage/cut/param change** — `VisionOSTAAManager.swift:29-41,117-118`; `MacTemporalUpscaler.swift:49-51,172-175` — two histories alternate read/write; `needsReset`/`forceReset` discard accumulation after discontinuities (reset assigned before textures per newer SDK semantics). — Prevents reads of uninitialized/stale history (flashing/ghosting). — **STATUS: 🟡 conditional** (temporal/TAA paths).
 
 **Depth output for async timewarp / ASW** — `Shaders.metal:132,287-291,2588-2590` — hits write `output.depth = z/w` (visionOS NDC already [0,1], passthrough); misses write far-Z. — Hands the compositor a correct depth buffer for head-pose reprojection between frames. — **STATUS: ✅ active** (default fragment path, every frame).
 
-**Depth-edge-preserving / merged stereo depth resolve** — `Shaders.metal:3040-3092` — depth sampled nearest (preserve silhouettes); `formatConversionFragmentStereoMerged` writes color+depth in one invocation. — Keeps compositor reprojection faithful; merged path saves a second pass. — **STATUS: 🟡 conditional** (MetalFX resolve path; merged built `try?`, falls back to two encoders).
-
-**Reverse-Z perspective projection (precomputed)** — `RenderPrecompute.swift:17-29` — CPU builds reverse-Z [0,1] projection per frame. — Better depth precision for motion-vector/warm-start features. — **STATUS: 🟡 conditional** — Mac/iOS only; visionOS uses the CompositorServices-supplied projection.
+**Reverse-Z perspective projection (precomputed)** — `RenderPrecompute.swift:17-29` — CPU builds reverse-Z [0,1] projection per frame. — Better depth precision for motion-vector and compositor reprojection features. — **STATUS: 🟡 conditional** — Mac/iOS only; visionOS uses the CompositorServices-supplied projection.
 
 ### Command-Encoding / Sync
 
@@ -213,13 +177,9 @@ Critically, the verification pass reveals that **the most-advertised "exotic" op
 
 **Single command buffer per frame, deferred submission** — `Renderer.swift:746,986-987,1233-1236` — one `MTLCommandBuffer`, all encoders recorded into it, `startSubmission()` deferred until after CPU updates, single `encodePresent`+`commit`. — Minimizes submission overhead; keeps the GPU-visible window short. — **STATUS: ✅ active.**
 
-**MTLResidencySet pre-validation + batched commits** — `Renderer.swift:751-756`; `RendererSetupAndSession.swift:7-43` — uniform/tile buffers committed resident once; new textures added with one `commit()`+`requestResidency()` only on recreation. — Cuts per-frame residency validation; avoids churn on steady-state frames. — **STATUS: ✅ active** (base buffers every frame; texture-batching portion conditional on MetalFX/compute being engaged).
+**MTLResidencySet pre-validation + batched commits** — `Renderer.swift:751-756`; `RendererSetupAndSession.swift:7-43` — uniform/tile buffers committed resident once; new textures added with one `commit()`+`requestResidency()` only on recreation. — Cuts per-frame residency validation; avoids churn on steady-state frames. — **STATUS: ✅ active** (base buffers every frame; texture-batching conditional on compute textures being recreated).
 
 **Single-pass stereo via vertex amplification** — `Shaders.metal:2724-2729`; `RendererRenderSupport.swift:57`; `RendererPipelineHelpers.swift:70` — one amplified draw renders both eyes via `amplification_id` + per-view mappings (cached, rebuilt only on view-count change). — Halves CPU encode + vertex-stage work vs two per-eye passes. — **STATUS: ✅ active** (visionOS stereo; Mac is single-view `fragmentShaderMono`).
-
-**Explicit fragment→scaler fence (eager, reused)** — `Renderer.swift:357-361,1184-1188`; `RendererRenderSupport.swift:143` — render encoder `updateFence(after:.fragment)`, scaler waits on it; created once. — Fine-grained producer→consumer dependency without per-frame fence alloc or full barrier. — **STATUS: 🟡 conditional** (consumed only on MetalFX-active frames; fence creation itself eager/unconditional).
-
-**Merged single-encoder MetalFX color+depth resolve** — `RendererRenderSupport.swift:705-726`; `Renderer.swift:341-348` — one fragment writes color(0)+depth(any) when the merged pipeline (built `try?`) exists, else two encoders. — Saves an encoder, a depth tile load/store, and a second fullscreen draw. — **STATUS: 🟡 conditional** (MetalFX active + merged pipeline built).
 
 **Buddhabrot in-order single command-buffer chaining** — `BuddhabrotRenderer.swift:665-667,1273-1324` — clear→accumulate→normalize→march (or emit→depth-keys→sort→render) all on one command buffer, no `waitUntilCompleted`/fence. — Metal serializes encoders in order; no host round-trip stalls. — **STATUS: ✅ active** (both Buddhabrot modes).
 
@@ -227,15 +187,9 @@ Critically, the verification pass reveals that **the most-advertised "exotic" op
 
 ### Memory / Bandwidth
 
-**Drop `.shaderWrite` on spatial output (lossless compression)** — `MetalFXManager.swift:271-277` — output usage `[.shaderRead,.renderTarget]` only, enabling framebuffer compression. — ~1.5-3 MB/eye + reduced write/read bandwidth (driver-dependent prerequisite). — **STATUS: 🟡 conditional** (MetalFX engaged).
-
 **Memoryless/private depth target, depth store skipped** — `RaymarchRenderView.swift:584-595,711-746`; `MetalFXTextureSupport.swift:30-37` — render-only depth uses `.memoryless` (iOS) / `.private` (Mac); `storeAction=.dontCare` except where the motion pass needs it. — Keeps depth in tile memory; skips DRAM write-back when unconsumed. — **STATUS: ✅ active** on the native direct path (depth-store-skip); memoryless branch is iOS + spatial-path + sub-native only.
 
-**Aspect-correction folded into resolve UV** — `Shaders.metal:3020-3022,3053-3055` — in-shader `uv.x` rescale about 0.5, guarded by `!=1.0`. — Handles foveated physical-texture squish without a dedicated rescale pass. — **STATUS: 🟡 conditional** (MetalFX resolve, aspect-mismatched textures).
-
 **Non-sRGB writable-twin temporal output** — `MacTemporalUpscaler.swift:29-33,62-68` — compute-written output in `bgra8Unorm` (sRGB can't be compute-written), blit handles the linear round-trip. — Keeps output 8-bit; avoids a conversion pass. — **STATUS: 🟡 conditional** (Mac temporal path).
-
-**Residency-set registration to skip per-frame validation** — `RendererRenderSupport.swift:895-904` — adds (re)created MetalFX textures to an `MTLResidencySet` only on `resolutionChanged`. — Compositor skips per-frame residency validation. — **STATUS: 🟡 conditional** (visionOS 2.0+, MetalFX texture (re)alloc).
 
 **Cheap nearest-sample Mac blit to drawable** — `Shaders.metal:3113-3117` — final present is a single nearest tap, single-view. — Minimum-cost image move to drawable. — **STATUS: 🟡 conditional** (Mac upscaled paths only; native path writes the drawable directly).
 
@@ -344,8 +298,6 @@ These exist in code but are **not buying performance** in the current/default st
 - **Floor-circle overlay (Mac)** — `Shaders.metal:2657-2663`; `RaymarchRenderView.swift:1179-1180`. **💀 latent-dead on Mac** — `floorCenterRadius` hardcoded to zero radius → `floorHit.alpha` always 0. Live only on visionOS.
 
 - **`completedSplatCount` completion handler** — `BuddhabrotRenderer.swift:965-973`. **💀 latent-dead/vestigial** — written but never read; the direct shared-counter read supersedes it.
-
-- **MetalFX / TAA / fragment warm-start stack** — `MetalFXManager`, `VisionOSTAAManager`, `Shaders.metal:2566-2580`. **⛔ disabled by default.** All gated on `resolutionScale<0.999` (default 1.0). **Activate:** lower the resolution slider / load a preset with sub-native scale. (Fully wired and functional — just not the default.)
 
 - **Entire adaptive 8×8 hierarchical compute path** — `Shaders.metal:1688-2097`; `RendererRenderSupport.swift:214-226`. **⛔ disabled by default.** Selected only when `tileSize==8`; default `_tileSize=0` (`RenderSettings.swift:124`). All of its sub-techniques (per-pixel reprojection, tile/supertile seeds, tile-empty 5-ray skip, shared tile shadows, in-kernel foveation, coherent packet) ride this gate. **Activate:** set `tileSize=8` in a preset/quality config.
 

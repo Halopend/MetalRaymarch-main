@@ -46,6 +46,13 @@ enum TopDockTab: String, CaseIterable {
     case music = "Music"
     case performance = "Performance"
 
+    var title: String {
+        switch self {
+        case .music: return "Input"
+        default: return rawValue
+        }
+    }
+
     var icon: String {
         switch self {
         case .explore: return "sparkles.rectangle.stack"
@@ -156,6 +163,7 @@ enum VisualizationsRailSection: String, CaseIterable {
 
 enum MusicRailSection: String, CaseIterable {
     case playback = "Playback"
+    case lfo = "LFO"
     case songs = "Songs"
     case playlists = "Playlists"
     case albums = "Albums"
@@ -164,8 +172,8 @@ enum MusicRailSection: String, CaseIterable {
         #if os(macOS)
         switch self {
         case .playback:
-            return "Music App"
-        case .songs, .playlists, .albums:
+            return "Microphone"
+        case .lfo, .songs, .playlists, .albums:
             return rawValue
         }
         #else
@@ -177,10 +185,11 @@ enum MusicRailSection: String, CaseIterable {
         switch self {
         case .playback:
             #if os(macOS)
-            return "waveform.circle.fill"
+            return "mic.fill"
             #else
             return "play.circle.fill"
             #endif
+        case .lfo:       return "waveform.path"
         case .songs:     return "music.note"
         case .playlists: return "music.note.list"
         case .albums:    return "square.stack"
@@ -189,15 +198,16 @@ enum MusicRailSection: String, CaseIterable {
 
     static var availableCases: [MusicRailSection] {
         #if os(macOS)
-        return [.playback]
+        return [.playback, .lfo]
         #else
-        return allCases
+        return [.playback, .songs, .playlists, .albums]
         #endif
     }
 
     var musicPanelTab: MusicPanelTab {
         switch self {
         case .playback:  return .music
+        case .lfo:       return .lfo
         case .songs:     return .songs
         case .playlists: return .playlists
         case .albums:    return .albums
@@ -226,6 +236,7 @@ enum PinnedRailControl: String, CaseIterable {
     case visualizationsTransition
     case visualizationsReactive
     case musicPlayback
+    case musicLFO
     case musicSongs
     case musicPlaylists
     case musicAlbums
@@ -252,6 +263,7 @@ enum PinnedRailControl: String, CaseIterable {
         case .visualizationsTransition: return VisualizationsRailSection.transition.title
         case .visualizationsReactive: return VisualizationsRailSection.reactive.title
         case .musicPlayback: return MusicRailSection.playback.title
+        case .musicLFO: return MusicRailSection.lfo.title
         case .musicSongs: return MusicRailSection.songs.title
         case .musicPlaylists: return MusicRailSection.playlists.title
         case .musicAlbums: return MusicRailSection.albums.title
@@ -280,6 +292,7 @@ enum PinnedRailControl: String, CaseIterable {
         case .visualizationsTransition: return VisualizationsRailSection.transition.icon
         case .visualizationsReactive: return VisualizationsRailSection.reactive.icon
         case .musicPlayback: return MusicRailSection.playback.icon
+        case .musicLFO: return MusicRailSection.lfo.icon
         case .musicSongs: return MusicRailSection.songs.icon
         case .musicPlaylists: return MusicRailSection.playlists.icon
         case .musicAlbums: return MusicRailSection.albums.icon
@@ -300,7 +313,7 @@ enum QuickToggleHome {
     case shapeSpace             // Spherical Inversion, Safety Bubble, Detail
     case shapeTransformations   // Sphere Projection, Spherical Inversion, warp stack
     case shapeBounding          // Containment: Bounding Shape, Scrunch to Surroundings, Bound to Space
-    case shapePerformance       // Smart Advance, Coherent Packet, Self-Shadows, Bounding Sphere Skip
+    case shapePerformance       // Coherent Packet, Self-Shadows, Bounding Sphere Skip
     case audioReactive          // Audio Reactive + bass/mid/treble/beat
 }
 

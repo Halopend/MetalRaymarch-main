@@ -158,7 +158,7 @@ const c2=card("Space & Audio","#40c8e0",[
 panel.appendChild(c2.c); c2.c.layoutSizingHorizontal="FILL"; c2.built.forEach(r=> r.layoutSizingHorizontal="FILL");
 
 const c3=card("Performance","#ff9f0a",[
-  {l:"Smart Advance",on:true},{l:"Coherent Packet",on:false},
+  {l:"Coherent Packet",on:false},
   {l:"Self-Shadows",on:true},{l:"Bounding Sphere Skip",on:false},
 ]);
 panel.appendChild(c3.c); c3.c.layoutSizingHorizontal="FILL"; c3.built.forEach(r=> r.layoutSizingHorizontal="FILL");

@@ -1,0 +1,29 @@
+{
+  "defaults": {
+    "scene": "Start",
+    "frames": 180,
+    "warmup": 60,
+    "settleSeconds": 2.5,
+    "shadows": true,
+    "qc": {
+      "coneMarchStrength": 1.0,
+      "distanceLODStrength": 0.98,
+      "overRelaxationMax": 1.6,
+      "boundingSphereSkipEnabled": 1.0
+    }
+  },
+  "jobs": [
+    {
+      "name": "stress-720p",
+      "size": "1280x720"
+    },
+    {
+      "name": "stress-1080p",
+      "size": "1920x1080"
+    },
+    {
+      "name": "stress-1440p",
+      "size": "2560x1440"
+    }
+  ]
+}

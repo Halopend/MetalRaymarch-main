@@ -14,7 +14,6 @@ import QuartzCore
 import Synchronization
 
 // Debug logging toggle - set to false for release builds
-let RENDERER_DEBUG = false
 
 actor Renderer {
     let device: MTLDevice
@@ -54,9 +53,6 @@ actor Renderer {
     /// Mirrors the render pipeline cache but for the adaptive hierarchical compute path.
     /// Each entry has Map()/Shadow loops fully unrolled for that iteration count.
     var computePipelineCache: [String: MTLComputePipelineState] = [:]
-    /// Track last compute pipeline key to avoid log spam
-    var lastComputePipelineKey: String = ""
-    
     // === COMPUTE PIPELINE SELECTION FAST-PATH ===
     var lastComputeFT: Int32 = -1
     var lastComputeFI: Int = -1
@@ -65,7 +61,8 @@ actor Renderer {
     var lastComputeCustomHash: String?
     var lastComputeBubble: Bool?
     var lastComputePacket: Bool?
-    var lastComputeLegacyBugMode: Bool = false
+    var lastComputeEnvScrunch: Bool?
+    var lastComputeHandField: Bool?
     var lastSelectedComputePipeline: MTLComputePipelineState?
 
     // === UI UPDATE COORDINATION ===
@@ -107,45 +104,9 @@ actor Renderer {
     private var temporalDepthTextures: [MTLTexture?] = [nil, nil]  // ping-pong
     private var temporalDepthIndex: Int = 0                         // which is "current write"
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // CONSERVATIVE CONE COARSE-PREPASS WARM-START (fragment path, opt-in)
-    // A low-res compute pass (coneCoarsePrepass8x8) marches one cone per 8x8 block
-    // and writes a provable LOWER BOUND on the nearest-surface entry distance into
-    // this r32Float array texture (physical/8 sized, one layer per eye). The
-    // fragment shader raises its full-march start t to that bound. Defaults OFF —
-    // when off the pass is never dispatched, the fragment FC stays undefined, and a
-    // 1x1 dummy keeps the texture slot bound so validation never faults.
-    // ═══════════════════════════════════════════════════════════════════════════
-    private var coarseStartTexture: MTLTexture?
-    var coneCoarsePrepassPipeline: MTLComputePipelineState?
-    private var coarseStartDummyTexture: MTLTexture?
-    // Lazily-built, separately-cached cone-enabled fragment pipelines (FC_COARSE_
-    // WARM_START=true). Keyed by the same exact signature selectPipeline uses, so a
-    // variant is built per (iterations, raySteps, fractalType, …) the first time
-    // the user turns the toggle on for that config. Keeps the main pipeline cache
-    // (always FC off) byte-identical.
-    var coarseWarmStartPipelineCache: [String: MTLRenderPipelineState] = [:]
     var previousViewProjMatrices: [matrix_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]  // per eye
     private var temporalFrameCount: Int = 0                         // 0 = first frame, no reprojection
 
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // TEMPORAL DEPTH WARM-START (fragment path)
-    // The fragment raymarch reprojects last frame's MetalFX depth to start each
-    // ray just in front of the previously-hit surface (narrow window, reduced
-    // step budget, full-march fallback on miss). These track whether last
-    // frame's depth is trustworthy for that.
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Single owner of warm-start validity (see WarmStartGate in
-    // RendererCoreTypes.swift): paths that don't write fragment depth call
-    // invalidate(), the MetalFX path records the geometry key on success, and
-    // the per-frame uniform patch asks allowsWarmStart(). Continuous geometry
-    // params are compared with a per-frame tolerance so smooth-damp and audio
-    // morphs don't permanently disable the optimization.
-    var warmStartGate = WarmStartGate()
-    // Bound on the direct (non-MetalFX) path where pipelines still declare the
-    // prev-depth argument; never sampled there (warmStartEnabled == 0).
-    var warmStartDummyDepthTexture: MTLTexture?
 
     // Custom-formula self-heal bookkeeping (see scheduleCustomLibrarySelfHeal
     // in RendererCustomShader.swift): set while a recovery activation is in
@@ -191,23 +152,6 @@ actor Renderer {
     var hasLoggedWorldTrackingWarning = false
     var hasLoggedDeviceAnchorInfo = false
     var hasLoggedMissingDeviceAnchor = false
-
-#if canImport(MetalFX)
-    var metalFXManager: MetalFXManager?
-    var metalFXFence: MTLFence?
-
-    var lastMetalFXInputSize: SIMD2<Int> = .zero
-    var lastMetalFXOutputSize: SIMD2<Int> = .zero
-    var hasLoggedMetalFXFallback = false
-    var hasLoggedMetalFXLayout = false
-    var hasLoggedMetalFXResolve = false
-    var hasLoggedMetalFXBlitSizeMismatch = false
-    var hasLoggedMetalFXClamp = false
-    var metalFXColorResolvePipeline: MTLRenderPipelineState?
-    var metalFXDepthResolvePipeline: MTLRenderPipelineState?
-    // Phase 2.7: Merged color+depth resolve in a single render encoder.
-    var metalFXMergedResolvePipeline: MTLRenderPipelineState?
-#endif
 
     // === RESIDENCY SET (visionOS 2.0+) ===
     // Pre-validates GPU resource residency to reduce per-frame validation overhead
@@ -271,11 +215,10 @@ actor Renderer {
     }
     let handTrackingDispatchState = Mutex(HandTrackingDispatchState())
     var hasLoggedHandTrackingNil: Bool = false          // One-shot guard for nil provider log
-    var lastHandTrackingStateLogTime: TimeInterval = 0  // Throttle non-running state logs
+    var lastHandProviderWarningTime: TimeInterval = 0  // Throttle non-running provider warnings
     var cachedDeltaTime: Float = 1.0 / 90.0  // Cached for use in updateGameState
     var lastPerfLogTime: TimeInterval = 0
     let perfLogFrameMsThreshold: Double = 30.0  // ~33 FPS
-    private var lastFPSConsoleLogTime: TimeInterval = 0  // For periodic FPS console logging
 
     // Shared music-reactive engine. Owns all per-target oscillator/envelope state,
     // damped source levels, the triplet-gain cache, and the reusable operation
@@ -340,7 +283,6 @@ actor Renderer {
         self.layerRenderer = layerRenderer
         self.device = layerRenderer.device
         guard let queue = self.device.makeCommandQueue() else {
-            if RENDERER_DEBUG { print("❌ Failed to create command queue") }
             return nil
         }
         self.commandQueue = queue
@@ -367,7 +309,6 @@ actor Renderer {
 
         guard let uniformBuffer = self.device.makeBuffer(length: uniformBufferSize,
                                                           options: [MTLResourceOptions.storageModeShared]) else {
-            if RENDERER_DEBUG { print("❌ Failed to create uniform buffer") }
             return nil
         }
         self.dynamicUniformBuffer = uniformBuffer
@@ -383,7 +324,7 @@ actor Renderer {
 
         uniforms = UnsafeMutableRawPointer(dynamicUniformBuffer.contents()).bindMemory(to:UniformsArray.self, capacity:1)
 
-        let mtlVertexDescriptor = Renderer.buildMetalVertexDescriptor()
+        let mtlVertexDescriptor = RenderMeshBuilder.makeVertexDescriptor()
         self.mtlVertexDescriptor = mtlVertexDescriptor
 
         do {
@@ -393,72 +334,8 @@ actor Renderer {
                                                                        mtlVertexDescriptor: mtlVertexDescriptor,
                                                                        archive: self.renderPipelineArchive)
         } catch {
-            if RENDERER_DEBUG { print("❌ Unable to compile render pipeline state: \(error)") }
             return nil
         }
-
-        #if canImport(MetalFX)
-        do {
-            let postProcessVertexDescriptor = MTLVertexDescriptor()
-            metalFXColorResolvePipeline = try Renderer.buildRenderPipelineWithDevice(
-                device: device,
-                layerRenderer: layerRenderer,
-                rasterSampleCount: rasterSampleCount,
-                mtlVertexDescriptor: postProcessVertexDescriptor,
-                depthFormat: .invalid,
-                vertexFunctionName: "formatConversionVertexStereo",
-                fragmentFunctionName: "formatConversionFragmentStereo",
-                archive: self.renderPipelineArchive
-            )
-            metalFXDepthResolvePipeline = try Renderer.buildRenderPipelineWithDevice(
-                device: device,
-                layerRenderer: layerRenderer,
-                rasterSampleCount: rasterSampleCount,
-                mtlVertexDescriptor: postProcessVertexDescriptor,
-                colorFormat: .invalid,
-                vertexFunctionName: "formatConversionVertexStereo",
-                fragmentFunctionName: "depthUpscaleFragmentStereo",
-                archive: self.renderPipelineArchive
-            )
-            // Phase 2.7: Merged single-encoder resolve. Optional — if it fails to
-            // build (e.g. driver mismatch) we fall back to the two-encoder path.
-            metalFXMergedResolvePipeline = try? Renderer.buildRenderPipelineWithDevice(
-                device: device,
-                layerRenderer: layerRenderer,
-                rasterSampleCount: rasterSampleCount,
-                mtlVertexDescriptor: postProcessVertexDescriptor,
-                vertexFunctionName: "formatConversionVertexStereo",
-                fragmentFunctionName: "formatConversionFragmentStereoMerged",
-                archive: self.renderPipelineArchive
-            )
-            if RENDERER_DEBUG { print("✓ MetalFX resolve pipelines ready (color=bgra8Unorm_srgb/depth=invalid, depth=invalid/depth=depth32Float, merged=\(metalFXMergedResolvePipeline != nil ? "ok" : "unavailable"))") }
-        } catch {
-            if RENDERER_DEBUG { print("⚠️ MetalFX resolve pipeline failed: \(error)") }
-            metalFXColorResolvePipeline = nil
-            metalFXDepthResolvePipeline = nil
-            metalFXMergedResolvePipeline = nil
-        }
-
-        // Phase 1.2: Create the MetalFX fragment→scaler fence eagerly so the
-        // first MetalFX-active frame doesn't depend on lazy init order. The
-        // fence cost is negligible and reuse is safe across frames.
-        metalFXFence = device.makeFence()
-        metalFXFence?.label = "MetalFX Fragment→Scaler"
-
-        #endif
-
-        // 1×1 placeholder for the warm-start prev-depth argument on frames where
-        // MetalFX is inactive (never sampled: warmStartEnabled stays 0).
-        let dummyDepthDesc = MTLTextureDescriptor()
-        dummyDepthDesc.textureType = .type2DArray
-        dummyDepthDesc.pixelFormat = .depth32Float
-        dummyDepthDesc.width = 1
-        dummyDepthDesc.height = 1
-        dummyDepthDesc.arrayLength = 2
-        dummyDepthDesc.storageMode = .private
-        dummyDepthDesc.usage = [.shaderRead, .renderTarget]
-        warmStartDummyDepthTexture = device.makeTexture(descriptor: dummyDepthDesc)
-        warmStartDummyDepthTexture?.label = "WarmStart Dummy Depth"
 
         // === BUILD SPECIALIZED PIPELINES FOR QUALITY PRESETS ===
         // Key optimization: Map() inner loop (50-100+ calls per pixel) can be fully unrolled
@@ -471,7 +348,6 @@ actor Renderer {
         let qualityPresets = QualityPreset.allCases
         
         var pipelineCount = 0
-        if RENDERER_DEBUG { print("Building specialized pipelines for \(qualityPresets.count) quality presets...") }
         
         for preset in qualityPresets {
             let iterCount = preset.fractalIterations
@@ -495,24 +371,20 @@ actor Renderer {
             ) {
                 pipelineCache[unifiedKey] = pipeline
                 pipelineCount += 1
-                if RENDERER_DEBUG { print("  ✓ \(preset.rawValue): FI=\(iterCount), RS=\(raySteps) [\(unifiedKey)]") }
             }
         }
-        if RENDERER_DEBUG { print("✓ Built \(pipelineCount) specialized pipelines (\(pipelineCache.count) total)") }
 
         let depthStateDescriptor = MTLDepthStencilDescriptor()
         depthStateDescriptor.depthCompareFunction = MTLCompareFunction.less
         depthStateDescriptor.isDepthWriteEnabled = true
         guard let depthState = device.makeDepthStencilState(descriptor: depthStateDescriptor) else {
-            if RENDERER_DEBUG { print("❌ Failed to create depth stencil state") }
             return nil
         }
         self.depthState = depthState
 
         do {
-            mesh = try Renderer.buildMesh(device: device, mtlVertexDescriptor: mtlVertexDescriptor)
+            mesh = try RenderMeshBuilder.makeEllipsoid(device: device, vertexDescriptor: mtlVertexDescriptor)
         } catch {
-            if RENDERER_DEBUG { print("❌ Unable to build MetalKit Mesh: \(error)") }
             return nil
         }
 
@@ -526,7 +398,6 @@ actor Renderer {
         // Build tile-based compute pipelines with function constants for maximum optimization
         do {
             guard let library = Renderer.bundledDefaultLibrary(device: device) else {
-                if RENDERER_DEBUG { print("⚠️ Failed to load default Metal library; compute path disabled") }
                 adaptiveHierarchicalPipeline8x8 = nil
                 throw RendererError.metalLibraryUnavailable
             }
@@ -535,7 +406,6 @@ actor Renderer {
             // Build specialized compute pipelines for each quality preset.
             // Each pipeline bakes FC_FRACTAL_ITERATIONS / FC_SHADOW_ITERATIONS / FC_MAX_RAY_STEPS
             // so the Map() inner loop is fully unrolled per iteration count.
-            if RENDERER_DEBUG { print("Building specialized compute pipelines for \(QualityPreset.allCases.count) quality presets...") }
             var computeBuilt = 0
             for preset in QualityPreset.allCases {
                 let fi = Int32(preset.fractalIterations)
@@ -548,7 +418,6 @@ actor Renderer {
                                                        archive: self.pipelineArchive) {
                     computePipelineCache[key] = pipeline
                     computeBuilt += 1
-                    if RENDERER_DEBUG { print("  ✓ Compute \(preset.rawValue): FI=\(fi), RS=\(rs) [\(key)]") }
                 }
             }
             // Build a GENERIC fallback pipeline (no function constants baked in).
@@ -573,32 +442,13 @@ actor Renderer {
                                                                                           reflection: nil)
                 }
             }
-            if RENDERER_DEBUG { print("✓ Built \(computeBuilt) specialized compute pipelines + 1 generic fallback") }
-
-            // Conservative cone coarse-prepass kernel. A single generic pipeline
-            // (empty constants — reads iterations/type from TileUniforms at
-            // runtime) is sufficient for Increment 1; it's only ever dispatched
-            // when the opt-in toggle is on AND the fractal is box/fold + un-warped.
-            if let coneKernel = try? library.makeFunction(name: "coneCoarsePrepass8x8", constantValues: emptyConstants) {
-                let coneDesc = MTLComputePipelineDescriptor()
-                coneDesc.computeFunction = coneKernel
-                coneDesc.label = "Compute_coneCoarsePrepass8x8_generic"
-                if let archive = self.pipelineArchive {
-                    coneCoarsePrepassPipeline = try? archive.makeComputePipeline(device: device, descriptor: coneDesc)
-                } else {
-                    coneCoarsePrepassPipeline = try? device.makeComputePipelineState(descriptor: coneDesc, options: [], reflection: nil)
-                }
-                if RENDERER_DEBUG { print("✓ Cone coarse-prepass pipeline ready: \(coneCoarsePrepassPipeline != nil)") }
-            }
 
             // Uniform buffer for tile compute (one per eye)
             let tileUniformSize = MemoryLayout<TileUniforms>.stride * 2
             tileUniformBuffer = device.makeBuffer(length: tileUniformSize, options: .storageModeShared)
             tileUniformBuffer?.label = "TileUniforms"
             
-            if RENDERER_DEBUG { print("✓ Tile-based compute pipeline ready (adaptive 8x8)") }
         } catch {
-            if RENDERER_DEBUG { print("⚠️ Failed to create tile compute pipelines: \(error)") }
             adaptiveHierarchicalPipeline8x8 = nil
         }
         
@@ -735,12 +585,10 @@ actor Renderer {
             // (CustomShaderCompiler.library uses the async makeLibrary API).
             let pendingFormula = await MainActor.run { appModel.activeEmbeddedFormula }
             if let pending = pendingFormula {
-                customSceneDiagnostic("🔬 [CSDiag] Handler ready — scheduling deferred activation for '\(pending.name)' hash=\(pending.shortHash) (concurrent; does NOT block first frame)")
                 Task {
                     do {
                         try await renderer.activateEmbeddedFormula(pending)
                     } catch {
-                        customSceneDiagnostic("🔬 [CSDiag] ❌ Deferred activation failed: \(error)")
                     }
                 }
             }
@@ -771,46 +619,6 @@ actor Renderer {
         appModel.setActiveRenderLoopTask(renderLoopTask, id: renderLoopID)
     }
     
-    static func buildMetalVertexDescriptor() -> MTLVertexDescriptor {
-        // Create a Metal vertex descriptor specifying how vertices will by laid out for input into our render
-        //   pipeline and how we'll layout our Model IO vertices
-
-        let mtlVertexDescriptor = MTLVertexDescriptor()
-
-        mtlVertexDescriptor.attributes[VertexAttribute.position.rawValue].format = MTLVertexFormat.float3
-        mtlVertexDescriptor.attributes[VertexAttribute.position.rawValue].offset = 0
-        mtlVertexDescriptor.attributes[VertexAttribute.position.rawValue].bufferIndex = BufferIndex.meshPositions.rawValue
-
-        mtlVertexDescriptor.attributes[VertexAttribute.texcoord.rawValue].format = MTLVertexFormat.float2
-        mtlVertexDescriptor.attributes[VertexAttribute.texcoord.rawValue].offset = 0
-        mtlVertexDescriptor.attributes[VertexAttribute.texcoord.rawValue].bufferIndex = BufferIndex.meshGenerics.rawValue
-
-        mtlVertexDescriptor.layouts[BufferIndex.meshPositions.rawValue].stride = 12
-        mtlVertexDescriptor.layouts[BufferIndex.meshPositions.rawValue].stepRate = 1
-        mtlVertexDescriptor.layouts[BufferIndex.meshPositions.rawValue].stepFunction = MTLVertexStepFunction.perVertex
-
-        mtlVertexDescriptor.layouts[BufferIndex.meshGenerics.rawValue].stride = 8
-        mtlVertexDescriptor.layouts[BufferIndex.meshGenerics.rawValue].stepRate = 1
-        mtlVertexDescriptor.layouts[BufferIndex.meshGenerics.rawValue].stepFunction = MTLVertexStepFunction.perVertex
-
-        return mtlVertexDescriptor
-    }
-
-    // Pipeline cache telemetry (debug-only logging in selection paths)
-    var renderPipelineCacheHits: Int = 0
-    var renderPipelineCacheMisses: Int = 0
-    var computePipelineCacheHits: Int = 0
-    var computePipelineCacheMisses: Int = 0
-    var lastPipelineTelemetryLogTime: TimeInterval = 0
-    var lastPipelineMissHistogramLogTime: TimeInterval = 0
-    var renderPipelineMissKeyCounts: [String: Int] = [:]
-    var computePipelineMissKeyCounts: [String: Int] = [:]
-    var renderPipelineSelectionCounts: [String: Int] = [:]
-    var computePipelineSelectionCounts: [String: Int] = [:]
-    
-    // Track last logged pipeline to avoid spam
-    var lastLoggedPipelineKey: String = ""
-    
     // === PIPELINE SELECTION FAST-PATH CACHE ===
     // Avoids per-frame String interpolation + Dictionary lookup when parameters haven't changed.
     // selectPipeline() is called every frame; caching the last result short-circuits the common case.
@@ -824,36 +632,10 @@ actor Renderer {
     var lastSelectBubble: Bool?
     var lastSelectSpaceWarp: Bool?
     var lastSelectEnvScrunch: Bool?
+    var lastSelectHandField: Bool?
     var lastSelectedPipeline: MTLRenderPipelineState?
     var lastSelectedIsSpecialized: Bool = false
     
-    static func buildMesh(device: MTLDevice,
-                          mtlVertexDescriptor: MTLVertexDescriptor) throws -> MTKMesh {
-        /// Create and condition mesh data to feed into a pipeline using the given vertex descriptor
-
-        let metalAllocator = MTKMeshBufferAllocator(device: device)
-
-        let mdlMesh = MDLMesh.newEllipsoid(withRadii: .init(repeating: 100),
-                                           radialSegments: 64,
-                                           verticalSegments: 32,
-                                           geometryType: .triangles,
-                                           inwardNormals: false,
-                                           hemisphere: false,
-                                           allocator: metalAllocator)
-
-        let mdlVertexDescriptor = MTKModelIOVertexDescriptorFromMetal(mtlVertexDescriptor)
-
-        guard let attributes = mdlVertexDescriptor.attributes as? [MDLVertexAttribute] else {
-            throw RendererError.badVertexDescriptor
-        }
-        attributes[VertexAttribute.position.rawValue].name = MDLVertexAttributePosition
-        attributes[VertexAttribute.texcoord.rawValue].name = MDLVertexAttributeTextureCoordinate
-
-        mdlMesh.vertexDescriptor = mdlVertexDescriptor
-
-        return try MTKMesh(mesh:mdlMesh, device:device)
-    }
-
     func renderFrame() {
         /// Per frame updates hare
 
@@ -932,7 +714,6 @@ actor Renderer {
         }
 
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
-            if RENDERER_DEBUG { print("⚠️ Failed to create command buffer; skipping frame") }
             return
         }
         // Traces this command buffer's commit→completion latency regardless of
@@ -990,7 +771,6 @@ actor Renderer {
             // GPU is severely behind — present an empty frame to satisfy CompositorServices,
             // then skip rendering to avoid accumulating latency.
             RenderTrace.event("GPU Stall", "inFlightSemaphore timed out (100ms)")
-            if RENDERER_DEBUG { print("⚠️ GPU stall detected: inFlightSemaphore timed out (100ms)") }
             drawable.deviceAnchor = deviceAnchor
             frame.startSubmission()
             defer { frame.endSubmission() }
@@ -1033,10 +813,6 @@ actor Renderer {
             uiUpdateCoordinator?.scheduleUIUpdate(fps: updatedFPS, currentTime: time)
             
             // Periodic FPS console logging (every 2 seconds)
-            if RENDERER_DEBUG && time - lastFPSConsoleLogTime > 2.0 {
-                lastFPSConsoleLogTime = time
-                print("[FPS] \(String(format: "%.1f", updatedFPS)) fps | frame time: \(String(format: "%.2f", deltaTime * 1000))ms")
-            }
             
         }
         lastPresentationTime = presentationTime
@@ -1067,7 +843,10 @@ actor Renderer {
         // Auto-detect active sources: use mic FFT, Spotify beat sync, and/or
         // Apple Music BPM-based synthesis — blend whatever is available.
         let backgroundCpuStart = CACurrentMediaTime()
-        let isAudioMode = settings.lightingMode == .audioReactive || settings.lightingMode == .visualizer || settings.fractalAudioReactiveEnabled
+        let isAudioMode = settings.lightingMode == .audioReactive
+            || settings.lightingMode == .visualizer
+            || settings.fractalAudioReactiveEnabled
+            || settings.musicPresetBankEffectEnabled
         let hasActiveAudioSources = appModel.audioAnalyzer.isCapturing || appModel.appleMusicManager.isActive
         let shouldUpdateAnimation = settings.isAnimationPlaying
         
@@ -1077,76 +856,21 @@ actor Renderer {
         parameterUpdateCoordinator?.scheduleParameterUpdates(
             shouldUpdateAnimation: shouldUpdateAnimation,
             shouldUpdateAudio: isAudioMode && hasActiveAudioSources,
+            musicPresetBankEffectEnabled: settings.musicPresetBankEffectEnabled,
+            hasActiveAudioSource: hasActiveAudioSources,
             deltaTime: animDelta,
             currentTime: time
         )
         
-        if isAudioMode {
-            let mic = appModel.audioAnalyzer
-            let appleMusicManager = appModel.appleMusicManager
-            // Auto-detect: use whatever sources are currently active
-            let micActive = mic.isCapturing
-            let appleMusicActive = appleMusicManager.isActive
-            
-            // Sensitivity multipliers from user settings
-            let bassSens = settings.bassSensitivity
-            let midSens = settings.midSensitivity
-            let trebleSens = settings.trebleSensitivity
-            let beatSens = settings.beatSensitivity
-
-            // Collect active source levels, then blend proportionally
-            var totalBass: Float = 0, totalMid: Float = 0, totalTreble: Float = 0
-            var totalBeat: Float = 0, totalLevel: Float = 0
-            var sourceCount: Float = 0
-
-            if micActive {
-                totalBass += mic.bassLevel
-                totalMid += mic.midLevel
-                totalTreble += mic.trebleLevel
-                totalBeat = max(totalBeat, mic.onsetLevel)  // real spectral-flux onset, not a loudness envelope
-                totalLevel += mic.level
-                sourceCount += 1
-            }
-            if appleMusicActive {
-                totalBass += appleMusicManager.bassLevel
-                totalMid += appleMusicManager.midLevel
-                totalTreble += appleMusicManager.trebleLevel
-                totalBeat = max(totalBeat, appleMusicManager.beatIntensity)
-                totalLevel += appleMusicManager.overallLevel
-                sourceCount += 1
-            }
-
-            if sourceCount > 0 {
-                let inv = 1.0 / sourceCount
-                // Audio state writes: these feed PrecomputedAudio (CPU-side aggregate),
-                // NOT per-pixel shader values. They stay as direct RenderSettings writes
-                // because they aren't scalar parameters eligible for layer-stack dispatch.
-                settings.bassLevel = min(1.0, totalBass * inv * bassSens)
-                settings.midLevel = min(1.0, totalMid * inv * midSens)
-                settings.trebleLevel = min(1.0, totalTreble * inv * trebleSens)
-                settings.beatIntensity = min(1.0, totalBeat * beatSens)
-                settings.audioLevel = totalLevel * inv
-            }
-
-            // Music drives fractal geometry AND effects (Fractal Forge-inspired).
-            // The aggregation above produced the per-band levels; the shared engine
-            // applies damping, response curves, the LFO overlay, and dispatch.
-            if settings.fractalAudioReactiveEnabled {
-                let bandLevels = BandLevels(bass: settings.bassLevel,
-                                            mid: settings.midLevel,
-                                            treble: settings.trebleLevel,
-                                            beat: settings.beatIntensity,
-                                            overall: settings.audioLevel)
-                musicReactiveEngine.process(bandLevels: bandLevels,
-                                            settings: settings,
-                                            deltaTime: cachedDeltaTime,
-                                            pipeline: appModel.parameterPipeline)
-            } else {
-                musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
-            }
-        } else {
-            musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
-        }
+        AudioReactiveFrameDriver.update(
+            analyzer: appModel.audioAnalyzer,
+            appleMusicManager: appModel.appleMusicManager,
+            settings: settings,
+            isAudioMode: isAudioMode,
+            engine: musicReactiveEngine,
+            pipeline: appModel.parameterPipeline,
+            deltaTime: cachedDeltaTime
+        )
         frameBreakdown.backgroundCpuMs = (CACurrentMediaTime() - backgroundCpuStart) * 1000.0
 
         let snapshotStart = CACurrentMediaTime()
@@ -1193,9 +917,6 @@ actor Renderer {
             )
             
             if computeRendered {
-                // Adaptive-compute frames don't write fragment depth — next
-                // fragment frame must not warm-start from stale history.
-                warmStartGate.invalidate()
                 if renderContextRequired {
                     encodeDrawableRenderContextPass(commandBuffer: commandBuffer, drawable: drawable)
                 }
@@ -1208,94 +929,14 @@ actor Renderer {
             useAdaptiveCompute = false
         }
 
-        // ═══════════════════════════════════════════════════════════════════════
-        // FRAGMENT RENDER PATH (with optional MetalFX spatial upscale)
-        //
-        // When resolutionScale < 1.0 AND MetalFX is available, render the fragment
-        // pass into MetalFX's private low-res input texture, then spatially
-        // upscale into the drawable. MetalFX on visionOS supports spatial
-        // upscaling only (temporal is unsupported), so this is the only MetalFX
-        // codepath we need. The adaptive-compute path intentionally skips MetalFX
-        // — it has its own quality controls (compute tile cascade).
-        // ═══════════════════════════════════════════════════════════════════════
+        // Fragment render path.
         let fragmentPassPlan = prepareFragmentPassPlan(
             drawable: drawable,
             settingsSnapshot: settingsSnapshot,
             framePath: framePath
         )
 
-        // === TEMPORAL DEPTH WARM-START: patch per-frame uniforms ===
-        // The MetalFX input size is only known once the pass plan exists, so the
-        // warm-start fields are patched here (same pattern as the TAA jitter).
-        #if canImport(MetalFX)
-        if let bundle = fragmentPassPlan.metalFXBundle {
-            let res = SIMD2<Float>(Float(bundle.inputWidth), Float(bundle.inputHeight))
-            // WarmStartGate compares the snapshot against the geometry key
-            // recorded when the depth history was written: discrete changes
-            // (fractal type, iterations, inversion) are hard cuts, continuous
-            // params get a small per-frame tolerance — the 0.9×/−0.3 start
-            // margin and full-march fallback absorb bounded one-frame morphs,
-            // so gestures and music reactivity keep the warm start alive.
-            let warmStartOK: Int32 = (bundle.manager.depthHistoryValid
-                && warmStartGate.allowsWarmStart(for: settingsSnapshot)) ? 1 : 0
-            uniforms[uniformBufferIndex].uniforms.0.renderResolution = res
-            uniforms[uniformBufferIndex].uniforms.1.renderResolution = res
-            uniforms[uniformBufferIndex].uniforms.0.warmStartEnabled = warmStartOK
-            uniforms[uniformBufferIndex].uniforms.1.warmStartEnabled = warmStartOK
-        }
-        #endif
-
-        // ═══════════════════════════════════════════════════════════════════════
-        // CONSERVATIVE CONE COARSE-PREPASS WARM-START (opt-in, default OFF)
-        // ═══════════════════════════════════════════════════════════════════════
-        // Gate: feature toggle ON, fractal is box/fold family, and the domain is
-        // UN-WARPED. Only then is the analytic lower-bound cone trusted. When false,
-        // the cone pass is never dispatched, a 1×1 dummy keeps the fragment texture
-        // slot bound, and the fragment pipeline keeps FC_COARSE_WARM_START undefined
-        // → the consumer code is dead-code-eliminated (byte-identical to before).
-        let coneAllowed = settingsSnapshot.coarsePrepassWarmStartEnabled
-            && isBoxFoldFamily(settingsSnapshot.fractalType)
-            && settingsSnapshot.sphericalInversionMode.rawValue == 0
-            && !(settingsSnapshot.sphereProjectionEnabled && settingsSnapshot.sphereProjectionBlend > 0)
-            && settingsSnapshot.spaceWarpStrength <= 0
-
-        // Render-target dimensions the fragment pass writes into (MetalFX input, or
-        // the drawable color texture for the direct path).
-        var fragmentRenderWidth = drawable.colorTextures[0].width
-        var fragmentRenderHeight = drawable.colorTextures[0].height
-        #if canImport(MetalFX)
-        if let bundle = fragmentPassPlan.metalFXBundle {
-            fragmentRenderWidth = bundle.inputWidth
-            fragmentRenderHeight = bundle.inputHeight
-        }
-        #endif
-
-        var coneCoarseTexture: MTLTexture? = nil
-        if coneAllowed {
-            coneCoarseTexture = ensureCoarseStartTexture(
-                renderWidth: fragmentRenderWidth,
-                renderHeight: fragmentRenderHeight,
-                viewCount: drawable.views.count
-            )
-            if let coarseTex = coneCoarseTexture {
-                encodeConeCoarsePrepass(
-                    commandBuffer: commandBuffer,
-                    coarseTex: coarseTex,
-                    drawable: drawable,
-                    settingsSnapshot: settingsSnapshot,
-                    framePreparation: framePreparation,
-                    renderWidth: fragmentRenderWidth,
-                    renderHeight: fragmentRenderHeight,
-                    viewports: fragmentPassPlan.viewports
-                )
-            }
-        }
-        // When the cone pass didn't run (or texture alloc failed), fall back to the
-        // dummy so the fragment slot is always populated.
-        let coneActive = coneAllowed && coneCoarseTexture != nil
-
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: fragmentPassPlan.renderPassDescriptor) else {
-            if RENDERER_DEBUG { print("⚠️ Failed to create render encoder; skipping frame") }
             if renderContextRequired {
                 encodeDrawableRenderContextPass(commandBuffer: commandBuffer, drawable: drawable)
             }
@@ -1337,27 +978,7 @@ actor Renderer {
                 colorIterations: settingsSnapshot.colorIterations
             )
         )
-        // When the cone pass ran this frame, swap in a fragment pipeline variant
-        // that bakes FC_COARSE_WARM_START=true (so the min-over-2x2 read + warm
-        // start seed are compiled in). Falls back to the base pipeline if the
-        // cone-enabled variant can't be built — the cone texture is still bound but
-        // never sampled (FC undefined), so behavior is identical to off.
-        var selectedPipeline = baseSelectedPipeline
-        if coneActive {
-            if let conePipeline = selectCoarseWarmStartPipeline(
-                forIterations: currentIterations,
-                raySteps: currentRaySteps,
-                neonMode: isNeonMode,
-                request: RenderPipelineRequest(
-                    fractalType: settingsSnapshot.fractalType,
-                    formulaParams: settingsSnapshot.formulaParams,
-                    colorIterations: settingsSnapshot.colorIterations
-                )
-            ) {
-                selectedPipeline = conePipeline
-            }
-        }
-        renderEncoder.setRenderPipelineState(selectedPipeline)
+        renderEncoder.setRenderPipelineState(baseSelectedPipeline)
 
         renderEncoder.setDepthStencilState(depthState)
 
@@ -1381,31 +1002,6 @@ actor Renderer {
         }
         let benchPtr: UnsafeMutableRawPointer? = benchCollecting ? benchBuf?.contents() : nil
 
-        // Previous-frame depth for the temporal march warm-start. Pipelines built
-        // via buildRenderPipelineWithDevice declare this argument (FC_WARM_START);
-        // when MetalFX is inactive the dummy satisfies validation and is never
-        // sampled (warmStartEnabled == 0).
-        #if canImport(MetalFX)
-        let warmStartDepth = fragmentPassPlan.metalFXBundle?.manager.previousDepthTexture ?? warmStartDummyDepthTexture
-        #else
-        let warmStartDepth = warmStartDummyDepthTexture
-        #endif
-        if let warmStartDepth {
-            renderEncoder.setFragmentTexture(warmStartDepth, index: FragmentTextureIndex.prevDepth.rawValue)
-        }
-
-        // Conservative cone coarse-prepass warmT. When the cone-enabled pipeline is
-        // active the fragment shader declares this argument (FC_COARSE_WARM_START)
-        // and reads it; otherwise a 1×1 dummy keeps the slot populated and the
-        // argument is compiled out, so it's never sampled (mirrors the warm-start
-        // dummy depth pattern).
-        let coarseBound: MTLTexture? = coneActive
-            ? coneCoarseTexture
-            : ensureCoarseStartDummyTexture(viewCount: drawable.views.count)
-        if let coarseBound {
-            renderEncoder.setFragmentTexture(coarseBound, index: FragmentTextureIndex.coarseWarmStart.rawValue)
-        }
-
         let viewports = fragmentPassPlan.viewports
         renderEncoder.setViewports(viewports)
         applyVertexAmplificationIfNeeded(to: renderEncoder, viewCount: viewports.count)
@@ -1424,27 +1020,7 @@ actor Renderer {
 
         renderEncoder.popDebugGroup()
 
-        // If MetalFX is active, signal the fence after the fragment stage so the
-        // spatial scaler waits for our writes into the input/depth textures
-        // before it reads them. Metal's automatic hazard tracking would handle
-        // this for tracked private textures in the same command buffer, but the
-        // explicit fence makes the dependency unambiguous across devices/OS
-        // versions and matches how MTLFXSpatialScaler is documented to be used.
-        #if canImport(MetalFX)
-        if fragmentPassPlan.metalFXBundle != nil, let fence = metalFXFence {
-            renderEncoder.updateFence(fence, after: .fragment)
-        }
-        #endif
-
         renderEncoder.endEncoding()
-
-        finishFragmentPass(
-            commandBuffer: commandBuffer,
-            drawable: drawable,
-            fragmentPassPlan: fragmentPassPlan,
-            framePreparation: framePreparation,
-            settingsSnapshot: settingsSnapshot
-        )
         
         frameBreakdown.renderPathEncodeMs = (CACurrentMediaTime() - renderEncodeStart) * 1000.0
 
@@ -1516,7 +1092,6 @@ actor Renderer {
         bufferContents: UnsafeMutableRawPointer
     ) {
         guard let pipeline = pipeline ?? adaptiveHierarchicalPipeline8x8 else {
-            if RENDERER_DEBUG { print("⚠️ Adaptive compute pipeline not available") }
             return
         }
         let eyePreparation = framePreparation.perEye[viewIndex]
@@ -1583,7 +1158,7 @@ actor Renderer {
                 rateMapValid = true
                 screenResolution = SIMD2<Float>(Float(map.screenSize.width), Float(map.screenSize.height))
             }
-            // One-time diagnostic (fires regardless of RENDERER_DEBUG): the compute
+            // One-time diagnostic: the compute
             // path's foveation distortion is pinned by the relationship between the
             // physical texture, the rate map's screen size, and the per-eye viewport
             // (origin + size). Logged once per launch so it can be read off-device.
@@ -1645,12 +1220,10 @@ actor Renderer {
         let tileSafetyBubbleStrength: Float = (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength
         let tileMarchEpsilonScale: Float = (1.0 / max(framePreparation.effectiveScale, 1.0)) * max(1.0, 0.15 / max(framePreparation.effectiveScale, 1e-4))
         let tileSphereProjectionBlend: Float = settingsSnapshot.sphereProjectionEnabled ? settingsSnapshot.sphereProjectionBlend : 0
-        let tileSmartAdvanceEnabled: Int32 = settingsSnapshot.smartAdvanceEnabled ? 1 : 0
         let tileRenderHeight = Float(renderHeight)
         let tileConeMarchScale: Float = RenderPrecompute.coneMarchScale(strength: settingsSnapshot.coneMarchStrength, projection: projection, viewportHeight: tileRenderHeight)
         let tileShadowsEnabled: Int32 = settingsSnapshot.shadowsEnabled ? 1 : 0
         let tileDistanceLODFalloff: Float = settingsSnapshot.distanceLODStrength * 0.5 * min(1.0, framePreparation.effectiveScale / 0.15)
-        let tilePixelFootprintPerDist: Float = RenderPrecompute.pixelFootprintPerDist(projection: projection, viewportHeight: tileRenderHeight)
         let tileBlendFactor: Float = settingsSnapshot.isGeometryGestureActive ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5)
         let tileSpringStretch: Float = simd_length(settingsSnapshot.springDisplacement)
         let tileSpringVisible: Int32 = (settingsSnapshot.springActive || tileSpringStretch > 0.001) ? 1 : 0
@@ -1698,15 +1271,10 @@ actor Renderer {
             spaceWarpParam3: settingsSnapshot.spaceWarpParam3,
             spaceWarpAxis: settingsSnapshot.spaceWarpAxis,
             spaceWarpStack: settingsSnapshot.spaceWarpStack,
-            stepMultiplier: settingsSnapshot.stepMultiplier,
             boundingSphereRadius: settingsSnapshot.estimatedBoundingSphereRadius,
-            smartAdvanceEnabled: tileSmartAdvanceEnabled,
             coneMarchScale: tileConeMarchScale,
-            coneCoverageAAEnabled: settingsSnapshot.coneCoverageAAEnabled ? 1 : 0,
             shadowsEnabled: tileShadowsEnabled,
             distanceLODFalloff: tileDistanceLODFalloff,
-            pixelFootprintPerDist: tilePixelFootprintPerDist,
-            coarseRateMagMax: 1.0,
             blendFactor: tileBlendFactor,
             springDisplacementX: settingsSnapshot.springDisplacement.x,
             springDisplacementY: settingsSnapshot.springDisplacement.y,
@@ -1738,6 +1306,8 @@ actor Renderer {
             boundAmbientStrength: settingsSnapshot.boundAmbientStrength,
             modelToWorldMatrix: framePreparation.modelMatrix,
             envScrunch: framePreparation.envScrunch,
+            boundingFogEnabled: Int32(settingsSnapshot.boundingShapeFogMode),
+            boundingShadowDepth: settingsSnapshot.boundingShapeShadowDepth,
             boundingShapeType: settingsSnapshot.boundingShapeType,
             // Pin the Bounding Shape while the Linear Rail slides content through
             // it (0 when the rail is off).
@@ -1750,7 +1320,6 @@ actor Renderer {
         
         // Create compute encoder
         guard let computeEncoder = commandBuffer.makeComputeCommandEncoder() else {
-            if RENDERER_DEBUG { print("⚠️ Failed to create compute encoder") }
             return
         }
         
@@ -1814,7 +1383,6 @@ actor Renderer {
         descriptor.usage = [.shaderWrite, .shaderRead]  // Key: has shaderWrite!
         
         guard let texture = device.makeTexture(descriptor: descriptor) else {
-            if RENDERER_DEBUG { print("⚠️ Failed to create compute output texture") }
             return nil
         }
         texture.label = "Adaptive Compute Output"
@@ -1823,7 +1391,6 @@ actor Renderer {
 
         // Residency update deferred to renderWithAdaptiveCompute() for batching
         
-        if RENDERER_DEBUG { print("📐 Created compute output texture: \(width)×\(height) × \(viewCount) layers") }
         return texture
     }
 
@@ -1885,7 +1452,6 @@ actor Renderer {
         
         guard let tex0 = device.makeTexture(descriptor: descriptor),
               let tex1 = device.makeTexture(descriptor: descriptor) else {
-            if RENDERER_DEBUG { print("⚠️ Failed to create temporal depth textures") }
             return nil
         }
         tex0.label = "Temporal Depth 0"
@@ -1897,80 +1463,11 @@ actor Renderer {
         
         // Residency update deferred to renderWithAdaptiveCompute() for batching
         
-        if RENDERER_DEBUG { print("📐 Created temporal depth textures: \(width)×\(height) × \(viewCount) layers") }
         return (read: tex0, write: tex0)  // First frame: read=write (will be marked invalid)
     }
 
     /// Creates or resizes the coarse warm-start texture (conservative cone
     /// coarse-prepass). Sized to the FOVEATED PHYSICAL render-target size / 8
-    /// (width = ceil(renderWidth/8), height = ceil(renderHeight/8)) so its texels
-    /// line up 1:1 with the fragment shader's floor(fragCoord/8). r32Float, one
-    /// layer per eye, .private with shaderWrite|shaderRead — cloned from
-    /// ensureTemporalDepthTextures.
-    private func ensureCoarseStartTexture(renderWidth: Int, renderHeight: Int, viewCount: Int) -> MTLTexture? {
-        let cw = max(1, (renderWidth + 7) / 8)
-        let ch = max(1, (renderHeight + 7) / 8)
-
-        if let existing = coarseStartTexture,
-           existing.width == cw,
-           existing.height == ch,
-           existing.arrayLength == viewCount {
-            return existing
-        }
-
-        let descriptor = MTLTextureDescriptor()
-        descriptor.textureType = .type2DArray
-        descriptor.pixelFormat = .r32Float
-        descriptor.width = cw
-        descriptor.height = ch
-        descriptor.arrayLength = viewCount
-        descriptor.storageMode = .private
-        descriptor.usage = [.shaderWrite, .shaderRead]
-
-        guard let texture = device.makeTexture(descriptor: descriptor) else {
-            if RENDERER_DEBUG { print("⚠️ Failed to create coarse warm-start texture") }
-            return nil
-        }
-        texture.label = "Cone Coarse Warm-Start"
-        coarseStartTexture = texture
-        updateResidencySetForComputeTextures([texture])
-        if RENDERER_DEBUG { print("📐 Created coarse warm-start texture: \(cw)×\(ch) × \(viewCount) layers") }
-        return texture
-    }
-
-    /// 1×1 r32Float array dummy bound to the fragment coarse-texture slot when the
-    /// cone pass is disabled, so the slot is always populated (mirrors the
-    /// warm-start dummy depth pattern). Never sampled (FC_COARSE_WARM_START off).
-    private func ensureCoarseStartDummyTexture(viewCount: Int) -> MTLTexture? {
-        if let existing = coarseStartDummyTexture, existing.arrayLength == viewCount {
-            return existing
-        }
-        let descriptor = MTLTextureDescriptor()
-        descriptor.textureType = .type2DArray
-        descriptor.pixelFormat = .r32Float
-        descriptor.width = 1
-        descriptor.height = 1
-        descriptor.arrayLength = max(1, viewCount)
-        descriptor.storageMode = .private
-        descriptor.usage = [.shaderRead]
-        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
-        texture.label = "Cone Coarse Warm-Start (dummy)"
-        coarseStartDummyTexture = texture
-        updateResidencySetForComputeTextures([texture])
-        return texture
-    }
-
-    /// True only for the box/fold fractal family whose analytic DE is a
-    /// conservative (Lipschitz-1) lower bound, so the cone-bounding warm start is
-    /// provably safe. Matches coneSafetyForFamily in Shaders.metal.
-    func isBoxFoldFamily(_ type: FractalModelType) -> Bool {
-        switch type {
-        case .mandelbox, .menger, .octahedron, .mengerSphere:
-            return true
-        default:
-            return false
-        }
-    }
 
     /// Copies compute output texture to drawable using blit encoder
     private func blitComputeOutputToDrawable(
@@ -2029,233 +1526,6 @@ actor Renderer {
         blitEncoder.endEncoding()
     }
 
-    // MARK: - Conservative Cone Coarse-Prepass Warm-Start
-
-    /// Encodes the cone coarse-prepass for every eye on `commandBuffer`, writing a
-    /// conservative warmT (provable LOWER BOUND on the nearest-surface entry
-    /// distance) into `coarseTex` (sized to renderWidth/8 × renderHeight/8). The
-    /// fragment pass that follows on the same command buffer reads it; Metal's
-    /// automatic hazard tracking provides the read-after-write barrier (the texture
-    /// is .private and tracked). Caller must have verified `coneAllowed`.
-    ///
-    /// `renderWidth/renderHeight` are the fragment pass's render-target dimensions
-    /// (MetalFX input size, or the drawable size). `viewports` are the per-eye
-    /// viewports the fragment pass uses (origin 0 under MetalFX; drawable viewport
-    /// origins on the direct path) — the cone reconstructs rays in the SAME space.
-    private func encodeConeCoarsePrepass(
-        commandBuffer: MTLCommandBuffer,
-        coarseTex: MTLTexture,
-        drawable: LayerRenderer.Drawable,
-        settingsSnapshot: RenderSettingsSnapshot,
-        framePreparation: RendererFramePreparation,
-        renderWidth: Int,
-        renderHeight: Int,
-        viewports: [MTLViewport]
-    ) {
-        guard let pipeline = coneCoarsePrepassPipeline else { return }
-        guard let uniformBuffer = tileUniformBuffer else { return }
-        let bufferContents = uniformBuffer.contents()
-
-        guard let computeEncoder = commandBuffer.makeComputeCommandEncoder() else { return }
-        computeEncoder.label = "Cone Coarse-Prepass"
-        computeEncoder.setComputePipelineState(pipeline)
-        if let envGrid = environmentSDF.withLock({ $0 }) {
-            computeEncoder.useResource(envGrid.buffer, usage: .read)
-        }
-
-        // Dispatch over the FULL render target / 8 (so coarse texels line up with
-        // the fragment's floor(fragCoord/8)). One thread per coarse texel.
-        let coarseW = max(1, (renderWidth + 7) / 8)
-        let coarseH = max(1, (renderHeight + 7) / 8)
-        let tg = MTLSize(width: 16, height: 16, depth: 1)
-        let grid = MTLSize(
-            width: (coarseW + tg.width - 1) / tg.width,
-            height: (coarseH + tg.height - 1) / tg.height,
-            depth: 1
-        )
-
-        let viewCount = drawable.views.count
-        for viewIndex in 0..<viewCount {
-            let eyePreparation = framePreparation.perEye[viewIndex]
-            let modelView = eyePreparation.modelView
-            let inverseModelView = eyePreparation.inverseModelView
-            let projection = eyePreparation.projection
-            let cameraPos = SIMD3<Float>(inverseModelView.columns.3.x, inverseModelView.columns.3.y, inverseModelView.columns.3.z)
-
-            // Per-eye viewport (origin + size) the fragment pass renders into.
-            let vp = viewIndex < viewports.count ? viewports[viewIndex] : (drawable.views[viewIndex].textureMap.viewport)
-            let viewportOriginX = max(0, Int(vp.originX.rounded(.down)))
-            let viewportOriginY = max(0, Int(vp.originY.rounded(.down)))
-            let viewportW = max(1, Int(vp.width.rounded(.up)))
-            let viewportH = max(1, Int(vp.height.rounded(.up)))
-
-            // Foveation rate-map decode setup (mirror encodeAdaptiveCompute). With a
-            // valid map the fragment geometry is in physical space and decoded
-            // through the rate map; the cone must decode the same way. We bound the
-            // physical→screen magnification conservatively (over-bounding only
-            // shortens the skip, which is always safe).
-            let rateMaps = drawable.rasterizationRateMaps
-            var rateMapValid = false
-            var rateMapLayer = 0
-            var screenResolution = SIMD2<Float>(Float(viewportW), Float(viewportH))
-            var selectedRateMap: MTLRasterizationRateMap? = nil
-            if !rateMaps.isEmpty {
-                let perEye = rateMaps.count == viewCount
-                let map = perEye ? rateMaps[viewIndex] : rateMaps[0]
-                let layer = perEye ? 0 : viewIndex
-                let phys = map.physicalSize(layer: layer)
-                if phys.width <= renderWidth && phys.height <= renderHeight {
-                    selectedRateMap = map
-                    rateMapLayer = layer
-                    rateMapValid = true
-                    screenResolution = SIMD2<Float>(Float(map.screenSize.width), Float(map.screenSize.height))
-                }
-            }
-            var rateMapParamBuffer: MTLBuffer?
-            if let map = selectedRateMap {
-                let need = map.parameterDataSizeAndAlign.size
-                if rateMapParamBuffers[viewIndex] == nil || rateMapParamBuffers[viewIndex]!.length < need {
-                    rateMapParamBuffers[viewIndex] = device.makeBuffer(length: max(need, 16), options: .storageModeShared)
-                    rateMapParamBuffers[viewIndex]?.label = "RateMapParams(cone) eye\(viewIndex)"
-                }
-                if let buf = rateMapParamBuffers[viewIndex] {
-                    map.copyParameterData(buffer: buf, offset: 0)
-                    rateMapParamBuffer = buf
-                }
-            }
-            if rateMapParamBuffer == nil {
-                rateMapValid = false
-                if rateMapDummyBuffer == nil {
-                    rateMapDummyBuffer = device.makeBuffer(length: 256, options: .storageModeShared)
-                    rateMapDummyBuffer?.label = "RateMapParams (dummy)"
-                }
-                rateMapParamBuffer = rateMapDummyBuffer
-            }
-
-            // Over-bound on physical→screen magnification under foveation. 4.0 is a
-            // safe upper bound for the gaze-tracked rate map's peripheral
-            // compression; 1.0 (no magnification) when no map applies. Over-bounding
-            // only shortens the warm-start skip — never unsafe.
-            let coarseRateMagMax: Float = rateMapValid ? 4.0 : 1.0
-
-            // Mixed immersion: cap the comfort bubble (see RendererGameState).
-            let mixedBubbleCapActive = appModel.immersionStyleForRenderer == .mixed && settingsSnapshot.safetyBubbleMixedAutoShrink
-            let bubbleRadiusMeters = mixedBubbleCapActive
-                ? min(settingsSnapshot.safetyBubbleRadius, settingsSnapshot.safetyBubbleMixedRadius)
-                : settingsSnapshot.safetyBubbleRadius
-            let scaleCorrectedBubbleRadius = bubbleRadiusMeters / max(framePreparation.effectiveScale, 0.001)
-            let scaleCorrectedFadeWidth = settingsSnapshot.safetyBubbleFadeWidth / max(framePreparation.effectiveScale, 0.001)
-
-            var tileUniforms = TileUniforms(
-                invViewMatrix: inverseModelView,
-                invProjMatrix: projection.inverse,
-                cameraPos: cameraPos,
-                time: framePreparation.frameTime,
-                resolution: SIMD2<Float>(Float(viewportW), Float(viewportH)),
-                viewportOrigin: SIMD2<Float>(Float(viewportOriginX), Float(viewportOriginY)),
-                minDistance: settingsSnapshot.minDistance,
-                fractalScale: settingsSnapshot.fractalScale,
-                sphereRadius: settingsSnapshot.sphereRadius,
-                safetyBubbleRadius: scaleCorrectedBubbleRadius,
-                safetyBubbleEnabled: (settingsSnapshot.fractalType == .mandelbulb) ? 0 : (settingsSnapshot.safetyBubbleEnabled ? 1 : 0),
-                safetyBubbleShape: settingsSnapshot.safetyBubbleShape,
-                safetyBubbleFadeEnabled: settingsSnapshot.safetyBubbleFadeEnabled ? 1 : 0,
-                safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
-                safetyBubbleStrength: (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength,
-                handField: framePreparation.handAttraction.asHandFieldParams,
-                foldingLimit: settingsSnapshot.foldingLimit,
-                glowIntensity: framePreparation.animatedGlow,
-                colorMix: framePreparation.animatedColorMix,
-                fractalIterations: Int32(settingsSnapshot.fractalIterations),
-                colorIterations: Int32(settingsSnapshot.colorIterations),
-                maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
-                maxViewDistance: framePreparation.maxViewDistance,
-                // Zoom-in tighten × zoom-out loosen (see the fragment-path site).
-                marchEpsilonScale: (1.0 / max(framePreparation.effectiveScale, 1.0))
-                    * max(1.0, 0.15 / max(framePreparation.effectiveScale, 1e-4)),
-                eyeIndex: UInt32(viewIndex),
-                debugHierarchical: 0,
-                limitFlash: settingsSnapshot.limitFlash,
-                fractalType: settingsSnapshot.fractalType.rawValue,
-                lightingSoftness: settingsSnapshot.lightingSoftness,
-                sphericalInversionMode: settingsSnapshot.sphericalInversionMode.rawValue,
-                sphericalInversionRadius: settingsSnapshot.sphericalInversionRadius,
-                sphereProjectionBlend: settingsSnapshot.sphereProjectionEnabled ? settingsSnapshot.sphereProjectionBlend : 0,
-                sphereProjectionRadius: settingsSnapshot.sphereProjectionRadius,
-                spaceWarpStrength: settingsSnapshot.spaceWarpStrength,
-                spaceWarpParam1: settingsSnapshot.spaceWarpParam1,
-                spaceWarpParam2: settingsSnapshot.spaceWarpParam2,
-                spaceWarpParam3: settingsSnapshot.spaceWarpParam3,
-                spaceWarpAxis: settingsSnapshot.spaceWarpAxis,
-                spaceWarpStack: settingsSnapshot.spaceWarpStack,
-                stepMultiplier: settingsSnapshot.stepMultiplier,
-                boundingSphereRadius: settingsSnapshot.estimatedBoundingSphereRadius,
-                smartAdvanceEnabled: settingsSnapshot.smartAdvanceEnabled ? 1 : 0,
-                coneMarchScale: RenderPrecompute.coneMarchScale(
-                    strength: settingsSnapshot.coneMarchStrength,
-                    projection: projection,
-                    viewportHeight: Float(viewportH)),
-                coneCoverageAAEnabled: settingsSnapshot.coneCoverageAAEnabled ? 1 : 0,
-                shadowsEnabled: settingsSnapshot.shadowsEnabled ? 1 : 0,
-                distanceLODFalloff: settingsSnapshot.distanceLODStrength * 0.5
-                    * min(1.0, framePreparation.effectiveScale / 0.15),
-                pixelFootprintPerDist: RenderPrecompute.pixelFootprintPerDist(
-                    projection: projection,
-                    viewportHeight: Float(viewportH)),
-                coarseRateMagMax: coarseRateMagMax,
-                blendFactor: 1.0,
-                springDisplacementX: 0,
-                springDisplacementY: 0,
-                springDisplacementZ: 0,
-                springStretch: 0,
-                springAnchorNDC: SIMD2<Float>(0.7, -0.7),
-                springVisible: 0,
-                springRestRadius: 0.06,
-                jitterOffset: .zero,
-                temporalReprojectionEnabled: 0,
-                coherentPacketEnabled: 0,
-                foveationStrength: settingsSnapshot.foveationStrength,
-                floorPlane: framePreparation.perEye[viewIndex].floorPlane,
-                floorCenterRadius: framePreparation.perEye[viewIndex].floorCenterRadius,
-                formulaParams: settingsSnapshot.formulaParams,
-                currentViewProjMatrix: projection * modelView,
-                previousViewProjMatrix: previousViewProjMatrices[viewIndex],
-                currentInvViewProjMatrix: (projection * modelView).inverse,
-                precomputedFractal: framePreparation.precomputedFractal,
-                precomputedLighting: framePreparation.precomputedLighting,
-                precomputedAudio: framePreparation.precomputedAudio,
-                precomputedFog: framePreparation.precomputedFog,
-                colorScheme: settingsSnapshot.colorSchemeParams,
-                screenResolution: screenResolution,
-                rateMapValid: rateMapValid ? 1 : 0,
-                rateMapLayer: UInt32(rateMapLayer),
-                boundToSpaceMode: settingsSnapshot.resolvedBoundToSpaceMode,
-                boundSpaceSize: settingsSnapshot.boundSpaceSize,
-                boundAmbientStrength: settingsSnapshot.boundAmbientStrength,
-                modelToWorldMatrix: framePreparation.modelMatrix,
-                envScrunch: framePreparation.envScrunch,
-                boundingShapeType: settingsSnapshot.boundingShapeType,
-                // Pin the Bounding Shape while the Linear Rail slides content
-                // through it (0 when the rail is off).
-                boundingShapeCenter: settingsSnapshot.boundingShapeCenterModel(modelMatrix: framePreparation.modelMatrix)
-            )
-
-            let uniformOffset = MemoryLayout<TileUniforms>.stride * viewIndex
-            memcpy(bufferContents.advanced(by: uniformOffset), &tileUniforms, MemoryLayout<TileUniforms>.size)
-
-            computeEncoder.setBuffer(uniformBuffer, offset: uniformOffset, index: 0)
-            if let rateMapParamBuffer {
-                computeEncoder.setBuffer(rateMapParamBuffer, offset: 0, index: 1)
-                computeEncoder.useResource(rateMapParamBuffer, usage: .read)
-            }
-            computeEncoder.setTexture(coarseTex, index: 0)
-            computeEncoder.dispatchThreadgroups(grid, threadsPerThreadgroup: tg)
-        }
-
-        computeEncoder.endEncoding()
-    }
-
-    /// Renders using the adaptive 8x8 compute pipeline instead of fragment shaders
     /// Returns true if compute rendering was used
     private func renderWithAdaptiveCompute(
         commandBuffer: MTLCommandBuffer,
@@ -2297,7 +1567,6 @@ actor Renderer {
         
         // Set up temporal reprojection depth textures (ping-pong)
         guard let depthPair = ensureTemporalDepthTextures(for: drawable) else {
-            if RENDERER_DEBUG { print("⚠️ Temporal textures unavailable; falling back to fragment rendering") }
             return false
         }
         

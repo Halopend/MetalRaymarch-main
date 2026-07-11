@@ -16,7 +16,6 @@ extension Renderer {
                                               fragmentFunctionName: String = "fragmentShader",
                                               usesVertexAmplification: Bool = true,
                                               functionConstants: MTLFunctionConstantValues? = nil,
-                                              coarseWarmStart: Bool = false,
                                               library: MTLLibrary? = nil,
                                               archive: PipelineBinaryArchive? = nil) throws -> MTLRenderPipelineState {
         /// Build a render state pipeline object. When `library` is non-nil, all
@@ -36,23 +35,8 @@ extension Renderer {
         // IMPORTANT: Once a shader declares function constants, Metal requires using
         // makeFunction(name:constantValues:) even if no values are being set.
         // Always provide function constants (empty if nil) for fragment shaders that use them.
-        let fragmentFunction: MTLFunction?
         let constants = functionConstants ?? MTLFunctionConstantValues()
-        if fragmentFunctionName == "fragmentShader" {
-            // FC_WARM_START (index 13): compile in the temporal-depth march
-            // warm-start (prev-depth texture argument + reprojection). Runtime
-            // engagement is still gated per frame via uniforms.warmStartEnabled.
-            // Screenshot and Mac pipelines bypass this helper and compile it out.
-            var warmStart = true
-            constants.setConstantValue(&warmStart, type: .bool, index: FunctionConstantIndex.warmStart.rawValue)
-            // FC_COARSE_WARM_START (index 15): compile in the conservative cone
-            // coarse-prepass warm-start (coarse texture argument + min-over-2x2 read
-            // + full-march seed). Default false → dead-code-eliminated; only the
-            // dedicated cone-enabled pipeline variant sets it true.
-            var coarse = coarseWarmStart
-            constants.setConstantValue(&coarse, type: .bool, index: FunctionConstantIndex.coarseWarmStart.rawValue)
-        }
-        fragmentFunction = try library?.makeFunction(name: fragmentFunctionName, constantValues: constants)
+        let fragmentFunction = try library?.makeFunction(name: fragmentFunctionName, constantValues: constants)
 
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
         pipelineDescriptor.label = functionConstants != nil ? "RenderPipeline_Specialized" : "RenderPipeline"
@@ -82,6 +66,7 @@ extension Renderer {
         var safetyBubbleEnabled: Bool?     // FC index 2
         var hasSpaceWarp: Bool?            // FC index 3 — nil leaves it undefined (shader defaults ON = full stack)
         var hasEnvScrunch: Bool?           // FC index 16 — nil leaves it undefined (shader defaults ON = scrunch code present)
+        var hasHandField: Bool?            // FC index 18 — nil leaves it undefined (shader defaults ON = hand code present)
         var qualityMode: Int32?            // FC index 4 (0=high, 1=medium, 2=low)
         var debugHierarchical: Bool?       // FC index 5
         var maxRaySteps: Int32?            // FC index 6 - max ray marching steps
@@ -110,6 +95,9 @@ extension Renderer {
             }
             if var es = hasEnvScrunch {
                 constants.setConstantValue(&es, type: .bool, index: FunctionConstantIndex.hasEnvScrunch.rawValue)
+            }
+            if var hf = hasHandField {
+                constants.setConstantValue(&hf, type: .bool, index: FunctionConstantIndex.hasHandField.rawValue)
             }
             if var quality = qualityMode {
                 constants.setConstantValue(&quality, type: .int, index: FunctionConstantIndex.qualityMode.rawValue)
@@ -186,12 +174,8 @@ extension Renderer {
                 shadowIterations: fc.shadowIterations,
                 safetyBubbleEnabled: preset.effectiveSafetyBubbleEnabled,
                 hasSpaceWarp: preset.effectiveHasSpaceWarp,
-                // Environment Scrunch is DEVICE-LOCAL (never preset state — see the
-                // envScrunchStaysDeviceLocal test), so presets prewarm the default-OFF
-                // variant; the key's `_ES0` segment pairs with this bake. When the
-                // device toggle is ON, selectPipeline computes `_ES1` and simply
-                // misses the prewarm (rebuild, never a wrong pipeline).
-                hasEnvScrunch: false,
+                hasEnvScrunch: preset.effectiveHasEnvScrunch,
+                hasHandField: preset.effectiveHasHandField,
                 qualityMode: fc.qualityMode,
                 debugHierarchical: false,
                 maxRaySteps: fc.maxRaySteps,
@@ -210,7 +194,6 @@ extension Renderer {
                                          mtlVertexDescriptor: MTLVertexDescriptor,
                                          config: FunctionConstantConfig,
                                          fragmentFunctionName: String = "fragmentShader",
-                                         coarseWarmStart: Bool = false,
                                          library: MTLLibrary? = nil,
                                          archive: PipelineBinaryArchive? = nil) throws -> MTLRenderPipelineState {
         return try buildRenderPipelineWithDevice(
@@ -220,7 +203,6 @@ extension Renderer {
             mtlVertexDescriptor: mtlVertexDescriptor,
             fragmentFunctionName: fragmentFunctionName,
             functionConstants: config.toMTLConstants(),
-            coarseWarmStart: coarseWarmStart,
             library: library,
             archive: archive
         )

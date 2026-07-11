@@ -224,9 +224,6 @@ extension ContentView {
 
     private var quickTogglePerformanceRows: [QuickToggleRow] {
         [
-            QuickToggleRow("Smart Advance", "bolt", home: .shapePerformance,
-                get: { appModel.renderSettings.smartAdvanceEnabled },
-                set: { appModel.renderSettings.smartAdvanceEnabled = $0 }),
             QuickToggleRow("Coherent Packet", "square.grid.3x3", home: .shapePerformance,
                 get: { appModel.renderSettings.coherentPacketEnabled },
                 set: { appModel.renderSettings.coherentPacketEnabled = $0 }),
@@ -405,7 +402,7 @@ extension ContentView {
             // immersive floor field is never rendered, so the section is
             // hidden entirely.
 #if os(visionOS)
-            platformSection
+            PlatformControlsSection(cache: cache)
 #endif
 
             // Handedness lives in display, not gestures: it affects which
@@ -433,50 +430,6 @@ extension ContentView {
             experimentalDisplaySection
         }
     }
-
-    /// VisionOS-only glass-floor platform settings. Mirrors the
-    /// `ContentView+FractalTab` block but is the canonical home for these
-    /// controls now that Settings has a Display sub-tab.
-#if os(visionOS)
-    private var platformSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("Platform", systemImage: AppIcons.circleHexagongridFill)
-                    .font(.headline)
-                Spacer()
-                if cache.display.platformEnabled {
-                    Text(String(format: "%.1f m", cache.display.platformRadius))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                Toggle("Show Platform", isOn: Binding(
-                    get: { cache.display.platformEnabled },
-                    set: { cache.display.platformEnabled = $0 }
-                ))
-                .labelsHidden()
-                .tint(.cyan)
-            }
-
-            Text("Renders a glass floor in the immersive space. The fractal color blends through it so the platform reads as a thick transparent surface. Disable for a clean floor-less view.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if cache.display.platformEnabled {
-                EffectSliderRow(icon: "circle.dotted", label: "Radius",
-                    value: Binding(
-                        get: { cache.display.platformRadius },
-                        set: { cache.display.platformRadius = $0 }
-                    ), range: 0.5...2.5,
-                    enabled: .constant(true),
-                    onChanged: { cache.commitPlatformRadius() },
-                    showToggle: false)
-            }
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.07)))
-    }
-#endif
 
     /// iOS-only toggle for the fingertip glow indicators drawn over the
     /// render view (cyan = orbit, violet = pan/zoom).
@@ -594,24 +547,6 @@ extension ContentView {
             }
             .tint(.orange)
 
-            Toggle(isOn: Binding(
-                get: { cache.quality.recreateLegacyComputeCacheBug },
-                set: {
-                    cache.quality.recreateLegacyComputeCacheBug = $0
-                    cache.push(\.recreateLegacyComputeCacheBug, value: $0)
-                }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Legacy Sphere Projection Bug")
-                        .font(.subheadline.weight(.semibold))
-                    Text("Recreates the old \"Accidental Sphere Projection\" artifact look by serving the nearest cached compute pipeline even when iteration/ray-step counts mismatch.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .tint(.orange)
-
             VStack(alignment: .leading, spacing: 4) {
                 CompactValueSlider(
                     title: "Sphere Projection Mismatch (δ)",
@@ -640,9 +575,9 @@ extension ContentView {
 
     // MARK: - Sharing sub-view
 
-    /// Sharing sub-view: Community Sharing (analytics + username) and
-    /// iCloud Drive backup. Sharing is **on by default** — the user must
-    /// opt out by turning the toggle off. The username is independent
+    /// Sharing sub-view: anonymous analytics, a local community display name,
+    /// and iCloud Drive backup. Analytics are **off by default** and begin only
+    /// after the user opts in. The display name is independent
     /// and is always shown so the user can set an attribution handle
     /// without enabling sharing.
     private var settingsSharingContent: some View {
@@ -702,7 +637,7 @@ extension ContentView {
     private var communitySharingSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Community Sharing", systemImage: AppIcons.person3Fill)
+                Label("Anonymous Analytics", systemImage: "chart.bar.fill")
                     .font(.headline)
                 Spacer()
                 Image(systemName: UsageAnalytics.shared.analyticsEnabled
@@ -710,12 +645,11 @@ extension ContentView {
                       : "minus.circle")
                     .foregroundStyle(UsageAnalytics.shared.analyticsEnabled ? .green : .secondary)
                     .help(UsageAnalytics.shared.analyticsEnabled
-                          ? "Sharing is on"
-                          : "Sharing is off")
+                          ? "Anonymous analytics are on"
+                          : "Anonymous analytics are off")
             }
 
-            // Flipped copy: "on by default" is the headline.
-            Text("On by default. Disable below to opt out. No account is created and no Apple ID, email, or location is required.")
+            Text("Off by default. If you opt in, Threshold sends aggregate feature, settings, performance, device-model, and OS-version data. It does not send scenes, preset names, recordings, or personal files.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -725,8 +659,8 @@ extension ContentView {
                 set: { UsageAnalytics.shared.analyticsEnabled = $0 }
             )) {
                 Label(
-                    UsageAnalytics.shared.analyticsEnabled ? "Sharing with the community" : "Sharing is off",
-                    systemImage: UsageAnalytics.shared.analyticsEnabled ? AppIcons.person3Fill : AppIcons.personSlash
+                    UsageAnalytics.shared.analyticsEnabled ? "Share anonymous analytics" : "Anonymous analytics are off",
+                    systemImage: UsageAnalytics.shared.analyticsEnabled ? "chart.bar.fill" : AppIcons.personSlash
                 )
             }
             .tint(.blue)
@@ -747,10 +681,10 @@ extension ContentView {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Label("What you're opting into:", systemImage: AppIcons.checkmarkCircle)
+                Label("What opting in sends:", systemImage: AppIcons.checkmarkCircle)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Text("• Your settings can be reviewed for future community features\n• Shared setups may appear later in original or altered form\n• If you add a user name, it can be used for attribution\n• Aggregated usage stats help us improve performance and features")
+                Text("• Time-weighted settings and feature-use aggregates\n• Average frame rate plus device, OS, and app versions\n• Preset load/save counts, never preset names or contents\n• No account, advertising identifier, location, or personal files")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -1050,8 +984,7 @@ extension ContentView {
     }
 
     /// Grouped raymarcher acceleration controls (Advanced tab). Collects the
-    /// distance-field march knobs — Smart Advance, Coherent Packet, and
-    /// Foveation — into a single card with subtle dividers, replacing the three
+    /// distance-field march knobs — Coherent Packet and Foveation — into a single card, replacing the
     /// loose, badge-duplicating blocks that used to float in the Advanced list.
     private var raymarcherSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1065,22 +998,6 @@ extension ContentView {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-
-            Divider().opacity(0.4)
-
-            // ── Smart Advance — every render path ────────────────────────
-            Toggle(isOn: Binding(
-                get: { appModel.renderSettings.smartAdvanceEnabled },
-                set: { appModel.renderSettings.smartAdvanceEnabled = $0 }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Smart Advance")
-                    Text("Reads the gradient of the march to spot rays skimming nearly parallel to a surface, then leads ahead with larger steps where plain tracing would creep. Faster through open and grazing regions; can soften fine silhouette detail. Works on every render path.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }.tint(themeColor)
 
             Divider().opacity(0.4)
 
@@ -1145,7 +1062,7 @@ extension ContentView {
                 }
             }.padding().background(themeColor.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
 
-            // Raymarcher acceleration toggles — Smart Advance, Coherent Packet,
+            // Raymarcher acceleration toggles — Coherent Packet,
             // and Foveation grouped into one card (see `raymarcherSection`).
             raymarcherSection
 

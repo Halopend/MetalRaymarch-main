@@ -48,11 +48,8 @@ struct RenderSettingsSnapshot {
     let debugHierarchical: Bool
     let coherentPacketEnabled: Bool
     let computeTemporalReprojectionEnabled: Bool
-    let coarsePrepassWarmStartEnabled: Bool
     let foveationStrength: Float
-    let smartAdvanceEnabled: Bool
     let coneMarchStrength: Float
-    let coneCoverageAAEnabled: Bool
     let distanceLODStrength: Float
     let shadowsEnabled: Bool
     let boundingSphereSkipEnabled: Bool
@@ -110,12 +107,6 @@ struct RenderSettingsSnapshot {
     // ═══════════════════════════════════════════════════════════════════════════
     let geometryState: GeometryState
     let isGeometryGestureActive: Bool
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // GMT-FRACTALS OPTIMIZATIONS
-    // Step over-relaxation factor for raymarch convergence acceleration
-    // ═══════════════════════════════════════════════════════════════════════════
-    let stepMultiplier: Float
 
     // Spring blob navigation
     let springDisplacement: SIMD3<Float>

@@ -19,6 +19,8 @@ final class ParameterUpdateCoordinator: Sendable {
         var lastAudioUpdate: TimeInterval = 0
         var pendingAnimationUpdate = false
         var pendingAudioUpdate = false
+        var pendingPresetBankReset = false
+        var wasPresetBankSourceActive: Bool?
         var pendingDeltaTime: TimeInterval = 1.0 / 90.0
         var isMainActorDispatchScheduled = false
     }
@@ -26,6 +28,7 @@ final class ParameterUpdateCoordinator: Sendable {
     private struct PendingParameterWork: Sendable {
         let shouldUpdateAnimation: Bool
         let shouldUpdateAudio: Bool
+        let shouldResetPresetBank: Bool
         let deltaTime: TimeInterval
     }
 
@@ -44,8 +47,12 @@ final class ParameterUpdateCoordinator: Sendable {
                 appModel.animationManager?.update(deltaTime: pendingWork.deltaTime)
             }
 
+            if pendingWork.shouldResetPresetBank {
+                appModel.resetMusicPresetBankEffectTrigger()
+            }
             if pendingWork.shouldUpdateAudio {
                 appModel.appleMusicManager.updateFrame()
+                appModel.updateMusicPresetBankEffect()
             }
         }
     }
@@ -55,6 +62,8 @@ final class ParameterUpdateCoordinator: Sendable {
     nonisolated func scheduleParameterUpdates(
         shouldUpdateAnimation: Bool,
         shouldUpdateAudio: Bool,
+        musicPresetBankEffectEnabled: Bool,
+        hasActiveAudioSource: Bool,
         deltaTime: TimeInterval,
         currentTime: TimeInterval
     ) {
@@ -63,8 +72,16 @@ final class ParameterUpdateCoordinator: Sendable {
                 (currentTime - state.lastAnimationUpdate >= animationUpdateInterval)
             let needsAudioUpdate = shouldUpdateAudio &&
                 (currentTime - state.lastAudioUpdate >= audioUpdateInterval)
+            let presetBankSourceIsActive = musicPresetBankEffectEnabled && hasActiveAudioSource
+            // A nil prior state means this is a newly-created render session.
+            // Always reset once at that boundary: audio may have stopped and
+            // restarted while no coordinator existed to observe either edge.
+            let needsPresetBankReset = musicPresetBankEffectEnabled
+                && (state.wasPresetBankSourceActive == nil
+                    || (state.wasPresetBankSourceActive == true && !hasActiveAudioSource))
+            state.wasPresetBankSourceActive = presetBankSourceIsActive
             
-            guard needsAnimationUpdate || needsAudioUpdate else { return false }
+            guard needsAnimationUpdate || needsAudioUpdate || needsPresetBankReset else { return false }
             
             if needsAnimationUpdate {
                 state.lastAnimationUpdate = currentTime
@@ -75,6 +92,7 @@ final class ParameterUpdateCoordinator: Sendable {
             
             state.pendingAnimationUpdate = state.pendingAnimationUpdate || needsAnimationUpdate
             state.pendingAudioUpdate = state.pendingAudioUpdate || needsAudioUpdate
+            state.pendingPresetBankReset = state.pendingPresetBankReset || needsPresetBankReset
             state.pendingDeltaTime = deltaTime
             
             guard !state.isMainActorDispatchScheduled else { return false }
@@ -96,12 +114,14 @@ final class ParameterUpdateCoordinator: Sendable {
             defer {
                 state.pendingAnimationUpdate = false
                 state.pendingAudioUpdate = false
+                state.pendingPresetBankReset = false
                 state.isMainActorDispatchScheduled = false
             }
 
             return PendingParameterWork(
                 shouldUpdateAnimation: state.pendingAnimationUpdate,
                 shouldUpdateAudio: state.pendingAudioUpdate,
+                shouldResetPresetBank: state.pendingPresetBankReset,
                 deltaTime: state.pendingDeltaTime
             )
         }

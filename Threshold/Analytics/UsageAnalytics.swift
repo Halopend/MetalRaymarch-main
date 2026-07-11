@@ -3,7 +3,7 @@
 //  Threshold
 //
 //  Created on January 31, 2026.
-//  Automatic anonymous usage analytics for TestFlight beta.
+//  Opt-in anonymous usage analytics for TestFlight beta.
 //  Uses CloudKit public database - no server required.
 //
 //  SETUP INSTRUCTIONS:
@@ -18,7 +18,6 @@
 //       * timestamp (Date/Time)
 //       * sessionDuration (Double)
 //       * qualityDistribution (String)
-//       * colorSchemeDistribution (String)
 //       * fractalTypeDistribution (String)
 //       * gradientPresetDistribution (String)
 //       * lightingPresetDistribution (String)
@@ -39,38 +38,20 @@
 //       * usedAnimation (Int64)
 //       * presetsLoaded (Int64)
 //       * presetsSaved (Int64)
-//       * favoritePresets (List of Strings)
 //       * avgFPS (Double)
 //       * deviceModel (String)
 //       * osVersion (String)
 //       * appVersion (String)
-//
-//     - Create another Record Type: "PresetSnapshot"
-//     - Add fields:
-//       * timestamp (Date/Time)
-//       * presetName (String)
-//       * presetJSON (String) - full preset as JSON for easy parsing
-//       * deviceModel (String)
-//       * appVersion (String)
-//       --- Individual fields for easy CloudKit querying/filtering ---
-//       * colorScheme (String)
-//       * fractalScale (Double)
-//       * foldingLimit (Double)
-//       * sphereRadius (Double)
-//       * minDistance (Double)
-//       * fractalIterations (Int64)
-//       * glowIntensity (Double)
-//       * fogIntensity (Double)
-//       * colorSchemeVibrance (Double)
 //     - Deploy to Production environment before TestFlight
 //
 //  VIEW DATA:
-//  - CloudKit Console → Data → Public Database → UsageSnapshot / PresetSnapshot
+//  - CloudKit Console → Data → Public Database → UsageSnapshot
 //  - Export to CSV/JSON for analysis
 //
 
 import Foundation
 import CloudKit
+import OSLog
 import Security
 #if canImport(UIKit)
 import UIKit
@@ -79,14 +60,15 @@ import Observation
 
 /// Anonymous usage statistics collected during a session
 struct UsageSnapshot: Codable {
+    /// Stable upload identity. Optional only so queues written by older builds
+    /// decode successfully; legacy entries receive and persist an ID before any
+    /// network request is attempted.
+    var uploadID: UUID?
     let timestamp: Date
     let sessionDuration: TimeInterval
     
     // Quality settings distribution (percentage of time at each level)
     var qualityDistribution: [String: Float]  // e.g., ["iter6": 0.2, "iter9": 0.8]
-    
-    // Gradient preset usage (percentage of time)
-    var gradientPresetUsageDistribution: [String: Float]
     
     // Parameter averages (weighted by time spent)
     var avgFractalScale: Float
@@ -117,7 +99,6 @@ struct UsageSnapshot: Codable {
     // Preset interactions
     var presetsLoaded: Int
     var presetsSaved: Int
-    var favoritePresetNames: [String]  // Top 3 most loaded
     
     // Performance context
     var avgFPS: Float
@@ -132,22 +113,57 @@ struct UsageSnapshot: Codable {
 @MainActor
 @Observable
 final class UsageAnalytics {
-    static let shared = UsageAnalytics()
-    private static let analyticsEnabledKey = "AnalyticsEnabled"
+    static let shared = UsageAnalytics(defaults: .standard)
+    nonisolated static let analyticsEnabledKey = "AnalyticsEnabled"
+    nonisolated static let pendingUploadsKey = "PendingUsageSnapshots"
+    nonisolated static let maxPendingUploads = 10
     private static let communityDisplayNameKey = "CommunityDisplayName"
+    private static let logger = Logger(subsystem: "com.puppypower.Threshold", category: "UsageAnalytics")
     
-    static var persistedAnalyticsEnabled: Bool {
-        // Sharing is opt-out: first-launch users get sharing enabled by
-        // default. The `object(forKey:) == nil` check is what distinguishes
-        // "never set" (first launch) from "explicitly turned off" (an
-        // existing user who later set it to false). Returning `true` for
-        // the first-launch case is the entire default-flip.
-        UserDefaults.standard.object(forKey: analyticsEnabledKey) as? Bool ?? true
+    nonisolated static var persistedAnalyticsEnabled: Bool {
+        persistedAnalyticsEnabled(in: .standard)
+    }
+
+    /// Reads consent without creating the shared analytics object. An absent
+    /// key is deliberately OFF: collection starts only after an explicit opt-in.
+    nonisolated static func persistedAnalyticsEnabled(in defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: analyticsEnabledKey) as? Bool ?? false
+    }
+
+    /// Stable CloudKit record name used for every retry of an outbox item.
+    nonisolated static func recordName(for uploadID: UUID) -> String {
+        "usage-\(uploadID.uuidString.lowercased())"
+    }
+
+    /// Stable, bounded-cardinality key. A custom formula's descriptor carries
+    /// its user-authored display name, which must never become telemetry.
+    nonisolated static func fractalAnalyticsKey(for type: FractalModelType) -> String {
+        guard type != .custom else { return "custom" }
+        return type.descriptor.codableString
+    }
+
+    /// Retains the newest values when bounding a durable queue.
+    nonisolated static func boundedSuffix<T>(_ values: [T], limit: Int) -> [T] {
+        guard limit > 0 else { return [] }
+        return values.count > limit ? Array(values.suffix(limit)) : values
+    }
+
+    /// A retry of a successfully-created deterministic record reports a
+    /// conflict. It is delivered only when the server record is the exact ID
+    /// we attempted, never for an unrelated conflict.
+    nonisolated static func isDeliveredRecordConflict(
+        code: CKError.Code,
+        serverRecordID: CKRecord.ID?,
+        expectedRecordID: CKRecord.ID
+    ) -> Bool {
+        code == .serverRecordChanged && serverRecordID == expectedRecordID
     }
 
     // CloudKit is initialized on first use so analytics-disabled launches
     // don't touch CloudKit during startup or permission-triggered relaunches.
     @ObservationIgnored private var cachedDatabase: CKDatabase?
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let automaticallyUploadPending: Bool
     
     // Local tracking state
     private var lastSampleTime: Date = Date()
@@ -155,7 +171,6 @@ final class UsageAnalytics {
     
     // Weighted accumulators (value * time)
     private var qualityTimeAccum: [String: TimeInterval] = [:]
-    private var gradientPresetUsageAccum: [String: TimeInterval] = [:]
     private var fractalScaleAccum: Float = 0
     private var foldingLimitAccum: Float = 0
     private var sphereRadiusAccum: Float = 0
@@ -185,24 +200,29 @@ final class UsageAnalytics {
     // Preset tracking
     private var presetsLoaded = 0
     private var presetsSaved = 0
-    private var presetLoadCounts: [String: Int] = [:]
     
     // Upload interval (upload every 5 minutes of active use)
     private let uploadInterval: TimeInterval = 300
     private var lastUploadTime: Date = Date()
     
-    // Persistence key
-    private let pendingUploadsKey = "PendingUsageSnapshots"
+    private var isDrainingOutbox = false
 
     private var storedCommunityDisplayName: String
     
     var analyticsEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(analyticsEnabled, forKey: Self.analyticsEnabledKey)
+            guard oldValue != analyticsEnabled else { return }
+            defaults.set(analyticsEnabled, forKey: Self.analyticsEnabledKey)
             if analyticsEnabled {
-                Task {
-                    await uploadPendingSnapshots()
+                lastSampleTime = Date()
+                lastUploadTime = Date()
+                if automaticallyUploadPending {
+                    Task {
+                        await uploadPendingSnapshots()
+                    }
                 }
+            } else {
+                purgeCollectedAnalytics()
             }
         }
     }
@@ -215,29 +235,33 @@ final class UsageAnalytics {
             storedCommunityDisplayName = normalized
 
             if normalized.isEmpty {
-                UserDefaults.standard.removeObject(forKey: Self.communityDisplayNameKey)
+                defaults.removeObject(forKey: Self.communityDisplayNameKey)
             } else {
-                UserDefaults.standard.set(normalized, forKey: Self.communityDisplayNameKey)
+                defaults.set(normalized, forKey: Self.communityDisplayNameKey)
             }
         }
     }
     
-    private init() {
-        // Default to enabled — user can opt out via Settings > Sharing or
-        // by toggling it on the welcome screen. `persistedAnalyticsEnabled`
-        // returns `true` for users who have never set the key (first
-        // launch); users who explicitly turned it off in a previous build
-        // will see it stay off.
-        self.analyticsEnabled = Self.persistedAnalyticsEnabled
+    init(defaults: UserDefaults, automaticallyUploadPending: Bool = true) {
+        // Existing explicit choices are preserved; an unset key is OFF.
+        self.defaults = defaults
+        self.automaticallyUploadPending = automaticallyUploadPending
+        self.analyticsEnabled = Self.persistedAnalyticsEnabled(in: defaults)
         self.storedCommunityDisplayName = Self.normalizedCommunityDisplayName(
-            UserDefaults.standard.string(forKey: Self.communityDisplayNameKey) ?? ""
+            defaults.string(forKey: Self.communityDisplayNameKey) ?? ""
         )
         
         // Try to upload any pending snapshots from previous sessions when opted in.
         if analyticsEnabled {
-            Task {
-                await uploadPendingSnapshots()
+            if automaticallyUploadPending {
+                Task {
+                    await uploadPendingSnapshots()
+                }
             }
+        } else {
+            // Also clears legacy queued payloads on upgrade when consent is
+            // absent or had already been withdrawn.
+            defaults.removeObject(forKey: Self.pendingUploadsKey)
         }
     }
 
@@ -248,13 +272,6 @@ final class UsageAnalytics {
     private func distributionPercentages(_ source: [String: TimeInterval], duration: TimeInterval) -> [String: Float] {
         let safeDuration = max(duration, 1.0)
         return source.mapValues { Float($0 / safeDuration) }
-    }
-
-    private func topFavoritePresets(limit: Int = 3) -> [String] {
-        presetLoadCounts
-            .sorted { $0.value > $1.value }
-            .prefix(limit)
-            .map { $0.key }
     }
 
     private func currentDeviceModel() -> String {
@@ -319,7 +336,13 @@ final class UsageAnalytics {
     /// `CKContainer.default()` (which aborts with an uncaught ObjC exception when the
     /// entitlement is absent), this probe is non-throwing, so it's safe on unsigned builds.
     private static let hasCloudKitEntitlement: Bool = {
-        #if os(macOS)
+        #if targetEnvironment(simulator)
+        // Simulator builds are commonly unsigned. Even when the host Mac has
+        // an iCloud identity token, touching CKContainer.default() without the
+        // app entitlement can raise an Objective-C exception that Swift cannot
+        // catch. Analytics is intentionally a no-op in simulators.
+        return false
+        #elseif os(macOS)
         // The unsigned-build CloudKit freeze this guards against only happens on the
         // macOS local-build workflow (CODE_SIGNING_ALLOWED=NO). SecTask entitlement
         // introspection is exposed there; use it as the non-throwing probe.
@@ -341,21 +364,20 @@ final class UsageAnalytics {
         hasEntitlement && ubiquityIdentityToken != nil
     }
 
-    private func buildSnapshot() -> UsageSnapshot {
+    private func buildSnapshot(uploadID: UUID) -> UsageSnapshot {
         let duration = totalSessionTime
         let durationF = Float(max(duration, 1.0))
 
         let qualityDist = distributionPercentages(qualityTimeAccum, duration: duration)
-        let gradientPresetUsageDist = distributionPercentages(gradientPresetUsageAccum, duration: duration)
         let fractalTypeDist = distributionPercentages(fractalTypeTimeAccum, duration: duration)
         let gradientPresetDist = distributionPercentages(gradientPresetTimeAccum, duration: duration)
         let lightingPresetDist = distributionPercentages(lightingPresetTimeAccum, duration: duration)
 
         return UsageSnapshot(
+            uploadID: uploadID,
             timestamp: Date(),
             sessionDuration: duration,
             qualityDistribution: qualityDist,
-            gradientPresetUsageDistribution: gradientPresetUsageDist,
             avgFractalScale: fractalScaleAccum / durationF,
             avgFoldingLimit: foldingLimitAccum / durationF,
             avgSphereRadius: sphereRadiusAccum / durationF,
@@ -376,7 +398,6 @@ final class UsageAnalytics {
             avgFogIntensity: fogIntensityAccum / durationF,
             presetsLoaded: presetsLoaded,
             presetsSaved: presetsSaved,
-            favoritePresetNames: topFavoritePresets(),
             avgFPS: fpsAccum / durationF,
             deviceModel: currentDeviceModel(),
             osVersion: currentOSVersion(),
@@ -410,10 +431,6 @@ final class UsageAnalytics {
         let lit = settings.lightingConfig
         let sb  = settings.safetyBubbleConfig
 
-        // Accumulate gradient preset time
-        let presetName = col.gradientState.gradientPreset?.rawValue ?? "custom"
-        gradientPresetUsageAccum[presetName, default: 0] += dt
-        
         // Accumulate parameter values (for averaging)
         let dtf = Float(dt)
         fractalScaleAccum += geo.fractalScale * dtf
@@ -428,7 +445,7 @@ final class UsageAnalytics {
         fpsAccum += Float(fps) * dtf
 
         // Accumulate fractal type distribution
-        fractalTypeTimeAccum[geo.fractalType.displayName, default: 0] += dt
+        fractalTypeTimeAccum[Self.fractalAnalyticsKey(for: geo.fractalType), default: 0] += dt
         
         // Accumulate gradient preset distribution
         usedGradientColoring = true
@@ -477,105 +494,37 @@ final class UsageAnalytics {
     }
     
     /// Track preset load
-    func trackPresetLoaded(name: String) {
+    func trackPresetLoaded(name _: String) {
         guard analyticsEnabled else { return }
         presetsLoaded += 1
-        presetLoadCounts[name, default: 0] += 1
     }
     
-    /// Track that a preset was saved (local aggregate count only).
-    ///
-    /// Historically this ALSO uploaded the preset's name + full JSON to the PUBLIC
-    /// CloudKit database on every save — user-authored content, world-readable,
-    /// opt-out. That upload is DISABLED pending a real accounts-based community /
-    /// sharing feature: publishing user content to a public DB needs actual identity
-    /// and explicit per-preset consent, not a silent opt-out telemetry push.
-    /// `uploadPresetSnapshot` is retained (unused) so it can be re-wired behind that
-    /// feature once accounts exist.
-    func trackPresetSaved(preset: FractalPreset) {
+    /// Track that a preset was saved (aggregate count only). The preset object is
+    /// intentionally ignored: names and authored content never enter telemetry.
+    func trackPresetSaved(preset _: FractalPreset) {
         guard analyticsEnabled else { return }
         presetsSaved += 1
     }
     
-    // MARK: - Preset Snapshot Upload
-    
-    /// Upload a saved preset to CloudKit for analysis
-    private func uploadPresetSnapshot(_ preset: FractalPreset) async {
-        guard analyticsEnabled else { return }
-        let record = CKRecord(recordType: "PresetSnapshot")
-        
-        // Metadata
-        record["timestamp"] = Date() as NSDate
-        record["presetName"] = preset.name
-        
-        // Encode full preset as JSON for complete data access
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = .prettyPrinted
-        if let jsonData = try? encoder.encode(preset),
-           let jsonString = String(data: jsonData, encoding: .utf8) {
-            record["presetJSON"] = jsonString
-        }
-        
-        // Device info
-        record["deviceModel"] = currentDeviceModel()
-        record["appVersion"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
-        
-        // === Key fields for easy CloudKit querying/filtering ===
-        // These let you filter/sort in CloudKit Console without parsing JSON
-        
-        // Color & style
-        record["gradientPreset"] = preset.gradientState?.gradientPreset?.rawValue ?? "custom"
-        record["colorSchemeVibrance"] = (preset.colorSchemeVibrance ?? 0.0) as NSNumber
-        record["colorSchemeSaturation"] = preset.colorSchemeSaturation as NSNumber
-        record["colorSchemeContrast"] = preset.colorSchemeContrast as NSNumber
-        
-        // Fractal geometry
-        record["fractalScale"] = preset.fractalScale as NSNumber
-        record["foldingLimit"] = preset.foldingLimit as NSNumber
-        record["sphereRadius"] = preset.sphereRadius as NSNumber
-        record["minDistance"] = preset.minDistance as NSNumber
-        record["fractalIterations"] = preset.fractalIterations as NSNumber
-        
-        // Effects
-        record["glowIntensity"] = (preset.glowEffect?.intensity ?? 0.0) as NSNumber
-        record["fogIntensity"] = (preset.fogEffect?.intensity ?? 0.5) as NSNumber
-        record["bloomStrength"] = (preset.bloomEffect?.strength ?? 0.0) as NSNumber
-        
-        // Lighting
-        record["lightingMode"] = preset.lightingMode?.displayName ?? "Animated"
-        record["hueCycleSpeed"] = (preset.hueRotationEffect?.speed ?? 0.0) as NSNumber
-        record["pulseSpeed"] = (preset.pulseEffect?.speed ?? 0.0) as NSNumber
-        
-        // Position (useful to see if people explore far from origin)
-        record["positionX"] = preset.position.x as NSNumber
-        record["positionY"] = preset.position.y as NSNumber
-        record["positionZ"] = preset.position.z as NSNumber
-        
-        guard let database = database() else { return }  // CloudKit unavailable — skip
-        do {
-            _ = try await database.save(record)
-        } catch {
-            // Could save for retry, but presets are less critical than session data
-        }
-    }
-    
     // MARK: - CloudKit Upload
     
-    /// Upload current snapshot to CloudKit
+    /// Consumes the current aggregate window into the durable outbox, then tries
+    /// to deliver it. Persisting succeeds before accumulators are reset or any
+    /// network request starts, so a crash/background suspension cannot lose it.
     func uploadSnapshot() async {
         guard analyticsEnabled else { return }
         guard totalSessionTime > 10 else { return }  // Don't upload very short sessions
-        
-        // Build a snapshot from the current accumulated data.
-        let snapshot = buildSnapshot()
 
-        await uploadToCloudKit(snapshot)
+        let snapshot = buildSnapshot(uploadID: UUID())
+        guard enqueuePendingSnapshot(snapshot) else { return }
+        resetAccumulatedWindow()
+        await uploadPendingSnapshots()
     }
 
-    private func uploadToCloudKit(_ snapshot: UsageSnapshot) async {
-        guard analyticsEnabled else { return }
-        let record = CKRecord(recordType: "UsageSnapshot")
+    private func uploadToCloudKit(_ snapshot: UsageSnapshot, database: CKDatabase) async -> Bool {
+        guard analyticsEnabled, let uploadID = snapshot.uploadID else { return false }
+        let recordID = CKRecord.ID(recordName: Self.recordName(for: uploadID))
+        let record = CKRecord(recordType: "UsageSnapshot", recordID: recordID)
         
         // Session info
         record["timestamp"] = snapshot.timestamp as NSDate
@@ -584,10 +533,6 @@ final class UsageAnalytics {
         // Encode distributions as JSON strings (CloudKit doesn't support nested dicts)
         if let qualityString = jsonString(from: snapshot.qualityDistribution) {
             record["qualityDistribution"] = qualityString
-        }
-        
-        if let presetString = jsonString(from: snapshot.gradientPresetUsageDistribution) {
-            record["gradientPresetDistribution"] = presetString
         }
         
         // Parameter averages
@@ -623,9 +568,6 @@ final class UsageAnalytics {
         // Presets
         record["presetsLoaded"] = snapshot.presetsLoaded as NSNumber
         record["presetsSaved"] = snapshot.presetsSaved as NSNumber
-        if !snapshot.favoritePresetNames.isEmpty {
-            record["favoritePresets"] = snapshot.favoritePresetNames
-        }
         
         // Performance
         record["avgFPS"] = snapshot.avgFPS as NSNumber
@@ -635,50 +577,194 @@ final class UsageAnalytics {
         record["osVersion"] = snapshot.osVersion
         record["appVersion"] = snapshot.appVersion
         
-        guard let database = database() else { return }  // CloudKit unavailable — skip
         do {
             _ = try await database.save(record)
+            return true
+        } catch let cloudError as CKError {
+            if Self.isDeliveredRecordConflict(
+                code: cloudError.code,
+                serverRecordID: cloudError.serverRecord?.recordID,
+                expectedRecordID: recordID
+            ) {
+                // A prior attempt reached CloudKit but its acknowledgement did
+                // not reach us. The deterministic record already exists.
+                return true
+            }
+            Self.logger.error(
+                "CloudKit analytics upload failed (code: \(cloudError.code.rawValue, privacy: .public)); outbox retained"
+            )
+            return false
         } catch {
-            // Save for retry later
-            savePendingSnapshot(snapshot)
+            Self.logger.error("CloudKit analytics upload failed; outbox retained")
+            return false
         }
     }
     
     // MARK: - Offline Persistence
     
-    private func savePendingSnapshot(_ snapshot: UsageSnapshot) {
+    @discardableResult
+    private func enqueuePendingSnapshot(_ snapshot: UsageSnapshot) -> Bool {
         var pending = loadPendingSnapshots()
+        assignMissingUploadIDs(in: &pending)
         pending.append(snapshot)
-        
-        // Keep only last 10 pending
-        if pending.count > 10 {
-            pending = Array(pending.suffix(10))
+        let bounded = Self.boundedSuffix(pending, limit: Self.maxPendingUploads)
+        if bounded.count < pending.count {
+            Self.logger.notice("Analytics outbox reached its retention limit; oldest window dropped")
         }
-        
-        if let data = try? JSONEncoder().encode(pending) {
-            UserDefaults.standard.set(data, forKey: pendingUploadsKey)
-        }
+        return persistPendingSnapshots(bounded)
     }
     
     private func loadPendingSnapshots() -> [UsageSnapshot] {
-        guard let data = UserDefaults.standard.data(forKey: pendingUploadsKey),
-              let snapshots = try? JSONDecoder().decode([UsageSnapshot].self, from: data) else {
+        guard let data = defaults.data(forKey: Self.pendingUploadsKey) else { return [] }
+        do {
+            return try JSONDecoder().decode([UsageSnapshot].self, from: data)
+        } catch {
+            // The bytes are unusable and may have come from an incompatible beta
+            // schema. Do not log their contents.
+            Self.logger.error("Analytics outbox could not be decoded and was discarded")
+            defaults.removeObject(forKey: Self.pendingUploadsKey)
             return []
         }
-        return snapshots
+    }
+
+    @discardableResult
+    private func persistPendingSnapshots(_ snapshots: [UsageSnapshot]) -> Bool {
+        if snapshots.isEmpty {
+            defaults.removeObject(forKey: Self.pendingUploadsKey)
+            return true
+        }
+        do {
+            let data = try JSONEncoder().encode(snapshots)
+            defaults.set(data, forKey: Self.pendingUploadsKey)
+            return true
+        } catch {
+            Self.logger.error("Analytics outbox could not be encoded; collection window retained")
+            return false
+        }
+    }
+
+    private func assignMissingUploadIDs(in snapshots: inout [UsageSnapshot]) {
+        for index in snapshots.indices where snapshots[index].uploadID == nil {
+            snapshots[index].uploadID = UUID()
+        }
+    }
+
+    /// Migrates legacy queue entries (which had no ID and could contain fields
+    /// no longer present in `UsageSnapshot`) and persists the sanitized form
+    /// before delivery. Returning nil means persistence failed, so networking
+    /// must not begin.
+    private func outboxReadyForDelivery() -> [UsageSnapshot]? {
+        var pending = loadPendingSnapshots()
+        let originalCount = pending.count
+        let hadMissingIDs = pending.contains { $0.uploadID == nil }
+        assignMissingUploadIDs(in: &pending)
+        pending = Self.boundedSuffix(pending, limit: Self.maxPendingUploads)
+
+        if hadMissingIDs || pending.count != originalCount {
+            guard persistPendingSnapshots(pending) else { return nil }
+        }
+        return pending
+    }
+
+    @discardableResult
+    private func removePendingSnapshot(uploadID: UUID) -> Bool {
+        var pending = loadPendingSnapshots()
+        pending.removeAll { $0.uploadID == uploadID }
+        return persistPendingSnapshots(pending)
     }
     
     private func uploadPendingSnapshots() async {
-        guard analyticsEnabled else { return }
-        let pending = loadPendingSnapshots()
-        guard !pending.isEmpty else { return }
-        
-        // Clear pending - uploadToCloudKit will re-save failures
-        UserDefaults.standard.removeObject(forKey: pendingUploadsKey)
-        
-        for snapshot in pending {
-            await uploadToCloudKit(snapshot)
+        guard analyticsEnabled, !isDrainingOutbox else { return }
+        isDrainingOutbox = true
+        defer { isDrainingOutbox = false }
+
+        // Normalize and persist legacy entries even when CloudKit is currently
+        // unavailable. This strips retired raw-name fields from the encoded queue.
+        guard let initialPending = outboxReadyForDelivery(), !initialPending.isEmpty else { return }
+        guard let database = database() else {
+            Self.logger.debug("CloudKit unavailable; analytics outbox retained")
+            return
         }
+
+        while analyticsEnabled {
+            guard let pending = outboxReadyForDelivery(), let snapshot = pending.first,
+                  let uploadID = snapshot.uploadID else {
+                return
+            }
+
+            guard await uploadToCloudKit(snapshot, database: database) else { return }
+            guard analyticsEnabled else { return }
+            // If this write fails, leave the item in place. Its deterministic
+            // record name makes the next attempt safe even after server success.
+            guard removePendingSnapshot(uploadID: uploadID) else { return }
+        }
+    }
+
+    // MARK: - Window Reset / Consent Revocation
+
+    /// Internal invariant used by consent handling and regression tests.
+    var isCurrentWindowEmpty: Bool {
+        totalSessionTime == 0 &&
+        qualityTimeAccum.isEmpty &&
+        fractalScaleAccum == 0 &&
+        foldingLimitAccum == 0 &&
+        sphereRadiusAccum == 0 &&
+        minDistanceAccum == 0 &&
+        colorMixAccum == 0 &&
+        glowIntensityAccum == 0 &&
+        safetyBubbleRadiusAccum == 0 &&
+        fpsAccum == 0 &&
+        !usedAudioReactive &&
+        !usedHandGestures &&
+        !usedRecording &&
+        !usedSharePlay &&
+        !usedGradientColoring &&
+        !usedAnimation &&
+        fractalTypeTimeAccum.isEmpty &&
+        gradientPresetTimeAccum.isEmpty &&
+        lightingPresetTimeAccum.isEmpty &&
+        bloomStrengthAccum == 0 &&
+        fogIntensityAccum == 0 &&
+        presetsLoaded == 0 &&
+        presetsSaved == 0
+    }
+
+    private func resetAccumulatedWindow(now: Date = Date()) {
+        lastSampleTime = now
+        lastUploadTime = now
+        totalSessionTime = 0
+
+        qualityTimeAccum.removeAll(keepingCapacity: true)
+        fractalScaleAccum = 0
+        foldingLimitAccum = 0
+        sphereRadiusAccum = 0
+        minDistanceAccum = 0
+        colorMixAccum = 0
+        glowIntensityAccum = 0
+        safetyBubbleRadiusAccum = 0
+        fpsAccum = 0
+
+        usedAudioReactive = false
+        usedHandGestures = false
+        usedRecording = false
+        usedSharePlay = false
+        usedGradientColoring = false
+        usedAnimation = false
+
+        fractalTypeTimeAccum.removeAll(keepingCapacity: true)
+        gradientPresetTimeAccum.removeAll(keepingCapacity: true)
+        lightingPresetTimeAccum.removeAll(keepingCapacity: true)
+        bloomStrengthAccum = 0
+        fogIntensityAccum = 0
+
+        presetsLoaded = 0
+        presetsSaved = 0
+    }
+
+    private func purgeCollectedAnalytics() {
+        resetAccumulatedWindow()
+        defaults.removeObject(forKey: Self.pendingUploadsKey)
+        cachedDatabase = nil
     }
     
     // MARK: - Session Lifecycle
@@ -686,6 +772,12 @@ final class UsageAnalytics {
     /// Call when app goes to background or terminates
     func endSession() async {
         guard analyticsEnabled else { return }
+        guard totalSessionTime > 10 else {
+            // A short foreground period is intentionally discarded, not merged
+            // into a later session or uploaded twice by inactive/background hooks.
+            resetAccumulatedWindow()
+            return
+        }
         await uploadSnapshot()
     }
     

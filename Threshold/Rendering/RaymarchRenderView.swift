@@ -244,7 +244,6 @@ struct ThresholdMacRenderView: NSViewRepresentable {
 
 final class ThresholdMacRenderer {
     private enum SetupError: Error {
-        case badVertexDescriptor
         case metalLibraryUnavailable
     }
 
@@ -484,10 +483,10 @@ final class ThresholdMacRenderer {
 
         let builtPipeline: MTLRenderPipelineState
         let builtMesh: MTKMesh
-        let builtVertexDescriptor = Self.buildMetalVertexDescriptor()
+        let builtVertexDescriptor = RenderMeshBuilder.makeVertexDescriptor()
         do {
             builtPipeline = try Self.buildRenderPipeline(device: device, colorPixelFormat: colorPixelFormat, depthPixelFormat: depthPixelFormat, vertexDescriptor: builtVertexDescriptor)
-            builtMesh = try Self.buildMesh(device: device, vertexDescriptor: builtVertexDescriptor)
+            builtMesh = try RenderMeshBuilder.makeEllipsoid(device: device, vertexDescriptor: builtVertexDescriptor)
         } catch {
             print("ThresholdMac renderer setup failed: \(error)")
             return nil
@@ -1054,6 +1053,11 @@ final class ThresholdMacRenderer {
         let safetyBubbleEnabled = settings.fractalType != .mandelbulb && settings.safetyBubbleEnabled
         let shadowsEnabled = settings.shadowsEnabled
         let sphereProjectionEnabled = settings.sphereProjectionEnabled && settings.sphereProjectionBlend > 0
+        // writeUniforms() runs before pipeline resolution and publishes the Mac
+        // synthetic grid on first use, so this flips keys as soon as scrunch is
+        // actually usable. Hand tracking is unavailable on the mono Mac path.
+        let hasEnvScrunch = settings.envScrunchEnabled && macEnvGrid != nil
+        let hasHandField = false
 
         let powerKey = power.map { "_P\($0)" } ?? ""
         // Atomic (library, hash) read so the cache-key hash and the build library
@@ -1078,7 +1082,7 @@ final class ThresholdMacRenderer {
         // first transform flips the key → cache miss → the generic pipeline (FC unset
         // → defaults ON) renders correctly while the new variant compiles.
         let hasSpaceWarp = !settings.spaceWarpStack.isEmpty || custom.hash != nil
-        let key = customPrefix + "FT\(fractalType)_FI\(iterations)_RS\(raySteps)_CI\(colorIterations)\(powerKey)_B\(safetyBubbleEnabled ? 1 : 0)_SH\(shadowsEnabled ? 1 : 0)_SP\(sphereProjectionEnabled ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)"
+        let key = customPrefix + "FT\(fractalType)_FI\(iterations)_RS\(raySteps)_CI\(colorIterations)\(powerKey)_B\(safetyBubbleEnabled ? 1 : 0)_SH\(shadowsEnabled ? 1 : 0)_SP\(sphereProjectionEnabled ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)_ES\(hasEnvScrunch ? 1 : 0)_HF0"
 
         if let specialized = specializedPipelineCache.pipeline(for: key) {
             appModel.isUsingSpecializedPipeline = true
@@ -1099,6 +1103,8 @@ final class ThresholdMacRenderer {
                 shadowsEnabled: shadowsEnabled,
                 sphereProjectionEnabled: sphereProjectionEnabled,
                 hasSpaceWarp: hasSpaceWarp,
+                hasEnvScrunch: hasEnvScrunch,
+                hasHandField: hasHandField,
                 customLibrary: custom.library
             )
         }
@@ -1119,6 +1125,8 @@ final class ThresholdMacRenderer {
                                           shadowsEnabled: Bool,
                                           sphereProjectionEnabled: Bool,
                                           hasSpaceWarp: Bool,
+                                          hasEnvScrunch: Bool,
+                                          hasHandField: Bool,
                                           customLibrary: MTLLibrary?) {
         let cache = specializedPipelineCache
         // When a custom `.threshfx` is active, build against its runtime-compiled
@@ -1137,7 +1145,7 @@ final class ThresholdMacRenderer {
         // lives in a CompositorServices-only file): 0=fractalIterations,
         // 2=safetyBubble, 3=hasSpaceWarp, 6=maxRaySteps, 7=fractalType,
         // 9=colorIterations, 11=shadows, 12=mandelbulbPower,
-        // 17=sphereProjection.
+        // 16=envScrunch, 17=sphereProjection, 18=handField.
         let constants = MTLFunctionConstantValues()
         var fi = iterations
         constants.setConstantValue(&fi, type: .int, index: 0)
@@ -1159,6 +1167,10 @@ final class ThresholdMacRenderer {
         constants.setConstantValue(&shadows, type: .bool, index: 11)
         var sphereProjection = sphereProjectionEnabled
         constants.setConstantValue(&sphereProjection, type: .bool, index: 17)
+        var envScrunch = hasEnvScrunch
+        constants.setConstantValue(&envScrunch, type: .bool, index: 16)
+        var handField = hasHandField
+        constants.setConstantValue(&handField, type: .bool, index: 18)
         // FC_HAS_SPACEWARP (index 3): bake the space-warp seam in/out. Baked false only
         // for scenes provably without any transform, letting the whole warp path DCE.
         var sw = hasSpaceWarp
@@ -1277,24 +1289,27 @@ final class ThresholdMacRenderer {
 
         let isAudioMode = settings.lightingMode == .audioReactive ||
             settings.lightingMode == .visualizer ||
-            settings.fractalAudioReactiveEnabled
+            settings.fractalAudioReactiveEnabled ||
+            settings.musicPresetBankEffectEnabled
         let hasActiveAudioSources = appModel.audioAnalyzer.isCapturing || appModel.appleMusicManager.isActive
 
         parameterUpdateCoordinator.scheduleParameterUpdates(
             shouldUpdateAnimation: settings.isAnimationPlaying,
             shouldUpdateAudio: isAudioMode && hasActiveAudioSources,
+            musicPresetBankEffectEnabled: settings.musicPresetBankEffectEnabled,
+            hasActiveAudioSource: hasActiveAudioSources,
             deltaTime: deltaTime,
             currentTime: now
         )
-        updateAudioLevels(appModel: appModel,
-                          settings: settings,
-                          isAudioMode: isAudioMode,
-                          hasActiveAudioSources: hasActiveAudioSources)
-        updateMusicReactiveParameters(appModel: appModel,
-                                      settings: settings,
-                                      isAudioMode: isAudioMode,
-                                      hasActiveAudioSources: hasActiveAudioSources,
-                                      deltaTime: Float(deltaTime))
+        AudioReactiveFrameDriver.update(
+            analyzer: appModel.audioAnalyzer,
+            appleMusicManager: appModel.appleMusicManager,
+            settings: settings,
+            isAudioMode: isAudioMode,
+            engine: musicReactiveEngine,
+            pipeline: appModel.parameterPipeline,
+            deltaTime: Float(deltaTime)
+        )
 
         let framePacing = framePacingTracker.withLock { $0.snapshot() }
         uiUpdateCoordinator.scheduleUIUpdate(fps: framePacing.fps,
@@ -1447,112 +1462,6 @@ final class ThresholdMacRenderer {
             settings.targetWorldRotation = targetRotation
             settings.targetDetailScale = targetDetailScale
         }
-    }
-
-    private func updateAudioLevels(appModel: AppModel,
-                                   settings: RenderSettings,
-                                   isAudioMode: Bool,
-                                   hasActiveAudioSources: Bool) {
-        guard isAudioMode else { return }
-
-        guard hasActiveAudioSources else {
-            settings.bassLevel = 0
-            settings.midLevel = 0
-            settings.trebleLevel = 0
-            settings.beatIntensity = 0
-            settings.audioLevel = 0
-            return
-        }
-
-        let analyzer = appModel.audioAnalyzer
-        let appleMusicManager = appModel.appleMusicManager
-        let bassSensitivity = settings.bassSensitivity
-        let midSensitivity = settings.midSensitivity
-        let trebleSensitivity = settings.trebleSensitivity
-        let beatSensitivity = settings.beatSensitivity
-
-        var totalBass: Float = 0
-        var totalMid: Float = 0
-        var totalTreble: Float = 0
-        var totalBeat: Float = 0
-        var totalLevel: Float = 0
-        var sourceCount: Float = 0
-
-        if analyzer.isCapturing {
-            totalBass += analyzer.bassLevel
-            totalMid += analyzer.midLevel
-            totalTreble += analyzer.trebleLevel
-            totalBeat = max(totalBeat, analyzer.onsetLevel)  // real spectral-flux onset, not a loudness envelope
-            totalLevel += analyzer.level
-            sourceCount += 1
-        }
-
-        if appleMusicManager.isActive {
-            totalBass += appleMusicManager.bassLevel
-            totalMid += appleMusicManager.midLevel
-            totalTreble += appleMusicManager.trebleLevel
-            totalBeat = max(totalBeat, appleMusicManager.beatIntensity)
-            totalLevel += appleMusicManager.overallLevel
-            sourceCount += 1
-        }
-
-        // Guard against non-finite analyzer levels before they can propagate into
-        // RenderSettings and from there into GPU uniforms. AudioAnalyzer already
-        // sanitizes internally, but a race window or future code path could
-        // still produce a non-finite value here.
-        guard sourceCount > 0,
-              totalBass.isFinite, totalMid.isFinite, totalTreble.isFinite,
-              totalBeat.isFinite, totalLevel.isFinite else {
-            if sourceCount > 0 {
-                renderLogger.error("Non-finite analyzer level detected — zeroing audio inputs (bass=\(totalBass) mid=\(totalMid) treble=\(totalTreble) beat=\(totalBeat) level=\(totalLevel))")
-            }
-            settings.bassLevel = 0
-            settings.midLevel = 0
-            settings.trebleLevel = 0
-            settings.beatIntensity = 0
-            settings.audioLevel = 0
-            return
-        }
-
-        let inverseSourceCount = 1.0 / sourceCount
-        settings.bassLevel = min(1.0, totalBass * inverseSourceCount * bassSensitivity)
-        settings.midLevel = min(1.0, totalMid * inverseSourceCount * midSensitivity)
-        settings.trebleLevel = min(1.0, totalTreble * inverseSourceCount * trebleSensitivity)
-        settings.beatIntensity = min(1.0, totalBeat * beatSensitivity)
-        settings.audioLevel = totalLevel * inverseSourceCount
-    }
-
-    private func updateMusicReactiveParameters(appModel: AppModel,
-                                               settings: RenderSettings,
-                                               isAudioMode: Bool,
-                                               hasActiveAudioSources: Bool,
-                                               deltaTime: Float) {
-        guard isAudioMode, hasActiveAudioSources, settings.fractalAudioReactiveEnabled else {
-            musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
-            return
-        }
-
-        // The aggregation in `updateAudioLevels` produced the per-band levels; the
-        // shared engine applies damping, response curves, the LFO overlay, and dispatch.
-        let bass    = settings.bassLevel
-        let mid     = settings.midLevel
-        let treble  = settings.trebleLevel
-        let beat    = settings.beatIntensity
-        let overall = settings.audioLevel
-
-        // A non-finite band level here means something slipped past the earlier
-        // sanitization; bail out to prevent musicReactiveEngine from amplifying it.
-        guard bass.isFinite, mid.isFinite, treble.isFinite, beat.isFinite, overall.isFinite else {
-            renderLogger.error("Non-finite band level in updateMusicReactiveParameters — skipping engine dispatch")
-            musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
-            return
-        }
-
-        let bandLevels = BandLevels(bass: bass, mid: mid, treble: treble, beat: beat, overall: overall)
-        musicReactiveEngine.process(bandLevels: bandLevels,
-                                    settings: settings,
-                                    deltaTime: deltaTime,
-                                    pipeline: appModel.parameterPipeline)
     }
 
     /// Reads the Sudden Motion Sensor and injects tilt as orbit input when
@@ -1757,8 +1666,7 @@ final class ThresholdMacRenderer {
             modelViewMatrix: modelView,
             inverseModelViewMatrix: inverseModelView,
             modelToWorldMatrix: modelMatrix,
-            // Warm start is visionOS-only (FC_WARM_START compiled out of the Mac
-            // pipelines); these stay inert here.
+            // Fragment reprojection is visionOS-only; these stay inert here.
             previousViewProjMatrix: matrix_identity_float4x4,
             previousInvViewProjMatrix: matrix_identity_float4x4,
             maxViewDistance: maxViewDistance,
@@ -1766,9 +1674,6 @@ final class ThresholdMacRenderer {
             // strictly conservative under MetalFX dynamic resolution.
             coneMarchScale: RenderPrecompute.coneMarchScale(
                 strength: settings.coneMarchStrength,
-                projection: projection,
-                viewportHeight: Float(drawableSize.height)),
-            pixelFootprintPerDist: RenderPrecompute.pixelFootprintPerDist(
                 projection: projection,
                 viewportHeight: Float(drawableSize.height)),
             safetyBubbleRadiusMeters: settings.safetyBubbleRadius,
@@ -1864,48 +1769,6 @@ final class ThresholdMacRenderer {
         return try? device.makeRenderPipelineState(descriptor: descriptor)
     }
 
-    private static func buildMetalVertexDescriptor() -> MTLVertexDescriptor {
-        let descriptor = MTLVertexDescriptor()
-
-        descriptor.attributes[VertexAttribute.position.rawValue].format = .float3
-        descriptor.attributes[VertexAttribute.position.rawValue].offset = 0
-        descriptor.attributes[VertexAttribute.position.rawValue].bufferIndex = BufferIndex.meshPositions.rawValue
-
-        descriptor.attributes[VertexAttribute.texcoord.rawValue].format = .float2
-        descriptor.attributes[VertexAttribute.texcoord.rawValue].offset = 0
-        descriptor.attributes[VertexAttribute.texcoord.rawValue].bufferIndex = BufferIndex.meshGenerics.rawValue
-
-        descriptor.layouts[BufferIndex.meshPositions.rawValue].stride = 12
-        descriptor.layouts[BufferIndex.meshPositions.rawValue].stepRate = 1
-        descriptor.layouts[BufferIndex.meshPositions.rawValue].stepFunction = .perVertex
-
-        descriptor.layouts[BufferIndex.meshGenerics.rawValue].stride = 8
-        descriptor.layouts[BufferIndex.meshGenerics.rawValue].stepRate = 1
-        descriptor.layouts[BufferIndex.meshGenerics.rawValue].stepFunction = .perVertex
-
-        return descriptor
-    }
-
-    private static func buildMesh(device: MTLDevice, vertexDescriptor: MTLVertexDescriptor) throws -> MTKMesh {
-        let allocator = MTKMeshBufferAllocator(device: device)
-        let mesh = MDLMesh.newEllipsoid(withRadii: SIMD3<Float>(repeating: 100),
-                                        radialSegments: 64,
-                                        verticalSegments: 32,
-                                        geometryType: .triangles,
-                                        inwardNormals: false,
-                                        hemisphere: false,
-                                        allocator: allocator)
-
-        let modelIODescriptor = MTKModelIOVertexDescriptorFromMetal(vertexDescriptor)
-        guard let attributes = modelIODescriptor.attributes as? [MDLVertexAttribute] else {
-            throw SetupError.badVertexDescriptor
-        }
-        attributes[VertexAttribute.position.rawValue].name = MDLVertexAttributePosition
-        attributes[VertexAttribute.texcoord.rawValue].name = MDLVertexAttributeTextureCoordinate
-        mesh.vertexDescriptor = modelIODescriptor
-
-        return try MTKMesh(mesh: mesh, device: device)
-    }
 }
 
 #if os(iOS)

@@ -6,7 +6,7 @@
 # "Stress test" scene at 1080p in two configs:
 #
 #   accel-on   the acceleration levers a real install runs with (cone march,
-#              distance LOD, over-relaxation, bounding-sphere skip) — ~19.6 ms
+#              distance LOD, bounding-sphere skip) — ~19.6 ms
 #   accel-off  raw march at code defaults — ~52 ms, exercises the unaccelerated
 #              path the levers hide
 #
@@ -31,7 +31,7 @@ TOLERANCE_PCT="${PERF_GATE_TOLERANCE_PCT:-5}"
 STEPS_TOLERANCE_PCT="${PERF_GATE_STEPS_TOLERANCE_PCT:-2}"
 SCENE="Stress test"
 SIZE="1920x1080"
-ACCEL_QC="coneMarchStrength=1,distanceLODStrength=0.98,overRelaxationMax=1.6,boundingSphereSkipEnabled=1"
+ACCEL_QC="coneMarchStrength=1,distanceLODStrength=0.98,boundingSphereSkipEnabled=1"
 BASE="$REPO/Baselines"
 REBASELINE=0
 [[ "${1:-}" == "--rebaseline" ]] && REBASELINE=1

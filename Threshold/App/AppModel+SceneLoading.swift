@@ -21,8 +21,10 @@ extension AppModel {
     @MainActor
     func loadStaticScene(
         _ preset: FractalPreset,
-        options: StaticSceneLoadOptions = []
+        options: StaticSceneLoadOptions = [],
+        completion: (@MainActor () -> Void)? = nil
     ) {
+        activeStaticSceneID = preset.id
         // Exit keyframe-animation mode before loading a static scene. While an
         // animation is playing, `RenderSettings.isAnimationPlaying` makes the
         // effective-target getters return the per-frame `animationBase` and the
@@ -33,16 +35,14 @@ extension AppModel {
         // Intents) in lockstep. Runs synchronously (main-actor) before the async
         // apply Task so the stop lands immediately on tap/keypress.
         animationManager?.clearCurrentSceneSelection()
-        let source = options.isEmpty ? "keyboard" : "external"
         Task { @MainActor in
-            customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene source=\(source) name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
+            defer { completion?() }
             if let formula = preset.embeddedFormula, formula.effectKind == .spaceWarp {
                 // A space warp rides the preset's built-in fractalType — install it
                 // and fall through to apply the rest of the scene normally.
                 installSpaceWarp(formula)
             } else if let formula = preset.embeddedFormula {
                 let installResult = await installEmbeddedFormulaIfNeededAndWait(formula)
-                customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene installEmbeddedFormula returned \(installResult)")
                 if installResult == .failed { return }
                 if installResult == .deferred {
                     // Renderer isn't up yet (typical: .threshfx opened from
@@ -117,7 +117,6 @@ extension AppModel {
             )
         }
         Task { @MainActor in
-            customSceneDiagnostic("🔬 [CSDiag] queuePresetApplyAfterFormulaActivation name='\(preset.name)' hash=\(preset.embeddedFormula?.shortHash ?? "nil")")
             let deadline = Date().addingTimeInterval(timeout)
             while activateEmbeddedFormulaHandler == nil {
                 if Date() > deadline {
@@ -167,10 +166,8 @@ extension AppModel {
     ) async {
         if preset.embeddedFormula != nil {
             await preparePipelineHandler?(preset)
-            customSceneDiagnostic("🔬 [CSDiag] applyLoadedScene preparePipelineHandler completed; loading preset NOW")
         } else {
             Task { await preparePipelineHandler?(preset) }
-            customSceneDiagnostic("🔬 [CSDiag] applyLoadedScene preparePipelineHandler dispatched (fire-and-forget); loading preset NOW")
         }
         // Snapshot the currently displayed parameters so the load can ease
         // from them toward the new preset.

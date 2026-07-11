@@ -159,6 +159,31 @@ struct FractalPresetPersistenceTests {
         #expect(abs(fresh.boundingShapeShadowDepth - 0.5) < 1e-5)
     }
 
+    @Test("Glassy Intersect bounding mode survives fromSettings → encode → decode → scene-load apply")
+    func glassyIntersectBoundingModeRoundTrip() throws {
+        let settings = RenderSettings()
+        settings.fractalType = .mandelbox
+        settings.boundingSphereSkipEnabled = true
+        settings.boundingShapeFogMode = BoundingFogMode.glassyIntersect.rawValue
+        settings.boundingShapeShadowDepth = 0.42
+
+        let preset = FractalPreset.fromSettings(settings, name: "Glass vitrine")
+        let decoded = try JSONDecoder().decode(
+            FractalPreset.self,
+            from: try JSONEncoder().encode(preset)
+        )
+
+        #expect(decoded.boundingShapeFogMode == BoundingFogMode.glassyIntersect.rawValue)
+        #expect(abs((decoded.boundingShapeShadowDepth ?? -1) - 0.42) < 1e-5)
+
+        let fresh = RenderSettings()
+        fresh.fractalType = .mandelbox
+        decoded.apply(to: fresh, includePerformance: false)
+
+        #expect(fresh.boundingShapeFogMode == BoundingFogMode.glassyIntersect.rawValue)
+        #expect(abs(fresh.boundingShapeShadowDepth - 0.42) < 1e-5)
+    }
+
     @Test("Environment Scrunch PARAMETERS survive fromSettings → encode → decode → scene-load apply")
     func envScrunchRoundTrip() throws {
         // The scrunch look (mode/strength/reach/contain) travels with the scene,
@@ -430,6 +455,52 @@ struct FractalPresetPersistenceTests {
         #expect(emptyPreset.spaceWarpOps == nil)
         emptyPreset.apply(to: fresh)
         #expect(fresh.spaceWarpStack.isEmpty)   // previous scene's transforms don't leak through
+    }
+
+    @Test("Plain static scene clears every transformation family")
+    func plainStaticSceneClearsEveryTransformation() {
+        let settings = RenderSettings()
+        settings.sphericalInversionMode = .outwardIn
+        settings.sphericalInversionRadius = 7
+        settings.sphereProjectionEnabled = true
+        settings.sphereProjectionBlend = 0.25
+        settings.sphereProjectionRadius = 3
+        settings.deIterationMismatch = 2
+        settings.spaceWarpStrength = 0.8
+        settings.spaceWarpOrigin = SIMD3<Float>(1, 2, 3)
+        settings.spaceWarpAxis = SIMD3<Float>(1, 0, 0)
+        settings.spaceWarpStack = [SpaceWarpOpValue(kind: .twist)]
+
+        FractalPreset(name: "Plain").apply(to: settings)
+
+        #expect(settings.sphericalInversionMode == .off)
+        #expect(settings.sphericalInversionRadius == 2)
+        #expect(settings.sphereProjectionEnabled == false)
+        #expect(settings.sphereProjectionBlend == 1)
+        #expect(settings.sphereProjectionRadius == 1)
+        #expect(settings.deIterationMismatch == 0)
+        #expect(settings.spaceWarpStrength == 0)
+        #expect(settings.spaceWarpOrigin == .zero)
+        #expect(settings.spaceWarpAxis == SIMD3<Float>(0, 1, 0))
+        #expect(settings.spaceWarpStack.isEmpty)
+    }
+
+    @Test("Selecting an animation scene resets transforms before playback")
+    @MainActor
+    func animationSceneSelectionClearsTransformBleedThrough() {
+        let settings = RenderSettings()
+        settings.sphericalInversionMode = .outwardIn
+        settings.sphereProjectionEnabled = true
+        settings.spaceWarpStrength = 0.8
+        settings.spaceWarpStack = [SpaceWarpOpValue(kind: .twist)]
+
+        let manager = AnimationManager(renderSettings: settings)
+        manager.currentScene = AnimationScene(name: "One keyframe")
+
+        #expect(settings.sphericalInversionMode == .off)
+        #expect(settings.sphereProjectionEnabled == false)
+        #expect(settings.spaceWarpStrength == 0)
+        #expect(settings.spaceWarpStack.isEmpty)
     }
 
     @Test("WarpCatalog is the single source of truth: one descriptor per kind, valid GPU bridge")
@@ -876,7 +947,7 @@ struct SpaceWarpPipelineKeyTests {
 
     // The renderer bakes FC_HAS_SPACEWARP into a distinct pipeline variant and folds
     // its state into the cache key as `_SW0/_SW1`. `FractalPreset.pipelineCacheKey`
-    // must carry the SAME segment (in the `_B..._SW..._N` scene slot) or a
+    // must carry the SAME segment (in the scene-feature slot) or a
     // prewarmed/preset pipeline is stored under a key `selectPipeline` never looks up.
     // These lock the key ⇄ FC pairing so a warped scene can never collide with the
     // `_SW0` (seam-compiled-out) variant.
@@ -901,13 +972,29 @@ struct SpaceWarpPipelineKeyTests {
         #expect(noWarp.pipelineCacheKey != warped.pipelineCacheKey)
     }
 
-    @Test("The _SW segment sits in the scene slot, matching RenderPipelineKeyContext")
+    @Test("DE-tail feature segments sit in the scene slot, matching RenderPipelineKeyContext")
     func keySegmentPosition() {
         // RenderPipelineKeyContext builds `..._RS{n}{sceneKey}_N{neon}...` with
-        // sceneKey = "_B{bubble}_SW{sw}"; the preset key must mirror it exactly.
+        // sceneKey = "_B{bubble}_SW{sw}_ES{env}_HF{hand}"; the preset key must
+        // mirror it exactly.
         let warped = preset { $0.spaceWarpStack = [SpaceWarpOpValue(kind: .boxFold)] }
-        #expect(warped.pipelineCacheKey.contains("_SW1_N"),
-                "expected `_SW1` immediately before `_N` (the scene-segment slot): \(warped.pipelineCacheKey)")
+        #expect(warped.pipelineCacheKey.contains("_SW1_ES0_HF1_N"),
+                "expected the complete scene-feature segment before `_N`: \(warped.pipelineCacheKey)")
+    }
+
+    @Test("Environment and hand gates produce distinct exact-pipeline keys")
+    func deTailFeatureKeys() {
+        let off = preset {
+            $0.envScrunchEnabled = false
+            $0.handAttractionEnabled = false
+        }
+        let on = preset {
+            $0.envScrunchEnabled = true
+            $0.handAttractionEnabled = true
+        }
+        #expect(off.pipelineCacheKey.contains("_ES0_HF0"))
+        #expect(on.pipelineCacheKey.contains("_ES1_HF1"))
+        #expect(off.pipelineCacheKey != on.pipelineCacheKey)
     }
 
     @Test("Custom fractals conservatively keep the seam ON (_SW1)")

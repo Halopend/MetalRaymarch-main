@@ -14,9 +14,7 @@
     "coneMarchStrength" : 0,
     "distanceLODStrength" : 0,
     "foveationStrength" : 0,
-    "overRelaxationMax" : 1.399999976158142,
     "shadowsEnabled" : true,
-    "smartAdvanceEnabled" : false,
     "tileSize" : 0
   },
   "scenes" : [

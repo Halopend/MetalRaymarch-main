@@ -15,6 +15,7 @@ enum BoundingFogMode: Int, CaseIterable, Identifiable, Sendable {
     case off = 0
     case ghostFade = 1
     case innerShadow = 2
+    case glassyIntersect = 3
 
     var id: Int { rawValue }
 
@@ -23,6 +24,7 @@ enum BoundingFogMode: Int, CaseIterable, Identifiable, Sendable {
         case .off: return "Off"
         case .ghostFade: return "Ghost Fade"
         case .innerShadow: return "Inner Shadow"
+        case .glassyIntersect: return "Glassy Intersect"
         }
     }
 
@@ -34,6 +36,8 @@ enum BoundingFogMode: Int, CaseIterable, Identifiable, Sendable {
             return "Fades the fractal out near the bounding shape's edge. In Partial/Mixed immersion the fade goes translucent, revealing passthrough."
         case .innerShadow:
             return "Darkens the fractal near the bounding shape's edge without ever going translucent — stays fully opaque, even in Partial/Mixed immersion. Depth slider controls how far the darkening reaches in."
+        case .glassyIntersect:
+            return "Turns the clipped intersection into a cool glass band with refraction-like colour, Fresnel highlights, and translucency in Partial/Mixed immersion. Width controls how far the glass reaches in."
         }
     }
 }
@@ -159,9 +163,6 @@ struct QualityConfig: Codable, Equatable, Sendable {
 
     // Debug
     var debugHierarchical: Bool = false
-    // Legacy "Accidental Sphere Projection" look: allow nearest cached compute
-    // pipeline even when FI/RS mismatch (the old artifact-producing behavior).
-    var recreateLegacyComputeCacheBug: Bool = false
 
     // Experimental: coherent packet predict-validate raymarch path (Stages 0-3)
     var coherentPacketEnabled: Bool = false
@@ -171,18 +172,8 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // default for a correct baseline.
     var computeTemporalReprojectionEnabled: Bool = false
 
-    // visionOS fragment path: conservative cone coarse-prepass warm-start. A
-    // low-res cone pass writes a provable LOWER BOUND on each 8x8 block's
-    // nearest-surface entry distance; the full march raises its start t to it.
-    // Off by default — when off, the code path is byte-identical to before.
-    var coarsePrepassWarmStartEnabled: Bool = false
-
     // Foveated raymarching strength (0...1); peripheral 8x8 tiles march fewer steps.
     var foveationStrength: Float = 0.0
-
-    // Smart advance: grazing-aware lead-ahead sphere tracing. Reads the along-ray
-    // DE gradient to step further through grazing/receding regions. Off by default.
-    var smartAdvanceEnabled: Bool = false
 
     // Cone marching strength (0...1): grow the march hit-threshold with ray
     // distance so each ray stops once the distance field falls within ~N pixels
@@ -192,22 +183,6 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // baseline march is already a ~1-pixel cone, so meaningful strength scales the
     // footprint up to ~16 px. Works on every render path.
     var coneMarchStrength: Float = 0.0
-
-    // Cone-coverage anti-aliasing (CTSS-lite). Derives a silhouette edge-coverage
-    // alpha from the cone footprint at the closest lateral approach and composites
-    // the near-miss surface over the background. Decouples edge quality from the
-    // Cone Marching threshold so that knob can run harder (fewer steps) without
-    // blobby, inflated silhouettes. Softens outer edges only (no sub-pixel thin-
-    // feature recovery). Fragment path only for now. Off by default.
-    var coneCoverageAAEnabled: Bool = false
-
-    // Over-relaxation ceiling (Keinert enhanced sphere tracing): the largest
-    // step multiplier the auto-ramp may reach once geometry settles. 1.0 = plain
-    // conservative sphere tracing (sharpest on thin features, slowest); higher
-    // takes larger over-relaxed steps (faster, guarded by overstep-failure
-    // retreat). The shader still clamps per fractal type. Default 1.4 = the
-    // previous hardcoded ceiling.
-    var overRelaxationMax: Float = 1.4
 
     // Distance-based iteration LOD: drop fractal iterations on faraway samples,
     // where the lost detail is already sub-pixel. 0 = off (full iterations
@@ -230,11 +205,12 @@ struct QualityConfig: Codable, Equatable, Sendable {
 
     // Bounding-edge treatment: 0 = off (hard clip), 1 = Ghost Fade (fades RGB
     // and, under passthrough, alpha too — translucent), 2 = Inner Shadow (fades
-    // RGB only, stays opaque — the original pre-passthrough fog behavior).
+    // RGB only, stays opaque — the original pre-passthrough fog behavior),
+    // 3 = Glassy Intersect (tinted Fresnel band, translucent under passthrough).
     var boundingShapeFogMode: Int = 0
 
-    // Inner Shadow band width, as a fraction of boundingShapeRadius (0...1).
-    // Only used while boundingShapeFogMode == 2 (Ghost Fade keeps a fixed band).
+    // Adjustable edge-band width, as a fraction of boundingShapeRadius (0...1).
+    // Used by Inner Shadow and Glassy Intersect; Ghost Fade keeps a fixed band.
     var boundingShapeShadowDepth: Float = 0.35
 
     // Bounding Shape family/preset — same encoding as SafetyBubbleConfig.shape:
@@ -272,7 +248,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
 
     mutating func clamp() {
         boundingShapeRadius = boundingShapeRadius.clamped(to: 0.05...30.0)
-        boundingShapeFogMode = boundingShapeFogMode.clamped(to: 0...2)
+        boundingShapeFogMode = boundingShapeFogMode.clamped(to: 0...3)
         boundingShapeShadowDepth = boundingShapeShadowDepth.clamped(to: 0.02...0.95)
         boundingShapeType = boundingShapeType.clamped(to: 0.0...SafetyBubbleShapePreset.maxStoredValue)
         boundToSpaceMode = boundToSpaceMode.clamped(to: 0...2)
@@ -291,7 +267,6 @@ struct QualityConfig: Codable, Equatable, Sendable {
         renderQuality = renderQuality.clamped(to: Self.visionMinRenderQuality...Self.visionMaxRenderQuality)
         foveationStrength = foveationStrength.clamped(to: 0.0...1.0)
         coneMarchStrength = coneMarchStrength.clamped(to: 0.0...1.0)
-        overRelaxationMax = overRelaxationMax.clamped(to: 1.0...1.6)
         distanceLODStrength = distanceLODStrength.clamped(to: 0.0...1.0)
     }
 
@@ -305,9 +280,8 @@ struct QualityConfig: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case baseFractalIterations, baseMaxRaySteps
         case resolutionScale, renderQuality, tileSize
-        case debugHierarchical, recreateLegacyComputeCacheBug, coherentPacketEnabled, computeTemporalReprojectionEnabled, coarsePrepassWarmStartEnabled, foveationStrength
-        case smartAdvanceEnabled, coneMarchStrength, coneCoverageAAEnabled
-        case overRelaxationMax, distanceLODStrength, shadowsEnabled, boundingSphereSkipEnabled, boundingShapeRadius
+        case debugHierarchical, coherentPacketEnabled, computeTemporalReprojectionEnabled, foveationStrength
+        case coneMarchStrength, distanceLODStrength, shadowsEnabled, boundingSphereSkipEnabled, boundingShapeRadius
         case boundingShapeFogEnabled  // legacy Bool key, migrated into boundingShapeFogMode on decode
         case boundingShapeFogMode, boundingShapeShadowDepth, boundingShapeType
         case boundToSpaceEnabled, boundToSpaceMode, boundSpaceWidth, boundSpaceDepth, boundSpaceHeight
@@ -329,15 +303,10 @@ struct QualityConfig: Codable, Equatable, Sendable {
         let decodedTileSize   = try c.decodeIfPresent(Int.self,   forKey: .tileSize)              ?? 0
         tileSize              = decodedTileSize == 2 ? 0 : decodedTileSize  // Old "Quad Shared" mode removed → degrade to fragment
         debugHierarchical     = try c.decodeIfPresent(Bool.self,  forKey: .debugHierarchical)     ?? false
-        recreateLegacyComputeCacheBug = try c.decodeIfPresent(Bool.self, forKey: .recreateLegacyComputeCacheBug) ?? false
         coherentPacketEnabled = try c.decodeIfPresent(Bool.self,  forKey: .coherentPacketEnabled) ?? false
         computeTemporalReprojectionEnabled = try c.decodeIfPresent(Bool.self, forKey: .computeTemporalReprojectionEnabled) ?? false
-        coarsePrepassWarmStartEnabled = try c.decodeIfPresent(Bool.self, forKey: .coarsePrepassWarmStartEnabled) ?? false
         foveationStrength     = try c.decodeIfPresent(Float.self, forKey: .foveationStrength)     ?? 0.0
-        smartAdvanceEnabled   = try c.decodeIfPresent(Bool.self,  forKey: .smartAdvanceEnabled)   ?? false
         coneMarchStrength     = try c.decodeIfPresent(Float.self, forKey: .coneMarchStrength)     ?? 0.0
-        coneCoverageAAEnabled = try c.decodeIfPresent(Bool.self,  forKey: .coneCoverageAAEnabled) ?? false
-        overRelaxationMax     = try c.decodeIfPresent(Float.self, forKey: .overRelaxationMax)     ?? 1.4
         distanceLODStrength   = try c.decodeIfPresent(Float.self, forKey: .distanceLODStrength)   ?? 0.0
         shadowsEnabled        = try c.decodeIfPresent(Bool.self,  forKey: .shadowsEnabled)        ?? true
         boundingSphereSkipEnabled = try c.decodeIfPresent(Bool.self, forKey: .boundingSphereSkipEnabled) ?? false
@@ -378,15 +347,10 @@ struct QualityConfig: Codable, Equatable, Sendable {
         try c.encode(renderQuality, forKey: .renderQuality)
         try c.encode(tileSize, forKey: .tileSize)
         try c.encode(debugHierarchical, forKey: .debugHierarchical)
-        try c.encode(recreateLegacyComputeCacheBug, forKey: .recreateLegacyComputeCacheBug)
         try c.encode(coherentPacketEnabled, forKey: .coherentPacketEnabled)
         try c.encode(computeTemporalReprojectionEnabled, forKey: .computeTemporalReprojectionEnabled)
-        try c.encode(coarsePrepassWarmStartEnabled, forKey: .coarsePrepassWarmStartEnabled)
         try c.encode(foveationStrength, forKey: .foveationStrength)
-        try c.encode(smartAdvanceEnabled, forKey: .smartAdvanceEnabled)
         try c.encode(coneMarchStrength, forKey: .coneMarchStrength)
-        try c.encode(coneCoverageAAEnabled, forKey: .coneCoverageAAEnabled)
-        try c.encode(overRelaxationMax, forKey: .overRelaxationMax)
         try c.encode(distanceLODStrength, forKey: .distanceLODStrength)
         try c.encode(shadowsEnabled, forKey: .shadowsEnabled)
         try c.encode(boundingSphereSkipEnabled, forKey: .boundingSphereSkipEnabled)

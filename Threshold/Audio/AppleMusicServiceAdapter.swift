@@ -1,34 +1,38 @@
-//
-//  AppleMusicServiceAdapter.swift
-//  Threshold
-//
-//  Adapts AppleMusicManager to the unified MusicServiceProvider protocol.
-//  Thin wrapper — all real work lives in AppleMusicManager.
-//
-
 import SwiftUI
 #if !os(macOS)
 import MediaPlayer
 #endif
 
+/// Adapts the platform AppleMusicManager to the shared music-service model.
+/// Library mapping lives once; only native transport, lookup, and search differ.
 @MainActor
 final class AppleMusicServiceAdapter: MusicServiceProvider {
-
-    // ── Backing manager ──────────────────────────────────────────────────
     let manager: AppleMusicManager
 
     init(manager: AppleMusicManager) {
         self.manager = manager
     }
 
-    // ── Connection ───────────────────────────────────────────────────────
     var connectionStatus: MusicServiceConnectionStatus {
         switch manager.authorizationStatus {
-        case .authorized:    return .connected
-        case .denied:        return .error("Access denied. Enable in Settings.")
-        case .restricted:    return .error("Apple Music is restricted on this device.")
-        case .notDetermined: return .disconnected
-        @unknown default:    return .disconnected
+        case .authorized:
+            return .connected
+        case .denied:
+            #if os(macOS)
+            return .error("Access denied. Enable Apple Music access in System Settings.")
+            #else
+            return .error("Access denied. Enable Apple Music access in Settings.")
+            #endif
+        case .restricted:
+            #if os(macOS)
+            return .error("Apple Music is restricted on this Mac.")
+            #else
+            return .error("Apple Music is restricted on this device.")
+            #endif
+        case .notDetermined:
+            return .disconnected
+        @unknown default:
+            return .disconnected
         }
     }
 
@@ -36,55 +40,78 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
         manager.requestAuthorization()
     }
 
-    // ── Now Playing ──────────────────────────────────────────────────────
     var nowPlaying: UnifiedTrack? {
         guard !manager.nowPlayingTitle.isEmpty else { return nil }
-        let player = MPMusicPlayerController.systemMusicPlayer
-        let pid = player.nowPlayingItem?.persistentID
-        return UnifiedTrack(
-            id: pid.map { String($0) } ?? UUID().uuidString,
-            serviceID: serviceID,
+        #if os(macOS)
+        let id = manager.nowPlayingID ?? UUID().uuidString
+        let album = manager.nowPlayingAlbum
+        #else
+        let item = MPMusicPlayerController.systemMusicPlayer.nowPlayingItem
+        let id = item.map { String($0.persistentID) } ?? UUID().uuidString
+        let album = item?.albumTitle ?? ""
+        #endif
+        return makeTrack(
+            id: id,
             title: manager.nowPlayingTitle,
             artist: manager.nowPlayingArtist,
-            album: player.nowPlayingItem?.albumTitle ?? "",
-            artworkURL: nil,
+            album: album,
             durationSeconds: manager.durationSeconds
         )
     }
 
-    // ── Transport ────────────────────────────────────────────────────────
-    func togglePlayPause() async { manager.togglePlayPause() }
-    func next() async            { manager.nextTrack() }
-    func previous() async        { manager.previousTrack() }
-    func seek(fraction: Float) async {
-        let player = MPMusicPlayerController.systemMusicPlayer
-        let pos = Double(fraction) * manager.durationSeconds
-        player.currentPlaybackTime = pos
-        manager.updateFrame()
+    func togglePlayPause() async {
+        #if os(macOS)
+        await manager.togglePlayPause()
+        #else
+        manager.togglePlayPause()
+        #endif
     }
 
-    // ── Library ──────────────────────────────────────────────────────────
+    func next() async {
+        #if os(macOS)
+        await manager.nextTrack()
+        #else
+        manager.nextTrack()
+        #endif
+    }
+
+    func previous() async {
+        #if os(macOS)
+        await manager.previousTrack()
+        #else
+        manager.previousTrack()
+        #endif
+    }
+
+    func seek(fraction: Float) async {
+        #if os(macOS)
+        manager.seek(fraction: fraction)
+        #else
+        let player = MPMusicPlayerController.systemMusicPlayer
+        player.currentPlaybackTime = Double(fraction) * manager.durationSeconds
+        manager.updateFrame()
+        #endif
+    }
+
     var librarySongs: [UnifiedTrack] {
         manager.librarySongs.map { song in
-            UnifiedTrack(
+            makeTrack(
                 id: String(song.id),
-                serviceID: serviceID,
                 title: song.title,
                 artist: song.artist,
                 album: song.album,
-                artworkURL: nil,
-                durationSeconds: 0  // MediaPlayer doesn't store duration on query items cheaply
+                durationSeconds: songDuration(song)
             )
         }
     }
 
     var libraryPlaylists: [UnifiedPlaylist] {
-        manager.libraryPlaylists.map { pl in
+        manager.libraryPlaylists.map { playlist in
             UnifiedPlaylist(
-                id: String(pl.id),
+                id: String(playlist.id),
                 serviceID: serviceID,
-                name: pl.name,
-                trackCount: pl.trackCount,
+                name: playlist.name,
+                trackCount: playlist.trackCount,
                 artworkURL: nil,
                 ownerName: nil
             )
@@ -92,91 +119,163 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
     }
 
     var libraryAlbums: [UnifiedAlbum] {
-        manager.libraryAlbums.map { alb in
+        manager.libraryAlbums.map { album in
             UnifiedAlbum(
-                id: String(alb.id),
+                id: String(album.id),
                 serviceID: serviceID,
-                title: alb.title,
-                artist: alb.artist,
-                trackCount: alb.trackCount,
+                title: album.title,
+                artist: album.artist,
+                trackCount: album.trackCount,
                 artworkURL: nil
             )
         }
     }
 
     func refreshLibrary() async {
+        #if os(macOS)
+        await manager.refreshLibrary()
+        #else
         manager.refreshLibrary()
+        #endif
     }
 
     func playSong(_ track: UnifiedTrack) async {
-        guard let songID = UInt64(track.id) else { return }
-        manager.playSong(id: songID)
+        #if os(macOS)
+        await manager.playSong(id: track.id)
+        #else
+        guard let id = UInt64(track.id) else { return }
+        manager.playSong(id: id)
+        #endif
+    }
+
+    func playSongByNativeID(_ nativeID: String) async -> Bool {
+        #if os(macOS)
+        if !manager.librarySongs.contains(where: { $0.id == nativeID }) {
+            await manager.refreshLibrary()
+        }
+        guard manager.librarySongs.contains(where: { $0.id == nativeID }) else { return false }
+        await manager.playSong(id: nativeID)
+        #else
+        guard let id = UInt64(nativeID) else { return false }
+        manager.playSong(id: id)
+        #endif
+        return true
     }
 
     func playPlaylist(_ playlist: UnifiedPlaylist, shuffle: Bool) async {
-        guard let plID = UInt64(playlist.id) else { return }
-        manager.playPlaylist(id: plID, shuffle: shuffle)
+        #if os(macOS)
+        await manager.playPlaylist(id: playlist.id, shuffle: shuffle)
+        #else
+        guard let id = UInt64(playlist.id) else { return }
+        manager.playPlaylist(id: id, shuffle: shuffle)
+        #endif
     }
 
     func playAlbum(_ album: UnifiedAlbum, shuffle: Bool) async {
-        guard let albID = UInt64(album.id) else { return }
-        manager.playAlbum(id: albID, shuffle: shuffle)
+        #if os(macOS)
+        await manager.playAlbum(id: album.id, shuffle: shuffle)
+        #else
+        guard let id = UInt64(album.id) else { return }
+        manager.playAlbum(id: id, shuffle: shuffle)
+        #endif
     }
 
     func fetchPlaylistTracks(_ playlist: UnifiedPlaylist) async -> [UnifiedTrack] {
-        guard let plID = UInt64(playlist.id) else { return [] }
-        return manager.playlistTracks(id: plID).map { song in
-            UnifiedTrack(
-                id: String(song.id),
-                serviceID: serviceID,
-                title: song.title,
-                artist: song.artist,
-                album: song.album,
-                artworkURL: nil,
-                durationSeconds: 0
+        #if os(macOS)
+        let tracks = await manager.playlistTracks(id: playlist.id)
+        #else
+        guard let id = UInt64(playlist.id) else { return [] }
+        let tracks = manager.playlistTracks(id: id)
+        #endif
+        return tracks.map { track in
+            makeTrack(
+                id: String(track.id),
+                title: track.title,
+                artist: track.artist,
+                album: track.album,
+                durationSeconds: songDuration(track)
             )
         }
     }
 
-    func playSongByNativeID(_ nativeID: String) async -> Bool {
-        guard let songID = UInt64(nativeID) else { return false }
-        manager.playSong(id: songID)
-        return true
-    }
-
-    // ── Search ───────────────────────────────────────────────────────────
     func searchTrack(title: String, artist: String) async -> UnifiedTrack? {
+        #if os(macOS)
+        if manager.librarySongs.isEmpty, manager.isAuthorized {
+            await manager.refreshLibrary()
+        }
+        let normalizedTitle = normalized(title)
+        let normalizedArtist = normalized(artist)
+        let match = manager.librarySongs.first {
+            normalized($0.title) == normalizedTitle && normalized($0.artist) == normalizedArtist
+        } ?? manager.librarySongs.first {
+            normalized($0.title).contains(normalizedTitle) && normalized($0.artist).contains(normalizedArtist)
+        }
+        guard let match else { return nil }
+        return makeTrack(
+            id: match.id,
+            title: match.title,
+            artist: match.artist,
+            album: match.album,
+            durationSeconds: match.durationSeconds
+        )
+        #else
         guard connectionStatus.isConnected else { return nil }
-
         let query = MPMediaQuery.songs()
-        query.addFilterPredicate(
-            MPMediaPropertyPredicate(value: title,
-                                     forProperty: MPMediaItemPropertyTitle,
-                                     comparisonType: .contains)
-        )
-
+        query.addFilterPredicate(MPMediaPropertyPredicate(
+            value: title,
+            forProperty: MPMediaItemPropertyTitle,
+            comparisonType: .contains
+        ))
         guard let items = query.items, !items.isEmpty else { return nil }
+        let normalizedArtist = normalized(artist)
+        let match = items.first { normalized($0.artist ?? "").contains(normalizedArtist) } ?? items[0]
+        return makeTrack(
+            id: String(match.persistentID),
+            title: match.title ?? title,
+            artist: match.artist ?? artist,
+            album: match.albumTitle ?? "",
+            durationSeconds: match.playbackDuration
+        )
+        #endif
+    }
 
-        // Prefer an exact artist match; fall back to first result
-        let normalizedArtist = artist.lowercased()
-        let best = items.first {
-            ($0.artist ?? "").lowercased().contains(normalizedArtist)
-        } ?? items.first!
+    func createPlaylist(name: String, trackNativeIDs: [String]) async -> String? {
+        #if os(macOS)
+        return await manager.createPlaylist(name: name, songIDs: trackNativeIDs)
+        #else
+        return await manager.createPlaylist(name: name, songIDs: trackNativeIDs.compactMap(UInt64.init))
+        #endif
+    }
 
-        return UnifiedTrack(
-            id: String(best.persistentID),
+    private func makeTrack(
+        id: String,
+        title: String,
+        artist: String,
+        album: String,
+        durationSeconds: Double
+    ) -> UnifiedTrack {
+        UnifiedTrack(
+            id: id,
             serviceID: serviceID,
-            title: best.title ?? title,
-            artist: best.artist ?? artist,
-            album: best.albumTitle ?? "",
+            title: title,
+            artist: artist,
+            album: album,
             artworkURL: nil,
-            durationSeconds: best.playbackDuration
+            durationSeconds: durationSeconds
         )
     }
 
-    // ── Playlist Creation ─────────────────────────────────────────────────
-    func createPlaylist(name: String, trackNativeIDs: [String]) async -> String? {
-        await manager.createPlaylist(name: name, songIDs: trackNativeIDs.compactMap { UInt64($0) })
+    private func normalized(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
+    #if os(macOS)
+    private func songDuration(_ song: AppleMusicManager.LibrarySong) -> Double {
+        song.durationSeconds
+    }
+    #else
+    private func songDuration(_ song: AppleMusicManager.LibrarySong) -> Double {
+        0
+    }
+    #endif
 }

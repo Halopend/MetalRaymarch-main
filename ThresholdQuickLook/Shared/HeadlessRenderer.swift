@@ -133,9 +133,6 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
             strength: settings.coneMarchStrength,
             projection: projection,
             viewportHeight: Float(drawableSize.height)),
-        pixelFootprintPerDist: RenderPrecompute.pixelFootprintPerDist(
-            projection: projection,
-            viewportHeight: Float(drawableSize.height)),
         safetyBubbleRadiusMeters: settings.safetyBubbleRadius,
         // No hand tracking in Quick Look — single-source disabled block.
         handField: .off,

@@ -69,6 +69,7 @@ private enum FractalSceneSelection: Equatable {
 struct FractalGridView: View {
     let animationManager: AnimationManager?
     let presetManager: PresetManager?
+    let activeStaticSceneID: UUID?
     var onEditScene: ((AnimationScene) -> Void)? = nil
     var onLoadAnimationScene: ((AnimationScene) -> Void)? = nil
     var onLoadStaticScene: ((FractalPreset) -> Void)? = nil
@@ -80,6 +81,7 @@ struct FractalGridView: View {
     init(
         animationManager: AnimationManager?,
         presetManager: PresetManager?,
+        activeStaticSceneID: UUID? = nil,
         tabSelection: Binding<FractalBrowseTab>? = nil,
         onEditScene: ((AnimationScene) -> Void)? = nil,
         onLoadAnimationScene: ((AnimationScene) -> Void)? = nil,
@@ -87,6 +89,7 @@ struct FractalGridView: View {
     ) {
         self.animationManager = animationManager
         self.presetManager = presetManager
+        self.activeStaticSceneID = activeStaticSceneID
         self.tabSelection = tabSelection
         self.onEditScene = onEditScene
         self.onLoadAnimationScene = onLoadAnimationScene
@@ -193,7 +196,8 @@ struct FractalGridView: View {
                     ForEach(Array(animatedScenes.enumerated()), id: \.offset) { _, scene in
                         sceneCard(
                             title: scene.name,
-                            subtitle: scene.fractalType?.displayName ?? "Any fractal",
+                            subtitle: scene.embeddedFormula?.name
+                                ?? (scene.fractalType ?? .mandelbox).displayName,
                             detail: scene.attachedSong?.title ?? "Visual-only scene",
                             systemImage: scene.attachedSong == nil ? AppIcons.sparklesRectangleStack : AppIcons.musicNote,
                             showsFlashingWarning: scene.name.localizedCaseInsensitiveContains("ambient blur"),
@@ -242,7 +246,7 @@ struct FractalGridView: View {
                             subtitle: preset.embeddedFormula?.name ?? preset.fractalType.displayName,
                             detail: staticSceneDetail(for: preset),
                             systemImage: AppIcons.chevronLeftForwardslashChevronRight,
-                            thumbnailData: preset.thumbnailData,
+                            thumbnailPreset: preset,
                             isSelected: activeSelection == .staticPreset(preset.id),
                             onEdit: nil
                         ) {
@@ -288,7 +292,7 @@ struct FractalGridView: View {
                             subtitle: preset.fractalType.displayName,
                             detail: staticSceneDetail(for: preset),
                             systemImage: AppIcons.photo,
-                            thumbnailData: preset.thumbnailData,
+                            thumbnailPreset: preset,
                             isSelected: activeSelection == .staticPreset(preset.id),
                             onEdit: nil
                         ) {
@@ -334,7 +338,7 @@ struct FractalGridView: View {
                             subtitle: preset.fractalType.displayName,
                             detail: staticSceneDetail(for: preset),
                             systemImage: AppIcons.photo,
-                            thumbnailData: preset.thumbnailData,
+                            thumbnailPreset: preset,
                             isSelected: activeSelection == .staticPreset(preset.id),
                             onEdit: nil
                         ) {
@@ -380,7 +384,7 @@ struct FractalGridView: View {
                             subtitle: preset.fractalType.displayName,
                             detail: staticSceneDetail(for: preset),
                             systemImage: AppIcons.musicNote,
-                            thumbnailData: preset.thumbnailData,
+                            thumbnailPreset: preset,
                             isSelected: activeSelection == .staticPreset(preset.id),
                             onEdit: nil
                         ) {
@@ -397,7 +401,10 @@ struct FractalGridView: View {
     private func filteredStaticPresets() -> [FractalPreset] {
         (presetManager?.presets ?? []).filter { preset in
             // Skip transient utility entries if they ever leak into the shared preset list.
-            preset.name != "__lastState__"
+#if os(macOS)
+            guard preset.mixedModeScene != true else { return false }
+#endif
+            return preset.name != "__lastState__"
         }
     }
 
@@ -421,6 +428,10 @@ struct FractalGridView: View {
 
     private func resolvedTabSelection(currentTab: FractalBrowseTab, hasCustomScenes: Bool, hasAnimatedScenes: Bool) -> FractalBrowseTab {
         switch currentTab {
+#if os(macOS)
+        case .mixed:
+            return .jumpingOff
+#endif
         case .customScenes where !hasCustomScenes:
             return .jumpingOff
         case .animated where !hasAnimatedScenes:
@@ -450,7 +461,7 @@ struct FractalGridView: View {
             return .animation(sceneID)
         }
 
-        guard let staticID = selectedStaticSceneID,
+        guard let staticID = activeStaticSceneID ?? selectedStaticSceneID,
               staticScenePresets.contains(where: { $0.id == staticID }) else {
             return .none
         }
@@ -544,11 +555,11 @@ struct FractalGridView: View {
         }
     }
 
-    private func sceneCard(title: String, subtitle: String, detail: String, systemImage: String, thumbnailData: Data? = nil, showsFlashingWarning: Bool = false, isSelected: Bool, onEdit: (() -> Void)? = nil, action: @escaping () -> Void) -> some View {
+    private func sceneCard(title: String, subtitle: String, detail: String, systemImage: String, thumbnailPreset: FractalPreset? = nil, showsFlashingWarning: Bool = false, isSelected: Bool, onEdit: (() -> Void)? = nil, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 8) {
-                    sceneCardIcon(systemImage: systemImage, thumbnailData: thumbnailData)
+                    sceneCardIcon(systemImage: systemImage, thumbnailPreset: thumbnailPreset)
 
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
@@ -602,9 +613,8 @@ struct FractalGridView: View {
     }
 
     @ViewBuilder
-    private func sceneCardIcon(systemImage: String, thumbnailData: Data?) -> some View {
-        if let thumbnailData,
-           let image = FractalPreset(id: UUID(), name: "Preview", thumbnailData: thumbnailData).thumbnailImage {
+    private func sceneCardIcon(systemImage: String, thumbnailPreset: FractalPreset?) -> some View {
+        if let image = thumbnailPreset?.thumbnailImage {
             #if os(visionOS) || os(iOS)
             Image(uiImage: image)
                 .resizable()

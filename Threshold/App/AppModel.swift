@@ -60,17 +60,6 @@ final class RenderMetrics {
     var stepProfilingEnabled: Bool = false
 }
 
-/// High-frequency hand tracking UI state isolated from AppModel so that
-/// ~15 Hz updates (gestureStatus, leftHandTracked, rightHandTracked) only
-/// invalidate HandTrackingStatusView, not every AppModel observer.
-@MainActor
-@Observable
-final class HandTrackingState {
-    var gestureStatus: String = "Waiting for immersive space…"
-    var leftHandTracked: Bool = false
-    var rightHandTracked: Bool = false
-}
-
 enum ExternalFileImportPayload {
     case preset(FractalPreset)
     case animation(AnimationScene)
@@ -207,11 +196,6 @@ class AppModel {
     /// not all AppModel observers.
     let renderMetrics = RenderMetrics()
 
-    /// Isolated container for high-frequency hand tracking UI state.
-    /// Reading handTrackingState.gestureStatus only invalidates views that subscribe
-    /// to HandTrackingState, not all AppModel observers.
-    let handTrackingState = HandTrackingState()
-
     /// Whether the renderer is currently using a specialized (compiled) pipeline vs generic fallback
     @ObservationIgnored nonisolated(unsafe) var isUsingSpecializedPipeline: Bool = false
     
@@ -245,38 +229,32 @@ class AppModel {
         didSet {
             UserDefaults.standard.set(handTrackingEnabled, forKey: "handTrackingEnabled")
             if !handTrackingEnabled {
-                leftHandTracked = false
-                rightHandTracked = false
                 gestureController?.syncWithSettings()
             }
         }
     }
-    /// Forwarding accessors for hand tracking UI state.
-    /// Reads/writes route to the isolated `handTrackingState` container so that
-    /// high-frequency updates don't invalidate all AppModel observers.
-    var leftHandTracked: Bool {
-        get { handTrackingState.leftHandTracked }
-        set { handTrackingState.leftHandTracked = newValue }
-    }
-    var rightHandTracked: Bool {
-        get { handTrackingState.rightHandTracked }
-        set { handTrackingState.rightHandTracked = newValue }
-    }
-    var gestureStatus: String {
-        get { handTrackingState.gestureStatus }
-        set { handTrackingState.gestureStatus = newValue }
-    }
-    
-    /// Whether the hand tracking ARKit provider is actively running.
-    /// Only written by the render loop, never read by SwiftUI views — skip observation.
-    @ObservationIgnored var handTrackingRunning: Bool = false
-
     
     // Gesture controller for mapping hand gestures to parameters
     var gestureController: GestureController?
 
     // Preset management
     let presetManager = PresetManager()
+    /// Global music effect that advances through ordered banks of full visual
+    /// presets. Stored with music-library preferences rather than scene state so
+    /// each selected scene cannot disable the sequencer that selected it.
+    var musicPresetBankEffect = SettingsPersistence.Music.loadPresetBankEffect() {
+        didSet {
+            let normalized = musicPresetBankEffect.normalized
+            if normalized != musicPresetBankEffect {
+                musicPresetBankEffect = normalized
+            }
+            renderSettings.musicPresetBankEffectEnabled = normalized.isEnabled
+            musicPresetBankTrigger.reset()
+            SettingsPersistence.Music.savePresetBankEffect(normalized)
+        }
+    }
+    @ObservationIgnored private var musicPresetBankTrigger = MusicPresetBankTrigger()
+    @ObservationIgnored private var musicPresetBankLoadInFlight = false
     /// Drives the on-device performance sweep that writes the per-build perf log.
     let perfSweepRunner = PerfSweepRunner()
 
@@ -300,6 +278,10 @@ class AppModel {
     var isMenuWindowVisible: Bool = true
     var isMenuInteractionActive: Bool = false
     @ObservationIgnored private(set) var activeResetPreset: FractalPreset?
+    /// ID of the currently selected static scene for browse UI highlighting.
+    /// Kept separate from `activeResetPreset` because the latter is a settings
+    /// snapshot used by Reset and is updated after the eased scene load begins.
+    var activeStaticSceneID: UUID?
 
     @ObservationIgnored private let menuWindowRetoggleGuardInterval: CFTimeInterval = 0.45
     @ObservationIgnored private var lastMenuWindowOpenedAt: CFTimeInterval = 0
@@ -465,6 +447,7 @@ class AppModel {
         // Publish the shared reference only after all stored properties are
         // initialized — `self` cannot escape an initializer before then.
         AppModel.shared = self
+        renderSettings.musicPresetBankEffectEnabled = musicPresetBankEffect.isEnabled
 
         // Initialize gesture controller with render settings
         gestureController = GestureController(renderSettings: renderSettings, parameterPipeline: parameterPipeline)
@@ -540,9 +523,6 @@ class AppModel {
         }
 
         refreshMenuInteractionState()
-        
-        // Add built-in presets if this is first launch
-        presetManager.addBuiltInPresetsIfNeeded()
         
         // Restore last state if available.
         // If the restored preset carries an embedded formula, install it so
@@ -872,6 +852,7 @@ class AppModel {
     }
 
     func rememberActiveResetPreset(_ preset: FractalPreset) {
+        activeStaticSceneID = preset.id
         var snapshot = FractalPreset.fromSettings(
             renderSettings,
             name: preset.name,
@@ -883,12 +864,17 @@ class AppModel {
         activeResetPreset = snapshot
     }
 
+    func clearActiveStaticSceneSelection() {
+        activeStaticSceneID = nil
+    }
+
     /// Capture the CURRENT settings as the reset target — used when the user
     /// manually switches fractal type (there is no source scene). A type switch
     /// applies that type's defaults, so snapshotting here makes Reset ease back
     /// to the freshly-selected type instead of the previously-loaded scene's
     /// type ("reset should also work for last fractal type selected").
     func rememberActiveResetPresetFromCurrent(name: String = "__typeDefault__") {
+        activeStaticSceneID = nil
         var snapshot = FractalPreset.fromSettings(
             renderSettings,
             name: name,
@@ -919,21 +905,59 @@ class AppModel {
     func cycleJumpingOffScene(forward: Bool) {
         let scenes = presetManager.presets
             .filter { $0.name != "__lastState__" && $0.isKeyboardSwitchableStaticPreset }
-        guard !scenes.isEmpty else { return }
+        let currentID = activeStaticSceneID ?? activeResetPreset?.id
+        guard let next = MusicPresetBankCycler.nextPreset(
+            in: scenes,
+            after: currentID,
+            forward: forward
+        ) else { return }
+        loadStaticScene(next)
+    }
 
-        let currentIndex = activeResetPreset.flatMap { active in
-            scenes.firstIndex(where: { $0.id == active.id })
+    /// Sample the raw merged Drop envelope on MainActor and advance only on a
+    /// cadence-complete rising edge. This intentionally bypasses each scene's
+    /// beat-sensitivity multiplier so a loaded preset cannot disable sequencing.
+    func updateMusicPresetBankEffect() {
+        let analyzerIsActive = audioAnalyzer.isCapturing
+        let playbackIsActive = appleMusicManager.isActive
+        let rawDropIntensity = MusicPresetBankDropEnvelope.merged(
+            analyzerOnset: audioAnalyzer.onsetLevel,
+            analyzerIsActive: analyzerIsActive,
+            playbackBeat: appleMusicManager.beatIntensity,
+            playbackIsActive: playbackIsActive
+        )
+        let shouldAdvance = musicPresetBankTrigger.update(
+            beatIntensity: rawDropIntensity,
+            configuration: musicPresetBankEffect,
+            hasActiveSource: analyzerIsActive || playbackIsActive,
+            now: ProcessInfo.processInfo.systemUptime
+        )
+        if shouldAdvance {
+            advanceMusicPresetBank()
         }
+    }
 
-        let nextIndex: Int
-        if let currentIndex {
-            let count = scenes.count
-            nextIndex = ((currentIndex + (forward ? 1 : -1)) % count + count) % count
-        } else {
-            nextIndex = forward ? 0 : scenes.count - 1
-        }
+    /// Clear cadence state when the active audio session ends. The render-side
+    /// coordinator calls this once on the source-active to source-inactive edge.
+    func resetMusicPresetBankEffectTrigger() {
+        musicPresetBankTrigger.reset()
+    }
 
-        loadStaticScene(scenes[nextIndex])
+    /// Advance the configured bank once. This is also exposed to the Music UI
+    /// as a manual preview button. All work goes through loadStaticScene so
+    /// transitions, animation teardown, pipeline preparation, and gesture
+    /// overrides remain identical to a user-selected scene.
+    func advanceMusicPresetBank() {
+        guard !musicPresetBankLoadInFlight else { return }
+        let presets = musicPresetBankEffect.bank.presets(from: presetManager.presets)
+        let currentID = activeStaticSceneID ?? activeResetPreset?.id
+        guard let next = MusicPresetBankCycler.nextPreset(in: presets, after: currentID),
+              next.id != currentID else { return }
+
+        musicPresetBankLoadInFlight = true
+        loadStaticScene(next, completion: { [weak self] in
+            self?.musicPresetBankLoadInFlight = false
+        })
     }
 
 

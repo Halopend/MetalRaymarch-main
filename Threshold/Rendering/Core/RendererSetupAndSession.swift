@@ -34,9 +34,7 @@ extension Renderer {
                 residencySet?.commit()
                 residencySet?.requestResidency()
 
-                if RENDERER_DEBUG { print("✓ Residency set created with \(residencySet?.allocatedSize ?? 0) bytes") }
             } catch {
-                if RENDERER_DEBUG { print("⚠️ Failed to create residency set: \(error)") }
                 residencySet = nil
             }
         }
@@ -58,11 +56,9 @@ extension Renderer {
     func startARSession() async {
         guard WorldTrackingProvider.isSupported else {
             print("⚠️ World tracking is not supported on this device – hand gestures unavailable")
-            await MainActor.run { appModel.gestureStatus = "World tracking not supported" }
             return
         }
 
-        if RENDERER_DEBUG { print("ℹ️ Requesting only world sensing (for pose) plus hand tracking; no extra sensors requested.") }
         var authStatus = await arSession.queryAuthorization(for: [.worldSensing, .handTracking])
         if authStatus[.worldSensing] == .notDetermined || authStatus[.handTracking] == .notDetermined {
             print("🔐 Requesting ARKit world-sensing + hand-tracking authorization")
@@ -79,9 +75,6 @@ extension Renderer {
         if !handTrackingAllowed {
             print("⚠️ Hand tracking NOT authorized. Status: \(String(describing: authStatus[.handTracking]))")
             print("   → Go to Settings > Privacy & Security > Hand & Body Tracking to enable")
-            await MainActor.run {
-                appModel.gestureStatus = "Hand tracking not authorized – check Settings"
-            }
         } else {
             print("✓ Hand tracking authorized")
         }
@@ -104,15 +97,9 @@ extension Renderer {
             try await arSession.run(providers)
             print("✓ ARKit session started with \(providers.count) providers")
             startEnvironmentMeshTasks()
-            if RENDERER_DEBUG {
-                print("  World tracking state: \(worldTracking.state)")
-            }
         } catch {
             if !hasLoggedWorldTrackingWarning {
                 print("⚠️ ARKit session failed: \(error)")
-                await MainActor.run {
-                    appModel.gestureStatus = "ARKit session failed: \(error.localizedDescription)"
-                }
                 hasLoggedWorldTrackingWarning = true
             }
         }

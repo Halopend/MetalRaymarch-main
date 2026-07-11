@@ -3,8 +3,7 @@ import Metal
 import MetalFX
 
 /// macOS-only MetalFX spatial upscaler operating on plain single-view 2D
-/// textures (the shared `MetalFXManager` uses `type2DArray`/per-eye views for
-/// the visionOS stereo path, which is awkward to reuse for the Mac renderer).
+/// textures.
 ///
 /// The Mac renderer draws the raymarch into a reduced-resolution offscreen
 /// color+depth target, then this upscaler resolves it to the full drawable
@@ -101,8 +100,7 @@ final class MacSpatialUpscaler {
         descriptor.outputHeight = outputSize.height
         descriptor.colorTextureFormat = colorFormat
         descriptor.outputTextureFormat = colorFormat
-        // sRGB formats require perceptual processing (same constraint the
-        // visionOS `MetalFXManager` documents).
+        // sRGB formats require perceptual processing.
         descriptor.colorProcessingMode = .perceptual
 
         guard let made = descriptor.makeSpatialScaler(device: device) else {

@@ -1,0 +1,85 @@
+#!/bin/bash
+# Render a repository corpus into durable PNGs, per-scene JSON, and manifest.
+set -uo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RENDERER="$REPO/Scripts/metal-raymarch-headless"
+
+if [[ $# -lt 2 ]]; then
+  echo "usage: Scripts/catalog-scenes-headless <corpus-dir> <output-dir> [--size N] [--timeout S] [--resume]" >&2
+  exit 2
+fi
+
+SOURCE_INPUT="$1"
+OUTPUT_INPUT="$2"
+shift 2
+SIZE=512
+TIMEOUT=90
+RESUME=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --size) SIZE="${2:-}"; shift 2 ;;
+    --timeout) TIMEOUT="${2:-}"; shift 2 ;;
+    --resume) RESUME=1; shift ;;
+    *) echo "catalog-scenes-headless: unknown option $1" >&2; exit 2 ;;
+  esac
+done
+[[ "$SIZE" =~ ^[0-9]+$ && "$SIZE" -ge 16 && "$SIZE" -le 4096 ]] || {
+  echo "catalog-scenes-headless: --size must be in 16...4096" >&2; exit 2;
+}
+[[ "$TIMEOUT" =~ ^[0-9]+([.][0-9]+)?$ ]] || {
+  echo "catalog-scenes-headless: --timeout must be positive" >&2; exit 2;
+}
+SOURCE="$(cd "$SOURCE_INPUT" && pwd)" || exit 2
+mkdir -p "$OUTPUT_INPUT"
+OUTPUT="$(cd "$OUTPUT_INPUT" && pwd)"
+IMAGES="$OUTPUT/images"
+RECORDS="$OUTPUT/records"
+mkdir -p "$IMAGES" "$RECORDS"
+
+TOTAL=0
+FAILED=0
+while IFS= read -r scene; do
+  [[ -n "$scene" ]] || continue
+  TOTAL=$((TOTAL + 1))
+  relative="${scene#"$SOURCE"/}"
+  stem="${relative%.*}"
+  image="$IMAGES/$stem.png"
+  record="$RECORDS/$stem.json"
+  mkdir -p "$(dirname "$image")" "$(dirname "$record")"
+  if [[ $RESUME -eq 1 && -s "$image" && -s "$record" ]]; then
+    echo "[$TOTAL] resume $relative" >&2
+    continue
+  fi
+  echo "[$TOTAL] render $relative" >&2
+  if ! "$RENDERER" "$scene" --out "$image" --json "$record" \
+      --width "$SIZE" --height "$SIZE" --timeout "$TIMEOUT" --quiet; then
+    FAILED=$((FAILED + 1))
+    echo "      FAILED $relative" >&2
+  fi
+done < <(find "$SOURCE" -type f \( -name '*.threshscene' -o -name '*.threshmp' \) | sort)
+
+MANIFEST_TMP="$OUTPUT/.manifest-$$.json"
+{
+  echo '{'
+  echo '  "renderer": "metal-raymarch-headless-v1",'
+  echo "  \"width\": $SIZE,"
+  echo "  \"height\": $SIZE,"
+  echo "  \"sceneCount\": $TOTAL,"
+  echo "  \"failureCount\": $FAILED,"
+  echo '  "records": ['
+  FIRST=1
+  while IFS= read -r record; do
+    [[ -n "$record" ]] || continue
+    if [[ $FIRST -eq 0 ]]; then echo ','; fi
+    cat "$record"
+    FIRST=0
+  done < <(find "$RECORDS" -type f -name '*.json' | sort)
+  echo
+  echo '  ]'
+  echo '}'
+} > "$MANIFEST_TMP"
+mv "$MANIFEST_TMP" "$OUTPUT/manifest.json"
+
+echo "cataloged $TOTAL scene(s), $FAILED failure(s) -> $OUTPUT" >&2
+exit "$FAILED"

@@ -15,7 +15,7 @@
 #   Scripts/build.sh test      # TRUSTWORTHY unit run: clean + serial (a green here is real)
 #   Scripts/build.sh testfast  # fast incremental tests — ⚠️ can run STALE, don't trust a pass
 #   Scripts/build.sh embeds    # generate an inspection copy under .build/Generated
-#   Scripts/build.sh all       # embeds + mac + vision + test
+#   Scripts/build.sh all       # embeds + mac + vision + iOS + test
 #
 # Override the toolchain explicitly:  DEVELOPER_DIR=/path/to/Xcode.app/Contents/Developer Scripts/build.sh mac
 
@@ -87,6 +87,6 @@ case "${1:-mac}" in
     test)     run_tests ;;
     testfast) run_tests_fast ;;
     embeds)   regen_embeds ;;
-    all)      regen_embeds && build_mac && build_vision && run_tests ;;
+    all)      regen_embeds && build_mac && build_vision && build_ios && run_tests ;;
     *) echo "Unknown command: $1 (expected: mac | vision | ios | test | testfast | embeds | all)" >&2; exit 2 ;;
 esac

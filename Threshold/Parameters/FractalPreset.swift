@@ -166,8 +166,8 @@ struct FractalPreset: Codable, Identifiable {
     var boundingShapeEnabled: Bool?       // Bounding Shape (sphere) clip on/off
     var boundingShapeRadius: Float?       // Bounding Shape radius, model units
     var boundingShapeFogEnabled: Bool?    // legacy — migrated into boundingShapeFogMode on load
-    var boundingShapeFogMode: Int?        // Bounding edge treatment: 0=off, 1=Ghost Fade, 2=Inner Shadow
-    var boundingShapeShadowDepth: Float?  // Inner Shadow band width, fraction of boundingShapeRadius
+    var boundingShapeFogMode: Int?        // Bounding edge treatment: 0=off, 1=Ghost Fade, 2=Inner Shadow, 3=Glassy Intersect
+    var boundingShapeShadowDepth: Float?  // Adjustable edge-band width, fraction of boundingShapeRadius
     var boundingShapeType: Float?         // Bounding Shape family/preset (sphere/cube/platonic), same encoding as safetyBubbleShape
     var boundToSpaceEnabled: Bool?        // Bound to Space (assumed-room clip) on/off
     var boundToSpaceMode: Int?            // 0 = Match Space, 1 = Ceiling Open, 2 = Walls Open
@@ -637,17 +637,22 @@ struct FractalPreset: Codable, Identifiable {
         !(spaceWarpOps?.isEmpty ?? true) || fractalType == .custom || embeddedFormula != nil
     }
 
+    /// Scene-authored DE-tail feature bakes used by preset prewarming. Older
+    /// scenes default scrunch off and hand interaction on, matching apply().
+    var effectiveHasEnvScrunch: Bool { envScrunchEnabled ?? false }
+    var effectiveHasHandField: Bool { handAttraction?.enabled ?? true }
+
     /// Returns a unique key for pipeline caching based on function constants.
     /// Presets with identical function constant values can share pipelines.
     ///
-    /// The `_B..._SW...` scene segment must match `RenderPipelineKeyContext`'s exact
+    /// The scene segment must match `RenderPipelineKeyContext`'s exact
     /// key (inserted between RS and _N). Without it, `getPipeline(forPreset:)` stores
     /// the prewarmed pipeline under a key `selectPipeline` never looks up once the
     /// preset is applied, so preset loads miss the prewarm and rebuild/fall back.
     var pipelineCacheKey: String {
         let fc = deriveFunctionConstants()
         let powerKey = fc.mandelbulbPower.map { "_P\($0)" } ?? ""
-        let sceneKey = "_B\(effectiveSafetyBubbleEnabled ? 1 : 0)_SW\(effectiveHasSpaceWarp ? 1 : 0)"
+        let sceneKey = "_B\(effectiveSafetyBubbleEnabled ? 1 : 0)_SW\(effectiveHasSpaceWarp ? 1 : 0)_ES\(effectiveHasEnvScrunch ? 1 : 0)_HF\(effectiveHasHandField ? 1 : 0)"
         return "FT\(fractalType.rawValue)_FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)\(sceneKey)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)_CI\(fc.colorIterations)\(powerKey)"
     }
     
@@ -929,6 +934,12 @@ struct FractalPreset: Codable, Identifiable {
             settings.handAttractionConfig = handAttraction
         }
 
+        // Reset the complete transformation domain before applying this scene.
+        // Besides the persisted systems below, this clears the legacy/custom
+        // Space Warp controls and their live music offsets; those controls can
+        // otherwise survive into an older/plain scene that has no transform keys.
+        settings.resetSceneTransformations(spaceWarpStack: spaceWarpOps ?? [])
+
         // Space module (domain transforms) — AUTHORITATIVE like the sphere
         // projection below: a scene without the field means the default, never
         // the previous scene's inversion.
@@ -945,12 +956,6 @@ struct FractalPreset: Codable, Identifiable {
         // Same authoritative-reset rule: a scene without the mismatch field
         // means a correct DE, so clear any δ the previous scene left live.
         settings.deIterationMismatch = deIterationMismatch ?? 0.0
-
-        // Composable domain-transform stack (Transformations section). A scene fully
-        // defines its transforms, so apply AUTHORITATIVELY: nil/absent (an empty stack
-        // or an older pre-transform scene) clears any transforms the previous scene
-        // left live, instead of leaking them into this one.
-        settings.spaceWarpStack = spaceWarpOps ?? []
 
         // Glass-floor platform — AUTHORITATIVE: absent means the defaults
         // (platform on at 1.888), never the previous scene's platform.
@@ -1137,7 +1142,10 @@ extension FractalPreset {
     }
 
     var hasMusicReactiveMappings: Bool {
-        !(musicReactiveMappings?.isEmpty ?? true)
+        if let audioReactiveConfig {
+            return !audioReactiveConfig.musicReactiveMappings.isEmpty
+        }
+        return !(musicReactiveMappings?.isEmpty ?? true)
     }
 
     /// Names that should appear in the "Jumping Off" browse tab even though they
@@ -1166,10 +1174,15 @@ extension FractalPreset {
         return !hasMusicReactiveMappings
     }
 
-    /// Whether this preset should participate in desktop left/right scene
-    /// switching. Includes both Jumping Off and Music Reactive presets, while
-    /// excluding custom embedded-formula scenes.
+    /// Whether this preset should participate in left/right scene switching.
+    /// Includes both Jumping Off and Music Reactive presets, while excluding
+    /// custom embedded-formula scenes. Mixed-immersion scenes are intentionally
+    /// excluded from macOS switching because macOS has no Mixed immersion mode.
     var isKeyboardSwitchableStaticPreset: Bool {
+#if os(macOS)
+        !isCustomScenePreset && mixedModeScene != true
+#else
         !isCustomScenePreset
+#endif
     }
 }

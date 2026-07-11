@@ -51,9 +51,7 @@ typedef NS_ENUM(EnumBackingType, VertexAttribute)
 
 typedef NS_ENUM(EnumBackingType, TextureIndex)
 {
-    TextureIndexColor    = 0,
-    TextureIndexPrevDepth = 1,  // Previous-frame depth for temporal march warm-start
-    TextureIndexCoarseWarmStart = 2  // Conservative cone coarse-prepass warmT (LOWER BOUND on entry distance per 8x8 block)
+    TextureIndexColor = 0,
 };
 
 // Function constant indices for shader specialization
@@ -75,7 +73,6 @@ typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
     FCIndexMandelbulbPower     = 12, // int: Bake Mandelbulb power for fastPowR optimization
     FCIndexWarmStart           = 13, // bool: Compile in temporal-depth march warm-start (visionOS fragment path)
     // index 14 = FC_COHERENT_PACKET (compute kernel only; see Shaders.metal)
-    FCIndexCoarseWarmStart     = 15, // bool: Compile in the conservative cone coarse-prepass warm-start (fragment path + cone kernel). Index 14 is taken by FC_COHERENT_PACKET, so this uses the next free slot.
 };
 
 // Fractal type selection
@@ -394,7 +391,6 @@ typedef struct
     float colorIterations;   // How many iterations contribute to color
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring, 4=pinky)
-    int warmStartEnabled;    // 1 = previous-frame depth texture is valid for march warm-start
     int fractalType;         // 0=Mandelbox, 1-14=formula types (see FractalType enum)
     float lightingSoftness;  // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
     int sphericalInversionMode; // 0=off, 1=outward-in ray inversion
@@ -407,25 +403,14 @@ typedef struct
     float spaceWarpParam3;
     vector_float3 spaceWarpAxis;    // Built-in Twist rotation axis (orientation); normalized on GPU. Origin = spaceWarpParam1/2/3
     SpaceWarpStack spaceWarpStack;  // Composable domain-transform stack (Transformations UI). count==0 = off.
-    // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
-    float stepMultiplier;    // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius; // Bounding sphere for early ray rejection (0 = disabled)
-    int smartAdvanceEnabled; // 1 = grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient to step further through grazing/receding regions)
     float coneMarchScale;    // Cone marching: per-distance growth of the march hit threshold (= projected pixel footprint × stop margin). 0 = off
-    int coneCoverageAAEnabled; // 1 = CTSS-lite silhouette AA: composite near-miss edges over background by cone-footprint coverage (fragment path). 0 = off
     int shadowsEnabled;      // 0 = skip the per-pixel shadow marches (flat, cheaper lighting); 1 = full soft shadows
     float distanceLODFalloff;// Distance iteration LOD: fractal iterations dropped per unit ray distance. 0 = off
     int benchCollectSteps;   // 1 = accumulate per-ray march step counts into BufferIndexBenchCounters (benchmark only)
 
-    // === CONSERVATIVE CONE COARSE-PREPASS WARM-START ===
-    // Raw per-pixel lateral footprint at depth 1: 2·tan(fovY/2)/viewportHeight
-    // (= coneMarchScale WITHOUT the LOD-widening s·coneMarchMaxPixels factor).
-    // Used by the cone kernel to bound the 8x8 block footprint; the fragment path
-    // also carries it so it can be read alongside the coarse texture if needed.
-    float pixelFootprintPerDist;
     // Conservative UPPER BOUND on physical→screen magnification under foveation.
     // Over-bounding only shortens the warm-start skip (always safe). 1.0 = none.
-    float coarseRateMagMax;
 
     // === SPRING BLOB NAVIGATION WIDGET ===
     float springDisplacementX;        // Spring displacement X (NDC-ish space)
@@ -466,9 +451,10 @@ typedef struct
     // passthroughBackground is set) over the outer ~third of the sphere —
     // translucent near the boundary. 2 = Inner Shadow: fades RGB only over a
     // band whose width is boundingShadowDepth, staying fully opaque.
+    // 3 = Glassy Intersect: tinted Fresnel band, translucent under passthrough.
     int boundingFogEnabled;
-    // Inner Shadow band width, as a fraction of boundingSphereRadius (0-1).
-    // Only used while boundingFogEnabled == 2.
+    // Adjustable edge-band width, as a fraction of boundingSphereRadius (0-1).
+    // Used while boundingFogEnabled is 2 (shadow) or 3 (glass).
     float boundingShadowDepth;
     // Bounding Shape family/preset — same encoding as safetyBubbleShape:
     // 0...1 = sphere/cube morph, 2...6 = discrete platonic solids (see
@@ -555,19 +541,10 @@ typedef struct
     float spaceWarpParam3;
     vector_float3 spaceWarpAxis;    // Built-in Twist rotation axis (orientation); normalized on GPU. Origin = spaceWarpParam1/2/3
     SpaceWarpStack spaceWarpStack;  // Composable domain-transform stack (Transformations UI). count==0 = off.
-    // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
-    float stepMultiplier;        // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius;  // Bounding sphere for early ray rejection (0 = disabled)
-    int smartAdvanceEnabled;     // 1 = grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient to step further through grazing/receding regions)
     float coneMarchScale;        // Cone marching: per-distance growth of the march hit threshold (= projected pixel footprint × stop margin). 0 = off
-    int coneCoverageAAEnabled;   // 1 = CTSS-lite silhouette AA (fragment path only; unused on the compute tile path). 0 = off
     int shadowsEnabled;          // 0 = skip the per-pixel shadow marches (flat, cheaper lighting); 1 = full soft shadows
     float distanceLODFalloff;    // Distance iteration LOD: fractal iterations dropped per unit ray distance. 0 = off
-    // === CONSERVATIVE CONE COARSE-PREPASS WARM-START ===
-    // Raw per-pixel lateral footprint at depth 1 (no LOD widening); see Uniforms.
-    float pixelFootprintPerDist;
-    // Conservative UPPER BOUND on physical→screen magnification under foveation (>=1).
-    float coarseRateMagMax;
     float blendFactor;           // Temporal reuse factor: 1.0 = moving, lower = stable enough to trust depth history
     // === SPRING BLOB NAVIGATION WIDGET ===
     // Packed as scalars to avoid float3 alignment issues between Swift and Metal
@@ -629,11 +606,16 @@ typedef struct
     matrix_float4x4 modelToWorldMatrix; // march/model space → world meters
 
     EnvScrunchParams envScrunch;        // scanned-environment scrunch field (grid via bindless address)
+    // Bounding-edge treatment, matching Uniforms.boundingFogEnabled. The compute
+    // path is never selected for passthrough, so Glassy Intersect remains opaque
+    // here while retaining its tint and Fresnel highlight.
+    int boundingFogEnabled;
+    float boundingShadowDepth;
     // Bounding Shape family/preset — same encoding as Uniforms.boundingShapeType /
     // safetyBubbleShape (0...1 sphere→cube morph, 2...6 platonic solids). The
-    // compute tile path has no per-hit edge fade, so it HARD-clips hits outside
-    // this shape (see the reclassify in adaptiveHierarchical8x8). Only meaningful
-    // while boundingSphereRadius > 0.
+    // compute tile path hard-clips hits outside this shape, then applies the
+    // selected treatment to surviving hits. Only meaningful while
+    // boundingSphereRadius > 0.
     float boundingShapeType;
     // Model-space center of the Bounding Shape clip test (default 0). Mirrors
     // Uniforms.boundingShapeCenter — pins the shape while the Linear Rail slides

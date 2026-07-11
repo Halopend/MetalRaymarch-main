@@ -1,0 +1,77 @@
+#!/bin/bash
+# Cached launcher for the original Metal Raymarch offscreen renderer.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BUILD="${THRESHOLD_HEADLESS_BUILD_DIR:-$REPO/.build/headless}"
+BIN="$BUILD/metal-raymarch-headless"
+METALLIB="$BUILD/shaders.metallib"
+WIRE="$REPO/ThresholdQuickLook/wire_quicklook.rb"
+FORCE=0
+if [[ "${1:-}" == "--rebuild" ]]; then FORCE=1; shift; fi
+
+if [[ -z "${DEVELOPER_DIR:-}" || ! -x "$DEVELOPER_DIR/usr/bin/xcodebuild" ]]; then
+  for candidate in \
+    /Applications/Xcode-beta.app/Contents/Developer \
+    /Applications/Xcode.app/Contents/Developer \
+    "$(xcode-select -p 2>/dev/null)"; do
+    if [[ -x "$candidate/usr/bin/xcodebuild" ]]; then
+      DEVELOPER_DIR="$candidate"
+      break
+    fi
+  done
+fi
+export DEVELOPER_DIR
+[[ -x "${DEVELOPER_DIR:-}/usr/bin/xcodebuild" ]] || {
+  echo "metal-raymarch-headless: full Xcode toolchain not found" >&2
+  exit 2
+}
+
+FILES=()
+while IFS= read -r path; do FILES+=("$REPO/$path"); done < <(
+  awk 'active && /^\]/ {exit} /SHARED_SOURCES *= *\[/ {active=1} active' "$WIRE" \
+    | grep -oE '"(Threshold|ThresholdQuickLook)/[^"]+\.swift"' \
+    | tr -d '"' | sort -u
+)
+FILES+=("$REPO/ThresholdQuickLook/Tests/HeadlessMain.swift")
+[[ ${#FILES[@]} -ge 30 ]] || {
+  echo "metal-raymarch-headless: Quick Look source closure is incomplete" >&2
+  exit 2
+}
+
+NEEDS_BUILD=$FORCE
+if [[ ! -x "$BIN" || ! -f "$METALLIB" ]]; then NEEDS_BUILD=1; fi
+if [[ $NEEDS_BUILD -eq 0 ]]; then
+  INPUTS=("${FILES[@]}" "$0" "$WIRE" "$REPO/Threshold/Rendering/Shaders.metal"
+          "$REPO/Threshold/Rendering/ShaderTypes.h")
+  while IFS= read -r path; do INPUTS+=("$path"); done < <(
+    find "$REPO/Threshold/Formulas" -type f -name '*.h' -print
+  )
+  for path in "${INPUTS[@]}"; do
+    if [[ "$path" -nt "$BIN" ]]; then NEEDS_BUILD=1; break; fi
+  done
+fi
+
+if [[ $NEEDS_BUILD -eq 1 ]]; then
+  mkdir -p "$BUILD"
+  TMP="$BUILD/.build-$$"
+  mkdir -p "$TMP"
+  trap 'rm -rf "$TMP"' EXIT
+  echo "metal-raymarch-headless: building cached renderer" >&2
+  (
+    cd "$REPO/Threshold"
+    xcrun -sdk macosx metal -c Rendering/Shaders.metal -o "$TMP/shaders.air"
+    xcrun -sdk macosx metallib "$TMP/shaders.air" -o "$TMP/shaders.metallib"
+  )
+  ARCH="$(uname -m)"
+  xcrun -sdk macosx swiftc -O -target "$ARCH-apple-macos26.0" \
+    -import-objc-header "$REPO/Threshold/Rendering/ShaderTypes.h" \
+    -framework Metal -framework MetalKit -framework ModelIO -framework AppKit \
+    "${FILES[@]}" -o "$TMP/metal-raymarch-headless"
+  mv "$TMP/shaders.metallib" "$METALLIB"
+  mv "$TMP/metal-raymarch-headless" "$BIN"
+  trap - EXIT
+  rm -rf "$TMP"
+fi
+
+THRESHOLD_QL_METALLIB="$METALLIB" exec "$BIN" "$@"

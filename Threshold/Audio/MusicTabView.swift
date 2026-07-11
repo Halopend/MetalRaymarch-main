@@ -8,12 +8,14 @@
 //  controls, and fractal audio-reactivity settings.
 //
 
+import Foundation
 import SwiftUI
 
 // MARK: - Music Tab Content
 
 enum MusicPanelTab: String, CaseIterable {
     case music = "Music"
+    case lfo = "LFO"
     case songs = "Songs"
     case playlists = "Playlists"
     case albums = "Albums"
@@ -29,6 +31,8 @@ struct MusicTabContent: View {
     private let musicService: MusicService
     private let audioAnalyzer: AudioAnalyzer
     private let renderSettings: RenderSettings
+    @Binding private var presetBankEffect: MusicPresetBankEffect
+    private let onAdvancePresetBank: @MainActor () -> Void
     #if os(macOS)
     private let systemAudioCapture: SystemAudioTapCapture
     #endif
@@ -58,7 +62,7 @@ struct MusicTabContent: View {
         switch tab {
         case .songs, .playlists, .albums:
             return .music
-        case .music, .visualizations:
+        case .music, .lfo, .visualizations:
             return tab
         }
         #else
@@ -67,8 +71,10 @@ struct MusicTabContent: View {
     }
 
     private var activeMusicPermutationCount: Int {
-        guard cache.audioReactive.fractalAudioReactiveEnabled else { return 0 }
-        return cache.audioReactive.musicReactiveMappings.count
+        let mappingCount = cache.audioReactive.fractalAudioReactiveEnabled
+            ? cache.audioReactive.musicReactiveMappings.count
+            : 0
+        return mappingCount + (presetBankEffect.isEnabled ? 1 : 0)
     }
 
     private var hasFlashingVisualMappings: Bool {
@@ -86,6 +92,8 @@ struct MusicTabContent: View {
         audioAnalyzer: AudioAnalyzer,
         renderSettings: RenderSettings,
         systemAudioCapture: SystemAudioTapCapture,
+        presetBankEffect: Binding<MusicPresetBankEffect>,
+        onAdvancePresetBank: @escaping @MainActor () -> Void,
         tabSelection: Binding<MusicPanelTab>? = nil
     ) {
         self.cache = cache
@@ -93,6 +101,8 @@ struct MusicTabContent: View {
         self.audioAnalyzer = audioAnalyzer
         self.renderSettings = renderSettings
         self.systemAudioCapture = systemAudioCapture
+        _presetBankEffect = presetBankEffect
+        self.onAdvancePresetBank = onAdvancePresetBank
         self.tabSelection = tabSelection
         _viewModel = State(initialValue: MusicTabViewModel(musicService: musicService))
     }
@@ -102,12 +112,16 @@ struct MusicTabContent: View {
         musicService: MusicService,
         audioAnalyzer: AudioAnalyzer,
         renderSettings: RenderSettings,
+        presetBankEffect: Binding<MusicPresetBankEffect>,
+        onAdvancePresetBank: @escaping @MainActor () -> Void,
         tabSelection: Binding<MusicPanelTab>? = nil
     ) {
         self.cache = cache
         self.musicService = musicService
         self.audioAnalyzer = audioAnalyzer
         self.renderSettings = renderSettings
+        _presetBankEffect = presetBankEffect
+        self.onAdvancePresetBank = onAdvancePresetBank
         self.tabSelection = tabSelection
         _viewModel = State(initialValue: MusicTabViewModel(musicService: musicService))
     }
@@ -145,6 +159,9 @@ struct MusicTabContent: View {
                     }
                     #endif
 
+                case .lfo:
+                    lfoDashboard
+
                 case .songs:
                     librarySongsSection
 
@@ -161,6 +178,7 @@ struct MusicTabContent: View {
                         ScrollView(.vertical, showsIndicators: true) {
                             VStack(spacing: 10) {
                                 reactivitySection
+                                presetBankSection
                                 presetsSection
                                 levelMeters
                             }
@@ -343,7 +361,7 @@ struct MusicTabContent: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Music Reactive Visuals")
                 .font(.subheadline.bold())
-            Text("Toggle and map audio-driven modulation")
+            Text("Map audio modulation or sequence full preset banks")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
@@ -370,6 +388,123 @@ struct MusicTabContent: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.08)))
+    }
+
+    // MARK: - Preset Bank Sequencer
+
+    private var presetBankSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Label("Preset Bank Sequencer", systemImage: AppIcons.squareStack3dUp)
+                            .font(.subheadline.bold())
+                        Image(systemName: AppIcons.exclamationmarkTriangle)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.orange)
+                            .accessibilityHidden(true)
+                            .help("Changing full visual presets can produce large or flashing changes.")
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Preset Bank Sequencer")
+                    .accessibilityHint("Warning: changing full visual presets can produce large or flashing changes.")
+                    Text("Advance to a new full visual scene from detected Drops.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+
+                Toggle("Sequence presets", isOn: Binding(
+                    get: { presetBankEffect.isEnabled },
+                    set: { isEnabled in updatePresetBankEffect { $0.isEnabled = isEnabled } }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            }
+
+            if presetBankEffect.isEnabled {
+                Picker("Bank", selection: Binding(
+                    get: { presetBankEffect.bank },
+                    set: { bank in updatePresetBankEffect { $0.bank = bank } }
+                )) {
+                    ForEach(MusicPresetBank.allCases, id: \.self) { bank in
+                        Label(bank.shortDisplayName, systemImage: bank.icon).tag(bank)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                HStack(spacing: 8) {
+                    Text("Change every")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Picker("Change every", selection: Binding(
+                        get: { presetBankEffect.dropsPerChange },
+                        set: { cadence in updatePresetBankEffect { $0.dropsPerChange = cadence } }
+                    )) {
+                        ForEach(MusicPresetBankEffect.supportedDropCadences, id: \.self) { cadence in
+                            Text("\(cadence) Drop\(cadence == 1 ? "" : "s")").tag(cadence)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .controlSize(.small)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Minimum scene time")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(Int(presetBankEffect.minimumInterval.rounded())) s")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { presetBankEffect.minimumInterval },
+                            set: { interval in updatePresetBankEffect { $0.minimumInterval = interval } }
+                        ),
+                        in: 2...60,
+                        step: 1
+                    )
+                    .accessibilityLabel("Minimum scene time")
+                    .accessibilityValue("\(Int(presetBankEffect.minimumInterval.rounded())) seconds")
+                }
+
+                HStack(spacing: 8) {
+                    Button {
+                        onAdvancePresetBank()
+                    } label: {
+                        Label("Next Preset", systemImage: AppIcons.forwardFill)
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Spacer(minLength: 0)
+
+                    Text(presetBankEffect.bank.displayName)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.purple)
+                }
+            } else {
+                Text("Off — detected Drops leave the current full scene unchanged.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.indigo.opacity(0.10)))
+    }
+
+    private func updatePresetBankEffect(_ mutate: (inout MusicPresetBankEffect) -> Void) {
+        var effect = presetBankEffect
+        mutate(&effect)
+        presetBankEffect = effect.normalized
     }
 
     // MARK: - Saved Reactivity Presets
@@ -1492,6 +1627,128 @@ struct MusicTabContent: View {
         cache.push(\.musicReactiveMappings, value: mappings)
     }
 
+    private var lfoDashboard: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Low Frequency Oscillator", systemImage: "waveform.path")
+                            .font(.headline)
+                        Text("Add slow, repeating motion to each mapped visual parameter.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Toggle("Engine", isOn: reactToMusicBinding)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                }
+
+                if cache.audioReactive.musicReactiveMappings.isEmpty {
+                    Text("Add a parameter mapping in Reactive Controls before assigning an LFO.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.22)))
+                } else {
+                    LazyVStack(spacing: 8) {
+                        ForEach(Array(cache.audioReactive.musicReactiveMappings.enumerated()), id: \.element.id) { index, mapping in
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: mapping.target.icon(for: cache.fractalType))
+                                        .foregroundStyle(.secondary)
+                                    Text(mapping.target.displayName(for: cache.fractalType))
+                                        .font(.caption.bold())
+                                    Spacer()
+                                    Toggle("LFO", isOn: Binding(
+                                        get: { mappingAt(index)?.lfo.enabled ?? false },
+                                        set: { enabled in updateMapping(index) { $0.lfo.enabled = enabled } }
+                                    ))
+                                    .toggleStyle(.switch)
+                                    .controlSize(.small)
+                                }
+
+                                if mappingAt(index)?.lfo.enabled == true {
+                                    Picker("Shape", selection: Binding(
+                                        get: { mappingAt(index)?.lfo.shape ?? .sine },
+                                        set: { shape in updateMapping(index) { $0.lfo.shape = shape } }
+                                    )) {
+                                        ForEach(LFOShape.allCases, id: \.self) { shape in
+                                            Text(shape.rawValue.capitalized).tag(shape)
+                                        }
+                                    }
+                                    .pickerStyle(.segmented)
+
+                                    lfoFrequencyRow(index: index)
+
+                                    sliderRow(label: "Depth", value: Binding(
+                                        get: { mappingAt(index)?.lfo.amplitude ?? 0.2 },
+                                        set: { amplitude in updateMapping(index) { $0.lfo.amplitude = amplitude } }
+                                    ), range: 0...1)
+                                }
+                            }
+                            .padding(12)
+                            .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.09)))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .strokeBorder(Color.purple.opacity(0.16), lineWidth: 1)
+                            )
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+    }
+
+    private func lfoFrequencyRow(index: Int) -> some View {
+        let frequency = mappingAt(index)?.lfo.frequency ?? 0.1
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text("Rate")
+                    .font(.caption)
+                Spacer()
+                Text(lfoRateDescription(frequency))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            Slider(
+                value: Binding(
+                    get: {
+                        log10(Double(max(mappingAt(index)?.lfo.frequency ?? 0.1, 0.001)))
+                    },
+                    set: { exponent in
+                        updateMapping(index) { mapping in
+                            mapping.lfo.frequency = Float(pow(10, exponent))
+                        }
+                    }
+                ),
+                in: -3...log10(5.0)
+            )
+            .accessibilityLabel("LFO rate")
+            .accessibilityValue(lfoRateDescription(frequency))
+        }
+    }
+
+    private func lfoRateDescription(_ frequency: Float) -> String {
+        let clampedFrequency = max(frequency, 0.001)
+        let period = 1.0 / Double(clampedFrequency)
+        if period >= 60 {
+            let minutes = Int(period) / 60
+            let seconds = Int(period.rounded()) % 60
+            return String(format: "%.3f Hz · %dm %02ds", clampedFrequency, minutes, seconds)
+        }
+        if period >= 10 {
+            return String(format: "%.3f Hz · %.0fs", clampedFrequency, period)
+        }
+        return String(format: "%.2f Hz · %.1fs", clampedFrequency, period)
+    }
+
     private var availableMappingTargetsToAdd: [MusicReactiveTarget] {
         let existing = Set(cache.audioReactive.musicReactiveMappings.map(\.target))
         // One transform-stack slot per active op (slot N = transform card #N+1).
@@ -1679,14 +1936,18 @@ private struct MusicTabPreviewHarness: View {
                 musicService: musicService,
                 audioAnalyzer: AudioAnalyzer(),
                 renderSettings: RenderSettings(),
-                systemAudioCapture: SystemAudioTapCapture(analyzer: AudioAnalyzer())
+                systemAudioCapture: SystemAudioTapCapture(analyzer: AudioAnalyzer()),
+                presetBankEffect: .constant(MusicPresetBankEffect()),
+                onAdvancePresetBank: {}
             )
             #else
             MusicTabContent(
                 cache: cache,
                 musicService: musicService,
                 audioAnalyzer: AudioAnalyzer(),
-                renderSettings: RenderSettings()
+                renderSettings: RenderSettings(),
+                presetBankEffect: .constant(MusicPresetBankEffect()),
+                onAdvancePresetBank: {}
             )
             #endif
         }

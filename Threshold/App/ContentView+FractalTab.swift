@@ -21,9 +21,11 @@ extension ContentView {
                 FractalGridView(
                     animationManager: appModel.animationManager,
                     presetManager: appModel.presetManager,
+                    activeStaticSceneID: appModel.activeStaticSceneID,
                     tabSelection: $fractalBrowseTab,
                     onEditScene: openAnimationEditor,
                     onLoadAnimationScene: { _ in
+                        appModel.clearActiveStaticSceneSelection()
                         appModel.dismissMenuWindowForSceneLoad()
                     },
                     onLoadStaticScene: { preset in
@@ -455,43 +457,7 @@ extension ContentView {
             // is a quick-adjust affordance while tweaking in the immersive
             // scene and is hidden entirely on iOS / macOS.
 #if os(visionOS)
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Label("Platform", systemImage: AppIcons.circleHexagongridFill)
-                        .font(.headline)
-                    Spacer()
-                    if cache.display.platformEnabled {
-                        Text(String(format: "%.1f m", cache.display.platformRadius))
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                    Toggle("Show", isOn: Binding(
-                        get: { cache.display.platformEnabled },
-                        set: { cache.display.platformEnabled = $0 }
-                    ))
-                    .labelsHidden()
-                    .tint(.cyan)
-                    .controlSize(.mini)
-                }
-
-                Text("Controls the glass floor field in the immersive space. The fractal color blends through it so the platform reads as a thick transparent surface. Toggle off for a clean floor-less view.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if cache.display.platformEnabled {
-                    EffectSliderRow(icon: "circle.dotted", label: "Radius",
-                        value: Binding(
-                            get: { cache.display.platformRadius },
-                            set: { cache.display.platformRadius = $0 }
-                        ), range: 0.5...2.5,
-                        enabled: .constant(true),
-                        onChanged: { cache.commitPlatformRadius() },
-                        showToggle: false)
-                }
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.07)))
+            PlatformControlsSection(cache: cache)
 #endif
 
             // (Spherical Inversion + Sphere Projection moved to the Transformations
@@ -646,18 +612,6 @@ extension ContentView {
             // ── Sliders, two per row. Foveation is Adaptive-Compute-only. ──
             LazyVGrid(columns: twoCol, alignment: .leading, spacing: 10) {
                 CompactValueSlider(
-                    title: "Over-Relaxation",
-                    value: Binding(
-                        get: { cache.quality.overRelaxationMax },
-                        set: { cache.quality.overRelaxationMax = $0; cache.push(\.overRelaxationMax, value: $0) }
-                    ),
-                    range: 1.0...1.6,
-                    display: String(format: "%.2f×", cache.quality.overRelaxationMax),
-                    tint: .cyan,
-                    helpText: "How big a step the march takes in open space (Keinert enhanced sphere tracing). Higher = faster; lower = sharper on thin features. 1.0 = plain conservative tracing."
-                )
-
-                CompactValueSlider(
                     title: "Cone Marching",
                     value: Binding(
                         get: { cache.quality.coneMarchStrength },
@@ -700,12 +654,6 @@ extension ContentView {
 
             // ── Toggles ("checkmarks"), arranged horizontally two per row. ──
             LazyVGrid(columns: twoCol, alignment: .leading, spacing: 8) {
-                accelToggleCompact("Smart Advance",
-                            isOn: cache.quality.smartAdvanceEnabled,
-                            help: "Leads ahead with larger steps through grazing/receding regions where plain tracing creeps. Faster on open and grazing angles; can soften fine silhouettes.") { v in
-                    cache.quality.smartAdvanceEnabled = v; cache.push(\.smartAdvanceEnabled, value: v)
-                }
-
                 accelToggleCompact("Self-Shadows",
                             isOn: cache.quality.shadowsEnabled,
                             help: "Soft self-shadowing from the spotlight and sun. Turning it off skips two extra marches on every lit pixel — a large saving — for flatter, faster lighting.") { v in
@@ -728,19 +676,6 @@ extension ContentView {
                 .disabled(!isCompute)
                 .opacity(isCompute ? 1 : 0.45)
 
-                accelToggleCompact("Cone Warm-Start",
-                            isOn: cache.quality.coarsePrepassWarmStartEnabled,
-                            help: "A low-res cone pre-pass marches one cone per 8×8 block and writes a provable lower bound on the nearest surface distance; the full march starts there, skipping empty space without ever skipping a surface. Conservative and exact (box/fold fractals, un-warped domain only). Fragment renderer path; off by default.") { v in
-                    cache.quality.coarsePrepassWarmStartEnabled = v; cache.push(\.coarsePrepassWarmStartEnabled, value: v)
-                }
-
-                accelToggleCompact("Cone Coverage AA",
-                            isOn: cache.quality.coneCoverageAAEnabled,
-                            help: "Anti-aliases silhouettes from the cone footprint so Cone Marching can run harder (fewer steps) without blobby, inflated edges. Softens outer edges only — no sub-pixel thin-feature recovery. Fragment renderer path.") { v in
-                    cache.quality.coneCoverageAAEnabled = v; cache.push(\.coneCoverageAAEnabled, value: v)
-                }
-                .disabled(isCompute)
-                .opacity(isCompute ? 0.45 : 1)
             }
         }
         .padding()
@@ -832,19 +767,23 @@ extension ContentView {
             .opacity(cache.quality.boundingSphereSkipEnabled ? 1 : 0.45)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Fade Effect").font(.caption)
-                Picker("Fade Effect", selection: Binding(
-                    get: { BoundingFogMode(rawValue: cache.quality.boundingShapeFogMode) ?? .off },
-                    set: { mode in
-                        cache.quality.boundingShapeFogMode = mode.rawValue
-                        cache.push(\.boundingShapeFogMode, value: mode.rawValue)
+                HStack {
+                    Text("Edge Effect").font(.caption)
+                    Spacer()
+                    Picker("Edge Effect", selection: Binding(
+                        get: { BoundingFogMode(rawValue: cache.quality.boundingShapeFogMode) ?? .off },
+                        set: { mode in
+                            cache.quality.boundingShapeFogMode = mode.rawValue
+                            cache.push(\.boundingShapeFogMode, value: mode.rawValue)
+                        }
+                    )) {
+                        ForEach(BoundingFogMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
                     }
-                )) {
-                    ForEach(BoundingFogMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
                 }
-                .pickerStyle(.segmented)
 
                 Text(BoundingFogMode(rawValue: cache.quality.boundingShapeFogMode)?.help ?? BoundingFogMode.off.help)
                     .font(.caption2)
@@ -854,11 +793,14 @@ extension ContentView {
             .disabled(!boundingEdgeTreatmentActive)
             .opacity(boundingEdgeTreatmentActive ? 1 : 0.45)
 
-            if cache.quality.boundingShapeFogMode == BoundingFogMode.innerShadow.rawValue {
-                accelSliderCompact("Shadow Depth",
+            let edgeMode = BoundingFogMode(rawValue: cache.quality.boundingShapeFogMode) ?? .off
+            if edgeMode == .innerShadow || edgeMode == .glassyIntersect {
+                accelSliderCompact(edgeMode == .glassyIntersect ? "Glass Width" : "Shadow Depth",
                             value: cache.quality.boundingShapeShadowDepth, range: 0.02...0.95,
                             display: "\(Int((cache.quality.boundingShapeShadowDepth * 100).rounded()))%",
-                            help: "How far the darkening reaches in from the bounding shape's edge, as a fraction of its radius.") { v in
+                            help: edgeMode == .glassyIntersect
+                                ? "How far the glass treatment reaches in from the bounding shape's edge, as a fraction of its radius."
+                                : "How far the darkening reaches in from the bounding shape's edge, as a fraction of its radius.") { v in
                     cache.quality.boundingShapeShadowDepth = v; cache.push(\.boundingShapeShadowDepth, value: v)
                 }
                 .disabled(!boundingEdgeTreatmentActive)

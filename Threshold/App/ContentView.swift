@@ -108,8 +108,16 @@ struct ContentView: View {
     }
 
     private var activeMusicPermutationCount: Int {
-        guard cache.audioReactive.fractalAudioReactiveEnabled else { return 0 }
-        return cache.audioReactive.musicReactiveMappings.count
+        cache.audioReactive.fractalAudioReactiveEnabled
+            ? cache.audioReactive.musicReactiveMappings.count
+            : 0
+    }
+
+    private var musicPresetBankEffectBinding: Binding<MusicPresetBankEffect> {
+        Binding(
+            get: { appModel.musicPresetBankEffect },
+            set: { appModel.musicPresetBankEffect = $0 }
+        )
     }
 
     /// True when spherical inversion is warping space, or the sphere-projection
@@ -131,6 +139,7 @@ struct ContentView: View {
         if cache.lighting.beatFlashEffect.enabled { count += 1 }
         if cache.fractalType.supports(.polarRotation), cache.lighting.polarRotationEffect.enabled { count += 1 }
         if cache.fractalType.supports(.juliaDrift), cache.lighting.juliaDriftEffect.enabled { count += 1 }
+        if appModel.musicPresetBankEffect.isEnabled { count += 1 }
         return count
     }
 
@@ -607,7 +616,7 @@ struct ContentView: View {
                                 .font(.system(size: IconSize.medium, weight: .semibold))
                             topDockBadge(for: tab)
                         }
-                        Text(tab.rawValue)
+                        Text(tab.title)
                             .font(.subheadline.weight(.semibold))
                     }
                     .padding(.horizontal, 14)
@@ -661,7 +670,12 @@ struct ContentView: View {
                 VStack(spacing: 8) {
                     switch topDockTab {
                     case .explore:
-                        let exploreSections = ExploreRailSection.allCases.filter { $0 != .customScenes || allowCustomScenes }
+                        let exploreSections = ExploreRailSection.allCases.filter { section in
+                            #if os(macOS)
+                            guard section != .mixed else { return false }
+                            #endif
+                            return section != .customScenes || allowCustomScenes
+                        }
                         ForEach(exploreSections, id: \.self) { section in
                             railButton(
                                 title: section.rawValue,
@@ -883,7 +897,7 @@ struct ContentView: View {
     private func isSupportedPinnedRailControl(_ control: PinnedRailControl) -> Bool {
         #if os(macOS)
         switch control {
-        case .musicSongs, .musicPlaylists, .musicAlbums:
+        case .exploreMixed, .musicSongs, .musicPlaylists, .musicAlbums:
             return false
         default:
             return true
@@ -967,10 +981,15 @@ struct ContentView: View {
 
     private func activateExploreSection(_ section: ExploreRailSection) {
         topDockTab = .explore
-        exploreRailSection = section
+        #if os(macOS)
+        let resolvedSection: ExploreRailSection = section == .mixed ? .jumpingOff : section
+        #else
+        let resolvedSection = section
+        #endif
+        exploreRailSection = resolvedSection
         selectedTab = .fractal
         fractalSubTab = .browse
-        fractalBrowseTab = section.browseTab
+        fractalBrowseTab = resolvedSection.browseTab
     }
 
     private func activateShapeSection(_ section: ShapeRailSection) {
@@ -1034,15 +1053,9 @@ struct ContentView: View {
 
     private func activateMusicSection(_ section: MusicRailSection) {
         topDockTab = .music
-        let resolvedSection: MusicRailSection
-        #if os(macOS)
-        resolvedSection = .playback
-        #else
-        resolvedSection = section
-        #endif
-        musicRailSection = resolvedSection
+        musicRailSection = section
         selectedTab = .music
-        musicPanelTab = resolvedSection.musicPanelTab
+        musicPanelTab = section.musicPanelTab
     }
 
     private func togglePinnedRailControl(_ control: PinnedRailControl) {
@@ -1097,6 +1110,8 @@ struct ContentView: View {
             return topDockTab == .visualizations && visualizationsRailSection == .reactive && selectedTab != .gestures && selectedTab != .settings
         case .musicPlayback:
             return topDockTab == .music && musicRailSection == .playback && selectedTab != .gestures && selectedTab != .settings
+        case .musicLFO:
+            return topDockTab == .music && musicRailSection == .lfo && selectedTab != .gestures && selectedTab != .settings
         case .musicSongs:
             return topDockTab == .music && musicRailSection == .songs && selectedTab != .gestures && selectedTab != .settings
         case .musicPlaylists:
@@ -1149,6 +1164,8 @@ struct ContentView: View {
                 activateVisualizationsSection(.reactive)
             case .musicPlayback:
                 activateMusicSection(.playback)
+            case .musicLFO:
+                activateMusicSection(.lfo)
             case .musicSongs:
                 activateMusicSection(.songs)
             case .musicPlaylists:
@@ -1196,6 +1213,7 @@ struct ContentView: View {
     private func pinnedRailControl(for section: MusicRailSection) -> PinnedRailControl {
         switch section {
         case .playback: return .musicPlayback
+        case .lfo: return .musicLFO
         case .songs: return .musicSongs
         case .playlists: return .musicPlaylists
         case .albums: return .musicAlbums
@@ -1208,7 +1226,13 @@ struct ContentView: View {
             switch fractalSubTab {
             case .browse:
                 topDockTab = .explore
+                #if os(macOS)
+                exploreRailSection = ExploreRailSection.allCases.first(where: {
+                    $0 != .mixed && $0.browseTab == fractalBrowseTab
+                }) ?? .jumpingOff
+                #else
                 exploreRailSection = ExploreRailSection.allCases.first(where: { $0.browseTab == fractalBrowseTab }) ?? .jumpingOff
+                #endif
             case .shape:
                 topDockTab = .shape
                 switch shapeInnerTab {
@@ -1252,13 +1276,18 @@ struct ContentView: View {
             } else {
                 topDockTab = .music
                 #if os(macOS)
-                musicRailSection = .playback
-                if musicPanelTab != .music {
-                    musicPanelTab = .music
+                if musicPanelTab == .lfo {
+                    musicRailSection = .lfo
+                } else {
+                    musicRailSection = .playback
+                    if musicPanelTab != .music {
+                        musicPanelTab = .music
+                    }
                 }
                 #else
                 switch musicPanelTab {
                 case .music:       musicRailSection = .playback
+                case .lfo:         musicRailSection = .lfo
                 case .songs:       musicRailSection = .songs
                 case .playlists:   musicRailSection = .playlists
                 case .albums:      musicRailSection = .albums
@@ -1311,9 +1340,9 @@ struct ContentView: View {
                 case .effects:  effectsTabContent
                 case .music:
                     #if os(macOS)
-                    MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings, systemAudioCapture: appModel.systemAudioCapture, tabSelection: $musicPanelTab)
+                    MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings, systemAudioCapture: appModel.systemAudioCapture, presetBankEffect: musicPresetBankEffectBinding, onAdvancePresetBank: { appModel.advanceMusicPresetBank() }, tabSelection: $musicPanelTab)
                     #else
-                    MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings, tabSelection: $musicPanelTab)
+                    MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings, presetBankEffect: musicPresetBankEffectBinding, onAdvancePresetBank: { appModel.advanceMusicPresetBank() }, tabSelection: $musicPanelTab)
                     #endif
                 case .transition:
                     if let animationManager = appModel.animationManager {

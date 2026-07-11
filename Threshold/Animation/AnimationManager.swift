@@ -404,7 +404,17 @@ final class AnimationManager {
         didSet {
             // Reset playhead when scene changes
             if currentScene?.id != oldValue?.id {
+                // Scene-level transforms must change at selection time, not only
+                // inside play(). One-keyframe scenes jump straight to a keyframe
+                // and never call play(), which previously let every transform from
+                // the prior scene bleed through. Missing transform data is an
+                // authoritative "none"; a scene-provided stack is installed here.
+                renderSettings?.resetSceneTransformations(
+                    spaceWarpStack: currentScene?.spaceWarpOps ?? []
+                )
+
                 let wasPlaying = playhead.state == .playing
+                resumeTransition = nil
                 playhead.reset()
                 playhead.sceneID = currentScene?.id
                 uiPlayhead = playhead
@@ -484,6 +494,17 @@ final class AnimationManager {
     
     /// Playback speed multiplier (1.0 = normal, 2.0 = double speed, 0.5 = half speed)
     var playbackSpeed: Double = 1.0
+
+    /// A paused scene may be explored before playback resumes. In that case the
+    /// playhead stays fixed while the displayed state eases back to the exact
+    /// timeline state, then ordinary playback continues from that same instant.
+    private struct ResumeTransition {
+        let start: AnimationKeyframe
+        let target: AnimationKeyframe
+        var elapsed: TimeInterval
+        let duration: TimeInterval
+    }
+    @ObservationIgnored private var resumeTransition: ResumeTransition?
 
     /// True when current playback should auto-stop once an attached song finishes.
     @ObservationIgnored private var stopWhenAttachedSongEnds = false
@@ -903,6 +924,11 @@ final class AnimationManager {
             return
         }
 
+        let wasPaused = playhead.state == .paused
+        let exploredState = wasPaused ? renderSettings.map {
+            AnimationKeyframe(from: $0, name: "Resume Start", duration: 0)
+        } : nil
+
         // Force the first keyframe to re-assert every effect (the caches gate the
         // persisting effect setters, so a stale cache would skip the initial write).
         resetKeyframeEffectCaches()
@@ -924,6 +950,22 @@ final class AnimationManager {
         // Ensure pipelines are compiled before playback (after fractal type is set)
         precompilePipelinesForCurrentScene()
 
+        // Direction is start-up state, not resume state. Reinitializing it here on
+        // every play() made reverse scenes jump to their end and ping-pong scenes
+        // switch back to forward when unpaused.
+        if !wasPaused {
+            let mode = currentScene?.playbackMode ?? .forward
+            switch mode {
+            case .forward, .pingPong:
+                playhead.isGoingForward = true
+            case .reverse:
+                let kfCount = currentScene?.keyframes.count ?? 2
+                playhead.currentKeyframeIndex = kfCount - 1
+                playhead.elapsedInSegment = 0
+                playhead.isGoingForward = false
+            }
+        }
+
         // Apply scene-level safety bubble / blend window settings
         if let settings = renderSettings, let scene = currentScene {
             // Clear lingering user/gesture offsets so playback starts from clean scene values.
@@ -931,9 +973,9 @@ final class AnimationManager {
             // Scenes own their music-reactive state. Start from defaults so a
             // previous scene's audio settings don't leak into this one.
             settings.audioReactiveConfig = AudioReactiveConfig()
-            // Animated scenes are authoritative for domain transforms just like
-            // static scenes: missing/empty means clear whatever was active before.
-            settings.spaceWarpStack = scene.spaceWarpOps ?? []
+            // Re-assert the scene's complete transformation domain on every start.
+            // This also discards live edits/audio offsets made after selection.
+            settings.resetSceneTransformations(spaceWarpStack: scene.spaceWarpOps ?? [])
 
             if isStartingFromBeginning,
                let speedOverride = scene.playbackSpeedOverride {
@@ -1003,29 +1045,47 @@ final class AnimationManager {
                 settings.lightingSoftness = soft
             }
 
-            // Apply the current playhead state immediately so first rendered frame
-            // does not momentarily show stale values from prior interaction.
-            if let keyframe = interpolatedKeyframeAtCurrentPlayhead(in: scene) {
-                applyKeyframe(keyframe)
+            // Resolve the current playhead state after scene-level defaults have
+            // been restored. On resume, briefly applying and recapturing it fills
+            // in nil per-keyframe fields with those defaults; restoring `start`
+            // happens synchronously, before a frame can display the target.
+            if let playheadKeyframe = interpolatedKeyframeAtCurrentPlayhead(in: scene) {
+                applyKeyframe(playheadKeyframe)
+
+                if wasPaused, let start = exploredState {
+                    var resolvedTarget = AnimationKeyframe(
+                        from: settings,
+                        name: "Resume Target",
+                        duration: 0
+                    )
+                    // setAnimationBaseFormulaParams only rebuilds the live formula
+                    // vector once isAnimationPlaying flips below, so preserve the
+                    // timeline formula explicitly in this pre-play snapshot.
+                    if let formulaValues = playheadKeyframe.formulaParamValues {
+                        resolvedTarget.formulaParamValues = formulaValues
+                    }
+                    let duration = sceneTransitionDuration
+                    if duration > 0,
+                       Self.resumeStateDiffers(start, resolvedTarget) {
+                        resumeTransition = ResumeTransition(
+                            start: start,
+                            target: resolvedTarget,
+                            elapsed: 0,
+                            duration: duration
+                        )
+                        applyKeyframe(start)
+                    } else {
+                        resumeTransition = nil
+                    }
+                } else {
+                    resumeTransition = nil
+                }
             }
         }
 
         // Signal render loop to tick animation updates every frame.
         // Renderer gates animationManager.update(...) behind this flag.
         renderSettings?.isAnimationPlaying = true
-
-        // Initialise playhead direction for the current scene's playback mode.
-        let mode = currentScene?.playbackMode ?? .forward
-        switch mode {
-        case .forward, .pingPong:
-            playhead.isGoingForward = true
-        case .reverse:
-            // Start at the last segment so the first tick runs N-1 → N-2.
-            let kfCount = currentScene?.keyframes.count ?? 2
-            playhead.currentKeyframeIndex = kfCount - 1
-            playhead.elapsedInSegment = 0
-            playhead.isGoingForward = false
-        }
 
         playhead.state = .playing
         uiPlayhead = playhead
@@ -1057,6 +1117,7 @@ final class AnimationManager {
 
     /// Pause playback
     func pause() {
+        resumeTransition = nil
         playhead.state = .paused
         uiPlayhead = playhead
         attachedSongFadeVelocityScale = 1.0
@@ -1066,6 +1127,7 @@ final class AnimationManager {
     
     /// Stop playback and reset to beginning
     func stop() {
+        resumeTransition = nil
         playhead.state = .stopped
         playhead.reset()
         uiPlayhead = playhead
@@ -1150,6 +1212,7 @@ final class AnimationManager {
         guard let scene = currentScene,
               scene.keyframes.indices.contains(index) else { return }
         
+        resumeTransition = nil
         playhead.currentKeyframeIndex = index
         playhead.elapsedInSegment = 0
         uiPlayhead = playhead
@@ -1246,6 +1309,24 @@ final class AnimationManager {
         guard playhead.state == .playing,
               let scene = currentScene,
               scene.keyframes.count >= 2 else { return }
+
+        // Rejoin a paused-and-explored scene before moving its timeline. Keeping
+        // the playhead frozen makes the destination stable instead of chasing a
+        // keyframe that continues to move during the return blend.
+        if var transition = resumeTransition {
+            transition.elapsed = min(transition.duration, transition.elapsed + max(0, deltaTime))
+            let linearProgress = Float(transition.elapsed / transition.duration)
+            let easedProgress = linearProgress * linearProgress * (3 - 2 * linearProgress)
+            applyKeyframe(transition.start.interpolated(to: transition.target, t: easedProgress))
+
+            if transition.elapsed >= transition.duration {
+                resumeTransition = nil
+            } else {
+                resumeTransition = transition
+            }
+            return
+        }
+
         let keyframes = scene.keyframes
         let keyframeCount = keyframes.count
         let mode = scene.playbackMode
@@ -1585,12 +1666,30 @@ final class AnimationManager {
 
         let keyframeCount = keyframes.count
         let fromIndex = min(max(playhead.currentKeyframeIndex, 0), keyframeCount - 1)
-        var toIndex = fromIndex + 1
-        if toIndex >= keyframeCount {
-            toIndex = scene.isLooping ? 0 : keyframeCount - 1
+        let goingForward: Bool
+        switch scene.playbackMode {
+        case .forward:  goingForward = true
+        case .reverse:  goingForward = false
+        case .pingPong: goingForward = playhead.isGoingForward
         }
 
-        let segmentDuration = segmentDuration(for: keyframes, toIndex: toIndex)
+        let toIndex: Int
+        switch SegmentAdvancer.advance(
+            fromIndex: fromIndex,
+            goingForward: goingForward,
+            mode: scene.playbackMode,
+            isLooping: scene.isLooping,
+            keyframeCount: keyframeCount
+        ) {
+        case .stop:
+            return keyframes[fromIndex]
+        case .next(let nextIndex, _):
+            toIndex = nextIndex
+        }
+
+        // Match update(deltaTime:): reverse segments use the later keyframe's
+        // duration too, so resolving a paused playhead cannot land elsewhere.
+        let segmentDuration = segmentDuration(for: keyframes, toIndex: max(fromIndex, toIndex))
         let rawProgress: Float
         if segmentDuration > 0 {
             rawProgress = Float(min(max(playhead.elapsedInSegment / segmentDuration, 0.0), 1.0))
@@ -1622,6 +1721,81 @@ final class AnimationManager {
 
         let easedProgress = effectiveEasing.apply(rawProgress)
         return fromKeyframe.interpolated(to: toKeyframe, t: easedProgress)
+    }
+
+    /// Detect whether the paused scene was materially explored. Keyframe metadata
+    /// is ignored; rendered geometry, formula, lighting, and color state is checked.
+    private static func resumeStateDiffers(_ lhs: AnimationKeyframe,
+                                           _ rhs: AnimationKeyframe) -> Bool {
+        let scalarTolerance: Float = 1e-4
+        func optionalFloatDiffers(_ left: Float?, _ right: Float?) -> Bool {
+            switch (left, right) {
+            case let (left?, right?): return abs(left - right) > scalarTolerance
+            case (nil, nil): return false
+            default: return true
+            }
+        }
+
+        if abs(lhs.minDistance - rhs.minDistance) > scalarTolerance ||
+            abs(lhs.foldingLimit - rhs.foldingLimit) > scalarTolerance ||
+            abs(lhs.sphereRadius - rhs.sphereRadius) > scalarTolerance ||
+            abs(lhs.fractalScale - rhs.fractalScale) > scalarTolerance ||
+            abs(lhs.detailScale - rhs.detailScale) > scalarTolerance ||
+            lhs.baseFractalIterations != rhs.baseFractalIterations ||
+            lhs.baseMaxRaySteps != rhs.baseMaxRaySteps {
+            return true
+        }
+
+        if simd_length_squared(lhs.position - rhs.position) > scalarTolerance * scalarTolerance {
+            return true
+        }
+
+        // q and -q encode the same rotation, hence the absolute dot product.
+        let rotationDot = abs(simd_dot(lhs.worldRotation.vector, rhs.worldRotation.vector))
+        if rotationDot < 0.99999 {
+            return true
+        }
+
+        if lhs.lightingMode != rhs.lightingMode ||
+            lhs.lightingPreset != rhs.lightingPreset ||
+            lhs.hueRotationEffect != rhs.hueRotationEffect ||
+            lhs.pulseEffect != rhs.pulseEffect ||
+            lhs.glowEffect != rhs.glowEffect ||
+            lhs.bloomEffect != rhs.bloomEffect ||
+            lhs.fogEffect != rhs.fogEffect ||
+            lhs.gradientCycleEffect != rhs.gradientCycleEffect ||
+            lhs.colorMappingMode != rhs.colorMappingMode ||
+            lhs.gradientPreset != rhs.gradientPreset ||
+            lhs.musicReactiveConfig != rhs.musicReactiveConfig {
+            return true
+        }
+
+        if optionalFloatDiffers(lhs.gradientRepeat, rhs.gradientRepeat) ||
+            optionalFloatDiffers(lhs.gradientOffset, rhs.gradientOffset) ||
+            optionalFloatDiffers(lhs.gradientSmoothing, rhs.gradientSmoothing) ||
+            optionalFloatDiffers(lhs.colorSchemeSaturation, rhs.colorSchemeSaturation) ||
+            optionalFloatDiffers(lhs.colorSchemeContrast, rhs.colorSchemeContrast) ||
+            optionalFloatDiffers(lhs.colorSchemeGamma, rhs.colorSchemeGamma) ||
+            optionalFloatDiffers(lhs.colorSchemeVibrance, rhs.colorSchemeVibrance) ||
+            optionalFloatDiffers(lhs.colorSchemeCurve, rhs.colorSchemeCurve) ||
+            optionalFloatDiffers(lhs.colorSchemeShadows, rhs.colorSchemeShadows) ||
+            optionalFloatDiffers(lhs.colorSchemeHighlights, rhs.colorSchemeHighlights) ||
+            optionalFloatDiffers(lhs.lightingSoftness, rhs.lightingSoftness) {
+            return true
+        }
+
+        switch (lhs.formulaParamValues, rhs.formulaParamValues) {
+        case let (left?, right?) where left.count == right.count:
+            if zip(left, right).contains(where: { abs($0.0 - $0.1) > scalarTolerance }) {
+                return true
+            }
+        case (nil, nil):
+            break
+        default:
+            return true
+        }
+
+        return false
     }
     
     // ═══════════════════════════════════════════════════════════════════════════

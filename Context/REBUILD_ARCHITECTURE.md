@@ -881,8 +881,8 @@ list, filtered to `signal.namespace == "audio.*"` and `param.capabilities ⊇
 
 ### 12.7 Performance tab
 
-Rail: **Budget · Acceleration**. Acceleration exposes toggles for over-relaxation,
-cone marching, LOD, smart advance, self-shadows, foveation, coherent packet,
+Rail: **Budget · Acceleration**. Acceleration exposes toggles for cone marching,
+LOD, self-shadows, foveation, coherent packet,
 bounding-sphere culling, plus a quality slider and adaptive-governor state; Budget
 shows FPS, iteration/step counts, and (Metrics panel) measured steps-to-converge.
 

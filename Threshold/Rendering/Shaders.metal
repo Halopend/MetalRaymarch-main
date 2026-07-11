@@ -126,12 +126,6 @@ constant bool FC_SHADOWS_ENABLED [[function_constant(11)]];
 // branches in fastPowR and constant-folds power multiplications in the inner loop.
 constant int FC_MANDELBULB_POWER [[function_constant(12)]];
 
-// Temporal-depth march warm-start (visionOS fragment path). When unset (Mac,
-// screenshot, quad-shared pipelines) the prev-depth texture argument and the
-// warm-start code are compiled out entirely.
-constant bool FC_WARM_START [[function_constant(13)]];
-constant bool FC_WARM_START_ON = is_function_constant_defined(FC_WARM_START) ? FC_WARM_START : false;
-
 // Coherent-packet experiment toggle (adaptiveHierarchical8x8 only). When baked
 // false (the default settings state), the warm-start probe, the shadow
 // normal-coherence gate, and the layer-of-acceptance debug overlay are all
@@ -139,14 +133,12 @@ constant bool FC_WARM_START_ON = is_function_constant_defined(FC_WARM_START) ? F
 // runtime uniform so cache-miss fallbacks stay correct.
 constant bool FC_COHERENT_PACKET [[function_constant(14)]];
 
-// Conservative cone coarse-prepass warm-start (visionOS fragment path). When
-// baked true on the fragment pipeline, the coarse texture argument + the
-// min-over-2x2 warm-start read are compiled in; the full march then raises its
-// start t to that provable lower bound. Unset (Mac mono, cached default
-// pipelines, screenshot) → dead-code-eliminated, byte-identical to before.
-// NOTE: index 14 is taken by FC_COHERENT_PACKET, so this uses index 15.
-constant bool FC_COARSE_WARM_START [[function_constant(15)]];
-constant bool FC_COARSE_WS_ON = is_function_constant_defined(FC_COARSE_WARM_START) ? FC_COARSE_WARM_START : false;
+// Optional DE-tail feature gates. Undefined generic/shared pipelines preserve
+// runtime pointer/enable checks; exact pipelines bake false for the common off
+// case so the complete environment/hand field code disappears from every DE.
+constant bool FC_HAS_ENVSCRUNCH [[function_constant(16)]];
+constant bool FC_HAS_ENVSCRUNCH_ON = is_function_constant_defined(FC_HAS_ENVSCRUNCH)
+    ? FC_HAS_ENVSCRUNCH : true;
 
 // Sphere-projection presence gate. Undefined pipelines retain the runtime blend
 // check; exact scene pipelines bake false for the common unprojected case so the
@@ -154,6 +146,10 @@ constant bool FC_COARSE_WS_ON = is_function_constant_defined(FC_COARSE_WARM_STAR
 constant bool FC_SPHERE_PROJECTION_ENABLED [[function_constant(17)]];
 constant bool FC_SPHERE_PROJECTION_ON = is_function_constant_defined(FC_SPHERE_PROJECTION_ENABLED)
     ? FC_SPHERE_PROJECTION_ENABLED : true;
+
+constant bool FC_HAS_HAND_FIELD [[function_constant(18)]];
+constant bool FC_HAS_HAND_FIELD_ON = is_function_constant_defined(FC_HAS_HAND_FIELD)
+    ? FC_HAS_HAND_FIELD : true;
 
 // Space-warp (Transformations) presence gate (index 3 was free). When baked FALSE
 // on a scene that has NO transforms (empty stack, no custom warp), the whole
@@ -1099,6 +1095,51 @@ FORCE_INLINE float safetyBubbleDistance(float3 pos, float3 bubbleCenter, float b
     }
 }
 
+// Outward normal of the Bounding Shape SDF. This is only evaluated for the
+// optional Glassy Intersect material, never in the regular march/shading path.
+// Central differences keep the glass correct for the sphere→cube morph and the
+// discrete platonic presets without duplicating every shape's plane selection.
+FORCE_INLINE float3 boundingShapeSurfaceNormal(float3 pos, float3 center,
+                                               float radius, float shapeType) {
+    float e = max(radius * 0.001f, 0.0005f);
+    float3 ex = float3(e, 0.0f, 0.0f);
+    float3 ey = float3(0.0f, e, 0.0f);
+    float3 ez = float3(0.0f, 0.0f, e);
+    float3 gradient = float3(
+        safetyBubbleDistance(pos + ex, center, radius, shapeType)
+            - safetyBubbleDistance(pos - ex, center, radius, shapeType),
+        safetyBubbleDistance(pos + ey, center, radius, shapeType)
+            - safetyBubbleDistance(pos - ey, center, radius, shapeType),
+        safetyBubbleDistance(pos + ez, center, radius, shapeType)
+            - safetyBubbleDistance(pos - ez, center, radius, shapeType)
+    );
+    float lengthSquared = dot(gradient, gradient);
+    if (lengthSquared > 1e-10f) return gradient * rsqrt(lengthSquared);
+
+    float3 radial = pos - center;
+    return radial * rsqrt(dot(radial, radial) + kPowEpsilon);
+}
+
+FORCE_INLINE half glassyIntersectionFresnel(float3 viewDirection,
+                                            float3 boundaryNormal) {
+    float edge = 1.0f - saturate(abs(dot(viewDirection, boundaryNormal)));
+    return half(edge * edge * edge);
+}
+
+// Pseudo-refraction for a clipped SDF surface: preserve the authored colour,
+// pull it toward luminance as thick glass would, add a cool transmission tint,
+// then place a view-dependent Fresnel highlight on the intersection band.
+FORCE_INLINE half3 compositeGlassyIntersection(half3 color, half band,
+                                               half fresnel) {
+    half amount = saturate(band);
+    half luminance = dot(color, half3(0.2126h, 0.7152h, 0.0722h));
+    half3 transmitted = mix(color, half3(luminance), 0.22h);
+    half3 glassTint = half3(0.52h, 0.84h, 1.0h);
+    half3 glassColor = mix(transmitted, glassTint, 0.24h + fresnel * 0.18h);
+    half highlight = amount * (0.10h + fresnel * 0.42h);
+    return mix(color, glassColor, amount * 0.72h) + half3(highlight);
+}
+
 // The Bounding ray-skip / tile cull uses a cheap enclosing SPHERE. For any
 // non-sphere Bounding shape (the sphere→cube morph, or a platonic solid) the
 // shape circumscribes a LARGER sphere than its `radius` param — a cube's corners
@@ -1296,6 +1337,7 @@ FORCE_INLINE float3 envScrunchGradient(float3 pos, constant EnvScrunchParams& es
 // sign and cuts it. Single return so containment covers the scrunch early-outs
 // too (a point OUTSIDE the room, far from any wall, must still be clipped).
 FORCE_INLINE float applyEnvScrunch(float d, float3 pos, FractalParams params) {
+    if (!FC_HAS_ENVSCRUNCH_ON) return d;
     constant EnvScrunchParams* es = params.envScrunch;
     if (es == nullptr || es->enabled == 0 || params.envGrid == nullptr) return d;
     float e = envScrunchSample(pos, *es, params.envGrid);
@@ -1352,6 +1394,7 @@ FORCE_INLINE float applyEnvScrunch(float d, float3 pos, FractalParams params) {
 // Every DE tail calls this, so all fractal types and Map variants get both.
 FORCE_INLINE float applyHandAttraction(float d, float3 pos, FractalParams params) {
     d = applyEnvScrunch(d, pos, params);
+    if (!FC_HAS_HAND_FIELD_ON) return d;
     // Hand block lives behind a constant pointer (TECH_DEBT.md #8d) — nullptr
     // or disabled is the common case and returns before any field loads.
     constant HandFieldParams* hf = params.handField;
@@ -1402,11 +1445,11 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
     params.bubbleFadeEnabled = bubbleFadeEnabled;
     params.bubbleFadeWidth = bubbleFadeWidth;
     params.bubbleStrength = bubbleStrength;
-    params.envScrunch = envScrunch;
-    params.envGrid = (envScrunch != nullptr && envScrunch->gridAddress != 0)
-        ? reinterpret_cast<device const half*>(envScrunch->gridAddress) : nullptr;
+    params.envScrunch = FC_HAS_ENVSCRUNCH_ON ? envScrunch : nullptr;
+    params.envGrid = (params.envScrunch != nullptr && params.envScrunch->gridAddress != 0)
+        ? reinterpret_cast<device const half*>(params.envScrunch->gridAddress) : nullptr;
     // No copy: retain the constant-buffer pointer (same rule as spaceWarpOps).
-    params.handField = handField;
+    params.handField = FC_HAS_HAND_FIELD_ON ? handField : nullptr;
     params.sphereProjBlend = sphereProjBlend;
     params.sphereProjRadius = sphereProjRadius;
     params.spaceWarpStrength = spaceWarpStrength;
@@ -1526,7 +1569,7 @@ FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float folding
     half hSphRSq = half(params.sphereRadiusSq);
     half hInvSphRSq = 1.0h / hSphRSq;
     // Coarse pass must mirror the fine Map's sphere projection, else the
-    // over-relaxed marcher seeds startT from the un-projected (box) silhouette
+    // baseline marcher seeds startT from the un-projected (box) silhouette
     // and tunnels through the projected surface.
     bool useProj = FC_SPHERE_PROJECTION_ON && params.sphereProjBlend > 0.0f;
     half hProjBlend = half(params.sphereProjBlend);
@@ -2311,138 +2354,17 @@ struct SceneResult {
     float2 distGlow;    // .x = distance, .y = glow
     OrbitCache cache;   // Cached orbit state from final hit position
     int steps;          // Fine-march iterations taken to converge (benchmark metric)
-    // === CONE-COVERAGE AA (CTSS-lite) ===
-    // Set only on a grazed miss when coneCoverageAA is on: the ray missed but its
-    // pixel footprint clipped a surface. edgeCoverage is that silhouette's coverage
-    // of the pixel (0 = no edge), edgePos/edgeT the closest-approach sample the
-    // caller shades and composites over the background. Defaults keep every other
-    // SceneResult producer (warm-start, compute tile path) a no-op.
-    float  edgeCoverage = 0.0f;
-    float3 edgePos = float3(0.0f);
-    float  edgeT = 0.0f;
+    int hitMaterial;    // 0 = fractal, 1 = Glassy Intersect bounding cut face
 };
 
-// One step of relaxed sphere tracing (Keinert et al.). Returns true when the
-// previous over-relaxed step overshot (consecutive unbounding spheres no
-// longer overlap): stepLen turns negative to retreat inside the last safe
-// sphere and omega drops to 1 for the rest of the ray. On a normal step,
-// advances stepLen to h·omega. The caller must skip hit registration on a
-// failed step — the sample sits past a possibly-skipped gap.
-FORCE_INLINE bool relaxedStepUpdate(float h,
-                                    thread float& omega,
-                                    thread float& prevH,
-                                    thread float& stepLen)
-{
-    bool sorFail = omega > 1.0f && (h + prevH) < stepLen;
-    if (UNLIKELY(sorFail)) {
-        stepLen -= omega * stepLen;
-        omega = 1.0f;
-    } else {
-        stepLen = h * omega;
-    }
-    prevH = h;
-    return sorFail;
-}
-
-// Per-type over-relaxation ceiling. Over-stepping is only provably safe when
-// the DE is a true lower bound: box/sphere-fold estimators qualify, but the
-// log-DE types (Mandelbulb / Julia variants) and the fudge-factored Kleinian
-// family can locally OVERESTIMATE, where the overstep-failure test cannot
-// fire and rays tunnel through thin features. Custom .threshfx DEs are
-// arbitrary user code, so they keep the pre-detection 1.2 ceiling that
-// existing shared scenes were authored against. With FC_FRACTAL_TYPE set the
-// switch folds to a constant at pipeline-compile time.
-FORCE_INLINE float relaxedOmegaCap(int type) {
-    switch (type) {
-    case FractalTypeMandelbox:
-    case FractalTypeMenger:
-    case FractalTypeOctahedron:
-    case FractalTypeMengerSphere:
-        // Box/fold DEs tolerate the most over-relaxation; the overstep-failure
-        // retreat keeps it hit-safe, so the user's Over-Relaxation slider may push
-        // the auto-ramp up to here (default ramp stops at 1.4).
-        return 1.6f;
-    case FractalTypeMandelbulb:
-    case FractalTypeMandelbulbJulia:
-    case FractalTypeQuaternionJulia:
-        return 1.1f;
-    default: // Kleinian family, custom formulas, future types
-        return 1.2f;
-    }
-}
-
-// === SMART ADVANCE (grazing-aware lead-ahead sphere tracing) ===
-// Smart advance reads the gradient of the march itself — the change in the DE
-// per unit advance, (h - prevH)/stepLen — to decide when to step further than
-// plain sphere tracing would. That ratio is the directional derivative of the
-// SDF along the ray: ~ -1 when the ray heads straight at the surface (the DE
-// shrinks as fast as we move, so plain tracing is already optimal), ~0 when the
-// ray skims almost parallel to the surface (the DE barely changes, so plain
-// tracing creeps forward in many tiny steps), and >0 when the surface is
-// receding. We "lead ahead" by raising the over-relaxation factor as the ray
-// flattens out, escaping the slow grazing creep, while leaving head-on
-// convergence untouched.
-//
-// Grazing ceiling for smart advance. It can push past the conservative head-on
-// relaxedOmegaCap because it only over-relaxes where the surface is grazing or
-// receding — but it scales WITH the per-type cap so log-DE / Kleinian / custom
-// estimators (which can locally overestimate and defeat the overstep test) stay
-// proportionally restrained. box→2.2, bulb→1.3, default→1.6.
-FORCE_INLINE float smartOmegaCap(int type) {
-    return 1.0f + (relaxedOmegaCap(type) - 1.0f) * 3.0f;
-}
-
-// One step of smart-advance sphere tracing. Like relaxedStepUpdate (Keinert),
-// but the over-relaxation factor is derived per step from the along-ray DE
-// gradient instead of a fixed omega: it ramps from 1 (no boost, while clearly
-// converging) up to maxOmega (full lead-ahead, while grazing or receding). The
-// same overstep-failure test guards it — when the two unbounding spheres of
-// radii prevH and h no longer overlap across the step we just took, geometry
-// may hide in the gap, so we retreat to the far edge of the last provably-safe
-// sphere and set the sticky `gaveUp` flag, dropping the ray to plain tracing for
-// the rest of its life (prevents retreat/boost thrash). The caller must skip hit
-// registration on a failed step. Returns true on an overstep failure.
-FORCE_INLINE bool smartStepUpdate(float h,
-                                  float maxOmega,
-                                  thread bool& gaveUp,
-                                  thread float& prevH,
-                                  thread float& stepLen)
-{
-    // Unlike relaxedStepUpdate (which only tests when omega>1), smart advance
-    // tests every step: the boost is adaptive per step and can exceed 1 from the
-    // first grazing sample onward, so the overshoot guard must always be armed.
-    bool sorFail = (!gaveUp) && (h + prevH) < stepLen;
-    if (UNLIKELY(sorFail)) {
-        // Retreat. stepLen here still holds the (overshooting) step we just took,
-        // from t_prev to the current t. We reassign it to the SIGNED delta
-        // (prevH - stepLen), which is negative, so the caller's `t += stepLen`
-        // moves the ray back from t to t_prev + prevH — the far edge of the last
-        // provably-safe sphere. Never advances forward on a fail.
-        stepLen = prevH - stepLen;
-        gaveUp = true;
-    } else if (gaveUp || stepLen <= 1e-5f) {
-        // Plain sphere tracing: after a retreat, and on the cold-start step
-        // where prevH/stepLen aren't yet seeded (no valid gradient).
-        stepLen = h;
-    } else {
-        // Along-ray DE gradient: ~ -1 head-on, ~0 grazing, >0 receding.
-        float grad = (h - prevH) / stepLen;
-        // Ramp 0→1 across grad ∈ [-0.5, 0]: no boost while clearly converging,
-        // full lead-ahead once the surface stops rushing toward us.
-        float graze = saturate((grad + 0.5f) * 2.0f);
-        stepLen = h * mix(1.0f, maxOmega, graze);
-    }
-    prevH = h;
-    return sorFail;
-}
-
-// Raymarch that caches orbit state on hit for reuse in normals/colors
-FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float boundingSphereRadius = 0.0, float3 boundingCenter = float3(0.0), float stepMultiplier = 1.0, float maxRayDistance = kMaxRayDistanceDefault, bool smartAdvance = false, float epsilonScale = 1.0f, float coneMarchScale = 0.0f, float distanceLODFalloff = 0.0f, float warmStartT = -1.0f, int coneCoverageAA = 0, float pixelFootprintPerDist = 0.0f, constant DistanceCacheParams* distCache = nullptr)
+FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float boundingSphereRadius = 0.0, float3 boundingCenter = float3(0.0), float maxRayDistance = kMaxRayDistanceDefault, float epsilonScale = 1.0f, float coneMarchScale = 0.0f, float distanceLODFalloff = 0.0f, constant DistanceCacheParams* distCache = nullptr, float boundingShapeRadius = 0.0f, float boundingShapeType = 0.0f, int boundingEffectMode = 0)
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
     result.steps = 0;
+    result.hitMaterial = 0;
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
+    bool glassIntersectActive = boundingEffectMode == 3 && boundingShapeRadius > 0.0f;
 
     // Fractal distance cache: resolve the bindless grid pointer once. The
     // enable decision is frame-uniform (CPU-gated), so the per-step branch
@@ -2456,15 +2378,6 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
     // threshold so thin surface detail is not clipped.
     bool isMandelbulb = (type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia);
     float t = (isMandelbulb ? 0.005 : 0.05) + dither;
-
-    // === CONSERVATIVE CONE COARSE-PREPASS WARM-START ===
-    // warmStartT is a provable LOWER BOUND on the entry distance of the nearest
-    // surface for this ray (the cone kernel only ever advanced through cones that
-    // stayed strictly inside empty space, then backed off a full footprint). We
-    // ONLY raise the start — never lower it, never shorten the budget, never touch
-    // maxRayDistance or the epsilon — so the march still finds exactly what it
-    // would have found, just starting past provably-empty space. Negative = cold.
-    if (warmStartT > t) t = warmStartT;
 
     // === BOUNDING SPHERE PRE-TEST (GMT-fractals technique) ===
     // Skip empty space before the fractal's bounding volume.
@@ -2486,33 +2399,6 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
     // and compiler can make optimal unrolling decisions per quality preset
     const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
     int maxSteps = max(int(float(baseMaxSteps) * quality), 4);
-
-    // === RELAXED SPHERE TRACING (Keinert et al., "Enhanced Sphere Tracing") ===
-    // Take omega× over-relaxed steps; relaxedStepUpdate() retreats inside the
-    // last safe sphere when consecutive unbounding spheres stop overlapping.
-    // The ceiling is per fractal type — see relaxedOmegaCap() for why log-DE
-    // and Kleinian/custom estimators must stay closer to 1.
-    //
-    // When smartAdvance is set (a frame-uniform toggle) the march instead reads
-    // the along-ray DE gradient each step and leads ahead through grazing/
-    // receding regions — see smartStepUpdate(). The branch is uniform across the
-    // dispatch so it stays coherent and near-free.
-    float omega = clamp(stepMultiplier, 1.0f, relaxedOmegaCap(type));
-    // Only meaningful (and only computed) on the smart-advance path.
-    float smartCap = smartAdvance ? smartOmegaCap(type) : 1.0f;
-    bool gaveUp = false;
-    float prevH = 0.0;
-    float stepLen = 0.0;
-
-    // CTSS-lite cone-coverage AA: track the closest lateral approach of the
-    // surface, measured as the DE value normalized by this ray's pixel footprint
-    // radius (coneR = pixelFootprintPerDist·t). A ray that never crosses the tight
-    // threshold but whose minConeRatio drops below 1 grazed a surface inside its
-    // pixel — a silhouette edge we anti-alias below. All no-ops when coneCoverageAA
-    // is 0 (the branch is frame-uniform, so it stays coherent and near-free).
-    float minConeRatio = 1e9f;
-    float3 edgeP = float3(0.0f);
-    float edgeTLocal = 0.0f;
 
     for(int j = 0; j < maxSteps; j++)
     {
@@ -2539,63 +2425,37 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
         // hit test below only ever sees analytic values (nearBand >> threshold).
         // An underestimated h is still a valid unbounding-sphere radius, so the
         // relaxed/smart step logic below stays overshoot-safe unchanged.
-        float h;
+        float fractalH;
         float cachedBound = (dcGrid != nullptr) ? distCacheSample(p, *distCache, dcGrid) : 0.0f;
         if (dcGrid != nullptr && cachedBound > distCache->nearBandModel) {
-            h = cachedBound;
+            fractalH = cachedBound;
         } else {
-            h = MapUnified(p, params, foldingLimit, effIter, type, fp);
+            fractalH = MapUnified(p, params, foldingLimit, effIter, type, fp);
         }
+        float shapeH = glassIntersectActive
+            ? safetyBubbleDistance(p, boundingCenter, boundingShapeRadius, boundingShapeType)
+            : -kRayMissThreshold;
+        float h = glassIntersectActive ? max(fractalH, shapeH) : fractalH;
 
-        bool sorFail = smartAdvance
-            ? smartStepUpdate(h, smartCap, gaveUp, prevH, stepLen)
-            : relaxedStepUpdate(h, omega, prevH, stepLen);
-
-        if(UNLIKELY(h < threshold) && !sorFail)
+        if(UNLIKELY(h < threshold))
         {
-            // Re-iterate with full orbit cache + Jacobian for normals/colors.
-            OrbitCache hitCache;
-            MapWithOrbitCacheUnified(p, params, foldingLimit, effIter, type, fp, colorIterations, hitCache);
-            result.cache = hitCache;
+            bool boundaryWon = glassIntersectActive && shapeH >= fractalH;
+            if (!boundaryWon) {
+                // Re-iterate with full orbit cache + Jacobian for normals/colors.
+                OrbitCache hitCache;
+                MapWithOrbitCacheUnified(p, params, foldingLimit, effIter, type, fp, colorIterations, hitCache);
+                result.cache = hitCache;
+            }
+            result.hitMaterial = boundaryWon ? 1 : 0;
             result.distGlow = float2(t, finalizeGlow(glow));
             result.steps = j;
             return result;
         }
 
-        // Cone-coverage AA: remember the tightest normalized approach on a valid
-        // (non-overshoot) step. Skipped entirely when the feature is off.
-        if (coneCoverageAA != 0 && !sorFail)
-        {
-            float coneR = pixelFootprintPerDist * t;
-            float ratio = (coneR > 1e-6f) ? (h / coneR) : 1e9f;
-            if (ratio < minConeRatio) { minConeRatio = ratio; edgeP = p; edgeTLocal = t; }
-        }
-
         if (UNLIKELY(t > maxRayDistance)) break;
 
         glow = accumulateGlow(glow, h, glowIntensity);
-        t += stepLen;
-    }
-
-    // Cone-coverage AA: the march missed, but if its footprint grazed a surface
-    // (minConeRatio < 1) record a silhouette edge sample for the caller to shade
-    // and composite over the background. Coverage ramps 1 (surface nearly filled
-    // the pixel) → 0 (surface just touched the footprint edge). One extra orbit-
-    // cache eval, paid only by grazed-miss pixels.
-    if (coneCoverageAA != 0 && minConeRatio < 1.0f)
-    {
-        float cov = 1.0f - smoothstep(0.0f, 1.0f, minConeRatio);
-        if (cov > (1.0f / 255.0f))
-        {
-            int edgeIter = (distanceLODFalloff > 0.0f)
-                ? max(2, iterations - int(edgeTLocal * distanceLODFalloff)) : iterations;
-            OrbitCache edgeCache;
-            MapWithOrbitCacheUnified(edgeP, params, foldingLimit, edgeIter, type, fp, colorIterations, edgeCache);
-            result.cache = edgeCache;
-            result.edgeCoverage = cov;
-            result.edgePos = edgeP;
-            result.edgeT = edgeTLocal;
-        }
+        t += h;
     }
 
     result.distGlow = float2(kRayMissThreshold + 100.0, finalizeGlow(glow));
@@ -2603,12 +2463,14 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
 }
 
 // Raymarch with cache that starts from a known distance (for hierarchical acceleration)
-FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float stepMultiplier = 1.0, bool smartAdvance = false, float epsilonScale = 1.0f, float coneMarchScale = 0.0f, float distanceLODFalloff = 0.0f)
+FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float epsilonScale = 1.0f, float coneMarchScale = 0.0f, float distanceLODFalloff = 0.0f, float boundingShapeRadius = 0.0f, float3 boundingCenter = float3(0.0f), float boundingShapeType = 0.0f, int boundingEffectMode = 0)
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
     result.steps = 0;
+    result.hitMaterial = 0;
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
+    bool glassIntersectActive = boundingEffectMode == 3 && boundingShapeRadius > 0.0f;
     
     float dither = interleavedGradientNoise(fragCoord, time) * 0.01;
     bool isMandelbulb = (type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia);
@@ -2628,16 +2490,6 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
     int maxSteps = max(int(float(baseMaxSteps) * quality * stepScale), 8);
     float endT = startT + 2.0;
 
-    // Relaxed sphere tracing with overstep-failure detection; per-type ceiling
-    // (see relaxedOmegaCap for why log-DE/Kleinian/custom stay closer to 1).
-    // smartAdvance swaps in the grazing-aware lead-ahead variant (smartStepUpdate).
-    float omega = clamp(stepMultiplier, 1.0f, relaxedOmegaCap(type));
-    // Only meaningful (and only computed) on the smart-advance path.
-    float smartCap = smartAdvance ? smartOmegaCap(type) : 1.0f;
-    bool gaveUp = false;
-    float prevH = 0.0;
-    float stepLen = 0.0;
-
     for(int j = 0; j < maxSteps; j++)
     {
         // Additive floor scaled by epsilonScale (=1/effectiveScale) so detail keeps
@@ -2653,18 +2505,22 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
         // Distance iteration LOD: faraway samples drop fractal iterations (their
         // detail is sub-pixel). effIter == iterations when off (distanceLODFalloff 0).
         int effIter = (distanceLODFalloff > 0.0f) ? max(2, iterations - int(t * distanceLODFalloff)) : iterations;
-        float h = MapUnified(p, params, foldingLimit, effIter, type, fp);
+        float fractalH = MapUnified(p, params, foldingLimit, effIter, type, fp);
+        float shapeH = glassIntersectActive
+            ? safetyBubbleDistance(p, boundingCenter, boundingShapeRadius, boundingShapeType)
+            : -kRayMissThreshold;
+        float h = glassIntersectActive ? max(fractalH, shapeH) : fractalH;
 
-        bool sorFail = smartAdvance
-            ? smartStepUpdate(h, smartCap, gaveUp, prevH, stepLen)
-            : relaxedStepUpdate(h, omega, prevH, stepLen);
-
-        if(UNLIKELY(h < threshold) && !sorFail)
+        if(UNLIKELY(h < threshold))
         {
-            // Re-iterate with full orbit cache for normals/colors.
-            OrbitCache hitCache;
-            MapWithOrbitCacheUnified(p, params, foldingLimit, effIter, type, fp, colorIterations, hitCache);
-            result.cache = hitCache;
+            bool boundaryWon = glassIntersectActive && shapeH >= fractalH;
+            if (!boundaryWon) {
+                // Re-iterate with full orbit cache for normals/colors.
+                OrbitCache hitCache;
+                MapWithOrbitCacheUnified(p, params, foldingLimit, effIter, type, fp, colorIterations, hitCache);
+                result.cache = hitCache;
+            }
+            result.hitMaterial = boundaryWon ? 1 : 0;
             result.distGlow = float2(t, finalizeGlow(glow));
             result.steps = j;
             return result;
@@ -2673,7 +2529,7 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
         if (UNLIKELY(t > endT)) break;
 
         glow = accumulateGlow(glow, h, glowIntensity);
-        t += stepLen;
+        t += h;
     }
 
     result.distGlow = float2(kRayMissThreshold + 100.0, finalizeGlow(glow));
@@ -2886,7 +2742,7 @@ FORCE_INLINE half3 compositeFloorCircle(half3 color, FloorCircleHit hit) {
 
 // =============================================================================
 
-// Soft shadow with over-relaxation
+// Soft shadow march
 // OPTIMIZATION: Combined exit conditions to reduce branches
 // GMT-FRACTALS TECHNIQUE: FC_SHADOWS_ENABLED allows compile-time elimination of
 // entire shadow computation. When disabled, returns a flat ambient shadow value
@@ -3541,7 +3397,9 @@ kernel void adaptiveHierarchical8x8(
     SceneResult sceneResult;
     if (fineStartT > 0.06f) {
         sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, fineStartT, pixelCenter, 1.0, maxSteps,
-                                              uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff);
+                                              uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff,
+                                              uniforms.boundingSphereRadius, uniforms.boundingShapeCenter,
+                                              uniforms.boundingShapeType, uniforms.boundingFogEnabled);
     } else {
         // Bound to Space: clip the march to the room's interval along this ray
         // (start raised to room entry, budget capped at room exit). Rays that
@@ -3555,9 +3413,12 @@ kernel void adaptiveHierarchical8x8(
             sceneResult.distGlow = float2(kRayMissThreshold + 100.0, 0.0);
             sceneResult.cache = makeEmptyOrbitCache();
             sceneResult.steps = 0;
+            sceneResult.hitMaterial = 0;
         } else {
             sceneResult = SceneWithCache(marchOrigin, marchDir, pixelCenter, 1.0, maxSteps,
-                             uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), boundingCullSphereRadius(uniforms.boundingSphereRadius, uniforms.boundingShapeType), uniforms.boundingShapeCenter, uniforms.stepMultiplier, marchEndT, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff, marchStartT);
+                             uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), boundingCullSphereRadius(uniforms.boundingSphereRadius, uniforms.boundingShapeType), uniforms.boundingShapeCenter, marchEndT, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff, nullptr,
+                             uniforms.boundingSphereRadius, uniforms.boundingShapeType,
+                             uniforms.boundingFogEnabled);
         }
     }
 
@@ -3581,7 +3442,7 @@ kernel void adaptiveHierarchical8x8(
     if (uniforms.boundingSphereRadius > 0.0f && sceneResult.distGlow.x < kRayMissThreshold) {
         float3 hitModel = marchOrigin + sceneResult.distGlow.x * marchDir;
         float shapeDist = safetyBubbleDistance(hitModel, uniforms.boundingShapeCenter, uniforms.boundingSphereRadius, uniforms.boundingShapeType);
-        if (shapeDist > 0.0f) {
+        if (shapeDist > 0.0f && sceneResult.hitMaterial != 1) {
             sceneResult.distGlow.x = kRayMissThreshold + 100.0f;
         }
     }
@@ -3607,7 +3468,10 @@ kernel void adaptiveHierarchical8x8(
     // miss lanes get harmless placeholders (their shading block never runs).
     float3 p = didHit ? (marchOrigin + adjustedDist * marchDir) : float3(0.0f);
     float3 nor = didHit
-        ? GetNormal(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, uniforms.formulaParams, hitCache)
+        ? (sceneResult.hitMaterial == 1
+            ? boundingShapeSurfaceNormal(p, uniforms.boundingShapeCenter,
+                                         uniforms.boundingSphereRadius, uniforms.boundingShapeType)
+            : GetNormal(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, uniforms.formulaParams, hitCache))
         : float3(0.0f, 1.0f, 0.0f);
 
     // Lighting basis (precomputed on CPU — frame-uniform) + this lane's spotlight.
@@ -3718,6 +3582,31 @@ kernel void adaptiveHierarchical8x8(
                             uniforms.precomputedLighting.specPower, shaSpot, shaSun, col,
                             uniforms.colorScheme, fractalParams, uniforms.foldingLimit,
                             lodIterations, fractalType, uniforms.formulaParams, roomAmb);
+
+        // Match the fragment path's Bounding edge treatments. The adaptive
+        // compute path is disabled whenever passthrough is active, so Ghost Fade
+        // and Glassy Intersect remain opaque here while preserving their RGB look.
+        if (uniforms.boundingSphereRadius > 0.0f) {
+            float shapeDist = safetyBubbleDistance(
+                p, uniforms.boundingShapeCenter,
+                uniforms.boundingSphereRadius, uniforms.boundingShapeType);
+            if (uniforms.boundingFogEnabled == 3) {
+                float width = uniforms.boundingSphereRadius
+                    * clamp(uniforms.boundingShadowDepth, 0.02f, 0.95f);
+                half glassBand = half(smoothstep(-width, 0.0f, shapeDist));
+                half fresnel = glassyIntersectionFresnel(V, nor);
+                col = compositeGlassyIntersection(col, glassBand, fresnel);
+            } else if (uniforms.boundingFogEnabled == 2) {
+                float depth = clamp(uniforms.boundingShadowDepth, 0.02f, 0.95f);
+                half edgeFade = half(1.0f - smoothstep(
+                    -uniforms.boundingSphereRadius * depth, 0.0f, shapeDist));
+                col *= edgeFade;
+            } else if (uniforms.boundingFogEnabled == 1) {
+                half edgeFade = half(1.0f - smoothstep(
+                    -uniforms.boundingSphereRadius * 0.35f, 0.0f, shapeDist));
+                col *= edgeFade;
+            }
+        }
     }
 
     // Apply fog, glow, and clamp using helper functions
@@ -3770,111 +3659,6 @@ kernel void adaptiveHierarchical8x8(
     outputTexture.write(finalColor, pixelCoord, uniforms.eyeIndex);
 }
 
-// =============================================================================
-// CONSERVATIVE CONE COARSE-PREPASS WARM-START (Increment 1)
-// =============================================================================
-// A low-res compute pass that marches ONE cone per 8x8 pixel block and writes a
-// provable LOWER BOUND ("warmT") on the entry distance of the nearest surface
-// for every full-res ray covered by that block. The fragment shader later raises
-// its march start t to this bound (skip-to-then-full-march), skipping
-// provably-empty space WITHOUT EVER skipping a surface.
-//
-// SAFETY: the cone is only trusted for box/fold fractals (which expose an
-// analytic Lipschitz-1 lower-bound DE) on an UN-WARPED domain. Anything else
-// writes 0.0 (cold-start sentinel) and the fragment path falls back to a normal
-// full march. The cone advances by the DE (stepSafety = 1 is valid for these
-// estimators), and stops the moment its radius could poke outside the empty ball
-// (coneR >= DE) or it nears a surface (DE < hitThreshold). lastEmptyT is updated
-// ONLY on a passed empty-cone test — never on a hit — and warmT backs off a full
-// footprint from it, so the reported bound is strictly inside known-empty space.
-
-// True only for the box/fold family whose Map() DE is a conservative
-// (Lipschitz-1) lower bound, so cone-bounding is provably safe.
-FORCE_INLINE bool coneSafetyForFamily(int type, thread bool& coneTrusted) {
-    coneTrusted = (type == FractalTypeMandelbox)
-               || (type == FractalTypeMenger)
-               || (type == FractalTypeOctahedron)
-               || (type == FractalTypeMengerSphere);
-    return coneTrusted;
-}
-
-kernel void coneCoarsePrepass8x8(uint2 texel [[thread_position_in_grid]],
-    constant TileUniforms& uniforms [[buffer(0)]],
-    constant rasterization_rate_map_data& rateMapData [[buffer(1)]],
-    texture2d_array<float, access::write> coarseStartTex [[texture(0)]]) {
-    const float K = 8.0;
-    // The coarse texture spans the FULL render target / 8 so its texels line up
-    // 1:1 with the fragment shader's floor(fragCoord/8) (fragCoord is in
-    // full-render-target pixels). resolution here is the per-eye viewport SIZE;
-    // viewportOrigin places this eye within the full target.
-    uint2 coarseDimFull = uint2(ceil((uniforms.viewportOrigin + uniforms.resolution) / K));
-    if (texel.x >= coarseDimFull.x || texel.y >= coarseDimFull.y) return;
-
-    int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : uniforms.fractalType;
-    bool coneTrusted; coneSafetyForFamily(type, coneTrusted);
-    // GUARD 1: only box/fold + un-warped domain may write a real warmT.
-    bool domainWarped = (uniforms.sphericalInversionMode != 0)
-                     || (uniforms.sphereProjectionBlend > 0.0f)
-                     || (uniforms.spaceWarpStrength > 0.0f);
-    // Full-target pixel center of this 8x8 block; convert to viewport-LOCAL coords
-    // (reconstructModelPoint expects local pixels) and skip texels whose block
-    // center falls outside this eye's viewport (write the cold sentinel there).
-    float2 pixelCenterFull = (float2(texel) + 0.5f) * K;
-    float2 pixelCenter = pixelCenterFull - uniforms.viewportOrigin;
-    bool outsideViewport = any(pixelCenter < 0.0f) || any(pixelCenter >= uniforms.resolution);
-    if (!coneTrusted || domainWarped || outsideViewport) {
-        coarseStartTex.write(float4(0.0f, 0.0f, 0.0f, 0.0f), texel, uniforms.eyeIndex);
-        return;
-    }
-
-    // Reconstruct the camera ray through the CENTER of this 8x8 block, exactly as
-    // the fragment path reconstructs per-pixel rays (so the bound is consistent).
-    float3 cameraPos = uniforms.cameraPos;
-    float3 rd = normalize(reconstructModelPoint(pixelCenter, uniforms, rateMapData) - cameraPos);
-    float3 mO = cameraPos, mD = rd;
-    // No-op here (domain is un-warped, gated above) but kept for parity with the
-    // full march's ray setup.
-    applySphericalInversionRay(mO, mD, uniforms.sphericalInversionMode, uniforms.sphericalInversionRadius);
-
-    // GUARD 2: the cone radius must bound the WHOLE block footprint at every t.
-    // Block diagonal half-extent in pixels = K*0.5*sqrt(2); times the raw per-pixel
-    // angular size gives lateral radius per unit distance. coarseRateMagMax is a
-    // conservative UPPER BOUND on physical->screen magnification under foveation,
-    // so the cone can only ever be too FAT (a too-fat cone stops earlier → a
-    // shorter, still-safe skip).
-    float coneRadiusPerDist = uniforms.pixelFootprintPerDist * (K * 0.5f * 1.41421356f) * uniforms.coarseRateMagMax;
-
-    float epsilonScale = uniforms.marchEpsilonScale;
-    // Coarse iteration count: fewer Map iterations make the DE a LOOSER (smaller,
-    // still-conservative) lower bound, which is safe — it just stops the cone a
-    // touch earlier. Box/fold DEs shrink monotonically with iteration count.
-    float coarseIters = float(max(uniforms.fractalIterations, 2)) * 0.6f;
-
-    // Build FractalParams exactly like adaptiveHierarchical8x8 does.
-    FractalParams fp = makeFractalParamsFromPrecomputed(
-        uniforms.precomputedFractal,
-        uniforms.minDistance,
-        mO, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch);
-
-    float hitThreshold = 0.02f * epsilonScale;
-    float t = 0.05f;
-    float lastEmptyT = t;
-    const int maxCoarseSteps = 40;
-    for (int j = 0; j < maxCoarseSteps && t <= uniforms.maxViewDistance; j++) {
-        float3 p = fma(mD, float3(t), mO);
-        float de = MapContinuousUnified(p, fp, uniforms.foldingLimit, coarseIters, type, uniforms.formulaParams);
-        if (de < hitThreshold) break;            // near a surface — do NOT update lastEmptyT
-        float coneR = coneRadiusPerDist * t;
-        if (coneR >= de) break;                   // cone could poke outside the empty ball
-        lastEmptyT = t;                           // GUARD 3: only on a passed empty test
-        t += de;                                  // box/fold: stepSafety = 1 is valid
-    }
-    // Back off at least one footprint radius (and a hit-threshold floor) from the
-    // last provably-empty t, so warmT stays strictly inside known-empty space.
-    float backoff = max(2.0f * hitThreshold, coneRadiusPerDist * lastEmptyT);
-    float warmT = max(0.05f, lastEmptyT - backoff);
-    coarseStartTex.write(float4(warmT, 0.0f, 0.0f, 0.0f), texel, uniforms.eyeIndex);
-}
 
 // === SPRING BLOB NAVIGATION WIDGET ===
 // Screen-space SDF overlay: two spheres connected by a stretchy band.
@@ -3972,9 +3756,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                                    constant Uniforms& uniforms,
                                    float2 fragCoord,
                                    float time,
-                                   float warmStartT = -1.0f,
-                                   device atomic_uint* benchCounters = nullptr,
-                                   float coarseWarmStartT = -1.0f)
+                                   device atomic_uint* benchCounters = nullptr)
 {
     FragmentOutput output;
 
@@ -4002,51 +3784,37 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     half3 col = half3(0.0h);
     float2 ret;
     OrbitCache hitCache = makeEmptyOrbitCache();
-    // Bounding Fog: 1 = untouched; falls toward 0 as the hit point approaches
-    // the bounding-shape boundary (soft fade instead of the hard sphere clip).
+    // Bounding edge treatment. boundFade clips/darkens; boundOpacity is separate
+    // so Glassy Intersect can retain a visible, premultiplied glass surface in
+    // Partial/Mixed immersion instead of disappearing like Ghost Fade.
     half boundFade = 1.0h;
+    half boundOpacity = 1.0h;
 
-    // === TEMPORAL DEPTH WARM-START ===
-    // When the caller reprojected a valid previous-frame hit distance, march a
-    // narrow window around it with a reduced step budget (typically ~5-10 steps
-    // instead of hundreds). On a window miss (disocclusion / stale history) we
-    // fall back to the full march, so the warm start can never change WHAT is
-    // hit — only how fast we find it.
     SceneResult sceneResult;
-    bool needFullMarch = true;
-    if (FC_WARM_START_ON && warmStartT > 0.0f) {
-        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, warmStartT, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff);
-        needFullMarch = sceneResult.distGlow.x >= kRayMissThreshold;
-    }
-    if (needFullMarch) {
-        // The conservative cone coarse-prepass warm start ONLY raises the full
-        // march's start t (never the reprojection-window path above). It's a
-        // provable lower bound, so the march still finds exactly what it would
-        // have; passing -1.0f (the default) when the feature is off is a no-op.
-        //
-        // Bound to Space: clip the march to the room's interval along this ray
-        // (start raised to room entry, budget capped at room exit). Rays that
-        // never cross the room volume skip the march entirely. A no-op while
-        // boundToSpaceMode == 0.
-        float marchStartT = coarseWarmStartT;
-        float marchEndT = uniforms.maxViewDistance;
-        if (!clampMarchToSpaceBounds(marchOrigin, marchDir, uniforms.modelToWorldMatrix,
-                                     uniforms.boundSpaceSize, uniforms.boundToSpaceMode,
-                                     marchStartT, marchEndT)) {
-            sceneResult.distGlow = float2(kRayMissThreshold + 100.0, 0.0);
-            sceneResult.cache = makeEmptyOrbitCache();
-            sceneResult.steps = 0;
-        } else {
-            sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), boundingCullSphereRadius(uniforms.boundingSphereRadius, uniforms.boundingShapeType), uniforms.boundingShapeCenter, uniforms.stepMultiplier, marchEndT, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff, marchStartT, uniforms.coneCoverageAAEnabled, uniforms.pixelFootprintPerDist, &uniforms.distCache);
-        }
+    // Bound to Space: clip the march to the room's interval along this ray
+    // (start raised to room entry, budget capped at room exit). Rays that
+    // never cross the room volume skip the march entirely. A no-op while
+    // boundToSpaceMode == 0.
+    float marchStartT = -1.0f;
+    float marchEndT = uniforms.maxViewDistance;
+    if (!clampMarchToSpaceBounds(marchOrigin, marchDir, uniforms.modelToWorldMatrix,
+                                 uniforms.boundSpaceSize, uniforms.boundToSpaceMode,
+                                 marchStartT, marchEndT)) {
+        sceneResult.distGlow = float2(kRayMissThreshold + 100.0, 0.0);
+        sceneResult.cache = makeEmptyOrbitCache();
+        sceneResult.steps = 0;
+        sceneResult.hitMaterial = 0;
+    } else {
+        sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), boundingCullSphereRadius(uniforms.boundingSphereRadius, uniforms.boundingShapeType), uniforms.boundingShapeCenter, marchEndT, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff, &uniforms.distCache,
+                                     uniforms.boundingSphereRadius, uniforms.boundingShapeType,
+                                     uniforms.boundingFogEnabled);
     }
     ret = sceneResult.distGlow;
     hitCache = sceneResult.cache;
 
     // Bound to Space: reclassify hits outside the room as misses. The clamped
-    // full march can't produce them (beyond a single overshoot step), but the
-    // temporal depth warm-start path above can. The 1cm tolerance keeps hits
-    // sliced open right at a wall from speckling into misses.
+    // full march should not produce them beyond a single overshoot step. The
+    // 1cm tolerance keeps hits sliced open right at a wall from speckling into misses.
     if (uniforms.boundToSpaceMode != 0 && ret.x < kRayMissThreshold) {
         float3 hitWorld = (uniforms.modelToWorldMatrix * float4(marchOrigin + ret.x * marchDir, 1.0f)).xyz;
         if (spaceBoundsDistance(hitWorld, uniforms.boundSpaceSize, uniforms.boundToSpaceMode) > 0.01f) {
@@ -4062,18 +3830,11 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         atomic_fetch_add_explicit(&benchCounters[1], 1u, memory_order_relaxed);
     }
 
-    // Cone-coverage AA: a ray that missed but whose footprint grazed a surface
-    // shades the recorded edge sample and composites it over the background by its
-    // coverage (see the fog step below). edgeAA is frame-uniform-gated so it stays
-    // coherent; sceneResult.edgeCoverage is 0 unless the feature actually ran.
-    bool edgeAA = (uniforms.coneCoverageAAEnabled != 0) && (ret.x >= kRayMissThreshold)
-                  && (sceneResult.edgeCoverage > 0.0f);
-    float hitDist = edgeAA ? sceneResult.edgeT : ret.x;
-
-    if (ret.x < kRayMissThreshold || edgeAA)
+    float hitDist = ret.x;
+    if (ret.x < kRayMissThreshold)
     {
         // Compute hit position and clip-space depth once (used for depth output and debug visualization)
-        float3 p = edgeAA ? sceneResult.edgePos : (marchOrigin + ret.x * marchDir);
+        float3 p = marchOrigin + ret.x * marchDir;
         float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
         float depth = encodeDepthFromClip(clipPos);
         output.depth = depth;
@@ -4088,8 +3849,11 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         if (benchAblate == 10) {
             col = half3(0.6h, 0.6h, 0.6h);
         } else {
-        float3 nor = (benchAblate == 13) ? -marchDir
-                   : GetNormal(p, hitDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, uniforms.formulaParams, hitCache);
+        float3 nor = sceneResult.hitMaterial == 1
+            ? boundingShapeSurfaceNormal(p, uniforms.boundingShapeCenter,
+                                         uniforms.boundingSphereRadius, uniforms.boundingShapeType)
+            : ((benchAblate == 13) ? -marchDir
+               : GetNormal(p, hitDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, uniforms.formulaParams, hitCache));
 
         {
             // Use precomputed spotlight position and intensity from CPU
@@ -4137,11 +3901,28 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         // negative inside, positive outside.
         // Mode 0 (Off) hard-clips at the surface. Mode 1 (Ghost Fade) keeps the
         // original fixed outer-third band — translucent, composited via outAlpha
-        // below. Mode 2 (Inner Shadow) uses an adjustable band
-        // (boundingShadowDepth) and stays opaque.
+        // below. Mode 2 (Inner Shadow) uses an adjustable opaque dark band.
+        // Mode 3 (Glassy Intersect) uses true max(fractal, shape) intersection in
+        // the primary march; both its cut face and nearby fractal surface receive
+        // a cool Fresnel glass material.
         if (uniforms.boundingSphereRadius > 0.0f) {
             float shapeDist = safetyBubbleDistance(p, uniforms.boundingShapeCenter, uniforms.boundingSphereRadius, uniforms.boundingShapeType);
-            if (uniforms.boundingFogEnabled == 2) {
+            if (uniforms.boundingFogEnabled == 3) {
+                float depth = clamp(uniforms.boundingShadowDepth, 0.02f, 0.95f);
+                float width = uniforms.boundingSphereRadius * depth;
+                half glassBand = half(smoothstep(-width, 0.0f, shapeDist));
+                float3 boundaryNormal = boundingShapeSurfaceNormal(
+                    p, uniforms.boundingShapeCenter,
+                    uniforms.boundingSphereRadius, uniforms.boundingShapeType);
+                half fresnel = glassyIntersectionFresnel(-marchDir, boundaryNormal);
+                col = compositeGlassyIntersection(col, glassBand, fresnel);
+                // Front-facing glass transmits more passthrough; grazing angles
+                // become more opaque with the same Fresnel term that drives the rim.
+                half glassOpacity = 0.36h + 0.42h * fresnel;
+                boundOpacity = mix(1.0h, glassOpacity, glassBand);
+                boundFade = (sceneResult.hitMaterial == 1 || shapeDist <= 0.0f)
+                    ? 1.0h : 0.0h;
+            } else if (uniforms.boundingFogEnabled == 2) {
                 float depth = clamp(uniforms.boundingShadowDepth, 0.02f, 0.95f);
                 boundFade = half(1.0f - smoothstep(-uniforms.boundingSphereRadius * depth, 0.0f, shapeDist));
             } else if (uniforms.boundingFogEnabled == 1) {
@@ -4159,7 +3940,12 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             float3 hitWorld = (uniforms.modelToWorldMatrix * float4(p, 1.0f)).xyz;
             float spaceDist = spaceBoundsDistance(hitWorld, uniforms.boundSpaceSize, uniforms.boundToSpaceMode);
             half spaceFade;
-            if (uniforms.boundingFogEnabled == 2) {
+            if (uniforms.boundingFogEnabled == 3) {
+                // Bound to Space is retained only for old scene compatibility;
+                // keep its removed room boundary a hard clip. The live glass
+                // material belongs to the user-facing Bounding Shape above.
+                spaceFade = spaceDist > 0.0f ? 0.0h : 1.0h;
+            } else if (uniforms.boundingFogEnabled == 2) {
                 float depth = clamp(uniforms.boundingShadowDepth, 0.02f, 0.95f);
                 spaceFade = half(1.0f - smoothstep(-2.0f * depth, 0.0f, spaceDist));
             } else if (uniforms.boundingFogEnabled == 1) {
@@ -4178,28 +3964,21 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
     // Apply fog, glow, and clamp using helper functions
     half glow = half(ret.y);
-    if (edgeAA) {
-        // Cone-coverage AA composite: the shaded edge surface (fogged at its own
-        // depth) over the background sky (fog at infinity), weighted by coverage.
-        // Blending already-fogged colors keeps a distant edge correctly hazed
-        // while the uncovered fraction stays pure sky. The plain fog below is
-        // skipped for this pixel (edgeAA rays keep ret.x at the miss distance).
-        half3 surfCol = applyFog(col, sceneResult.edgeT, uniforms.precomputedFog);
-        half3 skyCol  = applyFog(half3(0.0h), kRayMissThreshold, uniforms.precomputedFog);
-        col = mix(skyCol, surfCol, half(sceneResult.edgeCoverage));
-    } else {
-        col = applyFog(col, ret.x, uniforms.precomputedFog);
-    }
+    col = applyFog(col, ret.x, uniforms.precomputedFog);
     col = applyGlow(col, glow);
     col = clampColor(col);
 
     col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), glow);
 
-    // Bounding Fog: applied before the floor circle / spring blob composite so
-    // those overlays stay at full strength. Fades to black in Full immersion;
-    // combined with the alpha fade below it fades to passthrough in
-    // Partial/Mixed.
+    // Bounding edge treatment is applied before the floor circle / spring blob
+    // composite so those overlays stay at full strength. Ghost Fade darkens in
+    // Full and fades through in Partial/Mixed. Glass only premultiplies its RGB
+    // when passthrough is active; in Full it keeps the bright opaque glass look.
     col *= boundFade;
+    if (uniforms.passthroughBackground != 0
+        && uniforms.boundingFogEnabled == 3) {
+        col *= boundOpacity;
+    }
 
     FloorCircleHit floorHit = evaluateFloorCircle(cameraPos, rd, ret.x, uniforms.floorPlane, uniforms.floorCenterRadius);
     col = compositeFloorCircle(col, floorHit);
@@ -4221,78 +4000,28 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     // pixels count as hits.
     float outAlpha = 1.0f;
     if (uniforms.passthroughBackground != 0) {
-        if (edgeAA && floorHit.alpha <= 0.0f) {
-            // Silhouette edge over passthrough: present at its coverage.
-            outAlpha = float(sceneResult.edgeCoverage);
-        } else if (ret.x >= kRayMissThreshold && floorHit.alpha <= 0.0f) {
+        if (ret.x >= kRayMissThreshold && floorHit.alpha <= 0.0f) {
             outAlpha = 0.0f;
         } else {
-            // Ghost Fade: hits near the boundary fade to transparent (boundFade
-            // is 1 when the fog mode is off/Inner Shadow or the ray missed).
-            // Inner Shadow stays opaque — it only darkens RGB above.
-            outAlpha = (uniforms.boundingFogEnabled == 2) ? 1.0f : float(boundFade);
+            // Inner Shadow stays opaque. Ghost Fade follows boundFade down to
+            // zero; Glassy Intersect keeps a Fresnel-weighted minimum opacity.
+            if (uniforms.boundingFogEnabled == 2) {
+                outAlpha = 1.0f;
+            } else if (uniforms.boundingFogEnabled == 3) {
+                outAlpha = float(boundFade * boundOpacity);
+            } else {
+                outAlpha = float(boundFade);
+            }
         }
     }
     output.color = float4(float3(col), outAlpha);
     return output;
 }
 
-// Reproject this pixel's ray into the previous frame's depth buffer and return
-// a conservative march start distance, or -1 when no valid history exists.
-// Mirrors the warm-start scheme already proven in adaptiveHierarchical8x8:
-// same-pixel probe → refine via reprojection → start at 0.9× the hit distance
-// (SceneWithCacheFromStart additionally backs off another 0.3 units).
-FORCE_INLINE float computeWarmStartT(
-    float2 fragCoord,
-    uint eyeIndex,
-    constant Uniforms& uniforms,
-    float3 marchOrigin,
-    float3 marchDir,
-    depth2d_array<float, access::sample> prevDepthTex)
-{
-    if (uniforms.warmStartEnabled == 0) return -1.0f;
-
-    constexpr sampler warmSampler(filter::nearest, address::clamp_to_edge);
-    // Miss pixels write ~1e-7 (far in reverse-Z); treat anything at or below
-    // that as "no surface" history.
-    constexpr float kValidDepthMin = 5e-7f;
-
-    float2 uv = fragCoord / uniforms.renderResolution;
-    float dSame = prevDepthTex.sample(warmSampler, uv, eyeIndex);
-    if (dSame <= kValidDepthMin) return -1.0f;
-
-    // Same-pixel probe: previous clip → model space point.
-    float2 ndc0 = float2(fma(uv.x, 2.0f, -1.0f), -fma(uv.y, 2.0f, -1.0f));
-    float4 m0 = uniforms.previousInvViewProjMatrix * float4(ndc0, dSame, 1.0f);
-    if (abs(m0.w) <= 1e-6f) return -1.0f;
-    float tGuess = dot(m0.xyz / m0.w - marchOrigin, marchDir);
-    if (tGuess <= 0.0f) return -1.0f;
-
-    // Refine: project the guess point on OUR ray into the previous frame and
-    // read the depth where it actually landed.
-    float3 probe = fma(marchDir, float3(tGuess), marchOrigin);
-    float4 prevClip = uniforms.previousViewProjMatrix * float4(probe, 1.0f);
-    if (prevClip.w <= 1e-5f) return -1.0f;
-    float2 prevNDC = prevClip.xy / prevClip.w;
-    float2 prevUV = float2(fma(prevNDC.x, 0.5f, 0.5f), fma(prevNDC.y, -0.5f, 0.5f));
-    if (any(prevUV < 0.0f) || any(prevUV > 1.0f)) return -1.0f;
-
-    float dRef = prevDepthTex.sample(warmSampler, prevUV, eyeIndex);
-    if (dRef <= kValidDepthMin) return -1.0f;
-    float4 m1 = uniforms.previousInvViewProjMatrix * float4(prevNDC, dRef, 1.0f);
-    if (abs(m1.w) <= 1e-6f) return -1.0f;
-    float tRef = dot(m1.xyz / m1.w - marchOrigin, marchDir);
-    if (tRef <= 0.0f || tRef >= kRayMissThreshold) return -1.0f;
-
-    return tRef * 0.9f;
-}
-
 fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
                                constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
                                device atomic_uint* benchCounters [[buffer(BufferIndexBenchCounters)]],
-                               ushort ampId [[amplification_id]],
-                               depth2d_array<float, access::sample> prevDepthTex [[texture(TextureIndexPrevDepth), function_constant(FC_WARM_START_ON)]],
-                               texture2d_array<float, access::read> coarseStartTex [[texture(TextureIndexCoarseWarmStart), function_constant(FC_COARSE_WS_ON)]])
+                               ushort ampId [[amplification_id]])
 {
     constant Uniforms& uniforms = uniformsArray.uniforms[ampId];
     float2 fragCoord = in.position.xy;
@@ -4303,50 +4032,8 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     // via the display's temporal integration at 90Hz.
     fragCoord += uniforms.jitterOffset;
 
-    float warmStartT = -1.0f;
-    if (FC_WARM_START_ON) {
-        // Warm start only runs without spherical inversion (CPU gates the flag),
-        // so the unwarped camera ray here matches fragmentMain's march ray.
-        float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
-        float3 rd = normalize(in.modelPos - cameraPos);
-        warmStartT = computeWarmStartT(fragCoord, ampId, uniforms, cameraPos, rd, prevDepthTex);
-    }
-
-    // === CONSERVATIVE CONE COARSE-PREPASS WARM-START (min over the 2x2 covering
-    // coarse texels) ===
-    // Each coarse texel holds a provable lower bound for its 8x8 block. A full-res
-    // pixel can straddle up to a 2x2 neighborhood of coarse texels; taking the MIN
-    // of their bounds keeps the start conservative for the whole pixel. warmT<=0.05
-    // is the cold-start sentinel (cone untrusted / domain warped / no skip found).
-    float coarseWS = -1.0f;
-    if (FC_COARSE_WS_ON) {
-        // fragCoord is in full-render-target pixels and the coarse texture is sized
-        // to full-render-target/8, so floor(fragCoord/8) indexes the covering
-        // coarse texels directly. Clamp against the texture's own dimensions so the
-        // 2x2 neighborhood can never read out of bounds at the right/bottom edge.
-        uint2 base = uint2(floor(fragCoord / 8.0f));
-        uint2 cdim = uint2(coarseStartTex.get_width(), coarseStartTex.get_height());
-        cdim = max(cdim, uint2(1u));
-        float m = FLT_MAX;
-        for (uint dy = 0; dy < 2; ++dy) {
-            for (uint dx = 0; dx < 2; ++dx) {
-                uint2 c = min(base + uint2(dx, dy), cdim - 1u);
-                float v = coarseStartTex.read(c, ampId).x;
-                if (v > 0.05f) m = min(m, v);   // treat warmT<=0.05 as cold
-            }
-        }
-        coarseWS = (m < FLT_MAX) ? m : -1.0f;
-    }
-
-    // Combine the two warm starts conservatively: take the MIN over the positive
-    // candidates (the lower start is always safe; a larger one might overshoot a
-    // disocclusion). The reprojection-window warmStartT keeps feeding the
-    // SceneWithCacheFromStart path unchanged inside fragmentMain; the cone bound is
-    // passed separately and only ever seeds the FULL-march SceneWithCache.
-    float coarseWarmStartT = coarseWS;
-
     // Render fractal
-    return fragmentMain(in, uniforms, fragCoord, uniforms.time, warmStartT, benchCounters, coarseWarmStartT);
+    return fragmentMain(in, uniforms, fragCoord, uniforms.time, benchCounters);
 }
 
 fragment FragmentOutput fragmentShaderMono(ColorInOut in [[stage_in]],
@@ -4360,184 +4047,8 @@ fragment FragmentOutput fragmentShaderMono(ColorInOut in [[stage_in]],
 
     // benchCounters is always bound by the Mac renderer; fragmentMain only writes
     // it when uniforms.benchCollectSteps != 0 (step-profiling armed), so normal
-    // frames pay nothing. No warm start on the mono path → warmStartT = -1.
-    return fragmentMain(in, uniforms, fragCoord, uniforms.time, -1.0f, benchCounters);
-}
-
-// === Format Conversion Shaders for MetalFX ===
-// Used to convert rgba16Float MetalFX output to drawable format (BGRA8Unorm_sRGB)
-// Also handles aspect ratio correction when MetalFX uses physical-sized textures
-
-struct FormatConversionParams {
-    float aspectCorrection;  // physicalAspect / screenAspect (< 1.0 means horizontally squished)
-    float rcasStrength;      // RCAS sharpening strength: 0.0 = off, 1.0 = max
-    float pad0;
-    float pad1;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RCAS — Robust Contrast Adaptive Sharpening (AMD FSR 1.0)
-// Applied inline during the MetalFX resolve pass to recover detail lost in the
-// spatial upscale. 5-tap cross, noise-adaptive negative lobe, neighbourhood-
-// clamped to prevent haloing. Zero extra render passes — runs in the existing
-// resolve fragment shader.
-// ─────────────────────────────────────────────────────────────────────────────
-static inline float3 rcasSharpen(
-    texture2d_array<float> tex,
-    float2 uv,
-    float2 rcpSize,   // 1.0 / float2(tex.width, tex.height)
-    uint   eye,
-    float  strength   // 0.0 = off, 1.0 = max adaptive sharpening
-) {
-    constexpr sampler s(filter::nearest, address::clamp_to_edge);
-
-    // 5-tap cross neighbourhood.
-    // Pre-clamp the off-centre taps to the texel-centre interior so the sampler
-    // never has to hardware-clamp an out-of-range coordinate. This sidesteps a
-    // Metal driver bug (FB172520325 / 177318505, notably Apple-family-10 GPUs)
-    // where a clamp-to-edge read can return ZERO instead of the edge texel — here
-    // that would feed black into the anti-ring clamp and leave a dark fringe on
-    // the outermost pixel row/column. With nearest filtering, clamping to the
-    // texel-centre range is identical to working clamp-to-edge on healthy GPUs.
-    float2 lo = rcpSize * 0.5;
-    float2 hi = 1.0 - lo;
-    float3 b = tex.sample(s, clamp(uv + float2( 0.0,       -rcpSize.y), lo, hi), eye).rgb;
-    float3 d = tex.sample(s, clamp(uv + float2(-rcpSize.x,  0.0      ), lo, hi), eye).rgb;
-    float3 e = tex.sample(s, uv,                                                 eye).rgb;
-    float3 f = tex.sample(s, clamp(uv + float2( rcpSize.x,  0.0      ), lo, hi), eye).rgb;
-    float3 h = tex.sample(s, clamp(uv + float2( 0.0,        rcpSize.y), lo, hi), eye).rgb;
-
-    // Luma weights — perceptual (2G + R + B unnormalised, consistent with FSR)
-    const float3 kLuma = float3(0.5, 1.0, 0.5);
-    float bL = dot(b, kLuma), dL = dot(d, kLuma), eL = dot(e, kLuma);
-    float fL = dot(f, kLuma), hL = dot(h, kLuma);
-
-    // Neighbourhood min/max for anti-ringing clamp
-    float3 mn4 = min(min(b, d), min(f, h));
-    float3 mx4 = max(max(b, d), max(f, h));
-
-    // Noise suppression: reduce sharpening in near-flat or high-frequency regions
-    float maxL = max(max(bL, dL), max(fL, hL));
-    float minL = min(min(bL, dL), min(fL, hL));
-    float nz   = abs(0.25 * (bL + dL + fL + hL) - eL) / max(maxL - minL, 1.0 / 255.0);
-    float ns   = saturate(1.0 - nz);  // 1 = smooth region (sharpen more), 0 = noisy (back off)
-
-    // Negative lobe weight, max -0.125 to prevent overshoot / ringing
-    float w = max(-0.125, -0.125 * strength * ns);
-
-    // 5-tap sharp: centre positive, neighbours negative
-    float3 result = (b + d + f + h) * w + e * (1.0 + 4.0 * (-w));
-
-    // Clamp to neighbourhood to prevent haloing
-    return clamp(result, min(mn4, e), max(mx4, e));
-}
-
-// Full-screen triangle vertex shader - generates vertices procedurally
-// Supports stereo via amplification_id for render_target_array_index
-struct FormatConversionVertexOut {
-    float4 position [[position]];
-    float2 texCoord;
-    uint eyeIndex;  // Pass eye index to fragment
-};
-
-vertex FormatConversionVertexOut formatConversionVertexStereo(uint vertexID [[vertex_id]],
-                                                              ushort ampId [[amplification_id]]) {
-    FormatConversionVertexOut out;
-    
-    // Generate full-screen triangle using oversized triangle technique
-    float2 position;
-    position.x = (vertexID == 1) ? 3.0 : -1.0;
-    position.y = (vertexID == 2) ? 3.0 : -1.0;
-    
-    out.position = float4(position, 0.0, 1.0);
-    
-    // Convert clip space to UV coordinates
-    out.texCoord.x = (position.x + 1.0) * 0.5;
-    out.texCoord.y = (1.0 - position.y) * 0.5;  // Flip Y for Metal
-    out.eyeIndex = ampId;
-    
-    return out;
-}
-
-// Stereo fragment shader — samples from the MetalFX upscaled output and applies
-// RCAS (Robust Contrast Adaptive Sharpening) to recover detail softened by the
-// spatial upscale. Uses 5-tap nearest reads; no bilinear blurring on top.
-fragment float4 formatConversionFragmentStereo(FormatConversionVertexOut in [[stage_in]],
-                                                texture2d_array<float> sourceTexture [[texture(0)]],
-                                                constant FormatConversionParams& params [[buffer(0)]]) {
-    float2 uv = in.texCoord;
-    if (params.aspectCorrection != 1.0) {
-        uv.x = 0.5 + (uv.x - 0.5) * params.aspectCorrection;
-    }
-
-    float2 rcpSize = 1.0 / float2(sourceTexture.get_width(), sourceTexture.get_height());
-
-    float3 color;
-    if (params.rcasStrength > 0.0) {
-        color = rcasSharpen(sourceTexture, uv, rcpSize, in.eyeIndex, params.rcasStrength);
-    } else {
-        constexpr sampler s(filter::nearest, address::clamp_to_edge);
-        color = sourceTexture.sample(s, uv, in.eyeIndex).rgb;
-    }
-    return float4(color, 1.0);
-}
-
-struct DepthOutput {
-    float depth [[depth(any)]];
-};
-
-// Phase 2.7: Merged color + depth resolve. Outputs both attachments from a
-// single fragment invocation so we don't pay the per-tile load/store and
-// command-encoder overhead of two separate render passes.
-struct ColorDepthOutput {
-    float4 color [[color(0)]];
-    float depth  [[depth(any)]];
-};
-
-fragment ColorDepthOutput formatConversionFragmentStereoMerged(FormatConversionVertexOut in [[stage_in]],
-                                                                texture2d_array<float> sourceColor [[texture(0)]],
-                                                                depth2d_array<float> sourceDepth  [[texture(1)]],
-                                                                constant FormatConversionParams& params [[buffer(0)]]) {
-    float2 uv = in.texCoord;
-    if (params.aspectCorrection != 1.0) {
-        uv.x = 0.5 + (uv.x - 0.5) * params.aspectCorrection;
-    }
-
-    ColorDepthOutput out;
-
-    float2 rcpSize = 1.0 / float2(sourceColor.get_width(), sourceColor.get_height());
-    float3 color;
-    if (params.rcasStrength > 0.0) {
-        color = rcasSharpen(sourceColor, uv, rcpSize, in.eyeIndex, params.rcasStrength);
-    } else {
-        constexpr sampler s(filter::nearest, address::clamp_to_edge);
-        color = sourceColor.sample(s, uv, in.eyeIndex).rgb;
-    }
-    out.color = float4(color, 1.0);
-
-    constexpr sampler depthSampler(mag_filter::nearest, min_filter::nearest,
-                                    address::clamp_to_edge);
-    out.depth = sourceDepth.sample(depthSampler, uv, in.eyeIndex);
-    return out;
-}
-
-// Stereo depth resolve fragment shader.
-// Preserve low-res depth discontinuities instead of averaging foreground and
-// background depths. Blended depth edges make compositor reprojection treat
-// projected surfaces as flatter than the color stereo pair suggests.
-fragment DepthOutput depthUpscaleFragmentStereo(FormatConversionVertexOut in [[stage_in]],
-                                                 depth2d_array<float> sourceTexture [[texture(0)]],
-                                                 constant FormatConversionParams& params [[buffer(0)]]) {
-    constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest,
-                                      address::clamp_to_edge);
-    
-    DepthOutput out;
-    float2 uv = in.texCoord;
-    if (params.aspectCorrection != 1.0) {
-        uv.x = 0.5 + (uv.x - 0.5) * params.aspectCorrection;
-    }
-    out.depth = sourceTexture.sample(textureSampler, uv, in.eyeIndex);
-    return out;
+    // frames pay nothing.
+    return fragmentMain(in, uniforms, fragCoord, uniforms.time, benchCounters);
 }
 
 // === macOS single-view blit (MetalFX upscaled output → drawable) ===

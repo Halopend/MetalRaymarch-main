@@ -87,6 +87,16 @@ enum SettingsPersistence {
             config.presets = presets
             SettingsPersistence.saveMusicConfig(config)
         }
+
+        static func loadPresetBankEffect() -> MusicPresetBankEffect {
+            SettingsPersistence.loadMusicConfig().presetBankEffect
+        }
+
+        static func savePresetBankEffect(_ effect: MusicPresetBankEffect) {
+            var config = SettingsPersistence.loadMusicConfig()
+            config.presetBankEffect = effect.normalized
+            SettingsPersistence.saveMusicConfig(config)
+        }
     }
 
     struct MusicPreferences: Codable, Sendable {
@@ -102,10 +112,30 @@ enum SettingsPersistence {
     struct MusicConfig: Codable, Sendable {
         var preferences: MusicPreferences
         var presets: [MusicReactivePreset]
+        var presetBankEffect: MusicPresetBankEffect
 
-        init(preferences: MusicPreferences = .init(), presets: [MusicReactivePreset] = []) {
+        init(
+            preferences: MusicPreferences = .init(),
+            presets: [MusicReactivePreset] = [],
+            presetBankEffect: MusicPresetBankEffect = .init()
+        ) {
             self.preferences = preferences
             self.presets = presets
+            self.presetBankEffect = presetBankEffect.normalized
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case preferences, presets, presetBankEffect
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            preferences = try container.decodeIfPresent(MusicPreferences.self, forKey: .preferences) ?? .init()
+            presets = try container.decodeIfPresent([MusicReactivePreset].self, forKey: .presets) ?? []
+            presetBankEffect = (try? container.decode(
+                MusicPresetBankEffect.self,
+                forKey: .presetBankEffect
+            )) ?? .init()
         }
     }
 

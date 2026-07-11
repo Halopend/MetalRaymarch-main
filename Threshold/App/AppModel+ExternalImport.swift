@@ -87,7 +87,6 @@ extension AppModel {
     }
 
     func previewExternalImport(_ request: ExternalFileImportRequest) {
-        customSceneDiagnostic("🔬 [CSDiag] previewExternalImport id=\(request.id) payload=\(request.payload)")
         if activeExternalPreviewID != request.id {
             clearExternalPreview(restorePreviewedState: true)
             activeExternalPreviewID = request.id
@@ -95,7 +94,6 @@ extension AppModel {
 
         switch request.payload {
         case .preset(let preset):
-            customSceneDiagnostic("🔬 [CSDiag] previewExternalImport .preset name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
             if externalPreviewRestorePreset == nil {
                 externalPreviewRestorePreset = FractalPreset.fromSettings(
                     renderSettings,
@@ -170,10 +168,8 @@ extension AppModel {
     }
 
     func importExternalFile(_ request: ExternalFileImportRequest) {
-        customSceneDiagnostic("🔬 [CSDiag] importExternalFile id=\(request.id)")
         switch request.payload {
         case .preset(let preset):
-            customSceneDiagnostic("🔬 [CSDiag] importExternalFile .preset name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
             // External imports are the only path that needs to (a) persist the
             // preset to the user's library, (b) write the new state to
             // lastState.json, and (c) close the import sheet. The shared helper

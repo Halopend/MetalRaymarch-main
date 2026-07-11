@@ -43,7 +43,6 @@ classDiagram
         +errorReporter : ErrorReporter
         +shareSession : FractalShareSession?
         +renderMetrics : RenderMetrics
-        +handTrackingState : HandTrackingState
         +activateEmbeddedFormulaHandler : AsyncFormulaHandler?
         +preparePipelineHandler : AsyncPresetHandler?
         +captureScreenshotHandler : AsyncDataHandler?
@@ -66,14 +65,7 @@ classDiagram
         +foveationEnabled : Bool
         +renderPath : String
     }
-    class HandTrackingState {
-        +gestureStatus : String
-        +leftHandTracked : Bool
-        +rightHandTracked : Bool
-    }
-
     AppModel *-- RenderMetrics
-    AppModel *-- HandTrackingState
     AppModel *-- RenderSettings
     AppModel *-- ParameterPipeline
     AppModel *-- GestureController
@@ -89,8 +81,8 @@ classDiagram
 > (`StorageMode` local/iCloud, folder-backed store) + the `BackupMerge` enum
 > (`newestWins` reconcile); frame timing is computed inline (see
 > `RendererGameState` "replaces the removed frozen AppClock").
-`RenderMetrics` / `HandTrackingState` are separate `@Observable` sub-containers so high-frequency
-render-thread updates don't invalidate the whole `AppModel`. The `*Handler` closures are set by the
+`RenderMetrics` is a separate `@Observable` sub-container so high-frequency render-thread updates
+don't invalidate the whole `AppModel`. The `*Handler` closures are set by the
 `Renderer` at startup — the only back-channel from the actor to the main-actor model.
 
 ---
@@ -405,7 +397,6 @@ classDiagram
         +tileSize : Int
         +coherentPacketEnabled : Bool
         +foveationStrength : Float
-        +smartAdvanceEnabled : Bool
         +clamp() void
     }
     class DisplayConfig {
@@ -630,9 +621,7 @@ classDiagram
         +uiUpdateCoordinator : UIUpdateCoordinator?
         +parameterUpdateCoordinator : ParameterUpdateCoordinator?
         +temporalDepthTextures : MTLTextureOpt[]
-        +warmStartGate : WarmStartGate
         +buddhabrotRenderer : BuddhabrotRenderer?
-        +metalFXManager : MetalFXManager?
         +screenshotTexture : MTLTexture?
         +layerRenderer : LayerRenderer
         +appModel : AppModel
@@ -666,17 +655,6 @@ classDiagram
         +viewportDidOrbit(delta) void
         +viewportDidZoom(delta) void
         +viewportDidTogglePlayback() void
-    }
-    class MetalFXManager {
-        -device : MTLDevice
-        -scalers : MTLFXSpatialScaler[]
-        -inputTexture : MTLTexture?
-        -outputTexture : MTLTexture?
-        -depthTextures : MTLTexture[]
-        +depthHistoryValid : Bool
-        +update(configuration, viewCount) void
-        +encodeSpatialUpscale(commandBuffer, fence) void
-        +advanceDepthHistory() void
     }
     class MacSpatialUpscaler {
         -device : MTLDevice
@@ -731,14 +709,11 @@ classDiagram
     RaymarchRenderView *-- Coordinator
     Coordinator ..> Renderer
     Coordinator ..> AppModel
-    Renderer *-- MetalFXManager
     Renderer *-- UIUpdateCoordinator
     Renderer *-- ParameterUpdateCoordinator
     Renderer ..> AdaptiveResolutionController
     Renderer ..> BenchmarkManager
     Renderer ..> RendererTaskExecutor : runs on
-    MetalFXManager ..> MacSpatialUpscaler
-    MetalFXManager ..> MacTemporalUpscaler
     UIUpdateCoordinator ..> AppModel
     ParameterUpdateCoordinator ..> AppModel
 ```

@@ -1,0 +1,229 @@
+recordType,metricKind,timestamp,gitSHA,gitState,run,requestedScene,harnessScene,resolutionLabel,widthPx,heightPx,kernel,variant,fractal,iterations,maxThreadsPerThreadgroup,threadExecutionWidth,threadgroupMemBytes,frames,warmup,gpuMsAvg,gpuMsP95,gpuMsMax,fpsAvg,fpsMin,stepsAvg,cpuEncodeMsAvg,notes
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Mandelbox,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Mandelbulb,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Menger,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,MandelbulbJulia,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,QuaternionJulia,6,448,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Octahedron,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,MengerSphere,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,TheliPseudoKleinian,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Kleinian,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Mandelbox,6,640,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Mandelbulb,6,640,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Menger,6,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,MandelbulbJulia,6,640,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,QuaternionJulia,6,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Octahedron,6,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,MengerSphere,6,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,TheliPseudoKleinian,6,704,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Kleinian,6,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Mandelbox,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Mandelbulb,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Menger,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,MandelbulbJulia,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,QuaternionJulia,12,448,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Octahedron,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,MengerSphere,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,TheliPseudoKleinian,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Kleinian,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Mandelbox,12,768,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Mandelbulb,12,640,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Menger,12,768,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,MandelbulbJulia,12,640,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,QuaternionJulia,12,768,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Octahedron,12,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,MengerSphere,12,768,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,TheliPseudoKleinian,12,704,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Kleinian,12,768,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,Mandelbox,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,Mandelbulb,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,Menger,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,MandelbulbJulia,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,QuaternionJulia,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,Octahedron,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,MengerSphere,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,TheliPseudoKleinian,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,Kleinian,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,Mandelbox,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,Mandelbulb,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,Menger,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,MandelbulbJulia,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,QuaternionJulia,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,Octahedron,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,MengerSphere,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,TheliPseudoKleinian,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,1,,,,,,coneCoarsePrepass8x8,default,Kleinian,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Mandelbox,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Mandelbulb,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Menger,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,MandelbulbJulia,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,QuaternionJulia,6,448,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Octahedron,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,MengerSphere,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,TheliPseudoKleinian,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Kleinian,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Mandelbox,6,640,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Mandelbulb,6,640,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Menger,6,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,MandelbulbJulia,6,640,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,QuaternionJulia,6,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Octahedron,6,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,MengerSphere,6,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,TheliPseudoKleinian,6,704,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Kleinian,6,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Mandelbox,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Mandelbulb,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Menger,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,MandelbulbJulia,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,QuaternionJulia,12,448,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Octahedron,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,MengerSphere,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,TheliPseudoKleinian,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Kleinian,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Mandelbox,12,768,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Mandelbulb,12,640,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Menger,12,768,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,MandelbulbJulia,12,640,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,QuaternionJulia,12,768,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Octahedron,12,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,MengerSphere,12,768,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,TheliPseudoKleinian,12,704,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Kleinian,12,768,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,Mandelbox,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,Mandelbulb,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,Menger,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,MandelbulbJulia,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,QuaternionJulia,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,Octahedron,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,MengerSphere,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,TheliPseudoKleinian,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,Kleinian,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,Mandelbox,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,Mandelbulb,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,Menger,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,MandelbulbJulia,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,QuaternionJulia,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,Octahedron,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,MengerSphere,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,TheliPseudoKleinian,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,2,,,,,,coneCoarsePrepass8x8,default,Kleinian,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Mandelbox,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Mandelbulb,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Menger,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,MandelbulbJulia,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,QuaternionJulia,6,448,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Octahedron,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,MengerSphere,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,TheliPseudoKleinian,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Kleinian,6,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Mandelbox,6,640,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Mandelbulb,6,640,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Menger,6,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,MandelbulbJulia,6,640,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,QuaternionJulia,6,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Octahedron,6,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,MengerSphere,6,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,TheliPseudoKleinian,6,704,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Kleinian,6,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Mandelbox,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Mandelbulb,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Menger,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,MandelbulbJulia,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,QuaternionJulia,12,448,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Octahedron,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,MengerSphere,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,TheliPseudoKleinian,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Kleinian,12,384,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Mandelbox,12,768,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Mandelbulb,12,640,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Menger,12,768,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,MandelbulbJulia,12,640,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,QuaternionJulia,12,768,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Octahedron,12,832,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,MengerSphere,12,768,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,TheliPseudoKleinian,12,704,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Kleinian,12,768,,32,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Mandelbox,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Mandelbulb,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Menger,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,MandelbulbJulia,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,QuaternionJulia,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Octahedron,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,MengerSphere,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,TheliPseudoKleinian,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Kleinian,6,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Mandelbox,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Mandelbulb,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Menger,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,MandelbulbJulia,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,QuaternionJulia,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Octahedron,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,MengerSphere,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,TheliPseudoKleinian,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+raw,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Kleinian,12,1024,32,0,,,,,,,,,,threadExecutionWidth blank when not printed by occupancy log
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Kleinian,6,832.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Kleinian,12,768.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Mandelbox,6,640.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Mandelbox,12,768.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Mandelbulb,6,640.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Mandelbulb,12,640.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,MandelbulbJulia,6,640.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,MandelbulbJulia,12,640.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Menger,6,832.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Menger,12,768.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,MengerSphere,6,832.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,MengerSphere,12,768.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Octahedron,6,832.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,Octahedron,12,832.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,QuaternionJulia,6,832.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,QuaternionJulia,12,768.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,TheliPseudoKleinian,6,704.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcBakedOff_postFix,TheliPseudoKleinian,12,704.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Kleinian,6,384.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Kleinian,12,384.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Mandelbox,6,384.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Mandelbox,12,384.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Mandelbulb,6,384.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Mandelbulb,12,384.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,MandelbulbJulia,6,384.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,MandelbulbJulia,12,384.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Menger,6,384.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Menger,12,384.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,MengerSphere,6,384.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,MengerSphere,12,384.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Octahedron,6,384.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,Octahedron,12,384.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,QuaternionJulia,6,448.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,QuaternionJulia,12,448.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,TheliPseudoKleinian,6,384.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,adaptiveHierarchical8x8,fcUndefined_preFix,TheliPseudoKleinian,12,384.00,,32.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Kleinian,6,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Kleinian,12,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Mandelbox,6,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Mandelbox,12,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Mandelbulb,6,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Mandelbulb,12,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,MandelbulbJulia,6,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,MandelbulbJulia,12,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Menger,6,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Menger,12,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,MengerSphere,6,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,MengerSphere,12,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Octahedron,6,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,Octahedron,12,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,QuaternionJulia,6,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,QuaternionJulia,12,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,TheliPseudoKleinian,6,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+summary,occupancy,2026-07-09T15:23:28Z,0d1c3087,clean,3,,,,,,coneCoarsePrepass8x8,default,TheliPseudoKleinian,12,1024.00,32,0.00,,,,,,,,,,mean of 3 runs
+raw,fps,2026-07-09T15:23:28Z,0d1c3087,clean,1,Start,Mandelbox,1080p,1920,1080,fragment-full-march,accelOn_shadowsOn,Mandelbox,,,,,180,60,16.430,18.110,19.850,60.864,50.378,24.00,0.100,Stress test preset absent; used bundled Start target. Harness may report Mandelbox for resolved startup preset.
+raw,fps,2026-07-09T15:23:28Z,0d1c3087,clean,2,Start,Start,1080p,1920,1080,fragment-full-march,accelOn_shadowsOn,Start,,,,,180,60,16.460,17.950,18.850,60.753,53.050,20.00,0.080,Stress test preset absent; used bundled Start target. Harness may report Mandelbox for resolved startup preset.
+raw,fps,2026-07-09T15:23:28Z,0d1c3087,clean,3,Start,Start,1080p,1920,1080,fragment-full-march,accelOn_shadowsOn,Start,,,,,180,60,16.460,18.490,20.080,60.753,49.801,20.00,0.080,Stress test preset absent; used bundled Start target. Harness may report Mandelbox for resolved startup preset.
+raw,fps,2026-07-09T15:23:28Z,0d1c3087,clean,1,Start,Mandelbox,1440p,2560,1440,fragment-full-march,accelOn_shadowsOn,Mandelbox,,,,,180,60,29.510,31.190,32.260,33.887,30.998,25.30,0.110,Stress test preset absent; used bundled Start target. Harness may report Mandelbox for resolved startup preset.
+raw,fps,2026-07-09T15:23:28Z,0d1c3087,clean,2,Start,Start,1440p,2560,1440,fragment-full-march,accelOn_shadowsOn,Start,,,,,180,60,30.430,32.270,33.960,32.862,29.446,22.10,0.110,Stress test preset absent; used bundled Start target. Harness may report Mandelbox for resolved startup preset.
+raw,fps,2026-07-09T15:23:28Z,0d1c3087,clean,3,Start,Start,1440p,2560,1440,fragment-full-march,accelOn_shadowsOn,Start,,,,,180,60,30.380,32.330,33.780,32.916,29.603,22.10,0.100,Stress test preset absent; used bundled Start target. Harness may report Mandelbox for resolved startup preset.
+raw,fps,2026-07-09T15:23:28Z,0d1c3087,clean,1,Start,Start,720p,1280,720,fragment-full-march,accelOn_shadowsOn,Start,,,,,180,60,7.210,9.290,9.760,138.696,102.459,16.70,0.180,Stress test preset absent; used bundled Start target. Harness may report Mandelbox for resolved startup preset.
+raw,fps,2026-07-09T15:23:28Z,0d1c3087,clean,2,Start,Mandelbox,720p,1280,720,fragment-full-march,accelOn_shadowsOn,Mandelbox,,,,,180,60,6.990,8.180,9.140,143.062,109.409,21.20,0.070,Stress test preset absent; used bundled Start target. Harness may report Mandelbox for resolved startup preset.
+raw,fps,2026-07-09T15:23:28Z,0d1c3087,clean,3,Start,Start,720p,1280,720,fragment-full-march,accelOn_shadowsOn,Start,,,,,180,60,6.830,7.770,9.520,146.413,105.042,16.70,0.060,Stress test preset absent; used bundled Start target. Harness may report Mandelbox for resolved startup preset.
+summary,fps,2026-07-09T15:23:28Z,0d1c3087,clean,3,Start,Mandelbox/Start,720p,1280,720,fragment-full-march,accelOn_shadowsOn,,,,,,180,60,7.010,8.413,9.473,142.724,105.637,18.20,0.103,mean of 3 runs
+summary,fps,2026-07-09T15:23:28Z,0d1c3087,clean,3,Start,Mandelbox/Start,1080p,1920,1080,fragment-full-march,accelOn_shadowsOn,,,,,,180,60,16.450,18.183,19.593,60.790,51.076,21.33,0.087,mean of 3 runs
+summary,fps,2026-07-09T15:23:28Z,0d1c3087,clean,3,Start,Mandelbox/Start,1440p,2560,1440,fragment-full-march,accelOn_shadowsOn,,,,,,180,60,30.107,31.930,33.333,33.222,30.016,23.17,0.107,mean of 3 runs

@@ -9,16 +9,6 @@
 import Foundation
 import simd
 
-#if os(macOS) || os(iOS)
-private let RENDERER_DEBUG = false
-#endif
-
-@inline(__always)
-func customSceneDiagnostic(_ message: @autoclosure () -> String) {
-    guard RENDERER_DEBUG else { return }
-    print(message())
-}
-
 /// Result of `installEmbeddedFormulaIfNeededAndWait`. Callers that need to
 /// know whether the renderer has *actually* compiled the formula (vs. just
 /// having it registered in the catalogs for later activation) check for
@@ -54,11 +44,9 @@ extension AppModel {
     /// or `.failed` on validation / compile errors.
     @discardableResult
     func installEmbeddedFormulaIfNeededAndWait(_ formula: EmbeddedFormula?) async -> EmbeddedFormulaInstallResult {
-        customSceneDiagnostic("🔬 [CSDiag] installEmbeddedFormulaIfNeededAndWait ENTRY formula=\(formula?.name ?? "nil") hash=\(formula?.shortHash ?? "nil") activeHash=\(activeEmbeddedFormulaHash ?? "nil") handlerReady=\(activateEmbeddedFormulaHandler != nil)")
         guard let formula else { return .ready }
 
         guard AppModel.allowCustomScenes else {
-            customSceneDiagnostic("🔬 [CSDiag] installEmbeddedFormula REFUSED — custom scenes feature disabled")
             errorReporter.report(.preset(.importFailed(
                 "Custom scenes are experimental. Enable “Allow custom scenes” in Settings → General to load this scene."
             )))
@@ -68,7 +56,6 @@ extension AppModel {
         do {
             try formula.validate()
         } catch {
-            customSceneDiagnostic("🔬 [CSDiag] ❌ installEmbeddedFormula validation failed: \(error)")
             errorReporter.report(.preset(.importFailed(
                 "Failed to validate custom shader: \(error.localizedDescription)"
             )))
@@ -81,9 +68,7 @@ extension AppModel {
             FractalTypeRegistry.registerCustom(formula)
             activeEmbeddedFormula = formula
             activeEmbeddedFormulaHash = hash
-            customSceneDiagnostic("🔬 [CSDiag] installEmbeddedFormula registered in FormulaCatalog + FractalTypeRegistry")
         } else {
-            customSceneDiagnostic("🔬 [CSDiag] installEmbeddedFormula already registered (hash unchanged)")
         }
 
         let handler = activateEmbeddedFormulaHandler
@@ -93,15 +78,12 @@ extension AppModel {
             // renderer's startup task will read `activeEmbeddedFormula` and
             // activate it once the handler binds. Callers MUST wait for
             // `rendererStartupWarmupComplete` before applying the preset.
-            customSceneDiagnostic("🔬 [CSDiag] ⚠️ installEmbeddedFormula DEFERRED (handler nil) — pipeline cache will NOT have FractalTypeCustom arm until renderer starts")
             return .deferred
         }
         do {
             try await handler?(formula)
-            customSceneDiagnostic("🔬 [CSDiag] installEmbeddedFormula handler completed")
             return .ready
         } catch {
-            customSceneDiagnostic("🔬 [CSDiag] ❌ installEmbeddedFormula handler THREW: \(error)")
             errorReporter.report(.preset(.importFailed(
                 "Failed to compile custom shader: \(error.localizedDescription)"
             )))

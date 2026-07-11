@@ -15,19 +15,6 @@ enum DisplayFormat {
     }
 }
 
-enum AdvancedTestScene {
-    static func create(startPosition: SIMD3<Float>) -> AnimationScene {
-        var scene = AnimationScene(name: "Dev Test")
-        scene.isLooping = true
-        scene.keyframes.append(AnimationKeyframe(name: "Start", duration: 0, minDistance: 0.8, foldingLimit: 1.0, sphereRadius: 0.5, fractalScale: 2.8, position: startPosition))
-        scene.keyframes.append(AnimationKeyframe(name: "Open", duration: 2.0, minDistance: 2.0, foldingLimit: 3.0, sphereRadius: 0.8, fractalScale: 2.5, position: startPosition + SIMD3<Float>(0.1, 0, 0)))
-        scene.keyframes.append(AnimationKeyframe(name: "Tight", duration: 2.0, minDistance: 0.5, foldingLimit: 0.8, sphereRadius: 0.3, fractalScale: 3.2, position: startPosition + SIMD3<Float>(0, 0.1, 0)))
-        scene.keyframes.append(AnimationKeyframe(name: "Wild", duration: 2.0, minDistance: 1.5, foldingLimit: 5.0, sphereRadius: 1.2, fractalScale: 2.2, position: startPosition + SIMD3<Float>(-0.1, 0, 0.1)))
-        scene.keyframes.append(AnimationKeyframe(name: "Return", duration: 2.0, minDistance: 0.8, foldingLimit: 1.0, sphereRadius: 0.5, fractalScale: 2.8, position: startPosition))
-        return scene
-    }
-}
-
 // NOTE: SharePlay UI (formerly `SharePlayControlsView`) is intentionally not
 // shipped. The backend (`FractalShareSession` / `FractalShareActivity`) is kept
 // for future use but no view exposes it, so the feature is dormant.

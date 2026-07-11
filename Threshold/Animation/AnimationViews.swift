@@ -19,6 +19,23 @@ fileprivate func formatDuration(_ duration: TimeInterval) -> String {
     }
 }
 
+fileprivate extension AnimationScene {
+    /// The row must describe this scene, not whichever custom formula happens
+    /// to be active in the global fractal registry at render time.
+    var fractalDisplayName: String {
+        embeddedFormula?.name ?? resolvedFractalType.displayName
+    }
+
+    var fractalDisplayIcon: String {
+        resolvedFractalType.icon
+    }
+
+    /// Legacy scenes without stored type metadata play as Mandelbox.
+    private var resolvedFractalType: FractalModelType {
+        fractalType ?? .mandelbox
+    }
+}
+
 fileprivate enum AnimationEditorLayout {
     static let sceneEditorMinWidth: CGFloat = 560
     static let workspaceInset: CGFloat = 6
@@ -216,9 +233,13 @@ struct SceneListView: View {
                                 Text(scene.name)
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
-                                Text("Hidden")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
+                                HStack(spacing: 8) {
+                                    Label(scene.fractalDisplayName, systemImage: scene.fractalDisplayIcon)
+                                    Text("Hidden")
+                                }
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
                             }
                             Spacer()
                             Button {
@@ -275,11 +296,17 @@ struct SceneListView: View {
     private func sceneListRow(_ scene: AnimationScene) -> some View {
         Group {
             if isInline {
-                // Minimal row for the editor sidebar — name only
+                // Compact row for the editor sidebar.
                 HStack {
-                    Text(scene.name)
-                        .font(.subheadline)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(scene.name)
+                            .font(.subheadline)
+                            .lineLimit(1)
+                        Label(scene.fractalDisplayName, systemImage: scene.fractalDisplayIcon)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                     Spacer()
                     if animationManager.currentScene?.id == scene.id {
                         Image(systemName: AppIcons.checkmark)
@@ -287,7 +314,7 @@ struct SceneListView: View {
                             .font(.caption)
                     }
                 }
-                .frame(minHeight: 34)
+                .frame(minHeight: 42)
                 .padding(.vertical, 4)
                 .contentShape(Rectangle())
                 .onTapGesture {
@@ -420,6 +447,8 @@ struct SceneRowView: View {
                 }
                 
                 HStack(spacing: 12) {
+                    Label(scene.fractalDisplayName, systemImage: scene.fractalDisplayIcon)
+                        .lineLimit(1)
                     Label("\(scene.keyframes.count)", systemImage: AppIcons.squareStack3dUp)
                     Label(formatDuration(scene.totalDuration), systemImage: AppIcons.clock)
                     if scene.isLooping {
@@ -679,14 +708,9 @@ struct SceneEditorView: View {
                     Text("Source Fractal")
                         .frame(width: AnimationEditorLayout.settingsLabelWidth, alignment: .leading)
                     Spacer()
-                    if let fractalType = scene.fractalType {
-                        Label(fractalType.displayName, systemImage: fractalType.icon)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("Unspecified")
-                            .foregroundStyle(.secondary)
-                    }
+                    Label(scene.fractalDisplayName, systemImage: scene.fractalDisplayIcon)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 
                 Divider()

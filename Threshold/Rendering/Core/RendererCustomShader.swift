@@ -114,7 +114,6 @@ extension Renderer {
     func activateEmbeddedFormula(_ formula: EmbeddedFormula?,
                                  warpStackSource: String? = nil,
                                  warpStackSignature: String = "s0") async throws {
-        customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula ENTRY formula=\(formula?.name ?? "nil") stackSig=\(warpStackSignature) currentHash=\(customShaderHash ?? "nil") libraryPresent=\(customShaderLibrary != nil)")
 
         let isWarp = (formula?.effectKind == .spaceWarp)
         let fractalEffect = isWarp ? nil : formula
@@ -125,8 +124,6 @@ extension Renderer {
             // Nothing active (no formula, empty stack) → detach, fall back to the
             // bundled default library. Pipelines stay cached (hash-namespaced, inert).
             if customShaderLibrary != nil {
-                customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula DEACTIVATE — library detached, pipelines retained")
-                warmStartGate.invalidate()
                 resetPipelineFastPaths()
                 customShaderLibrary = nil
                 customShaderHash = nil
@@ -139,18 +136,15 @@ extension Renderer {
         // Already active and unchanged — no work (self-heal retries, startup
         // re-activations, and stack slider tweaks that didn't change structure).
         if customShaderHash == newHash, customShaderLibrary != nil {
-            customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula NO-OP (hash unchanged + library present)")
             return
         }
 
         // All custom effects share the namespaced cache, so the warm-start gate's
         // geometry key cannot tell two effect sets apart — depth rendered by the
         // outgoing effect must never seed the incoming one's marches.
-        warmStartGate.invalidate()
 
         // Compile (cached internally by combined hash). While this runs the default
         // library's runtime-loop fallback keeps rendering the current stack.
-        customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula compiling library… stackSig=\(warpStackSignature)")
         let compiler = ensureCompiler()
         let library = try await compiler.library(forFractal: fractalEffect, spaceWarp: warpEffect,
                                                  warpStackSource: warpStackSource, warpStackSignature: warpStackSignature)
@@ -159,10 +153,6 @@ extension Renderer {
         customShaderHash = newHash
         retainCustomShaderPipelines(mostRecentHash: newHash)
 
-        customSceneDiagnostic("🔬 [CSDiag] ✅ activateEmbeddedFormula INSTALLED hash=\(newHash) — library now present")
-        if RENDERER_DEBUG {
-            print("🧪 [CustomShader] Activated effect set hash=\(newHash)")
-        }
     }
 
     // MARK: - Force recompile (debug)
@@ -183,7 +173,6 @@ extension Renderer {
         computePipelineCache.removeAll()
         recentCustomFormulaHashes.removeAll()
         resetPipelineFastPaths()
-        warmStartGate.invalidate()
 
         // If a custom formula is active, recompile it from source. Evicting the
         // compiler's library cache and detaching the live library forces
@@ -244,10 +233,6 @@ extension Renderer {
             computeEvicted += 1
         }
 
-        if RENDERER_DEBUG && (renderEvicted + computeEvicted) > 0 {
-            print("🧹 [CustomShader] Evicted \(renderEvicted) render + \(computeEvicted) compute pipelines for \(hash)")
-        }
-        customSceneDiagnostic("🔬 [CSDiag] evictCustomShaderPipelines(forHash: \(hash)) render=\(renderEvicted) compute=\(computeEvicted)")
     }
 
     /// Reset the one-entry pipeline fast paths so a stale cached pointer from

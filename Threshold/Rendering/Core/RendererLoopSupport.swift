@@ -17,7 +17,6 @@ extension Renderer {
                 continue
             }
             if layerRenderer.state == .invalidated {
-                if RENDERER_DEBUG { print("Layer is invalidated") }
                 updateImmersiveSpaceStateIfNeeded(.closed)
                 return
             } else if layerRenderer.state == .paused {

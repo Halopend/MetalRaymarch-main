@@ -166,6 +166,10 @@ final class RenderSettings: @unchecked Sendable {
     private var _fractalAudioAmount: Float              = loadFloat("fractalAudioAmount", default: 0.6)
     private var _fractalBeatPunch: Float                = loadFloat("fractalBeatPunch", default: 0.7)
     private var _fractalAudioDamping: Float             = loadFloat("fractalAudioDamping", default: 0.0)
+    // Library-level preset sequencing is intentionally outside AudioReactiveConfig:
+    // scene loads replace that scene-authored config, while this session control
+    // must remain active across every preset it selects.
+    private var _musicPresetBankEffectEnabled: Bool = false
     private var _musicReactiveMappings: [MusicReactiveMapping] = loadMusicReactiveMappings("musicReactiveMappings")
     private var _tripletMusicGains: [String: Float] = [:]
     
@@ -191,15 +195,11 @@ final class RenderSettings: @unchecked Sendable {
     private var _formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()  // Generic formula params
     private var _tileSize: Int = 0                   // 0=disabled (fragment), 8=8x8 adaptive hierarchical compute
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
-    private var _recreateLegacyComputeCacheBug: Bool = false  // Intentionally allow nearest-pipeline mismatch ("Accidental Sphere Projection" legacy look)
     private var _coherentPacketEnabled: Bool = loadBool("coherentPacketEnabled", default: false)  // Experimental predict-validate raymarch (Stages 0-3)
     private var _computeTemporalReprojectionEnabled: Bool = loadBool("computeTemporalReprojectionEnabled", default: false)  // Compute path: temporal reproject + tile/supertile depth seeding. Off = full coarse+fine march every frame (correct baseline; the seeding can blank disoccluded tiles)
-    private var _coarsePrepassWarmStartEnabled: Bool = loadBool("coarsePrepassWarmStartEnabled", default: false)  // visionOS fragment path: conservative cone coarse-prepass warm-start. A low-res cone pass writes a provable LOWER BOUND on each 8x8 block's nearest-surface entry distance; the full march raises its start t to it (skip-to-then-full-march). Off = no cone pass, byte-identical to before. Box/fold + un-warped domain only.
     private var _foveationStrength: Float = loadFloat("foveationStrength", default: 0.0)  // Peripheral step reduction on the 8x8 compute path (0 = off)
-    private var _smartAdvanceEnabled: Bool = loadBool("smartAdvanceEnabled", default: false)  // Grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient)
     private var _adaptiveRenderQualityEnabled: Bool = loadBool("adaptiveRenderQualityEnabled", default: true)  // visionOS: auto-lower compositor Render Quality to hold FPS (slider = ceiling)
     private var _coneMarchStrength: Float = loadFloat("coneMarchStrength", default: 0.0)  // 0 = off; scales the distance-growing hit threshold (projected pixel footprint, ConeMarchingPen)
-    private var _coneCoverageAAEnabled: Bool = loadBool("coneCoverageAAEnabled", default: false)  // CTSS-lite silhouette AA from the cone footprint (fragment path); lets Cone Marching run harder without blobby edges
     // ── Per-scene performance PROFILE (set by FractalPreset.apply on scene load;
     // NOT part of the device-local Quality domain / never persisted to UserDefaults).
     // These let a scene HINT at how it renders best without ever forcing a
@@ -214,16 +214,16 @@ final class RenderSettings: @unchecked Sendable {
     private var _sceneConeMarchCompatible: Bool = true
     private var _recommendedQuality: SceneQualityTarget? = nil
     private var _sceneRenderQualityFloor: Float = QualityConfig.visionMinRenderQuality
-    private var _overRelaxationMax: Float = loadFloat("overRelaxationMax", default: 1.4)  // Keinert over-relaxation ceiling the auto-ramp may reach (1.0 = conservative)
     private var _distanceLODStrength: Float = loadFloat("distanceLODStrength", default: 0.0)  // 0 = off; drops fractal iterations on faraway samples
     private var _shadowsEnabled: Bool = loadBool("shadowsEnabled", default: true)  // false skips the two per-pixel shadow marches
     private var _boundingSphereSkipEnabled: Bool = loadBool("boundingSphereSkipEnabled", default: false)  // reject rays that miss the fractal's bounding sphere
     private var _boundingShapeRadius: Float = loadFloat("boundingShapeRadius", default: 6.0)  // bounding shape (sphere) radius, model units
     // Bounding-edge treatment: 0 = off, 1 = Ghost Fade (translucent, the original
-    // combined RGB+alpha fade), 2 = Inner Shadow (opaque RGB-only darken). Migrates
-    // the old "boundingShapeFogEnabled" Bool (true → Ghost Fade) when unset.
+    // combined RGB+alpha fade), 2 = Inner Shadow (opaque RGB-only darken),
+    // 3 = Glassy Intersect (tinted Fresnel band). Migrates the old
+    // "boundingShapeFogEnabled" Bool (true → Ghost Fade) when unset.
     private var _boundingShapeFogMode: Int = loadInt("boundingShapeFogMode", default: loadBool("boundingShapeFogEnabled", default: false) ? 1 : 0)
-    private var _boundingShapeShadowDepth: Float = loadFloat("boundingShapeShadowDepth", default: 0.35)  // Inner Shadow band width, fraction of boundingShapeRadius
+    private var _boundingShapeShadowDepth: Float = loadFloat("boundingShapeShadowDepth", default: 0.35)  // Shadow/glass band width, fraction of boundingShapeRadius
     // Bounding Shape family/preset — same encoding as safetyBubbleShape (0...1 =
     // sphere/cube morph, 2...6 = discrete platonic solids).
     private var _boundingShapeType: Float = loadFloat("boundingShapeType", default: 0.0)
@@ -392,11 +392,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _isGeometryGestureActive: Bool = false
     private var _geometryStableFrameCount: Int = 0           // Frames since geometry settled
     private let geometrySettleThreshold: Float = 0.001       // Threshold for considering parameters settled
-    
-    // === GMT-FRACTALS OPTIMIZATIONS ===
-    // Step over-relaxation: >1.0 takes larger steps for faster convergence.
-    // 1.0 = safe default, 1.2-1.5 during stable geometry, reduced during interaction.
-    private var _stepMultiplier: Float = 1.0
     
     // === GRADIENT COLORING SYSTEM ===
     // Replaces hardcoded palettes with user-editable gradient stops.
@@ -698,6 +693,31 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _spaceWarpStack = newValue; _cachedPackedSpaceWarpStack = nil } }
     }
 
+    /// Reset every fractal-space transformation to its scene defaults, then install
+    /// the incoming scene's composable stack. Scene loading uses this as one atomic
+    /// boundary so standalone systems, the legacy/custom warp seam, live audio
+    /// offsets, and stack operations cannot bleed into a scene that omits them.
+    func resetSceneTransformations(spaceWarpStack: [SpaceWarpOpValue] = []) {
+        withLock {
+            _sphericalInversionMode = .off
+            _sphericalInversionRadius = 2.0
+            _sphereProjectionEnabled = false
+            _sphereProjectionBlend = 1.0
+            _sphereProjectionRadius = 1.0
+            _deIterationMismatch = 0.0
+
+            _spaceWarpStrength = 0.0
+            _spaceWarpParam1 = 0.0
+            _spaceWarpParam2 = 0.0
+            _spaceWarpParam3 = 0.0
+            _spaceWarpAxis = SIMD3<Float>(0, 1, 0)
+
+            _spaceWarpStack = spaceWarpStack
+            _spaceWarpAudioOffsets.removeAll(keepingCapacity: true)
+            _cachedPackedSpaceWarpStack = nil
+        }
+    }
+
     /// Replace the music-driven per-(slot, field) offsets atomically. Called once per
     /// audio frame by the music engine; pass `[:]` to clear (mapping removed / music
     /// off). Folded into each op's chosen field at snapshot time.
@@ -825,6 +845,13 @@ final class RenderSettings: @unchecked Sendable {
             withLock { _fractalAudioReactiveEnabled = newValue }
             persistAudioReactive()
         }
+    }
+
+    /// Thread-safe render-loop mirror of the global preset-bank sequencer toggle.
+    /// It is persisted by SettingsPersistence.Music, not as scene state.
+    var musicPresetBankEffectEnabled: Bool {
+        get { withLock { _musicPresetBankEffectEnabled } }
+        set { withLock { _musicPresetBankEffectEnabled = newValue } }
     }
 
     var fractalAudioAmount: Float {
@@ -1252,14 +1279,6 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _debugHierarchical = newValue } }
     }
 
-    /// Intentionally reenables the legacy nearest-pipeline fallback in the
-    /// compute cache to reproduce the historical "Accidental Sphere Projection"
-    /// artifact look (FC_FRACTAL_ITERATIONS / absScalePow mismatch).
-    var recreateLegacyComputeCacheBug: Bool {
-        get { withLock { _recreateLegacyComputeCacheBug } }
-        set { withLock { _recreateLegacyComputeCacheBug = newValue } }
-    }
-
     /// Experimental: enable coherent-packet predict-validate raymarch path.
     /// Replaces the prevDepth*0.9 warm-start heuristic with a single-DE-eval
     /// safety probe and gates shared shadows on local normal coherence.
@@ -1285,23 +1304,6 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    /// visionOS fragment path: conservative cone coarse-prepass warm-start. A
-    /// low-res compute pass marches a CONE per 8x8 block and writes a provable
-    /// LOWER BOUND on the entry distance of the nearest surface for every full-res
-    /// ray in that block. The fragment march then raises its start `t` to that
-    /// bound (skip-to-then-full-march), skipping provably-empty space without ever
-    /// skipping a surface. Defaults OFF — when off the cone pass is never
-    /// dispatched, the function constant stays undefined, and the code path is
-    /// byte-for-byte identical to before. Only engages for box/fold fractals on an
-    /// un-warped domain (the conservative analytic lower bound holds there).
-    var coarsePrepassWarmStartEnabled: Bool {
-        get { withLock { _coarsePrepassWarmStartEnabled } }
-        set {
-            withLock { _coarsePrepassWarmStartEnabled = newValue }
-            persistQuality()
-        }
-    }
-
     /// Foveated raymarching strength (0...1). 0 = uniform full-quality march
     /// everywhere; higher values march progressively fewer ray steps in the
     /// peripheral 8x8 tiles. Only affects the 8x8 adaptive compute path.
@@ -1310,31 +1312,6 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.0, min(1.0, newValue))
             withLock { _foveationStrength = clamped }
-            persistQuality()
-        }
-    }
-
-    /// Smart advance: grazing-aware lead-ahead sphere tracing. When on, the
-    /// march reads the along-ray DE gradient each step and steps further through
-    /// grazing/receding regions (where plain tracing creeps), guarded by the same
-    /// overstep-failure retreat as the Keinert over-relaxation. Off by default;
-    /// affects every raymarch path (Mac fragment + visionOS compute).
-    var smartAdvanceEnabled: Bool {
-        get { withLock { _smartAdvanceEnabled } }
-        set {
-            withLock { _smartAdvanceEnabled = newValue }
-            persistQuality()
-        }
-    }
-
-    /// Cone-coverage anti-aliasing (CTSS-lite). Composites near-miss silhouette
-    /// pixels over the background by a coverage alpha derived from the cone
-    /// footprint, so the Cone Marching threshold can grow (fewer steps) without
-    /// inflating silhouettes. Fragment path only. Off by default.
-    var coneCoverageAAEnabled: Bool {
-        get { withLock { _coneCoverageAAEnabled } }
-        set {
-            withLock { _coneCoverageAAEnabled = newValue }
             persistQuality()
         }
     }
@@ -1409,18 +1386,6 @@ final class RenderSettings: @unchecked Sendable {
         #endif
     }
 
-    /// Over-relaxation ceiling (Keinert enhanced sphere tracing). The largest
-    /// `stepMultiplier` the geometry-settle auto-ramp may reach. 1.0 = plain
-    /// conservative sphere tracing; up to 1.6 takes bigger over-relaxed steps
-    /// (faster, guarded by the in-shader overstep-failure retreat + per-type cap).
-    var overRelaxationMax: Float {
-        get { withLock { _overRelaxationMax } }
-        set {
-            withLock { _overRelaxationMax = max(1.0, min(1.6, newValue)) }
-            persistQuality()
-        }
-    }
-
     /// Distance-based iteration LOD (0...1, 0 = off). Drops fractal iterations on
     /// faraway march samples where the lost detail is already sub-pixel.
     var distanceLODStrength: Float {
@@ -1464,17 +1429,18 @@ final class RenderSettings: @unchecked Sendable {
 
     /// Bounding-edge treatment: 0 = off (hard clip), 1 = Ghost Fade (fades RGB and,
     /// under passthrough, alpha too — translucent), 2 = Inner Shadow (fades RGB
-    /// only — stays opaque). Only takes effect while `boundingSphereSkipEnabled` is on.
+    /// only — stays opaque), 3 = Glassy Intersect (tinted Fresnel band with
+    /// passthrough translucency). Only takes effect while `boundingSphereSkipEnabled` is on.
     var boundingShapeFogMode: Int {
         get { withLock { _boundingShapeFogMode } }
         set {
-            withLock { _boundingShapeFogMode = max(0, min(2, newValue)) }
+            withLock { _boundingShapeFogMode = max(0, min(3, newValue)) }
             persistQuality()
         }
     }
 
-    /// Inner Shadow band width, as a fraction of `boundingShapeRadius` (0...1).
-    /// Only takes effect while `boundingShapeFogMode == 2`.
+    /// Adjustable edge-band width, as a fraction of `boundingShapeRadius` (0...1).
+    /// Used by Inner Shadow (mode 2) and Glassy Intersect (mode 3).
     var boundingShapeShadowDepth: Float {
         get { withLock { _boundingShapeShadowDepth } }
         set {
@@ -2868,14 +2834,11 @@ final class RenderSettings: @unchecked Sendable {
                 debugHierarchical: _debugHierarchical,
                 coherentPacketEnabled: _coherentPacketEnabled,
                 computeTemporalReprojectionEnabled: _computeTemporalReprojectionEnabled,
-                coarsePrepassWarmStartEnabled: _coarsePrepassWarmStartEnabled,
                 foveationStrength: _foveationStrength,
-                smartAdvanceEnabled: _smartAdvanceEnabled,
                 // Per-scene gate: a scene marked cone-march-INcompatible zeroes the
                 // effective strength for every render path (single choke point), so
                 // the device's Cone Marching setting simply doesn't apply to it.
                 coneMarchStrength: _sceneConeMarchCompatible ? _coneMarchStrength : 0.0,
-                coneCoverageAAEnabled: _coneCoverageAAEnabled,
                 distanceLODStrength: _distanceLODStrength,
                 shadowsEnabled: _shadowsEnabled,
                 boundingSphereSkipEnabled: _boundingSphereSkipEnabled,
@@ -2924,7 +2887,6 @@ final class RenderSettings: @unchecked Sendable {
                 detailScale: _detailScale,
                 geometryState: _geometryState,
                 isGeometryGestureActive: _isGeometryGestureActive,
-                stepMultiplier: _stepMultiplier,
                 springDisplacement: _springDisplacement,
                 springActive: _springActive,
                 leftHandedMode: _leftHandedMode
@@ -3744,11 +3706,6 @@ final class RenderSettings: @unchecked Sendable {
                 } else if _geometryState == .stable {
                     _geometryStableFrameCount += 1
                 }
-                // Step multiplier stays high when converged (already settled).
-                // The march loops now run Keinert overstep-failure detection, so
-                // over-relaxation is hit-identical to 1.0 — 1.4 is safe everywhere.
-                let targetStepMultiplier: Float = _overRelaxationMax
-                _stepMultiplier += (targetStepMultiplier - _stepMultiplier) * 0.1
             } else {
             
             // Check for NaN/Inf in targets before interpolating
@@ -3918,23 +3875,6 @@ final class RenderSettings: @unchecked Sendable {
                     _geometryStableFrameCount = 0
                 }
             }
-            
-            // ═══════════════════════════════════════════════════════════════════════════
-            // GMT-FRACTALS: ADAPTIVE STEP MULTIPLIER
-            // Over-relaxation factor adjusts based on geometry stability:
-            // - Parameters changing: 1.2
-            // - Parameters settled: 1.4
-            // The march loops run Keinert overstep-failure detection (retreat +
-            // conservative fallback when unbounding spheres stop overlapping), so
-            // over-relaxation can never skip a surface that 1.0 would hit — the
-            // multiplier is purely a speed knob now, safe even during interaction.
-            // Uses allGeometrySettled directly instead of _isGeometryGestureActive,
-            // which may not be wired to all gesture sources.
-            // ═══════════════════════════════════════════════════════════════════════════
-            let targetStepMultiplier: Float = allGeometrySettled ? _overRelaxationMax
-                                                                  : max(1.0, _overRelaxationMax - 0.2)
-            // Smooth transition to avoid popping
-            _stepMultiplier += (targetStepMultiplier - _stepMultiplier) * 0.1
             
             } // end convergence lock else
     }
@@ -4214,16 +4154,11 @@ final class RenderSettings: @unchecked Sendable {
                 c.renderQuality = _renderQuality
                 c.tileSize = _tileSize
                 c.debugHierarchical = _debugHierarchical
-                c.recreateLegacyComputeCacheBug = _recreateLegacyComputeCacheBug
                 c.coherentPacketEnabled = _coherentPacketEnabled
                 c.computeTemporalReprojectionEnabled = _computeTemporalReprojectionEnabled
-                c.coarsePrepassWarmStartEnabled = _coarsePrepassWarmStartEnabled
                 c.foveationStrength = _foveationStrength
-                c.smartAdvanceEnabled = _smartAdvanceEnabled
                 c.adaptiveRenderQualityEnabled = _adaptiveRenderQualityEnabled
                 c.coneMarchStrength = _coneMarchStrength
-                c.coneCoverageAAEnabled = _coneCoverageAAEnabled
-                c.overRelaxationMax = _overRelaxationMax
                 c.distanceLODStrength = _distanceLODStrength
                 c.shadowsEnabled = _shadowsEnabled
                 c.boundingSphereSkipEnabled = _boundingSphereSkipEnabled
@@ -4261,16 +4196,11 @@ final class RenderSettings: @unchecked Sendable {
                 _renderQuality = max(QualityConfig.visionMinRenderQuality, min(QualityConfig.visionMaxRenderQuality, newValue.renderQuality))
                 _tileSize = newValue.tileSize
                 _debugHierarchical = newValue.debugHierarchical
-                _recreateLegacyComputeCacheBug = newValue.recreateLegacyComputeCacheBug
                 _coherentPacketEnabled = newValue.coherentPacketEnabled
                 _computeTemporalReprojectionEnabled = newValue.computeTemporalReprojectionEnabled
-                _coarsePrepassWarmStartEnabled = newValue.coarsePrepassWarmStartEnabled
                 _foveationStrength = newValue.foveationStrength
-                _smartAdvanceEnabled = newValue.smartAdvanceEnabled
                 _adaptiveRenderQualityEnabled = newValue.adaptiveRenderQualityEnabled
                 _coneMarchStrength = max(0.0, min(1.0, newValue.coneMarchStrength))
-                _coneCoverageAAEnabled = newValue.coneCoverageAAEnabled
-                _overRelaxationMax = max(1.0, min(1.6, newValue.overRelaxationMax))
                 _distanceLODStrength = max(0.0, min(1.0, newValue.distanceLODStrength))
                 _shadowsEnabled = newValue.shadowsEnabled
                 _boundingSphereSkipEnabled = newValue.boundingSphereSkipEnabled

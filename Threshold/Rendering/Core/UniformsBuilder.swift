@@ -43,9 +43,8 @@ struct UniformsPlatformInputs {
     // Per-platform smoothed / capped horizon.
     var maxViewDistance: Float
 
-    // Cone-marching footprint: needs the platform's projection + viewport height.
+    // Cone-marching threshold scale: needs the platform's projection + viewport height.
     var coneMarchScale: Float
-    var pixelFootprintPerDist: Float
 
     // Safety-bubble radius in METERS, before the shared /effectiveScale correction.
     // visionOS may shrink this for mixed immersion; Mac/QL pass the raw setting.
@@ -157,7 +156,6 @@ func assembleUniforms(settings: RenderSettingsSnapshot,
                     colorIterations: settings.colorIterations,
                     limitFlash: settings.limitFlash,
                     activeGesture: Int32(settings.activeGestureIndex),
-                    warmStartEnabled: 0,
                     fractalType: settings.fractalType.rawValue,
                     lightingSoftness: settings.lightingSoftness,
                     sphericalInversionMode: settings.sphericalInversionMode.rawValue,
@@ -170,16 +168,11 @@ func assembleUniforms(settings: RenderSettingsSnapshot,
                     spaceWarpParam3: settings.spaceWarpParam3,
                     spaceWarpAxis: settings.spaceWarpAxis,
                     spaceWarpStack: settings.spaceWarpStack,
-                    stepMultiplier: settings.stepMultiplier,
                     boundingSphereRadius: settings.estimatedBoundingSphereRadius,
-                    smartAdvanceEnabled: settings.smartAdvanceEnabled ? 1 : 0,
                     coneMarchScale: platform.coneMarchScale,
-                    coneCoverageAAEnabled: settings.coneCoverageAAEnabled ? 1 : 0,
                     shadowsEnabled: settings.shadowsEnabled ? 1 : 0,
                     distanceLODFalloff: distanceLODFalloff,
                     benchCollectSteps: platform.benchCollectSteps,
-                    pixelFootprintPerDist: platform.pixelFootprintPerDist,
-                    coarseRateMagMax: 1.0,
                     springDisplacementX: settings.springDisplacement.x,
                     springDisplacementY: settings.springDisplacement.y,
                     springDisplacementZ: settings.springDisplacement.z,

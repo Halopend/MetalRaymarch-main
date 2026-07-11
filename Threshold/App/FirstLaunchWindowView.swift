@@ -6,7 +6,7 @@ import AVKit
 ///   1. Welcome (what Threshold is, what the app does)
 ///   2. Hand controls (movement video + handedness)
 ///   3. Menu gesture + compact shortcut summary
-///   4. Sharing (analytics on by default; user can opt out + username)
+///   4. Sharing (analytics opt-in + local community display name)
 ///
 /// Each page scrolls independently; a shared footer pins Back/Next and
 /// the page indicator to the bottom so they stay reachable at any
@@ -236,9 +236,9 @@ struct FirstLaunchWindowView: View {
                     detail: "Tap Reset to jump back to your saved baseline. Hold Reset to save the current setup as a new reset point or create a named preset."
                 )
                 IntroTipRow(
-                    icon: "person.2.wave.2",
-                    title: "Sharing is on by default",
-                    detail: "Threshold can share your settings with the community so they can become future collections. You can opt out anytime in Settings > Sharing."
+                    icon: "chart.bar.fill",
+                    title: "Analytics are off by default",
+                    detail: "You can opt in from Settings > Sharing to send aggregate usage and performance data. Scenes, preset names, recordings, and personal files stay local."
                 )
             }
         } detail: {
@@ -476,13 +476,13 @@ struct FirstLaunchWindowView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    // MARK: - Page 4: Sharing (opt-out)
+    // MARK: - Page 4: Sharing (opt-in)
 
     private var sharingPage: some View {
         OnboardingPageShell(
             icon: shareAnalytics ? AppIcons.person3Fill : AppIcons.personSlash,
-            title: "Community sharing",
-            subtitle: "Threshold can share settings snapshots for future community collections. No account, email, or location.",
+            title: "Anonymous analytics",
+            subtitle: "Help improve Threshold with aggregate usage and performance data. Off by default; no scenes, preset names, recordings, or personal files.",
             accent: .blue
         ) {
             VStack(alignment: .leading, spacing: 12) {
@@ -491,18 +491,18 @@ struct FirstLaunchWindowView: View {
                         .font(.title3)
                         .foregroundStyle(shareAnalytics ? .blue : .secondary)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(shareAnalytics ? "Sharing with the community" : "Sharing is off")
+                        Text(shareAnalytics ? "Anonymous analytics are on" : "Anonymous analytics are off")
                             .font(.headline)
                         Text(shareAnalytics
-                             ? "Your settings can be reviewed for future community features."
-                             : "Tap below to turn sharing back on.")
+                             ? "Aggregate usage and performance data will be shared."
+                             : "Turn this on only if you want to share anonymous analytics.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
 
                 Toggle(isOn: $shareAnalytics) {
-                    Text(shareAnalytics ? "Sharing is on (turn off)" : "Sharing is off (turn on)")
+                    Text(shareAnalytics ? "Share anonymous analytics" : "Anonymous analytics are off")
                 }
                 .tint(.blue)
 
@@ -522,17 +522,17 @@ struct FirstLaunchWindowView: View {
         } detail: {
             VStack(alignment: .leading, spacing: 8) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Label("What you're sharing:", systemImage: AppIcons.checkmarkCircle)
+                    Label("What opting in sends:", systemImage: AppIcons.checkmarkCircle)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text("• Settings snapshots that can become community collections\n• Aggregated usage stats (e.g. which fractals are popular)\n• Your display name, if you add one, for attribution")
+                    Text("• Time-weighted settings and feature-use aggregates\n• Average frame rate plus device, OS, and app versions\n• Preset load/save counts, never preset names or contents")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                     Label("What we don't collect:", systemImage: AppIcons.xmarkCircle)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .padding(.top, 4)
-                    Text("• No account is created\n• No Apple ID, email, or location\n• No photos, recordings, or personal files")
+                    Text("• No advertising identifier, email, or location\n• No scenes, photos, recordings, or personal files\n• Your optional display name stays on this device")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }

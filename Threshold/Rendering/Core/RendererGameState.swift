@@ -283,15 +283,6 @@ extension Renderer {
             hasLoggedDeviceAnchorInfo = true
             let transform = anchor.originFromAnchorTransform
             let position = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
-            if RENDERER_DEBUG {
-                print("📍 Device anchor first frame:")
-                print("   Position: (\(position.x), \(position.y), \(position.z))")
-                print("   isTracked: \(anchor.isTracked)")
-                // If position is exactly (0,0,0), world sensing permission may not be granted
-                if position.x == 0 && position.y == 0 && position.z == 0 {
-                    print("   ⚠️ Position is origin - world sensing may not be authorized!")
-                }
-            }
         }
 
         // === PRECOMPUTE FRAME-UNIFORM VALUES ===
@@ -364,7 +355,6 @@ extension Renderer {
                 : settingsSnapshot.safetyBubbleRadius
 
             // Previous frame's view-proj (model → prev clip) for the temporal
-            // depth warm-start. updateGameState runs before finishFragmentPass
             // rotates these, so they still hold last frame's matrices here.
             let prevViewProj = viewIndex < previousViewProjMatrices.count
                 ? previousViewProjMatrices[viewIndex]
@@ -384,7 +374,6 @@ extension Renderer {
                 previousInvViewProjMatrix: prevViewProj.inverse,
                 maxViewDistance: maxViewDistance,
                 coneMarchScale: RenderPrecompute.coneMarchScale(strength: settingsSnapshot.coneMarchStrength, projection: projection, viewportHeight: viewportHeight),
-                pixelFootprintPerDist: RenderPrecompute.pixelFootprintPerDist(projection: projection, viewportHeight: viewportHeight),
                 safetyBubbleRadiusMeters: bubbleRadiusMeters,
                 handField: handAttraction.asHandFieldParams,
                 precomputedFractal: precomputedFractal,

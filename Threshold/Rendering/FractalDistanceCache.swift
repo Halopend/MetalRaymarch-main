@@ -124,7 +124,7 @@ final class FractalDistanceCache {
 
     /// Feature gate: only fractal types whose DE is a true lower bound with
     /// local Lipschitz constant ≤ 1 (the box-fold family — the same set that
-    /// tolerates relaxedOmegaCap 1.6). Log-DE and fudge-factored estimators
+    /// is conservative). Log-DE and fudge-factored estimators
     /// can locally OVERESTIMATE, which would break the baked bound.
     private static let eligibleTypes: Set<FractalModelType> = [
         .mandelbox, .menger, .octahedron, .mengerSphere,

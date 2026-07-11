@@ -35,7 +35,7 @@ classDiagram
         +musicService: MusicService
         +audioAnalyzer: AudioAnalyzer
         +presetManager: PresetManager
-        +renderMetrics / handTrackingState
+        +renderMetrics
         +handlers ..> Renderer
     }
 
@@ -121,10 +121,6 @@ classDiagram
     }
     class UIUpdateCoordinator { <<Sendable>> }
     class ParameterUpdateCoordinator { <<Sendable>> }
-    class MetalFXManager {
-        scalers[] (per eye)
-        depthTextures[]
-    }
     class MacSpatialUpscaler
     class MacTemporalUpscaler
     class AdaptiveResolutionController
@@ -141,12 +137,9 @@ classDiagram
     Renderer *-- UIUpdateCoordinator
     Renderer *-- ParameterUpdateCoordinator
     Renderer ..> RendererTaskExecutor : runs on
-    Renderer ..> MetalFXManager
     Renderer ..> AdaptiveResolutionController
     Renderer ..> BuddhabrotRenderer : optional volume path
 
-    MetalFXManager ..> MacSpatialUpscaler
-    MetalFXManager ..> MacTemporalUpscaler
     UIUpdateCoordinator ..> AppModel : batched FPS/metrics
     ParameterUpdateCoordinator ..> AppModel : batched anim/audio
 
@@ -352,7 +345,6 @@ classDiagram
     class TwoPointGrabEngine
     class PerFingerTapGestureEngine
     class MenuToggleGestureEngine
-    class HandTrackingState { <<@Observable>> }
     class GrabZoomMapping { <<struct>> }
     class GestureSensitivityStore { <<singleton>> }
 
@@ -362,7 +354,6 @@ classDiagram
     GestureController *-- TwoPointGrabEngine
     GestureController *-- PerFingerTapGestureEngine
     GestureController *-- MenuToggleGestureEngine
-    GestureController ..> HandTrackingState
     GestureController ..> ParameterPipeline : dispatchGesture
     GestureController ..> FractalTypeRegistry : gesture ranges
     GestureController ..> GestureSensitivityStore

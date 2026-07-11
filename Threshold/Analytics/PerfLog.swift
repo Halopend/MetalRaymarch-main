@@ -101,10 +101,8 @@ struct PerfRaymarchConfig: Codable, Sendable {
     var baseFractalIterations: Int
     var baseMaxRaySteps: Int
     var tileSize: Int
-    var overRelaxationMax: Double
     var coneMarchStrength: Double
     var distanceLODStrength: Double
-    var smartAdvanceEnabled: Bool
     var shadowsEnabled: Bool
     var foveationStrength: Double
     var coherentPacketEnabled: Bool
@@ -114,8 +112,7 @@ struct PerfRaymarchConfig: Codable, Sendable {
     var summary: String {
         func pct(_ v: Double) -> String { v < 0.005 ? "off" : "\(Int((v * 100).rounded()))%" }
         return "tile=\(tileSize) iters=\(baseFractalIterations) steps=\(baseMaxRaySteps) "
-            + "overRelax=\(String(format: "%.2f", overRelaxationMax)) cone=\(pct(coneMarchStrength)) "
-            + "lod=\(pct(distanceLODStrength)) smartAdv=\(smartAdvanceEnabled ? "on" : "off") "
+            + "cone=\(pct(coneMarchStrength)) lod=\(pct(distanceLODStrength)) "
             + "shadows=\(shadowsEnabled ? "on" : "off") fov=\(pct(foveationStrength)) "
             + "coherent=\(coherentPacketEnabled ? "on" : "off") "
             + "boundSphere=\(boundingSphereSkipEnabled ? "on" : "off")"
@@ -162,10 +159,8 @@ extension PerfRaymarchConfig {
             baseFractalIterations: q.baseFractalIterations,
             baseMaxRaySteps: q.baseMaxRaySteps,
             tileSize: q.tileSize,
-            overRelaxationMax: Double(q.overRelaxationMax),
             coneMarchStrength: Double(q.coneMarchStrength),
             distanceLODStrength: Double(q.distanceLODStrength),
-            smartAdvanceEnabled: q.smartAdvanceEnabled,
             shadowsEnabled: q.shadowsEnabled,
             foveationStrength: Double(q.foveationStrength),
             coherentPacketEnabled: q.coherentPacketEnabled,

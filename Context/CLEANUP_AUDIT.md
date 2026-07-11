@@ -108,7 +108,7 @@ Apple Music adapters and the duplicated animation-interpolation helpers.
 - [ ] **`ParameterOperationValue` single-case enum + no-op resolver** — `Parameters/ParameterOperationSystem.swift:11-19` — one case `.absolute(Float)`; `resolved(from:)` ignores its arg. Replace with a plain `Float` (or at least delete `resolved`), collapsing ~10 `.absolute()` call sites.
 - [ ] **`RendererPrecomputeHelpers` is 4 pure pass-throughs, one caller** — `Rendering/Core/RendererPrecomputeHelpers.swift:3-34` — forward to `RenderPrecompute.*` only for `Self.` call sites in `RendererGameState`. Point those at `RenderPrecompute.*` directly and delete the file.
 - [ ] **`clearMusicReactiveLayersIfNeeded` misleading 1-line wrapper** — `RaymarchRenderView.swift:989-991` — unconditional, single caller. Inline the `musicReactiveEngine.reset(...)` at line 972.
-- [ ] **`recordPipelineTelemetry` grows unbounded histograms in release** — `RendererPipelineCache.swift:94-162` — called per-frame; the miss-key/source dictionaries are only read by DEBUG logs but mutated in all builds. Move those writes inside the `RENDERER_DEBUG` guard.
+- [x] **Removed disabled pipeline telemetry** — the unused histograms, `RENDERER_DEBUG` guard, and diagnostic-only call sites were deleted.
 - [ ] **`MetalFXTextureSupport` empty-on-macOS `if`** — `:33-37` — the iOS-only body is stripped on macOS, leaving an evaluated no-op `if`. Wrap the whole block in `#if os(iOS)`.
 - [ ] **`QualityPreset` three parallel switches** — `Parameters/QualityPreset.swift:12-28` — `fractalIterations`/`raySteps`/`resolutionScale` are parallel per-case switches feeding `values(for:)`. Collapse into one per-case table.
 - [ ] *(uncertain — review)* **`RendererTaskExecutor` weak-capture run loop** — `Rendering/RendererTaskExecutor.swift:50-67` — `while executor != nil` over a weak capture of a process-lifetime singleton; the nil path can't occur. Strong-capture to drop the `executor!` dance — but `shared` is a `var`, so the guard is a latent release defense. Judgment call.
@@ -118,7 +118,7 @@ Apple Music adapters and the duplicated animation-interpolation helpers.
 
 ## Tier 4 — Stale & low-risk tidy-ups
 
-**Leftover debug `print()`s** (remove or gate behind `#if DEBUG` / route to `customSceneDiagnostic`):
+**Leftover debug `print()`s** (remove or gate behind `#if DEBUG` / route to structured logging):
 - [ ] `App/AppModel.swift:429,437,441,843,1169,1179,1193,1214` (emoji prints in hot paths)
 - [ ] `App/AppModel+EmbeddedFormula.swift:69,99,105,109` (`[CustomScene]`)
 - [ ] `Parameters/FractalPreset.swift:608-620` (multi-line print on every preset load)
@@ -156,9 +156,9 @@ The verification pass refuted these; each looked dead locally but has live cross
 `safetyBubbleBlend` (slider bindings + serialized assets) · `GradientColorMap` memberwise init ·
 `FractalVariant` Hashable (load-bearing for sibling types) · `estimatedBoundingSphereRadius` (2 live refs) ·
 `MetalFXResolveParams.aspectCorrection` (read by shaders at `Shaders.metal:3048,3081,3115`) ·
-`customSceneDiagnostic` (37 call sites) · `BenchmarkManager.clearStats` ("Clear Stats" button) ·
-`AppleMusicServiceAdapterMac` (the real macOS impl, not a dead clone) · `nowPlayingAlbum` (read by Mac adapter) ·
+`BenchmarkManager.clearStats` ("Clear Stats" button) ·
+`nowPlayingAlbum` (read by the Apple Music adapter) ·
 `artworkURL`/`ownerName` (rendered in MusicLibraryWindow/MusicTabView) · `updateAudioLevels`,
 `buildMetalVertexDescriptor` (both render paths) · `runtimeViewModeForRenderer` · `PinnedRailControl.title/icon` ·
 `debugHierarchical` (kept as kill-switch) · `GestureArbitrationInput` · `EasingFunction.apply(.bezier)` ·
-`MetalFXManager.minimumInputShortEdge`.
+Mac spatial/temporal upscalers.

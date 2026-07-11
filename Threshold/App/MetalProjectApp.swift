@@ -72,6 +72,10 @@ struct MetalProjectTestApp: App {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
 
+    init() {
+        MetricKitReporter.shared.start()
+    }
+
     var body: some Scene {
         Window(appModel.menuWindowID, id: appModel.menuWindowID) {
             ContentView()

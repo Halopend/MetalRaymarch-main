@@ -6,6 +6,10 @@ struct ThresholdiOSApp: App {
     @State private var appModel = AppModel()
     @Environment(\.scenePhase) private var scenePhase
 
+    init() {
+        MetricKitReporter.shared.start()
+    }
+
     var body: some Scene {
         WindowGroup {
             ThresholdiOSRootView()

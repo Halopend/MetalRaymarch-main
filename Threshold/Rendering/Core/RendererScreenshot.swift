@@ -31,7 +31,6 @@ extension Renderer {
 
         do {
             guard let library = Renderer.bundledDefaultLibrary(device: device) else {
-                if RENDERER_DEBUG { print("⚠️ Failed to load default Metal library for screenshot setup") }
                 return
             }
             let vertexFunction = library.makeFunction(name: "screenshotVertexShader")
@@ -44,13 +43,11 @@ extension Renderer {
             pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
             pipelineDescriptor.depthAttachmentPixelFormat = .depth32Float
 
-            let mtlVertexDescriptor = Renderer.buildMetalVertexDescriptor()
+            let mtlVertexDescriptor = RenderMeshBuilder.makeVertexDescriptor()
             pipelineDescriptor.vertexDescriptor = mtlVertexDescriptor
 
             screenshotPipeline = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
-            if RENDERER_DEBUG { print("✓ Screenshot capture pipeline ready") }
         } catch {
-            if RENDERER_DEBUG { print("⚠️ Failed to create screenshot pipeline: \(error)") }
         }
     }
 

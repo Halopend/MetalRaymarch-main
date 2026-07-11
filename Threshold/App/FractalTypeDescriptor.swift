@@ -228,7 +228,7 @@ enum FractalTypeRegistry {
     /// `super.init(rawValue:)` or a missing/duplicate descriptor BEFORE it can
     /// silently shift the Int32-fallback decode of an old `.threshscene`.
     /// NOTE: this validates the SWIFT side only — it does NOT bind the Metal
-    /// dispatch switches / relaxedOmegaCap (those stay hand-synced until the
+    /// dispatch switches (those stay hand-synced until the
     /// shader-codegen step lands).
     private static func validateRegistry(_ d: [Int32: FractalTypeDescriptor]) {
         // Presence: every enum case resolves to a descriptor.

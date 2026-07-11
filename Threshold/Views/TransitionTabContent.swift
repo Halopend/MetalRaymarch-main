@@ -4,7 +4,7 @@
 //
 //  Controls for smoothed scene transitions. Hosts the
 //  "Same Scene Transition Time" slider which eases live parameters
-//  toward a newly selected scene's starting keyframe over time.
+//  toward a newly selected scene or a resumed animation's playhead.
 //
 
 import SwiftUI
@@ -31,7 +31,7 @@ struct TransitionTabContent: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Scene Transitions")
                 .font(.subheadline.bold())
-            Text("Smoothly ease parameters toward a new scene's starting point instead of jumping instantly.")
+            Text("Smoothly ease into a new scene, or back to a paused animation's playhead after exploring.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -59,7 +59,7 @@ struct TransitionTabContent: View {
 
             Text(animationManager.sceneTransitionDuration <= 0
                  ? "Off — scenes switch instantly."
-                 : "Parameters play out over time toward the new starting point.")
+                 : "Parameters ease toward the new scene or saved playhead position.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
