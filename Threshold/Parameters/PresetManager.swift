@@ -492,12 +492,19 @@ class PresetManager {
 
     /// Delete every store file (both folders) whose decoded id matches `id`.
     private func removePresetFiles(id: UUID, root: URL) {
+        removePresetFiles(ids: [id], root: root)
+    }
+
+    /// Delete every store file (both folders) whose decoded id is in `ids`, scanning
+    /// each folder once (vs one scan per id). Used by the delete sites and `replaceAll`.
+    private func removePresetFiles(ids: Set<UUID>, root: URL) {
+        guard !ids.isEmpty else { return }
         let exts = ThresholdExportFormat.extensions(in: .preset)
         for dir in [StorageLocation.scenesDir(root), StorageLocation.musicPresetsDir(root)] {
             guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
             for url in files where exts.contains(url.pathExtension) {
                 if let data = try? Data(contentsOf: url),
-                   let preset = try? presetDecoder.decode(FractalPreset.self, from: data), preset.id == id {
+                   let preset = try? presetDecoder.decode(FractalPreset.self, from: data), ids.contains(preset.id) {
                     try? FileManager.default.removeItem(at: url)
                 }
             }
@@ -640,14 +647,18 @@ class PresetManager {
     }
 
     /// Replace all presets and mirror the array into the store folder: write each
-    /// preset's file, and remove store files whose id is no longer present.
+    /// preset's file, and remove files for ids the app is dropping.
+    ///
+    /// Removals are attributed to ids that were in the current in-memory set but
+    /// are absent from `newPresets` — we do NOT infer them by diffing the folder
+    /// scan. A not-yet-downloaded iCloud preset from another device is absent from
+    /// the scan yet must not be deleted, or the delete propagates to every device.
+    /// Mirrors `AnimationManager.replaceUserScenes`.
     func replaceAll(with newPresets: [FractalPreset]) {
+        let droppedIDs = Set(presets.map(\.id)).subtracting(newPresets.map(\.id))
         presets = newPresets
         if let root = storeRoot {
-            let keep = Set(newPresets.map(\.id))
-            for id in Set(presetFileCache.values.map { $0.preset.id }) where !keep.contains(id) {
-                removePresetFiles(id: id, root: root)
-            }
+            removePresetFiles(ids: droppedIDs, root: root)
             for preset in newPresets { writePresetFile(preset, root: root) }
             presetFileCache = [:]
         }
@@ -767,7 +778,12 @@ class PresetManager {
 
     @discardableResult
     func importPreset(_ preset: FractalPreset) -> FractalPreset {
+        var preset = preset
         if let existingIndex = presets.firstIndex(where: { $0.id == preset.id }) {
+            // Overwriting an existing id is a content change — advance the merge
+            // clock so the iCloud newest-wins reconcile favors this edit. (Not on
+            // the merge/reconcile path itself, so no ping-pong.) TECH_DEBT #6.
+            preset.updatedAt = Date()
             presets[existingIndex] = preset
         } else {
             presets.insert(preset, at: 0)

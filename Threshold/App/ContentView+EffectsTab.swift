@@ -69,6 +69,8 @@ extension ContentView {
 
             lightVariationControls
 
+            effectSizeAndDefinitionControls
+
             // ── Color Animation ──
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "arrow.trianglehead.2.clockwise.rotate.90", label: "Gradient Cycle",
@@ -193,6 +195,138 @@ extension ContentView {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .moduleCard(.teal)
+    }
+
+    /// Display controls for the animated visual itself. These live beside the
+    /// periodic/chaotic effect controls so users can tune the feature's scale
+    /// and legibility without jumping to another tab.
+    private var effectSizeAndDefinitionControls: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Label("Visual", systemImage: "viewfinder")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                Text(String(format: "%.2f×", cache.liveDetailScale))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            EffectSliderRow(
+                icon: "arrow.up.left.and.arrow.down.right",
+                label: "Size",
+                value: Binding(
+                    get: { cache.liveDetailScale },
+                    set: { newValue in
+                        let clamped = max(0.05, min(20.0, newValue))
+                        appModel.renderSettings.detailScale = clamped
+                        appModel.renderSettings.targetDetailScale = clamped
+                        cache.liveDetailScale = clamped
+                    }
+                ),
+                range: 0.05...20.0,
+                enabled: .constant(true),
+                onChanged: {},
+                showToggle: false
+            )
+
+            #if os(visionOS)
+            EffectSliderRow(
+                icon: "sparkles",
+                label: "Definition",
+                value: Binding(
+                    get: { cache.quality.renderQuality },
+                    set: { newValue in
+                        let snapped = (newValue * 20).rounded() / 20
+                        cache.quality.renderQuality = snapped
+                        cache.push(\.renderQuality, value: snapped)
+                    }
+                ),
+                range: QualityConfig.visionMinRenderQuality...QualityConfig.visionMaxRenderQuality,
+                enabled: .constant(true),
+                onChanged: {},
+                showToggle: false
+            )
+            #else
+            EffectSliderRow(
+                icon: "sparkles",
+                label: "Definition",
+                value: Binding(
+                    get: { cache.quality.resolutionScale },
+                    set: { newValue in
+                        let clamped = ControlCatalog.resolutionScale.clamp(newValue)
+                        cache.quality.resolutionScale = clamped
+                        cache.push(\.resolutionScale, value: clamped)
+                    }
+                ),
+                range: ControlCatalog.resolutionScale.range,
+                enabled: .constant(true),
+                onChanged: {},
+                showToggle: false
+            )
+            #endif
+
+            EffectSliderRow(
+                icon: "circle.lefthalf.filled",
+                label: "Edge Detector",
+                value: Binding(
+                    get: { cache.lighting.edgeDetectionEffect.strength },
+                    set: { cache.lighting.edgeDetectionEffect.strength = $0 }
+                ),
+                range: 0...1,
+                enabled: Binding(
+                    get: { cache.lighting.edgeDetectionEffect.enabled },
+                    set: { enabled in
+                        cache.lighting.edgeDetectionEffect.enabled = enabled
+                        cache.commitEdgeDetectionEffect()
+                    }
+                ),
+                onChanged: { cache.commitEdgeDetectionEffect() }
+            )
+            if cache.lighting.edgeDetectionEffect.enabled {
+                EffectSliderRow(
+                    icon: "line.3.horizontal.decrease",
+                    label: "Edge Threshold",
+                    value: Binding(
+                        get: { cache.lighting.edgeDetectionEffect.threshold },
+                        set: { cache.lighting.edgeDetectionEffect.threshold = $0 }
+                    ),
+                    range: 0...0.5,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitEdgeDetectionEffect() },
+                    showToggle: false
+                )
+                EffectSliderRow(
+                    icon: "line.3.horizontal",
+                    label: "Edge Softness",
+                    value: Binding(
+                        get: { cache.lighting.edgeDetectionEffect.softness },
+                        set: { cache.lighting.edgeDetectionEffect.softness = $0 }
+                    ),
+                    range: 0.01...0.3,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitEdgeDetectionEffect() },
+                    showToggle: false
+                )
+                EffectSliderRow(
+                    icon: "square.grid.3x3",
+                    label: "Window Size",
+                    value: Binding(
+                        get: { Float(cache.lighting.edgeDetectionEffect.windowRadius) },
+                        set: { cache.lighting.edgeDetectionEffect.windowRadius = Int($0.rounded()) }
+                    ),
+                    range: 1...3,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitEdgeDetectionEffect() },
+                    showToggle: false
+                )
+            }
+
+            Text("Size changes the visible zoom. Definition trades render sharpness against frame rate. Edge Detector outlines luminance transitions; lower the threshold for more contours.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .moduleCard(.purple)
     }
 
     private var linearRailControls: some View {

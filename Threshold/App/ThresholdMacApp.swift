@@ -7,19 +7,28 @@ struct ThresholdMacApp: App {
     @State private var appModel = AppModel()
     @Environment(\.scenePhase) private var scenePhase
 
+    init() {
+        // Headless offscreen perf sweep (THRESHOLD_BENCHMARK=1). Launched from
+        // init, not a window .task: when the app starts as a background process
+        // (perf-gate/CI runs the binary directly), macOS never materializes the
+        // SwiftUI Window scenes, so a window-mounted .task would never fire.
+        // The harness renders offscreen via its own CAMetalLayer and exits the
+        // process when done, so it needs no window — only a running main loop.
+        if BenchmarkMode.isActive {
+            let model = AppModel()
+            _appModel = State(initialValue: model)
+            Task { @MainActor in
+                await MacBenchmarkHarness.run(appModel: model)
+            }
+        }
+    }
+
     var body: some Scene {
         Window("Threshold", id: appModel.menuWindowID) {
             ThresholdMacRootView()
                 .environment(appModel)
                 .onOpenURL { url in
                     appModel.openExternalFile(url)
-                }
-                .task {
-                    // Headless offscreen perf sweep; runs and exits only when
-                    // THRESHOLD_BENCHMARK=1 (see MacBenchmarkHarness).
-                    if BenchmarkMode.isActive {
-                        await MacBenchmarkHarness.run(appModel: appModel)
-                    }
                 }
         }
         .defaultSize(width: 1780, height: 920)

@@ -371,6 +371,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _pulseEffect: PulseEffect = .off
     private var _glowEffect: GlowEffect = .off
     private var _bloomEffect: BloomEffect = .off
+    private var _edgeDetectionEffect: EdgeDetectionEffect = .off
     private var _fogEffect: FogEffect = .off
     /// Eased mixed-immersion fog attenuation applied at pack time (1.0 = full
     /// authored fog). Fog reads heavy against passthrough, so in .mixed the
@@ -2331,6 +2332,7 @@ final class RenderSettings: @unchecked Sendable {
                     _pulseEffect = effects.pulse
                     _glowEffect = effects.glow
                     _bloomEffect = effects.bloom
+                    _edgeDetectionEffect = effects.edge
                     _fogEffect = effects.fog
                     _gradientCycleEffect = effects.gradientCycle
                     _linearRailEffect = effects.linearRail
@@ -2394,6 +2396,18 @@ final class RenderSettings: @unchecked Sendable {
         set {
             withLock {
                 _bloomEffect = newValue
+                _lightingPreset = .custom
+            }
+            persistLighting()
+        }
+    }
+
+    /// Screen-space convolution-style edge detector.
+    var edgeDetectionEffect: EdgeDetectionEffect {
+        get { withLock { _edgeDetectionEffect } }
+        set {
+            withLock {
+                _edgeDetectionEffect = newValue
                 _lightingPreset = .custom
             }
             persistLighting()
@@ -2783,6 +2797,11 @@ final class RenderSettings: @unchecked Sendable {
             glowIntensity: _glowEffect.intensity,
             bloomEnabled: _bloomEffect.enabled ? 1 : 0,
             bloomStrength: _bloomEffect.strength,
+            edgeDetectionEnabled: _edgeDetectionEffect.enabled ? 1 : 0,
+            edgeDetectionStrength: _edgeDetectionEffect.strength,
+            edgeDetectionThreshold: _edgeDetectionEffect.threshold,
+            edgeDetectionSoftness: _edgeDetectionEffect.softness,
+            edgeDetectionWindowRadius: Int32(max(1, min(3, _edgeDetectionEffect.windowRadius))),
             beatFlashEnabled: _beatFlashEffect.enabled ? 1 : 0,
             beatFlashIntensity: _beatFlashEffect.intensity * animationActivity
         )
@@ -4363,6 +4382,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.pulseEffect = _pulseEffect
                 c.glowEffect = _glowEffect
                 c.bloomEffect = _bloomEffect
+                c.edgeDetectionEffect = _edgeDetectionEffect
                 c.fogEffect = _fogEffect
                 c.gradientCycleEffect = _gradientCycleEffect
                 c.linearRailEffect = _linearRailEffect
@@ -4380,6 +4400,7 @@ final class RenderSettings: @unchecked Sendable {
                 _pulseEffect = newValue.pulseEffect
                 _glowEffect = newValue.glowEffect
                 _bloomEffect = newValue.bloomEffect
+                _edgeDetectionEffect = newValue.edgeDetectionEffect
                 _fogEffect = newValue.fogEffect
                 _gradientCycleEffect = newValue.gradientCycleEffect
                 _linearRailEffect = newValue.linearRailEffect

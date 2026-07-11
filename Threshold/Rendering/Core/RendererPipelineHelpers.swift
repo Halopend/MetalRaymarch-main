@@ -82,6 +82,7 @@ extension Renderer {
         var safetyBubbleEnabled: Bool?     // FC index 2
         var hasSpaceWarp: Bool?            // FC index 3 — nil leaves it undefined (shader defaults ON = full stack)
         var hasEnvScrunch: Bool?           // FC index 16 — nil leaves it undefined (shader defaults ON = scrunch code present)
+        var hasHandField: Bool?            // FC index 18 — nil leaves it undefined (shader defaults ON = hand-field code present)
         var qualityMode: Int32?            // FC index 4 (0=high, 1=medium, 2=low)
         var debugHierarchical: Bool?       // FC index 5
         var maxRaySteps: Int32?            // FC index 6 - max ray marching steps
@@ -110,6 +111,9 @@ extension Renderer {
             }
             if var es = hasEnvScrunch {
                 constants.setConstantValue(&es, type: .bool, index: FunctionConstantIndex.hasEnvScrunch.rawValue)
+            }
+            if var hasHands = hasHandField {
+                constants.setConstantValue(&hasHands, type: .bool, index: FunctionConstantIndex.hasHandField.rawValue)
             }
             if var quality = qualityMode {
                 constants.setConstantValue(&quality, type: .int, index: FunctionConstantIndex.qualityMode.rawValue)
@@ -178,6 +182,23 @@ extension Renderer {
         /// ```
         static func fromPreset(_ preset: FractalPreset) -> FunctionConstantConfig {
             let fc = preset.deriveFunctionConstants()
+            // DE-tail bakes are macOS-only (see selectPipeline). Leaving them nil
+            // on other platforms keeps FC 16/17 undefined → the shader's
+            // defaults-ON path, so visionOS/iOS prewarm is byte-identical to before
+            // and pairs with the empty (non-Mac) preset-key deTail segment.
+            #if os(macOS)
+            // Environment Scrunch is DEVICE-LOCAL (never preset state — see the
+            // envScrunchStaysDeviceLocal test), so presets prewarm the default-OFF
+            // variant; the key's `_ES0` segment pairs with this bake. When the
+            // device toggle is ON, selectPipeline computes `_ES1` and simply
+            // misses the prewarm (rebuild, never a wrong pipeline). The hand field
+            // needs hand tracking, which macOS lacks — always off, pairs with `_HF0`.
+            let bakeEnvScrunch: Bool? = false
+            let bakeHandField: Bool? = false
+            #else
+            let bakeEnvScrunch: Bool? = nil
+            let bakeHandField: Bool? = nil
+            #endif
             return FunctionConstantConfig(
                 // Bake the same effective bubble state encoded in the preset's
                 // pipelineCacheKey so the prewarmed pipeline matches what
@@ -186,12 +207,8 @@ extension Renderer {
                 shadowIterations: fc.shadowIterations,
                 safetyBubbleEnabled: preset.effectiveSafetyBubbleEnabled,
                 hasSpaceWarp: preset.effectiveHasSpaceWarp,
-                // Environment Scrunch is DEVICE-LOCAL (never preset state — see the
-                // envScrunchStaysDeviceLocal test), so presets prewarm the default-OFF
-                // variant; the key's `_ES0` segment pairs with this bake. When the
-                // device toggle is ON, selectPipeline computes `_ES1` and simply
-                // misses the prewarm (rebuild, never a wrong pipeline).
-                hasEnvScrunch: false,
+                hasEnvScrunch: bakeEnvScrunch,
+                hasHandField: bakeHandField,
                 qualityMode: fc.qualityMode,
                 debugHierarchical: false,
                 maxRaySteps: fc.maxRaySteps,

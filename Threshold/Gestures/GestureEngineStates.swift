@@ -35,35 +35,6 @@ struct SingleHandDragEngineState {
     var accumulatedPosition: SIMD3<Float> = .zero
 }
 
-struct WindowPullGestureState {
-    var isActive: Bool = false
-    var startPalmPosition: SIMD3<Float> = .zero
-    var hasTriggered: Bool = false
-    var cooldown: Float = 0
-}
-
-/// Per-hand tracking for the open-palm "bat through the air" scene swipe.
-/// The anchor marks where the current fast sideways sweep began; it re-anchors
-/// whenever the hand slows down or reverses direction.
-struct SceneSwipeHandState {
-    var hasAnchor: Bool = false
-    var anchor: SIMD3<Float> = .zero
-    var anchorAge: Float = 0
-    var prevPalm: SIMD3<Float> = .zero
-    var hasPrev: Bool = false
-
-    mutating func clearAnchor() {
-        hasAnchor = false
-        anchorAge = 0
-    }
-}
-
-struct SceneSwipeGestureState {
-    var left = SceneSwipeHandState()
-    var right = SceneSwipeHandState()
-    var cooldown: Float = 0
-}
-
 /// Per-forearm state for the arm-slider music gesture. The opposite hand's
 /// index fingertip slides along the forearm (elbow→wrist); its normalized
 /// position sets a music-reactivity value absolutely (elbow = min, wrist = max).

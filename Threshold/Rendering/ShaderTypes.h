@@ -182,6 +182,13 @@ typedef struct
     // Bloom Effect - bright areas bleed
     int bloomEnabled;                 // 0 = off, 1 = on
     float bloomStrength;              // Bloom intensity (0-1)
+
+    // Screen-space edge detector (fragment path; compute path remains unchanged)
+    int edgeDetectionEnabled;         // 0 = off, 1 = on
+    float edgeDetectionStrength;      // Outline blend amount (0-1)
+    float edgeDetectionThreshold;     // Luminance gradient threshold
+    float edgeDetectionSoftness;       // Threshold transition width
+    int edgeDetectionWindowRadius;     // Sliding-window radius: 1...3
     
     // Beat Flash Effect - music-driven edge glow
     int beatFlashEnabled;             // 0 = off, 1 = on

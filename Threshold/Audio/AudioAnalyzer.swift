@@ -334,6 +334,7 @@ class AudioAnalyzer {
             pendingBass = 0
             pendingMid = 0
             pendingTreble = 0
+            pendingOnset = 0
             if !pendingLevelDispatch {
                 pendingLevelDispatch = true
                 Task { @MainActor in self.drainPendingLevels() }

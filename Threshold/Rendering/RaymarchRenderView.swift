@@ -1078,7 +1078,15 @@ final class ThresholdMacRenderer {
         // first transform flips the key → cache miss → the generic pipeline (FC unset
         // → defaults ON) renders correctly while the new variant compiles.
         let hasSpaceWarp = !settings.spaceWarpStack.isEmpty || custom.hash != nil
-        let key = customPrefix + "FT\(fractalType)_FI\(iterations)_RS\(raySteps)_CI\(colorIterations)\(powerKey)_B\(safetyBubbleEnabled ? 1 : 0)_SH\(shadowsEnabled ? 1 : 0)_SP\(sphereProjectionEnabled ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)"
+        // Environment Scrunch and the hand field each add a tail to EVERY DE
+        // evaluation, inflating the megakernel's register footprint and slowing
+        // the whole march even when runtime-disabled (~4 ms + ~6 ms at 1080p).
+        // Bake them out (FC 16/18 → DCE) unless live state needs them, exactly
+        // like FC_HAS_SPACEWARP above. Env Scrunch is device-local (its toggle);
+        // the hand field needs hand tracking, which macOS lacks — always off.
+        let hasEnvScrunch = settings.qualityConfig.envScrunchEnabled
+        let hasHandField = false
+        let key = customPrefix + "FT\(fractalType)_FI\(iterations)_RS\(raySteps)_CI\(colorIterations)\(powerKey)_B\(safetyBubbleEnabled ? 1 : 0)_SH\(shadowsEnabled ? 1 : 0)_SP\(sphereProjectionEnabled ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)_ES\(hasEnvScrunch ? 1 : 0)_HF\(hasHandField ? 1 : 0)"
 
         if let specialized = specializedPipelineCache.pipeline(for: key) {
             appModel.isUsingSpecializedPipeline = true
@@ -1099,6 +1107,8 @@ final class ThresholdMacRenderer {
                 shadowsEnabled: shadowsEnabled,
                 sphereProjectionEnabled: sphereProjectionEnabled,
                 hasSpaceWarp: hasSpaceWarp,
+                hasEnvScrunch: hasEnvScrunch,
+                hasHandField: hasHandField,
                 customLibrary: custom.library
             )
         }
@@ -1119,6 +1129,8 @@ final class ThresholdMacRenderer {
                                           shadowsEnabled: Bool,
                                           sphereProjectionEnabled: Bool,
                                           hasSpaceWarp: Bool,
+                                          hasEnvScrunch: Bool,
+                                          hasHandField: Bool,
                                           customLibrary: MTLLibrary?) {
         let cache = specializedPipelineCache
         // When a custom `.threshfx` is active, build against its runtime-compiled
@@ -1163,6 +1175,13 @@ final class ThresholdMacRenderer {
         // for scenes provably without any transform, letting the whole warp path DCE.
         var sw = hasSpaceWarp
         constants.setConstantValue(&sw, type: .bool, index: 3)
+        // FC_HAS_ENVSCRUNCH (index 16) / FC_HAS_HANDFIELD (index 18): bake the two
+        // DE-tail features in/out. Both default ON when unset (generic fallback),
+        // so the transient pre-build frames still render correctly.
+        var es = hasEnvScrunch
+        constants.setConstantValue(&es, type: .bool, index: 16)
+        var hf = hasHandField
+        constants.setConstantValue(&hf, type: .bool, index: 18)
 
         let fragmentFunction: MTLFunction
         do {

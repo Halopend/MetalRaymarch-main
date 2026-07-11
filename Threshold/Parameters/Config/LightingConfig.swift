@@ -18,6 +18,7 @@ struct LightingConfig: Codable, Equatable, Sendable {
     var pulseEffect: PulseEffect = PulseEffect()
     var glowEffect: GlowEffect = GlowEffect()
     var bloomEffect: BloomEffect = BloomEffect()
+    var edgeDetectionEffect: EdgeDetectionEffect = EdgeDetectionEffect()
     var fogEffect: FogEffect = FogEffect()
     var gradientCycleEffect: GradientCycleEffect = GradientCycleEffect()
     var linearRailEffect: LinearRailEffect = LinearRailEffect()
@@ -28,7 +29,7 @@ struct LightingConfig: Codable, Equatable, Sendable {
     init() {}
 
     enum CodingKeys: String, CodingKey {
-        case lightingPreset, lightVariationRate, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect
+        case lightingPreset, lightVariationRate, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, edgeDetectionEffect, fogEffect
         case gradientCycleEffect, linearRailEffect, beatFlashEffect, polarRotationEffect, juliaDriftEffect
     }
 
@@ -40,6 +41,7 @@ struct LightingConfig: Codable, Equatable, Sendable {
         pulseEffect = try container.decodeIfPresent(PulseEffect.self, forKey: .pulseEffect) ?? PulseEffect()
         glowEffect = try container.decodeIfPresent(GlowEffect.self, forKey: .glowEffect) ?? GlowEffect()
         bloomEffect = try container.decodeIfPresent(BloomEffect.self, forKey: .bloomEffect) ?? BloomEffect()
+        edgeDetectionEffect = try container.decodeIfPresent(EdgeDetectionEffect.self, forKey: .edgeDetectionEffect) ?? EdgeDetectionEffect()
         fogEffect = try container.decodeIfPresent(FogEffect.self, forKey: .fogEffect) ?? FogEffect()
         gradientCycleEffect = try container.decodeIfPresent(GradientCycleEffect.self, forKey: .gradientCycleEffect) ?? GradientCycleEffect()
         linearRailEffect = try container.decodeIfPresent(LinearRailEffect.self, forKey: .linearRailEffect) ?? LinearRailEffect()

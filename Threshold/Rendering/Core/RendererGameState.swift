@@ -219,7 +219,12 @@ extension Renderer {
         // Kleinian formulas benefit from a larger trace horizon when zooming out;
         // otherwise they look artificially bounded and fade away too early.
         let traceScaleFloor: Float = isKleinianFamily ? 0.02 : 0.15
-        let traceScale = max(effectiveScale, traceScaleFloor)
+        // Cap the divisor at the base (un-detail-zoomed) scale: dividing by the
+        // zoomed scale is correct for zooming OUT but on zoom-IN (detailScale > 1)
+        // it collapses the ray range below the fractal's own extent, punching a
+        // growing hole in the view center. Mirrors the Mac guard in
+        // RaymarchRenderView.makeUniforms (see its comment there). (TECH_DEBT #1)
+        let traceScale = max(min(effectiveScale, smoothedScale), traceScaleFloor)
         // Family cap + base horizon stay below the projection far plane (farZ 500)
         // so raymarch depth stays valid for compositing. (The old render-distance
         // multiplier was measured to have almost no perf effect; hardcoded to 1×.)

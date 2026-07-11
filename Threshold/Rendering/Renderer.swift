@@ -65,6 +65,9 @@ actor Renderer {
     var lastComputeCustomHash: String?
     var lastComputeBubble: Bool?
     var lastComputePacket: Bool?
+    var lastComputeSpaceWarp: Bool?
+    var lastComputeEnvScrunch: Bool?
+    var lastComputeHandField: Bool?
     var lastComputeLegacyBugMode: Bool = false
     var lastSelectedComputePipeline: MTLComputePipelineState?
 
@@ -84,6 +87,7 @@ actor Renderer {
     
     // Tile-based compute pipelines (adaptive 8x8 hierarchical cascade)
     var adaptiveHierarchicalPipeline8x8: MTLComputePipelineState?  // Adaptive 3-level cascade
+    var edgeDetectionPipeline: MTLComputePipelineState?
     var tileUniformBuffer: MTLBuffer?
 
     // Per-eye foveation rate-map parameter buffers for the adaptive compute path.
@@ -96,6 +100,7 @@ actor Renderer {
 
     // Dedicated compute output texture (has .shaderWrite flag that drawable textures lack)
     var computeOutputTexture: MTLTexture?
+    var edgeOutputTexture: MTLTexture?
     private var hasLoggedComputeMemoryFallback = false
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -591,6 +596,18 @@ actor Renderer {
                 if RENDERER_DEBUG { print("✓ Cone coarse-prepass pipeline ready: \(coneCoarsePrepassPipeline != nil)") }
             }
 
+            if let edgeKernel = try? library.makeFunction(name: "edgeDetectSlidingWindow", constantValues: emptyConstants) {
+                let edgeDesc = MTLComputePipelineDescriptor()
+                edgeDesc.computeFunction = edgeKernel
+                edgeDesc.label = "Compute_edgeDetectSlidingWindow"
+                if let archive = self.pipelineArchive {
+                    edgeDetectionPipeline = try? archive.makeComputePipeline(device: device, descriptor: edgeDesc)
+                } else {
+                    edgeDetectionPipeline = try? device.makeComputePipelineState(descriptor: edgeDesc, options: [], reflection: nil)
+                }
+                if RENDERER_DEBUG { print("✓ Sliding-window edge detector pipeline ready: \(edgeDetectionPipeline != nil)") }
+            }
+
             // Uniform buffer for tile compute (one per eye)
             let tileUniformSize = MemoryLayout<TileUniforms>.stride * 2
             tileUniformBuffer = device.makeBuffer(length: tileUniformSize, options: .storageModeShared)
@@ -824,6 +841,7 @@ actor Renderer {
     var lastSelectBubble: Bool?
     var lastSelectSpaceWarp: Bool?
     var lastSelectEnvScrunch: Bool?
+    var lastSelectHandField: Bool?
     var lastSelectedPipeline: MTLRenderPipelineState?
     var lastSelectedIsSpecialized: Bool = false
     
@@ -1827,6 +1845,28 @@ actor Renderer {
         return texture
     }
 
+    private func ensureEdgeOutputTexture(for drawable: LayerRenderer.Drawable) -> MTLTexture? {
+        let source = drawable.colorTextures[0]
+        let viewCount = drawable.views.count
+        if let existing = edgeOutputTexture,
+           existing.width == source.width,
+           existing.height == source.height,
+           existing.arrayLength == viewCount { return existing }
+
+        let descriptor = MTLTextureDescriptor()
+        descriptor.textureType = .type2DArray
+        descriptor.pixelFormat = source.pixelFormat
+        descriptor.width = source.width
+        descriptor.height = source.height
+        descriptor.arrayLength = viewCount
+        descriptor.storageMode = .private
+        descriptor.usage = [.shaderRead, .shaderWrite]
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
+        texture.label = "Sliding Window Edge Output"
+        edgeOutputTexture = texture
+        return texture
+    }
+
     private func estimatedAdaptiveComputeAuxiliaryBytes(for drawable: LayerRenderer.Drawable) -> Int {
         let width = drawable.colorTextures[0].width
         let height = drawable.colorTextures[0].height
@@ -1975,9 +2015,12 @@ actor Renderer {
     /// Copies compute output texture to drawable using blit encoder
     private func blitComputeOutputToDrawable(
         commandBuffer: MTLCommandBuffer,
-        drawable: LayerRenderer.Drawable
+        drawable: LayerRenderer.Drawable,
+        useEdgeOutput: Bool
     ) {
-        guard let sourceTexture = computeOutputTexture else { return }
+        let sourceTexture = (useEdgeOutput && edgeDetectionPipeline != nil && edgeOutputTexture != nil)
+            ? edgeOutputTexture : computeOutputTexture
+        guard let sourceTexture else { return }
         guard let blitEncoder = commandBuffer.makeBlitCommandEncoder() else { return }
         blitEncoder.label = "Copy Compute Output to Drawable"
         
@@ -2027,6 +2070,33 @@ actor Renderer {
         }
         
         blitEncoder.endEncoding()
+    }
+
+    private func encodeEdgeDetection(
+        commandBuffer: MTLCommandBuffer,
+        sourceTexture: MTLTexture,
+        destinationTexture: MTLTexture,
+        viewIndex: Int,
+        renderWidth: Int,
+        renderHeight: Int,
+        uniformBuffer: MTLBuffer
+    ) {
+        guard let pipeline = edgeDetectionPipeline,
+              let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+        encoder.label = "Sliding Window Edge Detector Eye \(viewIndex)"
+        encoder.setComputePipelineState(pipeline)
+        encoder.setBuffer(uniformBuffer, offset: MemoryLayout<TileUniforms>.stride * viewIndex, index: 0)
+        encoder.setTexture(sourceTexture, index: 0)
+        encoder.setTexture(destinationTexture, index: 1)
+        let w = max(1, min(renderWidth, sourceTexture.width))
+        let h = max(1, min(renderHeight, sourceTexture.height))
+        let tw = max(1, pipeline.threadExecutionWidth)
+        let th = max(1, pipeline.maxTotalThreadsPerThreadgroup / tw)
+        encoder.dispatchThreads(
+            MTLSize(width: w, height: h, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: min(tw, w), height: min(th, h), depth: 1)
+        )
+        encoder.endEncoding()
     }
 
     // MARK: - Conservative Cone Coarse-Prepass Warm-Start
@@ -2289,11 +2359,15 @@ actor Renderer {
         
         // Track textures created this frame for batched residency update
         let prevComputeOutput = computeOutputTexture
+        let prevEdgeOutput = edgeOutputTexture
         let prevDepth0 = temporalDepthTextures[0]
         
         guard let outputTexture = ensureComputeOutputTexture(for: drawable) else {
             return false
         }
+
+        let edgeEnabled = settingsSnapshot.colorSchemeParams.edgeDetectionEnabled != 0
+        let edgeTexture = edgeEnabled ? ensureEdgeOutputTexture(for: drawable) : nil
         
         // Set up temporal reprojection depth textures (ping-pong)
         guard let depthPair = ensureTemporalDepthTextures(for: drawable) else {
@@ -2304,6 +2378,7 @@ actor Renderer {
         // Batch residency set updates for any newly created textures (single commit)
         var newTextures: [MTLTexture] = []
         if computeOutputTexture !== prevComputeOutput { newTextures.append(outputTexture) }
+        if let edgeTexture, edgeOutputTexture !== prevEdgeOutput { newTextures.append(edgeTexture) }
         if temporalDepthTextures[0] !== prevDepth0 {
             newTextures.append(contentsOf: temporalDepthTextures.compactMap { $0 })
         }
@@ -2324,6 +2399,17 @@ actor Renderer {
                 uniformBuffer: uniformBuffer,
                 bufferContents: bufferContents
             )
+            if edgeEnabled, let edgeTexture {
+                encodeEdgeDetection(
+                    commandBuffer: commandBuffer,
+                    sourceTexture: outputTexture,
+                    destinationTexture: edgeTexture,
+                    viewIndex: viewIndex,
+                    renderWidth: outputTexture.width,
+                    renderHeight: outputTexture.height,
+                    uniformBuffer: uniformBuffer
+                )
+            }
         }
         
         // Advance temporal state for next frame
@@ -2331,7 +2417,7 @@ actor Renderer {
         temporalFrameCount += 1
         
         // Blit compute output to drawable for presentation
-        blitComputeOutputToDrawable(commandBuffer: commandBuffer, drawable: drawable)
+        blitComputeOutputToDrawable(commandBuffer: commandBuffer, drawable: drawable, useEdgeOutput: edgeEnabled)
         
         return true
     }

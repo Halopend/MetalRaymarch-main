@@ -530,14 +530,6 @@ class AppModel {
         gestureController?.onOpenQuickToggles = { [weak self] in
             self?.openQuickTogglesFromGesture()
         }
-        gestureController?.onMenuWindowPullTowardUser = { [weak self] in
-            self?.pullMenuWindowTowardUser()
-        }
-        // Open-palm swipe through the air = the Mac left/right arrow keys:
-        // swipe right → next scene, swipe left → previous.
-        gestureController?.onSceneSwipe = { [weak self] step in
-            self?.cycleJumpingOffScene(forward: step > 0)
-        }
 
         refreshMenuInteractionState()
         
@@ -702,14 +694,6 @@ class AppModel {
         } else {
             showMenuWindow(reason: "toggle")
         }
-    }
-
-    func pullMenuWindowTowardUser() {
-        guard !isMenuWindowVisible else {
-            refreshMenuInteractionState()
-            return
-        }
-        showMenuWindow(reason: "pull gesture")
     }
 
     func openShapeMenuFromGesture() {
