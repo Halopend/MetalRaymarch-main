@@ -904,10 +904,17 @@ struct SpaceWarpPipelineKeyTests {
     @Test("The _SW segment sits in the scene slot, matching RenderPipelineKeyContext")
     func keySegmentPosition() {
         // RenderPipelineKeyContext builds `..._RS{n}{sceneKey}_N{neon}...` with
-        // sceneKey = "_B{bubble}_SW{sw}"; the preset key must mirror it exactly.
+        // sceneKey = "_B{bubble}_SW{sw}{deTail}"; the preset key must mirror it
+        // exactly. macOS presets prewarm the DE-tail-OFF variant, appending
+        // "_ES0_HF0" after _SW; other platforms leave the de-tail segment empty.
         let warped = preset { $0.spaceWarpStack = [SpaceWarpOpValue(kind: .boxFold)] }
+        #if os(macOS)
+        #expect(warped.pipelineCacheKey.contains("_SW1_ES0_HF0_N"),
+                "expected `_SW1_ES0_HF0` immediately before `_N` (the scene-segment slot): \(warped.pipelineCacheKey)")
+        #else
         #expect(warped.pipelineCacheKey.contains("_SW1_N"),
                 "expected `_SW1` immediately before `_N` (the scene-segment slot): \(warped.pipelineCacheKey)")
+        #endif
     }
 
     @Test("Custom fractals conservatively keep the seam ON (_SW1)")
