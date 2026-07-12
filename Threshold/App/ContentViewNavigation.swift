@@ -46,12 +46,26 @@ enum TopDockTab: String, CaseIterable {
     case music = "Music"
     case performance = "Performance"
 
+    /// User-facing workspace order. Raw values intentionally remain unchanged so
+    /// existing AppStorage navigation state survives the information-architecture
+    /// update.
+    static var allCases: [TopDockTab] { [.explore, .music, .shape, .visualizations, .performance] }
+
+    var title: String {
+        switch self {
+        case .music: return "Input"
+        case .visualizations: return "Look"
+        case .performance: return "Quality"
+        default: return rawValue
+        }
+    }
+
     var icon: String {
         switch self {
         case .explore: return "sparkles.rectangle.stack"
         case .shape: return "cube.transparent"
         case .visualizations: return "paintbrush.pointed.fill"
-        case .music: return "music.note"
+        case .music: return "waveform"
         case .performance: return "speedometer"
         }
     }
@@ -132,6 +146,12 @@ enum VisualizationsRailSection: String, CaseIterable {
     case transition = "Transition"
     case reactive = "Reactive"
 
+    /// Audio reactivity now lives in Input. Keep the legacy case decodable so
+    /// saved routes can be redirected without losing user state.
+    static var visibleCases: [VisualizationsRailSection] {
+        [.color, .mapping, .atmosphere, .grading, .motion, .transition]
+    }
+
     var title: String {
         switch self {
         case .grading:
@@ -160,31 +180,29 @@ enum VisualizationsRailSection: String, CaseIterable {
 
 enum MusicRailSection: String, CaseIterable {
     case playback = "Playback"
+    case reactive = "Reactive"
+    case mappings = "Mappings"
+    case presets = "Presets"
     case songs = "Songs"
     case playlists = "Playlists"
     case albums = "Albums"
 
     var title: String {
-        #if os(macOS)
         switch self {
         case .playback:
-            return "Music App"
-        case .songs, .playlists, .albums:
+            return "Source"
+        case .reactive, .mappings, .presets, .songs, .playlists, .albums:
             return rawValue
         }
-        #else
-        return rawValue
-        #endif
     }
 
     var icon: String {
         switch self {
         case .playback:
-            #if os(macOS)
             return "waveform.circle.fill"
-            #else
-            return "play.circle.fill"
-            #endif
+        case .reactive:  return "waveform.path.ecg"
+        case .mappings:  return "point.3.connected.trianglepath.dotted"
+        case .presets:   return "square.stack.3d.up"
         case .songs:     return "music.note"
         case .playlists: return "music.note.list"
         case .albums:    return "square.stack"
@@ -193,15 +211,18 @@ enum MusicRailSection: String, CaseIterable {
 
     static var availableCases: [MusicRailSection] {
         #if os(macOS)
-        return [.playback]
+        return [.playback, .reactive, .mappings, .presets]
         #else
-        return allCases
+        return [.playback, .reactive, .mappings, .presets, .songs, .playlists, .albums]
         #endif
     }
 
     var musicPanelTab: MusicPanelTab {
         switch self {
         case .playback:  return .music
+        case .reactive:  return .reactive
+        case .mappings:  return .mappings
+        case .presets:   return .presets
         case .songs:     return .songs
         case .playlists: return .playlists
         case .albums:    return .albums
@@ -230,6 +251,9 @@ enum PinnedRailControl: String, CaseIterable {
     case visualizationsTransition
     case visualizationsReactive
     case musicPlayback
+    case musicReactive
+    case musicMappings
+    case musicPresets
     case musicSongs
     case musicPlaylists
     case musicAlbums
@@ -256,6 +280,9 @@ enum PinnedRailControl: String, CaseIterable {
         case .visualizationsTransition: return VisualizationsRailSection.transition.title
         case .visualizationsReactive: return VisualizationsRailSection.reactive.title
         case .musicPlayback: return MusicRailSection.playback.title
+        case .musicReactive: return MusicRailSection.reactive.title
+        case .musicMappings: return MusicRailSection.mappings.title
+        case .musicPresets: return MusicRailSection.presets.title
         case .musicSongs: return MusicRailSection.songs.title
         case .musicPlaylists: return MusicRailSection.playlists.title
         case .musicAlbums: return MusicRailSection.albums.title
@@ -284,6 +311,9 @@ enum PinnedRailControl: String, CaseIterable {
         case .visualizationsTransition: return VisualizationsRailSection.transition.icon
         case .visualizationsReactive: return VisualizationsRailSection.reactive.icon
         case .musicPlayback: return MusicRailSection.playback.icon
+        case .musicReactive: return MusicRailSection.reactive.icon
+        case .musicMappings: return MusicRailSection.mappings.icon
+        case .musicPresets: return MusicRailSection.presets.icon
         case .musicSongs: return MusicRailSection.songs.icon
         case .musicPlaylists: return MusicRailSection.playlists.icon
         case .musicAlbums: return MusicRailSection.albums.icon

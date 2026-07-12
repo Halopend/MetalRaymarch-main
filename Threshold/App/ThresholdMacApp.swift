@@ -534,11 +534,11 @@ private struct ThresholdMacRootView: View {
                 radialSelectedTab = .fractal
                 radialFractalSubTab = .render
 
-            case .music:
+            case .music(let section):
                 radialTopDockTab = .music
-                radialMusicSection = .playback
+                radialMusicSection = section
                 radialSelectedTab = .music
-                radialMusicPanelTab = .music
+                radialMusicPanelTab = section.musicPanelTab
 
             case .settings(let section):
                 radialSelectedTab = .settings
@@ -681,7 +681,7 @@ private struct ThresholdMacRootView: View {
         let dockNodes = TopDockTab.allCases.map { tab in
             MacRadialNavNode(
                 id: Self.rootNodeID(for: tab),
-                title: tab.rawValue,
+                title: tab.title,
                 systemImage: tab.icon,
                 isSelected: radialPath.first == Self.rootNodeID(for: tab),
                 children: radialSectionNodes(for: tab)
@@ -763,7 +763,7 @@ private struct ThresholdMacRootView: View {
             }
 
         case .visualizations:
-            return VisualizationsRailSection.allCases.map { section in
+            return VisualizationsRailSection.visibleCases.map { section in
                 MacRadialNavNode(
                     id: "visualizations.\(section.rawValue)",
                     title: section.title,

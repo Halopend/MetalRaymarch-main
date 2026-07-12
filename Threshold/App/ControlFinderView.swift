@@ -76,9 +76,9 @@ struct ControlFinderPlatformAvailability: OptionSet, Sendable {
 enum ControlFinderCategory: String, CaseIterable, Identifiable, Sendable {
     case explore = "Explore"
     case shape = "Shape"
-    case visualizations = "Visualizations"
-    case performance = "Performance"
-    case music = "Music"
+    case visualizations = "Look"
+    case performance = "Quality"
+    case music = "Input"
     case settings = "Settings"
     case workflow = "Workflow"
 
@@ -256,12 +256,6 @@ struct ControlFinderDestination: Identifiable {
             description: "Set scene-change timing and interpolation behavior.",
             keywords: ["transition", "duration", "crossfade", "interpolation", "scene change"]
         ),
-        destination(
-            VisualizationsRailSection.reactive,
-            description: "Map live audio bands and beats to visual parameters.",
-            keywords: ["audio reactive", "visualizer", "mapping", "bass", "mid", "treble", "beat"]
-        ),
-
         // Performance
         destination(
             PerformanceRailSection.overview,
@@ -277,8 +271,23 @@ struct ControlFinderDestination: Identifiable {
         // Music
         destination(
             MusicRailSection.playback,
-            description: "Configure playback or audio input and monitor the current signal.",
+            description: "Choose microphone, system audio, or music playback and monitor the live signal.",
             keywords: ["music app", "now playing", "microphone", "system audio", "transport", "visualizer"]
+        ),
+        destination(
+            MusicRailSection.reactive,
+            description: "Turn audio response on and tune amount, beat punch, damping, and sensitivity.",
+            keywords: ["audio reactive", "react to audio", "visualizer", "bass", "mid", "treble", "beat", "drop"]
+        ),
+        destination(
+            MusicRailSection.mappings,
+            description: "Map live audio bands and beats to shape, transform, color, lighting, and motion parameters.",
+            keywords: ["audio mapping", "modulation", "target", "curve", "smoothing", "intensity"]
+        ),
+        destination(
+            MusicRailSection.presets,
+            description: "Load and save reusable audio-reactive configurations.",
+            keywords: ["audio preset", "reactivity preset", "electronic", "ambient", "hip hop"]
         ),
         destination(
             MusicRailSection.songs,
@@ -462,7 +471,7 @@ struct ControlFinderDestination: Identifiable {
         ControlFinderDestination(
             title: section.title,
             category: .visualizations,
-            pathComponents: [TopDockTab.visualizations.rawValue, section.title],
+            pathComponents: [TopDockTab.visualizations.title, section.title],
             description: description,
             icon: section.icon,
             searchKeywords: keywords,
@@ -480,7 +489,7 @@ struct ControlFinderDestination: Identifiable {
         ControlFinderDestination(
             title: section.rawValue,
             category: .performance,
-            pathComponents: [TopDockTab.performance.rawValue, section.rawValue],
+            pathComponents: [TopDockTab.performance.title, section.rawValue],
             description: description,
             icon: section.icon,
             searchKeywords: keywords,
@@ -498,7 +507,7 @@ struct ControlFinderDestination: Identifiable {
         ControlFinderDestination(
             title: section.title,
             category: .music,
-            pathComponents: [TopDockTab.music.rawValue, section.title],
+            pathComponents: [TopDockTab.music.title, section.title],
             description: description,
             icon: section.icon,
             searchKeywords: keywords,

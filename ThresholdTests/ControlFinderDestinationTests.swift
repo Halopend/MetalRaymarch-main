@@ -6,7 +6,7 @@ struct ControlFinderDestinationTests {
     @Test("Catalog IDs are unique and every destination is routable")
     func uniqueRoutableDestinations() {
         let catalog = ControlFinderDestination.catalog
-        #expect(catalog.count == 31)
+        #expect(catalog.count == 33)
         #expect(Set(catalog.map(\.id)).count == catalog.count)
         #expect(catalog.allSatisfy { !$0.title.isEmpty && !$0.path.isEmpty && !$0.description.isEmpty })
         #expect(catalog.allSatisfy { $0.route != nil })
@@ -39,7 +39,7 @@ struct ControlFinderDestinationTests {
 
         #expect(explore == Set(ExploreRailSection.allCases.map(\.rawValue)))
         #expect(shape == Set(ShapeRailSection.allCases.filter { $0 != .performance }.map(\.rawValue)))
-        #expect(visualizations == Set(VisualizationsRailSection.allCases.map(\.rawValue)))
+        #expect(visualizations == Set(VisualizationsRailSection.visibleCases.map(\.rawValue)))
         #expect(performance == Set(PerformanceRailSection.allCases.map(\.rawValue)))
         #expect(music == Set(MusicRailSection.allCases.map(\.rawValue)))
         #expect(settings == Set(SettingsSubTab.visibleCases.map(\.rawValue)))
@@ -54,9 +54,9 @@ struct ControlFinderDestinationTests {
         let iPad = ControlFinderDestination.results(matching: "", on: .iOS)
         let vision = ControlFinderDestination.results(matching: "", on: .visionOS)
 
-        #expect(mac.count == 26)
-        #expect(iPad.count == 29)
-        #expect(vision.count == 31)
+        #expect(mac.count == 28)
+        #expect(iPad.count == 31)
+        #expect(vision.count == 33)
 
         #expect(!mac.contains { $0.id == "music.Songs" })
         #expect(iPad.contains { $0.id == "music.Songs" })

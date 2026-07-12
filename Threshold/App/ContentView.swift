@@ -723,7 +723,7 @@ struct ContentView: View {
                         ) { activateShapeSection(section) }
                     }
                 case .visualizations:
-                    ForEach(VisualizationsRailSection.allCases, id: \.self) { section in
+                    ForEach(VisualizationsRailSection.visibleCases, id: \.self) { section in
                         compactSectionButton(
                             title: section.title,
                             systemImage: section.icon,
@@ -829,7 +829,7 @@ struct ContentView: View {
                                 .font(.system(size: IconSize.medium, weight: .semibold))
                             topDockBadge(for: tab)
                         }
-                        Text(tab.rawValue)
+                        Text(tab.title)
                             .font(.subheadline.weight(.semibold))
                     }
                     .padding(.horizontal, 14)
@@ -940,7 +940,7 @@ struct ContentView: View {
                             }
                         }
                     case .visualizations:
-                        ForEach(VisualizationsRailSection.allCases, id: \.self) { section in
+                        ForEach(VisualizationsRailSection.visibleCases, id: \.self) { section in
                             railButton(
                                 title: section.title,
                                 systemImage: section.icon,
@@ -1316,15 +1316,9 @@ struct ContentView: View {
 
     private func activateMusicSection(_ section: MusicRailSection) {
         topDockTab = .music
-        let resolvedSection: MusicRailSection
-        #if os(macOS)
-        resolvedSection = .playback
-        #else
-        resolvedSection = section
-        #endif
-        musicRailSection = resolvedSection
+        musicRailSection = section
         selectedTab = .music
-        musicPanelTab = resolvedSection.musicPanelTab
+        musicPanelTab = section.musicPanelTab
     }
 
     private func presentControlFinder() {
@@ -1412,9 +1406,15 @@ struct ContentView: View {
         case .visualizationsTransition:
             return topDockTab == .visualizations && visualizationsRailSection == .transition && selectedTab != .gestures && selectedTab != .settings
         case .visualizationsReactive:
-            return topDockTab == .visualizations && visualizationsRailSection == .reactive && selectedTab != .gestures && selectedTab != .settings
+            return topDockTab == .music && musicRailSection == .mappings && selectedTab != .gestures && selectedTab != .settings
         case .musicPlayback:
             return topDockTab == .music && musicRailSection == .playback && selectedTab != .gestures && selectedTab != .settings
+        case .musicReactive:
+            return topDockTab == .music && musicRailSection == .reactive && selectedTab != .gestures && selectedTab != .settings
+        case .musicMappings:
+            return topDockTab == .music && musicRailSection == .mappings && selectedTab != .gestures && selectedTab != .settings
+        case .musicPresets:
+            return topDockTab == .music && musicRailSection == .presets && selectedTab != .gestures && selectedTab != .settings
         case .musicSongs:
             return topDockTab == .music && musicRailSection == .songs && selectedTab != .gestures && selectedTab != .settings
         case .musicPlaylists:
@@ -1464,9 +1464,15 @@ struct ContentView: View {
             case .visualizationsTransition:
                 activateVisualizationsSection(.transition)
             case .visualizationsReactive:
-                activateVisualizationsSection(.reactive)
+                activateMusicSection(.mappings)
             case .musicPlayback:
                 activateMusicSection(.playback)
+            case .musicReactive:
+                activateMusicSection(.reactive)
+            case .musicMappings:
+                activateMusicSection(.mappings)
+            case .musicPresets:
+                activateMusicSection(.presets)
             case .musicSongs:
                 activateMusicSection(.songs)
             case .musicPlaylists:
@@ -1514,6 +1520,9 @@ struct ContentView: View {
     private func pinnedRailControl(for section: MusicRailSection) -> PinnedRailControl {
         switch section {
         case .playback: return .musicPlayback
+        case .reactive: return .musicReactive
+        case .mappings: return .musicMappings
+        case .presets: return .musicPresets
         case .songs: return .musicSongs
         case .playlists: return .musicPlaylists
         case .albums: return .musicAlbums
@@ -1564,25 +1573,15 @@ struct ContentView: View {
             topDockTab = .visualizations
             visualizationsRailSection = effectsSubTab == .dynamic ? .motion : .atmosphere
         case .music:
-            if musicPanelTab == .visualizations {
-                topDockTab = .visualizations
-                visualizationsRailSection = .reactive
-            } else {
-                topDockTab = .music
-                #if os(macOS)
-                musicRailSection = .playback
-                if musicPanelTab != .music {
-                    musicPanelTab = .music
-                }
-                #else
-                switch musicPanelTab {
-                case .music:       musicRailSection = .playback
-                case .songs:       musicRailSection = .songs
-                case .playlists:   musicRailSection = .playlists
-                case .albums:      musicRailSection = .albums
-                case .visualizations: musicRailSection = .playback
-                }
-                #endif
+            topDockTab = .music
+            switch musicPanelTab {
+            case .music:       musicRailSection = .playback
+            case .reactive:    musicRailSection = .reactive
+            case .mappings, .visualizations: musicRailSection = .mappings
+            case .presets:     musicRailSection = .presets
+            case .songs:       musicRailSection = .songs
+            case .playlists:   musicRailSection = .playlists
+            case .albums:      musicRailSection = .albums
             }
         case .transition:
             topDockTab = .visualizations
@@ -1611,7 +1610,7 @@ struct ContentView: View {
         case .shapePerformance:
             selectedTab = .fractal; fractalSubTab = .render
         case .audioReactive:
-            selectedTab = .music; musicPanelTab = .visualizations
+            selectedTab = .music; musicPanelTab = .reactive
         }
     }
 

@@ -14,6 +14,9 @@ import SwiftUI
 
 enum MusicPanelTab: String, CaseIterable {
     case music = "Music"
+    case reactive = "Reactive"
+    case mappings = "Mappings"
+    case presets = "Presets"
     case songs = "Songs"
     case playlists = "Playlists"
     case albums = "Albums"
@@ -52,7 +55,7 @@ struct MusicTabContent: View {
         switch tab {
         case .songs, .playlists, .albums:
             return .music
-        case .music, .visualizations:
+        case .music, .reactive, .mappings, .presets, .visualizations:
             return tab
         }
         #else
@@ -145,6 +148,15 @@ struct MusicTabContent: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+                case .reactive:
+                    inputReactivePage
+
+                case .mappings:
+                    inputMappingsPage
+
+                case .presets:
+                    inputPresetsPage
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -166,6 +178,40 @@ struct MusicTabContent: View {
         #endif
         .onDisappear {
             updateVisualizationAddPopoverAdjustment(isPresented: false)
+        }
+    }
+
+    private var inputReactivePage: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(spacing: 10) {
+                visualizationHeaderSection
+                levelMeters
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+    }
+
+    private var inputMappingsPage: some View {
+        VStack(spacing: 10) {
+            visualizationHeaderSection
+            ScrollView(.vertical, showsIndicators: true) {
+                reactivitySection
+                    .padding(.bottom, 10)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private var inputPresetsPage: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(spacing: 10) {
+                visualizationHeaderSection
+                presetsSection
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
         }
     }
 
@@ -336,7 +382,7 @@ struct MusicTabContent: View {
 
     private var visualizationHeaderSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Music Reactive Visuals")
+            Text("Audio Reactive")
                 .font(.subheadline.bold())
             Text("Toggle and map audio-driven modulation")
                 .font(.caption2)
@@ -354,7 +400,7 @@ struct MusicTabContent: View {
             }
 
             if !cache.audioReactive.fractalAudioReactiveEnabled {
-                Text("Enable React to Music to add parameter mappings.")
+                Text("Enable React to Audio to add parameter mappings.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             } else if availableMappingTargetsToAdd.isEmpty {
@@ -504,7 +550,7 @@ struct MusicTabContent: View {
 
                 Spacer(minLength: 0)
 
-                Toggle("React to Music", isOn: reactToMusicBinding)
+                Toggle("React to Audio", isOn: reactToMusicBinding)
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .controlSize(.small)
@@ -1406,7 +1452,7 @@ struct MusicTabContent: View {
                 .padding(10)
                 .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.10)))
             } else {
-                Text("Enable React to Music above to start visualization mappings.")
+                Text("Enable React to Audio above to start parameter mappings.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(10)
