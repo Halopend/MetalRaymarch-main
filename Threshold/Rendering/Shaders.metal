@@ -2,10 +2,10 @@
 //  Shaders.metal
 //
 // === DEPTH BUFFER NOTES (CRITICAL FOR REPROJECTION/ASW) ===
-// visionOS projection outputs z/w in [0, 1] range directly.
-// Depth encoding: output.depth = clipPos.z / clipPos.w (no transformation needed)
-// Far plane (no hit): output.depth = 1e-7 (tiny value = far away for compositor)
-// clearDepth in render passes: 1.0
+// Depth encoding is projection-native z/w in [0, 1]. visionOS uses reverse-Z
+// (far ~= 0), while the Mac/iPad projection and MetalFX temporal scaler use
+// standard depth (far ~= 1). fragmentShader and fragmentShaderMono therefore
+// pass their own miss-depth convention into the shared fragment body.
 //
 // === COMPILER OPTIMIZATION HINTS ===
 // Force aggressive inlining for hot path functions
@@ -4010,7 +4010,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                                    float time,
                                    float warmStartT = -1.0f,
                                    device atomic_uint* benchCounters = nullptr,
-                                   float coarseWarmStartT = -1.0f)
+                                   float coarseWarmStartT = -1.0f,
+                                   bool reversedDepth = true)
 {
     FragmentOutput output;
 
@@ -4208,8 +4209,10 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     }
     else
     {
-        // No hit - far plane (tiny depth so compositor treats as far away)
-        output.depth = 1e-7;
+        // A miss must use the active projection's far convention. Keep a small
+        // epsilon from the clear value so the `.less` depth test still stores
+        // Mac/iPad background color and depth.
+        output.depth = reversedDepth ? 1e-7f : (1.0f - 1e-6f);
     }
 
     // Apply fog, glow, and clamp using helper functions
@@ -4231,17 +4234,6 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
     col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), glow);
 
-    // Manual screen-space edge detector. Derivatives provide a 2x2 local
-    // convolution without allocating an intermediate texture.
-    if (uniforms.colorScheme.edgeDetectionEnabled != 0) {
-        half luma = dot(col, half3(0.2126h, 0.7152h, 0.0722h));
-        half gradient = length(half2(dfdx(luma), dfdy(luma)));
-        half threshold = half(uniforms.colorScheme.edgeDetectionThreshold);
-        half softness = max(half(uniforms.colorScheme.edgeDetectionSoftness), 0.001h);
-        half edge = smoothstep(threshold, threshold + softness, gradient);
-        col = mix(col, half3(0.0h), edge * half(uniforms.colorScheme.edgeDetectionStrength));
-    }
-
     // Bounding Fog: applied before the floor circle / spring blob composite so
     // those overlays stay at full strength. Fades to black in Full immersion;
     // combined with the alpha fade below it fades to passthrough in
@@ -4260,6 +4252,19 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     // texCoord is [0,1] — convert to NDC [-1, 1] for SDF
     float2 blobUV = in.texCoord * 2.0f - 1.0f;
     col = compositeSpringBlob(col, blobUV, uniforms);
+
+    // Final-color edge post effect. Mac/iPad MetalFX frames patch this flag off
+    // and apply the same operation after upscale in macBlitFragment, keeping a
+    // one-input-pixel outline from expanding into a blocky output line. Placing
+    // the native version here keeps ordering consistent across both paths.
+    if (uniforms.colorScheme.edgeDetectionEnabled != 0) {
+        half luma = dot(col, half3(0.2126h, 0.7152h, 0.0722h));
+        half gradient = length(half2(dfdx(luma), dfdy(luma)));
+        half threshold = half(uniforms.colorScheme.edgeDetectionThreshold);
+        half softness = max(half(uniforms.colorScheme.edgeDetectionSoftness), 0.001h);
+        half edge = smoothstep(threshold, threshold + softness, gradient);
+        col = mix(col, half3(0.0h), edge * half(uniforms.colorScheme.edgeDetectionStrength));
+    }
 
     // Partial immersion (visionOS): miss rays go transparent so the compositor
     // shows passthrough instead of the black background. RGB keeps the fog/glow
@@ -4438,7 +4443,8 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     float coarseWarmStartT = coarseWS;
 
     // Render fractal
-    return fragmentMain(in, uniforms, fragCoord, uniforms.time, warmStartT, benchCounters, coarseWarmStartT);
+    return fragmentMain(in, uniforms, fragCoord, uniforms.time, warmStartT,
+                        benchCounters, coarseWarmStartT, true);
 }
 
 fragment FragmentOutput fragmentShaderMono(ColorInOut in [[stage_in]],
@@ -4453,7 +4459,8 @@ fragment FragmentOutput fragmentShaderMono(ColorInOut in [[stage_in]],
     // benchCounters is always bound by the Mac renderer; fragmentMain only writes
     // it when uniforms.benchCollectSteps != 0 (step-profiling armed), so normal
     // frames pay nothing. No warm start on the mono path → warmStartT = -1.
-    return fragmentMain(in, uniforms, fragCoord, uniforms.time, -1.0f, benchCounters);
+    return fragmentMain(in, uniforms, fragCoord, uniforms.time, -1.0f,
+                        benchCounters, -1.0f, false);
 }
 
 // === Format Conversion Shaders for MetalFX ===
@@ -4651,10 +4658,43 @@ vertex MacBlitVertexOut macBlitVertex(uint vertexID [[vertex_id]]) {
     return out;
 }
 
+struct MacBlitParams {
+    // x = enabled window radius (0 means off), y = strength,
+    // z = threshold, w = softness.
+    float4 edge;
+};
+
 fragment float4 macBlitFragment(MacBlitVertexOut in [[stage_in]],
-                                texture2d<float> source [[texture(0)]]) {
+                                texture2d<float> source [[texture(0)]],
+                                constant MacBlitParams& params [[buffer(0)]]) {
     constexpr sampler s(mag_filter::nearest, min_filter::nearest, address::clamp_to_edge);
-    return float4(source.sample(s, in.texCoord).rgb, 1.0);
+    float3 color = source.sample(s, in.texCoord).rgb;
+
+    if (params.edge.x > 0.0f) {
+        const float3 lumaWeights = float3(0.2126f, 0.7152f, 0.0722f);
+        float gradient;
+        if (params.edge.x < 1.5f) {
+            // Default radius: quad derivatives reuse the one center fetch, so
+            // post-upscale edge enhancement adds no texture samples or pass.
+            float luma = dot(color, lumaWeights);
+            gradient = length(float2(dfdx(luma), dfdy(luma)));
+        } else {
+            // Wider user-selected windows opt into four taps. The common radius
+            // 1 path above remains the performant one-fetch implementation.
+            float2 offset = params.edge.x
+                / float2(source.get_width(), source.get_height());
+            float left = dot(source.sample(s, in.texCoord - float2(offset.x, 0.0f)).rgb, lumaWeights);
+            float right = dot(source.sample(s, in.texCoord + float2(offset.x, 0.0f)).rgb, lumaWeights);
+            float top = dot(source.sample(s, in.texCoord - float2(0.0f, offset.y)).rgb, lumaWeights);
+            float bottom = dot(source.sample(s, in.texCoord + float2(0.0f, offset.y)).rgb, lumaWeights);
+            gradient = 0.5f * length(float2(right - left, bottom - top));
+        }
+        float softness = max(params.edge.w, 0.001f);
+        float outline = smoothstep(params.edge.z, params.edge.z + softness, gradient);
+        color = mix(color, float3(0.0f), outline * params.edge.y);
+    }
+
+    return float4(color, 1.0);
 }
 
 // === macOS temporal-upscaling motion vectors (Stage B) ===
@@ -4681,8 +4721,8 @@ fragment float2 macMotionFragment(MacBlitVertexOut in [[stage_in]],
                                    address::clamp_to_edge);
     float depth = depthTex.sample(depthSampler, in.texCoord);
 
-    // No-hit background writes a near-zero depth; reprojecting it directly
-    // yields garbage. But ZERO motion is wrong too: under camera rotation the
+    // Standard-depth Mac/iPad misses sit at the far plane. Avoid reconstructing
+    // exactly at infinity. But ZERO motion is wrong: under camera rotation the
     // sky/fog visibly slides across the screen, and telling MetalFX "this
     // pixel didn't move" makes it blend history from the wrong direction —
     // smeared, ghosted silhouettes against the background. Reproject a far
@@ -4690,7 +4730,11 @@ fragment float2 macMotionFragment(MacBlitVertexOut in [[stage_in]],
     // plane) so rotation tracks the background and history stays sharp.
     // (Same policy as ThresholdKit's march_offscreen aux path: a miss uses
     // the far point along the ray.)
-    if (depth < 1e-4) {
+    // The shader writes misses at exactly 1 - 1e-6. A broad 0.9999 cutoff also
+    // classified valid distant geometry (roughly 83+ world units) as sky.
+    // Keep the test close to the explicit sentinel; visible geometry is capped
+    // below the projection far plane by the renderer.
+    if (depth > (1.0f - 1.5e-6f)) {
         depth = 0.9999;
     }
 
@@ -4706,7 +4750,10 @@ fragment float2 macMotionFragment(MacBlitVertexOut in [[stage_in]],
 
     // NDC delta → UV delta (0..1). MetalFX `motionVectorScale` multiplies by the
     // input pixel dimensions to recover pixels. Y is flipped for texture space.
-    float2 motionNDC = curN - prevN;
+    // MetalFX expects a vector from the current pixel to where that pixel lived
+    // in the previous color frame. current - previous points the wrong way and
+    // turns camera motion into temporal smearing/edge breakup.
+    float2 motionNDC = prevN - curN;
     return float2(motionNDC.x * 0.5, -motionNDC.y * 0.5);
 }
 

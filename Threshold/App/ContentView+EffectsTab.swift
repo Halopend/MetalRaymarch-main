@@ -254,8 +254,16 @@ extension ContentView {
                     get: { cache.quality.resolutionScale },
                     set: { newValue in
                         let clamped = ControlCatalog.resolutionScale.clamp(newValue)
-                        cache.quality.resolutionScale = clamped
-                        cache.push(\.resolutionScale, value: clamped)
+                        // Temporal/scaler construction is keyed by input size.
+                        // Use coarse interaction steps so a drag cannot churn a
+                        // fresh configuration for every pointer pixel, while still
+                        // preserving the control's explicit 33% minimum.
+                        let coarse = (clamped * 20).rounded() / 20
+                        let snapped = clamped < 0.35
+                            ? ControlCatalog.resolutionScale.range.lowerBound
+                            : coarse
+                        cache.quality.resolutionScale = snapped
+                        cache.push(\.resolutionScale, value: snapped)
                     }
                 ),
                 range: ControlCatalog.resolutionScale.range,
@@ -265,63 +273,7 @@ extension ContentView {
             )
             #endif
 
-            EffectSliderRow(
-                icon: "circle.lefthalf.filled",
-                label: "Edge Detector",
-                value: Binding(
-                    get: { cache.lighting.edgeDetectionEffect.strength },
-                    set: { cache.lighting.edgeDetectionEffect.strength = $0 }
-                ),
-                range: 0...1,
-                enabled: Binding(
-                    get: { cache.lighting.edgeDetectionEffect.enabled },
-                    set: { enabled in
-                        cache.lighting.edgeDetectionEffect.enabled = enabled
-                        cache.commitEdgeDetectionEffect()
-                    }
-                ),
-                onChanged: { cache.commitEdgeDetectionEffect() }
-            )
-            if cache.lighting.edgeDetectionEffect.enabled {
-                EffectSliderRow(
-                    icon: "line.3.horizontal.decrease",
-                    label: "Edge Threshold",
-                    value: Binding(
-                        get: { cache.lighting.edgeDetectionEffect.threshold },
-                        set: { cache.lighting.edgeDetectionEffect.threshold = $0 }
-                    ),
-                    range: 0...0.5,
-                    enabled: .constant(true),
-                    onChanged: { cache.commitEdgeDetectionEffect() },
-                    showToggle: false
-                )
-                EffectSliderRow(
-                    icon: "line.3.horizontal",
-                    label: "Edge Softness",
-                    value: Binding(
-                        get: { cache.lighting.edgeDetectionEffect.softness },
-                        set: { cache.lighting.edgeDetectionEffect.softness = $0 }
-                    ),
-                    range: 0.01...0.3,
-                    enabled: .constant(true),
-                    onChanged: { cache.commitEdgeDetectionEffect() },
-                    showToggle: false
-                )
-                EffectSliderRow(
-                    icon: "square.grid.3x3",
-                    label: "Window Size",
-                    value: Binding(
-                        get: { Float(cache.lighting.edgeDetectionEffect.windowRadius) },
-                        set: { cache.lighting.edgeDetectionEffect.windowRadius = Int($0.rounded()) }
-                    ),
-                    range: 1...3,
-                    enabled: .constant(true),
-                    onChanged: { cache.commitEdgeDetectionEffect() },
-                    showToggle: false
-                )
-            }
-
-            Text("Size changes the visible zoom. Definition trades render sharpness against frame rate. Edge Detector outlines luminance transitions; lower the threshold for more contours.")
+            Text("Size changes the visible zoom. Definition trades render sharpness against frame rate.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -393,7 +345,9 @@ extension ContentView {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
-                    ForEach(LightingPreset.allCases, id: \.self) { preset in
+                    // Edge Detection now has its own output-space controls and
+                    // preset shortcut in Visualizations → Post Processing.
+                    ForEach(LightingPreset.allCases.filter { $0 != .edgeDetection }, id: \.self) { preset in
                         PresetCardButton(preset: preset, isSelected: cache.lighting.lightingPreset == preset) {
                             cache.lighting.lightingPreset = preset
                             cache.push(\.lightingPreset, value: preset)

@@ -22,9 +22,10 @@ import simd
 /// render thread on every pool miss (each step of a Render Quality drag or a
 /// live window resize is a fresh size, so a drag was a hitch storm). Builds
 /// now run on ONE private serial queue, coalesced latest-wins: until the
-/// requested size lands, `prepare` returns the nearest READY size (or `false`
-/// → the caller's spatial/direct fallback), so a resolution change costs zero
-/// render-thread stalls. This mirrors ThresholdKit's TemporalUpscaler, which
+/// requested size lands, `prepare` returns `false` so the caller uses an exact-
+/// size spatial fallback. Serving a READY temporal pass at a different size
+/// used to violate the user's requested resolution and mask its speed gain.
+/// This mirrors ThresholdKit's TemporalUpscaler, which
 /// was originally ported FROM this file and grew the async build; the fix is
 /// ported back.
 ///
@@ -33,8 +34,8 @@ import simd
 /// diagnostics (GPU capture / HUD / API validation) `makeTemporalScaler` can
 /// wedge in dispatch_group_wait indefinitely — enough concurrent blocked
 /// builds would strand every cooperative thread in the app. A wedged build on
-/// the private queue strands only that queue; `prepare` keeps serving the
-/// nearest ready size and logs the stall once instead of freezing.
+/// the private queue strands only that queue; `prepare` keeps using the exact-
+/// size spatial fallback and logs the stall once instead of freezing.
 ///
 /// Thread shape: `prepare`/`encode`/`requestReset` are render-thread calls;
 /// the exposed texture properties are render-thread-only mirrors of the
@@ -79,6 +80,9 @@ final class MacTemporalUpscaler: @unchecked Sendable {
         /// LRU pool of built scaler configurations. Bounded: each entry pins
         /// full-resolution output + MetalFX history textures.
         var entries: [Key: Entry] = [:]
+        /// Descriptor/allocation failures are negative-cached for this output
+        /// size so an unsupported configuration is not rebuilt every frame.
+        var failedKeys: Set<Key> = []
         var useCounter = 0
         /// The key `prepare` last returned — `encode` consumes its reset flag.
         var activeKey: Key?
@@ -149,11 +153,10 @@ final class MacTemporalUpscaler: @unchecked Sendable {
     }
 
     /// Prepares textures and the scaler for the requested sizes. Returns `true`
-    /// when a scaler is READY — the exact requested size when its build has
-    /// landed, else the nearest ready size for the same output (the exact
-    /// build is kicked off in the background). Returns `false` (caller falls
-    /// back to spatial/direct) when the input is out of MetalFX range or no
-    /// build for this output has completed yet. Never blocks.
+    /// when the exact requested scaler is READY. Returns `false` (caller falls
+    /// back to exact-size spatial/direct rendering) while a missing temporal
+    /// configuration builds in the background. Never blocks and never returns
+    /// a texture larger or smaller than the requested input.
     func prepare(inputWidth: Int, inputHeight: Int, outputWidth: Int, outputHeight: Int) -> Bool {
         guard MTLFXTemporalScalerDescriptor.supportsDevice(device),
               min(inputWidth, inputHeight) >= Self.minimumInputShortEdge,
@@ -176,6 +179,7 @@ final class MacTemporalUpscaler: @unchecked Sendable {
             if s.currentOutput != out {
                 s.currentOutput = out
                 s.entries.removeAll()
+                s.failedKeys.removeAll()
             }
 
             // Age the in-flight build; report a wedge exactly once per build.
@@ -195,13 +199,25 @@ final class MacTemporalUpscaler: @unchecked Sendable {
                 entry.needsReset = entry.needsReset || s.activeKey != key
                 s.entries[key] = entry
                 s.activeKey = key
+                // This exact ready entry is the newest request; do not leave an
+                // older queued size behind it.
+                s.wanted = nil
                 return (entry.pass, false, reportStall)
             }
 
+            if s.failedKeys.contains(key) {
+                s.wanted = nil
+                s.activeKey = nil
+                return (nil, false, reportStall)
+            }
+
             // Miss: latest-wins — overwrite whatever stale size a fast drag
-            // left here. Skip only when the builder is ALREADY on this key.
+            // left here. If the builder is ALREADY on this exact key, clear any
+            // older queued size; the in-flight result is what is wanted again.
             var startDrain = false
-            if s.inFlight != key {
+            if s.inFlight == key {
+                s.wanted = nil
+            } else {
                 s.wanted = key
                 if !s.draining {
                     s.draining = true
@@ -209,21 +225,10 @@ final class MacTemporalUpscaler: @unchecked Sendable {
                 }
             }
 
-            // Nearest ready fallback: the entry whose input area is closest
-            // to the request (same output — everything pooled matches).
-            let target = inputWidth * inputHeight
-            let nearest = s.entries.min {
-                abs($0.key.inW * $0.key.inH - target)
-                    < abs($1.key.inW * $1.key.inH - target)
-            }
-            if let nearest {
-                var entry = nearest.value
-                entry.lastUsed = s.useCounter
-                entry.needsReset = entry.needsReset || s.activeKey != nearest.key
-                s.entries[nearest.key] = entry
-                s.activeKey = nearest.key
-                return (entry.pass, startDrain, reportStall)
-            }
+            // Do not substitute a differently-sized temporal pass. In
+            // particular, reusing an older larger input after Definition was
+            // lowered kept raymarch cost high until this async build completed.
+            // The caller's spatial scaler can service the exact size now.
             s.activeKey = nil
             return (nil, startDrain, reportStall)
         }
@@ -233,7 +238,7 @@ final class MacTemporalUpscaler: @unchecked Sendable {
                 ⚠️ Mac temporal scaler build stalled (>\(Self.stalledBuildFrameLimit) \
                 frames in makeTemporalScaler) — Xcode Metal diagnostics (GPU \
                 capture / HUD / API validation) can wedge it; rendering \
-                continues at nearest/spatial/full resolution
+                continues through the spatial/full-resolution fallback
                 """)
         }
         if startDrain {
@@ -268,9 +273,8 @@ final class MacTemporalUpscaler: @unchecked Sendable {
 
     /// The builder loop (buildQueue only): take the newest wanted key, build
     /// it, publish, repeat until nothing is wanted. Builds superseded
-    /// mid-compile still publish — a valid size for this output is a useful
-    /// nearest-fallback — but a key whose OUTPUT went stale (resize) is
-    /// dropped without paying for the build.
+    /// mid-compile still publish into the bounded pool so revisiting that exact
+    /// size is instant, but a key whose OUTPUT went stale (resize) is dropped.
     private func drainBuilds() {
         while true {
             let next: Key? = state.withLock { s in
@@ -305,9 +309,12 @@ final class MacTemporalUpscaler: @unchecked Sendable {
                 s.inFlight = nil
                 s.inFlightAge = 0
                 // Discard a build that raced a resize (stale output).
-                guard let built,
-                      s.currentOutput == SIMD2(key.outW, key.outH)
-                else { return }
+                guard s.currentOutput == SIMD2(key.outW, key.outH) else { return }
+                guard let built else {
+                    s.failedKeys.insert(key)
+                    return
+                }
+                s.failedKeys.remove(key)
                 s.entries[key] = Entry(
                     pass: built, lastUsed: s.useCounter, needsReset: true)
                 if s.entries.count > maxPoolSize,
@@ -320,25 +327,6 @@ final class MacTemporalUpscaler: @unchecked Sendable {
     }
 
     private func build(key: Key) -> Pass? {
-        guard
-            let color = makeTexture(width: key.inW, height: key.inH,
-                                    format: colorFormat,
-                                    usage: [.renderTarget, .shaderRead],
-                                    label: "Mac Temporal Color"),
-            let depth = makeTexture(width: key.inW, height: key.inH,
-                                    format: depthFormat,
-                                    usage: [.renderTarget, .shaderRead],
-                                    label: "Mac Temporal Depth"),
-            let motion = makeTexture(width: key.inW, height: key.inH,
-                                     format: Self.motionFormat,
-                                     usage: [.renderTarget, .shaderRead],
-                                     label: "Mac Temporal Motion"),
-            let output = makeTexture(width: key.outW, height: key.outH,
-                                     format: outputFormat,
-                                     usage: [.shaderRead, .shaderWrite, .renderTarget],
-                                     label: "Mac Temporal Output")
-        else { return nil }
-
         let descriptor = MTLFXTemporalScalerDescriptor()
         descriptor.inputWidth = key.inW
         descriptor.inputHeight = key.inH
@@ -353,6 +341,38 @@ final class MacTemporalUpscaler: @unchecked Sendable {
             print("❌ Mac MetalFX makeTemporalScaler failed: input=\(key.inW)x\(key.inH) output=\(key.outW)x\(key.outH)")
             return nil
         }
+
+        // These are minimum requirements reported by the scaler implementation
+        // for this device/OS. Combine them with the render/read roles Threshold
+        // itself needs; hardcoded flags can become invalid as MetalFX changes its
+        // internal encoder path.
+        var colorUsage = made.colorTextureUsage
+        colorUsage.formUnion([.renderTarget, .shaderRead])
+        var depthUsage = made.depthTextureUsage
+        depthUsage.formUnion([.renderTarget, .shaderRead])
+        var motionUsage = made.motionTextureUsage
+        motionUsage.formUnion([.renderTarget, .shaderRead])
+        var outputUsage = made.outputTextureUsage
+        outputUsage.formUnion([.shaderRead, .renderTarget])
+
+        guard
+            let color = makeTexture(width: key.inW, height: key.inH,
+                                    format: colorFormat,
+                                    usage: colorUsage,
+                                    label: "Mac Temporal Color"),
+            let depth = makeTexture(width: key.inW, height: key.inH,
+                                    format: depthFormat,
+                                    usage: depthUsage,
+                                    label: "Mac Temporal Depth"),
+            let motion = makeTexture(width: key.inW, height: key.inH,
+                                     format: Self.motionFormat,
+                                     usage: motionUsage,
+                                     label: "Mac Temporal Motion"),
+            let output = makeTexture(width: key.outW, height: key.outH,
+                                     format: outputFormat,
+                                     usage: outputUsage,
+                                     label: "Mac Temporal Output")
+        else { return nil }
         // Raymarch depth is standard 0 (near) … 1 (far) — not reversed.
         made.isDepthReversed = false
         return Pass(colorTexture: color, depthTexture: depth,

@@ -238,8 +238,8 @@ struct ControlFinderDestination: Identifiable {
         ),
         destination(
             VisualizationsRailSection.grading,
-            description: "Adjust contrast, saturation, gamma, tonemapping, and shading.",
-            keywords: ["grade", "contrast", "saturation", "gamma", "vibrance", "shadows", "highlights", "toon"]
+            description: "Apply scene-level grading, tonemapping, shading, and output-space edge detection.",
+            keywords: ["post processing", "grade", "contrast", "saturation", "gamma", "vibrance", "shadows", "highlights", "toon", "edge", "outline", "contour"]
         ),
         destination(
             VisualizationsRailSection.motion,

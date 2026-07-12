@@ -298,7 +298,7 @@ extension ContentView {
 
     private var coloringGradingContent: some View {
         VStack(spacing: 12) {
-            Label("Color Grading", systemImage: AppIcons.cameraFilters).font(.headline)
+            Label("Post Processing", systemImage: AppIcons.cameraFilters).font(.headline)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             // Tone controls
@@ -358,6 +358,94 @@ extension ContentView {
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
+
+            // Output-space edge enhancement. This is scene-authored post
+            // processing, not a geometry/scale control; MetalFX frames apply it
+            // after reconstruction so the contour width is measured in output
+            // pixels rather than enlarged low-resolution pixels.
+            VStack(spacing: 4) {
+                HStack {
+                    Label("Edge Detection", systemImage: "circle.lefthalf.filled")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Button {
+                        cache.lighting.edgeDetectionEffect = .outline
+                        cache.lighting.lightingPreset = .custom
+                        cache.commitEdgeDetectionEffect()
+                    } label: {
+                        Label("Outline Preset", systemImage: "lines.measurement.horizontal")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(cache.lighting.edgeDetectionEffect == .outline ? .indigo : .secondary)
+                }
+
+                EffectSliderRow(
+                    icon: "circle.lefthalf.filled",
+                    label: "Edge Strength",
+                    value: Binding(
+                        get: { cache.lighting.edgeDetectionEffect.strength },
+                        set: { cache.lighting.edgeDetectionEffect.strength = $0 }
+                    ),
+                    range: 0...1,
+                    enabled: Binding(
+                        get: { cache.lighting.edgeDetectionEffect.enabled },
+                        set: { cache.lighting.edgeDetectionEffect.enabled = $0 }
+                    ),
+                    onChanged: { cache.commitEdgeDetectionEffect() }
+                )
+
+                if cache.lighting.edgeDetectionEffect.enabled {
+                    Divider().padding(.leading, 159)
+                    EffectSliderRow(
+                        icon: "line.3.horizontal.decrease",
+                        label: "Threshold",
+                        value: Binding(
+                            get: { cache.lighting.edgeDetectionEffect.threshold },
+                            set: { cache.lighting.edgeDetectionEffect.threshold = $0 }
+                        ),
+                        range: 0...0.5,
+                        enabled: .constant(true),
+                        onChanged: { cache.commitEdgeDetectionEffect() },
+                        showToggle: false
+                    )
+                    Divider().padding(.leading, 159)
+                    EffectSliderRow(
+                        icon: "line.3.horizontal",
+                        label: "Softness",
+                        value: Binding(
+                            get: { cache.lighting.edgeDetectionEffect.softness },
+                            set: { cache.lighting.edgeDetectionEffect.softness = $0 }
+                        ),
+                        range: 0.01...0.3,
+                        enabled: .constant(true),
+                        onChanged: { cache.commitEdgeDetectionEffect() },
+                        showToggle: false
+                    )
+                    Divider().padding(.leading, 159)
+                    EffectSliderRow(
+                        icon: "square.grid.3x3",
+                        label: "Window Size",
+                        value: Binding(
+                            get: { Float(cache.lighting.edgeDetectionEffect.windowRadius) },
+                            set: { cache.lighting.edgeDetectionEffect.windowRadius = Int($0.rounded()) }
+                        ),
+                        range: 1...3,
+                        enabled: .constant(true),
+                        onChanged: { cache.commitEdgeDetectionEffect() },
+                        showToggle: false,
+                        valueFormat: { String(Int($0.rounded())) }
+                    )
+                }
+
+                Text("Outlines luminance transitions in the final scene. Lower the threshold for more contours; raise softness for a gentler result.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.06)))
         }
     }
 }

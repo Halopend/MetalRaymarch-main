@@ -2,7 +2,7 @@
 //  FractalPresetPersistenceTests.swift
 //  ThresholdTests
 //
-//  Guards the second lossy-persistence fix: ten visual scene-state fields that
+//  Guards the second lossy-persistence fix: visual scene-state fields that
 //  lived in the domain configs (Display/Color/Lighting/SafetyBubble) but were
 //  never captured by FractalPreset, so authoring them then saving silently lost
 //  them on reload — the same class of bug as the sphere transforms in
@@ -46,6 +46,12 @@ struct FractalPresetPersistenceTests {
         settings.polarRotationEffect = polar
         var julia = JuliaDriftEffect(); julia.enabled = true; julia.speed = 0.35
         settings.juliaDriftEffect = julia
+        var edge = EdgeDetectionEffect.outline
+        edge.strength = 0.73
+        edge.threshold = 0.09
+        edge.softness = 0.04
+        edge.windowRadius = 3
+        settings.edgeDetectionEffect = edge
 
         // Safety bubble edge fade — get-only on RenderSettings, set via the config.
         // Bubble must be ON: apply() only restores bubble fields for scenes that
@@ -60,6 +66,7 @@ struct FractalPresetPersistenceTests {
         let preset = FractalPreset.fromSettings(settings, name: "Dropped")
         #expect(preset.platformEnabled == false)
         #expect(preset.cellShadingEnabled == true)
+        #expect(preset.edgeDetectionEffect?.enabled == true)
         #expect(preset.safetyBubbleFadeEnabled == false)
 
         let data = try JSONEncoder().encode(preset)
@@ -76,6 +83,11 @@ struct FractalPresetPersistenceTests {
         #expect(abs((decoded.polarRotationEffect?.speed ?? -1) - 0.4) < 1e-5)
         #expect(decoded.juliaDriftEffect?.enabled == true)
         #expect(abs((decoded.juliaDriftEffect?.speed ?? -1) - 0.35) < 1e-5)
+        #expect(decoded.edgeDetectionEffect?.enabled == true)
+        #expect(abs((decoded.edgeDetectionEffect?.strength ?? -1) - 0.73) < 1e-5)
+        #expect(abs((decoded.edgeDetectionEffect?.threshold ?? -1) - 0.09) < 1e-5)
+        #expect(abs((decoded.edgeDetectionEffect?.softness ?? -1) - 0.04) < 1e-5)
+        #expect(decoded.edgeDetectionEffect?.windowRadius == 3)
         #expect(decoded.safetyBubbleFadeEnabled == false)
         #expect(abs((decoded.safetyBubbleFadeWidth ?? -1) - 0.4) < 1e-5)
 
@@ -95,6 +107,11 @@ struct FractalPresetPersistenceTests {
         #expect(abs(fresh.polarRotationEffect.speed - 0.4) < 1e-5)
         #expect(fresh.juliaDriftEffect.enabled == true)
         #expect(abs(fresh.juliaDriftEffect.speed - 0.35) < 1e-5)
+        #expect(fresh.edgeDetectionEffect.enabled == true)
+        #expect(abs(fresh.edgeDetectionEffect.strength - 0.73) < 1e-5)
+        #expect(abs(fresh.edgeDetectionEffect.threshold - 0.09) < 1e-5)
+        #expect(abs(fresh.edgeDetectionEffect.softness - 0.04) < 1e-5)
+        #expect(fresh.edgeDetectionEffect.windowRadius == 3)
         #expect(fresh.safetyBubbleFadeEnabled == false)
         #expect(abs(fresh.safetyBubbleFadeWidth - 0.4) < 1e-5)
     }
@@ -688,6 +705,7 @@ struct FractalPresetPersistenceTests {
         #expect(preset.cellShadingEnabled == nil)
         #expect(preset.lightVariationRate == nil)
         #expect(preset.beatFlashEffect == nil)
+        #expect(preset.edgeDetectionEffect == nil)
         #expect(preset.safetyBubbleFadeWidth == nil)
 
         // Pre-seed non-default live values. Under the ORDER-INDEPENDENT apply
@@ -701,13 +719,25 @@ struct FractalPresetPersistenceTests {
         settings.platformEnabled = false
         settings.cellShadingEnabled = true
         settings.lightVariationRate = 0.2
+        settings.edgeDetectionEffect = .outline
         settings.boundToSpaceEnabled = true
         preset.apply(to: settings)
 
         #expect(settings.platformEnabled == true)              // default
         #expect(settings.cellShadingEnabled == false)          // default
         #expect(abs(settings.lightVariationRate - 0.5) < 1e-5) // default
+        #expect(settings.edgeDetectionEffect == .off)          // default
         #expect(settings.boundToSpaceEnabled == false)         // default
+
+        // Before edgeDetectionEffect had its own scene field, the dedicated
+        // lighting preset was the persisted signal. It must still reconstruct
+        // its outline rather than following the generic missing-field OFF path.
+        var legacyEdgePreset = preset
+        legacyEdgePreset.lightingPreset = .edgeDetection
+        let edgeSettings = RenderSettings()
+        legacyEdgePreset.apply(to: edgeSettings)
+        #expect(edgeSettings.edgeDetectionEffect == .outline)
+
         // The new per-scene performance profile also decodes to nil for older files.
         #expect(preset.coneMarchCompatible == nil)
         #expect(preset.recommendedQuality == nil)

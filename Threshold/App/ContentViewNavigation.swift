@@ -134,6 +134,10 @@ enum VisualizationsRailSection: String, CaseIterable {
 
     var title: String {
         switch self {
+        case .grading:
+            // Keep the raw value "Grading" stable for existing @AppStorage
+            // navigation state while presenting the broader scene-control home.
+            return "Post Processing"
         case .reactive:
             return "Audio Reactive"
         default:

@@ -120,6 +120,7 @@ struct FractalPreset: Codable, Identifiable {
     var pulseEffect: PulseEffect?
     var glowEffect: GlowEffect?
     var bloomEffect: BloomEffect?
+    var edgeDetectionEffect: EdgeDetectionEffect?
     var fogEffect: FogEffect?
     var gradientCycleEffect: GradientCycleEffect?
     var linearRailEffect: LinearRailEffect?
@@ -213,7 +214,7 @@ struct FractalPreset: Codable, Identifiable {
         case deIterationMismatch
         case spaceWarpOps
         // v2.0 modular lighting effects
-        case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect, linearRailEffect
+        case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, edgeDetectionEffect, fogEffect, gradientCycleEffect, linearRailEffect
         // Color scheme auto-transition
         case colorSchemeAutoTransition, colorSchemeAutoInterval, colorSchemeTransitionDuration
         // v2.1 gradient coloring system
@@ -370,6 +371,7 @@ struct FractalPreset: Codable, Identifiable {
         pulseEffect = try container.decodeIfPresent(PulseEffect.self, forKey: .pulseEffect)
         glowEffect = try container.decodeIfPresent(GlowEffect.self, forKey: .glowEffect)
         bloomEffect = try container.decodeIfPresent(BloomEffect.self, forKey: .bloomEffect)
+        edgeDetectionEffect = try container.decodeIfPresent(EdgeDetectionEffect.self, forKey: .edgeDetectionEffect)
         fogEffect = try container.decodeIfPresent(FogEffect.self, forKey: .fogEffect)
         gradientCycleEffect = try container.decodeIfPresent(GradientCycleEffect.self, forKey: .gradientCycleEffect)
         linearRailEffect = try container.decodeIfPresent(LinearRailEffect.self, forKey: .linearRailEffect)
@@ -509,6 +511,7 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(pulseEffect, forKey: .pulseEffect)
         try container.encodeIfPresent(glowEffect, forKey: .glowEffect)
         try container.encodeIfPresent(bloomEffect, forKey: .bloomEffect)
+        try container.encodeIfPresent(edgeDetectionEffect, forKey: .edgeDetectionEffect)
         try container.encodeIfPresent(fogEffect, forKey: .fogEffect)
         try container.encodeIfPresent(gradientCycleEffect, forKey: .gradientCycleEffect)
         try container.encodeIfPresent(linearRailEffect, forKey: .linearRailEffect)
@@ -750,6 +753,7 @@ struct FractalPreset: Codable, Identifiable {
         preset.pulseEffect = lit.pulseEffect
         preset.glowEffect = lit.glowEffect
         preset.bloomEffect = lit.bloomEffect
+        preset.edgeDetectionEffect = lit.edgeDetectionEffect
         preset.fogEffect = lit.fogEffect
         preset.gradientCycleEffect = lit.gradientCycleEffect
         preset.linearRailEffect = lit.linearRailEffect
@@ -1062,6 +1066,11 @@ struct FractalPreset: Codable, Identifiable {
         settings.pulseEffect = pulseEffect ?? .off
         settings.glowEffect = glowEffect ?? .off
         settings.bloomEffect = bloomEffect ?? .off
+        // Pre-field scene files could still select the dedicated Edge Detection
+        // lighting preset. Preserve that authored outline; other missing fields
+        // remain authoritatively OFF so the previous scene cannot leak through.
+        settings.edgeDetectionEffect = edgeDetectionEffect
+            ?? (lightingPreset ?? .off).effects().edge
         // Fog is opt-in: a scene must explicitly save it enabled. Absent a
         // saved fogEffect, load with fog OFF so it never persists from the
         // previously-live scene (matches every other effect defaulting to .off).

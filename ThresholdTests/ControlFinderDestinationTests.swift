@@ -76,6 +76,9 @@ struct ControlFinderDestinationTests {
         let colour = ControlFinderDestination.results(matching: "colour", on: .iOS)
         #expect(colour.first?.id == "visualizations.Color")
 
+        let edge = ControlFinderDestination.results(matching: "edge outline", on: .macOS)
+        #expect(edge.first?.id == "visualizations.Grading")
+
         let custom = ControlFinderDestination.results(matching: "threshfx", on: .macOS)
         #expect(custom.first?.id == "explore.Custom Scenes")
     }

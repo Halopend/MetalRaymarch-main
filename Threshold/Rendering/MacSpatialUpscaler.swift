@@ -37,6 +37,11 @@ final class MacSpatialUpscaler {
     private(set) var outputTexture: MTLTexture?
 
     private var scaler: MTLFXSpatialScaler?
+    /// A rejected configuration is deterministic on a given scaler/device in
+    /// normal operation. Remember it until the requested size changes instead
+    /// of repeating descriptor creation and texture allocation every frame.
+    private var failedInputSize: Size?
+    private var failedOutputSize: Size?
 
     init(device: MTLDevice, colorFormat: MTLPixelFormat, depthFormat: MTLPixelFormat) {
         self.device = device
@@ -67,33 +72,24 @@ final class MacSpatialUpscaler {
             return true
         }
 
-        inputSize = newInput
-        outputSize = newOutput
-        return rebuild()
-    }
-
-    private func rebuild() -> Bool {
-        colorTexture = makeTexture(width: inputSize.width,
-                                   height: inputSize.height,
-                                   format: colorFormat,
-                                   usage: [.renderTarget, .shaderRead],
-                                   label: "Mac Upscale Input")
-        depthTexture = makeTexture(width: inputSize.width,
-                                   height: inputSize.height,
-                                   format: depthFormat,
-                                   usage: [.renderTarget],
-                                   label: "Mac Upscale Depth")
-        outputTexture = makeTexture(width: outputSize.width,
-                                    height: outputSize.height,
-                                    format: colorFormat,
-                                    usage: [.renderTarget, .shaderRead],
-                                    label: "Mac Upscale Output")
-
-        guard colorTexture != nil, depthTexture != nil, outputTexture != nil else {
-            scaler = nil
+        if failedInputSize == newInput, failedOutputSize == newOutput {
             return false
         }
 
+        inputSize = newInput
+        outputSize = newOutput
+        let ready = rebuild()
+        if ready {
+            failedInputSize = nil
+            failedOutputSize = nil
+        } else {
+            failedInputSize = newInput
+            failedOutputSize = newOutput
+        }
+        return ready
+    }
+
+    private func rebuild() -> Bool {
         let descriptor = MTLFXSpatialScalerDescriptor()
         descriptor.inputWidth = inputSize.width
         descriptor.inputHeight = inputSize.height
@@ -110,6 +106,36 @@ final class MacSpatialUpscaler {
             scaler = nil
             return false
         }
+
+        // MetalFX reports the minimum usage flags required by this concrete
+        // scaler/device. Union those with the app's render/read roles instead of
+        // assuming its internal encoder implementation is identical on every OS.
+        var colorUsage = made.colorTextureUsage
+        colorUsage.formUnion([.renderTarget, .shaderRead])
+        var outputUsage = made.outputTextureUsage
+        outputUsage.formUnion([.renderTarget, .shaderRead])
+
+        colorTexture = makeTexture(width: inputSize.width,
+                                   height: inputSize.height,
+                                   format: colorFormat,
+                                   usage: colorUsage,
+                                   label: "Mac Upscale Input")
+        depthTexture = makeTexture(width: inputSize.width,
+                                   height: inputSize.height,
+                                   format: depthFormat,
+                                   usage: [.renderTarget],
+                                   label: "Mac Upscale Depth")
+        outputTexture = makeTexture(width: outputSize.width,
+                                    height: outputSize.height,
+                                    format: colorFormat,
+                                    usage: outputUsage,
+                                    label: "Mac Upscale Output")
+
+        guard colorTexture != nil, depthTexture != nil, outputTexture != nil else {
+            scaler = nil
+            return false
+        }
+
         made.inputContentWidth = inputSize.width
         made.inputContentHeight = inputSize.height
         scaler = made
