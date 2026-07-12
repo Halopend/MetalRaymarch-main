@@ -48,4 +48,19 @@ struct ControlCatalogTests {
                     "Long-tail spec '\(spec.id)' unexpectedly resolves as routed.")
         }
     }
+
+    @Test("Post-processing ranges cover shipped looks and identity/off values")
+    func postProcessingRanges() {
+        // Built-in gradient presets author contrast as high as 1.4.
+        #expect(ControlCatalog.colorSchemeContrast.range.contains(1.4))
+        // Gamma must cover both sides of the identity exponent.
+        #expect(ControlCatalog.colorSchemeGamma.range.contains(1.0))
+        #expect(ControlCatalog.colorSchemeGamma.range.upperBound > 1.0)
+
+        #expect(ControlCatalog.vignetteStrength.range.lowerBound == 0)
+        #expect(ControlCatalog.edgeStrength.range.lowerBound == 0)
+        #expect(ControlCatalog.edgeThreshold.range.upperBound == 0.25)
+        #expect(ControlCatalog.edgeSoftness.range.lowerBound == 0.001)
+        #expect(ControlCatalog.edgeWindowRadius.range == 1...3)
+    }
 }

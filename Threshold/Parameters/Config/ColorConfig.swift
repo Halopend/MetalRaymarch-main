@@ -17,8 +17,8 @@ struct ColorConfig: Codable, Equatable, Sendable {
     var colorMix: Float = 0.5              // 0.0 - 1.0
     var colorIterations: Float = 8.0   // 4.0 - 16.0 (matches runtime default; was 5.0)
     var colorSchemeSaturation: Float = 1.7 // 0.0 - 3.0
-    var colorSchemeContrast: Float = 1.08  // 0.95 - 1.15
-    var colorSchemeGamma: Float = 0.85     // 0.2 - 1.0
+    var colorSchemeContrast: Float = 1.08  // 0.75 - 1.5
+    var colorSchemeGamma: Float = 0.85     // 0.2 - 2.0
     var colorSchemeVibrance: Float = 0.8   // 0.0 - 1.0
     var colorSchemeCurve: Float = 0.0      // -1.0 - 1.0
     var colorSchemeShadows: Float = -0.018 // -0.05 - 0.05
@@ -28,6 +28,8 @@ struct ColorConfig: Codable, Equatable, Sendable {
     var cellShadingLevels: Float = 4.0     // 2.0 - 8.0
     var aoStrength: Float = 0.0            // 0.0 - 1.0 (0 = old flat ambient, default)
     var tonemapStrength: Float = 0.0       // 0.0 - 1.0 (0 = old plain clamp, default)
+    /// 1 preserves the historical always-on vignette; 0 is fully off.
+    var vignetteStrength: Float = 1.0
 
     // Auto-transition
     var colorSchemeAutoTransition: Bool = false
@@ -44,6 +46,7 @@ struct ColorConfig: Codable, Equatable, Sendable {
         case colorSchemeGamma, colorSchemeVibrance, colorSchemeCurve
         case colorSchemeShadows, colorSchemeHighlights, lightingSoftness
         case cellShadingEnabled, cellShadingLevels, aoStrength, tonemapStrength
+        case vignetteStrength
         case colorSchemeAutoTransition, colorSchemeAutoInterval
         case colorSchemeTransitionDuration
     }
@@ -66,6 +69,7 @@ struct ColorConfig: Codable, Equatable, Sendable {
         cellShadingLevels = try c.decodeIfPresent(Float.self, forKey: .cellShadingLevels) ?? 4.0
         aoStrength = try c.decodeIfPresent(Float.self, forKey: .aoStrength) ?? 0.0
         tonemapStrength = try c.decodeIfPresent(Float.self, forKey: .tonemapStrength) ?? 0.0
+        vignetteStrength = try c.decodeIfPresent(Float.self, forKey: .vignetteStrength) ?? 1.0
         colorSchemeAutoTransition = try c.decodeIfPresent(Bool.self, forKey: .colorSchemeAutoTransition) ?? false
         colorSchemeAutoInterval = try c.decodeIfPresent(Float.self, forKey: .colorSchemeAutoInterval) ?? 30.0
         colorSchemeTransitionDuration = try c.decodeIfPresent(Float.self, forKey: .colorSchemeTransitionDuration) ?? 2.0
@@ -88,6 +92,7 @@ struct ColorConfig: Codable, Equatable, Sendable {
         cellShadingLevels = ControlCatalog.cellShadingLevels.clamp(cellShadingLevels)
         aoStrength = ControlCatalog.aoStrength.clamp(aoStrength)
         tonemapStrength = ControlCatalog.tonemapStrength.clamp(tonemapStrength)
+        vignetteStrength = ControlCatalog.vignetteStrength.clamp(vignetteStrength)
         colorSchemeAutoInterval = ControlCatalog.colorSchemeAutoInterval.clamp(colorSchemeAutoInterval)
         colorSchemeTransitionDuration = ControlCatalog.colorSchemeTransitionDuration.clamp(colorSchemeTransitionDuration)
     }

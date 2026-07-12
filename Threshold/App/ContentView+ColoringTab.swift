@@ -309,10 +309,10 @@ extension ContentView {
                     onChanged: { cache.push(\.colorSchemeContrast, value: cache.color.colorSchemeContrast) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
-                EffectSliderRow(icon: "paintpalette.fill", label: "Vibrance",
-                    value: $cache.color.colorSchemeVibrance, range: ControlCatalog.colorSchemeVibrance.range,
+                EffectSliderRow(icon: "circle.lefthalf.filled", label: "Gamma",
+                    value: $cache.color.colorSchemeGamma, range: ControlCatalog.colorSchemeGamma.range,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.colorSchemeVibrance, value: cache.color.colorSchemeVibrance) },
+                    onChanged: { cache.push(\.colorSchemeGamma, value: cache.color.colorSchemeGamma) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "waveform.path", label: "Midtone Curve",
@@ -324,8 +324,21 @@ extension ContentView {
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
 
-            // Shadows & Highlights
+            // Color response, shadows & highlights
             VStack(spacing: 4) {
+                EffectSliderRow(icon: ControlCatalog.saturation.icon, label: "Saturation",
+                    value: $cache.color.colorSchemeSaturation, range: ControlCatalog.saturation.range,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitColorSchemeSaturation() },
+                    showToggle: false,
+                    musicTargetID: ParameterTargetID.Effect.saturation)
+                Divider().padding(.leading, 159)
+                EffectSliderRow(icon: "paintpalette.fill", label: "Vibrance",
+                    value: $cache.color.colorSchemeVibrance, range: ControlCatalog.colorSchemeVibrance.range,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.colorSchemeVibrance, value: cache.color.colorSchemeVibrance) },
+                    showToggle: false)
+                Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "shadow", label: "Shadows",
                     value: $cache.color.colorSchemeShadows, range: ControlCatalog.colorSchemeShadows.range,
                     enabled: .constant(true),
@@ -341,9 +354,24 @@ extension ContentView {
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.yellow.opacity(0.06)))
 
-            // Ambient occlusion & filmic tonemap (off by default — opt-in upgrades
-            // to the lighting/grading model, dial in to taste)
+            // Lighting finish and stylization. Zero-valued scalar effects are
+            // true bypasses; Cell Shading retains its explicit toggle because
+            // its useful band-count range starts at two.
             VStack(spacing: 4) {
+                EffectSliderRow(icon: ControlCatalog.lightingSoftness.icon, label: "Lighting Softness",
+                    value: $cache.color.lightingSoftness, range: ControlCatalog.lightingSoftness.range,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.lightingSoftness, value: cache.color.lightingSoftness) },
+                    showToggle: false)
+                Divider().padding(.leading, 159)
+                EffectSliderRow(icon: ControlCatalog.cellShadingLevels.icon, label: "Cell Shading",
+                    value: $cache.color.cellShadingLevels, range: ControlCatalog.cellShadingLevels.range,
+                    enabled: $cache.color.cellShadingEnabled,
+                    onChanged: {
+                        cache.push(\.cellShadingEnabled, value: cache.color.cellShadingEnabled)
+                        cache.push(\.cellShadingLevels, value: cache.color.cellShadingLevels)
+                    })
+                Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "circle.lefthalf.striped.horizontal", label: "Ambient Occlusion",
                     value: $cache.color.aoStrength, range: ControlCatalog.aoStrength.range,
                     enabled: .constant(true),
@@ -355,6 +383,13 @@ extension ContentView {
                     enabled: .constant(true),
                     onChanged: { cache.push(\.tonemapStrength, value: cache.color.tonemapStrength) },
                     showToggle: false)
+                Divider().padding(.leading, 159)
+                EffectSliderRow(icon: ControlCatalog.vignetteStrength.icon, label: "Vignette",
+                    value: $cache.color.vignetteStrength, range: ControlCatalog.vignetteStrength.range,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.vignetteStrength, value: cache.color.vignetteStrength) },
+                    showToggle: false,
+                    valueFormat: { $0 <= 0.001 ? "Off" : String(format: "%.2f", $0) })
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
@@ -385,60 +420,57 @@ extension ContentView {
                     label: "Edge Strength",
                     value: Binding(
                         get: { cache.lighting.edgeDetectionEffect.strength },
-                        set: { cache.lighting.edgeDetectionEffect.strength = $0 }
+                        set: { cache.lighting.edgeDetectionEffect.setStrength($0) }
                     ),
-                    range: 0...1,
-                    enabled: Binding(
-                        get: { cache.lighting.edgeDetectionEffect.enabled },
-                        set: { cache.lighting.edgeDetectionEffect.enabled = $0 }
-                    ),
-                    onChanged: { cache.commitEdgeDetectionEffect() }
+                    range: ControlCatalog.edgeStrength.range,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitEdgeDetectionEffect() },
+                    showToggle: false,
+                    valueFormat: { $0 <= EdgeDetectionEffect.activationEpsilon ? "Off" : String(format: "%.2f", $0) }
                 )
 
-                if cache.lighting.edgeDetectionEffect.enabled {
-                    Divider().padding(.leading, 159)
-                    EffectSliderRow(
-                        icon: "line.3.horizontal.decrease",
-                        label: "Threshold",
-                        value: Binding(
-                            get: { cache.lighting.edgeDetectionEffect.threshold },
-                            set: { cache.lighting.edgeDetectionEffect.threshold = $0 }
-                        ),
-                        range: 0...0.5,
-                        enabled: .constant(true),
-                        onChanged: { cache.commitEdgeDetectionEffect() },
-                        showToggle: false
-                    )
-                    Divider().padding(.leading, 159)
-                    EffectSliderRow(
-                        icon: "line.3.horizontal",
-                        label: "Softness",
-                        value: Binding(
-                            get: { cache.lighting.edgeDetectionEffect.softness },
-                            set: { cache.lighting.edgeDetectionEffect.softness = $0 }
-                        ),
-                        range: 0.01...0.3,
-                        enabled: .constant(true),
-                        onChanged: { cache.commitEdgeDetectionEffect() },
-                        showToggle: false
-                    )
-                    Divider().padding(.leading, 159)
-                    EffectSliderRow(
-                        icon: "square.grid.3x3",
-                        label: "Window Size",
-                        value: Binding(
-                            get: { Float(cache.lighting.edgeDetectionEffect.windowRadius) },
-                            set: { cache.lighting.edgeDetectionEffect.windowRadius = Int($0.rounded()) }
-                        ),
-                        range: 1...3,
-                        enabled: .constant(true),
-                        onChanged: { cache.commitEdgeDetectionEffect() },
-                        showToggle: false,
-                        valueFormat: { String(Int($0.rounded())) }
-                    )
-                }
+                Divider().padding(.leading, 159)
+                EffectSliderRow(
+                    icon: ControlCatalog.edgeThreshold.icon,
+                    label: "Threshold",
+                    value: Binding(
+                        get: { cache.lighting.edgeDetectionEffect.threshold },
+                        set: { cache.lighting.edgeDetectionEffect.threshold = $0 }
+                    ),
+                    range: ControlCatalog.edgeThreshold.range,
+                    enabled: .constant(cache.lighting.edgeDetectionEffect.isActive),
+                    onChanged: { cache.commitEdgeDetectionEffect() },
+                    showToggle: false
+                )
+                Divider().padding(.leading, 159)
+                EffectSliderRow(
+                    icon: ControlCatalog.edgeSoftness.icon,
+                    label: "Softness",
+                    value: Binding(
+                        get: { cache.lighting.edgeDetectionEffect.softness },
+                        set: { cache.lighting.edgeDetectionEffect.softness = $0 }
+                    ),
+                    range: ControlCatalog.edgeSoftness.range,
+                    enabled: .constant(cache.lighting.edgeDetectionEffect.isActive),
+                    onChanged: { cache.commitEdgeDetectionEffect() },
+                    showToggle: false
+                )
+                Divider().padding(.leading, 159)
+                EffectSliderRow(
+                    icon: ControlCatalog.edgeWindowRadius.icon,
+                    label: "Window Size",
+                    value: Binding(
+                        get: { Float(cache.lighting.edgeDetectionEffect.windowRadius) },
+                        set: { cache.lighting.edgeDetectionEffect.windowRadius = Int($0.rounded()) }
+                    ),
+                    range: ControlCatalog.edgeWindowRadius.range,
+                    enabled: .constant(cache.lighting.edgeDetectionEffect.isActive),
+                    onChanged: { cache.commitEdgeDetectionEffect() },
+                    showToggle: false,
+                    valueFormat: { String(Int($0.rounded())) }
+                )
 
-                Text("Outlines luminance transitions in the final scene. Lower the threshold for more contours; raise softness for a gentler result.")
+                Text("Outlines luminance transitions in the final scene. Strength 0 turns the pass off; lower the threshold for more contours and raise softness for a gentler result.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

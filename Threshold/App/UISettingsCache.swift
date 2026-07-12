@@ -381,6 +381,7 @@ final class UISettingsCache {
 
     func commitEdgeDetectionEffect() {
         guard let settings else { return }
+        lighting.edgeDetectionEffect.normalize()
         settings.edgeDetectionEffect = lighting.edgeDetectionEffect
     }
 

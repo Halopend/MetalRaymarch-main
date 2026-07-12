@@ -184,17 +184,50 @@ struct BloomEffect: LightingEffect {
 /// Screen-space edge detector. The fragment path uses a local luminance
 /// gradient, so this is a lightweight convolution-style outline pass.
 struct EdgeDetectionEffect: LightingEffect {
+    /// Below this value the output is indistinguishable from the source. Use the
+    /// same cutoff for UI state and uniform packing so an apparently-off edge
+    /// effect never allocates or dispatches the compute post-process pass.
+    static let activationEpsilon: Float = 0.001
+
     var enabled: Bool = false
     var strength: Float = 0.0
     var threshold: Float = 0.12
     var softness: Float = 0.08
     var windowRadius: Int = 1
 
+    var isActive: Bool {
+        enabled && strength > Self.activationEpsilon
+    }
+
     var primaryValue: Float {
         get { strength }
-        set { strength = newValue }
+        set { setStrength(newValue) }
     }
     static let primaryLabel = "Strength"
+
+    /// Edge strength is the authoritative on/off control. Dependent tuning is
+    /// intentionally preserved while off so raising strength restores the prior
+    /// threshold/softness/window settings.
+    mutating func setStrength(_ value: Float) {
+        strength = ControlCatalog.edgeStrength.clamp(value)
+        enabled = strength > Self.activationEpsilon
+        if !enabled { strength = 0 }
+    }
+
+    /// Clamp data arriving from scenes/UserDefaults. Legacy files could encode
+    /// `enabled: false` with a non-zero remembered strength; migrate that state
+    /// to the new zero-is-off representation without unexpectedly enabling it.
+    mutating func normalize() {
+        strength = ControlCatalog.edgeStrength.clamp(strength)
+        threshold = ControlCatalog.edgeThreshold.clamp(threshold)
+        softness = ControlCatalog.edgeSoftness.clamp(softness)
+        let radius = ControlCatalog.edgeWindowRadius.clamp(Float(windowRadius))
+        windowRadius = Int(radius.rounded())
+        if !enabled || strength <= Self.activationEpsilon {
+            enabled = false
+            strength = 0
+        }
+    }
 
     static var off: EdgeDetectionEffect {
         EdgeDetectionEffect(enabled: false, strength: 0.0)

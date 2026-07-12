@@ -1313,16 +1313,22 @@ private struct MacRadialSliderPill: View {
     /// Horizontal points that sweep the complete value range.
     private let fullRangeTravel: CGFloat = 180
 
-    private var isEmphasized: Bool { isHovering || isDragging }
+    private var isEnabled: Bool { slider.isEnabled() }
+    private var isEmphasized: Bool { isEnabled && (isHovering || isDragging) }
 
     var body: some View {
         let value = slider.read()
         let normalized = CGFloat(slider.normalized(value))
+        let enabled = isEnabled
 
         sliderInteractions(
             chrome(value: value, normalized: normalized),
-            formattedValue: slider.format(value)
+            formattedValue: slider.format(value),
+            isEnabled: enabled
         )
+        .opacity(enabled ? 1 : 0.42)
+        .saturation(enabled ? 1 : 0.18)
+        .animation(.easeOut(duration: 0.12), value: enabled)
     }
 
     /// Break the large SwiftUI expression at a concrete type boundary. This
@@ -1382,23 +1388,36 @@ private struct MacRadialSliderPill: View {
 
     private func sliderInteractions(
         _ content: AnyView,
-        formattedValue: String
+        formattedValue: String,
+        isEnabled: Bool
     ) -> AnyView {
         AnyView(
             content
                 .contentShape(Capsule().inset(by: -2))
-                .gesture(dragGesture)
-                .onHover(perform: updateHover)
+                .gesture(dragGesture, including: isEnabled ? .all : .none)
+                .onHover { hovering in
+                    updateHover(isEnabled && hovering)
+                }
                 .onDisappear(perform: resetInteractionState)
-                .help("\(node.title): drag right to increase, left to decrease, or scroll for fine adjustment")
+                .onChange(of: isEnabled) { _, enabled in
+                    if !enabled { resetInteractionState() }
+                }
+                .help(isEnabled
+                    ? "\(node.title): drag right to increase, left to decrease, or scroll for fine adjustment"
+                    : "\(node.title) is unavailable")
+                .disabled(!isEnabled)
                 .accessibilityElement()
                 .accessibilityLabel(node.title)
-                .accessibilityValue(formattedValue)
+                .accessibilityValue(isEnabled ? formattedValue : "\(formattedValue), unavailable")
+                .accessibilityHint(isEnabled
+                    ? "Drag, scroll, or use accessibility adjustment actions to change the value."
+                    : "This setting is currently unavailable.")
                 .accessibilityAdjustableAction { direction in
+                    guard slider.isEnabled() else { return }
                     let span = slider.range.upperBound - slider.range.lowerBound
                     let step = span / 20
                     let delta: Float = direction == .increment ? step : -step
-                    slider.write((slider.read() + delta).clamped(to: slider.range))
+                    slider.writeIfEnabled((slider.read() + delta).clamped(to: slider.range))
                 }
         )
     }
@@ -1406,12 +1425,13 @@ private struct MacRadialSliderPill: View {
     private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .named(MacRadialTabMenu.coordinateSpaceName))
             .onChanged { gesture in
+                guard slider.isEnabled() else { return }
                 if !isDragging {
                     isDragging = true
                     dragStartValue = slider.read()
                     onEditingChanged(true)
                 }
-                slider.write(slider.value(
+                slider.writeIfEnabled(slider.value(
                     startingAt: dragStartValue,
                     horizontalTranslation: gesture.translation.width,
                     fullRangeTravel: fullRangeTravel
@@ -1464,8 +1484,9 @@ private struct MacRadialSliderPill: View {
     }
 
     private func updateHover(_ hovering: Bool) {
-        isHovering = hovering
-        onHoverChanged(hovering)
+        let resolved = slider.isEnabled() && hovering
+        isHovering = resolved
+        onHoverChanged(resolved)
     }
 
 }

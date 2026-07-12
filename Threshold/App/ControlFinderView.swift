@@ -239,7 +239,7 @@ struct ControlFinderDestination: Identifiable {
         destination(
             VisualizationsRailSection.grading,
             description: "Apply scene-level grading, tonemapping, shading, and output-space edge detection.",
-            keywords: ["post processing", "grade", "contrast", "saturation", "gamma", "vibrance", "shadows", "highlights", "toon", "edge", "outline", "contour"]
+            keywords: ["post processing", "grade", "contrast", "saturation", "gamma", "vibrance", "shadows", "highlights", "toon", "cell shading", "ambient occlusion", "filmic", "tonemap", "vignette", "edge", "outline", "contour"]
         ),
         destination(
             VisualizationsRailSection.motion,
@@ -276,18 +276,12 @@ struct ControlFinderDestination: Identifiable {
         ),
         destination(
             MusicRailSection.reactive,
-            description: "Turn audio response on and tune amount, beat punch, damping, and sensitivity.",
-            keywords: ["audio reactive", "react to audio", "visualizer", "bass", "mid", "treble", "beat", "drop"]
-        ),
-        destination(
-            MusicRailSection.mappings,
-            description: "Map live audio bands and beats to shape, transform, color, lighting, and motion parameters.",
-            keywords: ["audio mapping", "modulation", "target", "curve", "smoothing", "intensity"]
-        ),
-        destination(
-            MusicRailSection.presets,
-            description: "Load and save reusable audio-reactive configurations.",
-            keywords: ["audio preset", "reactivity preset", "electronic", "ambient", "hip hop"]
+            description: "Tune audio response, map bands and beats to scene controls, and manage reusable reactivity presets.",
+            keywords: [
+                "audio reactive", "react to audio", "visualizer", "bass", "mid", "treble", "beat", "drop",
+                "audio mapping", "modulation", "target", "curve", "smoothing", "intensity",
+                "audio preset", "reactivity preset", "electronic", "ambient", "hip hop"
+            ]
         ),
         destination(
             MusicRailSection.songs,

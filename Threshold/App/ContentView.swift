@@ -1150,9 +1150,10 @@ struct ContentView: View {
 
     private var pinnedRailControls: [PinnedRailControl] {
         get {
-            pinnedRailControlsRaw
+            let decoded = pinnedRailControlsRaw
                 .split(separator: ",")
                 .compactMap { PinnedRailControl(rawValue: String($0)) }
+            return PinnedRailControl.canonicalized(decoded)
                 .filter(isSupportedPinnedRailControl)
         }
         nonmutating set {
@@ -1302,8 +1303,7 @@ struct ContentView: View {
         case .transition:
             selectedTab = .transition
         case .reactive:
-            selectedTab = .music
-            musicPanelTab = .visualizations
+            activateMusicSection(.reactive)
         }
     }
 
@@ -1315,6 +1315,7 @@ struct ContentView: View {
     }
 
     private func activateMusicSection(_ section: MusicRailSection) {
+        let section = section.canonical
         topDockTab = .music
         musicRailSection = section
         selectedTab = .music
@@ -1405,16 +1406,10 @@ struct ContentView: View {
             return topDockTab == .visualizations && visualizationsRailSection == .atmosphere && selectedTab != .gestures && selectedTab != .settings
         case .visualizationsTransition:
             return topDockTab == .visualizations && visualizationsRailSection == .transition && selectedTab != .gestures && selectedTab != .settings
-        case .visualizationsReactive:
-            return topDockTab == .music && musicRailSection == .mappings && selectedTab != .gestures && selectedTab != .settings
+        case .visualizationsReactive, .musicReactive, .musicMappings, .musicPresets:
+            return topDockTab == .music && musicRailSection.canonical == .reactive && selectedTab != .gestures && selectedTab != .settings
         case .musicPlayback:
             return topDockTab == .music && musicRailSection == .playback && selectedTab != .gestures && selectedTab != .settings
-        case .musicReactive:
-            return topDockTab == .music && musicRailSection == .reactive && selectedTab != .gestures && selectedTab != .settings
-        case .musicMappings:
-            return topDockTab == .music && musicRailSection == .mappings && selectedTab != .gestures && selectedTab != .settings
-        case .musicPresets:
-            return topDockTab == .music && musicRailSection == .presets && selectedTab != .gestures && selectedTab != .settings
         case .musicSongs:
             return topDockTab == .music && musicRailSection == .songs && selectedTab != .gestures && selectedTab != .settings
         case .musicPlaylists:
@@ -1463,16 +1458,10 @@ struct ContentView: View {
                 activateVisualizationsSection(.atmosphere)
             case .visualizationsTransition:
                 activateVisualizationsSection(.transition)
-            case .visualizationsReactive:
-                activateMusicSection(.mappings)
+            case .visualizationsReactive, .musicReactive, .musicMappings, .musicPresets:
+                activateMusicSection(.reactive)
             case .musicPlayback:
                 activateMusicSection(.playback)
-            case .musicReactive:
-                activateMusicSection(.reactive)
-            case .musicMappings:
-                activateMusicSection(.mappings)
-            case .musicPresets:
-                activateMusicSection(.presets)
             case .musicSongs:
                 activateMusicSection(.songs)
             case .musicPlaylists:
@@ -1574,11 +1563,14 @@ struct ContentView: View {
             visualizationsRailSection = effectsSubTab == .dynamic ? .motion : .atmosphere
         case .music:
             topDockTab = .music
-            switch musicPanelTab {
+            let canonicalTab = musicPanelTab.canonical
+            if musicPanelTab != canonicalTab {
+                musicPanelTab = canonicalTab
+            }
+            switch canonicalTab {
             case .music:       musicRailSection = .playback
             case .reactive:    musicRailSection = .reactive
-            case .mappings, .visualizations: musicRailSection = .mappings
-            case .presets:     musicRailSection = .presets
+            case .mappings, .presets, .visualizations: musicRailSection = .reactive
             case .songs:       musicRailSection = .songs
             case .playlists:   musicRailSection = .playlists
             case .albums:      musicRailSection = .albums

@@ -524,8 +524,10 @@ private struct ThresholdMacRootView: View {
                 case .transition:
                     radialSelectedTab = .transition
                 case .reactive:
+                    radialTopDockTab = .music
+                    radialMusicSection = .reactive
                     radialSelectedTab = .music
-                    radialMusicPanelTab = .visualizations
+                    radialMusicPanelTab = .reactive
                 }
 
             case .performance(let section):
@@ -535,6 +537,7 @@ private struct ThresholdMacRootView: View {
                 radialFractalSubTab = .render
 
             case .music(let section):
+                let section = section.canonical
                 radialTopDockTab = .music
                 radialMusicSection = section
                 radialSelectedTab = .music
@@ -780,7 +783,7 @@ private struct ThresholdMacRootView: View {
                     id: "music.\(section.rawValue)",
                     title: section.title,
                     systemImage: section.icon,
-                    isSelected: radialTopDockTab == .music && radialMusicSection == section && radialSelectedTab == .music,
+                    isSelected: radialTopDockTab == .music && radialMusicSection.canonical == section && radialSelectedTab == .music,
                     clickAction: { activateMusicFromLauncher(section) }
                 )
             }
@@ -912,19 +915,23 @@ private struct ThresholdMacRootView: View {
         )
     }
 
-    /// Grading controls are long-tail specs (no routed descriptor); their
-    /// writes are the same mirror-field + push pairs the panel sliders use in
-    /// coloringGradingContent. Ranges come from ControlCatalog — never inline
-    /// literals (validateStartupRouting exists to kill that drift class).
+    /// Post-processing is grouped into one extra navigation level so related
+    /// controls stay together and no radial ring exceeds the readability cap.
+    /// Long-tail ranges come from ControlCatalog; the groups are also the first
+    /// step toward a declarative post-effect catalog rather than another flat
+    /// list of unrelated sliders.
     private func gradingSliderNodes() -> [MacRadialNavNode] {
         let cache = radialCache
         func node(
             _ spec: ControlSpec,
             title: String,
             read: @escaping () -> Float,
-            write: @escaping (Float) -> Void
+            write: @escaping (Float) -> Void,
+            isEnabled: @escaping () -> Bool = { true },
+            format: ((Float) -> String)? = nil
         ) -> MacRadialNavNode {
-            MacRadialNavNode(
+            let valueFormat = format ?? Self.sliderValueFormat(for: spec.range)
+            return MacRadialNavNode(
                 id: "slider.\(spec.id)",
                 title: title,
                 systemImage: spec.icon,
@@ -932,15 +939,22 @@ private struct ThresholdMacRootView: View {
                     range: spec.range,
                     read: read,
                     write: { write(spec.clamp($0)) },
-                    format: Self.sliderValueFormat(for: spec.range)
+                    isEnabled: isEnabled,
+                    format: valueFormat
                 )
             )
         }
 
-        return [
+        let colorGrade = [
+            node(ControlCatalog.saturation, title: "Saturation",
+                 read: { cache.color.colorSchemeSaturation },
+                 write: { cache.color.colorSchemeSaturation = $0; cache.commitColorSchemeSaturation() }),
             node(ControlCatalog.colorSchemeContrast, title: "Contrast",
                  read: { cache.color.colorSchemeContrast },
                  write: { cache.color.colorSchemeContrast = $0; cache.push(\.colorSchemeContrast, value: $0) }),
+            node(ControlCatalog.colorSchemeGamma, title: "Gamma",
+                 read: { cache.color.colorSchemeGamma },
+                 write: { cache.color.colorSchemeGamma = $0; cache.push(\.colorSchemeGamma, value: $0) }),
             node(ControlCatalog.colorSchemeVibrance, title: "Vibrance",
                  read: { cache.color.colorSchemeVibrance },
                  write: { cache.color.colorSchemeVibrance = $0; cache.push(\.colorSchemeVibrance, value: $0) }),
@@ -952,13 +966,100 @@ private struct ThresholdMacRootView: View {
                  write: { cache.color.colorSchemeShadows = $0; cache.push(\.colorSchemeShadows, value: $0) }),
             node(ControlCatalog.colorSchemeHighlights, title: "Highlights",
                  read: { cache.color.colorSchemeHighlights },
-                 write: { cache.color.colorSchemeHighlights = $0; cache.push(\.colorSchemeHighlights, value: $0) }),
+                 write: { cache.color.colorSchemeHighlights = $0; cache.push(\.colorSchemeHighlights, value: $0) })
+        ]
+
+        // Cell shading has a discrete useful range of 2...8, but radial sliders
+        // need an off position. Map 0 -> off and 1...7 -> 2...8 bands while the
+        // canonical stored band count remains governed by its ControlSpec.
+        let cellShading = MacRadialNavNode(
+            id: "slider.post.cellShading",
+            title: "Cell Shading",
+            systemImage: ControlCatalog.cellShadingLevels.icon,
+            slider: MacRadialSliderBinding(
+                range: 0...(ControlCatalog.cellShadingLevels.range.upperBound - 1),
+                read: {
+                    cache.color.cellShadingEnabled
+                        ? max(1, cache.color.cellShadingLevels - 1)
+                        : 0
+                },
+                write: { rawValue in
+                    if rawValue <= EdgeDetectionEffect.activationEpsilon {
+                        cache.color.cellShadingEnabled = false
+                    } else {
+                        cache.color.cellShadingEnabled = true
+                        cache.color.cellShadingLevels = ControlCatalog.cellShadingLevels.clamp((rawValue + 1).rounded())
+                    }
+                    cache.push(\.cellShadingEnabled, value: cache.color.cellShadingEnabled)
+                    cache.push(\.cellShadingLevels, value: cache.color.cellShadingLevels)
+                },
+                format: { $0 <= EdgeDetectionEffect.activationEpsilon ? "Off" : "\(Int(($0 + 1).rounded()))" }
+            )
+        )
+
+        let lightingFinish = [
+            node(ControlCatalog.lightingSoftness, title: "Lighting Softness",
+                 read: { cache.color.lightingSoftness },
+                 write: { cache.color.lightingSoftness = $0; cache.push(\.lightingSoftness, value: $0) }),
+            cellShading,
             node(ControlCatalog.aoStrength, title: "Ambient Occlusion",
                  read: { cache.color.aoStrength },
                  write: { cache.color.aoStrength = $0; cache.push(\.aoStrength, value: $0) }),
             node(ControlCatalog.tonemapStrength, title: "Filmic Tonemap",
                  read: { cache.color.tonemapStrength },
-                 write: { cache.color.tonemapStrength = $0; cache.push(\.tonemapStrength, value: $0) })
+                 write: { cache.color.tonemapStrength = $0; cache.push(\.tonemapStrength, value: $0) }),
+            node(ControlCatalog.vignetteStrength, title: "Vignette",
+                 read: { cache.color.vignetteStrength },
+                 write: { cache.color.vignetteStrength = $0; cache.push(\.vignetteStrength, value: $0) },
+                 format: { $0 <= EdgeDetectionEffect.activationEpsilon ? "Off" : String(format: "%.2f", $0) })
+        ]
+
+        let edgeIsActive = { cache.lighting.edgeDetectionEffect.isActive }
+        let edgeDetection = [
+            node(ControlCatalog.edgeStrength, title: "Strength",
+                 read: { cache.lighting.edgeDetectionEffect.strength },
+                 write: { value in
+                     cache.lighting.edgeDetectionEffect.setStrength(value)
+                     cache.commitEdgeDetectionEffect()
+                 },
+                 format: { $0 <= EdgeDetectionEffect.activationEpsilon ? "Off" : String(format: "%.2f", $0) }),
+            node(ControlCatalog.edgeThreshold, title: "Threshold",
+                 read: { cache.lighting.edgeDetectionEffect.threshold },
+                 write: { cache.lighting.edgeDetectionEffect.threshold = $0; cache.commitEdgeDetectionEffect() },
+                 isEnabled: edgeIsActive),
+            node(ControlCatalog.edgeSoftness, title: "Softness",
+                 read: { cache.lighting.edgeDetectionEffect.softness },
+                 write: { cache.lighting.edgeDetectionEffect.softness = $0; cache.commitEdgeDetectionEffect() },
+                 isEnabled: edgeIsActive),
+            node(ControlCatalog.edgeWindowRadius, title: "Window Size",
+                 read: { Float(cache.lighting.edgeDetectionEffect.windowRadius) },
+                 write: {
+                     cache.lighting.edgeDetectionEffect.windowRadius = Int($0.rounded())
+                     cache.commitEdgeDetectionEffect()
+                 },
+                 isEnabled: edgeIsActive,
+                 format: { String(Int($0.rounded())) })
+        ]
+
+        return [
+            MacRadialNavNode(
+                id: "post.colorGrade",
+                title: "Color Grade",
+                systemImage: "paintpalette.fill",
+                children: colorGrade
+            ),
+            MacRadialNavNode(
+                id: "post.lightingFinish",
+                title: "Lighting Finish",
+                systemImage: "camera.filters",
+                children: lightingFinish
+            ),
+            MacRadialNavNode(
+                id: "post.edgeDetection",
+                title: "Edge Detection",
+                systemImage: "circle.lefthalf.filled",
+                children: edgeDetection
+            )
         ]
     }
 
@@ -974,10 +1075,11 @@ private struct ThresholdMacRootView: View {
     /// finer than the arc drag, for dialing in exact values.
     private func applyRadialSliderScroll(_ upwardDelta: CGFloat) {
         guard let hovered = hoveredRadialSlider,
-              let slider = radialNavRoots.node(withID: hovered.id)?.slider else { return }
+              let slider = radialNavRoots.node(withID: hovered.id)?.slider,
+              slider.isEnabled() else { return }
         let span = slider.range.upperBound - slider.range.lowerBound
         let value = (slider.read() + Float(upwardDelta / 240) * span).clamped(to: slider.range)
-        slider.write(value)
+        slider.writeIfEnabled(value)
     }
 
     private func activateExploreFromLauncher(_ section: ExploreRailSection) {
@@ -1037,13 +1139,16 @@ private struct ThresholdMacRootView: View {
         case .transition:
             radialSelectedTab = .transition
         case .reactive:
-            radialMusicPanelTab = .visualizations
+            radialTopDockTab = .music
+            radialMusicSection = .reactive
+            radialMusicPanelTab = .reactive
             radialSelectedTab = .music
         }
         showControlsAfterLauncherSelection()
     }
 
     private func activateMusicFromLauncher(_ section: MusicRailSection) {
+        let section = section.canonical
         radialTopDockTab = .music
         radialMusicSection = section
         radialMusicPanelTab = section.musicPanelTab

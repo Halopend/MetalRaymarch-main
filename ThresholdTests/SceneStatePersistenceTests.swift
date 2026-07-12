@@ -130,6 +130,7 @@ struct SceneStatePersistenceTests {
             destination.lightingPlay = true
             destination.shadowsEnabled = false
             destination.zoomFogCompensationEnabled = true
+            destination.vignetteStrength = 0
         }
 
         legacy.apply(to: destination)
@@ -141,6 +142,7 @@ struct SceneStatePersistenceTests {
         #expect(destination.lightingPlay == false)
         #expect(destination.shadowsEnabled)
         #expect(destination.zoomFogCompensationEnabled == false)
+        #expect(abs(destination.vignetteStrength - 1.0) < 1e-5)
     }
 
     @Test("domain configs tolerate older empty payloads")
@@ -153,6 +155,7 @@ struct SceneStatePersistenceTests {
         #expect(abs(geometry.fractalScale - 2.8) < 1e-5)
         #expect(color.colorScheme == .classic)
         #expect(abs(color.lightingSoftness - 0.35) < 1e-5)
+        #expect(abs(color.vignetteStrength - 1.0) < 1e-5)
     }
 
     @Test("canonical audio mappings determine music-preset classification")

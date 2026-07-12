@@ -2832,10 +2832,15 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, Preco
         rgb = fma(sign(delta), 0.5h * powr(abs(delta) * 2.0h, half3(exponent)), half3(0.5h));
     }
     
-    // Simplified vignette
-    half2 q = xy * (1.0h - xy);
-    half vignetteBase = max(16.0h * q.x * q.y, kPowEpsilonHalf);
-    rgb *= 0.5h + 0.5h * powr(vignetteBase, 0.2h);
+    // Simplified vignette. Strength 1 matches the historical fixed
+    // response; 0 is identity, so the effect follows the same zero-is-off
+    // convention as the rest of the post-process controls.
+    if (scheme.vignetteStrength > 0.001f) {
+        half2 q = xy * (1.0h - xy);
+        half vignetteBase = max(16.0h * q.x * q.y, kPowEpsilonHalf);
+        half vignette = 0.5h + 0.5h * powr(vignetteBase, 0.2h);
+        rgb *= mix(1.0h, vignette, half(scheme.vignetteStrength));
+    }
     
     // Limit flash effect - edge glow when parameter hits min/max. The limit
     // flash is deliberately subtle (scaled well below the beat flash): a faint

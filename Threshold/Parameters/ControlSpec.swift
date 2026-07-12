@@ -244,7 +244,9 @@ enum ControlCatalog {
 
     static let colorSchemeContrast = ControlSpec(
         id: "color.contrast", name: "Contrast", icon: "circle.righthalf.filled",
-        range: 0.95...1.15, defaultValue: 1.08)
+        // Built-in gradient presets already author values up to 1.4. The old
+        // 0.95...1.15 slider could not reproduce those shipped looks by hand.
+        range: 0.75...1.5, defaultValue: 1.08)
 
     static let colorSchemeVibrance = ControlSpec(
         id: "color.vibrance", name: "Vibrance", icon: "drop.fill",
@@ -268,7 +270,9 @@ enum ControlCatalog {
 
     static let colorSchemeGamma = ControlSpec(
         id: "color.gamma", name: "Gamma", icon: "circle.lefthalf.filled",
-        range: 0.2...1.0, defaultValue: 0.85)
+        // Values below 1 brighten; values above 1 darken. The previous upper
+        // bound of 1 exposed only half of the useful grading response.
+        range: 0.2...2.0, defaultValue: 0.85)
 
     static let lightingSoftness = ControlSpec(
         id: "color.lightingSoftness", name: "Lighting Softness", icon: "sun.max",
@@ -285,6 +289,31 @@ enum ControlCatalog {
     static let tonemapStrength = ControlSpec(
         id: "color.tonemapStrength", name: "Filmic Tonemap", icon: "camera.aperture",
         range: 0.0...1.0, defaultValue: 0.0)
+
+    /// Strength of the existing output vignette. 1 preserves the historical
+    /// always-on look; 0 is a true identity/off value.
+    static let vignetteStrength = ControlSpec(
+        id: "post.vignette.strength", name: "Vignette", icon: "viewfinder",
+        range: 0.0...1.5, defaultValue: 1.0)
+
+    // Edge detection is output-space and deliberately remains long-tail: it is
+    // scene-authored but not music/gesture routed. Keeping every bound here lets
+    // the full panel, radial menu, decode normalization, and GPU bridge agree.
+    static let edgeStrength = ControlSpec(
+        id: "post.edge.strength", name: "Edge Strength", icon: "circle.lefthalf.filled",
+        range: 0.0...1.0, defaultValue: 0.0)
+
+    static let edgeThreshold = ControlSpec(
+        id: "post.edge.threshold", name: "Edge Threshold", icon: "line.3.horizontal.decrease",
+        range: 0.0...0.25, defaultValue: 0.12)
+
+    static let edgeSoftness = ControlSpec(
+        id: "post.edge.softness", name: "Edge Softness", icon: "line.3.horizontal",
+        range: 0.001...0.15, defaultValue: 0.08)
+
+    static let edgeWindowRadius = ControlSpec(
+        id: "post.edge.windowRadius", name: "Edge Window Size", icon: "square.grid.3x3",
+        range: 1.0...3.0, defaultValue: 1.0)
 
     static let colorSchemeAutoInterval = ControlSpec(
         id: "color.autoInterval", name: "Auto Transition Interval", icon: "timer",
@@ -316,7 +345,8 @@ enum ControlCatalog {
         colorSchemeShadows, colorSchemeHighlights,
         colorSchemeGamma, lightingSoftness, cellShadingLevels,
         colorSchemeAutoInterval, colorSchemeTransitionDuration,
-        aoStrength, tonemapStrength
+        aoStrength, tonemapStrength, vignetteStrength,
+        edgeStrength, edgeThreshold, edgeSoftness, edgeWindowRadius
     ]
 
     /// Routed + long-tail. Every spec the catalog declares.

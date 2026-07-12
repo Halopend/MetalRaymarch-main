@@ -1536,6 +1536,13 @@ struct FractalPreset: Codable, Identifiable {
         settings.cellShadingLevels = cellShadingLevels ?? 4.0
         settings.aoStrength = aoStrength ?? 0.0
         settings.tonemapStrength = tonemapStrength ?? 0.0
+        // Vignette is canonical-domain-only. Legacy scenes predate the control
+        // but were rendered with the historical fixed vignette, so restore its
+        // historical-look default instead of leaking the previous scene's
+        // authored value. A present SceneState already applied the saved value.
+        if sceneState == nil {
+            settings.vignetteStrength = ControlCatalog.vignetteStrength.defaultValue
+        }
         if let arc = audioReactiveConfig {
             // Full config present (files saved by current builds): restore everything.
             settings.audioReactiveConfig = arc

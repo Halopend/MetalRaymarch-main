@@ -37,6 +37,7 @@ struct FractalPresetPersistenceTests {
         // Color
         settings.cellShadingEnabled = true       // default false
         settings.cellShadingLevels = 6.0         // default 4.0
+        settings.vignetteStrength = 0.42          // default 1.0
 
         // Lighting
         settings.lightVariationRate = 0.25       // default 0.5
@@ -66,6 +67,7 @@ struct FractalPresetPersistenceTests {
         let preset = FractalPreset.fromSettings(settings, name: "Dropped")
         #expect(preset.platformEnabled == false)
         #expect(preset.cellShadingEnabled == true)
+        #expect(abs((preset.sceneState?.color.vignetteStrength ?? -1) - 0.42) < 1e-5)
         #expect(preset.edgeDetectionEffect?.enabled == true)
         #expect(preset.safetyBubbleFadeEnabled == false)
 
@@ -76,6 +78,7 @@ struct FractalPresetPersistenceTests {
         #expect(abs((decoded.platformRadius ?? -1) - 1.2) < 1e-5)
         #expect(decoded.cellShadingEnabled == true)
         #expect(abs((decoded.cellShadingLevels ?? -1) - 6.0) < 1e-5)
+        #expect(abs((decoded.sceneState?.color.vignetteStrength ?? -1) - 0.42) < 1e-5)
         #expect(abs((decoded.lightVariationRate ?? -1) - 0.25) < 1e-5)
         #expect(decoded.beatFlashEffect?.enabled == true)
         #expect(abs((decoded.beatFlashEffect?.intensity ?? -1) - 0.7) < 1e-5)
@@ -100,6 +103,7 @@ struct FractalPresetPersistenceTests {
         #expect(abs(fresh.platformRadius - 1.2) < 1e-5)
         #expect(fresh.cellShadingEnabled == true)
         #expect(abs(fresh.cellShadingLevels - 6.0) < 1e-5)
+        #expect(abs(fresh.vignetteStrength - 0.42) < 1e-5)
         #expect(abs(fresh.lightVariationRate - 0.25) < 1e-5)
         #expect(fresh.beatFlashEffect.enabled == true)
         #expect(abs(fresh.beatFlashEffect.intensity - 0.7) < 1e-5)
@@ -114,6 +118,39 @@ struct FractalPresetPersistenceTests {
         #expect(fresh.edgeDetectionEffect.windowRadius == 3)
         #expect(fresh.safetyBubbleFadeEnabled == false)
         #expect(abs(fresh.safetyBubbleFadeWidth - 0.4) < 1e-5)
+    }
+
+    @Test("Edge strength is authoritative, clamps dependent values, and zero bypasses GPU work")
+    func edgeStrengthZeroIsOff() {
+        let settings = RenderSettings()
+
+        var edge = EdgeDetectionEffect.outline
+        edge.strength = -3
+        edge.threshold = 9
+        edge.softness = -2
+        edge.windowRadius = 99
+        settings.edgeDetectionEffect = edge
+
+        let normalizedOff = settings.edgeDetectionEffect
+        #expect(normalizedOff.enabled == false)
+        #expect(normalizedOff.strength == 0)
+        #expect(normalizedOff.threshold == ControlCatalog.edgeThreshold.range.upperBound)
+        #expect(normalizedOff.softness == ControlCatalog.edgeSoftness.range.lowerBound)
+        #expect(normalizedOff.windowRadius == Int(ControlCatalog.edgeWindowRadius.range.upperBound))
+        #expect(settings.snapshot().colorSchemeParams.edgeDetectionEnabled == 0)
+
+        edge = normalizedOff
+        edge.setStrength(0.6)
+        settings.edgeDetectionEffect = edge
+        #expect(settings.edgeDetectionEffect.isActive)
+        #expect(abs(settings.edgeDetectionEffect.strength - 0.6) < 1e-5)
+        #expect(settings.snapshot().colorSchemeParams.edgeDetectionEnabled == 1)
+
+        edge = settings.edgeDetectionEffect
+        edge.setStrength(0)
+        settings.edgeDetectionEffect = edge
+        #expect(settings.edgeDetectionEffect.enabled == false)
+        #expect(settings.snapshot().colorSchemeParams.edgeDetectionEnabled == 0)
     }
 
     @Test("Bound to Space (removed 'Irregular Shape Bound') always loads OFF, even if a scene saved it on")

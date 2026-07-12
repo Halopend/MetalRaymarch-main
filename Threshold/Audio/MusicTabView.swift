@@ -15,12 +15,22 @@ import SwiftUI
 enum MusicPanelTab: String, CaseIterable {
     case music = "Music"
     case reactive = "Reactive"
+    // Legacy split-page values retained for AppStorage decoding.
     case mappings = "Mappings"
     case presets = "Presets"
     case songs = "Songs"
     case playlists = "Playlists"
     case albums = "Albums"
     case visualizations = "Visualizations"
+
+    var canonical: MusicPanelTab {
+        switch self {
+        case .mappings, .presets, .visualizations:
+            return .reactive
+        case .music, .reactive, .songs, .playlists, .albums:
+            return self
+        }
+    }
 }
 
 struct MusicTabContent: View {
@@ -51,15 +61,16 @@ struct MusicTabContent: View {
     }
 
     private func normalizedMusicPanelTab(_ tab: MusicPanelTab) -> MusicPanelTab {
+        let canonical = tab.canonical
         #if os(macOS)
-        switch tab {
+        switch canonical {
         case .songs, .playlists, .albums:
             return .music
         case .music, .reactive, .mappings, .presets, .visualizations:
-            return tab
+            return canonical
         }
         #else
-        return tab
+        return canonical
         #endif
     }
 
@@ -132,31 +143,8 @@ struct MusicTabContent: View {
                 case .albums:
                     libraryAlbumsSection
 
-                case .visualizations:
-                    VStack(spacing: 10) {
-                        visualizationHeaderSection
-
-                        ScrollView(.vertical, showsIndicators: true) {
-                            VStack(spacing: 10) {
-                                reactivitySection
-                                presetsSection
-                                levelMeters
-                            }
-                            .padding(.bottom, 10)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-
-                case .reactive:
+                case .reactive, .mappings, .presets, .visualizations:
                     inputReactivePage
-
-                case .mappings:
-                    inputMappingsPage
-
-                case .presets:
-                    inputPresetsPage
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -182,37 +170,26 @@ struct MusicTabContent: View {
     }
 
     private var inputReactivePage: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            VStack(spacing: 10) {
-                visualizationHeaderSection
-                levelMeters
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-        }
-    }
-
-    private var inputMappingsPage: some View {
         VStack(spacing: 10) {
             visualizationHeaderSection
+
             ScrollView(.vertical, showsIndicators: true) {
-                reactivitySection
-                    .padding(.bottom, 10)
+                VStack(spacing: 10) {
+                    reactivitySection
+                    presetsSection
+                    #if !os(macOS)
+                    // Source owns the live signal monitor on Mac. Other
+                    // platforms do not expose that capture dashboard, so keep
+                    // the meters here for them.
+                    levelMeters
+                    #endif
+                }
+                .padding(.bottom, 10)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-    }
-
-    private var inputPresetsPage: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            VStack(spacing: 10) {
-                visualizationHeaderSection
-                presetsSection
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private func updateVisualizationAddPopoverAdjustment(isPresented: Bool) {
@@ -271,27 +248,10 @@ struct MusicTabContent: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(microphone?.isActive != true && !microphoneCanStart)
 
-                Button("Reactive Controls") {
-                    effectiveTabSelection.wrappedValue = .visualizations
+                Button("Reactivity") {
+                    effectiveTabSelection.wrappedValue = .reactive
                 }
                 .buttonStyle(.bordered)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Quick Presets")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 8) {
-                    ForEach([ReactivityPreset.electronic, .ambient, .hiphop], id: \.self) { preset in
-                        Button(preset.rawValue) {
-                            toggleAudioSource(.microphone, preset: preset)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(microphone?.isActive != true && !microphoneCanStart)
-                    }
-                }
             }
 
             if let microphone, case .failed(let message) = microphone.availability {
@@ -382,9 +342,9 @@ struct MusicTabContent: View {
 
     private var visualizationHeaderSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Audio Reactive")
+            Text("Audio Reactivity")
                 .font(.subheadline.bold())
-            Text("Toggle and map audio-driven modulation")
+            Text("Enable response, tune the mix, and map audio to scene controls")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
@@ -716,7 +676,7 @@ struct MusicTabContent: View {
                             musicQuickActionButton(title: "Songs", systemImage: AppIcons.musicNote, tab: .songs)
                             musicQuickActionButton(title: "Playlists", systemImage: AppIcons.musicNoteList, tab: .playlists)
                             musicQuickActionButton(title: "Albums", systemImage: AppIcons.squareStack, tab: .albums)
-                            musicQuickActionButton(title: "Reactive", systemImage: AppIcons.waveformPathEcg, tab: .visualizations)
+                            musicQuickActionButton(title: "Reactivity", systemImage: AppIcons.waveformPathEcg, tab: .reactive)
                         }
                     }
                     #endif
@@ -1305,7 +1265,7 @@ struct MusicTabContent: View {
                         Spacer()
 
                         Menu {
-                            Section("Preset Shortcuts") {
+                            Section("Built-In Presets") {
                                 ForEach(ReactivityPreset.allCases, id: \.self) { preset in
                                     Button {
                                         applyPreset(preset)
@@ -1328,7 +1288,7 @@ struct MusicTabContent: View {
                                 }
                             }
                         } label: {
-                            Label("Shortcuts", systemImage: AppIcons.sparkles)
+                            Label("Presets", systemImage: AppIcons.sparkles)
                                 .font(.caption)
                         }
                         .buttonStyle(.bordered)

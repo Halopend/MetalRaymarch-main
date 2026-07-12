@@ -371,6 +371,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _cellShadingLevels: Float = 4.0
     private var _aoStrength: Float = 0.0                     // Ambient-occlusion blend (0 = old flat ambient, default)
     private var _tonemapStrength: Float = 0.0                // Filmic (ACES) tonemap blend (0 = old plain clamp, default)
+    private var _vignetteStrength: Float = 1.0               // 1 = historical vignette, 0 = off
     
     // === MODULAR LIGHTING EFFECTS ===
     // Card-based lighting system with presets and individual effect toggles
@@ -2224,6 +2225,16 @@ final class RenderSettings: @unchecked Sendable {
             persistColor()
         }
     }
+
+    /// Output vignette blend. Zero is an identity/off value; one preserves the
+    /// original fixed vignette response used before this became configurable.
+    var vignetteStrength: Float {
+        get { withLock { _vignetteStrength } }
+        set {
+            withLock { _vignetteStrength = ControlCatalog.vignetteStrength.clamp(newValue) }
+            persistColor()
+        }
+    }
     
     /// Midtone curve adjustment (-1 to 1)
     var colorSchemeCurve: Float {
@@ -2434,8 +2445,10 @@ final class RenderSettings: @unchecked Sendable {
     var edgeDetectionEffect: EdgeDetectionEffect {
         get { withLock { _edgeDetectionEffect } }
         set {
+            var normalized = newValue
+            normalized.normalize()
             withLock {
-                _edgeDetectionEffect = newValue
+                _edgeDetectionEffect = normalized
                 _lightingPreset = .custom
             }
             persistLighting()
@@ -2798,6 +2811,7 @@ final class RenderSettings: @unchecked Sendable {
             cellShadingLevels: _cellShadingLevels,
             aoStrength: _aoStrength,
             tonemapStrength: _tonemapStrength,
+            vignetteStrength: _vignetteStrength,
             neonIntensity: neonIntensity,
             hueFrequency: hueFreq,
             hueOffset: hueOffset,
@@ -2825,7 +2839,7 @@ final class RenderSettings: @unchecked Sendable {
             glowIntensity: _glowEffect.intensity,
             bloomEnabled: _bloomEffect.enabled ? 1 : 0,
             bloomStrength: _bloomEffect.strength,
-            edgeDetectionEnabled: _edgeDetectionEffect.enabled ? 1 : 0,
+            edgeDetectionEnabled: _edgeDetectionEffect.isActive ? 1 : 0,
             edgeDetectionStrength: _edgeDetectionEffect.strength,
             edgeDetectionThreshold: _edgeDetectionEffect.threshold,
             edgeDetectionSoftness: _edgeDetectionEffect.softness,
@@ -4377,6 +4391,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.cellShadingLevels = _cellShadingLevels
                 c.aoStrength = _aoStrength
                 c.tonemapStrength = _tonemapStrength
+                c.vignetteStrength = _vignetteStrength
                 c.colorSchemeAutoTransition = _colorSchemeAutoTransition
                 c.colorSchemeAutoInterval = _colorSchemeAutoInterval
                 c.colorSchemeTransitionDuration = _colorSchemeTransitionDuration
@@ -4408,6 +4423,7 @@ final class RenderSettings: @unchecked Sendable {
                 _cellShadingLevels = ControlCatalog.cellShadingLevels.clamp(newValue.cellShadingLevels)
                 _aoStrength = ControlCatalog.aoStrength.clamp(newValue.aoStrength)
                 _tonemapStrength = ControlCatalog.tonemapStrength.clamp(newValue.tonemapStrength)
+                _vignetteStrength = ControlCatalog.vignetteStrength.clamp(newValue.vignetteStrength)
                 _colorSchemeAutoTransition = newValue.colorSchemeAutoTransition
                 _colorSchemeAutoInterval = newValue.colorSchemeAutoInterval
                 _colorSchemeTransitionDuration = newValue.colorSchemeTransitionDuration
@@ -4436,6 +4452,8 @@ final class RenderSettings: @unchecked Sendable {
             }
         }
         set {
+            var normalizedEdge = newValue.edgeDetectionEffect
+            normalizedEdge.normalize()
             withLock {
                 _lightingPreset = newValue.lightingPreset
                 _lightVariationRate = newValue.lightVariationRate
@@ -4443,7 +4461,7 @@ final class RenderSettings: @unchecked Sendable {
                 _pulseEffect = newValue.pulseEffect
                 _glowEffect = newValue.glowEffect
                 _bloomEffect = newValue.bloomEffect
-                _edgeDetectionEffect = newValue.edgeDetectionEffect
+                _edgeDetectionEffect = normalizedEdge
                 _fogEffect = newValue.fogEffect
                 _gradientCycleEffect = newValue.gradientCycleEffect
                 _linearRailEffect = newValue.linearRailEffect

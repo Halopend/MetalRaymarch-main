@@ -61,6 +61,9 @@ struct MacRadialSliderBinding {
     let range: ClosedRange<Float>
     let read: () -> Float
     let write: (Float) -> Void
+    /// Live availability check. A closure keeps dependent controls in sync with
+    /// the setting that owns their availability without rebuilding the tree.
+    let isEnabled: () -> Bool
     /// Compact value label shown inside the pill (e.g. "1.4", "12").
     let format: (Float) -> String
 
@@ -68,12 +71,22 @@ struct MacRadialSliderBinding {
         range: ClosedRange<Float>,
         read: @escaping () -> Float,
         write: @escaping (Float) -> Void,
+        isEnabled: @escaping () -> Bool = { true },
         format: @escaping (Float) -> String = { String(format: "%.2f", $0) }
     ) {
         self.range = range
         self.read = read
         self.write = write
+        self.isEnabled = isEnabled
         self.format = format
+    }
+
+    /// Performs a user-originated write only while the control is available.
+    /// Callers still own range clamping/quantization, just as they do for
+    /// `write`; this method only centralizes the dynamic availability guard.
+    func writeIfEnabled(_ value: Float) {
+        guard isEnabled() else { return }
+        write(value)
     }
 
     /// Normalized 0…1 position of the current value inside `range`.

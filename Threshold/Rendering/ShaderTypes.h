@@ -140,6 +140,7 @@ typedef struct
     float cellShadingLevels;          // Number of lighting bands (2-8)
     float aoStrength;                 // Ambient-occlusion blend (0 = old flat hemisphere ambient, default; 1 = full SDF AO march)
     float tonemapStrength;            // Filmic (ACES) tonemap blend (0 = old plain clamp, default; 1 = full filmic curve)
+    float vignetteStrength;           // Output vignette blend (0 = off; 1 = historical look)
     
     // Neon mode parameters (HSV-based orbit trap coloring)
     float neonIntensity;              // 0 = off, 1 = full neon mode

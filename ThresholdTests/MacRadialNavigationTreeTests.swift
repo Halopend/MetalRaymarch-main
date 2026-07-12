@@ -4,6 +4,11 @@ import Testing
 
 @Suite("Mac radial navigation tree")
 struct MacRadialNavigationTreeTests {
+    private final class SliderState {
+        var isEnabled = false
+        var value: Float = 2
+    }
+
     private func makeTree(clicked: @escaping (String) -> Void = { _ in }) -> [MacRadialNavNode] {
         [
             MacRadialNavNode(
@@ -138,6 +143,50 @@ struct MacRadialNavigationTreeTests {
         #expect(binding.value(startingAt: 5, horizontalTranslation: 90, fullRangeTravel: 180) == 10)
         #expect(binding.value(startingAt: 5, horizontalTranslation: -90, fullRangeTravel: 180) == 0)
         #expect(binding.value(startingAt: 5, horizontalTranslation: 18, fullRangeTravel: 180) == 6)
+    }
+
+    @Test("Slider binding is enabled by default and evaluates availability live")
+    func sliderEnabledState() {
+        let state = SliderState()
+        let defaultBinding = MacRadialSliderBinding(
+            range: 0...10,
+            read: { 5 },
+            write: { _ in }
+        )
+        let dynamicBinding = MacRadialSliderBinding(
+            range: 0...10,
+            read: { state.value },
+            write: { state.value = $0 },
+            isEnabled: { state.isEnabled }
+        )
+
+        #expect(defaultBinding.isEnabled())
+        #expect(!dynamicBinding.isEnabled())
+
+        state.isEnabled = true
+        #expect(dynamicBinding.isEnabled())
+    }
+
+    @Test("Guarded slider writes are ignored while disabled")
+    func disabledSliderWriteGuard() {
+        let state = SliderState()
+        let binding = MacRadialSliderBinding(
+            range: 0...10,
+            read: { state.value },
+            write: { state.value = $0 },
+            isEnabled: { state.isEnabled }
+        )
+
+        binding.writeIfEnabled(8)
+        #expect(state.value == 2)
+
+        state.isEnabled = true
+        binding.writeIfEnabled(8)
+        #expect(state.value == 8)
+
+        state.isEnabled = false
+        binding.writeIfEnabled(4)
+        #expect(state.value == 8)
     }
 }
 #endif

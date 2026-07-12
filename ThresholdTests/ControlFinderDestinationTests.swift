@@ -6,7 +6,7 @@ struct ControlFinderDestinationTests {
     @Test("Catalog IDs are unique and every destination is routable")
     func uniqueRoutableDestinations() {
         let catalog = ControlFinderDestination.catalog
-        #expect(catalog.count == 33)
+        #expect(catalog.count == 31)
         #expect(Set(catalog.map(\.id)).count == catalog.count)
         #expect(catalog.allSatisfy { !$0.title.isEmpty && !$0.path.isEmpty && !$0.description.isEmpty })
         #expect(catalog.allSatisfy { $0.route != nil })
@@ -41,7 +41,7 @@ struct ControlFinderDestinationTests {
         #expect(shape == Set(ShapeRailSection.allCases.filter { $0 != .performance }.map(\.rawValue)))
         #expect(visualizations == Set(VisualizationsRailSection.visibleCases.map(\.rawValue)))
         #expect(performance == Set(PerformanceRailSection.allCases.map(\.rawValue)))
-        #expect(music == Set(MusicRailSection.allCases.map(\.rawValue)))
+        #expect(music == Set(MusicRailSection.visibleCases.map(\.rawValue)))
         #expect(settings == Set(SettingsSubTab.visibleCases.map(\.rawValue)))
         #expect(sidebar.contains(SidebarTab.gestures.rawValue))
         #expect(sidebar.contains(SidebarTab.quickToggles.rawValue))
@@ -54,9 +54,9 @@ struct ControlFinderDestinationTests {
         let iPad = ControlFinderDestination.results(matching: "", on: .iOS)
         let vision = ControlFinderDestination.results(matching: "", on: .visionOS)
 
-        #expect(mac.count == 28)
-        #expect(iPad.count == 31)
-        #expect(vision.count == 33)
+        #expect(mac.count == 26)
+        #expect(iPad.count == 29)
+        #expect(vision.count == 31)
 
         #expect(!mac.contains { $0.id == "music.Songs" })
         #expect(iPad.contains { $0.id == "music.Songs" })
@@ -81,5 +81,11 @@ struct ControlFinderDestinationTests {
 
         let custom = ControlFinderDestination.results(matching: "threshfx", on: .macOS)
         #expect(custom.first?.id == "explore.Custom Scenes")
+
+        let mapping = ControlFinderDestination.results(matching: "audio mapping smoothing", on: .macOS)
+        #expect(mapping.first?.id == "music.Reactive")
+
+        let preset = ControlFinderDestination.results(matching: "reactivity preset", on: .macOS)
+        #expect(preset.first?.id == "music.Reactive")
     }
 }

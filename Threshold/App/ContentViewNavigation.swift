@@ -181,6 +181,8 @@ enum VisualizationsRailSection: String, CaseIterable {
 enum MusicRailSection: String, CaseIterable {
     case playback = "Playback"
     case reactive = "Reactive"
+    // Legacy persisted routes. Mappings and presets now live on the combined
+    // Reactivity page, but the raw values must remain decodable from AppStorage.
     case mappings = "Mappings"
     case presets = "Presets"
     case songs = "Songs"
@@ -191,7 +193,9 @@ enum MusicRailSection: String, CaseIterable {
         switch self {
         case .playback:
             return "Source"
-        case .reactive, .mappings, .presets, .songs, .playlists, .albums:
+        case .reactive:
+            return "Reactivity"
+        case .mappings, .presets, .songs, .playlists, .albums:
             return rawValue
         }
     }
@@ -209,20 +213,35 @@ enum MusicRailSection: String, CaseIterable {
         }
     }
 
+    /// User-facing Input destinations. The legacy mapping/preset cases remain
+    /// in `allCases` solely so older saved navigation state can be decoded.
+    static var visibleCases: [MusicRailSection] {
+        [.playback, .reactive, .songs, .playlists, .albums]
+    }
+
     static var availableCases: [MusicRailSection] {
         #if os(macOS)
-        return [.playback, .reactive, .mappings, .presets]
+        return [.playback, .reactive]
         #else
-        return [.playback, .reactive, .mappings, .presets, .songs, .playlists, .albums]
+        return visibleCases
         #endif
+    }
+
+    /// Resolves old split-page routes to their single current destination.
+    var canonical: MusicRailSection {
+        switch self {
+        case .mappings, .presets:
+            return .reactive
+        case .playback, .reactive, .songs, .playlists, .albums:
+            return self
+        }
     }
 
     var musicPanelTab: MusicPanelTab {
         switch self {
         case .playback:  return .music
         case .reactive:  return .reactive
-        case .mappings:  return .mappings
-        case .presets:   return .presets
+        case .mappings, .presets: return .reactive
         case .songs:     return .songs
         case .playlists: return .playlists
         case .albums:    return .albums
@@ -257,6 +276,26 @@ enum PinnedRailControl: String, CaseIterable {
     case musicSongs
     case musicPlaylists
     case musicAlbums
+
+    /// Old Look/Mappings/Presets pins all point at the combined Input page.
+    /// Keeping the cases decodes existing storage; canonicalization prevents
+    /// three Quick Access buttons from representing the same destination.
+    var canonical: PinnedRailControl {
+        switch self {
+        case .visualizationsReactive, .musicMappings, .musicPresets:
+            return .musicReactive
+        default:
+            return self
+        }
+    }
+
+    static func canonicalized(_ controls: [PinnedRailControl]) -> [PinnedRailControl] {
+        var seen = Set<PinnedRailControl>()
+        return controls.compactMap { control in
+            let canonical = control.canonical
+            return seen.insert(canonical).inserted ? canonical : nil
+        }
+    }
 
     var title: String {
         switch self {
