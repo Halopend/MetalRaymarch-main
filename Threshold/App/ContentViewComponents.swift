@@ -477,6 +477,7 @@ struct ExternalFileImportSheet: View {
 /// only invalidate this small capsule, not the entire ContentView tree.
 struct FPSIndicatorView: View {
     @Environment(AppModel.self) private var appModel
+    @AppStorage("ContentView.showFPSInHUD") private var showFPS = true
 
     private var fps: Double { appModel.renderMetrics.fps }
     private var gpuMs: Double { appModel.renderMetrics.gpuFrameMs }
@@ -506,11 +507,20 @@ struct FPSIndicatorView: View {
             Image(systemName: appModel.isUsingSpecializedPipeline ? AppIcons.boltFill : AppIcons.boltSlash)
                 .font(.caption2)
                 .foregroundStyle(appModel.isUsingSpecializedPipeline ? .green : .orange)
-            HStack(spacing: 5) {
-                Circle().fill(fpsColor).frame(width: 8, height: 8)
-                Text("\(fps, specifier: "%.0f") FPS")
-                    .font(.caption.bold()).monospacedDigit()
+            if showFPS {
+                HStack(spacing: 5) {
+                    Circle().fill(fpsColor).frame(width: 8, height: 8)
+                    Text("\(fps, specifier: "%.0f") FPS")
+                        .font(.caption.bold()).monospacedDigit()
+                }
             }
+            Label(appModel.renderMetrics.upscalerPath,
+                  systemImage: appModel.renderMetrics.upscalerPath == "Native"
+                      ? "rectangle"
+                      : "arrow.up.left.and.arrow.down.right")
+                .font(.caption.bold())
+                .foregroundStyle(appModel.renderMetrics.upscalerPath == "Temporal" ? .mint : .secondary)
+                .help("Active presentation path: Temporal uses frame history, Spatial scales the current frame, and Native bypasses MetalFX.")
             // GPU ms is the signal that actually moves when you tune the
             // acceleration settings — FPS is quantized by the display refresh.
             if gpuMs > 0 {
@@ -566,6 +576,10 @@ struct RenderDiagnosticsView: View {
                 GridRow {
                     Text("Path").foregroundStyle(.secondary)
                     Text(metrics.renderPath)
+                }
+                GridRow {
+                    Text("Upscaler").foregroundStyle(.secondary)
+                    Text(metrics.upscalerPath)
                 }
                 GridRow {
                     Text("Foveation").foregroundStyle(.secondary)

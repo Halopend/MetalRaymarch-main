@@ -404,7 +404,7 @@ extension ContentView {
     /// HUD toggles, and resolution. Extracted from the old "General" tab
     /// so the user has one place to find visual / display-related knobs.
     private var settingsDisplayContent: some View {
-        VStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
             // Platform — only relevant on visionOS. On iOS/macOS the
             // immersive floor field is never rendered, so the section is
             // hidden entirely.
@@ -433,6 +433,7 @@ extension ContentView {
 
 #if os(macOS)
             macLauncherSection
+            macPerformanceDisplaySection
 #endif
 
             // Experimental display features (kept here, not in Advanced,
@@ -440,9 +441,32 @@ extension ContentView {
             // scene is running).
             experimentalDisplaySection
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
 #if os(macOS)
+    private var macPerformanceDisplaySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Performance Display", systemImage: AppIcons.chartBarFill)
+                .font(.headline)
+
+            Toggle("Show FPS in viewport", isOn: $showFPSInHUD)
+            Text("The viewport indicator still identifies the active Native, Spatial, or Temporal path when FPS is hidden.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            Toggle("Show metrics in bottom menu", isOn: $showPerformanceInMenu)
+            Text("Adds compact FPS, GPU frame time, and render quality to the bottom menu bar.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+    }
+
     private var macLauncherSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Viewport Control Launcher", systemImage: "circle.grid.cross")
@@ -452,6 +476,7 @@ extension ContentView {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
@@ -496,6 +521,7 @@ extension ContentView {
                     showToggle: false)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.07)))
     }
@@ -518,6 +544,7 @@ extension ContentView {
             }
             .tint(.cyan)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.07)))
     }
@@ -542,6 +569,7 @@ extension ContentView {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.07)))
     }
@@ -583,6 +611,7 @@ extension ContentView {
                     .disabled(uiMenuTextSizeIndex == DS.defaultTextSizeIndex)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.07)))
     }
@@ -637,6 +666,7 @@ extension ContentView {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
     }
@@ -651,10 +681,11 @@ extension ContentView {
     /// and is always shown so the user can set an attribution handle
     /// without enabling sharing.
     private var settingsSharingContent: some View {
-        VStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
             storageLocationSection
             communitySharingSection
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -700,6 +731,7 @@ extension ContentView {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(DS.Spacing.md)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.cyan.opacity(0.07)))
     }
@@ -760,6 +792,7 @@ extension ContentView {
                     .foregroundStyle(.tertiary)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(DS.Spacing.md)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.07)))
     }
@@ -795,7 +828,7 @@ extension ContentView {
     // MARK: - Export & Share Tab
 
     private var settingsExportContent: some View {
-        VStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
             // ── Current Preset Export ────────────────────────────────────
             VStack(spacing: 8) {
                 HStack {
@@ -1123,33 +1156,14 @@ extension ContentView {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var settingsAdvancedContent: some View {
         @Bindable var appModel = appModel
-        return VStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Image(systemName: AppIcons.chartBarFill).foregroundStyle(themeColor)
-                    Text("Performance in Menu").font(.headline)
-                    Spacer()
-                    Toggle("Show", isOn: $showPerformanceInMenu)
-                        .labelsHidden()
-                }
-                Text("Keeps compact FPS, GPU frame time, and render quality visible in the bottom menu bar.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    StatBox(label: "FPS", value: String(format: "%.0f", cache.liveFPS), color: liveFPSColor)
-                    StatBox(label: "Iterations", value: "\(cache.liveFractalIterations)", color: themeColor)
-                    StatBox(label: "Ray Steps", value: "\(cache.liveMaxRaySteps)", color: themeColor.opacity(0.8))
-                    StatBox(label: "Scale", value: String(format: "%.2f", cache.liveFractalScale), color: themeColor.opacity(0.6))
-                }
-            }.padding().background(themeColor.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
-
+        return VStack(alignment: .leading, spacing: 16) {
             // Raymarcher acceleration toggles — Smart Advance, Coherent Packet,
             // and Foveation grouped into one card (see `raymarcherSection`).
             raymarcherSection
@@ -1159,7 +1173,10 @@ extension ContentView {
                 Text("Live from the renderer. 'Drawable' is the actual per-eye render-target size the compositor granted — at 100% render quality it should reach the panel's native resolution. Render quality tracks the resolution slider.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-            }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
 
             // ── Performance Sweep (per-build Vision Pro perf log) ──
             VStack(alignment: .leading, spacing: 8) {
@@ -1183,7 +1200,11 @@ extension ContentView {
                     .font(.caption2).foregroundStyle(.secondary)
                 Text("Loads a curated set of scenes, measures GPU/CPU/FPS on this device, and appends one record to Documents/PerfLog/perf-log.jsonl (+ perf-log.md). Run it with the immersive view up. Pull the files via the Files app and append them to the repo's PERF_LOG.jsonl to track performance across builds.")
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

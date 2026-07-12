@@ -462,6 +462,9 @@ final class ThresholdMacRenderer {
     private var currentJitterPixels = SIMD2<Float>.zero
     private var haltonIndex: UInt32 = 0
     private var wasTemporalActive = false
+    /// Last value published to the UI; avoids scheduling a MainActor task every
+    /// frame when the presentation path is unchanged.
+    private var publishedUpscalerPath: String?
     private var temporalInvalidationKey: TemporalInvalidationKey?
 
     // Shared music-reactive engine — same type used by the visionOS `Renderer`,
@@ -823,6 +826,10 @@ final class ThresholdMacRenderer {
         // Edge detection is deferred only for frames that actually upscale. The
         // direct path keeps the inline derivative version in fragmentMain.
         let didUpscale = temporalPass != nil || spatialPass != nil
+        publishUpscalerPath(
+            temporalPass != nil ? "Temporal" : (spatialPass != nil ? "Spatial" : "Native"),
+            appModel: appModel
+        )
         commandBuffer.addCompletedHandler { [inFlightSemaphore, gpuFrameMsHolder] buffer in
             inFlightSemaphore.signal()
             let gpuSeconds = buffer.gpuEndTime - buffer.gpuStartTime
@@ -996,6 +1003,14 @@ final class ThresholdMacRenderer {
 
         commandBuffer.present(drawable)
         commandBuffer.commit()
+    }
+
+    private func publishUpscalerPath(_ path: String, appModel: AppModel) {
+        guard publishedUpscalerPath != path else { return }
+        publishedUpscalerPath = path
+        Task { @MainActor [weak appModel] in
+            appModel?.renderMetrics.upscalerPath = path
+        }
     }
 
     /// Encodes the raymarch draw into an active render encoder. Shared by the

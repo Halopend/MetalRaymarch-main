@@ -56,6 +56,7 @@ struct ContentView: View {
     @AppStorage("MacTabLauncher.enabled") var isMacTabLauncherEnabled = true
 #endif
     @AppStorage("ContentView.showPerformanceInMenu") var showPerformanceInMenu: Bool = false
+    @AppStorage("ContentView.showFPSInHUD") var showFPSInHUD: Bool = true
     @AppStorage("ContentView.pinnedRailControls") private var pinnedRailControlsRaw: String = ""
     @State var showStopsPopover = false
     @State private var showSaveDestinationSheet = false

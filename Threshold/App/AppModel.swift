@@ -39,6 +39,9 @@ final class RenderMetrics {
     var renderQuality: Float = 0      // current target, driven by the resolution slider
     var foveationEnabled: Bool = false
     var renderPath: String = "—"
+    /// Active Mac presentation path. Updated only when the renderer switches
+    /// between native rendering and a MetalFX scaler.
+    var upscalerPath: String = "—"
 
     /// Compute-path foveation rate-map decode dimensions (eye 0): physical texture
     /// size, rate-map screen size, and the per-eye viewport (size@origin), plus
