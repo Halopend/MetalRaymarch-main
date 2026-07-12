@@ -25,6 +25,9 @@ struct StoredFractalDefaults: Codable {
     var worldRotation: [Float]
     var safetyBubbleEnabled: Bool?
     var colorMappingModeRaw: Int?
+    /// Full v3 reset point. Legacy scalar fields remain for decoding installs
+    /// that saved defaults before SceneState existed.
+    var sceneState: SceneState? = nil
 }
 
 // MARK: - FractalDefaultsStore
@@ -107,6 +110,13 @@ enum FractalDefaultsStore {
 
     /// Apply stored defaults to a RenderSettings instance.
     static func applyStoredDefaults(_ stored: StoredFractalDefaults, to settings: RenderSettings) {
+        if let sceneState = stored.sceneState {
+            settings.withPersistenceSuppressed {
+                sceneState.apply(to: settings, includePerformance: false, scope: .session)
+            }
+            return
+        }
+
         settings.targetMinDistance = stored.minDistance
         settings.targetFoldingLimit = stored.foldingLimit
         settings.targetSphereRadius = stored.sphereRadius
@@ -166,7 +176,8 @@ enum FractalDefaultsStore {
                             settings.worldRotation.vector.z,
                             settings.worldRotation.vector.w],
             safetyBubbleEnabled: settings.safetyBubbleEnabled,
-            colorMappingModeRaw: settings.colorMappingMode.rawValue
+            colorMappingModeRaw: settings.colorMappingMode.rawValue,
+            sceneState: SceneState(capturing: settings)
         )
 
         var defaultsMap = loadStoredDefaultsMap()

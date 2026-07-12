@@ -18,11 +18,6 @@ import Synchronization
 enum SettingsPersistence {
 
     nonisolated(unsafe) private static let defaults = UserDefaults.standard
-    private static let encoder: JSONEncoder = {
-        let e = JSONEncoder()
-        e.outputFormatting = .sortedKeys
-        return e
-    }()
     private static let decoder = JSONDecoder()
 
     // MARK: Namespaced Keys
@@ -37,6 +32,7 @@ enum SettingsPersistence {
         case safetyBubble   = "cfg.safetyBubble"
         case handAttraction = "cfg.handAttraction"
         case display        = "cfg.display"
+        case buddhabrot     = "cfg.buddhabrot"
         case music          = "cfg.music"
     }
 
@@ -109,14 +105,19 @@ enum SettingsPersistence {
         }
     }
 
-    // MARK: Throttle
+    // MARK: Trailing debounce
 
-    /// Minimum interval (seconds) between consecutive saves for the same domain.
-    /// Prevents excessive UserDefaults writes from continuous slider drags / gestures.
-    private static let throttleInterval: TimeInterval = 1.0
-
-    /// Timestamp of the last successful save per domain.
-    private static let _lastSaveTime = Mutex<[Domain: TimeInterval]>([:])
+    /// Slider-driven domains use a trailing debounce: each edit replaces the
+    /// pending write, guaranteeing that the final value is persisted. The old
+    /// leading-only throttle routinely lost the last edit inside its one-second
+    /// window.
+    private struct PendingSaveState {
+        var nextGeneration: UInt64 = 0
+        var tasks: [Domain: (generation: UInt64, data: Data, task: Task<Void, Never>)] = [:]
+    }
+    private static let pendingSaves = Mutex(PendingSaveState())
+    private static let persistenceWriteLock = Mutex(())
+    private static let debounceDelay: Duration = .milliseconds(300)
 
     // MARK: Generic Save / Load
 
@@ -133,22 +134,72 @@ enum SettingsPersistence {
 
     static func save<T: Codable>(_ value: T, domain: Domain) {
         guard !benchmarkHermetic else { return }
-        guard let data = try? encoder.encode(value) else { return }
-        defaults.set(data, forKey: domain.rawValue)
+        guard let data = encode(value) else { return }
+        persistenceWriteLock.withLock { _ in
+            cancelPendingSave(for: domain)
+            defaults.set(data, forKey: domain.rawValue)
+        }
     }
 
-    /// Returns true if the domain is eligible for a save (throttle window has elapsed).
-    /// Call this BEFORE constructing the config struct to avoid unnecessary work.
-    static func shouldSave(domain: Domain) -> Bool {
-        let now = ProcessInfo.processInfo.systemUptime
-        return _lastSaveTime.withLock { lastSaveTime in
-            let last = lastSaveTime[domain] ?? 0
-            if now - last < throttleInterval {
-                return false
-            }
-            lastSaveTime[domain] = now
-            return true
+    static func saveDebounced<T: Codable & Sendable>(_ value: T, domain: Domain) {
+        guard !benchmarkHermetic, let data = encode(value) else { return }
+
+        let generation = pendingSaves.withLock { state -> UInt64 in
+            state.nextGeneration &+= 1
+            state.tasks[domain]?.task.cancel()
+            return state.nextGeneration
         }
+
+        let task = Task.detached(priority: .utility) {
+            try? await Task.sleep(for: debounceDelay)
+            guard !Task.isCancelled else { return }
+            persistenceWriteLock.withLock { _ in
+                pendingSaves.withLock { state in
+                    guard state.tasks[domain]?.generation == generation else { return }
+                    defaults.set(data, forKey: domain.rawValue)
+                    state.tasks.removeValue(forKey: domain)
+                }
+            }
+        }
+
+        pendingSaves.withLock { state in
+            // A newer call can win between generation allocation and task install.
+            guard state.tasks[domain]?.generation ?? 0 < generation else {
+                task.cancel()
+                return
+            }
+            state.tasks[domain] = (generation, data, task)
+        }
+    }
+
+    /// Commit only writes that originated from an explicit user edit and are
+    /// still waiting for the trailing debounce. This is intentionally different
+    /// from `saveAll(from:)`: a lifecycle checkpoint must not serialize the live
+    /// scene back into device/user preference domains after a suppressed scene
+    /// load or animation frame.
+    static func flushPendingSaves() {
+        guard !benchmarkHermetic else { return }
+        persistenceWriteLock.withLock { _ in
+            pendingSaves.withLock { state in
+                for (domain, pending) in state.tasks {
+                    pending.task.cancel()
+                    defaults.set(pending.data, forKey: domain.rawValue)
+                }
+                state.tasks.removeAll()
+            }
+        }
+    }
+
+    private static func cancelPendingSave(for domain: Domain) {
+        pendingSaves.withLock { state in
+            state.tasks.removeValue(forKey: domain)?.task.cancel()
+        }
+    }
+
+    private static func encode<T: Encodable>(_ value: T) -> Data? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return try? encoder.encode(value)
     }
 
     static func load<T: Codable>(_ type: T.Type, domain: Domain) -> T? {

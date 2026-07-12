@@ -67,7 +67,7 @@ struct GeometryConfig: Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        fractalType = try c.decode(FractalModelType.self, forKey: .fractalType)
+        fractalType = try c.decodeIfPresent(FractalModelType.self, forKey: .fractalType) ?? .mandelbox
 
         if let vals = try c.decodeIfPresent([Float].self, forKey: .formulaParamValues) {
             formulaParams = fractalType.defaultFormulaParams()
@@ -78,19 +78,19 @@ struct GeometryConfig: Codable, Sendable {
             formulaParams = fractalType.defaultFormulaParams()
         }
 
-        minDistance = try c.decode(Float.self, forKey: .minDistance)
-        fractalScale = try c.decode(Float.self, forKey: .fractalScale)
-        foldingLimit = try c.decode(Float.self, forKey: .foldingLimit)
-        sphereRadius = try c.decode(Float.self, forKey: .sphereRadius)
-        position = try c.decode(SIMD3<Float>.self, forKey: .position)
-        scale = try c.decode(Float.self, forKey: .scale)
+        minDistance = try c.decodeIfPresent(Float.self, forKey: .minDistance) ?? 0.8
+        fractalScale = try c.decodeIfPresent(Float.self, forKey: .fractalScale) ?? 2.8
+        foldingLimit = try c.decodeIfPresent(Float.self, forKey: .foldingLimit) ?? 1.0
+        sphereRadius = try c.decodeIfPresent(Float.self, forKey: .sphereRadius) ?? 0.5
+        position = try c.decodeIfPresent(SIMD3<Float>.self, forKey: .position) ?? .zero
+        scale = try c.decodeIfPresent(Float.self, forKey: .scale) ?? 1.0
 
-        let rx = try c.decode(Float.self, forKey: .worldRotationX)
-        let ry = try c.decode(Float.self, forKey: .worldRotationY)
-        let rz = try c.decode(Float.self, forKey: .worldRotationZ)
-        let rw = try c.decode(Float.self, forKey: .worldRotationW)
+        let rx = try c.decodeIfPresent(Float.self, forKey: .worldRotationX) ?? 0
+        let ry = try c.decodeIfPresent(Float.self, forKey: .worldRotationY) ?? 0
+        let rz = try c.decodeIfPresent(Float.self, forKey: .worldRotationZ) ?? 0
+        let rw = try c.decodeIfPresent(Float.self, forKey: .worldRotationW) ?? 1
         worldRotation = simd_quatf(ix: rx, iy: ry, iz: rz, r: rw).normalized
-        detailScale = try c.decode(Float.self, forKey: .detailScale)
+        detailScale = try c.decodeIfPresent(Float.self, forKey: .detailScale) ?? 1.0
     }
 
     init() {}

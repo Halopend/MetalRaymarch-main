@@ -367,6 +367,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
             fractalScale: lerp(self.fractalScale, other.fractalScale),
             baseFractalIterations: clampedT < 0.5 ? self.baseFractalIterations : other.baseFractalIterations,
             baseMaxRaySteps: clampedT < 0.5 ? self.baseMaxRaySteps : other.baseMaxRaySteps,
+            scale: lerp(self.scale, other.scale),
             position: lerp3(self.position, other.position),
             detailScale: lerp(self.detailScale, other.detailScale),
             worldRotation: simd_slerp(self.worldRotation, other.worldRotation, clampedT).normalized,
@@ -730,6 +731,12 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     /// The fractal type this scene was authored for.
     /// Restored on playback so the scene always renders with the correct fractal.
     var fractalType: FractalModelType?
+
+    /// Canonical scene-owned state captured when the animation is authored.
+    /// Keyframes animate their focused lanes over this baseline. Optional so
+    /// every existing `.threshanim` continues to decode through the legacy
+    /// scene-level fields below.
+    var baseline: SceneState?
     
     // ═══════════════════════════════════════════════════════════════════════════
     // COLOR / GRADIENT — scene-level defaults (applied once at start)
@@ -795,7 +802,7 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     /// (the synthesized init/encode reference these only).
     private enum CodingKeys: String, CodingKey {
         case id, name, keyframes, isLooping, playbackMode, createdAt, modifiedAt
-        case fractalType, gradientPreset, colorMappingMode, gradientRepeat
+        case fractalType, baseline, gradientPreset, colorMappingMode, gradientRepeat
         case gradientOffset, gradientSmoothing
         case colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
         case colorSchemeVibrance, colorSchemeCurve, colorSchemeShadows, colorSchemeHighlights
@@ -820,6 +827,7 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         self.playbackMode = .forward
         self.createdAt = Date()
         self.modifiedAt = Date()
+        self.baseline = nil
         self.spaceWarpOps = nil
         self.mixedModeScene = nil
     }
@@ -834,6 +842,7 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         self.createdAt = Date()
         self.modifiedAt = Date()
         self.fractalType = fractalType
+        self.baseline = nil
         self.spaceWarpOps = nil
         self.mixedModeScene = nil
     }
@@ -886,6 +895,7 @@ struct AnimationScene: Codable, Identifiable, Equatable {
             }
         }
         fractalType    = try c.decodeIfPresent(FractalModelType.self, forKey: .fractalType)
+        baseline       = try c.decodeIfPresent(SceneState.self, forKey: .baseline)
         gradientPreset = try c.decodeIfPresent(GradientPreset.self, forKey: .gradientPreset)
         colorMappingMode = try c.decodeIfPresent(ColorMappingMode.self, forKey: .colorMappingMode)
         gradientRepeat   = try c.decodeIfPresent(Float.self, forKey: .gradientRepeat)
@@ -911,7 +921,11 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         songFadeOutOffset     = try c.decodeIfPresent(TimeInterval.self, forKey: .songFadeOutOffset)
         if let formula = try c.decodeIfPresent(EmbeddedFormula.self, forKey: .embeddedFormula) {
             try formula.validate()
-            fractalType = .custom
+            // A custom space warp rides the scene's existing fractal. Only a
+            // distance-estimator payload selects the `.custom` fractal model.
+            if formula.effectKind == .fractal {
+                fractalType = .custom
+            }
             embeddedFormula = formula
         } else {
             embeddedFormula = nil
@@ -1197,6 +1211,7 @@ struct CatmullRomSpline {
             fractalScale: interpolate(p0.fractalScale, p1.fractalScale, p2.fractalScale, p3.fractalScale, t: t),
             baseFractalIterations: t < 0.5 ? p1.baseFractalIterations : p2.baseFractalIterations,
             baseMaxRaySteps: t < 0.5 ? p1.baseMaxRaySteps : p2.baseMaxRaySteps,
+            scale: interpolate(p0.scale, p1.scale, p2.scale, p3.scale, t: t),
             position: interpolate(p0.position, p1.position, p2.position, p3.position, t: t),
             detailScale: interpolate(p0.detailScale, p1.detailScale, p2.detailScale, p3.detailScale, t: t),
             worldRotation: simd_slerp(p1.worldRotation, p2.worldRotation, simd_clamp(t, 0, 1)).normalized,
@@ -1248,6 +1263,7 @@ struct CatmullRomSpline {
             fractalScale: 2 * anchor.fractalScale - away.fractalScale,
             baseFractalIterations: anchor.baseFractalIterations,
             baseMaxRaySteps: anchor.baseMaxRaySteps,
+            scale: 2 * anchor.scale - away.scale,
             position: 2 * anchor.position - away.position,
             detailScale: 2 * anchor.detailScale - away.detailScale,
             worldRotation: anchor.worldRotation,

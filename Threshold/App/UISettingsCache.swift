@@ -114,6 +114,13 @@ final class UISettingsCache {
     private var syncTimer: Timer?
     private weak var settings: RenderSettings?
     var renderSettings: RenderSettings? { settings }
+
+    init(renderSettings: RenderSettings? = nil) {
+        settings = renderSettings
+        if renderSettings != nil {
+            loadFromSettings()
+        }
+    }
     
     func startSync(with settings: RenderSettings, appModel: AppModel) {
         self.settings = settings
@@ -133,17 +140,39 @@ final class UISettingsCache {
     }
     
     private func syncLiveStats() {
-        guard let settings else { return }
-        // Skip syncing when app is backgrounded or immersive space is closed — no live stats to update
-        guard let appModel = _appModel, appModel.isAppActive,
-              appModel.immersiveSpaceState == .open else { return }
+        guard let appModel = _appModel else { return }
+        refreshLiveStats(
+            isAppActive: appModel.isAppActive,
+            immersiveSpaceIsOpen: appModel.immersiveSpaceState == .open,
+            fps: appModel.renderMetrics.fps
+        )
+    }
+
+    /// Refreshes renderer-backed values without making SwiftUI evaluate locked
+    /// `RenderSettings` properties. Desktop and mobile keep rendering in their
+    /// windows; only visionOS needs an open immersive space for live values.
+    func refreshLiveStats(isAppActive: Bool, immersiveSpaceIsOpen: Bool, fps: Double) {
+        guard let settings,
+              Self.shouldRefreshLiveStats(
+                isAppActive: isAppActive,
+                immersiveSpaceIsOpen: immersiveSpaceIsOpen
+              ) else { return }
         liveFractalIterations = settings.fractalIterations
         liveMaxRaySteps = settings.maxRaySteps
         liveFractalScale = settings.fractalScale
         livePosition = settings.position
         liveDetailScale = settings.detailScale
         liveWorldRotation = settings.worldRotation
-        liveFPS = appModel.renderMetrics.fps
+        liveFPS = fps
+    }
+
+    static func shouldRefreshLiveStats(isAppActive: Bool, immersiveSpaceIsOpen: Bool) -> Bool {
+        guard isAppActive else { return false }
+#if os(visionOS)
+        return immersiveSpaceIsOpen
+#else
+        return true
+#endif
     }
     
     func loadFromSettings() {
@@ -386,6 +415,11 @@ final class UISettingsCache {
 
     func commitPlatformRadius() {
         settings?.platformRadius = display.platformRadius
+    }
+
+    func setPlatformEnabled(_ enabled: Bool) {
+        display.platformEnabled = enabled
+        settings?.platformEnabled = enabled
     }
 
     /// The current containment mode, derived from the bounding-shape and scrunch

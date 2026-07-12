@@ -259,7 +259,11 @@ extension AppModel {
                 }
             }
             if let preset = externalPreviewRestorePreset {
-                preset.apply(to: renderSettings, resetEnvironment: true)
+                preset.apply(
+                    to: renderSettings,
+                    resetEnvironment: true,
+                    scope: .session
+                )
                 gestureController?.syncWithSettings()
                 NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
             }

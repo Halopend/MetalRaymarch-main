@@ -123,10 +123,12 @@ class AppModel {
         case open
     }
 
-    enum RuntimeViewMode: String {
+    enum RuntimeViewMode: String, Codable {
         case raymarch
         case buddhabrot
     }
+
+    private static let runtimeViewModeDefaultsKey = "AppModel.runtimeViewMode"
 
     var immersiveSpaceState = ImmersiveSpaceState.closed
     /// True while the controls are broken out into their own macOS window (via the
@@ -135,9 +137,14 @@ class AppModel {
     /// don't appear twice.
     var isControlsWindowOpen = false
     var rendererStartupWarmupComplete = false
-    var runtimeViewMode: RuntimeViewMode = .raymarch {
+    var runtimeViewMode: RuntimeViewMode =
+        RuntimeViewMode(rawValue: UserDefaults.standard.string(forKey: runtimeViewModeDefaultsKey) ?? "")
+        ?? .raymarch {
         didSet {
             runtimeViewModeForRenderer = runtimeViewMode
+            if !SettingsPersistence.benchmarkHermetic {
+                UserDefaults.standard.set(runtimeViewMode.rawValue, forKey: Self.runtimeViewModeDefaultsKey)
+            }
         }
     }
     @ObservationIgnored nonisolated(unsafe) var runtimeViewModeForRenderer: RuntimeViewMode = .raymarch
@@ -167,7 +174,13 @@ class AppModel {
     var immersionStylePreference: ImmersionStylePreference =
         .fromPersisted(UserDefaults.standard.string(forKey: "immersionStylePreference")) {
         didSet {
-            UserDefaults.standard.set(immersionStylePreference.rawValue, forKey: "immersionStylePreference")
+            // A scene's presentation intent is live authored state, not a new
+            // user default. Only an explicit picker change updates the launch
+            // preference; scene/animation application sets the renderer mirror
+            // without feeding back into UserDefaults.
+            if !immersionChangeIsSceneDriven, !SettingsPersistence.benchmarkHermetic {
+                UserDefaults.standard.set(immersionStylePreference.rawValue, forKey: "immersionStylePreference")
+            }
             immersionStyleForRenderer = immersionStylePreference
             // Containment follows immersion. Entering Mixed resets to the safe,
             // pre-gated default — Bounded (bounding shape on, Scrunch off) — so a
@@ -465,6 +478,7 @@ class AppModel {
         // Publish the shared reference only after all stored properties are
         // initialized — `self` cannot escape an initializer before then.
         AppModel.shared = self
+        runtimeViewModeForRenderer = runtimeViewMode
 
         // Initialize gesture controller with render settings
         gestureController = GestureController(renderSettings: renderSettings, parameterPipeline: parameterPipeline)
@@ -536,9 +550,18 @@ class AppModel {
         // Add built-in presets if this is first launch
         presetManager.addBuiltInPresetsIfNeeded()
         
-        // Restore last state if available.
-        // If the restored preset carries an embedded formula, install it so
-        // custom scenes survive app relaunch.
+        // Device/user preferences are the base layer. Restore them BEFORE the
+        // last scene so scene-owned values can be applied authoritatively without
+        // a later domain restore stomping them. Scene/session apply suppresses
+        // persistence, so startup cannot write a half-applied hybrid back into
+        // these blobs.
+        SettingsPersistence.restoreAll(into: renderSettings)
+        if let buddhabrot = SettingsPersistence.load(BuddhabrotConfig.self, domain: .buddhabrot) {
+            buddhabrotSettings.config = buddhabrot
+        }
+
+        // Restore last scene/session state if available. If it carries an
+        // embedded formula, install it so custom scenes survive app relaunch.
         if let restoredPreset = presetManager.restoreLastState(to: renderSettings),
            let formula = restoredPreset.embeddedFormula {
             if formula.effectKind == .spaceWarp {
@@ -548,8 +571,6 @@ class AppModel {
             }
         }
         
-        // Restore domain config structs (new persistence format, overlays legacy per-key values)
-        SettingsPersistence.restoreAll(into: renderSettings)
         migrateDistinctWindowGestureDefaultsIfNeeded()
         migrateMenuGestureOwnershipIfNeeded()
         
@@ -571,7 +592,11 @@ class AppModel {
     /// Save current state for restore on next launch
     func saveLastState() {
         presetManager.saveLastState(from: renderSettings, embeddedFormula: activeEmbeddedFormula)
-        SettingsPersistence.saveAll(from: renderSettings)
+        // Scene/session state is already checkpointed above. Flush only
+        // user-originated debounced writes; a blanket save of the live renderer
+        // would undo the scene mutation boundary and overwrite device defaults.
+        SettingsPersistence.flushPendingSaves()
+        SettingsPersistence.save(buddhabrotSettings.config, domain: .buddhabrot)
     }
 
     // MARK: - Storage Location

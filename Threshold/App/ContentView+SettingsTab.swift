@@ -474,7 +474,7 @@ extension ContentView {
                 }
                 Toggle("Show Platform", isOn: Binding(
                     get: { cache.display.platformEnabled },
-                    set: { cache.display.platformEnabled = $0 }
+                    set: { cache.setPlatformEnabled($0) }
                 ))
                 .labelsHidden()
                 .tint(.cyan)

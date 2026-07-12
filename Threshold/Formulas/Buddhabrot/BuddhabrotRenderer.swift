@@ -25,10 +25,139 @@ import os
 // MARK: - Render Mode
 
 /// Selects between the original volume ray march pipeline and the new Gaussian splat pipeline.
-enum BuddhabrotRenderMode: String, CaseIterable, Identifiable {
+enum BuddhabrotRenderMode: String, CaseIterable, Identifiable, Codable, Sendable {
     case gaussianSplats = "Gaussian Splats"
     case volumeRayMarch = "Volume Ray March"
     var id: String { rawValue }
+}
+
+/// Codable session checkpoint for every user-authored Buddhabrot control.
+/// Accumulation counters, clear generations, and GPU resources are transient and
+/// deliberately excluded.
+struct BuddhabrotConfig: Codable, Equatable, Sendable {
+    var resolution: Int = 128
+    var power: Float = 8.0
+    var maxIterations: Int = 100
+    var bailoutRadius: Float = 4.0
+    var useRGBMode: Bool = false
+    var batchSize: Int = 65_536
+    var batchesPerFrame: Int = 2
+    var normalizationInterval: Int = 4
+    var densityScale: Float = 1.0
+    var gamma: Float = 0.4
+    var alphaScale: Float = 8.0
+    var colorLow = SIMD3<Float>(0.02, 0.02, 0.12)
+    var colorMid = SIMD3<Float>(0.6, 0.2, 0.8)
+    var colorHigh = SIMD3<Float>(1.0, 0.95, 0.8)
+    var maxRaySteps: Int = 80
+    var earlyExitAlpha: Float = 0.95
+    var volumeDistance: Float = 1.5
+    var volumeScale: Float = 0.6
+    var autoRotate: Bool = true
+    var rotationSpeed: Float = 0.1
+    var worldExtent: Float = 2.0
+    var renderMode: BuddhabrotRenderMode = .gaussianSplats
+    var maxSplatCount: Int = 524_288
+    var splatScaleAlongTangent: Float = 0.04
+    var splatScalePerp: Float = 0.02
+    var splatOpacity: Float = 0.6
+    var brightnessScale: Float = 1.0
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case resolution, power, maxIterations, bailoutRadius, useRGBMode
+        case batchSize, batchesPerFrame, normalizationInterval
+        case densityScale, gamma, alphaScale, colorLow, colorMid, colorHigh
+        case maxRaySteps, earlyExitAlpha, volumeDistance, volumeScale
+        case autoRotate, rotationSpeed, worldExtent, renderMode, maxSplatCount
+        case splatScaleAlongTangent, splatScalePerp, splatOpacity, brightnessScale
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        resolution = try c.decodeIfPresent(Int.self, forKey: .resolution) ?? 128
+        power = try c.decodeIfPresent(Float.self, forKey: .power) ?? 8.0
+        maxIterations = try c.decodeIfPresent(Int.self, forKey: .maxIterations) ?? 100
+        bailoutRadius = try c.decodeIfPresent(Float.self, forKey: .bailoutRadius) ?? 4.0
+        useRGBMode = try c.decodeIfPresent(Bool.self, forKey: .useRGBMode) ?? false
+        batchSize = try c.decodeIfPresent(Int.self, forKey: .batchSize) ?? 65_536
+        batchesPerFrame = try c.decodeIfPresent(Int.self, forKey: .batchesPerFrame) ?? 2
+        normalizationInterval = try c.decodeIfPresent(Int.self, forKey: .normalizationInterval) ?? 4
+        densityScale = try c.decodeIfPresent(Float.self, forKey: .densityScale) ?? 1.0
+        gamma = try c.decodeIfPresent(Float.self, forKey: .gamma) ?? 0.4
+        alphaScale = try c.decodeIfPresent(Float.self, forKey: .alphaScale) ?? 8.0
+        colorLow = try c.decodeIfPresent(SIMD3<Float>.self, forKey: .colorLow) ?? SIMD3<Float>(0.02, 0.02, 0.12)
+        colorMid = try c.decodeIfPresent(SIMD3<Float>.self, forKey: .colorMid) ?? SIMD3<Float>(0.6, 0.2, 0.8)
+        colorHigh = try c.decodeIfPresent(SIMD3<Float>.self, forKey: .colorHigh) ?? SIMD3<Float>(1.0, 0.95, 0.8)
+        maxRaySteps = try c.decodeIfPresent(Int.self, forKey: .maxRaySteps) ?? 80
+        earlyExitAlpha = try c.decodeIfPresent(Float.self, forKey: .earlyExitAlpha) ?? 0.95
+        volumeDistance = try c.decodeIfPresent(Float.self, forKey: .volumeDistance) ?? 1.5
+        volumeScale = try c.decodeIfPresent(Float.self, forKey: .volumeScale) ?? 0.6
+        autoRotate = try c.decodeIfPresent(Bool.self, forKey: .autoRotate) ?? true
+        rotationSpeed = try c.decodeIfPresent(Float.self, forKey: .rotationSpeed) ?? 0.1
+        worldExtent = try c.decodeIfPresent(Float.self, forKey: .worldExtent) ?? 2.0
+        renderMode = try c.decodeIfPresent(BuddhabrotRenderMode.self, forKey: .renderMode) ?? .gaussianSplats
+        maxSplatCount = try c.decodeIfPresent(Int.self, forKey: .maxSplatCount) ?? 524_288
+        splatScaleAlongTangent = try c.decodeIfPresent(Float.self, forKey: .splatScaleAlongTangent) ?? 0.04
+        splatScalePerp = try c.decodeIfPresent(Float.self, forKey: .splatScalePerp) ?? 0.02
+        splatOpacity = try c.decodeIfPresent(Float.self, forKey: .splatOpacity) ?? 0.6
+        brightnessScale = try c.decodeIfPresent(Float.self, forKey: .brightnessScale) ?? 1.0
+        sanitize()
+    }
+
+    /// Validate persisted/imported values before they reach texture and buffer
+    /// allocation arithmetic. UI controls already constrain these ranges, but a
+    /// stale/corrupt defaults blob must receive the same protection.
+    mutating func sanitize() {
+        let defaults = BuddhabrotConfig()
+        resolution = Self.nearest(resolution, in: [64, 128, 192, 256, 512, 756])
+        power = Self.finite(power, fallback: defaults.power, in: 2...16)
+        maxIterations = max(10, min(500, maxIterations))
+        bailoutRadius = Self.finite(bailoutRadius, fallback: defaults.bailoutRadius, in: 2...20)
+        batchSize = max(4_096, min(262_144, batchSize))
+        batchesPerFrame = Self.nearest(batchesPerFrame, in: [1, 2, 4, 8])
+        normalizationInterval = Self.nearest(normalizationInterval, in: [1, 2, 4, 8])
+        densityScale = Self.finite(densityScale, fallback: defaults.densityScale, in: 0.01...10)
+        gamma = Self.finite(gamma, fallback: defaults.gamma, in: 0.1...2)
+        alphaScale = Self.finite(alphaScale, fallback: defaults.alphaScale, in: 0.5...30)
+        colorLow = Self.sanitizedColor(colorLow, fallback: defaults.colorLow)
+        colorMid = Self.sanitizedColor(colorMid, fallback: defaults.colorMid)
+        colorHigh = Self.sanitizedColor(colorHigh, fallback: defaults.colorHigh)
+        maxRaySteps = max(32, min(192, maxRaySteps))
+        earlyExitAlpha = Self.finite(earlyExitAlpha, fallback: defaults.earlyExitAlpha, in: 0.5...1)
+        volumeDistance = Self.finite(volumeDistance, fallback: defaults.volumeDistance, in: 0.5...5)
+        volumeScale = Self.finite(volumeScale, fallback: defaults.volumeScale, in: 0.1...3)
+        rotationSpeed = Self.finite(rotationSpeed, fallback: defaults.rotationSpeed, in: 0.01...1)
+        worldExtent = Self.finite(worldExtent, fallback: defaults.worldExtent, in: 0.5...4)
+        maxSplatCount = Self.nearest(maxSplatCount, in: [65_536, 131_072, 262_144, 524_288])
+        splatScaleAlongTangent = Self.finite(splatScaleAlongTangent, fallback: defaults.splatScaleAlongTangent, in: 0.005...0.2)
+        splatScalePerp = Self.finite(splatScalePerp, fallback: defaults.splatScalePerp, in: 0.005...0.2)
+        splatOpacity = Self.finite(splatOpacity, fallback: defaults.splatOpacity, in: 0.01...1)
+        brightnessScale = Self.finite(brightnessScale, fallback: defaults.brightnessScale, in: 0.1...5)
+    }
+
+    private static func nearest(_ value: Int, in allowed: [Int]) -> Int {
+        allowed.min { lhs, rhs in
+            abs(Double(lhs) - Double(value)) < abs(Double(rhs) - Double(value))
+        } ?? allowed[0]
+    }
+
+    private static func finite(_ value: Float,
+                               fallback: Float,
+                               in range: ClosedRange<Float>) -> Float {
+        guard value.isFinite else { return fallback }
+        return max(range.lowerBound, min(range.upperBound, value))
+    }
+
+    private static func sanitizedColor(_ value: SIMD3<Float>,
+                                       fallback: SIMD3<Float>) -> SIMD3<Float> {
+        SIMD3<Float>(
+            finite(value.x, fallback: fallback.x, in: 0...1),
+            finite(value.y, fallback: fallback.y, in: 0...1),
+            finite(value.z, fallback: fallback.z, in: 0...1)
+        )
+    }
 }
 
 // MARK: - Buddhabrot Settings
@@ -256,6 +385,78 @@ final class BuddhabrotSettings: @unchecked Sendable {
         withLock {
             if _clearGeneration == generation {
                 _needsClear = false
+            }
+        }
+    }
+
+    /// Consistent user-authored configuration snapshot (one lock acquisition).
+    var config: BuddhabrotConfig {
+        get {
+            withLock {
+                var c = BuddhabrotConfig()
+                c.resolution = _resolution
+                c.power = _power
+                c.maxIterations = _maxIterations
+                c.bailoutRadius = _bailoutRadius
+                c.useRGBMode = _useRGBMode
+                c.batchSize = _batchSize
+                c.batchesPerFrame = _batchesPerFrame
+                c.normalizationInterval = _normalizationInterval
+                c.densityScale = _densityScale
+                c.gamma = _gamma
+                c.alphaScale = _alphaScale
+                c.colorLow = _colorLow
+                c.colorMid = _colorMid
+                c.colorHigh = _colorHigh
+                c.maxRaySteps = _maxRaySteps
+                c.earlyExitAlpha = _earlyExitAlpha
+                c.volumeDistance = _volumeDistance
+                c.volumeScale = _volumeScale
+                c.autoRotate = _autoRotate
+                c.rotationSpeed = _rotationSpeed
+                c.worldExtent = _worldExtent
+                c.renderMode = _renderMode
+                c.maxSplatCount = _maxSplatCount
+                c.splatScaleAlongTangent = _splatScaleAlongTangent
+                c.splatScalePerp = _splatScalePerp
+                c.splatOpacity = _splatOpacity
+                c.brightnessScale = _brightnessScale
+                return c
+            }
+        }
+        set {
+            var newValue = newValue
+            newValue.sanitize()
+            withLock {
+                _resolution = newValue.resolution
+                _power = newValue.power
+                _maxIterations = newValue.maxIterations
+                _bailoutRadius = newValue.bailoutRadius
+                _useRGBMode = newValue.useRGBMode
+                _batchSize = newValue.batchSize
+                _batchesPerFrame = newValue.batchesPerFrame
+                _normalizationInterval = newValue.normalizationInterval
+                _densityScale = newValue.densityScale
+                _gamma = newValue.gamma
+                _alphaScale = newValue.alphaScale
+                _colorLow = newValue.colorLow
+                _colorMid = newValue.colorMid
+                _colorHigh = newValue.colorHigh
+                _maxRaySteps = newValue.maxRaySteps
+                _earlyExitAlpha = newValue.earlyExitAlpha
+                _volumeDistance = newValue.volumeDistance
+                _volumeScale = newValue.volumeScale
+                _autoRotate = newValue.autoRotate
+                _rotationSpeed = newValue.rotationSpeed
+                _worldExtent = newValue.worldExtent
+                _renderMode = newValue.renderMode
+                _maxSplatCount = newValue.maxSplatCount
+                _splatScaleAlongTangent = newValue.splatScaleAlongTangent
+                _splatScalePerp = newValue.splatScalePerp
+                _splatOpacity = newValue.splatOpacity
+                _brightnessScale = newValue.brightnessScale
+                _clearGeneration &+= 1
+                _needsClear = true
             }
         }
     }

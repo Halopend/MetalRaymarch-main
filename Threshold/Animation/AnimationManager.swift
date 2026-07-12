@@ -64,6 +64,7 @@ final class AnimationManager {
     @ObservationIgnored private var sceneFileCache: [URL: CachedSceneFile] = [:]
     @ObservationIgnored private var userSceneReloadTask: Task<Void, Never>?
     @ObservationIgnored private var userSceneReloadGeneration: UInt64 = 0
+    @ObservationIgnored private var pendingRootWrites: [UUID: AnimationScene] = [:]
     private static let sceneReloadDebounce: Duration = .milliseconds(350)
 
     // MARK: - Folder store (user scenes are files under <root>/Animations)
@@ -190,36 +191,71 @@ final class AnimationManager {
         )
     }
 
-    /// Write one user scene as its own file, removing any prior file for that id
-    /// first (a rename or attached-song change can't orphan a copy).
-    private func writeUserSceneFile(_ scene: AnimationScene) {
-        guard let root = storeRoot else { return }
+    /// Write one user scene as its own file. The replacement is written first;
+    /// old names/extensions are removed only after that succeeds, so a failed
+    /// encode/write cannot destroy the user's only copy.
+    @discardableResult
+    private func writeUserSceneFile(_ scene: AnimationScene) -> Bool {
+        writeUserSceneFiles([scene]).contains(scene.id)
+    }
+
+    /// Batch form used by whole-library saves. Every replacement is written
+    /// first, followed by one cleanup scan for all successful IDs; this keeps a
+    /// routine save O(scene + files) instead of decoding the folder once per
+    /// scene on the main actor.
+    @discardableResult
+    private func writeUserSceneFiles(_ scenes: [AnimationScene]) -> Set<UUID> {
+        guard let root = storeRoot else { return [] }
         let dir = StorageLocation.animationsDir(root)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        removeUserSceneFile(id: scene.id)
-        let ext = ThresholdExportFormat.animation(hasSong: scene.attachedSong != nil).ext
-        let url = dir.appendingPathComponent(Self.sanitizedSceneFileName(scene.name, id: scene.id, ext: ext))
+        invalidateUserSceneReloadForLocalMutation()
+        var successfulIDs: Set<UUID> = []
+        var writtenURLs: Set<URL> = []
         do {
-            let data = try prettySceneEncoder.encode(scene)
-            try data.write(to: url, options: .atomic)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         } catch {
-            print("❌ Failed to write scene file: \(error)")
+            print("❌ Failed to create animation directory: \(error)")
+            return []
         }
+
+        for scene in scenes {
+            do {
+                let ext = ThresholdExportFormat.animation(hasSong: scene.attachedSong != nil).ext
+                let url = dir.appendingPathComponent(Self.sanitizedSceneFileName(scene.name, id: scene.id, ext: ext))
+                let data = try prettySceneEncoder.encode(scene)
+                try data.write(to: url, options: .atomic)
+                successfulIDs.insert(scene.id)
+                writtenURLs.insert(url)
+            } catch {
+                print("❌ Failed to write scene file '\(scene.name)': \(error)")
+            }
+        }
+
+        removeUserSceneFiles(ids: successfulIDs, excluding: writtenURLs)
+        return successfulIDs
+    }
+
+    private func invalidateUserSceneReloadForLocalMutation() {
+        userSceneReloadGeneration &+= 1
+        userSceneReloadTask?.cancel()
+        userSceneReloadTask = nil
     }
 
     /// Delete every store file whose decoded id matches `id`.
     private func removeUserSceneFile(id: UUID) {
+        invalidateUserSceneReloadForLocalMutation()
         removeUserSceneFiles(ids: [id])
     }
 
     /// Delete every store file whose decoded id is in `ids`, in a single directory
     /// scan (vs one scan per id). Used by the delete site and `replaceUserScenes`.
-    private func removeUserSceneFiles(ids: Set<UUID>) {
+    private func removeUserSceneFiles(ids: Set<UUID>, excluding: Set<URL> = []) {
         guard !ids.isEmpty, let root = storeRoot else { return }
         let dir = StorageLocation.animationsDir(root)
+        let excluded = Set(excluding.map(\.standardizedFileURL))
         let exts = ThresholdExportFormat.extensions(in: .animation)
         guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
         for url in files where exts.contains(url.pathExtension) {
+            guard !excluded.contains(url.standardizedFileURL) else { continue }
             if let data = try? Data(contentsOf: url),
                let scene = try? sceneDecoder.decode(AnimationScene.self, from: data), ids.contains(scene.id) {
                 try? FileManager.default.removeItem(at: url)
@@ -307,13 +343,23 @@ final class AnimationManager {
         guard storeRoot != nil else { return }
         let key = "Scene.legacyMigrated"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
-        if FileManager.default.fileExists(atPath: scenesFileURL.path),
-           let data = try? Data(contentsOf: scenesFileURL),
-           let legacy = try? sceneDecoder.decode([AnimationScene].self, from: data) {
-            for scene in legacy where !DefaultScenes.isDefault(scene.id) { writeUserSceneFile(scene) }
+        var migrationSucceeded = true
+        if FileManager.default.fileExists(atPath: scenesFileURL.path) {
+            guard let data = try? Data(contentsOf: scenesFileURL),
+                  let legacy = try? sceneDecoder.decode([AnimationScene].self, from: data) else {
+                print("❌ Legacy animation migration deferred: animation_scenes.json could not be decoded")
+                return
+            }
+            let migratable = legacy.filter { !DefaultScenes.isDefault($0.id) }
+            let written = writeUserSceneFiles(migratable)
+            if written.count != migratable.count {
+                migrationSucceeded = false
+            }
             print("📦 Migrated \(legacy.count) user scene(s) from legacy animation_scenes.json")
         }
-        UserDefaults.standard.set(true, forKey: key)
+        if migrationSucceeded {
+            UserDefaults.standard.set(true, forKey: key)
+        }
     }
 
     /// Shared encoder config for scene persistence and (off-main) export.
@@ -519,6 +565,13 @@ final class AnimationManager {
     @ObservationIgnored private var recordingTask: Task<Void, Never>?
 
     @ObservationIgnored private var recordingFractalType: FractalModelType?
+
+    /// Non-animated scene state is captured at record-start, not record-stop,
+    /// so changing an animated lane during the take cannot accidentally become
+    /// the baseline for the finished scene.
+    @ObservationIgnored private var recordingBaseline: SceneState?
+    @ObservationIgnored private var recordingEmbeddedFormula: EmbeddedFormula?
+    @ObservationIgnored private var recordingMixedModeScene: Bool?
     
     /// Sample rate for live recording (samples per second).
     private static let recordingSampleRate: Double = 10.0
@@ -756,7 +809,10 @@ final class AnimationManager {
         // active root resolves (iCloud discovery) or the user switches storage mode.
         for name in [StorageLocation.rootResolvedNotification, StorageLocation.modeChangedNotification] {
             let observer = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.loadScenes() }
+                Task { @MainActor in
+                    self?.flushPendingRootWrites()
+                    self?.loadScenes()
+                }
             }
             storageObservers.append(observer)
         }
@@ -769,6 +825,43 @@ final class AnimationManager {
     // ═══════════════════════════════════════════════════════════════════════════
     // SCENE MANAGEMENT
     // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Capture the full scene-owned baseline while keeping presentation as a
+    /// stable raw string (SceneState deliberately does not depend on AppModel).
+    private func captureSceneBaseline(from settings: RenderSettings) -> SceneState {
+        var immersionStyle: String?
+        #if os(visionOS)
+        immersionStyle = AppModel.shared?.immersionStyleForRenderer.rawValue
+        #endif
+        return SceneState(capturing: settings, immersionStyle: immersionStyle)
+    }
+
+    /// Mirror the baseline into the old flat animation fields. Current builds
+    /// restore from `baseline`; populating these keeps new exports useful in
+    /// older builds that do not know about SceneState yet.
+    private func populateLegacySceneFields(_ scene: inout AnimationScene,
+                                           from baseline: SceneState) {
+        let gradient = baseline.color.gradientState
+        scene.gradientPreset = gradient.gradientPreset
+        scene.colorMappingMode = gradient.gradient.mappingMode
+        scene.gradientRepeat = gradient.gradient.repeatCount
+        scene.gradientOffset = gradient.gradient.offset
+        scene.gradientSmoothing = gradient.gradient.smoothing
+        scene.colorSchemeSaturation = baseline.color.colorSchemeSaturation
+        scene.colorSchemeContrast = baseline.color.colorSchemeContrast
+        scene.colorSchemeGamma = baseline.color.colorSchemeGamma
+        scene.colorSchemeVibrance = baseline.color.colorSchemeVibrance
+        scene.colorSchemeCurve = baseline.color.colorSchemeCurve
+        scene.colorSchemeShadows = baseline.color.colorSchemeShadows
+        scene.colorSchemeHighlights = baseline.color.colorSchemeHighlights
+        scene.lightingSoftness = baseline.color.lightingSoftness
+        scene.safetyBubbleEnabled = baseline.safetyBubble.enabled
+        scene.safetyBubbleRadius = baseline.safetyBubble.radius
+        scene.safetyBubbleShape = baseline.safetyBubble.shape
+        scene.safetyBubbleBlend = baseline.safetyBubble.strength
+        scene.spaceWarpOps = baseline.space.warpStack.isEmpty ? nil : baseline.space.warpStack
+        scene.mixedModeScene = baseline.presentation.immersionStyle == "mixed" ? true : nil
+    }
     
     /// Create a new scene and add current settings as first keyframe
     func createScene(name: String) -> AnimationScene {
@@ -782,31 +875,16 @@ final class AnimationManager {
         var initialKeyframe = AnimationKeyframe(from: settings, name: "Start", duration: 0)
         initialKeyframe.duration = 0  // First keyframe is the starting point
         
-        let scene = AnimationScene(name: name, initialKeyframe: initialKeyframe, fractalType: settings.fractalType)
-        // Capture current safety bubble / blend window settings into the scene
-        var sceneWithBubble = scene
-        sceneWithBubble.safetyBubbleEnabled = settings.safetyBubbleEnabled
-        sceneWithBubble.safetyBubbleRadius = settings.safetyBubbleRadius
-        sceneWithBubble.safetyBubbleShape = settings.safetyBubbleShape
-        sceneWithBubble.safetyBubbleBlend = settings.safetyBubbleBlend
-        sceneWithBubble.gradientPreset = settings.gradientPreset
-        sceneWithBubble.colorMappingMode = settings.colorMappingMode
-        sceneWithBubble.gradientRepeat = settings.gradientRepeat
-        sceneWithBubble.gradientOffset = settings.gradientOffset
-        sceneWithBubble.gradientSmoothing = settings.gradientSmoothing
-        sceneWithBubble.colorSchemeSaturation = settings.colorSchemeSaturation
-        sceneWithBubble.colorSchemeContrast = settings.colorSchemeContrast
-        sceneWithBubble.colorSchemeGamma = settings.colorSchemeGamma
-        sceneWithBubble.colorSchemeVibrance = settings.colorSchemeVibrance
-        sceneWithBubble.colorSchemeCurve = settings.colorSchemeCurve
-        sceneWithBubble.colorSchemeShadows = settings.colorSchemeShadows
-        sceneWithBubble.colorSchemeHighlights = settings.colorSchemeHighlights
-        sceneWithBubble.lightingSoftness = settings.lightingSoftness
-        userScenes.append(sceneWithBubble)
+        var scene = AnimationScene(name: name, initialKeyframe: initialKeyframe, fractalType: settings.fractalType)
+        let baseline = captureSceneBaseline(from: settings)
+        scene.baseline = baseline
+        scene.embeddedFormula = AppModel.shared?.activeEmbeddedFormula
+        populateLegacySceneFields(&scene, from: baseline)
+        userScenes.append(scene)
         saveScenes()
         
         print("🎬 Created scene '\(name)' with initial keyframe")
-        return sceneWithBubble
+        return scene
     }
     
     /// Delete a scene.
@@ -822,6 +900,7 @@ final class AnimationManager {
             print("👁️‍🗨️ Hid default scene '\(scene.name)'")
         } else {
             userScenes.removeAll { $0.id == scene.id }
+            pendingRootWrites.removeValue(forKey: scene.id)
             // Removing the file IS the deletion — under folder-as-truth that
             // removal is what propagates (iCloud syncs the delete to other devices).
             removeUserSceneFile(id: scene.id)
@@ -916,14 +995,51 @@ final class AnimationManager {
         let isStartingFromBeginning = playhead.state == .stopped ||
             (playhead.currentKeyframeIndex == 0 && playhead.elapsedInSegment <= 0.0001)
         
-        // Restore the fractal type the scene was authored for.
-        // This MUST happen before pipeline precompilation, because pipelines
-        // are specialized per-fractal-type (FT is baked into function constants).
-        if let settings = renderSettings {
-            let sceneFractalType = currentScene?.fractalType ?? .mandelbox
-            if settings.fractalType != sceneFractalType {
-                settings.fractalType = sceneFractalType
-                print("🎬 Switched fractal type to \(sceneFractalType) for scene playback")
+        // Restore the complete scene baseline before pipeline precompilation:
+        // fractal type is part of GeometryConfig and is baked into function
+        // constants. The legacy flat fields remain compatibility overrides.
+        if let settings = renderSettings, let scene = currentScene {
+            settings.withPersistenceSuppressed {
+                settings.clearAnimationManualOffsets()
+                settings.clearAudioPlaybackOffsets()
+                settings.setSpaceWarpAudioOffsets([:])
+                if isStartingFromBeginning {
+                    settings.resetSceneAnimationPhases()
+                }
+
+                if let baseline = scene.baseline {
+                    baseline.apply(to: settings, includePerformance: false, scope: .scene)
+                    if let legacyWarpStack = scene.spaceWarpOps {
+                        settings.spaceWarpStack = legacyWarpStack
+                    }
+                } else {
+                    // Backward-compatible authoritative baseline for animations
+                    // authored before SceneState existed. Preserve destination
+                    // comfort/hand settings unless the legacy animation explicitly
+                    // opts into them below, while clearing every visual lane that
+                    // otherwise could leak from the previously loaded scene.
+                    let legacyFractalType = scene.fractalType ?? .mandelbox
+                    var legacyBaseline = SceneState()
+                    legacyBaseline.geometry.fractalType = legacyFractalType
+                    legacyBaseline.geometry.formulaParams = legacyFractalType.defaultFormulaParams()
+                    legacyBaseline.safetyBubble.enabled = false
+                    legacyBaseline.handAttraction = settings.handAttractionConfig
+                    legacyBaseline.apply(to: settings, includePerformance: false, scope: .scene)
+                    settings.spaceWarpStack = scene.spaceWarpOps ?? []
+                }
+
+                let sceneFractalType: FractalModelType
+                if scene.embeddedFormula?.effectKind == .fractal {
+                    sceneFractalType = .custom
+                } else {
+                    sceneFractalType = scene.fractalType
+                        ?? scene.baseline?.geometry.fractalType
+                        ?? .mandelbox
+                }
+                if settings.fractalType != sceneFractalType {
+                    settings.fractalType = sceneFractalType
+                    print("🎬 Switched fractal type to \(sceneFractalType) for scene playback")
+                }
             }
         }
 
@@ -932,87 +1048,91 @@ final class AnimationManager {
 
         // Apply scene-level safety bubble / blend window settings
         if let settings = renderSettings, let scene = currentScene {
-            // Clear lingering user/gesture offsets so playback starts from clean scene values.
-            settings.clearAnimationManualOffsets()
-            // Scenes own their music-reactive state. Start from defaults so a
-            // previous scene's audio settings don't leak into this one.
-            settings.audioReactiveConfig = AudioReactiveConfig()
-            // Animated scenes are authoritative for domain transforms just like
-            // static scenes: missing/empty means clear whatever was active before.
-            settings.spaceWarpStack = scene.spaceWarpOps ?? []
+            settings.withPersistenceSuppressed {
+                if isStartingFromBeginning,
+                   let speedOverride = scene.playbackSpeedOverride {
+                    playbackSpeed = max(0.1, min(4.0, speedOverride))
+                }
 
-            if isStartingFromBeginning,
-               let speedOverride = scene.playbackSpeedOverride {
-                playbackSpeed = max(0.1, min(4.0, speedOverride))
-            }
+                #if os(visionOS)
+                if let app = AppModel.shared {
+                    let style: AppModel.ImmersionStylePreference
+                    if scene.mixedModeScene == true {
+                        style = .mixed
+                    } else if let rawStyle = scene.baseline?.presentation.immersionStyle {
+                        style = .fromPersisted(rawStyle)
+                    } else {
+                        style = .immersive
+                    }
+                    app.immersionChangeIsSceneDriven = true
+                    app.immersionStylePreference = style
+                    app.immersionChangeIsSceneDriven = false
+                }
+                #endif
 
-            #if os(visionOS)
-            if let app = AppModel.shared {
-                app.immersionChangeIsSceneDriven = true
-                app.immersionStylePreference = (scene.mixedModeScene == true) ? .mixed : .immersive
-                app.immersionChangeIsSceneDriven = false
-            }
-            #endif
-
-            if let enabled = scene.safetyBubbleEnabled {
-                settings.safetyBubbleEnabled = enabled
-            }
-            if let radius = scene.safetyBubbleRadius {
-                settings.safetyBubbleRadius = radius
-            }
-            if let shape = scene.safetyBubbleShape {
-                settings.safetyBubbleShape = shape
-            }
-            if let blend = scene.safetyBubbleBlend {
-                settings.safetyBubbleBlend = blend
-            }
+                // Shared animations follow the same comfort contract as static
+                // scenes: they may opt the bubble on and author its shape, but a
+                // downloaded animation may not disable the user's active bubble.
+                if scene.safetyBubbleEnabled == true {
+                    settings.safetyBubbleEnabled = true
+                    if let radius = scene.safetyBubbleRadius {
+                        settings.safetyBubbleRadius = radius
+                    }
+                    if let shape = scene.safetyBubbleShape {
+                        settings.safetyBubbleShape = shape
+                    }
+                    if let blend = scene.safetyBubbleBlend {
+                        settings.safetyBubbleBlend = blend
+                    }
+                }
             
-            // ── Apply scene-level gradient / color settings ──────────────
-            if let preset = scene.gradientPreset {
-                settings.applyGradientPreset(preset)
-                print("🎬 Restored gradient preset to \(preset) for scene playback")
-            }
-            if let mode = scene.colorMappingMode {
-                settings.colorMappingMode = mode
-            }
-            if let rep = scene.gradientRepeat {
-                settings.gradientRepeat = rep
-            }
-            if let off = scene.gradientOffset {
-                settings.gradientOffset = off
-            }
-            if let sm = scene.gradientSmoothing {
-                settings.gradientSmoothing = sm
-            }
-            if let sat = scene.colorSchemeSaturation {
-                settings.colorSchemeSaturation = sat
-            }
-            if let con = scene.colorSchemeContrast {
-                settings.colorSchemeContrast = con
-            }
-            if let gam = scene.colorSchemeGamma {
-                settings.colorSchemeGamma = gam
-            }
-            if let vib = scene.colorSchemeVibrance {
-                settings.colorSchemeVibrance = vib
-            }
-            if let cur = scene.colorSchemeCurve {
-                settings.colorSchemeCurve = cur
-            }
-            if let shd = scene.colorSchemeShadows {
-                settings.colorSchemeShadows = shd
-            }
-            if let hlt = scene.colorSchemeHighlights {
-                settings.colorSchemeHighlights = hlt
-            }
-            if let soft = scene.lightingSoftness {
-                settings.lightingSoftness = soft
-            }
+                // ── Apply scene-level gradient / color settings ──────────
+                if let preset = scene.gradientPreset {
+                    settings.applyGradientPreset(preset)
+                    print("🎬 Restored gradient preset to \(preset) for scene playback")
+                }
+                if let mode = scene.colorMappingMode {
+                    settings.colorMappingMode = mode
+                }
+                if let rep = scene.gradientRepeat {
+                    settings.gradientRepeat = rep
+                }
+                if let off = scene.gradientOffset {
+                    settings.gradientOffset = off
+                }
+                if let sm = scene.gradientSmoothing {
+                    settings.gradientSmoothing = sm
+                }
+                if let sat = scene.colorSchemeSaturation {
+                    settings.colorSchemeSaturation = sat
+                }
+                if let con = scene.colorSchemeContrast {
+                    settings.colorSchemeContrast = con
+                }
+                if let gam = scene.colorSchemeGamma {
+                    settings.colorSchemeGamma = gam
+                }
+                if let vib = scene.colorSchemeVibrance {
+                    settings.colorSchemeVibrance = vib
+                }
+                if let cur = scene.colorSchemeCurve {
+                    settings.colorSchemeCurve = cur
+                }
+                if let shd = scene.colorSchemeShadows {
+                    settings.colorSchemeShadows = shd
+                }
+                if let hlt = scene.colorSchemeHighlights {
+                    settings.colorSchemeHighlights = hlt
+                }
+                if let soft = scene.lightingSoftness {
+                    settings.lightingSoftness = soft
+                }
 
-            // Apply the current playhead state immediately so first rendered frame
-            // does not momentarily show stale values from prior interaction.
-            if let keyframe = interpolatedKeyframeAtCurrentPlayhead(in: scene) {
-                applyKeyframe(keyframe)
+                // Apply the current playhead state immediately so first rendered
+                // frame does not momentarily show values from prior interaction.
+                if let keyframe = interpolatedKeyframeAtCurrentPlayhead(in: scene) {
+                    applyKeyframe(keyframe)
+                }
             }
         }
 
@@ -1371,7 +1491,15 @@ final class AnimationManager {
     /// Targets are also updated so hand gestures can blend in when animation stops.
     private func applyKeyframe(_ keyframe: AnimationKeyframe) {
         guard let settings = renderSettings else { return }
-        
+        settings.withPersistenceSuppressed {
+            applyKeyframeWithoutPersistence(keyframe, to: settings)
+        }
+    }
+
+    /// Inner hot path. The caller establishes the scene-mutation boundary once
+    /// so effect setters cannot rewrite device/user preference blobs.
+    private func applyKeyframeWithoutPersistence(_ keyframe: AnimationKeyframe,
+                                                 to settings: RenderSettings) {
         settings.animationBaseMinDistance = keyframe.minDistance
         settings.animationBaseFoldingLimit = keyframe.foldingLimit
         settings.animationBaseSphereRadius = keyframe.sphereRadius
@@ -1395,6 +1523,7 @@ final class AnimationManager {
         settings.foldingLimit = keyframe.foldingLimit + settings.audioOffsetFoldingLimit
         settings.sphereRadius = keyframe.sphereRadius + settings.audioOffsetSphereRadius
         settings.fractalScale = keyframe.fractalScale + settings.audioOffsetFractalScale
+        settings.scale = keyframe.scale
         // Iteration budget: skip when the user has manually overridden it for
         // this scene. The override is cleared on every scene switch so the
         // scene's saved budget restores on first run.
@@ -1685,31 +1814,24 @@ final class AnimationManager {
     /// deletion removes its file at the delete site (`removeUserSceneFile`) or via
     /// `replaceUserScenes`, both of which only ever drop ids the app already knew.
     private func saveScenes() {
-        if let root = storeRoot {
-            let dir = StorageLocation.animationsDir(root)
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let exts = ThresholdExportFormat.extensions(in: .animation)
-            var existingByID: [UUID: URL] = [:]
-            if let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
-                for url in files where exts.contains(url.pathExtension) {
-                    if let data = try? Data(contentsOf: url),
-                       let scene = try? sceneDecoder.decode(AnimationScene.self, from: data),
-                       !DefaultScenes.isDefault(scene.id) {
-                        existingByID[scene.id] = url
-                    }
-                }
-            }
-            for scene in userScenes {
-                if let old = existingByID[scene.id] { try? FileManager.default.removeItem(at: old) }  // rename-safe
-                let ext = ThresholdExportFormat.animation(hasSong: scene.attachedSong != nil).ext
-                let fileURL = dir.appendingPathComponent(Self.sanitizedSceneFileName(scene.name, id: scene.id, ext: ext))
-                if let data = try? prettySceneEncoder.encode(scene) {
-                    try? data.write(to: fileURL, options: .atomic)
-                }
+        if storeRoot == nil {
+            for scene in userScenes { pendingRootWrites[scene.id] = scene }
+        } else {
+            let written = writeUserSceneFiles(userScenes)
+            for id in written {
+                pendingRootWrites.removeValue(forKey: id)
             }
         }
         if let data = try? prettySceneEncoder.encode(userScenes) { writeSceneBackup(data: data) }
         print("💾 Saved \(userScenes.count) user scenes")
+    }
+
+    private func flushPendingRootWrites() {
+        guard storeRoot != nil, !pendingRootWrites.isEmpty else { return }
+        let written = writeUserSceneFiles(Array(pendingRootWrites.values))
+        for id in written {
+            pendingRootWrites.removeValue(forKey: id)
+        }
     }
 
     /// Replace all user scenes with the given array and mirror into the folder.
@@ -1720,7 +1842,9 @@ final class AnimationManager {
     /// propagate to every device.
     func replaceUserScenes(with scenes: [AnimationScene]) {
         let droppedIDs = Set(userScenes.map(\.id)).subtracting(scenes.map(\.id))
+        invalidateUserSceneReloadForLocalMutation()
         removeUserSceneFiles(ids: droppedIDs)
+        for id in droppedIDs { pendingRootWrites.removeValue(forKey: id) }
         userScenes = scenes
         saveScenes()
     }
@@ -1793,9 +1917,14 @@ final class AnimationManager {
         // Stop any playback
         if isPlaying { stop() }
         
+        guard let settings = renderSettings else { return }
+
         recordingSamples = []
         recordingStartTime = CACurrentMediaTime()
-        recordingFractalType = renderSettings?.fractalType
+        recordingFractalType = settings.fractalType
+        recordingBaseline = captureSceneBaseline(from: settings)
+        recordingEmbeddedFormula = AppModel.shared?.activeEmbeddedFormula
+        recordingMixedModeScene = recordingBaseline?.presentation.immersionStyle == "mixed" ? true : nil
         isRecording = true
         UsageAnalytics.shared.trackRecordingUsed()
         
@@ -1835,6 +1964,12 @@ final class AnimationManager {
         recordingSamples = []
         let recordedFractalType = recordingFractalType
         recordingFractalType = nil
+        let recordedBaseline = recordingBaseline
+        recordingBaseline = nil
+        let recordedEmbeddedFormula = recordingEmbeddedFormula
+        recordingEmbeddedFormula = nil
+        let recordedMixedModeScene = recordingMixedModeScene
+        recordingMixedModeScene = nil
         
         guard samples.count >= 2, let lastSample = samples.last else {
             print("⚠️ Live recording too short — need at least 2 samples")
@@ -1867,9 +2002,15 @@ final class AnimationManager {
         scene.keyframes = keyframes
         scene.isLooping = true
         scene.fractalType = recordedFractalType ?? renderSettings?.fractalType
+        scene.baseline = recordedBaseline
+        scene.embeddedFormula = recordedEmbeddedFormula
+        scene.mixedModeScene = recordedMixedModeScene
+        if let recordedBaseline {
+            populateLegacySceneFields(&scene, from: recordedBaseline)
+        }
         
-        // Capture scene-level color grading from current settings
-        if let settings = renderSettings {
+        // Legacy fallback for a recording begun before a baseline was available.
+        if recordedBaseline == nil, let settings = renderSettings {
             scene.colorSchemeSaturation = settings.colorSchemeSaturation
             scene.colorSchemeContrast = settings.colorSchemeContrast
             scene.colorSchemeGamma = settings.colorSchemeGamma
@@ -1922,7 +2063,8 @@ final class AnimationManager {
             
             // Check if any parameter changed significantly
             let positionDelta = simd_length(curr.position - prev.position)
-            let scaleDelta = abs(curr.detailScale - prev.detailScale)
+            let baseScaleDelta = abs(curr.scale - prev.scale)
+            let detailScaleDelta = abs(curr.detailScale - prev.detailScale)
             let rotDelta = abs(1.0 - abs(simd_dot(curr.worldRotation, prev.worldRotation)))
             let minDistDelta = abs(curr.minDistance - prev.minDistance)
             let foldDelta = abs(curr.foldingLimit - prev.foldingLimit)
@@ -1941,7 +2083,8 @@ final class AnimationManager {
             }
             
             let changed = positionDelta > 0.001
-                || scaleDelta > 0.01
+                || baseScaleDelta > 0.001
+                || detailScaleDelta > 0.01
                 || rotDelta > 0.0001
                 || minDistDelta > 0.001
                 || foldDelta > 0.001

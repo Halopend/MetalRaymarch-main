@@ -174,6 +174,10 @@ class PresetManager {
     @ObservationIgnored private var presetFileCache: [URL: CachedPresetFile] = [:]
     @ObservationIgnored private var presetReloadTask: Task<Void, Never>?
     @ObservationIgnored private var presetReloadGeneration: UInt64 = 0
+    /// Saves made while iCloud/root discovery is unresolved. They are flushed
+    /// before the first reload from that root so the folder-as-truth scan cannot
+    /// discard an in-memory scene the user just created.
+    @ObservationIgnored private var pendingRootWrites: [UUID: FractalPreset] = [:]
     private static let presetReloadDebounce: Duration = .milliseconds(350)
     /// Observers that reload the store when the active root resolves or the mode changes.
     /// `nonisolated(unsafe)` so the nonisolated deinit can unregister them; the only
@@ -242,7 +246,10 @@ class PresetManager {
         // so files added/removed in the folder mirror into the app.
         for name in [StorageLocation.rootResolvedNotification, StorageLocation.modeChangedNotification] {
             let observer = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.loadPresets() }
+                Task { @MainActor in
+                    self?.flushPendingRootWrites()
+                    self?.loadPresets()
+                }
             }
             storageObservers.append(observer)
         }
@@ -435,15 +442,25 @@ class PresetManager {
         // sandbox location and migrates into whichever store is first active).
         let legacyMigratedKey = "Preset.legacyMigrated"
         if !UserDefaults.standard.bool(forKey: legacyMigratedKey) {
-            if let legacy = loadLegacyPresetsBlob() {
+            var migrationSucceeded = true
+            if FileManager.default.fileExists(atPath: legacyPresetsFileURL.path) {
+                guard let legacy = loadLegacyPresetsBlob() else {
+                    print("❌ Legacy preset migration deferred: presets.json could not be decoded")
+                    return wroteFiles
+                }
                 for preset in legacy where !present.contains(preset.id) {
-                    writeNewPresetFile(preset, root: root)
-                    present.insert(preset.id)
-                    wroteFiles = true
+                    if writeNewPresetFile(preset, root: root) != nil {
+                        present.insert(preset.id)
+                        wroteFiles = true
+                    } else {
+                        migrationSucceeded = false
+                    }
                 }
                 print("📦 Migrated \(legacy.count) preset(s) from legacy presets.json")
             }
-            UserDefaults.standard.set(true, forKey: legacyMigratedKey)
+            if migrationSucceeded {
+                UserDefaults.standard.set(true, forKey: legacyMigratedKey)
+            }
         }
 
         // Seed bundled defaults ONCE per store. `!present` keeps any migrated/edited
@@ -451,15 +468,26 @@ class PresetManager {
         // new bundled preset in a future build won't auto-seed into an already-seeded
         // store — the correct trade for never resurrecting a user deletion.)
         guard !alreadySeeded else { return wroteFiles }
+        var seedSucceeded = true
         for preset in Self.bundledPresets() where !present.contains(preset.id) {
-            writeNewPresetFile(preset, root: root)
-            wroteFiles = true
+            if writeNewPresetFile(preset, root: root) != nil {
+                wroteFiles = true
+            } else {
+                seedSucceeded = false
+            }
         }
         let seededIDs = Self.bundledPresets().map(\.id)
-        if let data = try? presetEncoder.encode(seededIDs) {
-            try? data.write(to: marker, options: .atomic)
+        if seedSucceeded, let data = try? presetEncoder.encode(seededIDs) {
+            do {
+                try data.write(to: marker, options: .atomic)
+            } catch {
+                seedSucceeded = false
+                print("❌ Failed to write bundled-preset seed marker: \(error)")
+            }
         }
-        print("🌱 Seeded \(seededIDs.count) bundled preset(s) into store")
+        if seedSucceeded {
+            print("🌱 Seeded \(seededIDs.count) bundled preset(s) into store")
+        }
         return wroteFiles
     }
 
@@ -467,16 +495,19 @@ class PresetManager {
 
     /// Write one preset as its own file, routed by music-reactivity
     /// (.threshmp → Music Presets/, .threshscene → Scenes/). Removes any prior
-    /// file for the same id first, so a rename or a music-reactivity change can't
-    /// leave an orphan copy.
-    private func writePresetFile(_ preset: FractalPreset, root: URL) {
-        removePresetFiles(id: preset.id, root: root)
-        writeNewPresetFile(preset, root: root)
+    /// file for the same id only AFTER the replacement is safely on disk. This
+    /// preserves the previous copy if encoding or writing fails.
+    @discardableResult
+    private func writePresetFile(_ preset: FractalPreset, root: URL) -> Bool {
+        guard let writtenURL = writeNewPresetFile(preset, root: root) else { return false }
+        removePresetFiles(id: preset.id, root: root, excluding: [writtenURL])
+        return true
     }
 
     /// Write a known-absent preset without scanning the store first. Used by
     /// migration/seeding after the detached scan has already established IDs.
-    private func writeNewPresetFile(_ preset: FractalPreset, root: URL) {
+    @discardableResult
+    private func writeNewPresetFile(_ preset: FractalPreset, root: URL) -> URL? {
         let hasMusic = preset.hasMusicReactiveMappings
         let dir = hasMusic ? StorageLocation.musicPresetsDir(root) : StorageLocation.scenesDir(root)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -485,24 +516,28 @@ class PresetManager {
         do {
             let data = try presetEncoder.encode(preset)
             try data.write(to: url, options: .atomic)
+            return url
         } catch {
             print("Failed to write preset file: \(error)")
+            return nil
         }
     }
 
     /// Delete every store file (both folders) whose decoded id matches `id`.
-    private func removePresetFiles(id: UUID, root: URL) {
-        removePresetFiles(ids: [id], root: root)
+    private func removePresetFiles(id: UUID, root: URL, excluding: Set<URL> = []) {
+        removePresetFiles(ids: [id], root: root, excluding: excluding)
     }
 
     /// Delete every store file (both folders) whose decoded id is in `ids`, scanning
     /// each folder once (vs one scan per id). Used by the delete sites and `replaceAll`.
-    private func removePresetFiles(ids: Set<UUID>, root: URL) {
+    private func removePresetFiles(ids: Set<UUID>, root: URL, excluding: Set<URL> = []) {
         guard !ids.isEmpty else { return }
+        let excluded = Set(excluding.map(\.standardizedFileURL))
         let exts = ThresholdExportFormat.extensions(in: .preset)
         for dir in [StorageLocation.scenesDir(root), StorageLocation.musicPresetsDir(root)] {
             guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
             for url in files where exts.contains(url.pathExtension) {
+                guard !excluded.contains(url.standardizedFileURL) else { continue }
                 if let data = try? Data(contentsOf: url),
                    let preset = try? presetDecoder.decode(FractalPreset.self, from: data), ids.contains(preset.id) {
                     try? FileManager.default.removeItem(at: url)
@@ -511,10 +546,33 @@ class PresetManager {
         }
     }
 
-    /// Persist a single preset to the store (no-op until the root resolves).
+    /// Persist a single preset, queueing it while the active root resolves.
     private func persist(_ preset: FractalPreset) {
-        guard let root = storeRoot else { return }
-        writePresetFile(preset, root: root)
+        guard let root = storeRoot else {
+            pendingRootWrites[preset.id] = preset
+            return
+        }
+        invalidatePresetReloadForLocalMutation()
+        if writePresetFile(preset, root: root) {
+            pendingRootWrites.removeValue(forKey: preset.id)
+        }
+    }
+
+    private func flushPendingRootWrites() {
+        guard let root = storeRoot, !pendingRootWrites.isEmpty else { return }
+        invalidatePresetReloadForLocalMutation()
+        let pending = pendingRootWrites
+        for (id, preset) in pending {
+            if writePresetFile(preset, root: root) {
+                pendingRootWrites.removeValue(forKey: id)
+            }
+        }
+    }
+
+    private func invalidatePresetReloadForLocalMutation() {
+        presetReloadGeneration &+= 1
+        presetReloadTask?.cancel()
+        presetReloadTask = nil
     }
 
     /// Schedule a folder mirror. Watcher, foreground, and startup bursts are
@@ -656,6 +714,7 @@ class PresetManager {
     /// Mirrors `AnimationManager.replaceUserScenes`.
     func replaceAll(with newPresets: [FractalPreset]) {
         let droppedIDs = Set(presets.map(\.id)).subtracting(newPresets.map(\.id))
+        invalidatePresetReloadForLocalMutation()
         presets = newPresets
         if let root = storeRoot {
             removePresetFiles(ids: droppedIDs, root: root)
@@ -718,8 +777,12 @@ class PresetManager {
     /// that removal is what propagates (iCloud syncs the delete to other devices).
     func deletePreset(_ preset: FractalPreset) {
         presets.removeAll { $0.id == preset.id }
+        pendingRootWrites.removeValue(forKey: preset.id)
         FractalPreset.clearThumbnailCache(for: preset.id)
-        if let root = storeRoot { removePresetFiles(id: preset.id, root: root) }
+        if let root = storeRoot {
+            invalidatePresetReloadForLocalMutation()
+            removePresetFiles(id: preset.id, root: root)
+        }
         scheduleBackup()
     }
 
@@ -729,7 +792,9 @@ class PresetManager {
             presets.indices.contains(index) ? presets[index] : nil
         }
         presets.remove(atOffsets: offsets)
+        if !removed.isEmpty { invalidatePresetReloadForLocalMutation() }
         for preset in removed {
+            pendingRootWrites.removeValue(forKey: preset.id)
             FractalPreset.clearThumbnailCache(for: preset.id)
             if let root = storeRoot { removePresetFiles(id: preset.id, root: root) }
         }
@@ -956,7 +1021,7 @@ extension PresetManager {
         guard FileManager.default.fileExists(atPath: lastStateFileURL.path) else {
             print("ℹ️ No last state found - loading Mandelbox default")
             let defaultPreset = PresetManager.mandelboxDefaultPreset()
-            defaultPreset.apply(to: settings)
+            defaultPreset.apply(to: settings, scope: .session)
             return defaultPreset
         }
         
@@ -965,7 +1030,7 @@ extension PresetManager {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let preset = try decoder.decode(FractalPreset.self, from: data)
-            preset.apply(to: settings)
+            preset.apply(to: settings, scope: .session)
             print("✅ Last state restored")
             return preset
         } catch {

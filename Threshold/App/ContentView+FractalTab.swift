@@ -468,7 +468,7 @@ extension ContentView {
                     }
                     Toggle("Show", isOn: Binding(
                         get: { cache.display.platformEnabled },
-                        set: { cache.display.platformEnabled = $0 }
+                        set: { cache.setPlatformEnabled($0) }
                     ))
                     .labelsHidden()
                     .tint(.cyan)
@@ -746,12 +746,6 @@ extension ContentView {
         }
         .padding()
         .background(Color.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
-        .onAppear {
-            if cache.quality.boundingShapeType != SafetyBubbleShapePreset.sphere.storedValue {
-                cache.quality.boundingShapeType = SafetyBubbleShapePreset.sphere.storedValue
-                cache.push(\.boundingShapeType, value: cache.quality.boundingShapeType)
-            }
-        }
     }
 
     // MARK: - Shape tab (rail sub-tab: Bounding)

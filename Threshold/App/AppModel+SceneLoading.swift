@@ -265,13 +265,15 @@ extension AppModel {
         guard let minsTriplet = triplets.first(where: { $0.groupName == "Mins" }),
               let maxsTriplet = triplets.first(where: { $0.groupName == "Maxs" }) else { return }
 
-        renderSettings.setBinding(
-            .parameterTriplet(minsTriplet),
-            for: GestureSlot(hand: .left, finger: .middle)
-        )
-        renderSettings.setBinding(
-            .parameterTriplet(maxsTriplet),
-            for: GestureSlot(hand: .right, finger: .middle)
-        )
+        renderSettings.withPersistenceSuppressed {
+            renderSettings.setBinding(
+                .parameterTriplet(minsTriplet),
+                for: GestureSlot(hand: .left, finger: .middle)
+            )
+            renderSettings.setBinding(
+                .parameterTriplet(maxsTriplet),
+                for: GestureSlot(hand: .right, finger: .middle)
+            )
+        }
     }
 }

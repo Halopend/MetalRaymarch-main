@@ -17,6 +17,11 @@ final class RenderSettings: @unchecked Sendable {
     static let infiniteZoomMaxScale: Float = 4096.0 // deepest zoom-in before octave-rebase is needed
     // os_unfair_lock is a low-level spinlock - fastest for short critical sections
     private var _lock = os_unfair_lock()
+    /// Scene loads, preview rollback, and animation playback mutate the live
+    /// renderer but must not rewrite the user's device-preference blobs. Nested
+    /// transactions are supported because a scene restore can call domain helpers
+    /// that also suppress persistence.
+    private var _persistenceSuppressionDepth: Int = 0
     
     // Inline lock/unlock for zero function call overhead
     @inline(__always)
@@ -24,6 +29,24 @@ final class RenderSettings: @unchecked Sendable {
         os_unfair_lock_lock(&_lock)
         defer { os_unfair_lock_unlock(&_lock) }
         return body()
+    }
+
+    /// Run mutations without feeding their intermediate values back into
+    /// SettingsPersistence. This is the mutation-origin boundary between
+    /// scene/session state and device/user preferences.
+    @discardableResult
+    func withPersistenceSuppressed<T>(_ body: () throws -> T) rethrows -> T {
+        withLock { _persistenceSuppressionDepth += 1 }
+        defer {
+            withLock {
+                _persistenceSuppressionDepth = max(0, _persistenceSuppressionDepth - 1)
+            }
+        }
+        return try body()
+    }
+
+    private var persistenceIsSuppressed: Bool {
+        withLock { _persistenceSuppressionDepth > 0 }
     }
     
     // ── UserDefaults init helpers ──────────────────────────────────────────
@@ -872,7 +895,8 @@ final class RenderSettings: @unchecked Sendable {
     /// Persist the audio-reactive domain now (used by the arm-slider gesture on
     /// release, after a run of live setter writes).
     func persistAudioReactiveNow() {
-        persistAudioReactive()
+        guard !persistenceIsSuppressed else { return }
+        SettingsPersistence.save(audioReactiveConfig, domain: .audioReactive)
     }
 
     var musicReactiveMappings: [MusicReactiveMapping] {
@@ -1073,7 +1097,7 @@ final class RenderSettings: @unchecked Sendable {
 
                 // ── Per-fractal gesture binding save / restore ───────────
                 // Save current gesture bindings under the old fractal type.
-                if oldValue != newValue {
+                if oldValue != newValue, _persistenceSuppressionDepth == 0 {
                     PerFractalGestureStore.save(_gestureBindings, for: oldValue)
                 }
                 // Try to restore saved bindings for the new fractal type.
@@ -1737,8 +1761,10 @@ final class RenderSettings: @unchecked Sendable {
         }
         persistGesture()
         // Also save bindings under the current fractal type for per-fractal restore.
-        withLock {
-            PerFractalGestureStore.save(_gestureBindings, for: _fractalType)
+        if !persistenceIsSuppressed {
+            withLock {
+                PerFractalGestureStore.save(_gestureBindings, for: _fractalType)
+            }
         }
     }
 
@@ -4113,25 +4139,26 @@ final class RenderSettings: @unchecked Sendable {
 
     /// Persist the audio-reactive config (throttled — continuous sliders may fire rapidly).
     private func persistAudioReactive() {
-        guard SettingsPersistence.shouldSave(domain: .audioReactive) else { return }
-        SettingsPersistence.save(audioReactiveConfig, domain: .audioReactive)
+        guard !persistenceIsSuppressed else { return }
+        SettingsPersistence.saveDebounced(audioReactiveConfig, domain: .audioReactive)
     }
 
     /// Persist the gesture config (called after binding/threshold/sensitivity changes).
     private func persistGesture() {
-        guard SettingsPersistence.shouldSave(domain: .gesture) else { return }
-        SettingsPersistence.save(gestureConfig, domain: .gesture)
+        guard !persistenceIsSuppressed else { return }
+        SettingsPersistence.saveDebounced(gestureConfig, domain: .gesture)
     }
 
     /// Persist the display config (called after HUD/music shortcut changes).
     private func persistDisplay() {
+        guard !persistenceIsSuppressed else { return }
         SettingsPersistence.save(displayConfig, domain: .display)
     }
 
     /// Persist the color config (throttled — sliders/gradients may fire at 90fps).
     private func persistColor() {
-        guard SettingsPersistence.shouldSave(domain: .color) else { return }
-        SettingsPersistence.save(colorConfig, domain: .color)
+        guard !persistenceIsSuppressed else { return }
+        SettingsPersistence.saveDebounced(colorConfig, domain: .color)
     }
 
     /// Benchmark-harness only: pin every CPU-side animation accumulator to a fixed
@@ -4160,28 +4187,44 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
+    /// Start a newly loaded authored scene from a deterministic animation phase
+    /// instead of inheriting clocks/accumulators from the previous scene.
+    func resetSceneAnimationPhases() {
+        withLock {
+            _colorAnimTime = 0
+            _lightAnimTime = 0
+            _huePhase = 0
+            _pulsePhase = 0
+            _fogHuePhase = 0
+            _gradientPhase = 0
+            _polarRotationAccum = 0
+            _juliaDriftAccum = 0
+            _colorSchemeAutoTimer = 0
+        }
+    }
+
     /// Persist the quality config (throttled — foveation slider may fire rapidly).
     private func persistQuality() {
-        guard SettingsPersistence.shouldSave(domain: .quality) else { return }
-        SettingsPersistence.save(qualityConfig, domain: .quality)
+        guard !persistenceIsSuppressed else { return }
+        SettingsPersistence.saveDebounced(qualityConfig, domain: .quality)
     }
 
     /// Persist the lighting config (throttled — effect intensity sliders may fire rapidly).
     private func persistLighting() {
-        guard SettingsPersistence.shouldSave(domain: .lighting) else { return }
-        SettingsPersistence.save(lightingConfig, domain: .lighting)
+        guard !persistenceIsSuppressed else { return }
+        SettingsPersistence.saveDebounced(lightingConfig, domain: .lighting)
     }
 
     /// Persist the safety bubble config (throttled — radius/shape sliders).
     private func persistSafetyBubble() {
-        guard SettingsPersistence.shouldSave(domain: .safetyBubble) else { return }
-        SettingsPersistence.save(safetyBubbleConfig, domain: .safetyBubble)
+        guard !persistenceIsSuppressed else { return }
+        SettingsPersistence.saveDebounced(safetyBubbleConfig, domain: .safetyBubble)
     }
 
     /// Persist the hand attraction config (throttled — radius/strength sliders).
     private func persistHandAttraction() {
-        guard SettingsPersistence.shouldSave(domain: .handAttraction) else { return }
-        SettingsPersistence.save(handAttractionConfig, domain: .handAttraction)
+        guard !persistenceIsSuppressed else { return }
+        SettingsPersistence.saveDebounced(handAttractionConfig, domain: .handAttraction)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

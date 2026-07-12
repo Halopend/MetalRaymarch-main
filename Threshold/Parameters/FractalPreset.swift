@@ -17,8 +17,346 @@ typealias PlatformImage = UIImage
 typealias PlatformImage = NSImage
 #endif
 
+// MARK: - Canonical scene state
+
+/// Describes why a state snapshot is being restored. A shared scene is allowed
+/// to opt into comfort features, but it must not turn off a user's safety bubble.
+/// Session/preview restoration, on the other hand, must reproduce the captured
+/// state exactly so cancel and relaunch are lossless.
+enum SceneRestoreScope: Sendable {
+    case scene
+    case session
+}
+
+/// Scene-owned quality and containment. Device/hardware tuning (foveation,
+/// temporal reprojection, cone-march strength, adaptive resolution, etc.) is
+/// intentionally absent: those settings belong to the destination device.
+struct SceneQualityState: Codable, Equatable {
+    var baseFractalIterations: Int = 9
+    var baseMaxRaySteps: Int = 64
+    var resolutionScale: Float?
+    var tileSize: Int?
+    var coneMarchCompatible: Bool = true
+    var recommendedQuality: SceneQualityTarget?
+    var shadowsEnabled: Bool = true
+    var boundingShapeEnabled: Bool = false
+    var boundingShapeRadius: Float = 6.0
+    var boundingShapeFogMode: Int = 0
+    var boundingShapeShadowDepth: Float = 0.35
+    var boundingShapeType: Float = 0.0
+    var boundToSpaceEnabled: Bool = false
+    var boundToSpaceMode: Int = 0
+    var boundSpaceWidth: Float = 4.0
+    var boundSpaceDepth: Float = 4.0
+    var boundSpaceHeight: Float = 2.5
+    var boundAmbientStrength: Float = 0.5
+    var envScrunchEnabled: Bool = false
+    var envScrunchMode: Int = 0
+    var envScrunchStrength: Float = 0.8
+    var envScrunchReach: Float = 0.75
+    var envScrunchContain: Int = 0
+    var envScrunchContainFeather: Float = 0.1
+    var zoomFogCompensationEnabled: Bool = false
+
+    init() {}
+
+    init(_ config: QualityConfig,
+         coneMarchCompatible: Bool,
+         recommendedQuality: SceneQualityTarget?) {
+        baseFractalIterations = config.baseFractalIterations
+        baseMaxRaySteps = config.baseMaxRaySteps
+        resolutionScale = config.resolutionScale
+        tileSize = config.tileSize
+        self.coneMarchCompatible = coneMarchCompatible
+        self.recommendedQuality = recommendedQuality
+        shadowsEnabled = config.shadowsEnabled
+        boundingShapeEnabled = config.boundingSphereSkipEnabled
+        boundingShapeRadius = config.boundingShapeRadius
+        boundingShapeFogMode = config.boundingShapeFogMode
+        boundingShapeShadowDepth = config.boundingShapeShadowDepth
+        boundingShapeType = config.boundingShapeType
+        boundToSpaceEnabled = config.boundToSpaceEnabled
+        boundToSpaceMode = config.boundToSpaceMode
+        boundSpaceWidth = config.boundSpaceWidth
+        boundSpaceDepth = config.boundSpaceDepth
+        boundSpaceHeight = config.boundSpaceHeight
+        boundAmbientStrength = config.boundAmbientStrength
+        envScrunchEnabled = config.envScrunchEnabled
+        envScrunchMode = config.envScrunchMode
+        envScrunchStrength = config.envScrunchStrength
+        envScrunchReach = config.envScrunchReach
+        envScrunchContain = config.envScrunchContain
+        envScrunchContainFeather = config.envScrunchContainFeather
+        zoomFogCompensationEnabled = config.zoomFogCompensationEnabled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case baseFractalIterations, baseMaxRaySteps, resolutionScale, tileSize
+        case coneMarchCompatible, recommendedQuality, shadowsEnabled
+        case boundingShapeEnabled, boundingShapeRadius, boundingShapeFogMode
+        case boundingShapeShadowDepth, boundingShapeType
+        case boundToSpaceEnabled, boundToSpaceMode, boundSpaceWidth, boundSpaceDepth, boundSpaceHeight
+        case boundAmbientStrength
+        case envScrunchEnabled, envScrunchMode, envScrunchStrength, envScrunchReach
+        case envScrunchContain, envScrunchContainFeather
+        case zoomFogCompensationEnabled
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        baseFractalIterations = try c.decodeIfPresent(Int.self, forKey: .baseFractalIterations) ?? 9
+        baseMaxRaySteps = try c.decodeIfPresent(Int.self, forKey: .baseMaxRaySteps) ?? 64
+        resolutionScale = try c.decodeIfPresent(Float.self, forKey: .resolutionScale)
+        tileSize = try c.decodeIfPresent(Int.self, forKey: .tileSize)
+        coneMarchCompatible = try c.decodeIfPresent(Bool.self, forKey: .coneMarchCompatible) ?? true
+        recommendedQuality = try c.decodeIfPresent(SceneQualityTarget.self, forKey: .recommendedQuality)
+        shadowsEnabled = try c.decodeIfPresent(Bool.self, forKey: .shadowsEnabled) ?? true
+        boundingShapeEnabled = try c.decodeIfPresent(Bool.self, forKey: .boundingShapeEnabled) ?? false
+        boundingShapeRadius = try c.decodeIfPresent(Float.self, forKey: .boundingShapeRadius) ?? 6.0
+        boundingShapeFogMode = try c.decodeIfPresent(Int.self, forKey: .boundingShapeFogMode) ?? 0
+        boundingShapeShadowDepth = try c.decodeIfPresent(Float.self, forKey: .boundingShapeShadowDepth) ?? 0.35
+        boundingShapeType = try c.decodeIfPresent(Float.self, forKey: .boundingShapeType) ?? 0.0
+        boundToSpaceEnabled = try c.decodeIfPresent(Bool.self, forKey: .boundToSpaceEnabled) ?? false
+        boundToSpaceMode = try c.decodeIfPresent(Int.self, forKey: .boundToSpaceMode) ?? 0
+        boundSpaceWidth = try c.decodeIfPresent(Float.self, forKey: .boundSpaceWidth) ?? 4.0
+        boundSpaceDepth = try c.decodeIfPresent(Float.self, forKey: .boundSpaceDepth) ?? 4.0
+        boundSpaceHeight = try c.decodeIfPresent(Float.self, forKey: .boundSpaceHeight) ?? 2.5
+        boundAmbientStrength = try c.decodeIfPresent(Float.self, forKey: .boundAmbientStrength) ?? 0.5
+        envScrunchEnabled = try c.decodeIfPresent(Bool.self, forKey: .envScrunchEnabled) ?? false
+        envScrunchMode = try c.decodeIfPresent(Int.self, forKey: .envScrunchMode) ?? 0
+        envScrunchStrength = try c.decodeIfPresent(Float.self, forKey: .envScrunchStrength) ?? 0.8
+        envScrunchReach = try c.decodeIfPresent(Float.self, forKey: .envScrunchReach) ?? 0.75
+        envScrunchContain = try c.decodeIfPresent(Int.self, forKey: .envScrunchContain) ?? 0
+        envScrunchContainFeather = try c.decodeIfPresent(Float.self, forKey: .envScrunchContainFeather) ?? 0.1
+        zoomFogCompensationEnabled = try c.decodeIfPresent(Bool.self, forKey: .zoomFogCompensationEnabled) ?? false
+    }
+}
+
+/// Scene-authored display state. `showMusicShortcuts` is deliberately not here;
+/// it is application chrome, not part of a rendered scene.
+struct SceneDisplayState: Codable, Equatable {
+    var lightingPlay: Bool = false
+    var lightingMode: LightingMode = .animated
+    var sphericalInversionMode: SphericalInversionMode = .off
+    var sphericalInversionRadius: Float = 2.0
+    var sphereProjectionEnabled: Bool = false
+    var sphereProjectionBlend: Float = 1.0
+    var sphereProjectionRadius: Float = 1.0
+    var deIterationMismatch: Float = 0.0
+    var platformRadius: Float = 1.888
+    var platformEnabled: Bool = true
+
+    init() {}
+
+    init(_ config: DisplayConfig) {
+        lightingPlay = config.lightingPlay
+        lightingMode = config.lightingMode
+        sphericalInversionMode = config.sphericalInversionMode
+        sphericalInversionRadius = config.sphericalInversionRadius
+        sphereProjectionEnabled = config.sphereProjectionEnabled
+        sphereProjectionBlend = config.sphereProjectionBlend
+        sphereProjectionRadius = config.sphereProjectionRadius
+        deIterationMismatch = config.deIterationMismatch
+        platformRadius = config.platformRadius
+        platformEnabled = config.platformEnabled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case lightingPlay, lightingMode, sphericalInversionMode, sphericalInversionRadius
+        case sphereProjectionEnabled, sphereProjectionBlend, sphereProjectionRadius
+        case deIterationMismatch, platformRadius, platformEnabled
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        lightingPlay = try c.decodeIfPresent(Bool.self, forKey: .lightingPlay) ?? false
+        lightingMode = try c.decodeIfPresent(LightingMode.self, forKey: .lightingMode) ?? .animated
+        sphericalInversionMode = try c.decodeIfPresent(SphericalInversionMode.self, forKey: .sphericalInversionMode) ?? .off
+        sphericalInversionRadius = try c.decodeIfPresent(Float.self, forKey: .sphericalInversionRadius) ?? 2.0
+        sphereProjectionEnabled = try c.decodeIfPresent(Bool.self, forKey: .sphereProjectionEnabled) ?? false
+        sphereProjectionBlend = try c.decodeIfPresent(Float.self, forKey: .sphereProjectionBlend) ?? 1.0
+        sphereProjectionRadius = try c.decodeIfPresent(Float.self, forKey: .sphereProjectionRadius) ?? 1.0
+        deIterationMismatch = try c.decodeIfPresent(Float.self, forKey: .deIterationMismatch) ?? 0.0
+        platformRadius = try c.decodeIfPresent(Float.self, forKey: .platformRadius) ?? 1.888
+        platformEnabled = try c.decodeIfPresent(Bool.self, forKey: .platformEnabled) ?? true
+    }
+}
+
+/// Both the legacy/custom single warp and the composable transform stack. The
+/// former was previously live-only and therefore disappeared on save/reset.
+struct SceneSpaceState: Codable, Equatable {
+    var warpStrength: Float = 0.0
+    var warpOrigin: SIMD3<Float> = .zero
+    var warpAxis: SIMD3<Float> = SIMD3<Float>(0, 1, 0)
+    var warpStack: [SpaceWarpOpValue] = []
+}
+
+struct SceneMotionState: Codable, Equatable {
+    var infiniteZoomEnabled: Bool = false
+    var infiniteZoomRate: Float = 0.15
+}
+
+/// Presentation intent is kept as a stable string instead of coupling the file
+/// format to AppModel. It preserves all three modes; the old `mixedModeScene`
+/// Boolean could not distinguish Window from Immersive.
+struct ScenePresentationState: Codable, Equatable {
+    var immersionStyle: String?
+}
+
+/// Versioned, domain-shaped source of truth for scene capture/restore. The old
+/// flat FractalPreset fields remain encoded for older app builds and are applied
+/// after this envelope as compatibility overrides.
+struct SceneState: Codable, Equatable {
+    static let currentSchemaVersion = 1
+
+    var schemaVersion: Int = currentSchemaVersion
+    var geometry: GeometryConfig = GeometryConfig()
+    var color: ColorConfig = ColorConfig()
+    var lighting: LightingConfig = LightingConfig()
+    var quality: SceneQualityState = SceneQualityState()
+    var display: SceneDisplayState = SceneDisplayState()
+    var safetyBubble: SafetyBubbleConfig = SafetyBubbleConfig()
+    var handAttraction: HandAttractionConfig = HandAttractionConfig()
+    var audioReactive: AudioReactiveConfig = AudioReactiveConfig()
+    var space: SceneSpaceState = SceneSpaceState()
+    var motion: SceneMotionState = SceneMotionState()
+    var presentation: ScenePresentationState = ScenePresentationState()
+
+    init() {}
+
+    init(capturing settings: RenderSettings, immersionStyle: String? = nil) {
+        geometry = settings.geometryConfig
+        color = settings.colorConfig
+        lighting = settings.lightingConfig
+        quality = SceneQualityState(
+            settings.qualityConfig,
+            coneMarchCompatible: settings.sceneConeMarchCompatible,
+            recommendedQuality: settings.recommendedQuality
+        )
+        display = SceneDisplayState(settings.displayConfig)
+        safetyBubble = settings.safetyBubbleConfig
+        handAttraction = settings.handAttractionConfig
+        audioReactive = settings.audioReactiveConfig
+        space = SceneSpaceState(
+            warpStrength: settings.spaceWarpStrength,
+            warpOrigin: settings.spaceWarpOrigin,
+            warpAxis: settings.spaceWarpAxis,
+            warpStack: settings.spaceWarpStack
+        )
+        motion = SceneMotionState(
+            infiniteZoomEnabled: settings.infiniteZoomEnabled,
+            infiniteZoomRate: settings.infiniteZoomRate
+        )
+        presentation = ScenePresentationState(immersionStyle: immersionStyle)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, geometry, color, lighting, quality, display
+        case safetyBubble, handAttraction, audioReactive, space, motion, presentation
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        geometry = (try? c.decodeIfPresent(GeometryConfig.self, forKey: .geometry)) ?? GeometryConfig()
+        color = (try? c.decodeIfPresent(ColorConfig.self, forKey: .color)) ?? ColorConfig()
+        lighting = (try? c.decodeIfPresent(LightingConfig.self, forKey: .lighting)) ?? LightingConfig()
+        quality = (try? c.decodeIfPresent(SceneQualityState.self, forKey: .quality)) ?? SceneQualityState()
+        display = (try? c.decodeIfPresent(SceneDisplayState.self, forKey: .display)) ?? SceneDisplayState()
+        safetyBubble = (try? c.decodeIfPresent(SafetyBubbleConfig.self, forKey: .safetyBubble)) ?? SafetyBubbleConfig()
+        handAttraction = (try? c.decodeIfPresent(HandAttractionConfig.self, forKey: .handAttraction)) ?? HandAttractionConfig()
+        audioReactive = (try? c.decodeIfPresent(AudioReactiveConfig.self, forKey: .audioReactive)) ?? AudioReactiveConfig()
+        space = (try? c.decodeIfPresent(SceneSpaceState.self, forKey: .space)) ?? SceneSpaceState()
+        motion = (try? c.decodeIfPresent(SceneMotionState.self, forKey: .motion)) ?? SceneMotionState()
+        presentation = (try? c.decodeIfPresent(ScenePresentationState.self, forKey: .presentation)) ?? ScenePresentationState()
+    }
+
+    /// Apply only scene-owned lanes, merging them over the destination device's
+    /// acceleration preferences. Domain config setters are non-persisting, which
+    /// also makes this safe for animation playback and external preview.
+    func apply(to settings: RenderSettings,
+               includePerformance: Bool,
+               scope: SceneRestoreScope) {
+        settings.geometryConfig = geometry
+        settings.targetMinDistance = geometry.minDistance
+        settings.targetFoldingLimit = geometry.foldingLimit
+        settings.targetSphereRadius = geometry.sphereRadius
+        settings.targetFractalScale = geometry.fractalScale
+        settings.targetPosition = geometry.position
+        settings.targetWorldRotation = geometry.worldRotation
+        settings.targetDetailScale = geometry.detailScale
+
+        var mergedQuality = settings.qualityConfig
+        mergedQuality.baseFractalIterations = quality.baseFractalIterations
+        mergedQuality.baseMaxRaySteps = quality.baseMaxRaySteps
+        if includePerformance {
+            if let resolutionScale = quality.resolutionScale {
+                mergedQuality.resolutionScale = resolutionScale
+            }
+            if let tileSize = quality.tileSize {
+                mergedQuality.tileSize = tileSize
+            }
+        }
+        mergedQuality.shadowsEnabled = quality.shadowsEnabled
+        mergedQuality.boundingSphereSkipEnabled = quality.boundingShapeEnabled
+        mergedQuality.boundingShapeRadius = quality.boundingShapeRadius
+        mergedQuality.boundingShapeFogMode = quality.boundingShapeFogMode
+        mergedQuality.boundingShapeShadowDepth = quality.boundingShapeShadowDepth
+        mergedQuality.boundingShapeType = quality.boundingShapeType
+        // The old assumed-room box was removed. Keep decoding its dimensions,
+        // but never reactivate it from a file.
+        mergedQuality.boundToSpaceEnabled = false
+        mergedQuality.boundToSpaceMode = quality.boundToSpaceMode
+        mergedQuality.boundSpaceWidth = quality.boundSpaceWidth
+        mergedQuality.boundSpaceDepth = quality.boundSpaceDepth
+        mergedQuality.boundSpaceHeight = quality.boundSpaceHeight
+        mergedQuality.boundAmbientStrength = quality.boundAmbientStrength
+        mergedQuality.envScrunchEnabled = quality.envScrunchEnabled
+        mergedQuality.envScrunchMode = quality.envScrunchMode
+        mergedQuality.envScrunchStrength = quality.envScrunchStrength
+        mergedQuality.envScrunchReach = quality.envScrunchReach
+        mergedQuality.envScrunchContain = quality.envScrunchContain
+        mergedQuality.envScrunchContainFeather = quality.envScrunchContainFeather
+        mergedQuality.zoomFogCompensationEnabled = quality.zoomFogCompensationEnabled
+        settings.qualityConfig = mergedQuality
+        settings.sceneConeMarchCompatible = quality.coneMarchCompatible
+        settings.applyRecommendedQuality(quality.recommendedQuality)
+
+        settings.colorConfig = color
+        settings.lightingConfig = lighting
+
+        var mergedDisplay = settings.displayConfig
+        mergedDisplay.lightingPlay = display.lightingPlay
+        mergedDisplay.lightingMode = display.lightingMode
+        mergedDisplay.sphericalInversionMode = display.sphericalInversionMode
+        mergedDisplay.sphericalInversionRadius = display.sphericalInversionRadius
+        mergedDisplay.sphereProjectionEnabled = display.sphereProjectionEnabled
+        mergedDisplay.sphereProjectionBlend = display.sphereProjectionBlend
+        mergedDisplay.sphereProjectionRadius = display.sphereProjectionRadius
+        mergedDisplay.deIterationMismatch = display.deIterationMismatch
+        mergedDisplay.platformRadius = display.platformRadius
+        mergedDisplay.platformEnabled = display.platformEnabled
+        settings.displayConfig = mergedDisplay
+
+        if scope == .session || safetyBubble.enabled {
+            settings.safetyBubbleConfig = safetyBubble
+        }
+        settings.handAttractionConfig = handAttraction
+        settings.audioReactiveConfig = audioReactive
+
+        settings.spaceWarpStrength = space.warpStrength
+        settings.spaceWarpOrigin = space.warpOrigin
+        settings.spaceWarpAxis = space.warpAxis
+        settings.spaceWarpStack = space.warpStack
+        settings.infiniteZoomEnabled = motion.infiniteZoomEnabled
+        settings.infiniteZoomRate = motion.infiniteZoomRate
+    }
+}
+
 /// Represents a saved preset with all render settings and a preview image
 struct FractalPreset: Codable, Identifiable {
+    static let currentSchemaVersion = 3
+
     let id: UUID
     var name: String
     var createdAt: Date
@@ -153,6 +491,14 @@ struct FractalPreset: Codable, Identifiable {
     /// the flat fields above: on load, flat fields apply first, then these module
     /// blocks apply with per-fractal capability filtering. Absent in older scenes.
     var modules: [String: ModuleParamBlock]?
+    /// Canonical domain-shaped scene snapshot. Flat fields remain alongside it
+    /// for older builds and externally-authored v1/v2 scenes.
+    var sceneState: SceneState?
+    /// Decode-only/apply routing for a valid schema-3 document that contains the
+    /// canonical envelope but omits the legacy compatibility projection. Current
+    /// writers normally dual-write; retaining this marker makes a decode/encode
+    /// cycle keep canonical-only semantics instead of inventing default overrides.
+    private var appliesLegacyFlatFields: Bool = true
 
     // === ADDITIONAL SCENE STATE (previously dropped on save) ===
     // Visual scene state that lives in the domain configs but was never captured
@@ -222,7 +568,7 @@ struct FractalPreset: Codable, Identifiable {
         case musicReactiveMappings  // legacy — mappings only
         case audioReactiveConfig    // canonical — full config
         case embeddedFormula        // optional self-contained DE shader payload
-        case schemaVersion, modules // module layer (typed/keyed params)
+        case schemaVersion, modules, sceneState, canonicalStateOnly // canonical state + legacy module layer
         // Additional scene state (previously dropped on save)
         case platformEnabled, platformRadius
         case mixedModeScene, boundingShapeEnabled, boundingShapeRadius, boundingShapeFogEnabled
@@ -271,18 +617,32 @@ struct FractalPreset: Codable, Identifiable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedSceneState = try container.decodeIfPresent(SceneState.self, forKey: .sceneState)
+        let explicitlyCanonicalOnly = try container.decodeIfPresent(Bool.self, forKey: .canonicalStateOnly) ?? false
+        let hasLegacyCore = container.contains(.fractalIterations)
+            && container.contains(.maxRaySteps)
+            && container.contains(.colorMix)
+            && container.contains(.colorIterations)
+            && container.contains(.position)
+            && container.contains(.scale)
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
         thumbnailData = try container.decodeIfPresent(Data.self, forKey: .thumbnailData)
         rating = try container.decodeIfPresent(Int.self, forKey: .rating) ?? 0
-        fractalIterations = try container.decode(Int.self, forKey: .fractalIterations)
-        maxRaySteps = try container.decode(Int.self, forKey: .maxRaySteps)
-        colorMix = try container.decode(Float.self, forKey: .colorMix)
-        colorIterations = try container.decode(Float.self, forKey: .colorIterations)
-        position = try container.decode(SIMD3<Float>.self, forKey: .position)
-        scale = try container.decode(Float.self, forKey: .scale)
+        fractalIterations = try container.decodeIfPresent(Int.self, forKey: .fractalIterations)
+            ?? decodedSceneState?.quality.baseFractalIterations ?? 9
+        maxRaySteps = try container.decodeIfPresent(Int.self, forKey: .maxRaySteps)
+            ?? decodedSceneState?.quality.baseMaxRaySteps ?? 64
+        colorMix = try container.decodeIfPresent(Float.self, forKey: .colorMix)
+            ?? decodedSceneState?.color.colorMix ?? 0.5
+        colorIterations = try container.decodeIfPresent(Float.self, forKey: .colorIterations)
+            ?? decodedSceneState?.color.colorIterations ?? 8.0
+        position = try container.decodeIfPresent(SIMD3<Float>.self, forKey: .position)
+            ?? decodedSceneState?.geometry.position ?? .zero
+        scale = try container.decodeIfPresent(Float.self, forKey: .scale)
+            ?? decodedSceneState?.geometry.scale ?? 1.0
         // Peek the raw fractalType marker BEFORE it maps through the alias so we
         // can detect a legacy "mandelboxSphereProjection" scene. The type itself
         // decodes to `.mandelbox` (FractalModelType back-compat alias); the
@@ -296,20 +656,36 @@ struct FractalPreset: Codable, Identifiable {
             }
             return false
         }()
-        fractalType = try container.decodeIfPresent(FractalModelType.self, forKey: .fractalType) ?? .mandelbox
-        colorScheme = try container.decodeIfPresent(ColorScheme.self, forKey: .colorScheme) ?? .classic
-        colorSchemeSaturation = try container.decodeIfPresent(Float.self, forKey: .colorSchemeSaturation) ?? 1.7
-        colorSchemeContrast = try container.decodeIfPresent(Float.self, forKey: .colorSchemeContrast) ?? 1.08
-        colorSchemeGamma = try container.decodeIfPresent(Float.self, forKey: .colorSchemeGamma) ?? 0.85
-        colorSchemeVibrance = try container.decodeIfPresent(Float.self, forKey: .colorSchemeVibrance) ?? 0.8
-        colorSchemeCurve = try container.decodeIfPresent(Float.self, forKey: .colorSchemeCurve) ?? 0.0
-        colorSchemeShadows = try container.decodeIfPresent(Float.self, forKey: .colorSchemeShadows) ?? -0.018
-        colorSchemeHighlights = try container.decodeIfPresent(Float.self, forKey: .colorSchemeHighlights) ?? 0.02
-        minDistance = try container.decodeIfPresent(Float.self, forKey: .minDistance) ?? 0.8
-        fractalScale = try container.decodeIfPresent(Float.self, forKey: .fractalScale) ?? 2.8
-        foldingLimit = try container.decodeIfPresent(Float.self, forKey: .foldingLimit) ?? 1.0
-        sphereRadius = try container.decodeIfPresent(Float.self, forKey: .sphereRadius) ?? 0.5
+        fractalType = try container.decodeIfPresent(FractalModelType.self, forKey: .fractalType)
+            ?? decodedSceneState?.geometry.fractalType ?? .mandelbox
+        colorScheme = try container.decodeIfPresent(ColorScheme.self, forKey: .colorScheme)
+            ?? decodedSceneState?.color.colorScheme ?? .classic
+        colorSchemeSaturation = try container.decodeIfPresent(Float.self, forKey: .colorSchemeSaturation)
+            ?? decodedSceneState?.color.colorSchemeSaturation ?? 1.7
+        colorSchemeContrast = try container.decodeIfPresent(Float.self, forKey: .colorSchemeContrast)
+            ?? decodedSceneState?.color.colorSchemeContrast ?? 1.08
+        colorSchemeGamma = try container.decodeIfPresent(Float.self, forKey: .colorSchemeGamma)
+            ?? decodedSceneState?.color.colorSchemeGamma ?? 0.85
+        colorSchemeVibrance = try container.decodeIfPresent(Float.self, forKey: .colorSchemeVibrance)
+            ?? decodedSceneState?.color.colorSchemeVibrance ?? 0.8
+        colorSchemeCurve = try container.decodeIfPresent(Float.self, forKey: .colorSchemeCurve)
+            ?? decodedSceneState?.color.colorSchemeCurve ?? 0.0
+        colorSchemeShadows = try container.decodeIfPresent(Float.self, forKey: .colorSchemeShadows)
+            ?? decodedSceneState?.color.colorSchemeShadows ?? -0.018
+        colorSchemeHighlights = try container.decodeIfPresent(Float.self, forKey: .colorSchemeHighlights)
+            ?? decodedSceneState?.color.colorSchemeHighlights ?? 0.02
+        minDistance = try container.decodeIfPresent(Float.self, forKey: .minDistance)
+            ?? decodedSceneState?.geometry.minDistance ?? 0.8
+        fractalScale = try container.decodeIfPresent(Float.self, forKey: .fractalScale)
+            ?? decodedSceneState?.geometry.fractalScale ?? 2.8
+        foldingLimit = try container.decodeIfPresent(Float.self, forKey: .foldingLimit)
+            ?? decodedSceneState?.geometry.foldingLimit ?? 1.0
+        sphereRadius = try container.decodeIfPresent(Float.self, forKey: .sphereRadius)
+            ?? decodedSceneState?.geometry.sphereRadius ?? 0.5
         formulaParamValues = try container.decodeIfPresent([Float].self, forKey: .formulaParamValues)
+            ?? decodedSceneState.map { state in
+                (0..<16).map { FormulaCatalog.getParam(state.geometry.formulaParams, index: $0) }
+            }
         resolutionScale = try container.decodeIfPresent(Float.self, forKey: .resolutionScale)
         let decodedTileSize = try container.decodeIfPresent(Int.self, forKey: .tileSize)
         tileSize = decodedTileSize == 2 ? nil : decodedTileSize  // Old "Quad Shared" mode removed → degrade to fragment
@@ -417,6 +793,8 @@ struct FractalPreset: Codable, Identifiable {
         // Module layer (typed/keyed params). Optional — older scenes have none.
         schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
         modules = try container.decodeIfPresent([String: ModuleParamBlock].self, forKey: .modules)
+        sceneState = decodedSceneState
+        appliesLegacyFlatFields = !explicitlyCanonicalOnly && (decodedSceneState == nil || hasLegacyCore)
 
         // Additional scene state (previously dropped) — all optional/backward-compatible.
         platformEnabled = try container.decodeIfPresent(Bool.self, forKey: .platformEnabled)
@@ -533,6 +911,10 @@ struct FractalPreset: Codable, Identifiable {
         // Module layer (typed/keyed params)
         try container.encodeIfPresent(schemaVersion, forKey: .schemaVersion)
         try container.encodeIfPresent(modules, forKey: .modules)
+        try container.encodeIfPresent(sceneState, forKey: .sceneState)
+        if !appliesLegacyFlatFields {
+            try container.encode(true, forKey: .canonicalStateOnly)
+        }
 
         // Additional scene state (previously dropped on save)
         try container.encodeIfPresent(platformEnabled, forKey: .platformEnabled)
@@ -691,9 +1073,17 @@ struct FractalPreset: Codable, Identifiable {
     /// Create a preset from current render settings
     static func fromSettings(_ settings: RenderSettings, name: String, id: UUID = UUID(), createdAt: Date = Date(), thumbnailData: Data? = nil, embeddedFormula: EmbeddedFormula? = nil) -> FractalPreset {
         var preset = FractalPreset(id: id, name: name, createdAt: createdAt, thumbnailData: thumbnailData)
+        var immersionStyle: String?
+        #if os(visionOS)
+        immersionStyle = AppModel.shared?.immersionStyleForRenderer.rawValue
+        #endif
+        // Capture each authored lane once, then derive the legacy projection from
+        // this exact canonical value. This prevents canonical and compatibility
+        // fields from representing two different instants during live playback.
+        let state = SceneState(capturing: settings, immersionStyle: immersionStyle)
 
         // ── Geometry domain (1 lock acquisition) ──
-        let geo = settings.geometryConfig
+        let geo = state.geometry
         preset.fractalType = geo.fractalType
         preset.minDistance = geo.minDistance
         preset.fractalScale = geo.fractalScale
@@ -714,17 +1104,17 @@ struct FractalPreset: Codable, Identifiable {
         preset.formulaParamValues = vals
 
         // ── Quality domain (1 lock acquisition) ──
-        let qual = settings.qualityConfig
+        let qual = state.quality
         preset.fractalIterations = qual.baseFractalIterations
         preset.maxRaySteps = qual.baseMaxRaySteps
         preset.resolutionScale = qual.resolutionScale
         preset.tileSize = qual.tileSize
         // Per-scene performance profile (live scene-load state, not part of QualityConfig).
-        preset.coneMarchCompatible = settings.sceneConeMarchCompatible
-        preset.recommendedQuality = settings.recommendedQuality
+        preset.coneMarchCompatible = qual.coneMarchCompatible
+        preset.recommendedQuality = qual.recommendedQuality
 
         // ── Color domain (1 lock acquisition) ──
-        let col = settings.colorConfig
+        let col = state.color
         preset.colorScheme = col.colorScheme
         preset.colorMix = col.colorMix
         preset.colorIterations = col.colorIterations
@@ -747,7 +1137,7 @@ struct FractalPreset: Codable, Identifiable {
         preset.tonemapStrength = col.tonemapStrength
 
         // ── Lighting domain (1 lock acquisition) ──
-        let lit = settings.lightingConfig
+        let lit = state.lighting
         preset.lightingPreset = lit.lightingPreset
         preset.hueRotationEffect = lit.hueRotationEffect
         preset.pulseEffect = lit.pulseEffect
@@ -764,7 +1154,7 @@ struct FractalPreset: Codable, Identifiable {
         preset.juliaDriftEffect = lit.juliaDriftEffect
 
         // ── Display domain (1 lock acquisition) ──
-        let disp = settings.displayConfig
+        let disp = state.display
         preset.lightingMode = disp.lightingMode
         // Space-module transforms live in DisplayConfig — capture them so they
         // round-trip through save/load (previously dropped).
@@ -778,41 +1168,41 @@ struct FractalPreset: Codable, Identifiable {
         preset.platformEnabled = disp.platformEnabled
         preset.platformRadius = disp.platformRadius
         // Bounding Shape (sphere) — artistic clip, round-trips with the scene.
-        preset.boundingShapeEnabled = settings.boundingSphereSkipEnabled
-        preset.boundingShapeRadius = settings.boundingShapeRadius
-        preset.boundingShapeFogMode = settings.boundingShapeFogMode
-        preset.boundingShapeShadowDepth = settings.boundingShapeShadowDepth
-        preset.boundingShapeType = settings.boundingShapeType
+        preset.boundingShapeEnabled = qual.boundingShapeEnabled
+        preset.boundingShapeRadius = qual.boundingShapeRadius
+        preset.boundingShapeFogMode = qual.boundingShapeFogMode
+        preset.boundingShapeShadowDepth = qual.boundingShapeShadowDepth
+        preset.boundingShapeType = qual.boundingShapeType
         // Bound to Space (assumed-room clip) — round-trips with the scene.
-        preset.boundToSpaceEnabled = settings.boundToSpaceEnabled
-        preset.boundToSpaceMode = settings.boundToSpaceMode
-        preset.boundSpaceWidth = settings.boundSpaceWidth
-        preset.boundSpaceDepth = settings.boundSpaceDepth
-        preset.boundSpaceHeight = settings.boundSpaceHeight
-        preset.boundAmbientStrength = settings.boundAmbientStrength
-        preset.envScrunchEnabled = settings.envScrunchEnabled
-        preset.envScrunchMode = settings.envScrunchMode
-        preset.envScrunchStrength = settings.envScrunchStrength
-        preset.envScrunchReach = settings.envScrunchReach
-        preset.envScrunchContain = settings.envScrunchContain
-        preset.envScrunchContainFeather = settings.envScrunchContainFeather
+        preset.boundToSpaceEnabled = qual.boundToSpaceEnabled
+        preset.boundToSpaceMode = qual.boundToSpaceMode
+        preset.boundSpaceWidth = qual.boundSpaceWidth
+        preset.boundSpaceDepth = qual.boundSpaceDepth
+        preset.boundSpaceHeight = qual.boundSpaceHeight
+        preset.boundAmbientStrength = qual.boundAmbientStrength
+        preset.envScrunchEnabled = qual.envScrunchEnabled
+        preset.envScrunchMode = qual.envScrunchMode
+        preset.envScrunchStrength = qual.envScrunchStrength
+        preset.envScrunchReach = qual.envScrunchReach
+        preset.envScrunchContain = qual.envScrunchContain
+        preset.envScrunchContainFeather = qual.envScrunchContainFeather
         // Mixed-immersion scene marker (visionOS): recorded only when the scene
         // is saved while Mixed is active, so loading it can restore the
         // passthrough presentation. Full/Partial saves leave it nil and loading
         // never *exits* Mixed — the user controls that from the picker.
         #if os(visionOS)
-        if AppModel.shared?.immersionStyleForRenderer == .mixed {
+        if state.presentation.immersionStyle == AppModel.ImmersionStylePreference.mixed.rawValue {
             preset.mixedModeScene = true
         }
         #endif
         // Composable domain-transform stack (Transformations section). Direct
         // RenderSettings property, not in DisplayConfig. Empty array → nil so older
         // readers and round-trips stay clean.
-        let warpOps = settings.spaceWarpStack
+        let warpOps = state.space.warpStack
         preset.spaceWarpOps = warpOps.isEmpty ? nil : warpOps
 
         // ── Safety bubble domain (1 lock acquisition) ──
-        let sb = settings.safetyBubbleConfig
+        let sb = state.safetyBubble
         preset.safetyBubbleEnabled = sb.enabled
         preset.safetyBubbleRadius = sb.radius
         preset.safetyBubbleShape = sb.shape
@@ -822,10 +1212,10 @@ struct FractalPreset: Codable, Identifiable {
         preset.safetyBubbleFadeWidth = sb.fadeWidth
 
         // ── Hand Attraction domain (1 lock acquisition) ──
-        preset.handAttraction = settings.handAttractionConfig
+        preset.handAttraction = state.handAttraction
 
         // ── Audio reactive domain (1 lock acquisition) ──
-        let arc = settings.audioReactiveConfig
+        let arc = state.audioReactive
         preset.audioReactiveConfig = arc
         // Keep legacy field in sync so files remain readable by older builds.
         preset.musicReactiveMappings = arc.musicReactiveMappings
@@ -834,13 +1224,62 @@ struct FractalPreset: Codable, Identifiable {
         // round-trips on top of whatever built-in fractal is active.
         preset.embeddedFormula = embeddedFormula
 
+        // Canonical v3 envelope. Keep every legacy field above populated so the
+        // same file remains useful to older app builds; current builds restore
+        // through this domain-shaped snapshot first, then apply those flat fields
+        // as compatibility overrides.
+        preset.schemaVersion = Self.currentSchemaVersion
+        preset.sceneState = state
+
         return preset
     }
     
-    /// Apply this preset to render settings
-    func apply(to settings: RenderSettings, includePerformance: Bool = true, resetEnvironment: Bool = false) {
+    /// Apply this preset without allowing scene-driven mutations to rewrite the
+    /// user's persisted device preferences. `scope: .session` is used for exact
+    /// preview rollback and relaunch checkpoints; ordinary shared scenes use the
+    /// comfort-preserving `.scene` policy.
+    func apply(to settings: RenderSettings,
+               includePerformance: Bool = true,
+               resetEnvironment: Bool = false,
+               scope: SceneRestoreScope = .scene) {
+        settings.withPersistenceSuppressed {
+            applyWithoutPersistence(
+                to: settings,
+                includePerformance: includePerformance,
+                resetEnvironment: resetEnvironment,
+                scope: scope
+            )
+        }
+    }
+
+    private func applyWithoutPersistence(to settings: RenderSettings,
+                                         includePerformance: Bool,
+                                         resetEnvironment: Bool,
+                                         scope: SceneRestoreScope) {
         if resetEnvironment {
             settings.audioReactiveConfig = AudioReactiveConfig()
+        }
+        if scope == .scene {
+            settings.resetSceneAnimationPhases()
+        }
+
+        // v3's canonical domain snapshot fills every scene-owned lane (including
+        // fields the legacy flat format never knew about). The flat fields below
+        // are still applied afterward so older files work and callers that edit a
+        // decoded legacy property continue to get the expected override.
+        sceneState?.apply(to: settings, includePerformance: includePerformance, scope: scope)
+        if sceneState == nil {
+            // Fields that did not exist in v1/v2 must still be authoritative so
+            // an older scene cannot inherit motion/warps from whatever was loaded
+            // immediately before it.
+            settings.spaceWarpStrength = 0.0
+            settings.spaceWarpOrigin = .zero
+            settings.spaceWarpAxis = SIMD3<Float>(0, 1, 0)
+            settings.infiniteZoomEnabled = false
+            settings.infiniteZoomRate = 0.15
+            settings.lightingPlay = false
+            settings.shadowsEnabled = true
+            settings.zoomFogCompensationEnabled = false
         }
 
         // A scene load must start from a CLEAN slate: live gesture offsets
@@ -851,6 +1290,15 @@ struct FractalPreset: Codable, Identifiable {
         settings.clearAnimationManualOffsets()
         settings.clearAudioPlaybackOffsets()
         settings.setSpaceWarpAudioOffsets([:])
+
+        // A canonical-only schema-3 document has no legacy compatibility
+        // projection to layer. Applying synthesized/default flat values here
+        // would immediately stomp the canonical domains we just restored.
+        if sceneState != nil, !appliesLegacyFlatFields {
+            applyPresentationIntent()
+            applyModuleOverrides(to: settings)
+            return
+        }
 
         settings.baseFractalIterations = fractalIterations
         settings.baseMaxRaySteps = maxRaySteps
@@ -935,8 +1383,13 @@ struct FractalPreset: Codable, Identifiable {
         // scenes cannot. A scene that uses the bubble as part of its authored
         // look applies its full bubble state, but a scene saved without it
         // must NOT silently disable (or reshape) the user's bubble on load.
-        if safetyBubbleEnabled == true {
-            settings.safetyBubbleEnabled = true
+        let shouldApplyBubble = (scope == .session)
+            ? (safetyBubbleEnabled != nil)
+            : (safetyBubbleEnabled == true)
+        if shouldApplyBubble {
+            if let safetyBubbleEnabled {
+                settings.safetyBubbleEnabled = safetyBubbleEnabled
+            }
             if let safetyBubbleRadius = safetyBubbleRadius {
                 settings.safetyBubbleRadius = safetyBubbleRadius
             }
@@ -1039,21 +1492,9 @@ struct FractalPreset: Codable, Identifiable {
         settings.envScrunchContain = envScrunchContain ?? 0
         settings.envScrunchContainFeather = envScrunchContainFeather ?? 0.1
 
-        // Scene-driven immersion (visionOS): the presentation style follows the
-        // scene — Mixed scenes present in Mixed (passthrough), everything else
-        // presents Immersive. The scene apply above is authoritative for the
-        // bounding fields, so the didSet coupling is suppressed for this switch
-        // (immersionChangeIsSceneDriven); the picker keeps working live afterward.
-        #if os(visionOS)
-        let sceneStyle: AppModel.ImmersionStylePreference =
-            (mixedModeScene == true) ? .mixed : .immersive
-        Task { @MainActor in
-            guard let app = AppModel.shared else { return }
-            app.immersionChangeIsSceneDriven = true
-            app.immersionStylePreference = sceneStyle
-            app.immersionChangeIsSceneDriven = false
-        }
-        #endif
+        // Scene-driven immersion (visionOS). v3 preserves Window distinctly;
+        // older files fall back to the legacy Mixed/Immersive Boolean.
+        applyPresentationIntent()
 
         // v2.0 modular lighting effects — AUTHORITATIVE: every field falls
         // back to its RenderSettings declaration default when absent, so an
@@ -1115,11 +1556,35 @@ struct FractalPreset: Codable, Identifiable {
         // refine a flat preset. Each param is capability-filtered against the
         // active fractal (e.g. sphere projection on an unsupported type is
         // skipped). No-op for older scenes that carry no `modules` block.
-        if let modules = modules {
-            for (rawKey, block) in modules {
-                guard let key = ModuleKey(rawValue: rawKey) else { continue }
-                ModuleRegistry.apply(key, block: block, to: settings)
-            }
+        applyModuleOverrides(to: settings)
+    }
+
+    private func applyPresentationIntent() {
+        #if os(visionOS)
+        let sceneStyle: AppModel.ImmersionStylePreference
+        if mixedModeScene == true {
+            // Flat compatibility marker wins when a bundled-scene classifier
+            // adds it after decoding an older document.
+            sceneStyle = .mixed
+        } else if let rawStyle = sceneState?.presentation.immersionStyle {
+            sceneStyle = .fromPersisted(rawStyle)
+        } else {
+            sceneStyle = .immersive
+        }
+        Task { @MainActor in
+            guard let app = AppModel.shared else { return }
+            app.immersionChangeIsSceneDriven = true
+            app.immersionStylePreference = sceneStyle
+            app.immersionChangeIsSceneDriven = false
+        }
+        #endif
+    }
+
+    private func applyModuleOverrides(to settings: RenderSettings) {
+        guard let modules else { return }
+        for (rawKey, block) in modules {
+            guard let key = ModuleKey(rawValue: rawKey) else { continue }
+            ModuleRegistry.apply(key, block: block, to: settings)
         }
     }
     
@@ -1180,7 +1645,11 @@ extension FractalPreset {
     }
 
     var hasMusicReactiveMappings: Bool {
-        !(musicReactiveMappings?.isEmpty ?? true)
+        let mappings = audioReactiveConfig?.musicReactiveMappings
+            ?? sceneState?.audioReactive.musicReactiveMappings
+            ?? musicReactiveMappings
+            ?? []
+        return !mappings.isEmpty
     }
 
     /// Names that should appear in the "Jumping Off" browse tab even though they

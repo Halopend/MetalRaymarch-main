@@ -23,7 +23,7 @@ struct ColorConfig: Codable, Equatable, Sendable {
     var colorSchemeCurve: Float = 0.0      // -1.0 - 1.0
     var colorSchemeShadows: Float = -0.018 // -0.05 - 0.05
     var colorSchemeHighlights: Float = 0.02 // -0.5 - 1.0
-    var lightingSoftness: Float = 0.5      // 0.0 - 1.0
+    var lightingSoftness: Float = 0.35     // 0.0 - 1.0
     var cellShadingEnabled: Bool = false
     var cellShadingLevels: Float = 4.0     // 2.0 - 8.0
     var aoStrength: Float = 0.0            // 0.0 - 1.0 (0 = old flat ambient, default)
@@ -33,6 +33,44 @@ struct ColorConfig: Codable, Equatable, Sendable {
     var colorSchemeAutoTransition: Bool = false
     var colorSchemeAutoInterval: Float = 30.0  // 5.0 - 120.0
     var colorSchemeTransitionDuration: Float = 2.0  // 0.1 - 10.0
+
+    init() {}
+
+    /// Tolerant domain decode: adding a color control must not make an older
+    /// UserDefaults blob or SceneState lose the entire color domain.
+    private enum CodingKeys: String, CodingKey {
+        case colorScheme, gradientState
+        case colorMix, colorIterations, colorSchemeSaturation, colorSchemeContrast
+        case colorSchemeGamma, colorSchemeVibrance, colorSchemeCurve
+        case colorSchemeShadows, colorSchemeHighlights, lightingSoftness
+        case cellShadingEnabled, cellShadingLevels, aoStrength, tonemapStrength
+        case colorSchemeAutoTransition, colorSchemeAutoInterval
+        case colorSchemeTransitionDuration
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        colorScheme = try c.decodeIfPresent(ColorScheme.self, forKey: .colorScheme) ?? .classic
+        gradientState = try c.decodeIfPresent(GradientState.self, forKey: .gradientState) ?? GradientState()
+        colorMix = try c.decodeIfPresent(Float.self, forKey: .colorMix) ?? 0.5
+        colorIterations = try c.decodeIfPresent(Float.self, forKey: .colorIterations) ?? 8.0
+        colorSchemeSaturation = try c.decodeIfPresent(Float.self, forKey: .colorSchemeSaturation) ?? 1.7
+        colorSchemeContrast = try c.decodeIfPresent(Float.self, forKey: .colorSchemeContrast) ?? 1.08
+        colorSchemeGamma = try c.decodeIfPresent(Float.self, forKey: .colorSchemeGamma) ?? 0.85
+        colorSchemeVibrance = try c.decodeIfPresent(Float.self, forKey: .colorSchemeVibrance) ?? 0.8
+        colorSchemeCurve = try c.decodeIfPresent(Float.self, forKey: .colorSchemeCurve) ?? 0.0
+        colorSchemeShadows = try c.decodeIfPresent(Float.self, forKey: .colorSchemeShadows) ?? -0.018
+        colorSchemeHighlights = try c.decodeIfPresent(Float.self, forKey: .colorSchemeHighlights) ?? 0.02
+        lightingSoftness = try c.decodeIfPresent(Float.self, forKey: .lightingSoftness) ?? 0.35
+        cellShadingEnabled = try c.decodeIfPresent(Bool.self, forKey: .cellShadingEnabled) ?? false
+        cellShadingLevels = try c.decodeIfPresent(Float.self, forKey: .cellShadingLevels) ?? 4.0
+        aoStrength = try c.decodeIfPresent(Float.self, forKey: .aoStrength) ?? 0.0
+        tonemapStrength = try c.decodeIfPresent(Float.self, forKey: .tonemapStrength) ?? 0.0
+        colorSchemeAutoTransition = try c.decodeIfPresent(Bool.self, forKey: .colorSchemeAutoTransition) ?? false
+        colorSchemeAutoInterval = try c.decodeIfPresent(Float.self, forKey: .colorSchemeAutoInterval) ?? 30.0
+        colorSchemeTransitionDuration = try c.decodeIfPresent(Float.self, forKey: .colorSchemeTransitionDuration) ?? 2.0
+        clamp()
+    }
 
     // MARK: - Validation
 

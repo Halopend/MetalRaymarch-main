@@ -88,30 +88,38 @@ struct FractalSyncMessage: Codable, Sendable {
     
     /// Apply this message's state to RenderSettings (for receiving participants)
     func apply(to settings: RenderSettings) {
-        // Set targets for smooth interpolation using the setTargets method
-        settings.setTargets(
-            minDistance: minDistance,
-            foldingLimit: foldingLimit,
-            sphereRadius: sphereRadius,
-            position: position
-        )
-        settings.scale = scale
-        
-        // Fractal parameters
-        if let fractalModel = FractalModelType(rawValue: fractalType) {
-            settings.fractalType = fractalModel
+        // Remote collaboration is another scene-origin mutation source: update
+        // the live view without turning the peer's stream into local preferences.
+        // It follows the shared-scene comfort rule as well — peers may opt a
+        // bubble on, but may not remotely disable an already-enabled bubble.
+        settings.withPersistenceSuppressed {
+            // Set targets for smooth interpolation using the setTargets method
+            settings.setTargets(
+                minDistance: minDistance,
+                foldingLimit: foldingLimit,
+                sphereRadius: sphereRadius,
+                position: position
+            )
+            settings.scale = scale
+
+            // Fractal parameters
+            if let fractalModel = FractalModelType(rawValue: fractalType) {
+                settings.fractalType = fractalModel
+            }
+            settings.fractalScale = fractalScale
+            settings.targetFractalScale = fractalScale
+            settings.fractalIterations = fractalIterations
+            settings.maxRaySteps = maxRaySteps
+
+            // Color
+            settings.colorMix = colorMix
+
+            // Safety bubble
+            if safetyBubbleEnabled {
+                settings.safetyBubbleEnabled = true
+                settings.safetyBubbleRadius = safetyBubbleRadius
+                settings.safetyBubbleShape = safetyBubbleShape
+            }
         }
-        settings.fractalScale = fractalScale
-        settings.targetFractalScale = fractalScale
-        settings.fractalIterations = fractalIterations
-        settings.maxRaySteps = maxRaySteps
-        
-        // Color
-        settings.colorMix = colorMix
-        
-        // Safety bubble
-        settings.safetyBubbleEnabled = safetyBubbleEnabled
-        settings.safetyBubbleRadius = safetyBubbleRadius
-        settings.safetyBubbleShape = safetyBubbleShape
     }
 }

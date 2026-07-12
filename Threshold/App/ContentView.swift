@@ -327,8 +327,6 @@ struct ContentView: View {
                 showSaveDestinationSheet = true
             }
             cache.startSync(with: appModel.renderSettings, appModel: appModel)
-            appModel.handTrackingEnabled = true
-            appModel.renderSettings.menuToggleGestureEnabled = true
             normalizeDesktopSelectionIfNeeded()
             syncNavigationChromeFromLegacySelection()
         }
@@ -505,6 +503,13 @@ struct ContentView: View {
 
     private func saveCurrentAsResetDefaults() {
         guard appModel.gestureController?.saveCurrentAsFractalDefaults() == true else { return }
+        if let activeResetPreset = appModel.activeResetPreset {
+            // Preserve the source scene's identity so keyboard scene cycling can
+            // still locate it after the user replaces its reset values.
+            appModel.rememberActiveResetPreset(activeResetPreset)
+        } else {
+            appModel.rememberActiveResetPresetFromCurrent()
+        }
         cache.loadFromSettings()
         showSaveConfirmation("Reset point updated")
     }
