@@ -45,7 +45,7 @@ final class ParameterUpdateCoordinator: Sendable {
             }
 
             if pendingWork.shouldUpdateAudio {
-                appModel.appleMusicManager.updateFrame()
+                appModel.audioHub.updateFrame()
             }
         }
     }

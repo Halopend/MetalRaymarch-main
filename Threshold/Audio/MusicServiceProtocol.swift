@@ -199,16 +199,9 @@ protocol MusicServiceProvider: AnyObject {
     /// Returns the playlist name on success, or nil if unsupported.
     func createPlaylist(name: String, trackNativeIDs: [String]) async -> String?
 
-    // ── Audio Levels (render-thread readable) ─────────────────────────────
-    /// These are read from the render thread for audio-reactive visuals.
-    var bassLevel: Float { get }
-    var midLevel: Float { get }
-    var trebleLevel: Float { get }
-    var beatIntensity: Float { get }
-    var overallLevel: Float { get }
-
-    /// Called every frame to advance beat-sync / audio analysis.
-    func updateFrame()
+    // Audio analysis deliberately does not live in this protocol. A provider
+    // supplies catalog, authorization, transport, and now-playing context;
+    // `AudioHub` owns capture/analysis and produces the renderer snapshot.
 }
 
 extension AppleMusicServiceAdapter {
@@ -225,18 +218,8 @@ extension AppleMusicServiceAdapter {
     var isLibraryLoading: Bool { manager.libraryLoading }
     var libraryError: String? { manager.libraryErrorMessage }
 
-    var bassLevel: Float { manager.bassLevel }
-    var midLevel: Float { manager.midLevel }
-    var trebleLevel: Float { manager.trebleLevel }
-    var beatIntensity: Float { manager.beatIntensity }
-    var overallLevel: Float { manager.overallLevel }
-
     func disconnect() {
         manager.stopMonitoring()
-    }
-
-    func updateFrame() {
-        manager.updateFrame()
     }
 }
 

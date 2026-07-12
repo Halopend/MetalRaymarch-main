@@ -27,18 +27,12 @@ struct MusicTabContent: View {
     @Bindable var cache: UISettingsCache
 
     private let musicService: MusicService
-    private let audioAnalyzer: AudioAnalyzer
+    private let audioHub: AudioHub
     private let renderSettings: RenderSettings
-    #if os(macOS)
-    private let systemAudioCapture: SystemAudioTapCapture
-    #endif
 
     @State private var viewModel: MusicTabViewModel
     var tabSelection: Binding<MusicPanelTab>? = nil
     @AppStorage("MusicTabContent.innerTab") private var storedTabSelection: MusicPanelTab = .music
-    #if os(macOS)
-    @State private var systemAudioCaptureTask: Task<Void, Never>?
-    #endif
     @State private var isShowingVisualizationAddPopover = false
     @State private var isHoldingVisualizationAddAdjustment = false
 
@@ -79,39 +73,20 @@ struct MusicTabContent: View {
         cache.audioReactive.fractalAudioReactiveEnabled && !availableMappingTargetsToAdd.isEmpty
     }
 
-    #if os(macOS)
     init(
         cache: UISettingsCache,
         musicService: MusicService,
-        audioAnalyzer: AudioAnalyzer,
-        renderSettings: RenderSettings,
-        systemAudioCapture: SystemAudioTapCapture,
-        tabSelection: Binding<MusicPanelTab>? = nil
-    ) {
-        self.cache = cache
-        self.musicService = musicService
-        self.audioAnalyzer = audioAnalyzer
-        self.renderSettings = renderSettings
-        self.systemAudioCapture = systemAudioCapture
-        self.tabSelection = tabSelection
-        _viewModel = State(initialValue: MusicTabViewModel(musicService: musicService))
-    }
-    #else
-    init(
-        cache: UISettingsCache,
-        musicService: MusicService,
-        audioAnalyzer: AudioAnalyzer,
+        audioHub: AudioHub,
         renderSettings: RenderSettings,
         tabSelection: Binding<MusicPanelTab>? = nil
     ) {
         self.cache = cache
         self.musicService = musicService
-        self.audioAnalyzer = audioAnalyzer
+        self.audioHub = audioHub
         self.renderSettings = renderSettings
         self.tabSelection = tabSelection
         _viewModel = State(initialValue: MusicTabViewModel(musicService: musicService))
     }
-    #endif
 
     var body: some View {
         VStack(spacing: 10) {
@@ -183,7 +158,9 @@ struct MusicTabContent: View {
         #if os(macOS)
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase != .active {
-                stopSystemAudioCapture()
+                Task { @MainActor in
+                    await audioHub.stopTransientSources()
+                }
             }
         }
         #endif
@@ -219,33 +196,34 @@ struct MusicTabContent: View {
     }
 
     private var macAudioInputHero: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let microphone = descriptor(for: .microphone)
+        let microphoneIsStarting = audioHub.isStarting(.microphone)
+        let microphoneCanStart = audioHub.canStart(.microphone)
+        let isLive = audioHub.sourceDescriptors.contains { $0.kind == .capture && $0.isActive }
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Audio Input Visualizer")
                         .font(.headline)
-                    Text("Use the Mac microphone, selected audio input, or whole-system output for reactive visuals.")
+                    Text("Use the Mac microphone or a policy-approved application source for reactive visuals.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Spacer(minLength: 0)
 
-                Label(audioAnalyzer.isCapturing ? "Live" : "Ready",
-                      systemImage: audioAnalyzer.isCapturing ? AppIcons.waveformCircleFill : AppIcons.circleDashed)
+                Label(isLive ? "Live" : "Ready",
+                      systemImage: isLive ? AppIcons.waveformCircleFill : AppIcons.circleDashed)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(audioAnalyzer.isCapturing ? .green : .secondary)
+                    .foregroundStyle(isLive ? .green : .secondary)
             }
 
             HStack(spacing: 8) {
-                Button(audioAnalyzer.isMicrophoneCapturing ? "Stop Input" : "Start Input") {
-                    if audioAnalyzer.isMicrophoneCapturing {
-                        audioAnalyzer.stopCapture()
-                    } else {
-                        startAudioInputVisualizer(using: .electronic)
-                    }
+                Button(microphone?.isActive == true ? "Stop Input" : (microphoneIsStarting ? "Starting…" : "Start Input")) {
+                    toggleAudioSource(.microphone, preset: .electronic)
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(microphone?.isActive != true && !microphoneCanStart)
 
                 Button("Reactive Controls") {
                     effectiveTabSelection.wrappedValue = .visualizations
@@ -261,24 +239,41 @@ struct MusicTabContent: View {
                 HStack(spacing: 8) {
                     ForEach([ReactivityPreset.electronic, .ambient, .hiphop], id: \.self) { preset in
                         Button(preset.rawValue) {
-                            startAudioInputVisualizer(using: preset)
+                            toggleAudioSource(.microphone, preset: preset)
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .disabled(microphone?.isActive != true && !microphoneCanStart)
                     }
                 }
             }
 
-            if let message = audioAnalyzer.errorMessage {
+            if let microphone, case .failed(let message) = microphone.availability {
                 Text(message)
                     .font(.caption2)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if let microphone, case .unavailable(let message) = microphone.availability {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(message)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Open Settings") {
+                        audioHub.openSettings(for: .microphone)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+
             Divider()
 
-            systemAudioCaptureRow
+            if let systemOutput = descriptor(for: .systemOutput) {
+                audioCaptureSourceRow(systemOutput)
+            }
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.08)))
@@ -771,159 +766,112 @@ struct MusicTabContent: View {
 
             Divider()
 
-            #if os(macOS)
-            macMicrophoneCaptureRow
-            Divider()
-            systemAudioCaptureRow
-            #else
-            // Microphone row
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Image(systemName: audioAnalyzer.isMicrophoneCapturing ? AppIcons.micFill : AppIcons.micSlashFill)
-                        .font(.caption)
-                        .foregroundStyle(audioAnalyzer.isMicrophoneCapturing ? .green : .secondary)
-                    Text("Microphone")
-                        .font(.subheadline)
-                    Spacer()
-                    Button(audioAnalyzer.isMicrophoneCapturing ? "Stop" : "Start") {
-                        if audioAnalyzer.isMicrophoneCapturing {
-                            audioAnalyzer.stopCapture()
-                        } else {
-                            audioAnalyzer.startCapture()
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-
-                if let message = audioAnalyzer.errorMessage {
-                    Text(message)
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
+            ForEach(audioHub.sourceDescriptors.filter { $0.kind == .capture }) { source in
+                audioCaptureSourceRow(source)
+                if source.id != audioHub.sourceDescriptors.last(where: { $0.kind == .capture })?.id {
+                    Divider()
                 }
             }
-            #endif
+
+            let mediaContexts = audioHub.sourceDescriptors.filter { $0.kind == .mediaContext }
+            if !mediaContexts.isEmpty {
+                Divider()
+                Text("Media Context")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(mediaContexts) { context in
+                    mediaContextRow(context)
+                }
+            }
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.gray.opacity(0.10)))
     }
 
-    #if os(macOS)
-    private var macMicrophoneCaptureRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
+    /// One data-driven row for any real capture adapter. Adding a USB, file, or
+    /// shared-content source now means registering a descriptor with AudioHub;
+    /// the music tab does not gain another platform-specific branch.
+    private func audioCaptureSourceRow(_ source: AudioSourceDescriptor) -> some View {
+        let isStarting = audioHub.isStarting(source.id)
+        return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Image(systemName: audioAnalyzer.isMicrophoneCapturing ? AppIcons.micFill : AppIcons.micSlashFill)
+                Image(systemName: source.systemImage)
                     .font(.caption)
-                    .foregroundStyle(audioAnalyzer.isMicrophoneCapturing ? .green : .secondary)
-                Text("Audio Input")
+                    .foregroundStyle(source.isActive ? .green : .secondary)
+                Text(source.displayName)
                     .font(.subheadline)
                 Spacer()
-                Button(audioAnalyzer.isMicrophoneCapturing ? "Stop" : "Start") {
-                    if audioAnalyzer.isMicrophoneCapturing {
-                        audioAnalyzer.stopCapture()
-                    } else {
-                        audioAnalyzer.startCapture()
-                    }
+                Button(source.isActive ? "Stop" : (isStarting ? "Starting…" : "Start")) {
+                    toggleAudioSource(source.id, preset: .electronic)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .disabled(!source.isActive && !audioHub.canStart(source.id))
             }
 
-            if let message = audioAnalyzer.errorMessage {
+            if let message = source.availability.detail {
                 Text(message)
                     .font(.caption2)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Text("Uses microphone permission only. Select a system or virtual audio input in macOS Sound settings when needed.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    /// Row that starts/stops whole-system ScreenCaptureKit audio capture.
-    @ViewBuilder
-    private var systemAudioCaptureRow: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: systemAudioCapture.isCapturing ? AppIcons.speakerWave2Fill : AppIcons.musicNote)
-                    .font(.caption)
-                    .foregroundStyle(systemAudioCapture.isCapturing ? .green : .secondary)
-                Text("System Audio")
-                    .font(.subheadline)
-                Spacer()
-                Button(systemAudioCapture.isCapturing ? "Stop" : "Start") {
-                    if systemAudioCapture.isCapturing {
-                        stopSystemAudioCapture()
-                    } else {
-                        startSystemAudioVisualizer(using: .electronic)
-                    }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-
-            if let message = systemAudioCapture.errorMessage {
-                Text(message)
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                if systemAudioCapture.permissionDenied {
-                    Button("Open System Settings") {
-                        systemAudioCapture.openScreenRecordingSettings()
+                if source.availability.isUnavailable && audioHub.canOpenSettings(for: source.id) {
+                    Button("Open Settings") {
+                        audioHub.openSettings(for: source.id)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
-            } else if systemAudioCapture.isCapturing {
-                Text("Capturing system output. Play audio in any app to drive the visualizer.")
+            } else if source.id == .systemOutput {
+                Text(source.isActive
+                     ? "Capturing a policy-approved application's audio."
+                     : "Uses ScreenCaptureKit with a policy-approved application allowlist.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
-                Text("Uses ScreenCaptureKit and macOS Screen & System Audio Recording permission.")
+                Text("Uses microphone permission. Select a system or virtual audio input in device settings when needed.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .task(id: systemAudioCapture.isCapturing) {
-            if !systemAudioCapture.isCapturing {
-                await systemAudioCapture.refreshAvailability()
+        .task {
+            await audioHub.refreshAvailability()
+        }
+    }
+
+    private func descriptor(for sourceID: AudioSourceID) -> AudioSourceDescriptor? {
+        audioHub.sourceDescriptors.first { $0.id == sourceID }
+    }
+
+    private func mediaContextRow(_ context: AudioSourceDescriptor) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: context.systemImage)
+                .font(.caption)
+                .foregroundStyle(context.availability.isPolicyBlocked ? .orange : .secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(context.displayName)
+                    .font(.subheadline)
+                Text(context.availability.detail ?? "Transport and now-playing context; not a raw audio capture source.")
+                    .font(.caption2)
+                    .foregroundStyle(context.availability.detail == nil ? Color.secondary : Color.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Text(context.provenance == .metadataSynthetic ? "Metadata" : "Context")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func toggleAudioSource(_ sourceID: AudioSourceID, preset: ReactivityPreset) {
+        Task { @MainActor in
+            if descriptor(for: sourceID)?.isActive == true {
+                await audioHub.stop(sourceID)
+            } else if await audioHub.start(sourceID) {
+                configureMusicAppVisualizer(using: preset)
             }
         }
-    }
-
-    private func startSystemAudioVisualizer(using preset: ReactivityPreset) {
-        replaceSystemAudioCaptureTask {
-            await systemAudioCapture.start()
-            guard !Task.isCancelled else { return }
-            guard systemAudioCapture.isCapturing else { return }
-            configureMusicAppVisualizer(using: preset)
-        }
-    }
-
-    private func stopSystemAudioCapture() {
-        replaceSystemAudioCaptureTask {
-            await systemAudioCapture.stop()
-        }
-    }
-
-    private func replaceSystemAudioCaptureTask(_ operation: @escaping @MainActor () async -> Void) {
-        systemAudioCaptureTask?.cancel()
-        systemAudioCaptureTask = Task { @MainActor in
-            await operation()
-            guard !Task.isCancelled else { return }
-            systemAudioCaptureTask = nil
-        }
-    }
-
-    private func startAudioInputVisualizer(using preset: ReactivityPreset) {
-        if !audioAnalyzer.isMicrophoneCapturing {
-            audioAnalyzer.startCapture()
-        }
-        configureMusicAppVisualizer(using: preset)
     }
 
     private func configureMusicAppVisualizer(using preset: ReactivityPreset) {
@@ -937,7 +885,6 @@ struct MusicTabContent: View {
         }
         applyPreset(preset)
     }
-    #endif
 
     /// A single service connection row — works for any provider.
     private func serviceRow(_ provider: MusicServiceProvider) -> some View {
@@ -1665,7 +1612,15 @@ private struct MusicTabPreviewHarness: View {
     @State private var cache = UISettingsCache()
 
     let musicService: MusicService
+    let audioHub: AudioHub
     let title: String
+
+    init(musicService: MusicService, title: String) {
+        self.musicService = musicService
+        self.audioHub = AudioHub(microphoneAnalyzer: AudioAnalyzer(),
+                                 appleMusicManager: musicService.appleMusic)
+        self.title = title
+    }
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -1673,22 +1628,12 @@ private struct MusicTabPreviewHarness: View {
                 .font(.headline)
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
-            #if os(macOS)
             MusicTabContent(
                 cache: cache,
                 musicService: musicService,
-                audioAnalyzer: AudioAnalyzer(),
-                renderSettings: RenderSettings(),
-                systemAudioCapture: SystemAudioTapCapture(analyzer: AudioAnalyzer())
-            )
-            #else
-            MusicTabContent(
-                cache: cache,
-                musicService: musicService,
-                audioAnalyzer: AudioAnalyzer(),
+                audioHub: audioHub,
                 renderSettings: RenderSettings()
             )
-            #endif
         }
         .frame(width: 460, height: 860)
     }

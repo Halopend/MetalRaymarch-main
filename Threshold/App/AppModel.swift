@@ -221,7 +221,9 @@ class AppModel {
     // Buddhabrot volume renderer settings (shared between UI and render loop)
     nonisolated let buddhabrotSettings = BuddhabrotSettings()
 
-    // Audio analyzer for reactive lighting
+    // Microphone FFT backend. `AudioHub` owns source selection and publishes
+    // the coherent render-facing snapshot; this remains available during the
+    // migration for the microphone capture adapter.
     let audioAnalyzer = AudioAnalyzer()
 
     // Apple Music integration for music visualizer
@@ -230,11 +232,10 @@ class AppModel {
     // Unified music service (wraps Apple Music)
     let musicService: MusicService
 
-    #if os(macOS)
-    /// Captures system audio output via Core Audio process taps (macOS 14.4+)
-    /// and feeds it into `audioAnalyzer` for FFT-driven visuals.
-    let systemAudioCapture: SystemAudioTapCapture
-    #endif
+    /// Central audio composition root. It owns a dedicated analyzer per PCM
+    /// capture source, media-feature fallback policy, and the immutable
+    /// snapshot read by every renderer.
+    let audioHub: AudioHub
     
     // Hand tracking state
     var handTrackingEnabled: Bool = {
@@ -455,12 +456,11 @@ class AppModel {
     init() {
         ParameterRoutingValidation.validateStartupRouting()
 
-        // Initialize unified music service first since it's a non-optional constant
+        // Initialize media control and the independent signal hub before any
+        // renderer can observe `self`.
         musicService = MusicService(appleMusic: appleMusicManager)
-
-        #if os(macOS)
-        systemAudioCapture = SystemAudioTapCapture(analyzer: audioAnalyzer)
-        #endif
+        audioHub = AudioHub(microphoneAnalyzer: audioAnalyzer,
+                            appleMusicManager: appleMusicManager)
 
         // Publish the shared reference only after all stored properties are
         // initialized — `self` cannot escape an initializer before then.

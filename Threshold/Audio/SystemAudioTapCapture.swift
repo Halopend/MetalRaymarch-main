@@ -2,9 +2,9 @@
 //  SystemAudioTapCapture.swift
 //  Threshold
 //
-//  macOS-only: captures system audio output using ScreenCaptureKit's audio
-//  capture (SCStream + capturesAudio) and feeds it into AudioAnalyzer for FFT
-//  analysis.
+//  macOS-only: captures a policy-approved application's audio using
+//  ScreenCaptureKit (SCStream + capturesAudio) and feeds it into AudioAnalyzer
+//  for FFT analysis.
 //
 //  Why ScreenCaptureKit and not Core Audio process taps:
 //  Core Audio process taps build an in-process aggregate device whose HAL
@@ -18,8 +18,9 @@
 //  crash cannot occur. This is the supported, App-Store-legal path that shipping
 //  sandboxed apps use for system audio.
 //
-//  Capture uses whole-system output and excludes the current process's own
-//  audio so the visualizer does not feed back into itself.
+//  Capture is scoped to an explicit application allowlist and excludes the
+//  current process's own audio. This prevents an unknown service (including
+//  browser-hosted streaming) from silently becoming a visualizer input.
 //
 //  Permission: system-audio capture via ScreenCaptureKit is gated by the
 //  "Screen & System Audio Recording" TCC permission, prompted by the system the
@@ -54,6 +55,7 @@ final class SystemAudioTapCapture {
     // MARK: - Dependencies
 
     private let analyzer: AudioAnalyzer
+    private let approvedApplicationBundleIDs: Set<String>
     private let logger = Logger(subsystem: "com.puppypower.Threshold", category: "SystemAudioCapture")
 
     // MARK: - Capture configuration
@@ -76,8 +78,9 @@ final class SystemAudioTapCapture {
         case denied
     }
 
-    init(analyzer: AudioAnalyzer) {
+    init(analyzer: AudioAnalyzer, approvedApplicationBundleIDs: Set<String>) {
         self.analyzer = analyzer
+        self.approvedApplicationBundleIDs = approvedApplicationBundleIDs
     }
 
     // MARK: - Permission
@@ -96,11 +99,18 @@ final class SystemAudioTapCapture {
 
     // MARK: - Availability
 
-    /// Refresh the whole-system capture row without triggering the TCC prompt.
+    /// Refresh the approved-application capture row without triggering TCC.
     /// Only `start()` asks for Screen & System Audio Recording permission.
     func refreshAvailability() async {
         guard hasScreenRecordingPermission else {
-            applyPermissionDeniedState()
+            // `CGPreflightScreenCaptureAccess` reports `false` both before the
+            // first request and after a user denial. Keep a fresh source
+            // startable so `startCaptureIfNeeded()` can issue the system
+            // prompt; a real decline is recorded there and remains blocked
+            // until Settings grants access.
+            if !permissionDenied {
+                errorMessage = nil
+            }
             return
         }
 
@@ -108,7 +118,7 @@ final class SystemAudioTapCapture {
         errorMessage = nil
     }
 
-    /// Collapse to the permission-denied state: only the whole-system entry, a
+    /// Collapse to the permission-denied state: only the application-capture entry, a
     /// clear message, and the `permissionDenied` flag set so callers stop
     /// retrying.
     private func applyPermissionDeniedState() {
@@ -126,17 +136,25 @@ final class SystemAudioTapCapture {
     /// Start capturing the selected source. The first capture in the app's
     /// lifetime triggers the system "Screen & System Audio Recording" prompt.
     func start() async {
-        guard !isCapturing else { return }
+        _ = await startCaptureIfNeeded()
+    }
+
+    /// Start capture and report whether a live ScreenCaptureKit stream was
+    /// installed. This makes permission/failure state observable by the shared
+    /// audio coordinator without a fragile delayed poll from the UI.
+    @discardableResult
+    func startCaptureIfNeeded() async -> Bool {
+        guard !isCapturing else { return true }
 
         switch ensureScreenRecordingPermission() {
         case .granted:
             break
         case .grantedNeedsRelaunch:
             applyPermissionGrantedNeedsRelaunchState()
-            return
+            return false
         case .denied:
             applyPermissionDeniedState()
-            return
+            return false
         }
 
         let content: SCShareableContent
@@ -148,7 +166,7 @@ final class SystemAudioTapCapture {
         } catch {
             errorMessage = captureErrorMessage(error)
             logger.error("Shareable content unavailable: \(error.localizedDescription, privacy: .public)")
-            return
+            return false
         }
 
         do {
@@ -157,11 +175,13 @@ final class SystemAudioTapCapture {
             errorMessage = nil
             analyzer.beginExternalCapture(sampleRate: Self.captureSampleRate)
             logger.info("System audio capture started")
+            return true
         } catch {
             await teardownStream()
             isCapturing = false
             errorMessage = captureErrorMessage(error)
             logger.error("System audio capture failed to start: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 
@@ -182,7 +202,13 @@ final class SystemAudioTapCapture {
         }
 
         let ownBundleID = Bundle.main.bundleIdentifier
-        let captureApplications = content.applications.filter { $0.bundleIdentifier != ownBundleID }
+        let captureApplications = content.applications.filter { application in
+            let bundleIdentifier = application.bundleIdentifier
+            return bundleIdentifier != ownBundleID && approvedApplicationBundleIDs.contains(bundleIdentifier)
+        }
+        guard !captureApplications.isEmpty else {
+            throw CaptureError.noApprovedApplication
+        }
         let filter = SCContentFilter(
             display: display,
             including: captureApplications,
@@ -277,6 +303,8 @@ final class SystemAudioTapCapture {
             switch capture {
             case .noDisplay:
                 return "No display is available to capture system audio from."
+            case .noApprovedApplication:
+                return "No configured approved audio application is running. Open an approved app, then try again."
             }
         }
         // SCStreamError for missing permission lands here.
@@ -285,6 +313,7 @@ final class SystemAudioTapCapture {
 
     enum CaptureError: Error {
         case noDisplay
+        case noApprovedApplication
     }
 }
 

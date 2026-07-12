@@ -526,15 +526,66 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
 // MARK: - Song Attachment
 
 /// A song linked to a scene so it auto-plays when the animation starts.
-enum SongSource: String, Codable, Equatable {
+///
+/// `other` deliberately carries the provider's machine-readable ID verbatim.
+/// Scenes can therefore survive a provider being unavailable in this build (or
+/// added by a later build) without being silently rewritten as Apple Music.
+enum SongSource: Codable, Equatable, Hashable, RawRepresentable {
     case appleMusic
+    case spotify
+    case other(String)
 
-    /// Map from a MusicServiceProvider.serviceID.
-    init?(serviceID: String) {
-        switch serviceID {
-        case "appleMusic": self = .appleMusic
-        default:           return nil
+    /// The corresponding `MusicServiceProvider.serviceID`.
+    var serviceID: String {
+        switch self {
+        case .appleMusic: return "appleMusic"
+        case .spotify: return "spotify"
+        case .other(let serviceID): return serviceID
         }
+    }
+
+    /// Retains the raw-string API the previous string-backed enum exposed.
+    var rawValue: String { serviceID }
+
+    /// Map from a `MusicServiceProvider.serviceID`.
+    ///
+    /// Known IDs get stable enum cases; every non-empty future ID is preserved
+    /// as an opaque value for lossless scene persistence.
+    init?(serviceID: String) {
+        self.init(rawValue: serviceID)
+    }
+
+    init?(rawValue: String) {
+        guard !rawValue.isEmpty else { return nil }
+
+        switch rawValue {
+        case "appleMusic": self = .appleMusic
+        case "spotify": self = .spotify
+        default: self = .other(rawValue)
+        }
+    }
+
+    /// Alias that makes intent clear at call sites which only need to retain
+    /// an as-yet unsupported provider ID.
+    static func unknown(_ serviceID: String) -> SongSource {
+        .other(serviceID)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let serviceID = try container.decode(String.self)
+        guard let source = SongSource(serviceID: serviceID) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "SongSource service ID must not be empty"
+            )
+        }
+        self = source
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(serviceID)
     }
 }
 
@@ -559,8 +610,9 @@ struct SongAttachment: Codable, Equatable {
     /// Convenience: the primary (first) track ID.
     var trackID: UnifiedTrackID { trackIDs[0] }
 
-    // ── Legacy field (backward compat decoding only) ─────────────────────
+    // ── Legacy fields (backward compat) ──────────────────────────────────
     var appleMusicID: String?
+    var spotifyURI: String?
 
     // ── Primary initializer (multi-service) ──────────────────────────────
     init(trackIDs: [UnifiedTrackID], title: String, artist: String) {
@@ -569,9 +621,13 @@ struct SongAttachment: Codable, Equatable {
         self.source = SongSource(serviceID: trackIDs[0].serviceID) ?? .appleMusic
         self.title = title
         self.artist = artist
-        // Populate legacy field for round-trip safety
+        // Populate legacy fields for round-trip safety.
         for tid in trackIDs {
-            if tid.serviceID == "appleMusic" { self.appleMusicID = tid.nativeID }
+            switch tid.serviceID {
+            case "appleMusic": self.appleMusicID = tid.nativeID
+            case "spotify": self.spotifyURI = tid.nativeID
+            default: break
+            }
         }
     }
 
@@ -583,20 +639,20 @@ struct SongAttachment: Codable, Equatable {
     // ── Custom Codable for backward compatibility ──────────────────────
     enum CodingKeys: String, CodingKey {
         case source, title, artist, trackID, trackIDs
-        case appleMusicID
+        case appleMusicID, spotifyURI
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        // Decode source, falling back to .appleMusic for old Spotify entries
-        if let rawSource = try? c.decode(SongSource.self, forKey: .source) {
-            source = rawSource
-        } else {
-            source = .appleMusic
-        }
         title  = try c.decode(String.self, forKey: .title)
         artist = try c.decode(String.self, forKey: .artist)
         appleMusicID = try c.decodeIfPresent(String.self, forKey: .appleMusicID)
+        spotifyURI = try c.decodeIfPresent(String.self, forKey: .spotifyURI)
+
+        // A missing or malformed source was possible in earlier scene files.
+        // Keep a valid source exactly as saved; otherwise derive it from the
+        // primary generic ID once that has been decoded below.
+        let persistedSource = try? c.decode(SongSource.self, forKey: .source)
 
         // 1) Prefer trackIDs array if present (new format)
         if let ids = try? c.decode([UnifiedTrackID].self, forKey: .trackIDs), !ids.isEmpty {
@@ -608,9 +664,41 @@ struct SongAttachment: Codable, Equatable {
         }
         // 3) Synthesize from legacy fields (oldest format)
         else {
-            trackIDs = [UnifiedTrackID(serviceID: "appleMusic",
-                                       nativeID: appleMusicID ?? "")]
+            var legacyIDs: [UnifiedTrackID] = []
+
+            // Keep the capture source first, matching the canonical
+            // `trackIDs` ordering used for playback preference.
+            if persistedSource == .spotify {
+                if let spotifyURI, !spotifyURI.isEmpty {
+                    legacyIDs.append(UnifiedTrackID(serviceID: "spotify", nativeID: spotifyURI))
+                }
+                if let appleMusicID, !appleMusicID.isEmpty {
+                    legacyIDs.append(UnifiedTrackID(serviceID: "appleMusic", nativeID: appleMusicID))
+                }
+            } else {
+                if let appleMusicID, !appleMusicID.isEmpty {
+                    legacyIDs.append(UnifiedTrackID(serviceID: "appleMusic", nativeID: appleMusicID))
+                }
+                if let spotifyURI, !spotifyURI.isEmpty {
+                    legacyIDs.append(UnifiedTrackID(serviceID: "spotify", nativeID: spotifyURI))
+                }
+            }
+
+            // Historical Apple Music attachments always carried
+            // `appleMusicID`. Preserve the former empty-ID fallback for a
+            // corrupt/incomplete legacy attachment, while retaining its source
+            // rather than converting a future provider to Apple Music.
+            if legacyIDs.isEmpty {
+                let fallbackSource = persistedSource ?? .appleMusic
+                legacyIDs = [UnifiedTrackID(serviceID: fallbackSource.serviceID, nativeID: "")]
+            }
+
+            trackIDs = legacyIDs
         }
+
+        source = persistedSource
+            ?? SongSource(serviceID: trackIDs[0].serviceID)
+            ?? .appleMusic
     }
 
     func encode(to encoder: Encoder) throws {
@@ -622,6 +710,7 @@ struct SongAttachment: Codable, Equatable {
         // Also write single trackID for forward compat with older builds
         try c.encode(trackID, forKey: .trackID)
         try c.encodeIfPresent(appleMusicID, forKey: .appleMusicID)
+        try c.encodeIfPresent(spotifyURI, forKey: .spotifyURI)
     }
 }
 

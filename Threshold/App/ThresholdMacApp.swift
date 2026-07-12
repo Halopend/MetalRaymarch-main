@@ -45,7 +45,10 @@ struct ThresholdMacApp: App {
                 // an unattended profiler run captures a continuous workload.
                 if !BenchmarkMode.isActive { appModel.isAppActive = false }
                 appModel.saveLastState()
-                Task { await UsageAnalytics.shared.endSession() }
+                Task { @MainActor in
+                    await appModel.audioHub.stopTransientSources()
+                    await UsageAnalytics.shared.endSession()
+                }
             }
         }
         // Breakout controls window — the same control panel that slides over

@@ -263,6 +263,15 @@ final class ThresholdMacRenderer {
         var previousViewProjNoJitter: matrix_float4x4
     }
 
+    /// Mirrors `MacBlitParams` in Shaders.metal. Edge detection is deferred to
+    /// the full-resolution MetalFX resolve so its outline is measured in output
+    /// pixels instead of being enlarged with the low-resolution source image.
+    private struct MacBlitParams {
+        /// x = enabled window radius (0 means off), y = strength,
+        /// z = threshold, w = softness.
+        var edge: SIMD4<Float> = .zero
+    }
+
     private struct TemporalInvalidationKey: Equatable {
         let fractalType: Int32
         let fractalIterations: Int
@@ -398,10 +407,6 @@ final class ThresholdMacRenderer {
     private let customShaderBox = MacCustomShaderBox()
     private let spatialUpscaler: MacSpatialUpscaler
     private let temporalUpscaler: MacTemporalUpscaler
-    /// Dynamic-resolution controller: lowers the offscreen render scale under GPU
-    /// load and recovers toward the user's chosen scale. Only engaged while an
-    /// upscaler is active (the user has opted into a sub-native `resolutionScale`).
-    private let adaptiveResolution = AdaptiveResolutionController()
     private let blitPipelineState: MTLRenderPipelineState?
     private let motionPipelineState: MTLRenderPipelineState?
     private let clearColor: MTLClearColor
@@ -541,8 +546,6 @@ final class ThresholdMacRenderer {
     func drawableSizeDidChange(_ size: CGSize) {
         drawableSize = size
         metalLayer.drawableSize = size
-        // A resize transient (and the new pixel count) shouldn't bias the budget.
-        adaptiveResolution.reset()
     }
 
     // MARK: - Headless benchmark support (BenchmarkMode / MacBenchmarkHarness)
@@ -710,24 +713,33 @@ final class ThresholdMacRenderer {
         var temporalPass: (color: MTLTexture, depth: MTLTexture, motion: MTLTexture, output: MTLTexture)?
         var spatialPass: (color: MTLTexture, depth: MTLTexture, output: MTLTexture)?
         if resolutionScale < 0.985, blitPipelineState != nil {
-            // Dynamic resolution: the user's `resolutionScale` is the ceiling; the
-            // controller renders at or below it to hold the GPU frame budget and
-            // recovers when there is headroom. MetalFX reconstructs the detail.
-            let effectiveScale = adaptiveResolution.currentScale(ceiling: resolutionScale)
+            // Definition is a manual, exact render scale. It must not silently
+            // collapse below the value shown in the UI: doing so made a displayed
+            // 75% setting render at 34%, while lowering the slider could produce no
+            // additional speedup because the hidden controller was already at its
+            // floor. An automatic governor can return behind an explicit Auto UI
+            // that also reports the actual scale.
+            let effectiveScale = resolutionScale
             let inputWidth = max(1, Int((Float(drawableWidth) * effectiveScale).rounded()))
             let inputHeight = max(1, Int((Float(drawableHeight) * effectiveScale).rounded()))
-            // MetalFX temporal supports at most 3× per dimension and rejects
-            // inputs with a short edge under `minimumInputShortEdge`; clamp the
-            // temporal input up to both floors so the lowest slider settings
-            // stay on the temporal path instead of falling back to spatial.
-            let minTemporalWidth = min(drawableWidth, max(
-                Int((Double(drawableWidth) / MacTemporalUpscaler.maxScaleFactor).rounded(.up)),
-                MacTemporalUpscaler.minimumInputShortEdge))
-            let minTemporalHeight = min(drawableHeight, max(
-                Int((Double(drawableHeight) / MacTemporalUpscaler.maxScaleFactor).rounded(.up)),
-                MacTemporalUpscaler.minimumInputShortEdge))
-            let temporalInputWidth = max(inputWidth, minTemporalWidth)
-            let temporalInputHeight = max(inputHeight, minTemporalHeight)
+            // MetalFX temporal supports at most 3× and rejects a short edge
+            // below its minimum. Raise one shared scale factor instead of clamping
+            // width/height independently, which distorted the input aspect ratio
+            // for small or unusually wide windows.
+            let drawableShortEdge = max(1, min(drawableWidth, drawableHeight))
+            let minimumTemporalScale = max(
+                Float(1.0 / MacTemporalUpscaler.maxScaleFactor),
+                Float(MacTemporalUpscaler.minimumInputShortEdge) / Float(drawableShortEdge)
+            )
+            let temporalScale = min(1.0, max(effectiveScale, minimumTemporalScale))
+            let temporalInputWidth = min(
+                drawableWidth,
+                max(1, Int((Float(drawableWidth) * temporalScale).rounded(.up)))
+            )
+            let temporalInputHeight = min(
+                drawableHeight,
+                max(1, Int((Float(drawableHeight) * temporalScale).rounded(.up)))
+            )
             if motionPipelineState != nil,
                temporalUpscaler.prepare(inputWidth: temporalInputWidth,
                                         inputHeight: temporalInputHeight,
@@ -808,11 +820,10 @@ final class ThresholdMacRenderer {
             directPassDescriptor = nil
         }
 
-        // Feed measured GPU frame time to the dynamic-resolution controller, but
-        // only for frames that actually upscaled — a native-resolution frame's
-        // cost would bias the budget for the upscaled path.
+        // Edge detection is deferred only for frames that actually upscale. The
+        // direct path keeps the inline derivative version in fragmentMain.
         let didUpscale = temporalPass != nil || spatialPass != nil
-        commandBuffer.addCompletedHandler { [inFlightSemaphore, adaptiveResolution, gpuFrameMsHolder] buffer in
+        commandBuffer.addCompletedHandler { [inFlightSemaphore, gpuFrameMsHolder] buffer in
             inFlightSemaphore.signal()
             let gpuSeconds = buffer.gpuEndTime - buffer.gpuStartTime
             if gpuSeconds > 0 {
@@ -822,9 +833,6 @@ final class ThresholdMacRenderer {
                 gpuFrameMsHolder.withLock { smoothed in
                     smoothed = smoothed <= 0 ? ms : smoothed + (ms - smoothed) * 0.1
                 }
-            }
-            if didUpscale {
-                adaptiveResolution.record(gpuTime: gpuSeconds)
             }
         }
 
@@ -841,7 +849,11 @@ final class ThresholdMacRenderer {
         let frameSlot = uniformBufferIndex
         let uniformBuffer = uniformBuffers[frameSlot]
         uniformBufferIndex = (uniformBufferIndex + 1) % uniformBuffers.count
-        writeUniforms(to: uniformBuffer, appModel: appModel)
+        var blitParams = writeUniforms(
+            to: uniformBuffer,
+            appModel: appModel,
+            deferEdgeDetection: didUpscale
+        )
 
         // Fractal distance cache: (re)bake before the render pass when a
         // DE-shaping parameter changed. Same command buffer ⇒ never stale.
@@ -928,6 +940,11 @@ final class ThresholdMacRenderer {
             }
             blitEncoder.setRenderPipelineState(blitPipelineState)
             blitEncoder.setFragmentTexture(temporalPass.output, index: 0)
+            blitEncoder.setFragmentBytes(
+                &blitParams,
+                length: MemoryLayout<MacBlitParams>.stride,
+                index: 0
+            )
             blitEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             blitEncoder.endEncoding()
 
@@ -957,6 +974,11 @@ final class ThresholdMacRenderer {
             }
             blitEncoder.setRenderPipelineState(blitPipelineState)
             blitEncoder.setFragmentTexture(spatialPass.output, index: 0)
+            blitEncoder.setFragmentBytes(
+                &blitParams,
+                length: MemoryLayout<MacBlitParams>.stride,
+                index: 0
+            )
             blitEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             blitEncoder.endEncoding()
 
@@ -1289,7 +1311,10 @@ final class ThresholdMacRenderer {
         return depthTexture
     }
 
-    private func writeUniforms(to buffer: MTLBuffer, appModel: AppModel) {
+    @discardableResult
+    private func writeUniforms(to buffer: MTLBuffer,
+                               appModel: AppModel,
+                               deferEdgeDetection: Bool = false) -> MacBlitParams {
         let now = CACurrentMediaTime()
         let deltaTime = max(1.0 / 240.0, min(now - lastFrameTime, 1.0 / 15.0))
         lastFrameTime = now
@@ -1304,22 +1329,21 @@ final class ThresholdMacRenderer {
         let isAudioMode = settings.lightingMode == .audioReactive ||
             settings.lightingMode == .visualizer ||
             settings.fractalAudioReactiveEnabled
-        let hasActiveAudioSources = appModel.audioAnalyzer.isCapturing || appModel.appleMusicManager.isActive
+        let audioSnapshot = appModel.audioHub.latestSnapshot()
 
         parameterUpdateCoordinator.scheduleParameterUpdates(
             shouldUpdateAnimation: settings.isAnimationPlaying,
-            shouldUpdateAudio: isAudioMode && hasActiveAudioSources,
+            shouldUpdateAudio: isAudioMode,
             deltaTime: deltaTime,
             currentTime: now
         )
-        updateAudioLevels(appModel: appModel,
-                          settings: settings,
+        updateAudioLevels(settings: settings,
                           isAudioMode: isAudioMode,
-                          hasActiveAudioSources: hasActiveAudioSources)
+                          snapshot: audioSnapshot)
         updateMusicReactiveParameters(appModel: appModel,
                                       settings: settings,
                                       isAudioMode: isAudioMode,
-                                      hasActiveAudioSources: hasActiveAudioSources,
+                                      snapshot: audioSnapshot,
                                       deltaTime: Float(deltaTime))
 
         let framePacing = framePacingTracker.withLock { $0.snapshot() }
@@ -1338,10 +1362,26 @@ final class ThresholdMacRenderer {
         // visual-regression diffs are deterministic (color cycles/warps otherwise
         // land at a run-dependent phase). nil in normal use and for perf frames.
         let effectiveElapsed = benchFixedTime ?? Float(now - startTime)
-        let uniforms = makeUniforms(settings: snapshot, elapsedTime: effectiveElapsed, deltaTime: Float(deltaTime))
+        var uniforms = makeUniforms(settings: snapshot, elapsedTime: effectiveElapsed, deltaTime: Float(deltaTime))
+        let edgeEnabled = deferEdgeDetection && uniforms.colorScheme.edgeDetectionEnabled != 0
+        let edgeRadius = edgeEnabled
+            ? Float(max(1, min(3, uniforms.colorScheme.edgeDetectionWindowRadius)))
+            : 0.0
+        let blitParams = MacBlitParams(edge: SIMD4<Float>(
+            edgeRadius,
+            uniforms.colorScheme.edgeDetectionStrength,
+            uniforms.colorScheme.edgeDetectionThreshold,
+            uniforms.colorScheme.edgeDetectionSoftness
+        ))
+        if edgeEnabled {
+            // Do not burn the synthetic outline into MetalFX color/history.
+            // The existing full-resolution blit pass applies it after upscale.
+            uniforms.colorScheme.edgeDetectionEnabled = 0
+        }
         let pointer = buffer.contents().bindMemory(to: UniformsArray.self, capacity: 1)
         pointer.pointee.uniforms.0 = uniforms
         pointer.pointee.uniforms.1 = uniforms
+        return blitParams
     }
 
     private func updateTemporalInvalidationState(settings: RenderSettingsSnapshot) {
@@ -1475,13 +1515,12 @@ final class ThresholdMacRenderer {
         }
     }
 
-    private func updateAudioLevels(appModel: AppModel,
-                                   settings: RenderSettings,
+    private func updateAudioLevels(settings: RenderSettings,
                                    isAudioMode: Bool,
-                                   hasActiveAudioSources: Bool) {
+                                   snapshot: AudioFeatureSnapshot) {
         guard isAudioMode else { return }
 
-        guard hasActiveAudioSources else {
+        guard snapshot.isActive else {
             settings.bassLevel = 0
             settings.midLevel = 0
             settings.trebleLevel = 0
@@ -1490,48 +1529,14 @@ final class ThresholdMacRenderer {
             return
         }
 
-        let analyzer = appModel.audioAnalyzer
-        let appleMusicManager = appModel.appleMusicManager
         let bassSensitivity = settings.bassSensitivity
         let midSensitivity = settings.midSensitivity
         let trebleSensitivity = settings.trebleSensitivity
         let beatSensitivity = settings.beatSensitivity
+        let features = snapshot.mixed
 
-        var totalBass: Float = 0
-        var totalMid: Float = 0
-        var totalTreble: Float = 0
-        var totalBeat: Float = 0
-        var totalLevel: Float = 0
-        var sourceCount: Float = 0
-
-        if analyzer.isCapturing {
-            totalBass += analyzer.bassLevel
-            totalMid += analyzer.midLevel
-            totalTreble += analyzer.trebleLevel
-            totalBeat = max(totalBeat, analyzer.onsetLevel)  // real spectral-flux onset, not a loudness envelope
-            totalLevel += analyzer.level
-            sourceCount += 1
-        }
-
-        if appleMusicManager.isActive {
-            totalBass += appleMusicManager.bassLevel
-            totalMid += appleMusicManager.midLevel
-            totalTreble += appleMusicManager.trebleLevel
-            totalBeat = max(totalBeat, appleMusicManager.beatIntensity)
-            totalLevel += appleMusicManager.overallLevel
-            sourceCount += 1
-        }
-
-        // Guard against non-finite analyzer levels before they can propagate into
-        // RenderSettings and from there into GPU uniforms. AudioAnalyzer already
-        // sanitizes internally, but a race window or future code path could
-        // still produce a non-finite value here.
-        guard sourceCount > 0,
-              totalBass.isFinite, totalMid.isFinite, totalTreble.isFinite,
-              totalBeat.isFinite, totalLevel.isFinite else {
-            if sourceCount > 0 {
-                renderLogger.error("Non-finite analyzer level detected — zeroing audio inputs (bass=\(totalBass) mid=\(totalMid) treble=\(totalTreble) beat=\(totalBeat) level=\(totalLevel))")
-            }
+        guard features.isFinite else {
+            renderLogger.error("Non-finite AudioHub snapshot detected — zeroing audio inputs")
             settings.bassLevel = 0
             settings.midLevel = 0
             settings.trebleLevel = 0
@@ -1540,20 +1545,19 @@ final class ThresholdMacRenderer {
             return
         }
 
-        let inverseSourceCount = 1.0 / sourceCount
-        settings.bassLevel = min(1.0, totalBass * inverseSourceCount * bassSensitivity)
-        settings.midLevel = min(1.0, totalMid * inverseSourceCount * midSensitivity)
-        settings.trebleLevel = min(1.0, totalTreble * inverseSourceCount * trebleSensitivity)
-        settings.beatIntensity = min(1.0, totalBeat * beatSensitivity)
-        settings.audioLevel = totalLevel * inverseSourceCount
+        settings.bassLevel = min(1.0, max(0, features.bass * bassSensitivity))
+        settings.midLevel = min(1.0, max(0, features.mid * midSensitivity))
+        settings.trebleLevel = min(1.0, max(0, features.treble * trebleSensitivity))
+        settings.beatIntensity = min(1.0, max(0, features.onset * beatSensitivity))
+        settings.audioLevel = min(1.0, max(0, features.overall))
     }
 
     private func updateMusicReactiveParameters(appModel: AppModel,
                                                settings: RenderSettings,
                                                isAudioMode: Bool,
-                                               hasActiveAudioSources: Bool,
+                                               snapshot: AudioFeatureSnapshot,
                                                deltaTime: Float) {
-        guard isAudioMode, hasActiveAudioSources, settings.fractalAudioReactiveEnabled else {
+        guard isAudioMode, snapshot.isActive, settings.fractalAudioReactiveEnabled else {
             musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
             return
         }

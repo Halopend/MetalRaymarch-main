@@ -1081,11 +1081,12 @@ actor Renderer {
         frameBreakdown.settingsUpdateMs = (CACurrentMediaTime() - settingsUpdateStart) * 1000.0
         
         // === AUDIO PIPELINE ===
-        // Auto-detect active sources: use mic FFT, Spotify beat sync, and/or
-        // Apple Music BPM-based synthesis — blend whatever is available.
+        // Renderers consume one coherent hub snapshot. Source discovery,
+        // permission/lifecycle, fallback policy, and feature mixing all live
+        // behind AudioHub rather than being reimplemented per render path.
         let backgroundCpuStart = CACurrentMediaTime()
         let isAudioMode = settings.lightingMode == .audioReactive || settings.lightingMode == .visualizer || settings.fractalAudioReactiveEnabled
-        let hasActiveAudioSources = appModel.audioAnalyzer.isCapturing || appModel.appleMusicManager.isActive
+        let audioSnapshot = appModel.audioHub.latestSnapshot()
         let shouldUpdateAnimation = settings.isAnimationPlaying
         
         // === PARAMETER UPDATE COORDINATION ===
@@ -1093,62 +1094,32 @@ actor Renderer {
         // Prevents per-frame MainActor blocking that causes UI lag during heavy rendering
         parameterUpdateCoordinator?.scheduleParameterUpdates(
             shouldUpdateAnimation: shouldUpdateAnimation,
-            shouldUpdateAudio: isAudioMode && hasActiveAudioSources,
+            shouldUpdateAudio: isAudioMode,
             deltaTime: animDelta,
             currentTime: time
         )
         
         if isAudioMode {
-            let mic = appModel.audioAnalyzer
-            let appleMusicManager = appModel.appleMusicManager
-            // Auto-detect: use whatever sources are currently active
-            let micActive = mic.isCapturing
-            let appleMusicActive = appleMusicManager.isActive
-            
             // Sensitivity multipliers from user settings
             let bassSens = settings.bassSensitivity
             let midSens = settings.midSensitivity
             let trebleSens = settings.trebleSensitivity
             let beatSens = settings.beatSensitivity
+            let features = audioSnapshot.mixed
 
-            // Collect active source levels, then blend proportionally
-            var totalBass: Float = 0, totalMid: Float = 0, totalTreble: Float = 0
-            var totalBeat: Float = 0, totalLevel: Float = 0
-            var sourceCount: Float = 0
-
-            if micActive {
-                totalBass += mic.bassLevel
-                totalMid += mic.midLevel
-                totalTreble += mic.trebleLevel
-                totalBeat = max(totalBeat, mic.onsetLevel)  // real spectral-flux onset, not a loudness envelope
-                totalLevel += mic.level
-                sourceCount += 1
-            }
-            if appleMusicActive {
-                totalBass += appleMusicManager.bassLevel
-                totalMid += appleMusicManager.midLevel
-                totalTreble += appleMusicManager.trebleLevel
-                totalBeat = max(totalBeat, appleMusicManager.beatIntensity)
-                totalLevel += appleMusicManager.overallLevel
-                sourceCount += 1
-            }
-
-            if sourceCount > 0 {
-                let inv = 1.0 / sourceCount
-                // Audio state writes: these feed PrecomputedAudio (CPU-side aggregate),
-                // NOT per-pixel shader values. They stay as direct RenderSettings writes
-                // because they aren't scalar parameters eligible for layer-stack dispatch.
-                settings.bassLevel = min(1.0, totalBass * inv * bassSens)
-                settings.midLevel = min(1.0, totalMid * inv * midSens)
-                settings.trebleLevel = min(1.0, totalTreble * inv * trebleSens)
-                settings.beatIntensity = min(1.0, totalBeat * beatSens)
-                settings.audioLevel = totalLevel * inv
-            }
+            // AudioHub always produces finite normalized values. Still clamp at
+            // the GPU boundary so a future source implementation cannot poison
+            // uniforms even if it bypasses the hub's normalizer.
+            settings.bassLevel = min(1.0, max(0, features.bass * bassSens))
+            settings.midLevel = min(1.0, max(0, features.mid * midSens))
+            settings.trebleLevel = min(1.0, max(0, features.treble * trebleSens))
+            settings.beatIntensity = min(1.0, max(0, features.onset * beatSens))
+            settings.audioLevel = min(1.0, max(0, features.overall))
 
             // Music drives fractal geometry AND effects (Fractal Forge-inspired).
             // The aggregation above produced the per-band levels; the shared engine
             // applies damping, response curves, the LFO overlay, and dispatch.
-            if settings.fractalAudioReactiveEnabled {
+            if settings.fractalAudioReactiveEnabled && audioSnapshot.isActive {
                 let bandLevels = BandLevels(bass: settings.bassLevel,
                                             mid: settings.midLevel,
                                             treble: settings.trebleLevel,

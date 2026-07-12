@@ -44,6 +44,10 @@ class AudioAnalyzer {
     /// Whether an external PCM source (whole-system output minus this process,
     /// captured via ScreenCaptureKit) is active. Read only within AudioAnalyzer.
     @ObservationIgnored nonisolated(unsafe) private var isExternalCapturing: Bool = false
+
+    /// Monotonic time of the most recently analyzed PCM buffer. Capture adapters
+    /// use this to keep a stalled route from presenting old features as live.
+    @ObservationIgnored nonisolated(unsafe) private(set) var lastSampleTime: TimeInterval = 0
     
     // Pending MainActor dispatch batching — avoids creating ~86 Tasks/sec
     @ObservationIgnored nonisolated(unsafe) private var pendingLevelDispatch = false
@@ -125,27 +129,33 @@ class AudioAnalyzer {
     
     // MARK: - Public Methods
     
-    /// Start capturing audio from the default input device
+    /// Start capturing audio from the default input device without forcing
+    /// callers that predate `AudioHub` to become asynchronous.
     func startCapture() {
-        guard !isMicrophoneCapturing else { return }
-        errorMessage = nil
-        
-        Task {
-            let permission = await checkMicrophonePermission()
-            if permission {
-                await MainActor.run {
-                    setupAudioCapture()
-                }
-            } else {
-                await MainActor.run {
-                    #if os(macOS)
-                    errorMessage = "Microphone access denied. Enable Threshold in System Settings -> Privacy & Security -> Microphone. If you recently changed the bundle identifier, macOS treats it as a new app and you must re-enable access."
-                    #else
-                    errorMessage = "Microphone access denied. Enable in Settings."
-                    #endif
-                }
-            }
+        Task { @MainActor in
+            _ = await startCaptureIfNeeded()
         }
+    }
+
+    /// Starts capture and reports whether a live microphone tap was installed.
+    /// `AudioHub` uses this rather than guessing from a delayed permission task,
+    /// which lets it make a source transition atomically with the feature mixer.
+    @discardableResult
+    func startCaptureIfNeeded() async -> Bool {
+        guard !isMicrophoneCapturing else { return true }
+        errorMessage = nil
+
+        guard await checkMicrophonePermission() else {
+            #if os(macOS)
+            errorMessage = "Microphone access denied. Enable Threshold in System Settings -> Privacy & Security -> Microphone. If you recently changed the bundle identifier, macOS treats it as a new app and you must re-enable access."
+            #else
+            errorMessage = "Microphone access denied. Enable in Settings."
+            #endif
+            return false
+        }
+
+        setupAudioCapture()
+        return isMicrophoneCapturing
     }
     
     /// Stop capturing audio
@@ -155,6 +165,7 @@ class AudioAnalyzer {
         audioEngine = nil
         inputNode = nil
         isMicrophoneCapturing = false
+        lastSampleTime = 0
         refreshCaptureState(resetLevelsWhenIdle: true)
     }
 
@@ -174,6 +185,7 @@ class AudioAnalyzer {
             computeBandIndices()
         }
         isExternalCapturing = true
+        lastSampleTime = 0
         refreshCaptureState()
         errorMessage = nil
     }
@@ -181,6 +193,7 @@ class AudioAnalyzer {
     /// Stop external ingestion and decay levels back to zero.
     func endExternalCapture() {
         isExternalCapturing = false
+        lastSampleTime = 0
         refreshCaptureState(resetLevelsWhenIdle: true)
     }
 
@@ -319,6 +332,8 @@ class AudioAnalyzer {
         
         let frameLength = Int(buffer.frameLength)
         guard frameLength > 0 else { return }
+
+        lastSampleTime = ProcessInfo.processInfo.systemUptime
         
         let samples = channelData[0]
         
@@ -558,4 +573,3 @@ class AudioAnalyzer {
 private struct SendablePCMBuffer: @unchecked Sendable {
     let buffer: AVAudioPCMBuffer
 }
-

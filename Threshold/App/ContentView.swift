@@ -1623,11 +1623,11 @@ struct ContentView: View {
                 case .coloring: coloringTabContent
                 case .effects:  effectsTabContent
                 case .music:
-                    #if os(macOS)
-                    MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings, systemAudioCapture: appModel.systemAudioCapture, tabSelection: $musicPanelTab)
-                    #else
-                    MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings, tabSelection: $musicPanelTab)
-                    #endif
+                    MusicTabContent(cache: cache,
+                                    musicService: appModel.musicService,
+                                    audioHub: appModel.audioHub,
+                                    renderSettings: appModel.renderSettings,
+                                    tabSelection: $musicPanelTab)
                 case .transition:
                     if let animationManager = appModel.animationManager {
                         TransitionTabContent(animationManager: animationManager)
