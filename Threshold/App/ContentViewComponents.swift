@@ -30,7 +30,7 @@ struct ResetControl: View {
                     .font(.subheadline.weight(.semibold))
             }
             .padding(.horizontal, 14)
-            .frame(height: 34)
+            .frame(minHeight: 44)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -41,22 +41,25 @@ struct ResetControl: View {
     }
 }
 
-/// The "+" button that opens the save-destination flow.
+/// Opens the save-destination flow. A text label is intentional here: a bare
+/// green plus was easy to mistake for "new animation" or "add keyframe".
 struct SaveControl: View {
     let onAdd: () -> Void
 
     var body: some View {
         Button(action: onAdd) {
-            Image(systemName: AppIcons.plus)
-                .font(.system(size: 15, weight: .bold))
-                .frame(width: 34, height: 34)
-                .contentShape(Circle())
+            Label("Save", systemImage: AppIcons.plus)
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 14)
+                .frame(minHeight: 44)
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white)
-        .background(Circle().fill(Color.green))
-        .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
-        .help("Save the current settings as a new scene.")
+        .background(Capsule().fill(Color.green))
+        .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
+        .help("Save the current settings as a preset or update the reset point.")
+        .accessibilityHint("Opens save options")
     }
 }
 
@@ -174,44 +177,58 @@ struct SaveDestinationSheet: View {
     let onSave: (SaveChoice, String?) -> Void
     let onCancel: () -> Void
 
-    @State private var choice: SaveChoice = .resetLocation
+    /// No implicit choice: replacing the reset point must never be the result of
+    /// opening the sheet and pressing Return without reading it.
+    @State private var choice: SaveChoice?
     @State private var manualPresetName = ""
+    @State private var isConfirmingResetReplacement = false
 
     private var canSave: Bool {
-        if choice != .presetCustomName && choice != .presetWithPreview { return true }
+        guard let choice else { return false }
+        if choice == .resetLocation { return true }
         return !manualPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var primaryActionTitle: String {
+        switch choice {
+        case .resetLocation: return "Update Reset Point"
+        case .presetCustomName, .presetWithPreview: return "Save Preset"
+        case nil: return "Choose an Option"
+        }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Save Current Settings")
+                Text("Save Current Look")
                     .font(.headline)
-                Text("Choose one destination.")
+                Text("Create a reusable preset, or deliberately replace what Reset restores.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             VStack(spacing: 8) {
                 saveChoiceButton(
-                    choice: .resetLocation,
-                    title: "Reset Location",
-                    subtitle: "Replace the current reset/default state.",
-                    systemImage: AppIcons.arrowCounterclockwise
-                )
-
-                saveChoiceButton(
                     choice: .presetCustomName,
-                    title: "Preset - Custom Name",
-                    subtitle: "Save with a name you enter.",
+                    title: "Save Named Preset",
+                    subtitle: "Keep this look in your scene library.",
                     systemImage: AppIcons.characterCursorIbeam
                 )
 
                 saveChoiceButton(
                     choice: .presetWithPreview,
-                    title: "Save + Convert Preview",
-                    subtitle: "Save a named preset with a generated image.",
+                    title: "Save Preset with Preview",
+                    subtitle: "Include a generated library thumbnail.",
                     systemImage: AppIcons.photoBadgePlus
+                )
+
+                Divider()
+
+                saveChoiceButton(
+                    choice: .resetLocation,
+                    title: "Update Reset Point",
+                    subtitle: "Replace the state restored by Reset.",
+                    systemImage: AppIcons.arrowCounterclockwise
                 )
             }
 
@@ -226,16 +243,34 @@ struct SaveDestinationSheet: View {
                 }
                 Spacer()
 
-                Button("Save") {
-                    let trimmed = manualPresetName.trimmingCharacters(in: .whitespacesAndNewlines)
-                    onSave(choice, trimmed.isEmpty ? nil : trimmed)
+                Button(primaryActionTitle) {
+                    guard let choice else { return }
+                    if choice == .resetLocation {
+                        isConfirmingResetReplacement = true
+                    } else {
+                        performSave(choice)
+                    }
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(choice == .resetLocation ? .orange : .blue)
                 .disabled(!canSave)
             }
         }
         .padding(16)
-        .frame(width: 360)
+        .frame(width: 390)
+        .alert("Replace the reset point?", isPresented: $isConfirmingResetReplacement) {
+            Button("Cancel", role: .cancel) {}
+            Button("Replace Reset Point", role: .destructive) {
+                performSave(.resetLocation)
+            }
+        } message: {
+            Text("Reset will return to the current settings instead of the previous saved baseline.")
+        }
+    }
+
+    private func performSave(_ choice: SaveChoice) {
+        let trimmed = manualPresetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        onSave(choice, trimmed.isEmpty ? nil : trimmed)
     }
 
     private func saveChoiceButton(choice: SaveChoice, title: String, subtitle: String, systemImage: String) -> some View {

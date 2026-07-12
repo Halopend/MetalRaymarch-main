@@ -23,6 +23,7 @@ struct ContentView: View {
     @Environment(AppModel.self) var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openWindow) var openWindow
     @Environment(\.dismissWindow) var dismissWindow
@@ -58,9 +59,14 @@ struct ContentView: View {
     @AppStorage("ContentView.pinnedRailControls") private var pinnedRailControlsRaw: String = ""
     @State var showStopsPopover = false
     @State private var showSaveDestinationSheet = false
+    @State private var saveConfirmationMessage: String?
+    @State private var isControlFinderPresented = false
+    #if os(iOS)
+    @State var isAnimationEditorPresented = false
+    @State var isWelcomePresented = false
+    #endif
     /// One-time first-run prompt to choose local vs iCloud storage.
     @State private var showStorageChoice = false
-    @State private var didLongPressPinnedRailControl: PinnedRailControl?
     #if os(macOS)
     @State var isHoldingSaveSheetAdjustment = false
     @State var isHoldingImportSheetAdjustment = false
@@ -110,6 +116,25 @@ struct ContentView: View {
     #endif
     }
 
+    private var usesCompactWorkspaceLayout: Bool {
+    #if os(iOS)
+        horizontalSizeClass == .compact
+    #else
+        false
+    #endif
+    }
+
+    private var availableShapeRailSections: [ShapeRailSection] {
+        ShapeRailSection.allCases.filter { section in
+            guard section != .performance else { return false }
+            #if os(visionOS)
+            return true
+            #else
+            return section != .hands
+            #endif
+        }
+    }
+
     private var activeMusicPermutationCount: Int {
         guard cache.audioReactive.fractalAudioReactiveEnabled else { return 0 }
         return cache.audioReactive.musicReactiveMappings.count
@@ -135,6 +160,10 @@ struct ContentView: View {
         if cache.fractalType.supports(.polarRotation), cache.lighting.polarRotationEffect.enabled { count += 1 }
         if cache.fractalType.supports(.juliaDrift), cache.lighting.juliaDriftEffect.enabled { count += 1 }
         return count
+    }
+
+    private var isPrimaryWorkspaceSelection: Bool {
+        selectedTab != .gestures && selectedTab != .settings && selectedTab != .quickToggles
     }
 
     var hasShapeMusicMapping: Bool {
@@ -213,11 +242,25 @@ struct ContentView: View {
             }
         }
         .overlay(alignment: .top) {
-            // Surfaces ErrorReporter failures (preset/animation import, etc.) that
-            // were previously reported but never shown. Transient: self-dismisses
-            // and only renders while currentError is set.
-            ErrorBannerView(errorReporter: appModel.errorReporter)
-                .padding(.top, 8)
+            VStack(spacing: 8) {
+                // Surfaces ErrorReporter failures (preset/animation import, etc.) that
+                // were previously reported but never shown. Transient: self-dismisses
+                // and only renders while currentError is set.
+                ErrorBannerView(errorReporter: appModel.errorReporter)
+
+                if let saveConfirmationMessage {
+                    Label(saveConfirmationMessage, systemImage: AppIcons.checkmarkCircleFill)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay(Capsule().strokeBorder(Color.green.opacity(0.45), lineWidth: 1))
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .accessibilityLabel(saveConfirmationMessage)
+                }
+            }
+            .padding(.top, 8)
         }
         .environment(\.menuAdjustmentActions, MenuAdjustmentActions(
             begin: { appModel.beginMenuAdjustment() },
@@ -351,9 +394,25 @@ struct ContentView: View {
                     showSaveDestinationSheet = false
                 }
             )
-            .presentationDetents([.height(300), .height(360)])
+            .presentationDetents([.height(430), .height(500)])
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $isControlFinderPresented) {
+            ControlFinderView(
+                onSelect: navigateFromControlFinder,
+                onDismiss: { isControlFinderPresented = false }
+            )
+        }
+        #if os(iOS)
+        .fullScreenCover(isPresented: $isAnimationEditorPresented) {
+            AnimationEditorWindowView()
+                .environment(appModel)
+        }
+        .fullScreenCover(isPresented: $isWelcomePresented) {
+            FirstLaunchWindowView()
+                .environment(appModel)
+        }
+        #endif
         .sheet(item: $appModel.pendingExternalImport) { request in
             ExternalFileImportSheet(
                 request: request,
@@ -447,6 +506,7 @@ struct ContentView: View {
     private func saveCurrentAsResetDefaults() {
         guard appModel.gestureController?.saveCurrentAsFractalDefaults() == true else { return }
         cache.loadFromSettings()
+        showSaveConfirmation("Reset point updated")
     }
 
     private func saveCurrentAsPreset(named providedName: String? = nil, includeGeneratedPreview: Bool = false) {
@@ -459,6 +519,20 @@ struct ContentView: View {
             thumbnailData: includeGeneratedPreview ? generatedPresetPreviewData(named: finalName) : nil,
             embeddedFormula: appModel.activeEmbeddedFormula
         )
+        showSaveConfirmation("Saved \"\(finalName)\"")
+    }
+
+    private func showSaveConfirmation(_ message: String) {
+        withMotionSensitiveAnimation(.easeOut(duration: 0.18)) {
+            saveConfirmationMessage = message
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2.4))
+            guard saveConfirmationMessage == message else { return }
+            withMotionSensitiveAnimation(.easeIn(duration: 0.16)) {
+                saveConfirmationMessage = nil
+            }
+        }
     }
 
     private func generatedPresetPreviewData(named name: String) -> Data? {
@@ -564,6 +638,19 @@ struct ContentView: View {
     // MARK: - Immersive Layout (Sidebar + Content)
     
     private var immersiveLayout: some View {
+        Group {
+            if usesCompactWorkspaceLayout {
+                compactWorkspaceLayout
+            } else {
+                regularWorkspaceLayout
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(minWidth: immersiveLayoutMinimumWidth, minHeight: 576)
+    }
+
+    private var regularWorkspaceLayout: some View {
         VStack(spacing: 10) {
 #if os(macOS) || os(iOS)
             HStack(spacing: 0) {
@@ -588,9 +675,136 @@ struct ContentView: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-    .frame(minWidth: immersiveLayoutMinimumWidth, minHeight: 576)
+    }
+
+    /// Compact inspector layout used by narrow iPad windows. The persistent
+    /// 208-point rail left too little room for the editor; sections become a
+    /// horizontal, keyboard/VoiceOver-addressable strip and the bottom bar only
+    /// keeps actions that are meaningful on iPad.
+    private var compactWorkspaceLayout: some View {
+        VStack(spacing: 8) {
+            topDockOrnament
+
+            compactSectionBar
+
+            Divider()
+
+            contentPanel
+
+            Divider()
+
+            compactBottomBar
+        }
+    }
+
+    private var compactSectionBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                switch topDockTab {
+                case .explore:
+                    ForEach(ExploreRailSection.allCases.filter { $0 != .customScenes || allowCustomScenes }, id: \.self) { section in
+                        compactSectionButton(
+                            title: section.rawValue,
+                            systemImage: section.icon,
+                            isSelected: selectedTab != .settings && selectedTab != .quickToggles && exploreRailSection == section
+                        ) { activateExploreSection(section) }
+                    }
+                case .shape:
+                    ForEach(availableShapeRailSections, id: \.self) { section in
+                        compactSectionButton(
+                            title: section.rawValue,
+                            systemImage: section.icon,
+                            isSelected: selectedTab != .settings && selectedTab != .quickToggles && shapeRailSection == section
+                        ) { activateShapeSection(section) }
+                    }
+                case .visualizations:
+                    ForEach(VisualizationsRailSection.allCases, id: \.self) { section in
+                        compactSectionButton(
+                            title: section.title,
+                            systemImage: section.icon,
+                            isSelected: selectedTab != .settings && selectedTab != .quickToggles && visualizationsRailSection == section
+                        ) { activateVisualizationsSection(section) }
+                    }
+                case .music:
+                    ForEach(MusicRailSection.availableCases, id: \.self) { section in
+                        compactSectionButton(
+                            title: section.title,
+                            systemImage: section.icon,
+                            isSelected: selectedTab != .settings && selectedTab != .quickToggles && musicRailSection == section
+                        ) { activateMusicSection(section) }
+                    }
+                case .performance:
+                    ForEach(PerformanceRailSection.allCases, id: \.self) { section in
+                        compactSectionButton(
+                            title: section.rawValue,
+                            systemImage: section.icon,
+                            isSelected: selectedTab != .settings && selectedTab != .quickToggles && performanceRailSection == section
+                        ) { activatePerformanceSection(section) }
+                    }
+                }
+
+                Divider()
+                    .frame(height: 28)
+
+                compactSectionButton(
+                    title: "Animation Editor",
+                    systemImage: AppIcons.pencilAndListClipboard,
+                    isSelected: false
+                ) { openAnimationEditor() }
+
+                compactSectionButton(
+                    title: "Quick Toggles",
+                    systemImage: SidebarTab.quickToggles.icon,
+                    isSelected: selectedTab == .quickToggles
+                ) { selectedTab = .quickToggles }
+
+                compactSectionButton(
+                    title: "Settings",
+                    systemImage: SidebarTab.settings.icon,
+                    isSelected: selectedTab == .settings
+                ) { selectedTab = .settings }
+            }
+            .padding(.horizontal, 2)
+        }
+        .frame(minHeight: 44)
+    }
+
+    private func compactSectionButton(title: String, systemImage: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .padding(.horizontal, 11)
+                .frame(minHeight: 40)
+                .background(
+                    Capsule().fill(isSelected ? Color.blue.opacity(0.20) : Color.secondary.opacity(0.08))
+                )
+                .overlay(
+                    Capsule().strokeBorder(isSelected ? Color.blue.opacity(0.38) : Color.secondary.opacity(0.14), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSelected ? .primary : .secondary)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var compactBottomBar: some View {
+        HStack(spacing: 10) {
+            if let animationManager = appModel.animationManager {
+                LiveSessionRecordingControl(animationManager: animationManager, compact: true)
+                    .disabled(animationManager.isPlaying)
+            }
+
+            ResetControl(onReset: resetCurrentFractalSettings)
+
+            Spacer(minLength: 8)
+
+            SaveControl {
+                showSaveDestinationSheet = true
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
     }
     
     // MARK: - Top Dock
@@ -617,17 +831,36 @@ struct ContentView: View {
                     .padding(.vertical, 10)
                     .background(
                         Capsule()
-                            .fill(topDockTab == tab && selectedTab != .gestures && selectedTab != .settings ? Color.blue.opacity(0.18) : Color.clear)
+                            .fill(topDockTab == tab && isPrimaryWorkspaceSelection ? Color.blue.opacity(0.18) : Color.clear)
                     )
                     .overlay(
                         Capsule()
-                            .strokeBorder(topDockTab == tab && selectedTab != .gestures && selectedTab != .settings ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.14), lineWidth: 1)
+                            .strokeBorder(topDockTab == tab && isPrimaryWorkspaceSelection ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.14), lineWidth: 1)
                     )
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(topDockTab == tab && selectedTab != .gestures && selectedTab != .settings ? .primary : .secondary)
-                .accessibilityAddTraits(topDockTab == tab && selectedTab != .gestures && selectedTab != .settings ? .isSelected : [])
+                .foregroundStyle(topDockTab == tab && isPrimaryWorkspaceSelection ? .primary : .secondary)
+                .accessibilityAddTraits(topDockTab == tab && isPrimaryWorkspaceSelection ? .isSelected : [])
             }
+
+            Divider()
+                .frame(height: 24)
+
+            Button(action: presentControlFinder) {
+                Label("Find", systemImage: AppIcons.magnifyingglass)
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 10)
+                    .background(Capsule().fill(Color.secondary.opacity(0.08)))
+                    .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.16), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Find any control or setting (⌘K)")
+            .accessibilityLabel("Find controls")
+            #if !os(macOS)
+            .keyboardShortcut("k", modifiers: .command)
+            #endif
         }
     }
 
@@ -641,6 +874,20 @@ struct ContentView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .thresholdGlassBackground(cornerRadius: 18)
+#elseif os(iOS)
+        ScrollView(.horizontal, showsIndicators: false) {
+            topDockBar
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(colorScheme == .dark ? Color.black.opacity(0.82) : Color.white.opacity(0.72))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.14), lineWidth: 1)
+        )
 #else
         topDockBar
             .padding(.horizontal, 14)
@@ -669,7 +916,7 @@ struct ContentView: View {
                             railButton(
                                 title: section.rawValue,
                                 systemImage: section.icon,
-                                isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .explore && exploreRailSection == section,
+                                isSelected: isPrimaryWorkspaceSelection && topDockTab == .explore && exploreRailSection == section,
                                 pinControl: pinnedRailControl(for: section)
                             ) {
                                 activateExploreSection(section)
@@ -677,11 +924,11 @@ struct ContentView: View {
                         }
                     case .shape:
                         // Performance moved out to its own top-dock tab; drop it here.
-                        ForEach(ShapeRailSection.allCases.filter { $0 != .performance }, id: \.self) { section in
+                        ForEach(availableShapeRailSections, id: \.self) { section in
                             railButton(
                                 title: section.rawValue,
                                 systemImage: section.icon,
-                                isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .shape && shapeRailSection == section,
+                                isSelected: isPrimaryWorkspaceSelection && topDockTab == .shape && shapeRailSection == section,
                                 pinControl: pinnedRailControl(for: section)
                             ) {
                                 activateShapeSection(section)
@@ -692,7 +939,7 @@ struct ContentView: View {
                             railButton(
                                 title: section.title,
                                 systemImage: section.icon,
-                                isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .visualizations && visualizationsRailSection == section,
+                                isSelected: isPrimaryWorkspaceSelection && topDockTab == .visualizations && visualizationsRailSection == section,
                                 pinControl: pinnedRailControl(for: section)
                             ) {
                                 activateVisualizationsSection(section)
@@ -703,7 +950,7 @@ struct ContentView: View {
                             railButton(
                                 title: section.title,
                                 systemImage: section.icon,
-                                isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .music && musicRailSection == section,
+                                isSelected: isPrimaryWorkspaceSelection && topDockTab == .music && musicRailSection == section,
                                 pinControl: pinnedRailControl(for: section)
                             ) {
                                 activateMusicSection(section)
@@ -714,7 +961,7 @@ struct ContentView: View {
                             railButton(
                                 title: section.rawValue,
                                 systemImage: section.icon,
-                                isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .performance && performanceRailSection == section
+                                isSelected: isPrimaryWorkspaceSelection && topDockTab == .performance && performanceRailSection == section
                             ) {
                                 activatePerformanceSection(section)
                             }
@@ -735,9 +982,35 @@ struct ContentView: View {
                     }
                 }
 
+                // Animated scenes remain discoverable in Explore, but authoring
+                // them needs a persistent path as well.  Keep the editor one
+                // click away instead of hiding it behind a scene-card action.
+                railButton(
+                    title: "Animation Editor",
+                    systemImage: AppIcons.pencilAndListClipboard,
+                    isSelected: false
+                ) {
+                    openAnimationEditor()
+                }
+
                 if !pinnedRailControls.isEmpty {
                     Divider()
                         .padding(.vertical, 4)
+
+                    HStack {
+                        Label("Quick Access", systemImage: AppIcons.pinFill)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 4)
+                        Button("Clear") {
+                            pinnedRailControls = []
+                        }
+                        .buttonStyle(.plain)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.blue)
+                        .accessibilityLabel("Clear Quick Access")
+                    }
+                    .padding(.horizontal, 4)
 
                     LazyVGrid(
                         columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
@@ -789,65 +1062,63 @@ struct ContentView: View {
 
     @ViewBuilder
     private func railButton(title: String, systemImage: String, isSelected: Bool, pinControl: PinnedRailControl? = nil, action: @escaping () -> Void) -> some View {
-        let base = Button {
-            if let pinControl, didLongPressPinnedRailControl == pinControl {
-                didLongPressPinnedRailControl = nil
-                return
-            }
-            action()
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: systemImage)
-                    .font(.system(size: IconSize.medium, weight: .semibold))
-                    .frame(width: 18)
+        let isPinned = pinControl.map { pinnedRailControls.contains($0) } ?? false
 
-                Text(title)
-                    .font(.footnote.weight(.semibold))
-                    .lineLimit(1)
+        HStack(spacing: 2) {
+            Button(action: action) {
+                HStack(spacing: 10) {
+                    Image(systemName: systemImage)
+                        .font(.system(size: IconSize.medium, weight: .semibold))
+                        .frame(width: 18)
 
-                Spacer(minLength: 0)
+                    Text(title)
+                        .font(.footnote.weight(.semibold))
+                        .lineLimit(1)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 10)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(isSelected ? Color.blue.opacity(0.18) : Color.clear)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(isSelected ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.10), lineWidth: 1)
-            )
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
+
+            if let pinControl {
+                Button {
+                    togglePinnedRailControl(pinControl)
+                } label: {
+                    Image(systemName: isPinned ? AppIcons.pinFill : AppIcons.pin)
+                        .font(.system(size: IconSize.small, weight: .semibold))
+                        .frame(width: 34, height: 42)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(isPinned ? Color.blue : Color.secondary.opacity(0.8))
+                .help(isPinned ? "Remove \(title) from Quick Access" : "Pin \(title) to Quick Access")
+                .accessibilityLabel(isPinned ? "Unpin \(title)" : "Pin \(title)")
+            }
         }
-        .buttonStyle(.plain)
+        .padding(.trailing, pinControl == nil ? 10 : 4)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(isSelected ? Color.blue.opacity(0.18) : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(isSelected ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.10), lineWidth: 1)
+        )
         .foregroundStyle(isSelected ? .primary : .secondary)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-
-        if let pc = pinControl {
-            base.simultaneousGesture(
-                LongPressGesture(minimumDuration: 0.55, maximumDistance: 24)
-                    .onEnded { _ in
-                        didLongPressPinnedRailControl = pc
-                        togglePinnedRailControl(pc)
-                    }
-            )
-        } else {
-            base
-        }
     }
 
     private func pinnedRailButton(title: String, systemImage: String, isSelected: Bool, pinControl: PinnedRailControl, action: @escaping () -> Void) -> some View {
-        Button {
-            if didLongPressPinnedRailControl == pinControl {
-                didLongPressPinnedRailControl = nil
-                return
-            }
-            action()
-        } label: {
+        Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: IconSize.medium, weight: .semibold))
                 .frame(maxWidth: .infinity)
-                .frame(height: 38)
+                .frame(minHeight: 44)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
                         .fill(isSelected ? Color.blue.opacity(0.18) : Color.clear)
@@ -862,13 +1133,14 @@ struct ContentView: View {
         .help(title)
         .accessibilityLabel(title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.55, maximumDistance: 24)
-                .onEnded { _ in
-                    didLongPressPinnedRailControl = pinControl
-                    togglePinnedRailControl(pinControl)
-                }
-        )
+        .accessibilityAction(named: Text("Remove from Quick Access")) {
+            togglePinnedRailControl(pinControl)
+        }
+        .contextMenu {
+            Button("Remove from Quick Access", systemImage: AppIcons.pin) {
+                togglePinnedRailControl(pinControl)
+            }
+        }
     }
 
     private var pinnedRailControls: [PinnedRailControl] {
@@ -886,11 +1158,13 @@ struct ContentView: View {
     private func isSupportedPinnedRailControl(_ control: PinnedRailControl) -> Bool {
         #if os(macOS)
         switch control {
-        case .musicSongs, .musicPlaylists, .musicAlbums:
+        case .shapeHands, .musicSongs, .musicPlaylists, .musicAlbums:
             return false
         default:
             return true
         }
+        #elseif os(iOS)
+        return control != .shapeHands
         #else
         return true
         #endif
@@ -1048,6 +1322,41 @@ struct ContentView: View {
         musicPanelTab = resolvedSection.musicPanelTab
     }
 
+    private func presentControlFinder() {
+        #if os(macOS)
+        if let openControlFinderHandler = appModel.openControlFinderHandler {
+            openControlFinderHandler()
+            return
+        }
+        #endif
+        isControlFinderPresented = true
+    }
+
+    private func navigateFromControlFinder(_ destination: ControlFinderDestination) {
+        guard let route = destination.route else { return }
+        withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) {
+            switch route {
+            case .explore(let section):
+                activateExploreSection(section)
+            case .shape(let section):
+                activateShapeSection(section)
+            case .visualizations(let section):
+                activateVisualizationsSection(section)
+            case .performance(let section):
+                activatePerformanceSection(section)
+            case .music(let section):
+                activateMusicSection(section)
+            case .settings(let section):
+                selectedTab = .settings
+                settingsSubTab = section
+            case .sidebar(let tab):
+                selectedTab = tab
+            case .animationEditor:
+                openAnimationEditor()
+            }
+        }
+    }
+
     private func togglePinnedRailControl(_ control: PinnedRailControl) {
         var controls = pinnedRailControls
         if let index = controls.firstIndex(of: control) {
@@ -1059,6 +1368,7 @@ struct ContentView: View {
     }
 
     private func isPinnedRailControlSelected(_ control: PinnedRailControl) -> Bool {
+        guard isPrimaryWorkspaceSelection else { return false }
         switch control {
         case .exploreJumpingOff:
             return topDockTab == .explore && exploreRailSection == .jumpingOff && selectedTab != .gestures && selectedTab != .settings
@@ -1339,8 +1649,16 @@ struct ContentView: View {
     }
 
     private func normalizeDesktopSelectionIfNeeded() {
-        guard !supportsGestureEditing, selectedTab == .gestures else { return }
-        selectedTab = .fractal
+        if !supportsGestureEditing, selectedTab == .gestures {
+            selectedTab = .fractal
+        }
+
+        #if !os(visionOS)
+        if selectedTab == .fractal, fractalSubTab == .shape, shapeInnerTab == .hands {
+            shapeInnerTab = .parameters
+            shapeRailSection = .parameters
+        }
+        #endif
     }
     
     // MARK: - Bottom Bar
@@ -1357,6 +1675,7 @@ struct ContentView: View {
             }
             .frame(minWidth: 220, alignment: .leading)
 
+            #if !os(iOS)
             HStack(spacing: 10) {
                 ToggleImmersiveSpaceButton()
                     .frame(width: 132, alignment: .center)
@@ -1367,6 +1686,7 @@ struct ContentView: View {
 #endif
             }
             .frame(maxWidth: .infinity, alignment: .center)
+            #endif
 
             if showPerformanceInMenu {
                 bottomPerformanceStrip

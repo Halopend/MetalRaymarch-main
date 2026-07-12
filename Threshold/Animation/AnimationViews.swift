@@ -54,6 +54,9 @@ fileprivate enum AnimationEditorLayout {
 /// Utility window for scene management and editing.
 struct AnimationEditorWindowView: View {
     @Environment(AppModel.self) private var appModel
+    #if os(iOS)
+    @Environment(\.dismiss) private var dismiss
+    #endif
 
     var body: some View {
         Group {
@@ -67,7 +70,16 @@ struct AnimationEditorWindowView: View {
                 )
             }
         }
+        #if os(iOS)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
+        #else
         .frame(minWidth: 920, minHeight: 620)
+        #endif
 #if os(visionOS)
         .glassBackgroundEffect()
 #endif
@@ -79,7 +91,18 @@ private struct AnimationEditorWorkspaceView: View {
     @Bindable var appModel: AppModel
 
     var body: some View {
-        Group {
+        NavigationSplitView {
+            SceneListView(
+                animationManager: animationManager,
+                appModel: appModel,
+                onEditScene: { scene in
+                    animationManager.currentScene = scene
+                },
+                isInline: true
+            )
+            .navigationTitle("Scenes")
+            .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 360)
+        } detail: {
             if let scene = animationManager.currentScene {
                 SceneEditorView(
                     scene: scene,
@@ -97,12 +120,13 @@ private struct AnimationEditorWorkspaceView: View {
                 ContentUnavailableView(
                     "No Scene Selected",
                     systemImage: AppIcons.pencilAndListClipboard,
-                    description: Text("Pick a scene in Video and open Edit to edit it here.")
+                    description: Text("Select a scene in the sidebar, or use the add button to create one from the current fractal.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.horizontal, AnimationEditorLayout.workspaceInset)
             }
         }
+        .navigationSplitViewStyle(.balanced)
     }
 }
 
@@ -572,6 +596,30 @@ struct SceneEditorView: View {
 
                     Spacer(minLength: 0)
 
+                    Button {
+                        if animationManager.isPlaying,
+                           animationManager.currentScene?.id == scene.id {
+                            animationManager.stop()
+                        } else {
+                            animationManager.currentScene = scene
+                            animationManager.play()
+                        }
+                    } label: {
+                        let isPlaying = animationManager.isPlaying
+                            && animationManager.currentScene?.id == scene.id
+                        Label(
+                            isPlaying ? "Stop" : "Play",
+                            systemImage: isPlaying ? AppIcons.stopFill : AppIcons.playFill
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                    .tint(animationManager.isPlaying && animationManager.currentScene?.id == scene.id ? .red : .green)
+                    .disabled(scene.keyframes.count < 2)
+                    .help(scene.keyframes.count < 2
+                        ? "Add one more keyframe to preview this animation"
+                        : "Preview this animation")
+
 #if !os(macOS)
                     Button(isEditMode == .active ? "Done Reorder" : "Reorder") {
                         withMotionSensitiveAnimation(.default) {
@@ -958,8 +1006,12 @@ struct SceneEditorView: View {
             // Keyframes Section
             Section {
                 if scene.keyframes.isEmpty {
-                    Text("No keyframes yet")
-                        .foregroundStyle(.secondary)
+                    ContentUnavailableView(
+                        "Capture the First Keyframe",
+                        systemImage: AppIcons.plusCircleFill,
+                        description: Text("Set up the fractal in the main view, then capture its current state here. Add another keyframe to create a playable transition.")
+                    )
+                    .padding(.vertical, 28)
                 } else {
                     ForEach(Array(scene.keyframes.enumerated()), id: \.element.id) { index, keyframe in
                         KeyframeRowView(
@@ -1015,9 +1067,14 @@ struct SceneEditorView: View {
                             }
                         }
                     } label: {
-                        Label("Capture", systemImage: AppIcons.plusCircleFill)
-                            .font(.caption)
+                        Label(
+                            scene.keyframes.isEmpty ? "Capture First Keyframe" : "Capture Keyframe",
+                            systemImage: AppIcons.plusCircleFill
+                        )
+                        .font(.caption.weight(.semibold))
                     }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
                 }
             } footer: {
                 Text("Keyframes capture shape, position, quality, color, and music-reactive controls. Save a Preset to persist the full scene outside animation.")
@@ -1090,7 +1147,7 @@ struct SceneEditorView: View {
 
     private var durationControlRow: some View {
         HStack(spacing: 10) {
-            Label("Duration", systemImage: AppIcons.timer)
+            Label("New segment", systemImage: AppIcons.timer)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Slider(value: $defaultDuration, in: 0.5...10.0, step: 0.5)
@@ -1101,6 +1158,7 @@ struct SceneEditorView: View {
                 .frame(width: 44, alignment: .trailing)
         }
         .frame(minHeight: AnimationEditorLayout.defaultRowHeight)
+        .help("Duration assigned to each newly captured keyframe after the first")
     }
 
     private func settingsSliderRow(label: String, value: Binding<Float>, range: ClosedRange<Float>, step: Float, format: String = "%.2f") -> some View {

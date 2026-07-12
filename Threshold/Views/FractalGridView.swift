@@ -69,18 +69,20 @@ private enum FractalSceneSelection: Equatable {
 struct FractalGridView: View {
     let animationManager: AnimationManager?
     let presetManager: PresetManager?
+    var onCreateAnimation: (() -> Void)? = nil
     var onEditScene: ((AnimationScene) -> Void)? = nil
     var onLoadAnimationScene: ((AnimationScene) -> Void)? = nil
     var onLoadStaticScene: ((FractalPreset) -> Void)? = nil
     var tabSelection: Binding<FractalBrowseTab>? = nil
     @AppStorage("FractalGridView.innerTab") private var storedTabSelection: FractalBrowseTab = .jumpingOff
     @SceneStorage("FractalGridView.selectedStaticSceneID") private var selectedStaticSceneIDRaw: String?
-    private let sceneColumns = Array(repeating: GridItem(.flexible(minimum: 150), spacing: 12), count: 4)
+    private let sceneColumns = [GridItem(.adaptive(minimum: 170, maximum: 280), spacing: 12)]
 
     init(
         animationManager: AnimationManager?,
         presetManager: PresetManager?,
         tabSelection: Binding<FractalBrowseTab>? = nil,
+        onCreateAnimation: (() -> Void)? = nil,
         onEditScene: ((AnimationScene) -> Void)? = nil,
         onLoadAnimationScene: ((AnimationScene) -> Void)? = nil,
         onLoadStaticScene: ((FractalPreset) -> Void)? = nil
@@ -88,6 +90,7 @@ struct FractalGridView: View {
         self.animationManager = animationManager
         self.presetManager = presetManager
         self.tabSelection = tabSelection
+        self.onCreateAnimation = onCreateAnimation
         self.onEditScene = onEditScene
         self.onLoadAnimationScene = onLoadAnimationScene
         self.onLoadStaticScene = onLoadStaticScene
@@ -115,15 +118,7 @@ struct FractalGridView: View {
 
 
     var body: some View {
-        let allScenes = animationManager?.scenes ?? []
-        let hasCustomScenes = !customScenePresets().isEmpty
-        let hasAnimatedScenes = allScenes.contains { $0.keyframes.count >= 2 }
-        let currentTab = effectiveTabSelection.wrappedValue
-        let selectedTab = resolvedTabSelection(
-            currentTab: currentTab,
-            hasCustomScenes: hasCustomScenes,
-            hasAnimatedScenes: hasAnimatedScenes
-        )
+        let selectedTab = effectiveTabSelection.wrappedValue
 
         VStack(spacing: 10) {
             ScrollView(.vertical, showsIndicators: true) {
@@ -140,9 +135,7 @@ struct FractalGridView: View {
                         }
 
                     case .animated:
-                        if let animationManager {
-                            animatedScenesGrid(animationManager)
-                        }
+                        animatedScenesGrid(animationManager)
 
                     case .mixed:
                         if let animationManager {
@@ -164,11 +157,11 @@ struct FractalGridView: View {
     }
 
     @ViewBuilder
-    private func animatedScenesGrid(_ animationManager: AnimationManager) -> some View {
-        let animatedScenes = animatedScenes(in: animationManager)
+    private func animatedScenesGrid(_ animationManager: AnimationManager?) -> some View {
+        let animatedScenes = animationManager.map { animatedScenes(in: $0) } ?? []
         let staticScenePresets = filteredStaticPresets()
         let activeSelection = currentSceneSelection(
-            currentScene: animationManager.currentScene,
+            currentScene: animationManager?.currentScene,
             visibleAnimationScenes: animatedScenes,
             staticScenePresets: staticScenePresets
         )
@@ -187,7 +180,20 @@ struct FractalGridView: View {
             )
 
             if animatedScenes.isEmpty {
-                emptySectionLabel("No animated scenes yet")
+                ContentUnavailableView {
+                    Label("No Animated Scenes", systemImage: AppIcons.sparklesRectangleStack)
+                } description: {
+                    Text("Create an animation with at least two keyframes to make it available here.")
+                } actions: {
+                    if let onCreateAnimation {
+                        Button(action: onCreateAnimation) {
+                            Label("Create Animation", systemImage: AppIcons.plusCircleFill)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 18)
             } else {
                 LazyVGrid(columns: sceneColumns, spacing: 12) {
                     ForEach(Array(animatedScenes.enumerated()), id: \.offset) { _, scene in
@@ -198,9 +204,13 @@ struct FractalGridView: View {
                             systemImage: scene.attachedSong == nil ? AppIcons.sparklesRectangleStack : AppIcons.musicNote,
                             showsFlashingWarning: scene.name.localizedCaseInsensitiveContains("ambient blur"),
                             isSelected: activeSelection == .animation(scene.id),
-                            onEdit: { onEditScene?(scene) }
+                            onEdit: onEditScene.map { editScene in
+                                { editScene(scene) }
+                            }
                         ) {
-                            selectScene(scene, using: animationManager)
+                            if let animationManager {
+                                selectScene(scene, using: animationManager)
+                            }
                         }
                     }
                 }
@@ -233,7 +243,13 @@ struct FractalGridView: View {
             )
 
             if presets.isEmpty {
-                emptySectionLabel("No custom scenes yet")
+                ContentUnavailableView {
+                    Label("No Custom Scenes", systemImage: AppIcons.chevronLeftForwardslashChevronRight)
+                } description: {
+                    Text("Scenes with an embedded custom .threshfx formula appear here after they are opened or saved in Threshold.")
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 18)
             } else {
                 LazyVGrid(columns: sceneColumns, spacing: 12) {
                     ForEach(Array(presets.enumerated()), id: \.offset) { _, preset in
@@ -419,17 +435,6 @@ struct FractalGridView: View {
         filteredStaticPresets().filter(\.isCustomScenePreset)
     }
 
-    private func resolvedTabSelection(currentTab: FractalBrowseTab, hasCustomScenes: Bool, hasAnimatedScenes: Bool) -> FractalBrowseTab {
-        switch currentTab {
-        case .customScenes where !hasCustomScenes:
-            return .jumpingOff
-        case .animated where !hasAnimatedScenes:
-            return hasCustomScenes ? .customScenes : .jumpingOff
-        default:
-            return currentTab
-        }
-    }
-
     private func animatedScenes(in animationManager: AnimationManager) -> [AnimationScene] {
         animationManager.scenes.filter { $0.keyframes.count >= 2 }
     }
@@ -544,8 +549,9 @@ struct FractalGridView: View {
         }
     }
 
+    @ViewBuilder
     private func sceneCard(title: String, subtitle: String, detail: String, systemImage: String, thumbnailData: Data? = nil, showsFlashingWarning: Bool = false, isSelected: Bool, onEdit: (() -> Void)? = nil, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        let card = Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 8) {
                     sceneCardIcon(systemImage: systemImage, thumbnailData: thumbnailData)
@@ -581,7 +587,7 @@ struct FractalGridView: View {
                         .foregroundStyle(.blue)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 116, maxHeight: 116, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 116, alignment: .leading)
             .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 12)
@@ -594,11 +600,20 @@ struct FractalGridView: View {
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.6, maximumDistance: 24)
-                .onEnded { _ in onEdit?() }
-        )
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+
+        if let onEdit {
+            card
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.6, maximumDistance: 24)
+                        .onEnded { _ in onEdit() }
+                )
+                .accessibilityAction(named: Text("Edit Scene")) {
+                    onEdit()
+                }
+        } else {
+            card
+        }
     }
 
     @ViewBuilder
@@ -703,7 +718,7 @@ struct FractalFormulaGrid: View {
 
     @State private var exportShareItem: ExportShareItem?
 
-    private let columns = Array(repeating: GridItem(.flexible(minimum: 120), spacing: 8), count: 3)
+    private let columns = [GridItem(.adaptive(minimum: 132, maximum: 220), spacing: 8)]
     private let orderedTypes: [FractalModelType] = FractalFormulaOrder.orderedTypes
 
     private var customFormulas: [EmbeddedFormula] {
@@ -787,8 +802,9 @@ struct FractalCustomFormulaCell: View {
     let action: () -> Void
     var onReveal: (() -> Void)? = nil
 
+    @ViewBuilder
     var body: some View {
-        Button(action: action) {
+        let cell = Button(action: action) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     Image(systemName: AppIcons.chevronLeftForwardslashChevronRight)
@@ -831,9 +847,18 @@ struct FractalCustomFormulaCell: View {
         .buttonStyle(.plain)
         .accessibilityLabel(formula.name)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.6, maximumDistance: 24)
-                .onEnded { _ in onReveal?() }
-        )
+
+        if let onReveal {
+            cell
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.6, maximumDistance: 24)
+                        .onEnded { _ in onReveal() }
+                )
+                .accessibilityAction(named: Text("Reveal Formula File")) {
+                    onReveal()
+                }
+        } else {
+            cell
+        }
     }
 }

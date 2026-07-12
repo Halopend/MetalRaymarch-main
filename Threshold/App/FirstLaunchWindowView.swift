@@ -17,6 +17,7 @@ struct FirstLaunchWindowView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.dismiss) private var dismiss
 
     @AppStorage("hasCompletedIntroOnboarding") private var hasCompletedIntroOnboarding = false
 
@@ -51,7 +52,11 @@ struct FirstLaunchWindowView: View {
 
             navigationFooter
         }
+        #if os(iOS)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #else
         .frame(minWidth: 720, idealWidth: 940, maxWidth: .infinity, minHeight: 540, idealHeight: 660, maxHeight: .infinity)
+        #endif
         .background(windowSurfaceFill, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -212,28 +217,52 @@ struct FirstLaunchWindowView: View {
 
     // MARK: - Page 1: Welcome
 
+    private var welcomeSubtitle: String {
+        #if os(visionOS)
+        "Explore infinite fractal worlds in spatial computing."
+        #else
+        "Explore, shape, animate, and save infinite GPU-rendered fractal worlds."
+        #endif
+    }
+
+    private var welcomeWorkflowSummary: String {
+        #if os(visionOS)
+        "Start with curated scenes, then shape them with hands, audio, and parameter controls."
+        #else
+        "Start with curated scenes, then shape them with the control workspace, audio, and precise parameter tools."
+        #endif
+    }
+
     private var welcomePage: some View {
         OnboardingPageShell(
             icon: "cube.transparent.fill",
             title: "Threshold",
-            subtitle: "Explore infinite fractal worlds in spatial computing.",
+            subtitle: welcomeSubtitle,
             accent: .blue
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 IntroTipRow(
                     icon: "cube.transparent.fill",
                     title: "Raymarched Fractals",
-                    detail: "Real-time GPU-rendered 3D fractals you can fly through and reshape with your hands."
+                    detail: "Real-time GPU-rendered 3D fractals you can fly through, reshape, animate, and save."
                 )
+                #if os(visionOS)
                 IntroTipRow(
                     icon: "hand.raised.fingers.spread",
                     title: "Hand Gesture Controls",
                     detail: "Pinch, grab, and sculpt fractal parameters using natural hand tracking. More on the next pages."
                 )
+                #else
+                IntroTipRow(
+                    icon: AppIcons.magnifyingglass,
+                    title: "Find Any Control",
+                    detail: "Search by feature or intent, then jump directly to the right workspace and section."
+                )
+                #endif
                 IntroTipRow(
                     icon: "arrow.counterclockwise.circle",
                     title: "Reset + Create",
-                    detail: "Tap Reset to jump back to your saved baseline. Hold Reset to save the current setup as a new reset point or create a named preset."
+                    detail: "Tap Reset to jump back to your saved baseline. Use Save to create a named preset or deliberately update that reset point."
                 )
                 IntroTipRow(
                     icon: "person.2.wave.2",
@@ -243,7 +272,7 @@ struct FirstLaunchWindowView: View {
             }
         } detail: {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Start with curated scenes, then shape them with hands, audio, and parameter controls.")
+                Text(welcomeWorkflowSummary)
                     .font(.title3.weight(.semibold))
                     .fixedSize(horizontal: false, vertical: true)
                 Text("You can always return to this window from Settings.")
@@ -251,7 +280,11 @@ struct FirstLaunchWindowView: View {
                     .foregroundStyle(.secondary)
                 HStack(spacing: 8) {
                     IntroPill(icon: "square.grid.2x2.fill", title: "Scenes")
+                    #if os(visionOS)
                     IntroPill(icon: "hand.raised.fingers.spread", title: "Hands")
+                    #else
+                    IntroPill(icon: AppIcons.magnifyingglass, title: "Find")
+                    #endif
                     IntroPill(icon: "waveform", title: "Music")
                 }
             }
@@ -261,6 +294,7 @@ struct FirstLaunchWindowView: View {
     // MARK: - Page 2: Hand Controls + Handedness
 
     private var controlsPage: some View {
+        #if os(visionOS)
         OnboardingPageShell(
             icon: "move.3d",
             title: "Movement and scale",
@@ -309,6 +343,37 @@ struct FirstLaunchWindowView: View {
                 }
             }
         }
+        #else
+        OnboardingPageShell(
+            icon: AppIcons.sliderHorizontal3,
+            title: "Find your controls",
+            subtitle: "Open the control surface, then jump straight to any feature.",
+            accent: .green
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                IntroTipRow(
+                    icon: AppIcons.sliderHorizontal3,
+                    title: "Controls",
+                    detail: "Use the labeled Controls button over the renderer to open the creative workspace."
+                )
+                IntroTipRow(
+                    icon: AppIcons.magnifyingglass,
+                    title: "Find",
+                    detail: "Search for a control by name or intent—try fog, FPS, export, gradient, or animation."
+                )
+                IntroTipRow(
+                    icon: AppIcons.pin,
+                    title: "Quick Access",
+                    detail: "Pin the sections you revisit so they remain one click away in the rail."
+                )
+            }
+        } detail: {
+            Text("Threshold organizes controls into Explore, Shape, Visualizations, Music, and Performance. Each workspace has a shorter section list, and Find can bypass the hierarchy entirely.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        #endif
     }
 
     // MARK: - Page 3: Menu Gesture
@@ -317,6 +382,7 @@ struct FirstLaunchWindowView: View {
     /// shortcuts are shown only as compact supporting context so the user does
     /// not see two different "open menu" systems.
     private var fingersPage: some View {
+        #if os(visionOS)
         OnboardingPageShell(
             icon: "hand.tap.fill",
             title: "Menu gesture",
@@ -354,6 +420,37 @@ struct FirstLaunchWindowView: View {
                 }
             }
         }
+        #else
+        OnboardingPageShell(
+            icon: AppIcons.pencilAndListClipboard,
+            title: "Create and recover",
+            subtitle: "Experiment freely while keeping reliable return points.",
+            accent: .purple
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                IntroTipRow(
+                    icon: AppIcons.arrowCounterclockwise,
+                    title: "Reset",
+                    detail: "Return the current fractal to its saved baseline."
+                )
+                IntroTipRow(
+                    icon: AppIcons.plusCircleFill,
+                    title: "Save",
+                    detail: "Create a named preset, include a preview, or deliberately update the Reset point."
+                )
+                IntroTipRow(
+                    icon: AppIcons.filmStack,
+                    title: "Animation Editor",
+                    detail: "Create a scene, capture parameter states as keyframes, and preview the result."
+                )
+            }
+        } detail: {
+            Text("Saving a preset is the safe default. Replacing the Reset point is a separate confirmed action, so pressing Save cannot silently change your recovery baseline.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        #endif
     }
 
     private var activeFingerShortcutRows: [FingerShortcutSummary] {
@@ -513,7 +610,7 @@ struct FirstLaunchWindowView: View {
                     TextField("Leave blank to share anonymously", text: $communityDisplayName)
                         .textFieldStyle(.roundedBorder)
                         .autocorrectionDisabled(true)
-                    Text("Used only for community credits. Stays on this device — never leaves your Mac. Leave blank to share anonymously.")
+                    Text("Used only for community credits when settings are shared. Leave it blank to share anonymously.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -563,8 +660,12 @@ struct FirstLaunchWindowView: View {
         appModel.renderSettings.leftHandedMode = leftHanded
         appModel.renderSettings.menuToggleGestureMode = menuGestureStyle.mode
         hasCompletedIntroOnboarding = true
+        #if os(iOS)
+        dismiss()
+        #else
         openWindow(id: appModel.menuWindowID)
         dismissWindow(id: AppModel.onboardingWindowID)
+        #endif
     }
 }
 

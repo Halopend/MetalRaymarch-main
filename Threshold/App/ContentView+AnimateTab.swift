@@ -35,7 +35,11 @@ extension ContentView {
                         animateEditButtonsVisible = (newValue == 1)
                     }
                     if newValue == 0 {
+                        #if os(iOS)
+                        isAnimationEditorPresented = false
+                        #else
                         dismissWindow(id: AppModel.animationEditorWindowID)
+                        #endif
                     }
                 }
             )) {
@@ -71,8 +75,16 @@ extension ContentView {
             if let animationManager = appModel.animationManager {
                 List {
                     if animationManager.scenes.isEmpty {
-                        ContentUnavailableView("No Scenes", systemImage: AppIcons.filmStack,
-                            description: Text("Open Scene Editor to create animation scenes"))
+                        ContentUnavailableView {
+                            Label("No Scenes", systemImage: AppIcons.filmStack)
+                        } description: {
+                            Text("Create a scene from the current fractal, then capture another keyframe to animate between states.")
+                        } actions: {
+                            Button("Open Animation Editor") {
+                                openAnimationEditor()
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
                     } else {
                         ForEach(animationManager.scenes) { scene in
                             SceneRowView(
@@ -159,6 +171,10 @@ extension ContentView {
         } else if animationManager.currentScene == nil {
             animationManager.currentScene = animationManager.scenes.first
         }
+        #if os(iOS)
+        isAnimationEditorPresented = true
+        #else
         openWindow(id: AppModel.animationEditorWindowID)
+        #endif
     }
 }

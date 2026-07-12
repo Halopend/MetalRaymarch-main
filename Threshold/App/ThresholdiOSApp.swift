@@ -29,6 +29,7 @@ struct ThresholdiOSApp: App {
 
 private struct ThresholdiOSRootView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isShowingControls = true
     private let controlsAnimation = MenuChrome.panelSpring
 
@@ -65,7 +66,7 @@ private struct ThresholdiOSRootView: View {
     }
 
     private func setControlsVisible(_ isVisible: Bool) {
-        withAnimation(controlsAnimation) {
+        withAnimation(reduceMotion ? nil : controlsAnimation) {
             isShowingControls = isVisible
         }
     }
@@ -74,13 +75,18 @@ private struct ThresholdiOSRootView: View {
         Button {
             setControlsVisible(!isShowingControls)
         } label: {
-            Image(systemName: isShowingControls ? AppIcons.sliderHorizontal3 : AppIcons.sliderHorizontalBelowRectangle)
+            Label(
+                isShowingControls ? "Hide Controls" : "Controls",
+                systemImage: isShowingControls ? AppIcons.sliderHorizontal3 : AppIcons.sliderHorizontalBelowRectangle
+            )
                 .font(.system(size: 16, weight: .semibold))
-                .frame(width: 40, height: 40)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
                 .foregroundStyle(.primary)
                 .shadow(color: Color.black.opacity(0.35), radius: 10, x: 0, y: 4)
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(isShowingControls ? "Hide controls" : "Show controls")
@@ -89,6 +95,7 @@ private struct ThresholdiOSRootView: View {
 
 private struct ThresholdiOSInspectorContent: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var isShowingControls: Bool
 
     private let swipeDismissThreshold: CGFloat = 90
@@ -96,6 +103,10 @@ private struct ThresholdiOSInspectorContent: View {
     var body: some View {
         ContentView()
             .environment(appModel)
+            // The controls always live in an inspector column, even when the
+            // enclosing iPad window has a regular size class. Mark the column
+            // compact so ContentView selects its rail-free responsive shell.
+            .environment(\.horizontalSizeClass, .compact)
             .overlay(alignment: .leading) {
                 swipeDismissHandle
             }
@@ -124,13 +135,19 @@ private struct ThresholdiOSInspectorContent: View {
                     guard horizontalDistance > swipeDismissThreshold,
                           horizontalDistance > verticalDistance * 1.25 else { return }
 
-                    withAnimation(MenuChrome.panelSpring) {
+                    withAnimation(reduceMotion ? nil : MenuChrome.panelSpring) {
                         isShowingControls = false
                     }
                 }
         )
         .accessibilityLabel("Swipe right to dismiss controls")
         .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Dismisses the control inspector")
+        .accessibilityAction {
+            withAnimation(reduceMotion ? nil : MenuChrome.panelSpring) {
+                isShowingControls = false
+            }
+        }
     }
 }
 #endif

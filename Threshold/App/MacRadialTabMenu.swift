@@ -569,6 +569,7 @@ struct MacRadialTabMenu: View {
             let isSliderRing = nodes.contains { $0.slider != nil }
             let ringRadius: CGFloat
             let layoutCenter: CGPoint
+            var resolvedBaseAngle = ringBaseAngle
 
             if layoutStyle == .radial {
                 layoutCenter = anchor
@@ -582,13 +583,15 @@ struct MacRadialTabMenu: View {
                         sliderRing: false
                     )
                 } else {
-                    positions = MacRadialTabGeometry(curvature: CGFloat(curvature)).concentricPositions(
+                    let resolved = fittedConcentricPositions(
                         count: nodes.count,
-                        anchor: anchor,
                         radius: ringRadius,
                         baseAngle: ringBaseAngle,
-                        sliderRing: isSliderRing
+                        sliderRing: isSliderRing,
+                        priorLayouts: layouts
                     )
+                    positions = resolved.positions
+                    resolvedBaseAngle = resolved.baseAngle
                 }
             } else {
                 layoutCenter = ringAnchor
@@ -607,7 +610,7 @@ struct MacRadialTabMenu: View {
                 nodes: nodes,
                 positions: positions,
                 anchor: layoutCenter,
-                baseAngle: ringBaseAngle,
+                baseAngle: resolvedBaseAngle,
                 radius: ringRadius
             ))
 
@@ -645,6 +648,78 @@ struct MacRadialTabMenu: View {
             depth += 1
         }
         return layouts
+    }
+
+    /// Rotates a concentric child arc just enough to remain on-screen and clear
+    /// already-visible pills. Radius and center never change, so the hierarchy
+    /// retains its concentric character instead of jumping to an unrelated fan.
+    private func fittedConcentricPositions(
+        count: Int,
+        radius: CGFloat,
+        baseAngle: CGFloat,
+        sliderRing: Bool,
+        priorLayouts: [RingLayout]
+    ) -> (positions: [CGPoint], baseAngle: CGFloat) {
+        let geometry = MacRadialTabGeometry(curvature: CGFloat(curvature))
+        let offsets: [CGFloat] = [0, 0.10, -0.10, 0.20, -0.20, 0.32, -0.32]
+        let halfWidth: CGFloat = sliderRing ? radialSliderWidth * 0.5 : 52
+        let halfHeight: CGFloat = sliderRing ? 17 : 16
+        let margin: CGFloat = 12
+
+        func score(_ points: [CGPoint], offset: CGFloat) -> CGFloat {
+            var total = abs(offset) * 18
+            for point in points {
+                let frame = CGRect(
+                    x: point.x - halfWidth,
+                    y: point.y - halfHeight,
+                    width: halfWidth * 2,
+                    height: halfHeight * 2
+                )
+                if frame.minX < margin { total += (margin - frame.minX) * 80 }
+                if frame.maxX > size.width - margin { total += (frame.maxX - size.width + margin) * 80 }
+                if frame.minY < margin { total += (margin - frame.minY) * 80 }
+                if frame.maxY > size.height - margin { total += (frame.maxY - size.height + margin) * 80 }
+
+                for prior in priorLayouts {
+                    for (priorIndex, priorPoint) in prior.positions.enumerated() {
+                        let isSelectedParent = prior.depth == priorLayouts.last?.depth
+                            && path.indices.contains(prior.depth)
+                            && prior.nodes.indices.contains(priorIndex)
+                            && prior.nodes[priorIndex].id == path[prior.depth]
+                        if isSelectedParent { continue }
+                        let priorHalfWidth: CGFloat = prior.depth == 0 ? 72 : 52
+                        let priorHalfHeight: CGFloat = prior.depth == 0 ? 20 : 16
+                        let priorFrame = CGRect(
+                            x: priorPoint.x - priorHalfWidth - 4,
+                            y: priorPoint.y - priorHalfHeight - 3,
+                            width: (priorHalfWidth + 4) * 2,
+                            height: (priorHalfHeight + 3) * 2
+                        )
+                        if frame.intersects(priorFrame) {
+                            let overlap = frame.intersection(priorFrame)
+                            total += overlap.width * overlap.height
+                        }
+                    }
+                }
+            }
+            return total
+        }
+
+        return offsets
+            .map { offset -> (positions: [CGPoint], baseAngle: CGFloat, score: CGFloat) in
+                let angle = baseAngle + offset
+                let points = geometry.concentricPositions(
+                    count: count,
+                    anchor: anchor,
+                    radius: radius,
+                    baseAngle: angle,
+                    sliderRing: sliderRing
+                )
+                return (points, angle, score(points, offset: offset))
+            }
+            .min(by: { $0.score < $1.score })
+            .map { ($0.positions, $0.baseAngle) }
+            ?? ([], baseAngle)
     }
 
     @ViewBuilder
@@ -755,8 +830,12 @@ struct MacRadialTabMenu: View {
 
         pendingHoverSelection?.cancel()
         pendingHoverNodeID = node.id
+        // Switching a parent after its child is visible gets a wider intent
+        // window. This protects diagonal travel toward the child arc without
+        // making first-time branch discovery feel sluggish.
+        let dwell: Duration = path.count > depth ? .milliseconds(175) : hoverSelectDwell
         pendingHoverSelection = Task { @MainActor in
-            try? await Task.sleep(for: hoverSelectDwell)
+            try? await Task.sleep(for: dwell)
             guard !Task.isCancelled else { return }
             pendingHoverNodeID = nil
             commitHoverSelection(node, depth: depth)
@@ -952,6 +1031,35 @@ struct MacRadialTabMenu: View {
                         style: StrokeStyle(lineWidth: ring.depth == 0 ? 1.2 : 0.8, dash: [2, 7])
                     )
                 }
+            }
+
+            // A single luminous route makes the selected ancestry legible at
+            // a glance. It is static Canvas geometry—no blur and no timeline.
+            let selectedPoints = rings.compactMap { ring -> CGPoint? in
+                guard path.indices.contains(ring.depth),
+                      let index = ring.nodes.firstIndex(where: { $0.id == path[ring.depth] }),
+                      ring.positions.indices.contains(index) else { return nil }
+                return ring.positions[index]
+            }
+            if !selectedPoints.isEmpty {
+                var route = Path()
+                route.move(to: anchor)
+                for point in selectedPoints {
+                    route.addLine(to: point)
+                }
+                context.stroke(
+                    route,
+                    with: .linearGradient(
+                        Gradient(colors: [
+                            sceneAccent.opacity(0.16),
+                            sceneAccent.opacity(0.78),
+                            Color.white.opacity(0.72)
+                        ]),
+                        startPoint: anchor,
+                        endPoint: selectedPoints.last ?? anchor
+                    ),
+                    style: StrokeStyle(lineWidth: 1.35, lineCap: .round, lineJoin: .round)
+                )
             }
         }
     }

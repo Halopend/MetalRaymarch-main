@@ -33,6 +33,7 @@ struct ErrorBannerView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss error")
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -43,6 +44,7 @@ struct ErrorBannerView: View {
             )
             .padding(.horizontal, 16)
             .transition(.move(edge: .top).combined(with: .opacity))
+            .accessibilityElement(children: .contain)
         }
     }
 

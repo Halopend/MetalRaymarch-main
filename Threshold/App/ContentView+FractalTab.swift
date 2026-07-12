@@ -22,6 +22,7 @@ extension ContentView {
                     animationManager: appModel.animationManager,
                     presetManager: appModel.presetManager,
                     tabSelection: $fractalBrowseTab,
+                    onCreateAnimation: { openAnimationEditor() },
                     onEditScene: openAnimationEditor,
                     onLoadAnimationScene: { _ in
                         appModel.dismissMenuWindowForSceneLoad()

@@ -41,7 +41,11 @@ extension ContentView {
                 .help("Choose a settings section")
 
                 Button {
+                    #if os(iOS)
+                    isWelcomePresented = true
+                    #else
                     openWindow(id: AppModel.onboardingWindowID)
+                    #endif
                 } label: {
                     Label("Show Welcome", systemImage: AppIcons.questionmarkCircle)
                         .labelStyle(.iconOnly)

@@ -124,9 +124,11 @@ struct DerivedValueGhost: View {
 
 // MARK: - Condensed Effect Slider Row
 
-/// Single-line effect row: icon + label | slider | on/off toggle
+/// Condensed effect row: icon + label | slider | on/off toggle.
+/// Reflows to a two-line layout at accessibility Dynamic Type sizes.
 struct EffectSliderRow: View {
     @Environment(\.menuAdjustmentActions) private var menuActions
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let icon: String
     let label: String
     @Binding var value: Float
@@ -143,49 +145,97 @@ struct EffectSliderRow: View {
     var musicTargetID: String? = nil
 
     var body: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        visualLabel(condensed: false)
+                        Spacer(minLength: 8)
+                        trailingAccessory(reservesEmptySpace: false)
+                    }
+                    sliderControl
+                }
+                .padding(.vertical, 4)
+            } else {
+                HStack(spacing: 8) {
+                    visualLabel(condensed: true)
+                    sliderControl
+                    trailingAccessory(reservesEmptySpace: true)
+                }
+                .frame(minHeight: 32)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func visualLabel(condensed: Bool) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.caption)
                 .foregroundStyle(enabled ? .primary : .secondary)
                 .frame(width: 16)
-            Text(label)
-                .font(.subheadline)
-                .foregroundStyle(enabled ? .primary : .secondary)
-                .frame(width: 135, alignment: .leading)
-                .lineLimit(1)
-            Slider(value: $value, in: range, onEditingChanged: { editing in
-                if editing {
-                    menuActions.begin()
-                } else {
-                    menuActions.end()
-                }
-            })
-            .disabled(!enabled)
-            .overlay {
-                if let musicTargetID {
-                    DerivedValueGhost(targetID: musicTargetID, range: range)
-                }
-            }
-            .onChange(of: value) { _, _ in onChanged() }
-            if showToggle {
-                Toggle("", isOn: $enabled)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .onChange(of: enabled) { _, _ in onChanged() }
-            } else if let valueFormat {
-                Text(valueFormat(value))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, alignment: .trailing)
+            if condensed {
+                Text(label)
+                    .font(.subheadline)
+                    .foregroundStyle(enabled ? .primary : .secondary)
+                    .frame(width: 135, alignment: .leading)
+                    .lineLimit(1)
             } else {
-                Spacer().frame(width: 44)
+                Text(label)
+                    .font(.subheadline)
+                    .foregroundStyle(enabled ? .primary : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .frame(height: 32)
-        .accessibilityElement(children: .combine)
+        // The native Slider and Toggle below carry the actionable semantics.
+        // Hiding this repeated visual label avoids an extra VoiceOver stop.
+        .accessibilityHidden(true)
+    }
+
+    private var sliderControl: some View {
+        Slider(value: $value, in: range, onEditingChanged: { editing in
+            if editing {
+                menuActions.begin()
+            } else {
+                menuActions.end()
+            }
+        })
+        .disabled(!enabled)
+        .overlay {
+            if let musicTargetID {
+                DerivedValueGhost(targetID: musicTargetID, range: range)
+            }
+        }
+        .onChange(of: value) { _, _ in onChanged() }
         .accessibilityLabel(label)
-        .accessibilityValue(String(format: "%.2f", value))
+        .accessibilityValue(formattedValue)
+    }
+
+    private var formattedValue: String {
+        valueFormat?(value) ?? String(format: "%.2f", value)
+    }
+
+    @ViewBuilder
+    private func trailingAccessory(reservesEmptySpace: Bool) -> some View {
+        if showToggle {
+            Toggle("Enable \(label)", isOn: $enabled)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(dynamicTypeSize.isAccessibilitySize ? .regular : .mini)
+                .onChange(of: enabled) { _, _ in onChanged() }
+                .accessibilityLabel("Enable \(label)")
+                .accessibilityValue(enabled ? "On" : "Off")
+        } else if let valueFormat {
+            Text(valueFormat(value))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: reservesEmptySpace ? 44 : nil, alignment: .trailing)
+                .accessibilityHidden(true)
+        } else if reservesEmptySpace {
+            Spacer()
+                .frame(width: 44)
+                .accessibilityHidden(true)
+        }
     }
 }
 
@@ -213,22 +263,29 @@ struct CompactValueSlider: View {
                     .monospacedDigit()
                     .foregroundStyle(display == "Off" ? Color.secondary : tint)
             }
-            if let step {
-                Slider(value: $value, in: range, step: step, onEditingChanged: onEditingChanged)
-                    .tint(tint)
-                    .controlSize(.small)
-            } else {
-                Slider(value: $value, in: range, onEditingChanged: onEditingChanged)
-                    .tint(tint)
-                    .controlSize(.small)
+            .accessibilityHidden(true)
+
+            Group {
+                if let step {
+                    Slider(value: $value, in: range, step: step, onEditingChanged: onEditingChanged)
+                } else {
+                    Slider(value: $value, in: range, onEditingChanged: onEditingChanged)
+                }
             }
+            .tint(tint)
+            .controlSize(.small)
+            .accessibilityLabel(title)
+            .accessibilityValue(display)
         }
         .help(helpText ?? "")
     }
 }
 
 struct FlashingLightIndicator: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isLit = false
+
+    private var visualIsLit: Bool { reduceMotion || isLit }
 
     var body: some View {
         ZStack {
@@ -238,20 +295,40 @@ struct FlashingLightIndicator: View {
             // work stole the frame budget and made those lists scroll laggily. The
             // opacity + ring-scale pulse reads the same "flashing warning" without it.
             Circle()
-                .fill(isLit ? Color.orange : Color.orange.opacity(0.28))
+                .fill(visualIsLit ? Color.orange : Color.orange.opacity(0.28))
                 .frame(width: 8, height: 8)
 
             Circle()
-                .stroke(Color.orange.opacity(isLit ? 0.72 : 0.18), lineWidth: 1)
-                .frame(width: isLit ? 14 : 10, height: isLit ? 14 : 10)
+                .stroke(Color.orange.opacity(visualIsLit ? 0.72 : 0.18), lineWidth: 1)
+                .frame(width: visualIsLit ? 14 : 10, height: visualIsLit ? 14 : 10)
         }
         .frame(width: 16, height: 16)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.42).repeatForever(autoreverses: true)) {
-                isLit = true
+        .transaction { transaction in
+            if reduceMotion {
+                transaction.animation = nil
+                transaction.disablesAnimations = true
             }
         }
+        .onAppear {
+            updatePulse(reduceMotion: reduceMotion)
+        }
+        .onChange(of: reduceMotion) { _, shouldReduceMotion in
+            updatePulse(reduceMotion: shouldReduceMotion)
+        }
         .accessibilityHidden(true)
+    }
+
+    private func updatePulse(reduceMotion: Bool) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            isLit = reduceMotion
+        }
+
+        guard !reduceMotion else { return }
+        withAnimation(.easeInOut(duration: 0.42).repeatForever(autoreverses: true)) {
+            isLit = true
+        }
     }
 }
 

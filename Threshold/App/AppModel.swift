@@ -681,6 +681,10 @@ class AppModel {
 
     /// Callback to present the save preset sheet from the active content view.
     var openSavePresetMenuHandler: (() -> Void)?
+
+    /// Callback to present the global control finder. The macOS root installs
+    /// this so Command-K works even while the slide-over control panel is hidden.
+    var openControlFinderHandler: (() -> Void)?
     
     /// Toggle menu window visibility.
     /// Closing dismisses the actual window; opening reuses the system-restored placement.

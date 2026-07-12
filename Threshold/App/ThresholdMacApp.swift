@@ -62,13 +62,39 @@ struct ThresholdMacApp: App {
         .defaultSize(width: 1040, height: 820)
         .windowResizability(.contentMinSize)
 
+        // A real utility window backs every Animation Editor affordance in the
+        // control panel. Previously those buttons called openWindow(id:) for an
+        // id that was only registered by the visionOS app, so they silently did
+        // nothing on macOS.
+        Window("Animation Editor", id: AppModel.animationEditorWindowID) {
+            AnimationEditorWindowView()
+                .environment(appModel)
+        }
+        .defaultSize(width: 1120, height: 760)
+        .windowResizability(.contentMinSize)
+
+        Window("Welcome", id: AppModel.onboardingWindowID) {
+            FirstLaunchWindowView()
+                .environment(appModel)
+        }
+        .defaultSize(width: 980, height: 760)
+        .windowResizability(.contentMinSize)
+
         .commands {
             CommandGroup(replacing: .saveItem) {
                 Button("Save Preset…") {
                     appModel.openSavePresetMenuHandler?()
                 }
                 .keyboardShortcut("s", modifiers: .command)
-                .disabled(appModel.openSavePresetMenuHandler == nil)
+                    .disabled(appModel.openSavePresetMenuHandler == nil)
+            }
+
+            CommandMenu("Navigate") {
+                Button("Find Controls…") {
+                    appModel.openControlFinderHandler?()
+                }
+                .keyboardShortcut("k", modifiers: .command)
+                .disabled(appModel.openControlFinderHandler == nil)
             }
         }
     }
@@ -77,6 +103,7 @@ struct ThresholdMacApp: App {
 private struct ThresholdMacRootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openWindow) private var openWindow
 
     @State private var isControlsPinnedOpen = false
     @State private var isHoverVisible = false
@@ -99,6 +126,7 @@ private struct ThresholdMacRootView: View {
     @State private var activeMenuTrackingCount = 0
     @State private var pendingAutoHide: DispatchWorkItem?
     @State private var pendingRadialReveal: DispatchWorkItem?
+    @State private var isControlFinderPresented = false
 
     @AppStorage("MacTabLauncher.enabled") private var isLauncherEnabled = true
     @AppStorage("MacTabLauncher.style") private var launcherStyle: MacTabLauncherStyle = .radial
@@ -116,6 +144,7 @@ private struct ThresholdMacRootView: View {
     @AppStorage("ContentView.coloringSubTab") private var radialColoringSubTab: ColoringSubTab = .gradient
     @AppStorage("ContentView.effectsSubTab") private var radialEffectsSubTab: EffectsSubTab = .dynamic
     @AppStorage("MusicTabContent.innerTab") private var radialMusicPanelTab: MusicPanelTab = .music
+    @AppStorage("ContentView.settingsSubTab") private var radialSettingsSubTab: SettingsSubTab = .display
     @AppStorage("allowCustomScenes") private var allowCustomScenes = false
 
     private let contentMinimumSize = CGSize(width: 980, height: 576)
@@ -274,6 +303,18 @@ private struct ThresholdMacRootView: View {
             }
         }
         .frame(minWidth: minimumWindowSize.width, minHeight: minimumWindowSize.height)
+        .sheet(isPresented: $isControlFinderPresented) {
+            ControlFinderView(
+                platform: .macOS,
+                onSelect: navigateFromControlFinder,
+                onDismiss: { isControlFinderPresented = false }
+            )
+        }
+        .onAppear {
+            appModel.openControlFinderHandler = {
+                isControlFinderPresented = true
+            }
+        }
         .onChange(of: appModel.isMenuInteractionActive) { _, _ in
             updateAutoHideState(animated: true)
         }
@@ -311,6 +352,7 @@ private struct ThresholdMacRootView: View {
             if isRadialVisible { radialCache.loadFromSettings() }
         }
         .onDisappear {
+            appModel.openControlFinderHandler = nil
             pendingAutoHide?.cancel()
             pendingAutoHide = nil
             pendingRadialReveal?.cancel()
@@ -377,32 +419,136 @@ private struct ThresholdMacRootView: View {
     }
 
     private func floatingToggle(windowSize: CGSize) -> some View {
-        Button {
+        let title: String = {
+            if isLauncherEnabled {
+                return isRadialVisible ? "Hide Controls" : "Controls"
+            }
+            return isControlsPinnedOpen ? "Hide Controls" : "Controls"
+        }()
+
+        return Button {
             if isLauncherEnabled {
                 toggleRadialLauncher(windowSize: windowSize)
             } else {
                 toggleControlsPin()
             }
         } label: {
-            Image(systemName: isLauncherEnabled ? launcherStyle.systemImage : AppIcons.sidebarRight)
-                .font(.system(size: 13, weight: .semibold))
-                .frame(width: 28, height: 28)
+            Label(title, systemImage: isLauncherEnabled ? launcherStyle.systemImage : AppIcons.sidebarRight)
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
                 .foregroundStyle(isRadialVisible ? Color.accentColor : Color.primary)
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .help(isLauncherEnabled
             ? (isRadialVisible ? "Hide control tabs (⌘.)" : "Show control tabs (⌘.)")
             : (isControlsPinnedOpen ? "Unpin controls (⌘.)" : "Pin controls open (⌘.)"))
         .keyboardShortcut(".", modifiers: .command)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
         .background(.ultraThinMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
         .foregroundStyle(.primary)
         .shadow(color: Color.black.opacity(0.35), radius: 10, x: 0, y: 4)
+        .accessibilityLabel(title)
+        .accessibilityHint("Opens the Threshold control surface")
         .contextMenu {
             Button(isControlsPinnedOpen ? "Unpin Full Controls" : "Pin Full Controls") {
                 toggleControlsPin()
+            }
+        }
+    }
+
+    private func navigateFromControlFinder(_ destination: ControlFinderDestination) {
+        guard let route = destination.route else { return }
+
+        hideRadialTabs(animated: false)
+        withAnimation(motionSensitivePanelAnimation) {
+            isControlsPinnedOpen = true
+
+            switch route {
+            case .explore(let section):
+                radialTopDockTab = .explore
+                radialExploreSection = section
+                radialSelectedTab = .fractal
+                radialFractalSubTab = .browse
+                radialBrowseTab = section.browseTab
+
+            case .shape(let section):
+                radialTopDockTab = .shape
+                radialShapeSection = section
+                radialSelectedTab = .fractal
+                switch section {
+                case .parameters:
+                    radialFractalSubTab = .shape
+                    radialShapeInnerTab = .parameters
+                case .formula:
+                    radialFractalSubTab = .shape
+                    radialShapeInnerTab = .formula
+                case .hands:
+                    radialFractalSubTab = .shape
+                    radialShapeInnerTab = .hands
+                case .space:
+                    radialFractalSubTab = .space
+                case .transformations:
+                    radialFractalSubTab = .transform
+                case .bounding:
+                    radialFractalSubTab = .bounding
+                case .performance:
+                    radialTopDockTab = .performance
+                    radialPerformanceSection = .tuning
+                    radialFractalSubTab = .render
+                }
+
+            case .visualizations(let section):
+                radialTopDockTab = .visualizations
+                radialVisualizationsSection = section
+                switch section {
+                case .color:
+                    radialSelectedTab = .coloring
+                    radialColoringSubTab = .gradient
+                case .mapping:
+                    radialSelectedTab = .coloring
+                    radialColoringSubTab = .mapping
+                case .grading:
+                    radialSelectedTab = .coloring
+                    radialColoringSubTab = .grading
+                case .motion:
+                    radialSelectedTab = .effects
+                    radialEffectsSubTab = .dynamic
+                case .atmosphere:
+                    radialSelectedTab = .effects
+                    radialEffectsSubTab = .static
+                case .transition:
+                    radialSelectedTab = .transition
+                case .reactive:
+                    radialSelectedTab = .music
+                    radialMusicPanelTab = .visualizations
+                }
+
+            case .performance(let section):
+                radialTopDockTab = .performance
+                radialPerformanceSection = section
+                radialSelectedTab = .fractal
+                radialFractalSubTab = .render
+
+            case .music:
+                radialTopDockTab = .music
+                radialMusicSection = .playback
+                radialSelectedTab = .music
+                radialMusicPanelTab = .music
+
+            case .settings(let section):
+                radialSelectedTab = .settings
+                radialSettingsSubTab = section
+
+            case .sidebar(let tab):
+                radialSelectedTab = tab
+
+            case .animationEditor:
+                if appModel.animationManager?.currentScene == nil {
+                    appModel.animationManager?.currentScene = appModel.animationManager?.scenes.first
+                }
+                openWindow(id: AppModel.animationEditorWindowID)
             }
         }
     }
@@ -599,6 +745,7 @@ private struct ThresholdMacRootView: View {
             return ShapeRailSection.allCases
                 .filter {
                     $0 != .performance
+                        && $0 != .hands
                         && (launcherStyle != .radial || $0 != .parameters)
                 }
                 .map { section in

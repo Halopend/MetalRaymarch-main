@@ -11,11 +11,6 @@
 		099D69EE64114830CE6B54E2 /* QuickLookThumbnailing.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C2C60FE2AC612DBC45321348 /* QuickLookThumbnailing.framework */; };
 		0C78E8AD4745827B432CF743 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0CD407A50A4FE37188F833F4 /* Cocoa.framework */; };
 		0CDCD3CEB3039B4A09D19E2C /* EmbeddedMetalSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91DE710F7BB2749FB8800C0F /* EmbeddedMetalSources.swift */; };
-		A1B2C3D4E5F6000000000001 /* EmbeddedMetalSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91DE710F7BB2749FB8800C0F /* EmbeddedMetalSources.swift */; };
-		A1B2C3D4E5F6000000000002 /* EmbeddedMetalSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91DE710F7BB2749FB8800C0F /* EmbeddedMetalSources.swift */; };
-		A1B2C3D4E5F6000000000003 /* EmbeddedMetalSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91DE710F7BB2749FB8800C0F /* EmbeddedMetalSources.swift */; };
-		A1B2C3D4E5F6000000000004 /* UniformsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000021 /* UniformsBuilder.swift */; };
-		A1B2C3D4E5F6000000000005 /* UniformsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000022 /* UniformsBuilder.swift */; };
 		0D518F892C60D595AFAE2A2D /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2D9C0FCEA23C2A00B886BC75 /* Metal.framework */; };
 		11261C08D81602E020D17A9E /* GeometryConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33032499041741A6DAF070F8 /* GeometryConfig.swift */; };
 		12F0366CA391F2B1BB85989A /* AudioReactiveConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C5071304A573C4CD0927CB1 /* AudioReactiveConfig.swift */; };
@@ -81,6 +76,11 @@
 		9C1E45BA0410BDA01AB29456 /* Module.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2555ADE15D5BF67D9AB3B11 /* Module.swift */; };
 		9CF76941F4529CE0CF2D3610 /* RenderSettingsSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = D817943CBDDDB5B502840504 /* RenderSettingsSnapshot.swift */; };
 		9F0F14D9860FB847DC472B38 /* RendererMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = F769728D520A7B9927A98F93 /* RendererMath.swift */; };
+		A1B2C3D4E5F6000000000001 /* EmbeddedMetalSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91DE710F7BB2749FB8800C0F /* EmbeddedMetalSources.swift */; };
+		A1B2C3D4E5F6000000000002 /* EmbeddedMetalSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91DE710F7BB2749FB8800C0F /* EmbeddedMetalSources.swift */; };
+		A1B2C3D4E5F6000000000003 /* EmbeddedMetalSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91DE710F7BB2749FB8800C0F /* EmbeddedMetalSources.swift */; };
+		A1B2C3D4E5F6000000000004 /* UniformsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000021 /* UniformsBuilder.swift */; };
+		A1B2C3D4E5F6000000000005 /* UniformsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000022 /* UniformsBuilder.swift */; };
 		A2DE4D640BCEBEE8E04E7BA9 /* ParameterTargetID.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D7A3D65630F4A3C1CADC20B /* ParameterTargetID.swift */; };
 		A49EED5D47CFEEEC9B2D0D66 /* SafetyBubbleConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 592A3385CBE68CE5E0CE2736 /* SafetyBubbleConfig.swift */; };
 		A9FCB5B990EE53439ED9FE83 /* Module.swift in Sources */ = {isa = PBXBuildFile; fileRef = A92085A1D3050F75ED8A6181 /* Module.swift */; };
@@ -185,7 +185,7 @@
 		13E0E291C71A2ACF08D9B125 /* MenuToggleGestureMode.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MenuToggleGestureMode.swift; path = Threshold/Gestures/MenuToggleGestureMode.swift; sourceTree = SOURCE_ROOT; };
 		1D7A3D65630F4A3C1CADC20B /* ParameterTargetID.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ParameterTargetID.swift; path = Threshold/Parameters/ParameterTargetID.swift; sourceTree = SOURCE_ROOT; };
 		2120938DEF53F1E5EBDA1AEA /* RenderSettingsSnapshot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderSettingsSnapshot.swift; path = Threshold/Parameters/RenderSettingsSnapshot.swift; sourceTree = SOURCE_ROOT; };
-		267AB8DEF708B1DC20911B9C /* EmbeddedMetalSources.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmbeddedMetalSources.swift; path = EmbeddedMetalSources.swift; sourceTree = DERIVED_FILE_DIR; };
+		267AB8DEF708B1DC20911B9C /* EmbeddedMetalSources.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EmbeddedMetalSources.swift; sourceTree = DERIVED_FILE_DIR; };
 		2D9C0FCEA23C2A00B886BC75 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		33032499041741A6DAF070F8 /* GeometryConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GeometryConfig.swift; path = Threshold/Parameters/Config/GeometryConfig.swift; sourceTree = SOURCE_ROOT; };
 		37D3A3272F51BBE19A3CDAD7 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
@@ -222,7 +222,7 @@
 		8CF999AB55321EF1A29B2E81 /* ColorConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ColorConfig.swift; path = Threshold/Parameters/Config/ColorConfig.swift; sourceTree = SOURCE_ROOT; };
 		8EFB06C7D9CCAAFDC2AEC871 /* CustomShaderCompiler.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CustomShaderCompiler.swift; path = Threshold/Rendering/Core/CustomShaderCompiler.swift; sourceTree = SOURCE_ROOT; };
 		8FC809342FFFD04F00C1D435 /* Threshold.profdata */ = {isa = PBXFileReference; lastKnownFileType = file; path = Threshold.profdata; sourceTree = "<group>"; };
-		91DE710F7BB2749FB8800C0F /* EmbeddedMetalSources.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmbeddedMetalSources.swift; path = EmbeddedMetalSources.swift; sourceTree = DERIVED_FILE_DIR; };
+		91DE710F7BB2749FB8800C0F /* EmbeddedMetalSources.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EmbeddedMetalSources.swift; sourceTree = DERIVED_FILE_DIR; };
 		95CB57512C86EAC0883E044E /* ControlSpec.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlSpec.swift; path = Threshold/Parameters/ControlSpec.swift; sourceTree = SOURCE_ROOT; };
 		9824E07E16D25804B68E737E /* AudioReactiveConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AudioReactiveConfig.swift; path = Threshold/Parameters/Config/AudioReactiveConfig.swift; sourceTree = SOURCE_ROOT; };
 		9B0A7A32EE19CCC9BA56E223 /* GestureConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GestureConfig.swift; path = Threshold/Parameters/Config/GestureConfig.swift; sourceTree = SOURCE_ROOT; };

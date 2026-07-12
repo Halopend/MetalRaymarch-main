@@ -25,14 +25,17 @@ Outer surface: `RoundedRectangle(cornerRadius: 20)` + `thresholdGlassBackground`
 
 ## Navigation taxonomy
 
-Top dock (`TopDockTab`): **Explore · Shape · Visualizations · Music**
+Top dock (`TopDockTab`): **Explore · Shape · Visualizations · Music · Performance**
 Rail sections per dock tab:
-- Explore → Jumping Off · Music Reactive · Animated · Custom Scenes
-- Shape → Parameters · Formula · Space · Performance
+- Explore → Jumping Off · Music Reactive · Animated · Mixed · Custom Scenes
+- Shape → Parameters · Formula · Hands · Space · Transform · Bounding
 - Visualizations → Color · Mapping · Grading · Cycling · Atmosphere · Transition · Audio Reactive
 - Music → Playback(/Music App) · Songs · Playlists · Albums  (macOS: Playback only)
+- Performance → Overview · Tuning
 
-Rail footer: Gestures (if supported) · pinned-control grid (3-col) · Settings.
+Rail footer: Gestures (if supported) · Animation Editor · pinned Quick Access
+grid (3-col) · Quick Toggles · Settings. Pinning is now a visible action on
+each pinnable row rather than a long-press-only feature.
 Rail sections map back onto legacy `selectedTab`/subtab content builders via
 `syncNavigationChromeFromLegacySelection` — the dock+rail are pure navigation
 chrome; the panels are the legacy `*Content` views.
@@ -43,7 +46,8 @@ Spacing: xxs 4 · xs 6 · sm 8 · md 10 · lg 12 · xl 16 · xxl 20
 Radius:  xs 4 · sm 6 · inset 8 · control 10 · card 12 · panel 16 · prominent 20
 Tints (opacity over bg): sectionFill .06 · surfaceFill .08 · hoverFill .12 ·
 selectedFill .14 · border .12 · strongBorder .4
-Semantic: surface = secondary@.08 · border = secondary@.12 · accent = blue
+Common view-level colors (not yet formal `DS` tokens): surface = secondary@.08 ·
+border = secondary@.12 · accent = blue
 
 ## Component vocabulary (selected → blue accent throughout)
 

@@ -42,14 +42,21 @@ extension ContentView {
                     .padding(.vertical, 4)
                     .background(Capsule().fill(Color.blue.opacity(0.12)))
             }
-            GradientPreviewBar(gradient: cache.color.gradientState.gradient)
-                .frame(height: 28).clipShape(RoundedRectangle(cornerRadius: 6))
-                .contentShape(RoundedRectangle(cornerRadius: 6))
-                .onTapGesture { showStopsPopover = true }
-                .popover(isPresented: $showStopsPopover, arrowEdge: .bottom) {
-                    GradientStopsPopover(cache: $cache)
-                }
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.4), lineWidth: 1))
+            Button {
+                showStopsPopover = true
+            } label: {
+                GradientPreviewBar(gradient: cache.color.gradientState.gradient)
+                    .frame(height: 28)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .contentShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.4), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Edit gradient colors")
+            .accessibilityHint("Opens the gradient stop editor")
+            .popover(isPresented: $showStopsPopover, arrowEdge: .bottom) {
+                GradientStopsPopover(cache: $cache)
+            }
             // ── Saved Custom Gradients ──
             HStack {
                 Text("Saved").font(.subheadline).foregroundColor(.secondary)
@@ -65,7 +72,7 @@ extension ContentView {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
             } else {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100, maximum: 180), spacing: 6)], spacing: 6) {
                     ForEach(Array(cache.gradientLibrary.savedCustomGradients.enumerated()), id: \.element.id) { index, saved in
                         let isActive = cache.color.gradientState.gradientPreset == nil && cache.color.gradientState.gradient.id == saved.id
                         Button {
@@ -117,7 +124,7 @@ extension ContentView {
             // ── Presets ──
             Text("Presets").font(.subheadline).foregroundColor(.secondary)
                 .padding(.top, 4)
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100, maximum: 180), spacing: 6)], spacing: 6) {
                 ForEach(GradientPreset.allCases, id: \.rawValue) { preset in
                     let isSelected = cache.color.gradientState.gradientPreset == preset
                     Button { cache.applyGradientPreset(preset) } label: {
@@ -175,7 +182,7 @@ extension ContentView {
                     .background(Capsule().fill(Color.blue.opacity(0.12)))
             }
 
-            LazyVGrid(columns: [GridItem(.flexible(minimum: 100), spacing: 8), GridItem(.flexible(minimum: 100), spacing: 8), GridItem(.flexible(minimum: 100), spacing: 8)], spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120, maximum: 220), spacing: 8)], spacing: 8) {
                 ForEach(ColorMappingMode.allCases, id: \.rawValue) { mode in
                     let isSelected = cache.color.gradientState.gradient.mappingMode == mode
                     Button {
