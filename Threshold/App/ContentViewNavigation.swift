@@ -152,6 +152,14 @@ enum VisualizationsRailSection: String, CaseIterable {
         [.color, .mapping, .atmosphere, .grading, .motion, .transition]
     }
 
+    /// A safe destination when opening the top-level Look workspace. Older
+    /// installs can still have the removed `reactive` section in AppStorage;
+    /// that legacy route belongs to Input now and must not make the Look button
+    /// appear to open Music.
+    var lookWorkspaceDestination: VisualizationsRailSection {
+        Self.visibleCases.contains(self) ? self : .color
+    }
+
     var title: String {
         switch self {
         case .grading:

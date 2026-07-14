@@ -18,6 +18,7 @@ enum FractalModelType: Int32, CaseIterable {
     case mengerSphere      = 14
     case theliPseudoKleinian = 15
     case kleinian              = 17
+    case boxFoldMandelbulb     = 18
     // Note: rawValue 20 was the removed `boxSphereFolder` type; old scenes that
     // encoded it decode to `.mandelbox` (see the Codable extension below).
     // Note: rawValue 21 is reserved for the legacy `mandelboxSphereProjection`

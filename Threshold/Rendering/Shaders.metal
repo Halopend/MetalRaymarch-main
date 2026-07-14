@@ -1697,7 +1697,8 @@ FORCE_INLINE float MapContinuousUnified(float3 pos, FractalParams params, float 
     // Formula DEs do not support Mandelbox-style fractional interpolation yet.
     // For Mandelbulb/MandelbulbJulia, rounding up keeps the coarse pass
     // conservative and avoids underestimating surface complexity near the front shell.
-    bool isMB = (type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia);
+    bool isMB = (type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia ||
+                 type == FractalTypeBoxFoldMandelbulb);
     int loopCount = max(isMB
                         ? int(ceil(fractionalIterations))
                         : int(fractionalIterations), 1);
@@ -2155,7 +2156,8 @@ FORCE_INLINE float MapWithOrbitCacheUnified(float3 pos, FractalParams params, fl
 FORCE_INLINE int ReducedSecondaryIterations(int iterations, int fractalType, bool forShadow = false)
 {
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
-    if (type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia) {
+    if (type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia ||
+        type == FractalTypeBoxFoldMandelbulb) {
         return max(forShadow ? ((iterations + 2) / 3) : ((iterations + 1) / 3), 2);
     }
     return max((iterations * 2) / 5, 3);
@@ -2292,7 +2294,8 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
 FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations, int fractalType = 0, FormulaParams fp = {}, float maxRayDistance = kMaxRayDistanceDefault, float epsilonScale = 1.0f)
 {
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
-    bool isMandelbulb = (type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia);
+    bool isMandelbulb = (type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia ||
+                         type == FractalTypeBoxFoldMandelbulb);
 
     // Mandelbulb DE returns much smaller values near the surface; start closer
     // and use a finer hit threshold to avoid overshooting the thin front face.
@@ -2400,6 +2403,7 @@ FORCE_INLINE float relaxedOmegaCap(int type) {
         return 1.6f;
     case FractalTypeMandelbulb:
     case FractalTypeMandelbulbJulia:
+    case FractalTypeBoxFoldMandelbulb:
     case FractalTypeQuaternionJulia:
         return 1.1f;
     default: // Kleinian family, custom formulas, future types
@@ -2490,7 +2494,8 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
     // Mandelbulb DE returns much smaller values near the surface compared to
     // box-fold fractals.  Start closer to the camera and use a finer hit
     // threshold so thin surface detail is not clipped.
-    bool isMandelbulb = (type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia);
+    bool isMandelbulb = (type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia ||
+                         type == FractalTypeBoxFoldMandelbulb);
     float t = (isMandelbulb ? 0.005 : 0.05) + dither;
 
     // === CONSERVATIVE CONE COARSE-PREPASS WARM-START ===
@@ -2647,7 +2652,8 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
     
     float dither = interleavedGradientNoise(fragCoord, time) * 0.01;
-    bool isMandelbulb = (type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia);
+    bool isMandelbulb = (type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia ||
+                         type == FractalTypeBoxFoldMandelbulb);
     float t = max(isMandelbulb ? 0.002 : 0.01, startT - 0.3) + dither;
     
     float glow = 0.0;

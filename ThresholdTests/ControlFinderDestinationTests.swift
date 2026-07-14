@@ -3,6 +3,15 @@ import Testing
 
 @Suite("Control Finder destination catalog")
 struct ControlFinderDestinationTests {
+    @Test("Opening Look replaces a removed saved section with Color")
+    func staleLookSectionFallsBackToColor() {
+        #expect(VisualizationsRailSection.reactive.lookWorkspaceDestination == .color)
+        #expect(VisualizationsRailSection.mapping.lookWorkspaceDestination == .mapping)
+        #expect(VisualizationsRailSection.visibleCases.allSatisfy {
+            $0.lookWorkspaceDestination == $0
+        })
+    }
+
     @Test("Catalog IDs are unique and every destination is routable")
     func uniqueRoutableDestinations() {
         let catalog = ControlFinderDestination.catalog

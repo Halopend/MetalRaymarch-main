@@ -209,6 +209,7 @@ enum FractalTypeRegistry {
         MengerSphereDescriptor(),
         TheliPseudoKleinianDescriptor(),
         KleinianDescriptor(),
+        BoxFoldMandelbulbDescriptor(),
         // Placeholder so `.custom` always resolves; real metadata is supplied
         // at scene-load time via `registerCustom(_:)`.
         CustomFractalDescriptor.placeholder,
@@ -505,6 +506,46 @@ private final class KleinianDescriptor: FractalTypeDescriptor, @unchecked Sendab
         fp.params.7 = 0.84
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
+    }
+}
+
+private final class BoxFoldMandelbulbDescriptor: FractalTypeDescriptor, @unchecked Sendable {
+    init() {
+        super.init(rawValue: 18, displayName: "Box-Fold Mandelbulb", icon: "shippingbox.and.arrow.backward",
+                   category: "Hybrid Folds", codableString: "boxFoldMandelbulb", isSelectableInUI: true)
+    }
+    override func primaryEquation() -> String? { "d(p) = DE_bulb(boxFold(p))" }
+    override func applyPolarRotation(into fp: inout FormulaParams, accum: Float) {
+        let base = FormulaCatalog.getParam(fp, index: 4)
+        FormulaCatalog.setParam(&fp, index: 4, value: base + accum)
+    }
+    override func qualityValues(for preset: QualityPreset) -> (fractalIterations: Int, raySteps: Int)? {
+        switch preset {
+        case .low:    return (4, 68)
+        case .medium: return (6, 88)
+        case .high:   return (8, 97)
+        case .ultra:  return (10, 102)
+        }
+    }
+    override var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags.union([.polarRotation]) }
+    override func defaultFormulaParams() -> FormulaParams {
+        var fp = Self.baseFormulaParams()
+        fp.params.0 = 8.0   // Mandelbulb power
+        fp.params.1 = 4.0   // Bailout
+        fp.params.2 = 1.0   // DE bias
+        fp.params.3 = 0.75  // Domain box-fold limit
+        FormulaCatalog.normalizeRotationFlags(&fp)
+        return fp
+    }
+    override var grabScaleClamp: ClosedRange<Float> { 0.0005...2000.0 }
+    override var defaultViewState: FractalViewDefaults {
+        Self.juliaLikeView(position: SIMD3<Float>(0.1, 0.1, -0.9))
+    }
+    override var defaultScalarBindings: [(slot: GestureSlot, paramName: String)] {
+        [
+            (GestureSlot(hand: .left, finger: .middle), "PolarRotation"),
+            (GestureSlot(hand: .left, finger: .index), "Power"),
+        ]
     }
 }
 

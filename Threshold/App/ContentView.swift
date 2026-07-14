@@ -1241,7 +1241,7 @@ struct ContentView: View {
         case .shape:
             activateShapeSection(shapeRailSection)
         case .visualizations:
-            activateVisualizationsSection(visualizationsRailSection)
+            activateVisualizationsSection(visualizationsRailSection.lookWorkspaceDestination)
         case .music:
             activateMusicSection(musicRailSection)
         case .performance:

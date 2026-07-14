@@ -42,6 +42,7 @@ struct EmbedFreshnessTests {
         ("mengerSphereH",         EmbeddedMetalSources.mengerSphereH,         "Threshold/Formulas/MengerSphere/MengerSphere.h"),
         ("theliPseudoKleinianH",  EmbeddedMetalSources.theliPseudoKleinianH,  "Threshold/Formulas/TheliPseudoKleinian/TheliPseudoKleinian.h"),
         ("kleinianH",             EmbeddedMetalSources.kleinianH,             "Threshold/Formulas/Kleinian/Kleinian.h"),
+        ("boxFoldMandelbulbH",    EmbeddedMetalSources.boxFoldMandelbulbH,    "Threshold/Formulas/BoxFoldMandelbulb/BoxFoldMandelbulb.h"),
         ("shadersMetal",          EmbeddedMetalSources.shadersMetal,          "Threshold/Rendering/Shaders.metal"),
     ]
 

@@ -90,6 +90,7 @@ typedef NS_ENUM(EnumBackingType, FractalType)
     FractalTypeMengerSphere        = 14,
     FractalTypeTheliPseudoKleinian = 15,
     FractalTypeKleinian              = 17,
+    FractalTypeBoxFoldMandelbulb     = 18,
     // NOTE: 20 was the removed `boxSphereFolder` type (see FractalModelType
     // back-compat decode). Do not reuse it.
     // NOTE: 21 is reserved — the legacy `mandelboxSphereProjection` type folded

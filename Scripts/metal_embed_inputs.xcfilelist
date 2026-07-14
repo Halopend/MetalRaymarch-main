@@ -9,4 +9,5 @@ $(SRCROOT)/Threshold/Formulas/Octahedron/Octahedron.h
 $(SRCROOT)/Threshold/Formulas/MengerSphere/MengerSphere.h
 $(SRCROOT)/Threshold/Formulas/TheliPseudoKleinian/TheliPseudoKleinian.h
 $(SRCROOT)/Threshold/Formulas/Kleinian/Kleinian.h
+$(SRCROOT)/Threshold/Formulas/BoxFoldMandelbulb/BoxFoldMandelbulb.h
 $(SRCROOT)/Threshold/Rendering/Shaders.metal
