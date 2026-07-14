@@ -14,8 +14,29 @@ import Testing
 import Foundation
 @testable import Threshold
 
-@Suite("QualityConfig — cone-coverage AA toggle persists")
+@Suite("QualityConfig — raymarch accelerator persistence")
 struct QualityConfigCodableTests {
+
+    @Test("raymarch accelerators default on and preserve explicit opt-out")
+    func raymarchAcceleratorDefaultsAndOptOut() throws {
+        let defaults = QualityConfig()
+        #expect(defaults.computeTemporalReprojectionEnabled == true)
+        #expect(defaults.smartAdvanceEnabled == true)
+
+        let legacy = try JSONDecoder().decode(QualityConfig.self, from: Data("{}".utf8))
+        #expect(legacy.computeTemporalReprojectionEnabled == true)
+        #expect(legacy.smartAdvanceEnabled == true)
+
+        var optedOut = defaults
+        optedOut.computeTemporalReprojectionEnabled = false
+        optedOut.smartAdvanceEnabled = false
+        let decoded = try JSONDecoder().decode(
+            QualityConfig.self,
+            from: JSONEncoder().encode(optedOut)
+        )
+        #expect(decoded.computeTemporalReprojectionEnabled == false)
+        #expect(decoded.smartAdvanceEnabled == false)
+    }
 
     @Test("coneCoverageAAEnabled survives encode → decode")
     func coneCoverageAARoundTrips() throws {

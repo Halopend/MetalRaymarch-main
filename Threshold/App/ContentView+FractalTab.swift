@@ -723,7 +723,7 @@ extension ContentView {
 
                 accelToggleCompact("Temporal Reproject",
                             isOn: cache.quality.computeTemporalReprojectionEnabled,
-                            help: "Reuses last frame's depth to skip most of the march — the path's main speedup. Currently can blank disoccluded 8×8/32×32 tiles, so it's off by default for a correct, comparable image. Adaptive Compute renderer mode only.") { v in
+                            help: "Reuses compatible previous-frame depth, then validates each predicted start with the distance field before skipping ahead. Rejected or stale predictions fall back to a full march. On by default; Adaptive Compute renderer mode only.") { v in
                     cache.quality.computeTemporalReprojectionEnabled = v; cache.push(\.computeTemporalReprojectionEnabled, value: v)
                 }
                 .disabled(!isCompute)

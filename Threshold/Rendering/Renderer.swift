@@ -131,6 +131,9 @@ actor Renderer {
     var coarseWarmStartPipelineCache: [String: MTLRenderPipelineState] = [:]
     var previousViewProjMatrices: [matrix_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]  // per eye
     private var temporalFrameCount: Int = 0                         // 0 = first frame, no reprojection
+    // Compute depth has a separate texture lifecycle from MetalFX fragment
+    // depth, so scene compatibility must be tracked independently.
+    var computeWarmStartGate = WarmStartGate()
 
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1196,6 +1199,11 @@ actor Renderer {
             useAdaptiveCompute = false
         }
 
+        // Reaching the fragment path means compute depth was not written this
+        // frame. Do not reuse it after a path switch: its depth and the stored
+        // previous-view-projection matrix would describe different frames.
+        computeWarmStartGate.invalidate()
+
         // ═══════════════════════════════════════════════════════════════════════
         // FRAGMENT RENDER PATH (with optional MetalFX spatial upscale)
         //
@@ -1642,7 +1650,9 @@ actor Renderer {
         let tileBlendFactor: Float = settingsSnapshot.isGeometryGestureActive ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5)
         let tileSpringStretch: Float = simd_length(settingsSnapshot.springDisplacement)
         let tileSpringVisible: Int32 = (settingsSnapshot.springActive || tileSpringStretch > 0.001) ? 1 : 0
-        let tileTemporalReprojectionEnabled: Int32 = (temporalFrameCount > 0 && settingsSnapshot.sphericalInversionMode.rawValue == 0 && settingsSnapshot.computeTemporalReprojectionEnabled) ? 1 : 0
+        let tileTemporalReprojectionEnabled: Int32 = (temporalFrameCount > 0
+            && settingsSnapshot.computeTemporalReprojectionEnabled
+            && computeWarmStartGate.allowsWarmStart(for: settingsSnapshot)) ? 1 : 0
         let tileRateMapValid: Int32 = rateMapValid ? 1 : 0
         let tileDebugHierarchical: UInt32 = settingsSnapshot.debugHierarchical ? 1 : 0
 
@@ -1904,6 +1914,7 @@ actor Renderer {
         temporalDepthTextures = [tex0, tex1]
         temporalDepthIndex = 0
         temporalFrameCount = 0  // Reset — first frame has no valid previous data
+        computeWarmStartGate.invalidate()
         
         // Residency update deferred to renderWithAdaptiveCompute() for batching
         
@@ -2324,6 +2335,7 @@ actor Renderer {
             temporalDepthTextures = [nil, nil]
             temporalDepthIndex = 0
             temporalFrameCount = 0
+            computeWarmStartGate.invalidate()
             return false
         }
         
@@ -2385,6 +2397,7 @@ actor Renderer {
         // Advance temporal state for next frame
         temporalDepthIndex = 1 - temporalDepthIndex  // Swap ping-pong
         temporalFrameCount += 1
+        computeWarmStartGate.recordDepthWritten(settingsSnapshot)
         
         // Blit compute output to drawable for presentation
         blitComputeOutputToDrawable(commandBuffer: commandBuffer, drawable: drawable, useEdgeOutput: edgeEnabled)

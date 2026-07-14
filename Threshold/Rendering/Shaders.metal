@@ -3296,22 +3296,23 @@ kernel void adaptiveHierarchical8x8(
         }
     }
 
-    // === COHERENT-PACKET WARM-START SAFETY PROBE (Stage 2) ===
+    // === PER-PIXEL WARM-START SAFETY PROBE ===
     // The legacy `prevDepth * 0.9` heuristic assumes DE monotonicity along the ray.
     // Fractal DEs (Mandelbulb / Mandelbox) are LOCALLY non-monotone: they decrease
     // into a fold then increase past it, so a fixed 10% backoff happily steps past
     // disocclusion-exposed surfaces.
     //
     // Replacement: a single MapUnified evaluation at the predicted t. Three outcomes:
-    //   • h < hitThreshold    → already on the surface; treat as confirmed hit
-    //                            and skip the fine march entirely (fast path).
+    //   • h < hitThreshold    → surface confirmed; restart just before it so the
+    //                            fine march terminates in a few refinement steps.
     //   • h > backoffMargin   → safely outside; tighten startT to (t - h), which
     //                            is GUARANTEED conservative by Lipschitz-1.
     //   • otherwise            → reject reprojection; fall back to coarse pass.
     //
-    // Cost: 1 DE eval per pixel for warm-start. Saves the entire coarse search and
-    // potentially the entire fine march. Failure is silent: we just use the legacy
-    // tileStartT path.
+    // Cost: 1 DE eval per temporally warm-started pixel. Saves the entire coarse
+    // search and potentially the entire fine march. Failure is silent: we use the
+    // full near-plane march. Validation is independent of the optional coherent-
+    // packet shadow/debug experiment so every temporal start takes this path.
     //
     // packetLayer is a per-pixel debug tag for the layer-of-acceptance overlay:
     //   0 = unset / fell through to coarse-tile path
@@ -3321,9 +3322,11 @@ kernel void adaptiveHierarchical8x8(
     int packetLayer = 0;
     const bool coherentPacketOn = is_function_constant_defined(FC_COHERENT_PACKET)
         ? FC_COHERENT_PACKET : (uniforms.coherentPacketEnabled != 0);
-    if (coherentPacketOn && reprojectionValid) {
+    if (reprojectionValid) {
         float t_pred = reprojectedDepth;
-        bool packetIsMandelbulb = (fractalType == FractalTypeMandelbulb || fractalType == FractalTypeMandelbulbJulia);
+        bool packetIsMandelbulb = (fractalType == FractalTypeMandelbulb ||
+                                   fractalType == FractalTypeMandelbulbJulia ||
+                                   fractalType == FractalTypeBoxFoldMandelbulb);
         // Hit threshold mirrors the fine-march acceptance gate so a probe-hit is
         // bit-for-bit consistent with what SceneWithCacheFromStart would accept.
         float probeHitThreshold = packetIsMandelbulb
@@ -3348,16 +3351,16 @@ kernel void adaptiveHierarchical8x8(
             // restart safely outside the hit band even with non-monotone DEs.
             float restartBackoff = max(probeHitThreshold * 6.0f, t_pred * 0.005f);
             reprojectedStartT = max(0.05f, t_pred - restartBackoff);
-            packetLayer = 1;
+            if (coherentPacketOn) packetLayer = 1;
         } else if (h_probe > probeBackoffMargin) {
             // Safely outside surface. (t - h) is Lipschitz-conservative.
             reprojectedStartT = max(0.05f, t_pred - h_probe);
-            packetLayer = 2;
+            if (coherentPacketOn) packetLayer = 2;
         } else {
             // Inside the unsafe band — could be a fold. Reject; let coarse pass run.
             reprojectionValid = false;
             reprojectedStartT = 0.0;
-            packetLayer = 3;
+            if (coherentPacketOn) packetLayer = 3;
         }
     }
     
@@ -3573,7 +3576,7 @@ kernel void adaptiveHierarchical8x8(
     // a PER-PIXEL reprojected start is safe to warm-start from. So we default to the
     // near plane (0.0 → the SceneWithCache full march below, identical to the fragment
     // reference path that has no cutoff) and ONLY warm-start when this lane has its own
-    // valid temporal reprojection (off by default; conservative when on).
+    // valid, predict-validated temporal reprojection.
     float fineStartT = 0.0f;
     if (reprojectionValid && reprojectedStartT > tileStartT) {
         // Per-pixel reprojected start — tight AND safe for this specific lane.

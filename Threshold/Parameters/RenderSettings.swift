@@ -215,10 +215,10 @@ final class RenderSettings: @unchecked Sendable {
     private var _tileSize: Int = 0                   // 0=disabled (fragment), 8=8x8 adaptive hierarchical compute
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
     private var _coherentPacketEnabled: Bool = loadBool("coherentPacketEnabled", default: false)  // Experimental predict-validate raymarch (Stages 0-3)
-    private var _computeTemporalReprojectionEnabled: Bool = loadBool("computeTemporalReprojectionEnabled", default: false)  // Compute path: temporal reproject + tile/supertile depth seeding. Off = full coarse+fine march every frame (correct baseline; the seeding can blank disoccluded tiles)
+    private var _computeTemporalReprojectionEnabled: Bool = loadBool("computeTemporalReprojectionEnabled", default: true)  // Compute path: compatible-history, per-pixel predict-validate temporal starts
     private var _coarsePrepassWarmStartEnabled: Bool = loadBool("coarsePrepassWarmStartEnabled", default: false)  // visionOS fragment path: conservative cone coarse-prepass warm-start. A low-res cone pass writes a provable LOWER BOUND on each 8x8 block's nearest-surface entry distance; the full march raises its start t to it (skip-to-then-full-march). Off = no cone pass, byte-identical to before. Box/fold + un-warped domain only.
     private var _foveationStrength: Float = loadFloat("foveationStrength", default: 0.0)  // Peripheral step reduction on the 8x8 compute path (0 = off)
-    private var _smartAdvanceEnabled: Bool = loadBool("smartAdvanceEnabled", default: false)  // Grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient)
+    private var _smartAdvanceEnabled: Bool = loadBool("smartAdvanceEnabled", default: true)  // Grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient)
     private var _adaptiveRenderQualityEnabled: Bool = loadBool("adaptiveRenderQualityEnabled", default: true)  // visionOS: auto-lower compositor Render Quality to hold FPS (slider = ceiling)
     private var _coneMarchStrength: Float = loadFloat("coneMarchStrength", default: 0.0)  // 0 = off; scales the distance-growing hit threshold (projected pixel footprint, ConeMarchingPen)
     private var _coneCoverageAAEnabled: Bool = loadBool("coneCoverageAAEnabled", default: false)  // CTSS-lite silhouette AA from the cone footprint (fragment path); lets Cone Marching run harder without blobby edges
@@ -1300,11 +1300,10 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    /// Compute path (tileSize == 8): enable temporal reprojection and the
-    /// tile/supertile previous-frame depth seeding that skips the per-tile coarse
-    /// march. This is the path's main speedup, but the seed can start the fine
-    /// march past disocclusion-exposed geometry, leaving whole 8x8/32x32 tiles
-    /// blank. Off = full coarse+fine march every frame (correct, slower baseline).
+    /// Compute path (tileSize == 8): enable compatible-history reprojection,
+    /// per-pixel predict/validate warm starts, and tile/supertile previous-frame
+    /// depth seeding that skips the per-tile coarse march. Rejected predictions
+    /// fall back to the full march.
     var computeTemporalReprojectionEnabled: Bool {
         get { withLock { _computeTemporalReprojectionEnabled } }
         set {
@@ -1345,7 +1344,7 @@ final class RenderSettings: @unchecked Sendable {
     /// Smart advance: grazing-aware lead-ahead sphere tracing. When on, the
     /// march reads the along-ray DE gradient each step and steps further through
     /// grazing/receding regions (where plain tracing creeps), guarded by the same
-    /// overstep-failure retreat as the Keinert over-relaxation. Off by default;
+    /// overstep-failure retreat as the Keinert over-relaxation. On by default;
     /// affects every raymarch path (Mac fragment + visionOS compute).
     var smartAdvanceEnabled: Bool {
         get { withLock { _smartAdvanceEnabled } }

@@ -163,10 +163,10 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // Experimental: coherent packet predict-validate raymarch path (Stages 0-3)
     var coherentPacketEnabled: Bool = false
 
-    // Compute path (tileSize == 8): temporal reprojection + tile/supertile depth
-    // seeding. The path's main speedup, but can blank disoccluded tiles — off by
-    // default for a correct baseline.
-    var computeTemporalReprojectionEnabled: Bool = false
+    // Compute path (tileSize == 8): per-pixel, predict-validate temporal depth
+    // warm starts plus tile/supertile coarse-pass seeding. History is accepted
+    // only across compatible distance fields; stale predictions are rejected.
+    var computeTemporalReprojectionEnabled: Bool = true
 
     // visionOS fragment path: conservative cone coarse-prepass warm-start. A
     // low-res cone pass writes a provable LOWER BOUND on each 8x8 block's
@@ -178,8 +178,9 @@ struct QualityConfig: Codable, Equatable, Sendable {
     var foveationStrength: Float = 0.0
 
     // Smart advance: grazing-aware lead-ahead sphere tracing. Reads the along-ray
-    // DE gradient to step further through grazing/receding regions. Off by default.
-    var smartAdvanceEnabled: Bool = false
+    // DE gradient to step further through grazing/receding regions, guarded by
+    // the overstep-failure retreat. On by default.
+    var smartAdvanceEnabled: Bool = true
 
     // Cone marching strength (0...1): grow the march hit-threshold with ray
     // distance so each ray stops once the distance field falls within ~N pixels
@@ -327,10 +328,10 @@ struct QualityConfig: Codable, Equatable, Sendable {
         tileSize              = decodedTileSize == 2 ? 0 : decodedTileSize  // Old "Quad Shared" mode removed → degrade to fragment
         debugHierarchical     = try c.decodeIfPresent(Bool.self,  forKey: .debugHierarchical)     ?? false
         coherentPacketEnabled = try c.decodeIfPresent(Bool.self,  forKey: .coherentPacketEnabled) ?? false
-        computeTemporalReprojectionEnabled = try c.decodeIfPresent(Bool.self, forKey: .computeTemporalReprojectionEnabled) ?? false
+        computeTemporalReprojectionEnabled = try c.decodeIfPresent(Bool.self, forKey: .computeTemporalReprojectionEnabled) ?? true
         coarsePrepassWarmStartEnabled = try c.decodeIfPresent(Bool.self, forKey: .coarsePrepassWarmStartEnabled) ?? false
         foveationStrength     = try c.decodeIfPresent(Float.self, forKey: .foveationStrength)     ?? 0.0
-        smartAdvanceEnabled   = try c.decodeIfPresent(Bool.self,  forKey: .smartAdvanceEnabled)   ?? false
+        smartAdvanceEnabled   = try c.decodeIfPresent(Bool.self,  forKey: .smartAdvanceEnabled)   ?? true
         coneMarchStrength     = try c.decodeIfPresent(Float.self, forKey: .coneMarchStrength)     ?? 0.0
         coneCoverageAAEnabled = try c.decodeIfPresent(Bool.self,  forKey: .coneCoverageAAEnabled) ?? false
         overRelaxationMax     = try c.decodeIfPresent(Float.self, forKey: .overRelaxationMax)     ?? 1.4
