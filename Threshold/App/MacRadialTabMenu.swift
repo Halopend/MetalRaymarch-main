@@ -2,7 +2,7 @@
 import AppKit
 import SwiftUI
 
-enum MacTabLauncherStyle: String, CaseIterable {
+enum MacTabLauncherStyle: String {
     case radial = "Radial"
     case grid = "Grid"
 
@@ -423,19 +423,18 @@ struct MacRadialTabGeometry {
 
 /// Screen-position anchored, tree-driven launcher for the macOS render view.
 ///
-/// Renders one ring per level of the navigation `path` through `roots`. Both
-/// layout styles walk the same tree: `.radial` places hierarchy levels on
-/// concentric arcs around the pointer
-/// pill, `.grid` stacks the levels as right-edge columns. Hovering a branch
-/// pill auto-selects it after a short dwell; only click leaves (window-opening
-/// actions) and slider drags perform side effects.
+/// Renders one ring per level of the navigation `path` through `roots`.
+/// `.radial` is the public launcher; the retained `.grid` renderer stacks the
+/// same levels as right-edge columns for compatibility. Hovering a branch pill
+/// auto-selects it after a short dwell; only fallback leaves (which open the
+/// full controls surface) and slider drags perform side effects.
 struct MacRadialTabMenu: View {
     let size: CGSize
     let pointerAnchor: CGPoint
     @Binding var curvature: Double
     let roots: [MacRadialNavNode]
     @Binding var path: [String]
-    @Binding var layoutStyle: MacTabLauncherStyle
+    let layoutStyle: MacTabLauncherStyle
     let sceneAccent: Color
     /// True while the user shift-peeks at the fractal: the menu stays mounted
     /// but hover must not re-navigate underneath the faded pills.
@@ -459,11 +458,9 @@ struct MacRadialTabMenu: View {
     @State private var hoveredRingDepth: Int?
 
     /// Focus identifiers for launcher chrome live outside the navigation tree.
-    /// Keeping them in the same explicit order as tree nodes prevents SwiftUI's
-    /// implicit key loop from skipping the layout controls after we consume Tab.
+    /// The grid renderer remains available as an implementation fallback, but
+    /// layout selection is no longer part of the public launcher chrome.
     private enum ChromeFocusID {
-        static let radialLayout = "launcher.chrome.layout.radial"
-        static let gridLayout = "launcher.chrome.layout.grid"
         static let tighterCurvature = "launcher.chrome.curvature.tighter"
         static let widerCurvature = "launcher.chrome.curvature.wider"
     }
@@ -569,7 +566,7 @@ struct MacRadialTabMenu: View {
                 ringView(ring)
             }
 
-            layoutPicker(primaryPositions: rings.first?.positions ?? [])
+            curvaturePicker(primaryPositions: rings.first?.positions ?? [])
 
             anchorMark
         }
@@ -841,10 +838,10 @@ struct MacRadialTabMenu: View {
                             // Click (or keyboard activation) on a pure branch
                             // navigates immediately — hover-only switching
                             // would strand click-first and keyboard users.
-                            if let action = node.clickAction {
-                                action()
-                            } else if node.isBranch {
+                            if node.isBranch {
                                 commitHoverSelection(node, depth: ring.depth)
+                            } else {
+                                node.fallbackAction?()
                             }
                         },
                         onHoverChanged: { hovering in
@@ -990,77 +987,33 @@ struct MacRadialTabMenu: View {
         }
     }
 
-    private func layoutPicker(primaryPositions: [CGPoint]) -> some View {
+    private func curvaturePicker(primaryPositions: [CGPoint]) -> some View {
         HStack(spacing: 3) {
-            ForEach(MacTabLauncherStyle.allCases, id: \.self) { style in
-                let focusID = layoutFocusID(for: style)
-                let isKeyboardFocused = focusedItemID == focusID
-                Button {
-                    withAnimation(.easeOut(duration: 0.16)) {
-                        layoutStyle = style
-                    }
-                } label: {
-                    Image(systemName: style.systemImage)
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 24, height: 22)
-                        .foregroundStyle(layoutStyle == style ? Color.white : Color.white.opacity(0.52))
-                        .background(
-                            layoutStyle == style || isKeyboardFocused
-                                ? Color(red: 0.58, green: 0.13, blue: 0.84).opacity(0.88)
-                                : Color.clear,
-                            in: Capsule()
-                        )
-                        .overlay(
-                            Capsule()
-                                .strokeBorder(
-                                    isKeyboardFocused ? sceneAccent.opacity(0.92) : Color.clear,
-                                    lineWidth: 1.2
-                                )
-                        )
-                }
-                .buttonStyle(.plain)
-                .focused($focusedItemID, equals: focusID)
-                .help("Use \(style.rawValue.lowercased()) tabs")
-            }
-
-            if layoutStyle == .radial {
-                Rectangle()
-                    .fill(Color.white.opacity(0.12))
-                    .frame(width: 1, height: 14)
-                    .padding(.horizontal, 1)
-
-                curvatureButton(
-                    systemImage: "minus",
-                    delta: -0.08,
-                    focusID: ChromeFocusID.tighterCurvature
-                )
-                curvatureButton(
-                    systemImage: "plus",
-                    delta: 0.08,
-                    focusID: ChromeFocusID.widerCurvature
-                )
-            }
+            curvatureButton(
+                systemImage: "minus",
+                delta: -0.08,
+                focusID: ChromeFocusID.tighterCurvature
+            )
+            curvatureButton(
+                systemImage: "plus",
+                delta: 0.08,
+                focusID: ChromeFocusID.widerCurvature
+            )
         }
         .padding(3)
         .background(Color(red: 0.055, green: 0.012, blue: 0.09).opacity(0.96), in: Capsule())
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8))
-        .frame(
-            width: layoutStyle == .grid ? gridPrimaryWidth : nil,
-            alignment: .trailing
-        )
-        .position(layoutPickerPosition(primaryPositions: primaryPositions))
-        .accessibilityLabel("Tab layout")
+        .position(curvaturePickerPosition(primaryPositions: primaryPositions))
+        .accessibilityLabel("Radial curvature")
     }
 
-    private func layoutPickerPosition(primaryPositions: [CGPoint]) -> CGPoint {
+    private func curvaturePickerPosition(primaryPositions: [CGPoint]) -> CGPoint {
         let top = primaryPositions.map(\.y).min() ?? anchor.y
         let bottom = primaryPositions.map(\.y).max() ?? anchor.y
         let desiredY = top - 32
         let resolvedY = desiredY >= 24 ? desiredY : min(bottom + 32, size.height - 24)
         return CGPoint(
-            x: layoutStyle == .grid
-                ? gridPrimaryColumnX
-                : bifurcates ? anchor.x : anchor.x + (opensLeft ? -70 : 70),
+            x: bifurcates ? anchor.x : anchor.x + (opensLeft ? -70 : 70),
             y: resolvedY
         )
     }
@@ -1206,18 +1159,9 @@ struct MacRadialTabMenu: View {
     }
 
     private var chromeFocusIDs: [String] {
-        var ids = [ChromeFocusID.radialLayout, ChromeFocusID.gridLayout]
-        if layoutStyle == .radial {
-            ids += [ChromeFocusID.tighterCurvature, ChromeFocusID.widerCurvature]
-        }
-        return ids
-    }
-
-    private func layoutFocusID(for style: MacTabLauncherStyle) -> String {
-        switch style {
-        case .radial: ChromeFocusID.radialLayout
-        case .grid: ChromeFocusID.gridLayout
-        }
+        layoutStyle == .radial
+            ? [ChromeFocusID.tighterCurvature, ChromeFocusID.widerCurvature]
+            : []
     }
 
     private func moveFocus(through targets: [MacRadialKeyboardTarget], backward: Bool) {
@@ -1275,12 +1219,6 @@ struct MacRadialTabMenu: View {
         guard let focusedItemID else { return .ignored }
 
         switch focusedItemID {
-        case ChromeFocusID.radialLayout:
-            layoutStyle = .radial
-            return .handled
-        case ChromeFocusID.gridLayout:
-            layoutStyle = .grid
-            return .handled
         case ChromeFocusID.tighterCurvature:
             curvature = min(max(curvature - 0.08, 0.35), 1.35)
             return .handled
@@ -1297,16 +1235,16 @@ struct MacRadialTabMenu: View {
             // Space falling through to viewport playback while a slider owns focus.
             return .handled
         }
-        if let action = node.clickAction {
+        if expandFocusedBranch() { return .handled }
+        if let action = node.fallbackAction {
             action()
             return .handled
         }
-        return expandFocusedBranch() ? .handled : .ignored
+        return .ignored
     }
 
-    /// Right Arrow (or activation of a pure branch) descends without running a
-    /// combined branch's click action. This is the keyboard route to the child
-    /// sliders that pointer users reveal by hovering.
+    /// Right Arrow (or activation of a branch) descends through the same quick
+    /// inputs that pointer users reveal by hovering.
     @discardableResult
     private func expandFocusedBranch() -> Bool {
         guard let focusedItemID,
@@ -1497,10 +1435,10 @@ private struct MacRadialTabButton: View {
             ? "\(item.title): press Right Arrow to reveal its controls"
             : item.title)
         .accessibilityHint(item.isBranch
-            ? (item.clickAction != nil
-                ? "Press Right Arrow to reveal child controls. Press Return to open this section."
-                : "Press Right Arrow or Return to reveal child controls.")
-            : "Press Return to open this control.")
+            ? "Press Right Arrow or Return to reveal child controls."
+            : item.fallbackAction != nil
+                ? "Press Return to open the full controls for this section."
+                : "Use the available quick control.")
         .accessibilityAddTraits(item.isSelected ? .isSelected : [])
     }
 

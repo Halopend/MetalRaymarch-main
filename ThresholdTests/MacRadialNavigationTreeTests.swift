@@ -62,14 +62,13 @@ struct MacRadialNavigationTreeTests {
                                     write: { _ in }
                                 )
                             )
-                        ],
-                        clickAction: { clicked("a.1") }
+                        ]
                     ),
                     MacRadialNavNode(
                         id: "a.2",
                         title: "A2",
                         systemImage: "2.circle",
-                        clickAction: { clicked("a.2") }
+                        fallbackAction: { clicked("a.2") }
                     )
                 ]
             ),
@@ -77,7 +76,7 @@ struct MacRadialNavigationTreeTests {
                 id: "root.leaf",
                 title: "Leaf",
                 systemImage: "l.circle",
-                clickAction: { clicked("root.leaf") }
+                fallbackAction: { clicked("root.leaf") }
             )
         ]
     }
@@ -198,28 +197,31 @@ struct MacRadialNavigationTreeTests {
         #expect(clicked.isEmpty)
     }
 
-    @Test("Activation policy is carried by node shape")
+    @Test("Only leaves without quick inputs carry full-controls fallbacks")
     func activationPolicyFromShape() {
         let tree = makeTree()
 
-        // Branches navigate on hover; the window-opening leaves and the
-        // branch's own click action are the only side-effectful paths.
+        // Branches navigate in place; only fallback leaves open full controls.
         let branch = tree.node(withID: "root.a")!
         #expect(branch.isBranch)
-        #expect(branch.clickAction == nil)
+        #expect(branch.fallbackAction == nil)
 
         let sectionWithSliders = tree.node(withID: "a.1")!
         #expect(sectionWithSliders.isBranch)
-        #expect(sectionWithSliders.clickAction != nil)
+        #expect(sectionWithSliders.fallbackAction == nil)
+
+        let nestedFallback = tree.node(withID: "a.2")!
+        #expect(!nestedFallback.isBranch)
+        #expect(nestedFallback.fallbackAction != nil)
 
         let windowLeaf = tree.node(withID: "root.leaf")!
         #expect(!windowLeaf.isBranch)
-        #expect(windowLeaf.clickAction != nil)
+        #expect(windowLeaf.fallbackAction != nil)
 
         let slider = tree.node(withID: "slider.a.1.x")!
         #expect(!slider.isBranch)
         #expect(slider.slider != nil)
-        #expect(slider.clickAction == nil)
+        #expect(slider.fallbackAction == nil)
     }
 
     @Test("Slider binding normalization round-trips and clamps")

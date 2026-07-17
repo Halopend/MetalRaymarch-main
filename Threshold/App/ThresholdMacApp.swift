@@ -110,7 +110,7 @@ private struct ThresholdMacRootView: View {
     @State private var radialAnchor = CGPoint(x: 1400, y: 320)
     /// Selected node id per ring depth — the launcher's transient browsing
     /// state. Hover auto-select rewrites it; committed selection stays in the
-    /// @AppStorage keys until a click leaf activates.
+    /// @AppStorage keys until a fallback leaf activates.
     @State private var radialPath: [String] = []
     /// Live parameter mirror backing the launcher's radial sliders. Synced
     /// only while the launcher is visible (each live cache costs a 0.5s
@@ -123,9 +123,7 @@ private struct ThresholdMacRootView: View {
     @State private var pendingAutoHide: DispatchWorkItem?
     @State private var pendingRadialReveal: DispatchWorkItem?
     @State private var isControlFinderPresented = false
-
     @AppStorage("MacTabLauncher.enabled") private var isLauncherEnabled = true
-    @AppStorage("MacTabLauncher.style") private var launcherStyle: MacTabLauncherStyle = .radial
     @AppStorage("MacTabLauncher.curvature") private var launcherCurvature: Double = 0.82
     @AppStorage("ContentView.topDockTab") private var radialTopDockTab: TopDockTab = .explore
     @AppStorage("ContentView.exploreRailSection") private var radialExploreSection: ExploreRailSection = .jumpingOff
@@ -196,7 +194,7 @@ private struct ThresholdMacRootView: View {
                         curvature: $launcherCurvature,
                         roots: radialNavRoots,
                         path: $radialPath,
-                        layoutStyle: $launcherStyle,
+                        layoutStyle: .radial,
                         sceneAccent: MacTabSceneAccent.color(from: appModel.renderSettings.gradientColorMap),
                         suspendsHoverNavigation: isShiftPressed,
                         hoveredSlider: $hoveredRadialSlider,
@@ -283,7 +281,7 @@ private struct ThresholdMacRootView: View {
                         return MacRadialTabMenu.windowDragHandleFrame(
                             size: proxy.size,
                             pointerAnchor: radialAnchor,
-                            layoutStyle: launcherStyle
+                            layoutStyle: .radial
                         ).contains(point)
                     },
                     onSliderScroll: { upwardDelta in
@@ -303,7 +301,6 @@ private struct ThresholdMacRootView: View {
                 guard let value = notification.userInfo?[ThresholdMacInteractiveView.clickLocationUserInfoKey] as? NSValue else {
                     return
                 }
-                launcherStyle = .radial
                 showRadialLauncher(
                     anchor: CGPoint(
                         x: value.pointValue.x,
@@ -444,7 +441,7 @@ private struct ThresholdMacRootView: View {
                 toggleControlsPin()
             }
         } label: {
-            Label(title, systemImage: isLauncherEnabled ? launcherStyle.systemImage : AppIcons.sidebarRight)
+            Label(title, systemImage: isLauncherEnabled ? MacTabLauncherStyle.radial.systemImage : AppIcons.sidebarRight)
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 12)
                 .frame(minHeight: 44)
@@ -679,11 +676,10 @@ private struct ThresholdMacRootView: View {
     // ═══════════════════════════════════════════════════════════════════════
     // MARK: Radial navigation tree
     //
-    // The single source of truth both launcher rendering modes consume.
-    // Reorganizing the launcher means editing this builder only: activation
-    // policy is derived from node shape (children → hover navigates,
-    // clickAction → click opens the controls window, slider → drag/scroll
-    // scrubs the live value), never from a node's position in the layout.
+    // The single source of truth for the radial quick-input launcher.
+    // Reorganizing the launcher means editing this builder only: children and
+    // sliders stay in the radial hierarchy; fallbackAction is reserved for a
+    // leaf with no useful quick-input representation and opens full controls.
     // ═══════════════════════════════════════════════════════════════════════
 
     static func rootNodeID(for tab: TopDockTab) -> String { "root.\(tab.rawValue)" }
@@ -699,30 +695,27 @@ private struct ThresholdMacRootView: View {
             )
         }
 
-        let launcherNodes: [MacRadialNavNode]
-        if launcherStyle == .radial {
-            let parameters = MacRadialNavNode(
-                id: "root.parameters",
-                title: "Parameters",
-                systemImage: ShapeRailSection.parameters.icon,
-                isSelected: radialTopDockTab == .shape
-                    && radialShapeSection == .parameters
-                    && radialSelectedTab == .fractal,
-                children: shapeSliderNodes(for: .parameters),
-                clickAction: { activateShapeFromLauncher(.parameters) }
-            )
-            launcherNodes = dockNodes + [parameters]
-        } else {
-            launcherNodes = dockNodes
-        }
+        let parameterInputs = shapeSliderNodes(for: .parameters)
+        let parameters = MacRadialNavNode(
+            id: "root.parameters",
+            title: "Parameters",
+            systemImage: ShapeRailSection.parameters.icon,
+            isSelected: radialTopDockTab == .shape
+                && radialShapeSection == .parameters
+                && radialSelectedTab == .fractal,
+            children: parameterInputs,
+            fallbackAction: parameterInputs.isEmpty
+                ? { activateShapeFromLauncher(.parameters) }
+                : nil
+        )
 
-        return launcherNodes + [
+        return dockNodes + [parameters,
             MacRadialNavNode(
                 id: "root.quickToggles",
                 title: "Quick Toggles",
                 systemImage: SidebarTab.quickToggles.icon,
                 isSelected: radialSelectedTab == .quickToggles,
-                clickAction: {
+                fallbackAction: {
                     radialSelectedTab = .quickToggles
                     showControlsAfterLauncherSelection()
                 }
@@ -732,7 +725,7 @@ private struct ThresholdMacRootView: View {
                 title: "Settings",
                 systemImage: SidebarTab.settings.icon,
                 isSelected: radialSelectedTab == .settings,
-                clickAction: {
+                fallbackAction: {
                     radialSelectedTab = .settings
                     showControlsAfterLauncherSelection()
                 }
@@ -751,37 +744,39 @@ private struct ThresholdMacRootView: View {
                         title: section.rawValue,
                         systemImage: section.icon,
                         isSelected: radialTopDockTab == .explore && radialExploreSection == section && radialSelectedTab == .fractal,
-                        clickAction: { activateExploreFromLauncher(section) }
+                        fallbackAction: { activateExploreFromLauncher(section) }
                     )
                 }
 
         case .shape:
             return ShapeRailSection.allCases
-                .filter {
-                    $0 != .performance
-                        && $0 != .hands
-                        && (launcherStyle != .radial || $0 != .parameters)
-                }
+                .filter { $0 != .performance && $0 != .hands && $0 != .parameters }
                 .map { section in
-                MacRadialNavNode(
+                let inputs = shapeSliderNodes(for: section)
+                return MacRadialNavNode(
                     id: "shape.\(section.rawValue)",
                     title: section.rawValue,
                     systemImage: section.icon,
                     isSelected: radialTopDockTab == .shape && radialShapeSection == section && radialSelectedTab == .fractal,
-                    children: shapeSliderNodes(for: section),
-                    clickAction: { activateShapeFromLauncher(section) }
+                    children: inputs,
+                    fallbackAction: inputs.isEmpty
+                        ? { activateShapeFromLauncher(section) }
+                        : nil
                 )
             }
 
         case .visualizations:
             return VisualizationsRailSection.visibleCases.map { section in
-                MacRadialNavNode(
+                let inputs = visualizationsSliderNodes(for: section)
+                return MacRadialNavNode(
                     id: "visualizations.\(section.rawValue)",
                     title: section.title,
                     systemImage: section.icon,
                     isSelected: radialTopDockTab == .visualizations && radialVisualizationsSection == section,
-                    children: visualizationsSliderNodes(for: section),
-                    clickAction: { activateVisualizationsFromLauncher(section) }
+                    children: inputs,
+                    fallbackAction: inputs.isEmpty
+                        ? { activateVisualizationsFromLauncher(section) }
+                        : nil
                 )
             }
 
@@ -792,7 +787,7 @@ private struct ThresholdMacRootView: View {
                     title: section.title,
                     systemImage: section.icon,
                     isSelected: radialTopDockTab == .music && radialMusicSection.canonical == section && radialSelectedTab == .music,
-                    clickAction: { activateMusicFromLauncher(section) }
+                    fallbackAction: { activateMusicFromLauncher(section) }
                 )
             }
 
@@ -803,7 +798,7 @@ private struct ThresholdMacRootView: View {
                     title: section.rawValue,
                     systemImage: section.icon,
                     isSelected: radialTopDockTab == .performance && radialPerformanceSection == section,
-                    clickAction: { activatePerformanceFromLauncher(section) }
+                    fallbackAction: { activatePerformanceFromLauncher(section) }
                 )
             }
         }
@@ -813,9 +808,9 @@ private struct ThresholdMacRootView: View {
 
     /// Terminal slider rings mirror where each control lives in the panel, so
     /// the radial route and the full controls window never disagree about a
-    /// control's home. Sections without in-place controls stay pure click
-    /// leaves. Radial rings are capped so the fan stays readable; the flattened
-    /// rectangle layout includes the complete formula-control list.
+    /// control's home. Sections without in-place controls stay pure fallback
+    /// leaves. Radial rings are capped so the fan stays readable; an overflow
+    /// leaf routes to the complete rectangular controls surface.
     private static let maxSlidersPerRing = 8
 
     private func shapeSliderNodes(for section: ShapeRailSection) -> [MacRadialNavNode] {
@@ -826,19 +821,32 @@ private struct ThresholdMacRootView: View {
             let formulaNodes = ParameterNodeRegistry.shared
                 .formulaBatch(for: radialCache.fractalType)
                 .floatNodes
-            let visibleFormulaNodes = launcherStyle == .radial
-                ? Array(formulaNodes.prefix(Self.maxSlidersPerRing - 1))
-                : formulaNodes
-            var nodes = visibleFormulaNodes
-                .map(formulaSliderNode(for:))
+            let formulaInputs = formulaNodes.map(formulaSliderNode(for:))
+            var pinnedInputs: [MacRadialNavNode] = []
             if radialCache.fractalType == .mandelbox,
                let scale = catalogSliderNode(ParameterTargetID.Core.fractalScale) {
-                nodes.append(scale)
+                pinnedInputs.append(scale)
             }
-            return Array(nodes)
+            let completeInputs = formulaInputs + pinnedInputs
+            guard completeInputs.count > Self.maxSlidersPerRing else {
+                return completeInputs
+            }
+
+            let formulaCapacity = max(
+                Self.maxSlidersPerRing - pinnedInputs.count - 1,
+                0
+            )
+            return Array(formulaInputs.prefix(formulaCapacity))
+                + pinnedInputs
+                + [MacRadialNavNode(
+                    id: "parameters.more",
+                    title: "More Parameters",
+                    systemImage: "ellipsis.circle",
+                    fallbackAction: { activateShapeFromLauncher(.parameters) }
+                )]
         case .space:
             // A disabled feature's slider would scrub a value the renderer
-            // ignores; the section then behaves as a pure click leaf.
+            // ignores; the section then behaves as a pure fallback leaf.
             guard radialCache.safetyBubble.enabled else { return [] }
             return [catalogSliderNode(ParameterTargetID.Effect.safetyBubbleRadius)].compactMap { $0 }
         case .transformations:
@@ -911,11 +919,8 @@ private struct ThresholdMacRootView: View {
             )
         }
 
-        guard launcherStyle == .radial else { return nodes + opNodes }
-
         // The fan has an eight-item readability budget. Preserve a final route
-        // to the full editor rather than silently dropping the remainder; the
-        // flattened rectangle layout above always contains every instance.
+        // to the full editor rather than silently dropping the remainder.
         let remainingCapacity = max(Self.maxSlidersPerRing - nodes.count, 0)
         guard opNodes.count > remainingCapacity else { return nodes + opNodes }
         let visibleCount = max(remainingCapacity - 1, 0)
@@ -925,7 +930,7 @@ private struct ThresholdMacRootView: View {
                 id: "transform.more",
                 title: "More Transforms",
                 systemImage: "ellipsis.circle",
-                clickAction: { activateShapeFromLauncher(.transformations) }
+                fallbackAction: { activateShapeFromLauncher(.transformations) }
             ))
         }
         return nodes

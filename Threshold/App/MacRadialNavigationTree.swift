@@ -4,31 +4,29 @@ import SwiftUI
 
 /// One node of the launcher's navigation tree.
 ///
-/// The tree is the single source of truth for BOTH launcher rendering modes
-/// (radial fan and right-edge grid): each mode walks the same nodes and decides
-/// only where to place them. Reorganizing the launcher therefore means editing
-/// the builder in `ThresholdMacApp`, never the renderers.
+/// The tree is the single source of truth for the radial quick-input launcher.
+/// The legacy right-edge grid renderer can still walk the same nodes, but it is
+/// intentionally not a user-selectable launcher mode. Reorganizing the launcher
+/// therefore means editing the builder in `ThresholdMacApp`, never the renderer.
 ///
 /// Activation policy is derived from shape, not from position:
 ///  - `children` non-empty  → hovering the pill auto-selects it and reveals the
 ///    next ring. Pure navigation must stay side-effect free so sweeping the
 ///    pointer across pills can never mutate app state irreversibly.
-///  - `clickAction` non-nil → clicking performs the side effect (today: opening
-///    the controls window on a given tab). Whatever layer ends in a window-
-///    opening leaf is automatically the click layer — moving "Quick Toggles"
-///    deeper into the tree keeps it click-to-open without touching render code.
+///  - `fallbackAction` non-nil → a leaf that cannot expose useful quick inputs
+///    opens the full rectangular controls surface at its routed destination.
 ///  - `slider` non-nil      → terminal ring renders the node as a radial slider
 ///    that scrubs a live control value in place.
 ///
-/// A node may combine `children` with `clickAction`: hover previews the deeper
-/// ring while click still jumps straight into the full controls panel.
+/// Branches never run fallback actions. Once quick inputs exist, hover, click,
+/// Return, and Right Arrow all remain inside the radial hierarchy.
 struct MacRadialNavNode: Identifiable {
     let id: String
     let title: String
     let systemImage: String
     let isSelected: Bool
     let children: [MacRadialNavNode]
-    let clickAction: (() -> Void)?
+    let fallbackAction: (() -> Void)?
     let slider: MacRadialSliderBinding?
 
     init(
@@ -37,15 +35,19 @@ struct MacRadialNavNode: Identifiable {
         systemImage: String,
         isSelected: Bool = false,
         children: [MacRadialNavNode] = [],
-        clickAction: (() -> Void)? = nil,
+        fallbackAction: (() -> Void)? = nil,
         slider: MacRadialSliderBinding? = nil
     ) {
+        assert(
+            fallbackAction == nil || (children.isEmpty && slider == nil),
+            "Fallback actions belong only on leaves without radial quick inputs."
+        )
         self.id = id
         self.title = title
         self.systemImage = systemImage
         self.isSelected = isSelected
         self.children = children
-        self.clickAction = clickAction
+        self.fallbackAction = fallbackAction
         self.slider = slider
     }
 
@@ -62,7 +64,7 @@ struct MacRadialKeyboardTarget: Equatable {
     let ancestorPath: [String]
 }
 
-/// Pure focus-order policy shared by both launcher layouts.
+/// Pure focus-order policy shared by the radial launcher and retained grid renderer.
 enum MacRadialKeyboardNavigation {
     /// Returns the adjacent target id, wrapping at either end. A missing or
     /// stale focus starts at the leading edge for forward traversal and the
