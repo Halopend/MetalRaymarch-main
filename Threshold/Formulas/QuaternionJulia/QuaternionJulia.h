@@ -3,6 +3,11 @@
 //  Threshold
 //
 //  Distance estimator for the Quaternion Julia set fractal.
+//
+//  License: N/A (paper/method attribution; no external code license asserted here)
+//  Authors: Alan Norton (quaternion Julia sets); John Hart, Daniel Sandin,
+//           and Louis Kauffman (distance-estimated rendering)
+//  Found: https://www.evl.uic.edu/hypercomplex/html/book/rtqjs.pdf
 //  params[0-3]=C(x,y,z,w), [4]=Threshold
 //
 //  Requires: FractalFormulaCommon.h

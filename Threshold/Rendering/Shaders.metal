@@ -28,6 +28,10 @@
 // Inline the iteration body for Map functions. Enables the compiler to see
 // the full loop body for optimization regardless of loop structure.
 
+// License: N/A (method attribution; no external code license asserted here)
+// Author: Tom Lowe
+// Found: https://sites.google.com/site/mandelbox/what-is-a-mandelbox
+
 // Basic Map iteration (no tracking) - used by Map()
 #define MAP_ITERATION_BASIC(p, p0, foldingLimit, params, invSphereRadiusSq) \
     p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz); \

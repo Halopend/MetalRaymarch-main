@@ -3,6 +3,10 @@
 //  Threshold
 //
 //  Distance estimator for the Menger Sphere fractal.
+//
+//  License: N/A (method attribution; no external code license asserted here)
+//  Authors: Threshold hybrid; based on Knighty's Menger KIFS formulation
+//  Found: https://github.com/buddhi1980/mandelbulber2/blob/master/mandelbulber2/formula/definition/fractal_menger_sponge.cpp
 //  params[0]=Scale, [1-3]=Offset, [4]=Spherify(bool)
 //
 //  Requires: FractalFormulaCommon.h

@@ -3,6 +3,10 @@
 //  Threshold
 //
 //  Distance estimator for the Octahedron IFS fractal.
+//
+//  License: N/A (method attribution; no external code license asserted here)
+//  Author: Knighty (kaleidoscopic escape-time IFS method)
+//  Found: http://blog.hvidtfeldts.net/index.php/category/kaleidoscopic-ifs/
 //  params[0]=Scale, [1-3]=Offset
 //
 //  Requires: FractalFormulaCommon.h

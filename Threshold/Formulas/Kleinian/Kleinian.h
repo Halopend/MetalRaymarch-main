@@ -5,6 +5,10 @@
 //  Distance estimator based on Knighty's Pseudo Kleinian fractal.
 //  Box fold + sphere inversion with a cylindrical cross-section DE.
 //
+//  Reference license: GPLv3 (Mandelbulber reference implementation)
+//  Authors: Theli-at (original hybrid); Knighty (standalone formulation)
+//  Found: https://github.com/buddhi1980/mandelbulber2/blob/master/mandelbulber2/formula/definition/fractal_pseudo_kleinian.cpp
+//
 //  params[0-2]=Mins.xyz, [3]=SphFold, [4-6]=Maxs.xyz, [7]=CrossR,
 //  params[8]=ColorOfs, [9]=ColorScale
 //

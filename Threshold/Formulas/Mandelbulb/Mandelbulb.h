@@ -3,6 +3,10 @@
 //  Threshold
 //
 //  Distance estimator for the Mandelbulb fractal.
+//
+//  License: N/A (method attribution; no external code license asserted here)
+//  Authors: Daniel White and Paul Nylander
+//  Found: http://www.skytopia.com/project/fractal/mandelbulb.html
 //  params[0]=Power, [1]=Bailout, [2]=DerivBias (DE multiplier for resolution),
 //  [4]=PolarRotation, [8]=Julia(bool), [9-11]=JuliaC
 //

@@ -6,6 +6,12 @@
 //  the fold into the Mandelbulb recurrence. It folds the input domain once,
 //  then evaluates the unchanged Mandelbulb distance estimator there:
 //
+//  License: N/A (method attribution; Threshold-specific composition)
+//  Authors: Threshold composition; Daniel White and Paul Nylander (Mandelbulb);
+//           Tom Lowe (box-fold method)
+//  Found: http://www.skytopia.com/project/fractal/mandelbulb.html
+//         https://sites.google.com/site/mandelbox/what-is-a-mandelbox
+//
 //      d(p) = DE_Mandelbulb(2*clamp(p, -L, L) - p)
 //
 //  The box fold is piecewise isometric (its Jacobian is diagonal with entries

@@ -4,6 +4,11 @@
 //
 //  Distance estimator for the Theli-AT Style Pseudo Kleinian Hybrid fractal.
 //  Scale-1 Julia-box style fold + embedded Menger-like base shape.
+//
+//  License: N/A (method attribution; no external code license asserted here)
+//  Authors: Theli-at (original hybrid); Knighty (standalone formulation and
+//           Menger hybrid documentation)
+//  Found: https://www.imaginary.org/gallery/hybrid-pseudo-kleinian
 //  params[0]=Size, [1-3]=CSize, [4-6]=C,
 //  params[7]=DEoffset, [8-10]=Offset,
 //  params[11]=MnIterations, [12]=MnScale, [13-15]=MnOffset

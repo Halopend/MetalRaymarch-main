@@ -4,6 +4,12 @@
 //
 //  GPU kernels for real-time 3D Buddhabrot on Vision Pro.
 //
+//  License: N/A (method attribution; Threshold implementation)
+//  Authors: Melinda Green (Buddhabrot orbit-density method); Daniel White and
+//           Paul Nylander (Mandelbulb recurrence used by this 3D variant)
+//  Found: https://superliminal.com/fractals/bbrot/
+//         http://www.skytopia.com/project/fractal/mandelbulb.html
+//
 //  Architecture:
 //    Phase 1 (async compute): Orbit accumulation into a linear uint32 density buffer
 //                             using atomic_fetch_add. No texture atomics needed.

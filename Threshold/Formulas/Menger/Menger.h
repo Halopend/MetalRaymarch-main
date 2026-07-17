@@ -3,6 +3,10 @@
 //  Threshold
 //
 //  Distance estimator for the Menger Sponge fractal.
+//
+//  Reference license: GPLv3 (Mandelbulber reference implementation)
+//  Authors: Karl Menger (fractal); Knighty (kaleidoscopic IFS formulation)
+//  Found: https://github.com/buddhi1980/mandelbulber2/blob/master/mandelbulber2/formula/definition/fractal_menger_sponge.cpp
 //  params[0]=Scale, [1-3]=Offset
 //  Classic Menger sponge — numerically identical to ReferenceDEs.menger
 //  (plus the app's per-iteration rotation, applied after the fold).
