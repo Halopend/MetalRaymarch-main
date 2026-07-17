@@ -923,7 +923,18 @@ struct AnimationScene: Codable, Identifiable, Equatable {
             try formula.validate()
             // A custom space warp rides the scene's existing fractal. Only a
             // distance-estimator payload selects the `.custom` fractal model.
-            if formula.effectKind == .fractal {
+            if let primitive = formula.bundledConstructionPrimitiveKind {
+                let params = primitive.bundledFormulaParams
+                let values = (0..<16).map {
+                    FormulaCatalog.getParam(params, index: $0)
+                }
+                fractalType = .constructionPrimitive
+                baseline?.geometry.fractalType = .constructionPrimitive
+                baseline?.geometry.formulaParams = params
+                for index in keyframes.indices {
+                    keyframes[index].formulaParamValues = values
+                }
+            } else if formula.effectKind == .fractal {
                 fractalType = .custom
             }
             embeddedFormula = formula

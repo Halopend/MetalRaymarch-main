@@ -753,7 +753,7 @@ actor Renderer {
             // library is ready). The compile itself is also off-thread now
             // (CustomShaderCompiler.library uses the async makeLibrary API).
             let pendingFormula = await MainActor.run { appModel.activeEmbeddedFormula }
-            if let pending = pendingFormula {
+            if let pending = pendingFormula, !pending.isBundledConstructionPrimitive {
                 customSceneDiagnostic("🔬 [CSDiag] Handler ready — scheduling deferred activation for '\(pending.name)' hash=\(pending.shortHash) (concurrent; does NOT block first frame)")
                 Task {
                     do {

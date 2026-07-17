@@ -22,6 +22,7 @@ struct TransformationsSection: View {
     /// flags in `body` auto-subscribes this view — the system cards below track the
     /// same state the Space tab / quick toggles drive (DisplayConfig, scene-persisted).
     let cache: UISettingsCache
+    let gestureController: GestureController?
 
     // RenderSettings is not Observable; bump to force a re-read of the op LIST after
     // structural edits (add / delete / reorder / enable). Slider drags mutate in
@@ -64,7 +65,7 @@ struct TransformationsSection: View {
                 addMenu
             }
 
-            Text("Stack domain transforms applied (top → bottom) before the fractal is drawn. Reorder to change the result; add multiples of the same kind to compound them. Sphere Projection and Spherical Inversion appear here too whenever they're active.")
+            Text("Choose an embedded primitive, then stack domain transforms top → bottom to build a form. Reorder to change the result; add multiples to compound them. The Mandelbox construction stages expose its folds and recurrence one technique at a time.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -94,6 +95,20 @@ struct TransformationsSection: View {
 
     private var addMenu: some View {
         Menu {
+            Section("Primitives") {
+                ForEach(FractalPrimitiveKind.allCases) { primitive in
+                    Button { select(primitive) } label: {
+                        Label(primitive.name, systemImage: primitive.icon)
+                    }
+                }
+            }
+            Section("Build a Mandelbox") {
+                ForEach(MandelboxConstructionStage.allCases) { stage in
+                    Button { apply(stage) } label: {
+                        Label(stage.name, systemImage: stage.icon)
+                    }
+                }
+            }
             // Curated starting stacks up top — each REPLACES the current stack.
             Section("Recipes") {
                 Button { surprise() } label: { Label("Surprise Me", systemImage: "dice") }
@@ -462,6 +477,24 @@ struct TransformationsSection: View {
         guard arr.count < Int(kMaxSpaceWarpOps) else { return }
         arr.append(SpaceWarpOpValue(kind: kind))
         renderSettings.spaceWarpStack = arr
+        refresh &+= 1
+    }
+
+    /// Start a new construction from a portable embedded primitive. Clearing the
+    /// stack is intentional: a primitive selection is the base of a new form,
+    /// while subsequent Add actions layer techniques onto it.
+    private func select(_ primitive: FractalPrimitiveKind) {
+        renderSettings.spaceWarpStack = []
+        cache.pushConstructionPrimitive(primitive, gestureController: gestureController)
+        refresh &+= 1
+    }
+
+    /// Load one pedagogical Mandelbox stage. All stages use the same embedded
+    /// terminal-sphere primitive, so a saved `.threshscene` carries its base DE;
+    /// only the editable transformation stack changes between stages.
+    private func apply(_ stage: MandelboxConstructionStage) {
+        renderSettings.spaceWarpStack = Array(stage.stack.prefix(Int(kMaxSpaceWarpOps)))
+        cache.pushConstructionPrimitive(.mandelboxSeed, gestureController: gestureController)
         refresh &+= 1
     }
 

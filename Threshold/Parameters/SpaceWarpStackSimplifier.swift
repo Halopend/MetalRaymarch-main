@@ -41,9 +41,10 @@ enum SpaceWarpStackSimplifier {
     /// Collapse a stack into an equivalent, never-longer stack using only exact,
     /// behaviour-preserving rewrites. Pure, deterministic, idempotent.
     static func simplify(_ ops: [SpaceWarpOpValue]) -> [SpaceWarpOpValue] {
-        // R1 — drop identity ops. Every warp body is the identity at strength ≤ 0
-        // (early-return or `mix(p, …, t==0) == p`), so removing them changes nothing.
-        let live = ops.filter { $0.strength > 0.0 }
+        // R1 — drop identity ops. Most warps use a non-negative amount and are
+        // identity at strength ≤ 0. Scale and Mandelbox Step use SIGNED scale,
+        // however, so negative values are meaningful and only zero is removable.
+        let live = ops.filter { !isIdentity($0) }
         guard live.count > 1 else { return live }
 
         // R2/R3 — left-to-right adjacent fusion. A successful fuse leaves the merged
@@ -102,6 +103,15 @@ enum SpaceWarpStackSimplifier {
     private static let strengthEps: Float = 1e-4
     private static let paramEps: Float = 1e-5
     private static let axisDotEps: Float = 1e-5
+
+    private static func isIdentity(_ op: SpaceWarpOpValue) -> Bool {
+        switch op.kind {
+        case .scale, .mandelboxStep:
+            return abs(op.strength) <= strengthEps
+        default:
+            return op.strength <= 0.0
+        }
+    }
 
     /// Idempotent folds collapse only when the blend is OFF (mix(p, fold, 1) == fold).
     private static func isFullStrength(_ op: SpaceWarpOpValue) -> Bool {

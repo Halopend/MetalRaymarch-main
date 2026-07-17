@@ -305,7 +305,9 @@ extension ContentView {
     // ripple / Coxeter), reorderable + stackable — its own "Transform" rail section.
     private var fractalTransformContent: some View {
         VStack(spacing: 12) {
-            TransformationsSection(renderSettings: appModel.renderSettings, cache: cache)
+            TransformationsSection(renderSettings: appModel.renderSettings,
+                                   cache: cache,
+                                   gestureController: appModel.gestureController)
         }
     }
 

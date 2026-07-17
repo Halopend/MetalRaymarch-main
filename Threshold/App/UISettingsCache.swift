@@ -329,6 +329,33 @@ final class UISettingsCache {
             appModel.rememberActiveResetPresetFromCurrent()
         }
     }
+
+    /// Select a trusted analytic primitive from the bundled Metal library while
+    /// retaining its EmbeddedFormula payload for scene attribution/portability.
+    @MainActor
+    func pushConstructionPrimitive(_ primitive: FractalPrimitiveKind,
+                                   gestureController: GestureController?) {
+        guard let appModel = _appModel else {
+            settings?.fractalType = .constructionPrimitive
+            settings?.formulaParams = primitive.bundledFormulaParams
+            loadFromSettings()
+            return
+        }
+
+        Task { @MainActor in
+            // Switch first: the canonical built-in path detaches any previous
+            // runtime custom fractal. Then register metadata without compiling.
+            appModel.switchFractalType(.constructionPrimitive)
+            settings?.formulaParams = primitive.bundledFormulaParams
+            let result = await appModel.installEmbeddedFormulaIfNeededAndWait(primitive.formula)
+            guard result == .ready else { return }
+            activeCustomFormulaHash = primitive.formula.shortHash
+            parameterPipeline?.clearFormulaStacks()
+            gestureController?.applyFractalDefaults()
+            loadFromSettings()
+            appModel.rememberActiveResetPresetFromCurrent()
+        }
+    }
     
     func pushGradientMap(_ map: GradientColorMap) {
         settings?.gradientColorMap = map

@@ -57,7 +57,7 @@ extension AppModel {
         customSceneDiagnostic("🔬 [CSDiag] installEmbeddedFormulaIfNeededAndWait ENTRY formula=\(formula?.name ?? "nil") hash=\(formula?.shortHash ?? "nil") activeHash=\(activeEmbeddedFormulaHash ?? "nil") handlerReady=\(activateEmbeddedFormulaHandler != nil)")
         guard let formula else { return .ready }
 
-        guard AppModel.allowCustomScenes else {
+        guard AppModel.allowCustomScenes || formula.isBundledConstructionPrimitive else {
             customSceneDiagnostic("🔬 [CSDiag] installEmbeddedFormula REFUSED — custom scenes feature disabled")
             errorReporter.report(.preset(.importFailed(
                 "Custom scenes are experimental. Enable “Allow custom scenes” in Settings → General to load this scene."
@@ -73,6 +73,28 @@ extension AppModel {
                 "Failed to validate custom shader: \(error.localizedDescription)"
             )))
             return .failed
+        }
+
+        // Trusted construction primitives are already present in default.metallib.
+        // Retain their embedded payload for portable scene attribution, but never
+        // synthesize/compile the full renderer source on iPad (a large transient
+        // allocation that can cause jetsam termination rather than a Swift error).
+        if formula.isBundledConstructionPrimitive {
+            FormulaCatalog.shared.unregisterEphemeral()
+            FractalTypeRegistry.unregisterCustom()
+            activeEmbeddedFormula = formula
+            activeEmbeddedFormulaHash = formula.shortHash
+            if let handler = activateEmbeddedFormulaHandler {
+                do {
+                    try await handler(nil)
+                } catch {
+                    errorReporter.report(.preset(.importFailed(
+                        "Failed to restore bundled shaders: \(error.localizedDescription)"
+                    )))
+                    return .failed
+                }
+            }
+            return .ready
         }
 
         let hash = formula.shortHash

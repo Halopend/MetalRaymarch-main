@@ -45,6 +45,45 @@
 // ============================================================================
 // DISPATCH — distance only
 // ============================================================================
+FORCE_INLINE float DE_ConstructionPrimitive_Dist(float3 pos, FormulaParams fp,
+                                                  float3x3 rot, int iterations) {
+    (void)iterations;
+    float3 p = hasRot1Precomputed(fp) ? (rot * pos) : pos;
+    int kind = clamp(int(round(fp.params[0])), 0, 4);
+    float primary = max(fp.params[1], 0.001f);
+    float secondary = max(fp.params[2], 0.0f);
+
+    if (kind == 1) { // rounded box
+        float radius = min(secondary, primary);
+        float3 q = abs(p) - float3(primary - radius);
+        return length(max(q, 0.0f)) + min(max(q.x, max(q.y, q.z)), 0.0f) - radius;
+    }
+    if (kind == 2) { // torus
+        float2 q = float2(length(p.xz) - primary, p.y);
+        return length(q) - max(secondary, 0.001f);
+    }
+    if (kind == 3) { // octahedron
+        return (abs(p.x) + abs(p.y) + abs(p.z) - primary) * 0.57735026919f;
+    }
+    // Sphere and the larger Mandelbox terminal sphere share the same SDF.
+    return length(p) - primary;
+}
+
+FORCE_INLINE float DE_ConstructionPrimitive(float3 pos, FormulaParams fp,
+                                             float3x3 rot, int iterations,
+                                             int colorIterations,
+                                             thread OrbitData& orbit) {
+    (void)colorIterations;
+    float3 p = hasRot1Precomputed(fp) ? (rot * pos) : pos;
+    float d = DE_ConstructionPrimitive_Dist(pos, fp, rot, iterations);
+    orbit.trap = dot(p, p);
+    orbit.trapIteration = 0;
+    orbit.trapPosition = p;
+    orbit.finalP = p;
+    orbit.iterationsUsed = 1;
+    return d;
+}
+
 FORCE_INLINE float FractalDE_Dispatch(float3 pos, int fractalType, FormulaParams fp, int iterations) {
     switch (fractalType) {
         case FractalTypeMandelbulb:
@@ -64,6 +103,8 @@ FORCE_INLINE float FractalDE_Dispatch(float3 pos, int fractalType, FormulaParams
             return DE_Kleinian_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypeBoxFoldMandelbulb:
             return DE_BoxFoldMandelbulb_Dist(pos, fp, fp.rotMatrix1, iterations);
+        case FractalTypeConstructionPrimitive:
+            return DE_ConstructionPrimitive_Dist(pos, fp, fp.rotMatrix1, iterations);
         // __CUSTOM_DISPATCH_DIST__
         default:
             return 1e10f; // Unknown type — far away
@@ -94,6 +135,8 @@ FORCE_INLINE float FractalDE_WithOrbit(float3 pos, int fractalType, FormulaParam
             return DE_Kleinian(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypeBoxFoldMandelbulb:
             return DE_BoxFoldMandelbulb(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
+        case FractalTypeConstructionPrimitive:
+            return DE_ConstructionPrimitive(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         // __CUSTOM_DISPATCH_ORBIT__
         default:
             orbit.trap = 1e20f;

@@ -617,7 +617,7 @@ struct FractalPreset: Codable, Identifiable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let decodedSceneState = try container.decodeIfPresent(SceneState.self, forKey: .sceneState)
+        var decodedSceneState = try container.decodeIfPresent(SceneState.self, forKey: .sceneState)
         let explicitlyCanonicalOnly = try container.decodeIfPresent(Bool.self, forKey: .canonicalStateOnly) ?? false
         let hasLegacyCore = container.contains(.fractalIterations)
             && container.contains(.maxRaySteps)
@@ -782,7 +782,19 @@ struct FractalPreset: Codable, Identifiable {
             try formula.validate()
             // Only a fractal DE drives FractalModelType.custom; a space-warp
             // effect rides whatever fractalType was decoded.
-            if formula.effectKind == .fractal {
+            if let primitive = formula.bundledConstructionPrimitiveKind {
+                // Migrate scenes saved by the first runtime-compiled primitive
+                // implementation. Both the legacy flat lane and canonical v3
+                // geometry may say `.custom`; rewrite both to the static type
+                // and its new selector/size parameter layout.
+                let params = primitive.bundledFormulaParams
+                fractalType = .constructionPrimitive
+                formulaParamValues = (0..<16).map {
+                    FormulaCatalog.getParam(params, index: $0)
+                }
+                decodedSceneState?.geometry.fractalType = .constructionPrimitive
+                decodedSceneState?.geometry.formulaParams = params
+            } else if formula.effectKind == .fractal {
                 fractalType = .custom
             }
             embeddedFormula = formula

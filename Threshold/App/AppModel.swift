@@ -349,10 +349,11 @@ class AppModel {
         didSet {
             guard let handler = activateEmbeddedFormulaHandler else { return }
             let formula = activeEmbeddedFormula
+            let rendererFormula = formula?.isBundledConstructionPrimitive == true ? nil : formula
             let queuedPreset = pendingPresetForActivation
             Task { @MainActor in
                 do {
-                    try await handler(formula)
+                    try await handler(rendererFormula)
                     // If a preset was queued behind a deferred activation,
                     // apply it now. This is the late-binding path that
                     // handles imports that happened *before* the user

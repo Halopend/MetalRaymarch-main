@@ -136,6 +136,21 @@ struct EmbeddedFormula: Codable, Equatable {
         return String(h.prefix(12))
     }
 
+    /// Built-in construction primitives are shipped as embedded formulas so a
+    /// scene remains self-contained, but unlike imported `.threshfx` files they
+    /// are trusted app content and do not require the experimental-import flag.
+    var bundledConstructionPrimitiveKind: FractalPrimitiveKind? {
+        let prefix = "com.puppypower.threshold.primitive."
+        guard id.hasPrefix(prefix),
+              let kind = FractalPrimitiveKind(rawValue: String(id.dropFirst(prefix.count))),
+              self == kind.formula else { return nil }
+        return kind
+    }
+
+    var isBundledConstructionPrimitive: Bool {
+        bundledConstructionPrimitiveKind != nil
+    }
+
     // MARK: Codable
 
     enum CodingKeys: String, CodingKey {
@@ -182,6 +197,179 @@ struct EmbeddedFormula: Codable, Equatable {
         self.defaultIterations = defaultIterations
         self.defaultColorIterations = defaultColorIterations
         self.supportedEffectTagsRaw = supportedEffectTagsRaw
+    }
+}
+
+// MARK: - Bundled construction primitives
+
+/// Small analytic SDFs used as the seed geometry for the Transformations editor.
+/// They deliberately use the same EmbeddedFormula contract as imported `.threshfx`
+/// content, so saving a scene embeds the selected primitive and its attribution.
+/// Current builds render these through the precompiled construction-primitive
+/// type; the source payload keeps the scene portable to builds that only know
+/// the runtime custom-formula contract.
+enum FractalPrimitiveKind: String, CaseIterable, Identifiable {
+    case sphere
+    case box
+    case torus
+    case octahedron
+    case mandelboxSeed
+
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .sphere: return "Sphere"
+        case .box: return "Box"
+        case .torus: return "Torus"
+        case .octahedron: return "Octahedron"
+        case .mandelboxSeed: return "Mandelbox Seed"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .sphere, .mandelboxSeed: return "circle.fill"
+        case .box: return "cube.fill"
+        case .torus: return "circle.dashed"
+        case .octahedron: return "diamond.fill"
+        }
+    }
+
+    /// Parameters consumed by the statically compiled construction-primitive
+    /// shader. Keeping this separate from the portable embedded formula lets
+    /// iPad render trusted primitives without runtime-compiling all Shaders.metal.
+    var bundledFormulaParams: FormulaParams {
+        var fp = FractalTypeDescriptor.baseFormulaParams()
+        switch self {
+        case .sphere:
+            fp.params.0 = 0; fp.params.1 = 1.0; fp.params.2 = 0.0
+        case .box:
+            fp.params.0 = 1; fp.params.1 = 1.0; fp.params.2 = 0.0
+        case .torus:
+            fp.params.0 = 2; fp.params.1 = 1.0; fp.params.2 = 0.25
+        case .octahedron:
+            fp.params.0 = 3; fp.params.1 = 1.0; fp.params.2 = 0.0
+        case .mandelboxSeed:
+            fp.params.0 = 4; fp.params.1 = 2.5; fp.params.2 = 0.0
+        }
+        FormulaCatalog.normalizeRotationFlags(&fp)
+        return fp
+    }
+
+    var formula: EmbeddedFormula {
+        let stem: String
+        let description: String
+        let params: [FormulaParamDescriptor]
+        let helper: String
+
+        switch self {
+        case .sphere:
+            stem = "PrimitiveSphere"
+            description = "Analytic sphere seed for building forms with the transformation stack."
+            params = [Self.param(0, "Radius", 1.0, 0.05, 4.0, 0.05)]
+            helper = """
+            FORCE_INLINE float primitiveDistance(float3 p, FormulaParams fp) {
+                return length(p) - max(fp.params[0], 0.001f);
+            }
+            """
+        case .box:
+            stem = "PrimitiveBox"
+            description = "Analytic rounded-box seed for building forms with the transformation stack."
+            params = [
+                Self.param(0, "Half Size", 1.0, 0.05, 4.0, 0.05),
+                Self.param(1, "Roundness", 0.0, 0.0, 1.0, 0.01)
+            ]
+            helper = """
+            FORCE_INLINE float primitiveDistance(float3 p, FormulaParams fp) {
+                float size = max(fp.params[0], 0.001f);
+                float roundness = max(fp.params[1], 0.0f);
+                float3 q = abs(p) - float3(size - roundness);
+                return length(max(q, 0.0f)) + min(max(q.x, max(q.y, q.z)), 0.0f) - roundness;
+            }
+            """
+        case .torus:
+            stem = "PrimitiveTorus"
+            description = "Analytic torus seed for building forms with the transformation stack."
+            params = [
+                Self.param(0, "Major Radius", 1.0, 0.05, 4.0, 0.05),
+                Self.param(1, "Tube Radius", 0.25, 0.02, 2.0, 0.02)
+            ]
+            helper = """
+            FORCE_INLINE float primitiveDistance(float3 p, FormulaParams fp) {
+                float2 q = float2(length(p.xz) - max(fp.params[0], 0.001f), p.y);
+                return length(q) - max(fp.params[1], 0.001f);
+            }
+            """
+        case .octahedron:
+            stem = "PrimitiveOctahedron"
+            description = "Analytic octahedron seed for building forms with the transformation stack."
+            params = [Self.param(0, "Size", 1.0, 0.05, 4.0, 0.05)]
+            helper = """
+            FORCE_INLINE float primitiveDistance(float3 p, FormulaParams fp) {
+                return (abs(p.x) + abs(p.y) + abs(p.z) - max(fp.params[0], 0.001f)) * 0.57735026919f;
+            }
+            """
+        case .mandelboxSeed:
+            stem = "MandelboxConstructionSeed"
+            description = "The terminal sphere used by the classic Mandelbox distance estimator. Repeat Mandelbox Step transformations to build the recurrence."
+            params = [Self.param(0, "Terminal Radius", 2.5, 0.05, 6.0, 0.05)]
+            helper = """
+            FORCE_INLINE float primitiveDistance(float3 p, FormulaParams fp) {
+                return length(p) - max(fp.params[0], 0.001f);
+            }
+            """
+        }
+
+        return EmbeddedFormula(
+            kind: .fractal,
+            id: "com.puppypower.threshold.primitive.\(rawValue)",
+            name: name,
+            category: "Primitives",
+            author: "Threshold",
+            formulaDescription: description,
+            functionStem: stem,
+            metalSource: Self.metalSource(stem: stem, helper: helper),
+            params: params,
+            defaultIterations: 1,
+            defaultColorIterations: 1,
+            supportedEffectTagsRaw: []
+        )
+    }
+
+    private static func param(_ index: Int, _ name: String, _ value: Float,
+                              _ min: Float, _ max: Float, _ step: Float) -> FormulaParamDescriptor {
+        FormulaParamDescriptor(index: index, name: name, default: value,
+                               min: min, max: max, step: step)
+    }
+
+    private static func metalSource(stem: String, helper: String) -> String {
+        """
+        // Threshold bundled construction primitive. This source is embedded in
+        // saved scenes so the primitive remains portable as a custom fractal type.
+        \(helper)
+
+        FORCE_INLINE float DE_\(stem)(float3 pos, FormulaParams fp, float3x3 rot,
+                                      int iterations, int colorIterations,
+                                      thread OrbitData& orbit) {
+            (void)iterations; (void)colorIterations;
+            float3 p = hasRot1Precomputed(fp) ? (rot * pos) : pos;
+            float d = primitiveDistance(p, fp);
+            orbit.trap = dot(p, p);
+            orbit.trapIteration = 0;
+            orbit.trapPosition = p;
+            orbit.finalP = p;
+            orbit.iterationsUsed = 1;
+            return d;
+        }
+
+        FORCE_INLINE float DE_\(stem)_Dist(float3 pos, FormulaParams fp,
+                                           float3x3 rot, int iterations) {
+            (void)iterations;
+            float3 p = hasRot1Precomputed(fp) ? (rot * pos) : pos;
+            return primitiveDistance(p, fp);
+        }
+        """
     }
 }
 

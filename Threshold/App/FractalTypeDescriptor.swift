@@ -210,6 +210,7 @@ enum FractalTypeRegistry {
         TheliPseudoKleinianDescriptor(),
         KleinianDescriptor(),
         BoxFoldMandelbulbDescriptor(),
+        ConstructionPrimitiveDescriptor(),
         // Placeholder so `.custom` always resolves; real metadata is supplied
         // at scene-load time via `registerCustom(_:)`.
         CustomFractalDescriptor.placeholder,
@@ -301,6 +302,23 @@ private final class MandelboxDescriptor: FractalTypeDescriptor, @unchecked Senda
     override func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = 0.8; fp.params.1 = 1.0; fp.params.2 = 0.5
+        FormulaCatalog.normalizeRotationFlags(&fp)
+        return fp
+    }
+}
+
+private final class ConstructionPrimitiveDescriptor: FractalTypeDescriptor, @unchecked Sendable {
+    init() {
+        super.init(rawValue: 23, displayName: "Construction Primitive", icon: "cube.fill",
+                   category: "Primitives", codableString: "constructionPrimitive",
+                   isSelectableInUI: false)
+    }
+
+    override func defaultFormulaParams() -> FormulaParams {
+        var fp = Self.baseFormulaParams()
+        fp.params.0 = 0.0 // sphere
+        fp.params.1 = 1.0 // primary size
+        fp.params.2 = 0.25 // tube radius / roundness
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
     }

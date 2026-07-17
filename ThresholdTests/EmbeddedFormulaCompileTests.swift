@@ -68,7 +68,32 @@ struct EmbeddedFormulaCompileTests {
             let container = try EmbeddedFormulaContainer.decode(fromContainerAt: url)
             result.append((url.lastPathComponent, container.formula))
         }
+
+        // Keep compatibility coverage for older builds that consume the embedded
+        // source. Current builds use the precompiled construction-primitive path.
+        for primitive in FractalPrimitiveKind.allCases {
+            result.append(("Bundled primitive: \(primitive.name)", primitive.formula))
+        }
         return result
+    }
+
+    @Test("Bundled construction primitives are valid, portable embedded formulas")
+    func bundledPrimitivesValidate() throws {
+        var ids = Set<String>()
+        for primitive in FractalPrimitiveKind.allCases {
+            let formula = primitive.formula
+            try formula.validate()
+            #expect(formula.effectKind == .fractal)
+            #expect(formula.isBundledConstructionPrimitive)
+            #expect(formula.bundledConstructionPrimitiveKind == primitive)
+            #expect(ids.insert(formula.id).inserted)
+
+            // An imported payload cannot claim the trusted/precompiled route by
+            // copying only a bundled identifier.
+            var spoofed = formula
+            spoofed.metalSource += "\n// modified"
+            #expect(!spoofed.isBundledConstructionPrimitive)
+        }
     }
 
     @Test("At least one embedded-formula example exists to exercise the compiler")

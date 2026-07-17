@@ -41,6 +41,7 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable {
     case tiling = 14       // domain repeat — infinite identical cells (round-lattice)
     case scale = 15        // uniform domain scale (IFS glue; strength = factor, deScale = factor)
     case offsetFold = 16   // p ↦ |p + c| — mirror fold about an off-origin centre
+    case mandelboxStep = 17 // one exact box-fold → sphere-fold → scale → +original-p recurrence
 
     var id: Int32 { rawValue }
 
@@ -115,6 +116,7 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable {
         case .tiling:       return "p ↦ p − size · round(p / size)   — wrap into an infinite lattice of size-wide cells"
         case .scale:        return "p ↦ p · scale   — uniform domain scale (DE ÷ scale); the fold→scale IFS step"
         case .offsetFold:   return "p ↦ mix(p, |p + c|, strength)   — mirror fold about an off-origin centre c"
+        case .mandelboxStep:return "z ↦ scale · sphereFold(boxFold(z)) + p₀   — one Mandelbox recurrence step"
         }
     }
 }
@@ -253,6 +255,15 @@ enum WarpCatalog {
                        defaultStrength: 1.0, strengthRange: 0.0...1.0,
                        gpuApplyFn: "warpOffsetFold",   // fold + translate → isometric, no DE divisor
                        blurb: "p ↦ |p + Offset|: a mirror fold whose crease is shifted off the origin by the Offset vector, so the two sides fold ASYMMETRICALLY. This broken symmetry is what turns a plain octant fold into Mandelbox-like structure. Contrast: Mirror Fold creases exactly on the axes; this one you can slide."),
+        WarpDescriptor(.mandelboxStep, "Mandelbox Step", icon: "cube.transparent",
+                       family: .selfSimilar,
+                       tagline: "One complete Mandelbox recurrence",
+                       amountLabel: "Scale",
+                       defaultStrength: -1.5, strengthRange: -3.0...3.0,
+                       params: [WarpParamSpec(slot: 1, label: "Fold Limit", icon: "cube", range: 0.1...3.0, defaultValue: 1.0),
+                                WarpParamSpec(slot: 2, label: "Min Radius", icon: "smallcircle.filled.circle", range: 0.05...1.0, defaultValue: 0.5)],
+                       gpuApplyFn: "warpMandelboxStep", gpuDEScaleFn: "warpMandelboxDEUpdate",
+                       blurb: "Performs one full Mandelbox iteration: box fold, sphere fold, signed scale, then adds the ORIGINAL sample point p₀. Stack several identical steps over the Mandelbox Seed primitive to reveal the fractal one recurrence at a time. Unlike separately stacking Box Fold, Sphere Fold and Scale, this op retains p₀ and updates the derivative with the required +1 term."),
         // ── Spherical & Radial ──────────────────────────────────────────────
         WarpDescriptor(.sphereFold, "Sphere Fold", icon: "circle.circle",
                        family: .spherical, tagline: "Inflate the core outward (Mandelbox)",
@@ -289,7 +300,7 @@ enum WarpCatalog {
                        blurb: "Wraps space into an infinite grid of identical cells of the given Cell Size, tiling the whole fractal in every direction like a crystal lattice. Contrast: Shells/Scale Repeat tile RADIALLY (outward rings); this tiles the CARTESIAN grid."),
         WarpDescriptor(.scale, "Scale", icon: "arrow.up.left.and.arrow.down.right.circle",
                        family: .selfSimilar, tagline: "Uniform zoom — the IFS fold→scale step",
-                       amountLabel: "Scale", defaultStrength: 2.0, strengthRange: 0.2...3.0,
+                       amountLabel: "Scale", defaultStrength: 2.0, strengthRange: -3.0...3.0,
                        gpuApplyFn: "warpScale", gpuDEScaleFn: "warpScaleDEScale",
                        blurb: "A plain uniform scale of the domain (the master slider IS the factor). On its own it just zooms; its real job is BETWEEN folds — a fold then a Scale then another fold is the Iterated-Function-System step that grows Sierpinski / Menger structure. Stack fold→Scale→fold→Scale for a few levels of true self-similarity. Contrast: Scale Repeat bakes infinite growing copies in one op; this is the single, composable scale you place by hand."),
         // ── Bend & Wave (non-fold distortions) ──────────────────────────────
@@ -399,6 +410,68 @@ struct WarpRecipe: Identifiable, Sendable {
     }
 }
 
+/// Pedagogical snapshots for constructing a Mandelbox from a terminal sphere.
+/// The first four stages expose the individual techniques. The last two replace
+/// those one-shot transforms with repeatable Mandelbox Step ops, which preserve
+/// the original point and therefore implement the actual recurrence.
+enum MandelboxConstructionStage: Int, CaseIterable, Identifiable {
+    case primitive
+    case boxFold
+    case sphereFold
+    case scaled
+    case threeIterations
+    case sixIterations
+
+    var id: Int { rawValue }
+
+    var name: String {
+        switch self {
+        case .primitive: return "0 · Terminal Sphere"
+        case .boxFold: return "1 · Add Box Fold"
+        case .sphereFold: return "2 · Add Sphere Fold"
+        case .scaled: return "3 · Add Scale"
+        case .threeIterations: return "4 · Repeat 3 Times"
+        case .sixIterations: return "5 · Final Mandelbox (6×)"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .primitive: return "circle.fill"
+        case .boxFold: return "cube"
+        case .sphereFold: return "circle.circle"
+        case .scaled: return "arrow.up.left.and.arrow.down.right"
+        case .threeIterations, .sixIterations: return "cube.transparent"
+        }
+    }
+
+    var stack: [SpaceWarpOpValue] {
+        switch self {
+        case .primitive:
+            return []
+        case .boxFold:
+            return [warpOp(.boxFold, p1: 1.0)]
+        case .sphereFold:
+            return [warpOp(.boxFold, p1: 1.0),
+                    warpOp(.sphereFold, strength: 1.0, p1: 0.5, p2: 1.0)]
+        case .scaled:
+            return [warpOp(.boxFold, p1: 1.0),
+                    warpOp(.sphereFold, strength: 1.0, p1: 0.5, p2: 1.0),
+                    warpOp(.scale, strength: -1.5)]
+        case .threeIterations:
+            return Self.recurrence(count: 3)
+        case .sixIterations:
+            return Self.recurrence(count: 6)
+        }
+    }
+
+    private static func recurrence(count: Int) -> [SpaceWarpOpValue] {
+        (0..<count).map { _ in
+            warpOp(.mandelboxStep, strength: -1.5, p1: 1.0, p2: 0.5)
+        }
+    }
+}
+
 /// Build one recipe op from its kind defaults, overriding only the fields a recipe
 /// cares about. Each call mints a fresh UUID so a recipe can be applied repeatedly
 /// without ForEach id collisions.
@@ -499,6 +572,10 @@ private func precomputedGPUOp(from v: SpaceWarpOpValue) -> SpaceWarpOp {
         // normalized direction — return it unchanged, bypassing the normalize below.
         return SpaceWarpOp(type: v.type, strength: v.strength, p1: v.p1, p2: v.p2,
                            axisX: v.axis.x, axisY: v.axis.y, axisZ: v.axis.z, _pad: 0)
+    case .mandelboxStep:
+        p1 = max(v.p1, 0.01)                                    // box-fold limit
+        let minR = min(max(v.p2, 0.01), 0.99)
+        p2 = minR * minR                                        // min radius squared; fixed radius² = 1
     case .ripple:
         p1 = max(v.p1, 0.01)                                     // freq
     case .boxFold:

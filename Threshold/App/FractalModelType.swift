@@ -19,6 +19,10 @@ enum FractalModelType: Int32, CaseIterable {
     case theliPseudoKleinian = 15
     case kleinian              = 17
     case boxFoldMandelbulb     = 18
+    /// Precompiled analytic seed used by the Transformations primitive menu.
+    /// The selected primitive is carried in FormulaParams; saved scenes may also
+    /// embed its source/attribution without requiring runtime Metal compilation.
+    case constructionPrimitive = 23
     // Note: rawValue 20 was the removed `boxSphereFolder` type; old scenes that
     // encoded it decode to `.mandelbox` (see the Codable extension below).
     // Note: rawValue 21 is reserved for the legacy `mandelboxSphereProjection`

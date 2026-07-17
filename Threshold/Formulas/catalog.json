@@ -2,6 +2,19 @@
   "version": 1,
   "formulas": [
     {
+      "id": "constructionPrimitive",
+      "name": "Construction Primitive",
+      "fractalType": 23,
+      "category": "Primitives",
+      "description": "Precompiled analytic seed used by the Transformations construction menu.",
+      "author": "Threshold",
+      "params": [
+        { "index": 0, "name": "Primitive", "default": 0.0, "min": 0.0, "max": 4.0, "step": 1.0, "isHidden": true },
+        { "index": 1, "name": "Primary Size", "default": 1.0, "min": 0.05, "max": 6.0, "step": 0.05 },
+        { "index": 2, "name": "Secondary Size", "default": 0.25, "min": 0.0, "max": 2.0, "step": 0.01 }
+      ]
+    },
+    {
       "id": "mandelbox",
       "name": "Mandelbox",
       "fractalType": 0,

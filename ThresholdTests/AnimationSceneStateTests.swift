@@ -207,5 +207,19 @@ struct AnimationSceneStateTests {
             from: JSONEncoder().encode(fractalScene)
         )
         #expect(decodedFractal.fractalType == .custom)
+
+        var primitiveScene = scene(fractalType: .constructionPrimitive)
+        primitiveScene.embeddedFormula = FractalPrimitiveKind.mandelboxSeed.formula
+        let primitiveData = try JSONEncoder().encode(primitiveScene)
+        let primitiveJSON = try #require(String(data: primitiveData, encoding: .utf8))
+            .replacingOccurrences(of: "constructionPrimitive", with: "custom")
+        let decodedPrimitive = try JSONDecoder().decode(
+            AnimationScene.self,
+            from: try #require(primitiveJSON.data(using: .utf8))
+        )
+        #expect(decodedPrimitive.fractalType == .constructionPrimitive)
+        #expect(decodedPrimitive.keyframes.allSatisfy {
+            $0.formulaParamValues?[0] == 4 && $0.formulaParamValues?[1] == 2.5
+        })
     }
 }

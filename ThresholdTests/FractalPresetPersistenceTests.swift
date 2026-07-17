@@ -501,6 +501,7 @@ struct FractalPresetPersistenceTests {
         #expect(SpaceWarpKind.scaleRepeat.descriptor.gpuApplyFn == "warpScaleRepeat")
         #expect(SpaceWarpKind.scaleRepeat.descriptor.gpuDEScaleFn == "warpScaleRepeatDEScale")
         #expect(SpaceWarpKind.shells.descriptor.gpuDEScaleFn == nil)  // isometric fold → deScale 1
+        #expect(SpaceWarpKind.mandelboxStep.descriptor.gpuApplyFn == "warpMandelboxStep")
     }
 
     @Test("cSpaceWarpStack packs enabled ops in order, drops disabled, caps at kMaxSpaceWarpOps")
@@ -519,6 +520,53 @@ struct FractalPresetPersistenceTests {
         // are NOT fusable, so the simplifier can't collapse them out from under the cap.)
         let many = (0..<(Int(kMaxSpaceWarpOps) + 4)).map { _ in SpaceWarpOpValue(kind: .inversion) }
         #expect(cSpaceWarpStack(from: many).count == kMaxSpaceWarpOps)
+
+        // Signed scales are structure, not disabled/identity amounts.
+        let recurrence = MandelboxConstructionStage.sixIterations.stack
+        let packedRecurrence = cSpaceWarpStack(from: recurrence)
+        #expect(packedRecurrence.count == 6)
+        withUnsafePointer(to: packedRecurrence.ops) { tuplePtr in
+            tuplePtr.withMemoryRebound(to: SpaceWarpOp.self, capacity: Int(kMaxSpaceWarpOps)) { base in
+                #expect(base[0].type == SpaceWarpKind.mandelboxStep.rawValue)
+                #expect(abs(base[0].strength - (-1.5)) < 1e-5)
+                #expect(abs(base[0].p2 - 0.25) < 1e-5) // min radius pre-squared
+            }
+        }
+    }
+
+    @Test("Mandelbox construction progresses from primitive techniques to recurrence")
+    func mandelboxConstructionStages() {
+        #expect(MandelboxConstructionStage.primitive.stack.isEmpty)
+        #expect(MandelboxConstructionStage.boxFold.stack.map(\.kind) == [.boxFold])
+        #expect(MandelboxConstructionStage.sphereFold.stack.map(\.kind) == [.boxFold, .sphereFold])
+        #expect(MandelboxConstructionStage.scaled.stack.map(\.kind) == [.boxFold, .sphereFold, .scale])
+        #expect(MandelboxConstructionStage.threeIterations.stack.allSatisfy { $0.kind == .mandelboxStep })
+        #expect(MandelboxConstructionStage.sixIterations.stack.count == 6)
+    }
+
+    @Test("Legacy runtime-compiled primitive scenes migrate to the precompiled type")
+    func constructionPrimitiveSceneMigration() throws {
+        let settings = RenderSettings()
+        settings.fractalType = .constructionPrimitive
+        settings.formulaParams = FractalPrimitiveKind.mandelboxSeed.bundledFormulaParams
+        let preset = FractalPreset.fromSettings(
+            settings,
+            name: "Legacy construction",
+            embeddedFormula: FractalPrimitiveKind.mandelboxSeed.formula
+        )
+
+        let encoded = try JSONEncoder().encode(preset)
+        let legacyJSON = try #require(String(data: encoded, encoding: .utf8))
+            .replacingOccurrences(of: "constructionPrimitive", with: "custom")
+        let migrated = try JSONDecoder().decode(
+            FractalPreset.self,
+            from: try #require(legacyJSON.data(using: .utf8))
+        )
+
+        #expect(migrated.fractalType == .constructionPrimitive)
+        #expect(migrated.sceneState?.geometry.fractalType == .constructionPrimitive)
+        #expect(migrated.formulaParamValues?[0] == 4)
+        #expect(migrated.formulaParamValues?[1] == 2.5)
     }
 
     @Test("cSpaceWarpStack precomputes GPU-ready fields (axis-normalize, squares, log, π/N)")

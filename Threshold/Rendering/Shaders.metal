@@ -882,7 +882,7 @@ FORCE_INLINE float3 warpScale(float3 p, SpaceWarpOp op) {       // 15
     return p * op.strength;   // strength = scale factor (not clamped to 0..1)
 }
 FORCE_INLINE float warpScaleDEScale(float3 p, SpaceWarpOp op) {
-    return max(op.strength, 1e-3f);
+    return max(abs(op.strength), 1e-3f);
 }
 // ── Offset fold (abs about an off-origin centre) ─────────────────────────────
 // p ↦ |p + c|: a mirror fold whose crease is shifted by the offset vector c (the
@@ -895,8 +895,33 @@ FORCE_INLINE float3 warpOffsetFold(float3 p, SpaceWarpOp op) {  // 16
     return mix(p, abs(p + c), t);
 }
 
+// ── Mandelbox recurrence step ────────────────────────────────────────────────
+// Unlike an ordinary domain warp, this op needs the ORIGINAL stack input p0:
+//   z' = scale * sphereFold(boxFold(z)) + p0
+// Repeating the op therefore reconstructs the actual Mandelbox recurrence instead
+// of merely applying its three component transforms once. p1 = fold limit,
+// p2 = min radius squared, fixed radius squared = 1, strength = signed scale.
+FORCE_INLINE float mandelboxStepSphereScale(float3 folded, SpaceWarpOp op) {
+    float r2 = dot(folded, folded);
+    if (r2 < op.p2) return 1.0f / max(op.p2, 1e-6f);
+    if (r2 < 1.0f) return 1.0f / max(r2, 1e-6f);
+    return 1.0f;
+}
+FORCE_INLINE float3 warpMandelboxStep(float3 p, float3 p0, SpaceWarpOp op) { // 17
+    float3 folded = fma(clamp(p, -op.p1, op.p1), float3(2.0f), -p);
+    float sphereScale = mandelboxStepSphereScale(folded, op);
+    return fma(folded, sphereScale * op.strength, p0);
+}
+// Mandelbox derivative recurrence is affine, not purely multiplicative:
+//   dr' = dr * abs(scale) * sphereScale + 1
+FORCE_INLINE float warpMandelboxDEUpdate(float3 p, float currentDE, SpaceWarpOp op) {
+    float3 folded = fma(clamp(p, -op.p1, op.p1), float3(2.0f), -p);
+    float localScale = abs(op.strength) * mandelboxStepSphereScale(folded, op);
+    return fma(currentDE, localScale, 1.0f);
+}
+
 // Runtime dispatch (default path): a coherent switch over op.type.
-FORCE_INLINE float3 applyWarpOp(float3 p, SpaceWarpOp op) {
+FORCE_INLINE float3 applyWarpOp(float3 p, float3 stackOrigin, SpaceWarpOp op) {
     switch (op.type) {
         default:
         case 0: return warpTwist(p, op);
@@ -916,6 +941,7 @@ FORCE_INLINE float3 applyWarpOp(float3 p, SpaceWarpOp op) {
         case 14: return warpTiling(p, op);
         case 15: return warpScale(p, op);
         case 16: return warpOffsetFold(p, op);
+        case 17: return warpMandelboxStep(p, stackOrigin, op);
     }
 }
 // Conservative DE divisor for one op (only radial / scaling warps stretch distance).
@@ -928,6 +954,12 @@ FORCE_INLINE float warpOpDEScale(float3 p, SpaceWarpOp op) {
         case 15: return warpScaleDEScale(p, op);
         default: return 1.0f;
     }
+}
+// Update the accumulated DE divisor. Most transforms are multiplicative; the
+// Mandelbox recurrence has the standard derivative +1 term and is special-cased.
+FORCE_INLINE float warpOpDEUpdate(float3 p, float currentDE, SpaceWarpOp op) {
+    if (op.type == 17) return warpMandelboxDEUpdate(p, currentDE, op);
+    return currentDE * warpOpDEScale(p, op);
 }
 
 // Warped sample point + its combined DE divisor. Declared here (above the codegen
@@ -955,19 +987,22 @@ struct SpaceTransform { float3 point; float deScale; };
 // __SPACEWARP_STACK_CODEGEN__
 #ifndef THRESHOLD_CODEGEN_SPACEWARP_STACK
 FORCE_INLINE float3 spaceWarpStackApply(float3 p, FractalParams params) {
+    float3 stackOrigin = p;
     int n = min(params.spaceWarpCount, kMaxSpaceWarpOps);
     for (int i = 0; i < n; ++i) {
-        p = applyWarpOp(p, params.spaceWarpOps[i]);
+        p = applyWarpOp(p, stackOrigin, params.spaceWarpOps[i]);
     }
     return p;
 }
 FORCE_INLINE float spaceWarpStackDEScale(float3 p, FractalParams params) {
     float scale = 1.0f;
+    float3 stackOrigin = p;
     float3 pt = p;
     int n = min(params.spaceWarpCount, kMaxSpaceWarpOps);
     for (int i = 0; i < n; ++i) {
-        scale *= warpOpDEScale(pt, params.spaceWarpOps[i]);
-        pt = applyWarpOp(pt, params.spaceWarpOps[i]);
+        SpaceWarpOp op = params.spaceWarpOps[i];
+        scale = warpOpDEUpdate(pt, scale, op);
+        pt = applyWarpOp(pt, stackOrigin, op);
     }
     return scale;
 }
@@ -978,11 +1013,12 @@ FORCE_INLINE SpaceTransform spaceWarpStackTransform(float3 p, FractalParams para
     SpaceTransform r;
     r.point = p;
     r.deScale = 1.0f;
+    float3 stackOrigin = p;
     int n = min(params.spaceWarpCount, kMaxSpaceWarpOps);
     for (int i = 0; i < n; ++i) {
         SpaceWarpOp op = params.spaceWarpOps[i];
-        r.deScale *= warpOpDEScale(r.point, op);   // divisor from the PRE-op point (old order)
-        r.point    = applyWarpOp(r.point, op);
+        r.deScale = warpOpDEUpdate(r.point, r.deScale, op); // update from PRE-op point
+        r.point    = applyWarpOp(r.point, stackOrigin, op);
     }
     return r;
 }

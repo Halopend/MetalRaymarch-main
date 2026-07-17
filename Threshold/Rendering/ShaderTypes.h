@@ -98,6 +98,10 @@ typedef NS_ENUM(EnumBackingType, FractalType)
     // FractalModelType back-compat decode). Do not reuse it.
     // NOTE: 22 was the removed `bulatovLimitSet` type (see FractalModelType
     // back-compat decode). Do not reuse it.
+    // Analytic seed selected by the Transformations primitive menu. This is
+    // statically compiled so selecting a trusted primitive never invokes the
+    // runtime Metal compiler on memory-constrained iPad hardware.
+    FractalTypeConstructionPrimitive = 23,
     // Sentinel for runtime-compiled custom DE formulas (.threshfx).
     // The static dispatch in FractalFormulas.h returns far for this value;
     // custom rendering uses a separately-compiled MTLLibrary.
@@ -254,7 +258,7 @@ typedef struct
 {
     // p1/p2/axis are GPU-READY (precomputed by cSpaceWarpStack each frame so the
     // per-step Metal warp fns never redo normalize / log / π÷N / squares / clamps).
-    int   type;       // SpaceWarpKind raw (0=Twist,1=Bend,2=Mirror,3=BoxFold,4=SphereFold,5=Inversion,6=Kaleido,7=Ripple)
+    int   type;       // SpaceWarpKind raw; 0...17 (17 = Mandelbox recurrence step)
     float strength;   // per-op amount (folds treat as 0..1 blend; Twist/Bend/Ripple as magnitude). 0 = this op is a no-op.
     float p1;         // PRECOMPUTED: boxFold L · sphere/circle minR² · inversion R² · kaleido seg(π/N) · ripple freq · shells spacing · scaleRepeat log(scale)
     float p2;         // PRECOMPUTED: sphere/circle maxR²
