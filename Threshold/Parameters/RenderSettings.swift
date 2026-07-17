@@ -4175,9 +4175,10 @@ final class RenderSettings: @unchecked Sendable {
     }
 
     /// Benchmark-harness only: pin every CPU-side animation accumulator to a fixed
-    /// value so a PNG regression capture is phase-deterministic across runs (the
-    /// phases integrate ∫speed·dt, so they otherwise land at run-dependent values
-    /// and two identical builds diff as "different"). Never called in normal use.
+    /// value so measurements and PNG regression captures are phase-deterministic
+    /// across runs (the phases integrate ∫speed·dt, so they otherwise land at
+    /// run-dependent values and identical builds render different geometry).
+    /// Never called in normal use.
     func benchFreezeAnimationPhases() {
         withLock {
             _colorAnimTime = 5.0

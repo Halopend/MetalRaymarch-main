@@ -619,9 +619,10 @@ enum MacBenchmarkHarness {
             + "resScale=\(settings.resolutionScale) shadows=\(settings.shadowsEnabled)"
             + (job.ablate.map { " ablate=\($0)" } ?? ""))
 
-        // Freeze animation phases + disable the auto color-scheme cycler for
-        // the whole job so measurement and capture are run-deterministic.
-        if pngDir != nil { settings.benchFreezeAnimationPhases() }
+        // Start every job from the same animation phase, even when PNG capture
+        // is disabled. Otherwise A/B jobs render different geometry and their
+        // GPU times and march-step counts are not directly comparable.
+        settings.benchFreezeAnimationPhases()
 
         // Formula-param overrides (e.g. MaxReflections sweep) after the apply
         // has settled, so they aren't stomped by the transition.
