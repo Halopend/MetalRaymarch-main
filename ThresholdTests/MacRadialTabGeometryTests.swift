@@ -9,12 +9,12 @@ struct MacRadialTabGeometryTests {
     func gridWindowDragHubClearsPrimaryControl() {
         let size = CGSize(width: 1_440, height: 640)
         let pointerAnchor = CGPoint(x: 900, y: 320)
-        let handle = MacRadialTabMenu.windowDragHandleFrame(
+        let handle = MacQuickMenu.windowDragHandleFrame(
             size: size,
             pointerAnchor: pointerAnchor,
             layoutStyle: .grid
         )
-        let primary = MacRadialTabMenu.gridCenterPrimaryPillFrame(
+        let primary = MacQuickMenu.gridCenterPrimaryPillFrame(
             size: size,
             pointerAnchor: pointerAnchor
         )

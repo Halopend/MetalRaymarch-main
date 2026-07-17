@@ -471,8 +471,8 @@ extension ContentView {
         VStack(alignment: .leading, spacing: 8) {
             Label("Viewport Control Launcher", systemImage: "circle.grid.cross")
                 .font(.headline)
-            Toggle("Enable radial quick controls", isOn: $isMacTabLauncherEnabled)
-            Text("Click the viewport or push right at the screen edge for quick inputs. The full controls sidebar opens only when a section has no radial representation. Disable this to use the standard sidebar for everything.")
+            Toggle("Enable hierarchical quick menu", isOn: $isMacTabLauncherEnabled)
+            Text("Click the viewport or push right at the screen edge, then choose radial or grid presentation. Both use the same navigation hierarchy; full controls open only for fallback destinations.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

@@ -4,10 +4,8 @@ import SwiftUI
 
 /// One node of the launcher's navigation tree.
 ///
-/// The tree is the single source of truth for the radial quick-input launcher.
-/// The legacy right-edge grid renderer can still walk the same nodes, but it is
-/// intentionally not a user-selectable launcher mode. Reorganizing the launcher
-/// therefore means editing the builder in `ThresholdMacApp`, never the renderer.
+/// One layout-neutral node in the quick-menu navigation hierarchy. Radial,
+/// grid, and keyboard presentations all consume the same node graph.
 ///
 /// Activation policy is derived from shape, not from position:
 ///  - `children` non-empty  → hovering the pill auto-selects it and reveals the
@@ -15,32 +13,54 @@ import SwiftUI
 ///    pointer across pills can never mutate app state irreversibly.
 ///  - `fallbackAction` non-nil → a leaf that cannot expose useful quick inputs
 ///    opens the full rectangular controls surface at its routed destination.
-///  - `slider` non-nil      → terminal ring renders the node as a radial slider
-///    that scrubs a live control value in place.
+///  - `slider` non-nil      → a terminal quick input scrubs a live value in place.
 ///
 /// Branches never run fallback actions. Once quick inputs exist, hover, click,
-/// Return, and Right Arrow all remain inside the radial hierarchy.
-struct MacRadialNavNode: Identifiable {
+/// Return, and Right Arrow all remain inside the quick-menu hierarchy.
+final class MacNavigationOverflowFallback {
+    let node: MacNavigationNode
+
+    init(_ node: MacNavigationNode) {
+        self.node = node
+    }
+}
+
+struct MacNavigationNode: Identifiable {
     let id: String
     let title: String
     let systemImage: String
     let isSelected: Bool
-    let children: [MacRadialNavNode]
+    let children: [MacNavigationNode]
     let fallbackAction: (() -> Void)?
-    let slider: MacRadialSliderBinding?
+    let slider: MacQuickSliderBinding?
+    /// Optional item budget for compact presentations such as the radial fan.
+    /// Grid and keyboard projections always retain the complete child list.
+    let compactChildrenLimit: Int?
+    /// A routed leaf appended when compact projection exceeds its item budget.
+    let overflowFallback: MacNavigationOverflowFallback?
 
     init(
         id: String,
         title: String,
         systemImage: String,
         isSelected: Bool = false,
-        children: [MacRadialNavNode] = [],
+        children: [MacNavigationNode] = [],
         fallbackAction: (() -> Void)? = nil,
-        slider: MacRadialSliderBinding? = nil
+        slider: MacQuickSliderBinding? = nil,
+        compactChildrenLimit: Int? = nil,
+        overflowFallback: MacNavigationOverflowFallback? = nil
     ) {
         assert(
             fallbackAction == nil || (children.isEmpty && slider == nil),
             "Fallback actions belong only on leaves without radial quick inputs."
+        )
+        assert(compactChildrenLimit == nil || !children.isEmpty)
+        assert(
+            overflowFallback == nil
+            || (overflowFallback?.node.children.isEmpty == true
+                && overflowFallback?.node.slider == nil
+                && overflowFallback?.node.fallbackAction != nil),
+            "Overflow fallbacks must be routed action leaves."
         )
         self.id = id
         self.title = title
@@ -49,9 +69,23 @@ struct MacRadialNavNode: Identifiable {
         self.children = children
         self.fallbackAction = fallbackAction
         self.slider = slider
+        self.compactChildrenLimit = compactChildrenLimit
+        self.overflowFallback = overflowFallback
     }
 
     var isBranch: Bool { !children.isEmpty }
+
+    /// The hierarchy is complete; presentation-specific density is projected
+    /// only at the point of consumption. This keeps reorganization independent
+    /// from radial/grid rendering while still protecting compact fan legibility.
+    func presentedChildren(for style: MacTabLauncherStyle) -> [MacNavigationNode] {
+        guard style == .radial,
+              let limit = compactChildrenLimit,
+              children.count > limit,
+              let overflowFallback = overflowFallback?.node,
+              limit > 0 else { return children }
+        return Array(children.prefix(max(limit - 1, 0))) + [overflowFallback]
+    }
 }
 
 /// One keyboard-stop in the launcher's flattened, depth-first traversal.
@@ -59,19 +93,19 @@ struct MacRadialNavNode: Identifiable {
 /// `ancestorPath` contains only the branches that must be selected to reveal
 /// the target. The target's own id is deliberately excluded, even when it is a
 /// branch, so focusing an item never opens its children as a side effect.
-struct MacRadialKeyboardTarget: Equatable {
+struct MacNavigationKeyboardTarget: Equatable {
     let id: String
     let ancestorPath: [String]
 }
 
-/// Pure focus-order policy shared by the radial launcher and retained grid renderer.
-enum MacRadialKeyboardNavigation {
+/// Pure focus-order policy shared by radial, grid, and keyboard presentations.
+enum MacNavigationKeyboardTraversal {
     /// Returns the adjacent target id, wrapping at either end. A missing or
     /// stale focus starts at the leading edge for forward traversal and the
     /// trailing edge for backward traversal.
     static func nextID(
         from currentID: String?,
-        in targets: [MacRadialKeyboardTarget],
+        in targets: [MacNavigationKeyboardTarget],
         backward: Bool
     ) -> String? {
         guard !targets.isEmpty else { return nil }
@@ -86,12 +120,12 @@ enum MacRadialKeyboardNavigation {
     }
 }
 
-/// Live read/write access for one radial slider leaf.
+/// Live read/write access for one hierarchy slider leaf.
 ///
 /// Closures rather than key paths so a single type can front every backing
 /// store in the app (ControlCatalog-routed descriptors, per-fractal formula
 /// params, ad-hoc RenderSettings properties) without the tree knowing which.
-struct MacRadialSliderBinding {
+struct MacQuickSliderBinding {
     let range: ClosedRange<Float>
     let read: () -> Float
     let write: (Float) -> Void
@@ -173,7 +207,7 @@ struct MacRadialSliderBinding {
 /// Users can put multiple instances of the same transform in the stack and can
 /// reorder them in the full editor; a stale quick-control binding must continue
 /// to edit that exact instance or become a no-op after it is deleted.
-enum MacRadialTransformNodeFactory {
+enum MacQuickTransformNodeFactory {
     typealias OpReader = (UUID) -> SpaceWarpOpValue?
     typealias OpUpdater = (UUID, (inout SpaceWarpOpValue) -> Void) -> Void
 
@@ -182,11 +216,11 @@ enum MacRadialTransformNodeFactory {
         position: Int,
         read: @escaping OpReader,
         update: @escaping OpUpdater
-    ) -> MacRadialNavNode {
+    ) -> MacNavigationNode {
         let kind = snapshot.kind
         let opID = snapshot.id
         let idPrefix = "transform.op.\(opID.uuidString.lowercased())"
-        var controls: [MacRadialNavNode] = []
+        var controls: [MacNavigationNode] = []
 
         controls.append(sliderNode(
             id: "\(idPrefix).enabled",
@@ -277,7 +311,7 @@ enum MacRadialTransformNodeFactory {
             }
         }
 
-        return MacRadialNavNode(
+        return MacNavigationNode(
             id: idPrefix,
             title: "\(position + 1) · \(kind.displayName)",
             systemImage: kind.icon,
@@ -296,12 +330,12 @@ enum MacRadialTransformNodeFactory {
         write: @escaping (Float) -> Void,
         isEnabled: @escaping () -> Bool,
         format: ((Float) -> String)? = nil
-    ) -> MacRadialNavNode {
-        MacRadialNavNode(
+    ) -> MacNavigationNode {
+        MacNavigationNode(
             id: "slider.\(id)",
             title: title,
             systemImage: systemImage,
-            slider: MacRadialSliderBinding(
+            slider: MacQuickSliderBinding(
                 range: range,
                 read: { read() ?? fallback },
                 write: { write($0.clamped(to: range)) },
@@ -324,26 +358,40 @@ enum MacRadialTransformNodeFactory {
 /// in the menu's coordinate space. The frame lets the NSEvent monitor verify
 /// the pointer geometrically — hover-exit events are sometimes dropped by the
 /// system, and a stale id alone would keep hijacking scroll events.
-struct MacRadialActiveSlider: Equatable {
+struct MacQuickActiveSlider: Equatable {
     let id: String
     let frame: CGRect
 }
 
-extension [MacRadialNavNode] {
-    /// All launcher nodes in stable preorder, including branches, action
-    /// leaves, and slider leaves. Each target carries the branch path needed to
-    /// reveal it in the ring/column renderer without invoking any node action.
-    func flattenedKeyboardTargets() -> [MacRadialKeyboardTarget] {
-        var targets: [MacRadialKeyboardTarget] = []
+/// Complete, layout-neutral hierarchy consumed by every quick-menu input mode.
+///
+/// The hierarchy owns traversal and projection; renderers own only placement.
+/// `.grid` is the complete flattened projection, while `.radial` may substitute
+/// an explicit overflow leaf at compact item budgets authored on a node.
+struct MacNavigationHierarchy {
+    let roots: [MacNavigationNode]
 
-        func append(_ nodes: [MacRadialNavNode], ancestors: [String]) {
+    init(roots: [MacNavigationNode]) {
+        self.roots = roots
+    }
+
+    func presentedRoots(for style: MacTabLauncherStyle) -> [MacNavigationNode] {
+        roots
+    }
+
+    /// All presented nodes in stable preorder. Each target carries the branch
+    /// path needed to reveal it without invoking any node action.
+    func flattenedKeyboardTargets(for style: MacTabLauncherStyle) -> [MacNavigationKeyboardTarget] {
+        var targets: [MacNavigationKeyboardTarget] = []
+
+        func append(_ nodes: [MacNavigationNode], ancestors: [String]) {
             for node in nodes {
-                targets.append(MacRadialKeyboardTarget(id: node.id, ancestorPath: ancestors))
-                append(node.children, ancestors: ancestors + [node.id])
+                targets.append(MacNavigationKeyboardTarget(id: node.id, ancestorPath: ancestors))
+                append(node.presentedChildren(for: style), ancestors: ancestors + [node.id])
             }
         }
 
-        append(self, ancestors: [])
+        append(presentedRoots(for: style), ancestors: [])
         return targets
     }
 
@@ -351,19 +399,84 @@ extension [MacRadialNavNode] {
     /// per level) from these roots. Index 0 is always the root ring; a path
     /// entry that no longer matches (e.g. a fractal switch removed a formula
     /// branch) truncates the walk instead of showing an orphaned ring.
-    func rings(along path: [String]) -> [[MacRadialNavNode]] {
-        var rings: [[MacRadialNavNode]] = [self]
-        var current = self
+    func rings(
+        along path: [String],
+        for style: MacTabLauncherStyle
+    ) -> [[MacNavigationNode]] {
+        let presentedRoots = presentedRoots(for: style)
+        var rings: [[MacNavigationNode]] = [presentedRoots]
+        var current = presentedRoots
         for id in path {
             guard let next = current.first(where: { $0.id == id }), next.isBranch else { break }
-            rings.append(next.children)
-            current = next.children
+            let children = next.presentedChildren(for: style)
+            rings.append(children)
+            current = children
         }
         return rings
     }
 
-    /// Depth-first lookup, used by tests and selection reconciliation.
-    func node(withID id: String) -> MacRadialNavNode? {
+    /// Keeps the longest valid branch prefix when switching presentation or
+    /// rebuilding dynamic children. A grid-only deep selection therefore
+    /// retreats to its nearest radial ancestor instead of orphaning the path.
+    func reconciledPath(
+        _ path: [String],
+        for style: MacTabLauncherStyle
+    ) -> [String] {
+        var resolved: [String] = []
+        var current = presentedRoots(for: style)
+        for id in path {
+            guard let node = current.first(where: { $0.id == id }), node.isBranch else { break }
+            resolved.append(id)
+            current = node.presentedChildren(for: style)
+        }
+        return resolved
+    }
+
+    /// Depth-first lookup in one presentation, used by focus, live slider
+    /// routing, tests, and path reconciliation.
+    func node(
+        withID id: String,
+        for style: MacTabLauncherStyle
+    ) -> MacNavigationNode? {
+        func find(in nodes: [MacNavigationNode]) -> MacNavigationNode? {
+            for node in nodes {
+                if node.id == id { return node }
+                if let found = find(in: node.presentedChildren(for: style)) { return found }
+            }
+            return nil
+        }
+
+        return find(in: presentedRoots(for: style))
+    }
+
+    /// Complete lookup independent of a presentation. Overflow fallbacks are
+    /// included even though they are not part of the grid's complete child set.
+    func node(withID id: String) -> MacNavigationNode? {
+        func find(in nodes: [MacNavigationNode]) -> MacNavigationNode? {
+            for node in nodes {
+                if node.id == id { return node }
+                if let overflow = node.overflowFallback?.node, overflow.id == id { return overflow }
+                if let found = find(in: node.children) { return found }
+            }
+            return nil
+        }
+
+        return find(in: roots)
+    }
+}
+
+extension [MacNavigationNode] {
+    /// Compatibility conveniences for non-rendering callers. New presentation
+    /// code should consume `MacNavigationHierarchy` explicitly.
+    func flattenedKeyboardTargets() -> [MacNavigationKeyboardTarget] {
+        MacNavigationHierarchy(roots: self).flattenedKeyboardTargets(for: .grid)
+    }
+
+    func rings(along path: [String]) -> [[MacNavigationNode]] {
+        MacNavigationHierarchy(roots: self).rings(along: path, for: .grid)
+    }
+
+    func node(withID id: String) -> MacNavigationNode? {
         for node in self {
             if node.id == id { return node }
             if let found = node.children.node(withID: id) { return found }
