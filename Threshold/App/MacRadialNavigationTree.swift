@@ -74,18 +74,6 @@ struct MacNavigationNode: Identifiable {
     }
 
     var isBranch: Bool { !children.isEmpty }
-
-    /// The hierarchy is complete; presentation-specific density is projected
-    /// only at the point of consumption. This keeps reorganization independent
-    /// from radial/grid rendering while still protecting compact fan legibility.
-    func presentedChildren(for style: MacTabLauncherStyle) -> [MacNavigationNode] {
-        guard style == .radial,
-              let limit = compactChildrenLimit,
-              children.count > limit,
-              let overflowFallback = overflowFallback?.node,
-              limit > 0 else { return children }
-        return Array(children.prefix(max(limit - 1, 0))) + [overflowFallback]
-    }
 }
 
 /// One keyboard-stop in the launcher's flattened, depth-first traversal.
@@ -396,10 +384,17 @@ struct MacNavigationHierarchy {
         atDepth depth: Int,
         for style: MacTabLauncherStyle
     ) -> [MacNavigationNode] {
-        guard style == .grid, depth >= Self.gridNavigationDepth - 1 else {
-            return node.presentedChildren(for: style)
+        if style == .grid {
+            return depth >= Self.gridNavigationDepth - 1
+                ? flattenedGridLeaves(in: node.children)
+                : node.children
         }
-        return flattenedGridLeaves(in: node.children)
+
+        guard let limit = node.compactChildrenLimit,
+              node.children.count > limit,
+              let overflowFallback = node.overflowFallback?.node,
+              limit > 0 else { return node.children }
+        return Array(node.children.prefix(max(limit - 1, 0))) + [overflowFallback]
     }
 
     /// All presented nodes in stable preorder. Each target carries the branch

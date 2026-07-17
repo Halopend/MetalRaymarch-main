@@ -229,6 +229,10 @@ struct MacNavigationHierarchyTests {
         #expect(radialRings[2].map(\.id) == [
             "shape.grading.contrast", "grading.exposure"
         ])
+        #expect(hierarchy.reconciledPath(
+            ["shape", "shape.grading", "shape.grading.contrast"],
+            for: .grid
+        ) == ["shape", "shape.grading"])
     }
 
     @Test("Keyboard targets use the same grid flattening projection")
