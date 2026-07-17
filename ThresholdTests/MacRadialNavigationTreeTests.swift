@@ -120,6 +120,48 @@ struct MacNavigationHierarchyTests {
         ])
     }
 
+    private func makeDeepHierarchy() -> MacNavigationHierarchy {
+        func slider(_ id: String, _ title: String) -> MacNavigationNode {
+            MacNavigationNode(
+                id: id,
+                title: title,
+                systemImage: "slider.horizontal.3",
+                slider: MacQuickSliderBinding(
+                    range: 0...1,
+                    read: { 0.5 },
+                    write: { _ in }
+                )
+            )
+        }
+
+        return MacNavigationHierarchy(roots: [
+            MacNavigationNode(
+                id: "shape",
+                title: "Shape",
+                systemImage: "cube",
+                children: [
+                    MacNavigationNode(
+                        id: "shape.grading",
+                        title: "Grading",
+                        systemImage: "camera.filters",
+                        children: [
+                            MacNavigationNode(
+                                id: "shape.grading.contrast",
+                                title: "Contrast",
+                                systemImage: "circle.lefthalf.filled",
+                                children: [
+                                    slider("contrast.strength", "Strength"),
+                                    slider("contrast.pivot", "Pivot")
+                                ]
+                            ),
+                            slider("grading.exposure", "Exposure")
+                        ]
+                    )
+                ]
+            )
+        ])
+    }
+
     @Test("Grid and radial project the same complete hierarchy at different densities")
     func presentationProjection() {
         let hierarchy = makeOverflowHierarchy()
@@ -162,6 +204,41 @@ struct MacNavigationHierarchyTests {
         #expect(fallback?.fallbackAction != nil)
         fallback?.fallbackAction?()
         #expect(clicked)
+    }
+
+    @Test("Grid keeps two navigation levels and flattens deeper quick inputs")
+    func gridFlattensAfterInnerSidebar() {
+        let hierarchy = makeDeepHierarchy()
+        let gridRings = hierarchy.rings(
+            along: ["shape", "shape.grading"],
+            for: .grid
+        )
+        let radialRings = hierarchy.rings(
+            along: ["shape", "shape.grading", "shape.grading.contrast"],
+            for: .radial
+        )
+
+        #expect(gridRings.count == 3)
+        #expect(gridRings[2].map(\.id) == [
+            "contrast.strength", "contrast.pivot", "grading.exposure"
+        ])
+        #expect(gridRings[2].map(\.title) == [
+            "Contrast › Strength", "Contrast › Pivot", "Exposure"
+        ])
+        #expect(radialRings.count == 4)
+        #expect(radialRings[2].map(\.id) == [
+            "shape.grading.contrast", "grading.exposure"
+        ])
+    }
+
+    @Test("Keyboard targets use the same grid flattening projection")
+    func gridKeyboardUsesFlattenedProjection() {
+        let targets = makeDeepHierarchy().flattenedKeyboardTargets(for: .grid)
+
+        #expect(!targets.contains { $0.id == "shape.grading.contrast" })
+        #expect(targets.first(where: { $0.id == "contrast.strength" })?.ancestorPath == [
+            "shape", "shape.grading"
+        ])
     }
 
     @Test("Path walk yields one ring per selected branch level")

@@ -34,7 +34,7 @@ struct MacNavigationNode: Identifiable {
     let fallbackAction: (() -> Void)?
     let slider: MacQuickSliderBinding?
     /// Optional item budget for compact presentations such as the radial fan.
-    /// Grid and keyboard projections always retain the complete child list.
+    /// Grid retains the complete descendant set when it flattens quick inputs.
     let compactChildrenLimit: Int?
     /// A routed leaf appended when compact projection exceeds its item budget.
     let overflowFallback: MacNavigationOverflowFallback?
@@ -369,6 +369,11 @@ struct MacQuickActiveSlider: Equatable {
 /// `.grid` is the complete flattened projection, while `.radial` may substitute
 /// an explicit overflow leaf at compact item budgets authored on a node.
 struct MacNavigationHierarchy {
+    /// Grid reserves these two levels for navigation (top and inner sidebar),
+    /// then flattens every deeper descendant into one complete quick-input
+    /// surface. Radial continues to present every authored hierarchy level.
+    static let gridNavigationDepth = 2
+
     let roots: [MacNavigationNode]
 
     init(roots: [MacNavigationNode]) {
@@ -379,19 +384,41 @@ struct MacNavigationHierarchy {
         roots
     }
 
+    /// Presentation-specific children of a node at an authored hierarchy depth.
+    ///
+    /// The hierarchy remains the source of truth. Radial consumes its authored
+    /// levels (with an optional compact overflow projection); grid consumes the
+    /// first two levels as navigation and flattens all terminal descendants of
+    /// the selected inner-sidebar node. Group names are retained in projected
+    /// leaf titles so controls with repeated labels remain distinguishable.
+    func presentedChildren(
+        of node: MacNavigationNode,
+        atDepth depth: Int,
+        for style: MacTabLauncherStyle
+    ) -> [MacNavigationNode] {
+        guard style == .grid, depth >= Self.gridNavigationDepth - 1 else {
+            return node.presentedChildren(for: style)
+        }
+        return flattenedGridLeaves(in: node.children)
+    }
+
     /// All presented nodes in stable preorder. Each target carries the branch
     /// path needed to reveal it without invoking any node action.
     func flattenedKeyboardTargets(for style: MacTabLauncherStyle) -> [MacNavigationKeyboardTarget] {
         var targets: [MacNavigationKeyboardTarget] = []
 
-        func append(_ nodes: [MacNavigationNode], ancestors: [String]) {
+        func append(_ nodes: [MacNavigationNode], ancestors: [String], depth: Int) {
             for node in nodes {
                 targets.append(MacNavigationKeyboardTarget(id: node.id, ancestorPath: ancestors))
-                append(node.presentedChildren(for: style), ancestors: ancestors + [node.id])
+                append(
+                    presentedChildren(of: node, atDepth: depth, for: style),
+                    ancestors: ancestors + [node.id],
+                    depth: depth + 1
+                )
             }
         }
 
-        append(presentedRoots(for: style), ancestors: [])
+        append(presentedRoots(for: style), ancestors: [], depth: 0)
         return targets
     }
 
@@ -406,9 +433,9 @@ struct MacNavigationHierarchy {
         let presentedRoots = presentedRoots(for: style)
         var rings: [[MacNavigationNode]] = [presentedRoots]
         var current = presentedRoots
-        for id in path {
+        for (depth, id) in path.enumerated() {
             guard let next = current.first(where: { $0.id == id }), next.isBranch else { break }
-            let children = next.presentedChildren(for: style)
+            let children = presentedChildren(of: next, atDepth: depth, for: style)
             rings.append(children)
             current = children
         }
@@ -424,10 +451,10 @@ struct MacNavigationHierarchy {
     ) -> [String] {
         var resolved: [String] = []
         var current = presentedRoots(for: style)
-        for id in path {
+        for (depth, id) in path.enumerated() {
             guard let node = current.first(where: { $0.id == id }), node.isBranch else { break }
             resolved.append(id)
-            current = node.presentedChildren(for: style)
+            current = presentedChildren(of: node, atDepth: depth, for: style)
         }
         return resolved
     }
@@ -438,15 +465,18 @@ struct MacNavigationHierarchy {
         withID id: String,
         for style: MacTabLauncherStyle
     ) -> MacNavigationNode? {
-        func find(in nodes: [MacNavigationNode]) -> MacNavigationNode? {
+        func find(in nodes: [MacNavigationNode], depth: Int) -> MacNavigationNode? {
             for node in nodes {
                 if node.id == id { return node }
-                if let found = find(in: node.presentedChildren(for: style)) { return found }
+                if let found = find(
+                    in: presentedChildren(of: node, atDepth: depth, for: style),
+                    depth: depth + 1
+                ) { return found }
             }
             return nil
         }
 
-        return find(in: presentedRoots(for: style))
+        return find(in: presentedRoots(for: style), depth: 0)
     }
 
     /// Complete lookup independent of a presentation. Overflow fallbacks are
@@ -462,6 +492,40 @@ struct MacNavigationHierarchy {
         }
 
         return find(in: roots)
+    }
+
+    private func flattenedGridLeaves(in nodes: [MacNavigationNode]) -> [MacNavigationNode] {
+        var leaves: [MacNavigationNode] = []
+
+        func append(_ nodes: [MacNavigationNode], groupTitles: [String]) {
+            for node in nodes {
+                if node.isBranch {
+                    append(node.children, groupTitles: groupTitles + [node.title])
+                } else {
+                    let projectedTitle = (groupTitles + [node.title]).joined(separator: " › ")
+                    leaves.append(node.projected(title: projectedTitle))
+                }
+            }
+        }
+
+        append(nodes, groupTitles: [])
+        return leaves
+    }
+}
+
+private extension MacNavigationNode {
+    func projected(title: String) -> MacNavigationNode {
+        MacNavigationNode(
+            id: id,
+            title: title,
+            systemImage: systemImage,
+            isSelected: isSelected,
+            children: children,
+            fallbackAction: fallbackAction,
+            slider: slider,
+            compactChildrenLimit: compactChildrenLimit,
+            overflowFallback: overflowFallback
+        )
     }
 }
 

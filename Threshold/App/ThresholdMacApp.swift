@@ -302,7 +302,6 @@ private struct ThresholdMacRootView: View {
                 guard let value = notification.userInfo?[ThresholdMacInteractiveView.clickLocationUserInfoKey] as? NSValue else {
                     return
                 }
-                launcherStyle = .radial
                 showRadialLauncher(
                     anchor: CGPoint(
                         x: value.pointValue.x,

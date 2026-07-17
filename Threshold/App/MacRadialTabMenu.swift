@@ -423,11 +423,11 @@ struct MacRadialTabGeometry {
 
 /// Screen-position anchored, tree-driven launcher for the macOS render view.
 ///
-/// Renders one ring per level of the navigation `path` through `roots`.
-/// Radial and grid are peer presentations of `hierarchy`: radial places levels
-/// on arcs around the pointer, while grid flattens the same routes into right-
-/// edge columns. Hovering a branch pill auto-selects it after a short dwell;
-/// only fallback leaves and slider drags perform side effects.
+/// Renders the visible projection of `hierarchy` for the chosen input layout.
+/// Radial places authored levels on arcs around the pointer. Grid reserves a
+/// top rail and inner-sidebar rail for navigation, then tiles every descendant
+/// quick input in a flat control surface. Hovering a branch pill auto-selects
+/// it after a short dwell; only fallback leaves and slider drags have effects.
 struct MacQuickMenu: View {
     let size: CGSize
     let pointerAnchor: CGPoint
@@ -507,7 +507,7 @@ struct MacQuickMenu: View {
 
     private var gridPrimaryWidth: CGFloat { Self.gridPrimaryWidth }
     private let gridChildWidth: CGFloat = 116
-    private let gridSliderWidth: CGFloat = 136
+    private let gridSliderWidth: CGFloat = 154
     /// Leave a clear rail for the window-drag hub. The old 6pt inset put the
     /// central primary pill underneath the hub in flattened/grid mode.
     private var gridRightInset: CGFloat { Self.gridRightInset }
@@ -625,10 +625,9 @@ struct MacQuickMenu: View {
 
     // MARK: Ring layout
 
-    /// Walks `path` through the tree, producing one layout per visible ring.
-    /// Radial mode uses true concentric arcs: every level shares the pointer
-    /// center and advances by one compact fixed radius. Grid mode retains its
-    /// parent-relative column behavior.
+    /// Walks `path` through the hierarchy's current projection. Radial uses
+    /// concentric arcs for every authored level. Grid stops after its two
+    /// navigation levels and lays the hierarchy's flattened leaves into tiles.
     private func ringLayouts() -> [RingLayout] {
         var layouts: [RingLayout] = []
         var nodes = roots
@@ -717,7 +716,11 @@ struct MacQuickMenu: View {
             if layoutStyle == .grid {
                 ringAnchor = pill
             }
-            nodes = nodes[selectedIndex].presentedChildren(for: layoutStyle)
+            nodes = hierarchy.presentedChildren(
+                of: nodes[selectedIndex],
+                atDepth: depth,
+                for: layoutStyle
+            )
             depth += 1
         }
         return layouts
@@ -967,34 +970,52 @@ struct MacQuickMenu: View {
     private func gridPositions(count: Int, depth: Int, centerY: CGFloat, sliderRing: Bool = false) -> [CGPoint] {
         guard count > 0 else { return [] }
         let preferredSpacing: CGFloat = depth == 0 ? 44 : (sliderRing ? 40 : 32)
-        // The flattened formula list can be longer than a readable radial ring.
-        // Tighten only as much as needed to retain every 30pt slider hit target
-        // inside the window's 30pt center margins.
         let availableSpan = max(size.height - 60, 0)
-        let fittingSpacing = count > 1 ? availableSpan / CGFloat(count - 1) : preferredSpacing
         let minimumSpacing: CGFloat = sliderRing ? 32 : 30
-        let spacing = min(preferredSpacing, max(minimumSpacing, fittingSpacing))
         // Columns tighten right-to-left: primary rail, branch column, slider
-        // column. Centers keep a ~20pt gutter between capsule edges.
-        let columnX: CGFloat
+        // surface. Centers keep a ~20pt gutter between capsule edges.
+        let baseColumnX: CGFloat
         switch depth {
-        case 0: columnX = gridPrimaryColumnX
-        case 1: columnX = anchor.x - 252
-        default: columnX = anchor.x - 252 - (gridChildWidth + gridSliderWidth) * 0.5 - 20
+        case 0: baseColumnX = gridPrimaryColumnX
+        case 1: baseColumnX = anchor.x - 252
+        default: baseColumnX = anchor.x - 252 - (gridChildWidth + gridSliderWidth) * 0.5 - 20
         }
-        let rawTop = centerY - CGFloat(count - 1) * spacing * 0.5
-        let margin: CGFloat = 30
-        let rawBottom = rawTop + CGFloat(count - 1) * spacing
-        let correction: CGFloat
-        if rawTop < margin {
-            correction = margin - rawTop
-        } else if rawBottom > size.height - margin {
-            correction = size.height - margin - rawBottom
+
+        // Top and inner-sidebar navigation remain single columns. The complete
+        // quick-input projection tiles into additional columns when it is too
+        // tall, instead of inventing deeper navigational levels or clipping.
+        let rowsPerColumn: Int
+        if depth < MacNavigationHierarchy.gridNavigationDepth {
+            rowsPerColumn = count
         } else {
-            correction = 0
+            rowsPerColumn = max(Int(availableSpan / preferredSpacing) + 1, 1)
         }
+        let columnStride = max(gridChildWidth, gridSliderWidth) + 20
+        let margin: CGFloat = 30
+
         return (0..<count).map { index in
-            CGPoint(x: columnX, y: rawTop + CGFloat(index) * spacing + correction)
+            let column = index / rowsPerColumn
+            let row = index % rowsPerColumn
+            let firstIndex = column * rowsPerColumn
+            let itemsInColumn = min(rowsPerColumn, count - firstIndex)
+            let fittingSpacing = itemsInColumn > 1
+                ? availableSpan / CGFloat(itemsInColumn - 1)
+                : preferredSpacing
+            let spacing = min(preferredSpacing, max(minimumSpacing, fittingSpacing))
+            let rawTop = centerY - CGFloat(itemsInColumn - 1) * spacing * 0.5
+            let rawBottom = rawTop + CGFloat(itemsInColumn - 1) * spacing
+            let correction: CGFloat
+            if rawTop < margin {
+                correction = margin - rawTop
+            } else if rawBottom > size.height - margin {
+                correction = size.height - margin - rawBottom
+            } else {
+                correction = 0
+            }
+            return CGPoint(
+                x: baseColumnX - CGFloat(column) * columnStride,
+                y: rawTop + CGFloat(row) * spacing + correction
+            )
         }
     }
 
@@ -1193,10 +1214,8 @@ struct MacQuickMenu: View {
 
     // MARK: Keyboard navigation
 
-    /// Rectangle mode is intentionally flattened for keyboard traversal. Its
-    /// preorder contains every node in the tree, and focusing a deep target
-    /// reveals the ancestor columns needed to put that control on screen. The
-    /// radial fan keeps its spatial, currently-visible ring order.
+    /// Grid traversal follows the same two-level navigation + flat quick-input
+    /// projection shown on screen. Radial keeps its spatial visible-ring order.
     private func keyboardFocusOrder(rings: [RingLayout]) -> [MacNavigationKeyboardTarget] {
         let flattened = hierarchy.flattenedKeyboardTargets(for: layoutStyle)
         let nodeTargets: [MacNavigationKeyboardTarget]
@@ -1325,7 +1344,11 @@ struct MacQuickMenu: View {
         else { return false }
 
         setNavigationPath(target.ancestorPath + [node.id])
-        if let firstChild = node.children.first {
+        if let firstChild = hierarchy.presentedChildren(
+            of: node,
+            atDepth: target.ancestorPath.count,
+            for: layoutStyle
+        ).first {
             self.focusedItemID = firstChild.id
         }
         return true
