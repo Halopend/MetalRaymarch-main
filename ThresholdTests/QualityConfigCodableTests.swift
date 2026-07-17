@@ -17,25 +17,25 @@ import Foundation
 @Suite("QualityConfig — raymarch accelerator persistence")
 struct QualityConfigCodableTests {
 
-    @Test("raymarch accelerators default on and preserve explicit opt-out")
-    func raymarchAcceleratorDefaultsAndOptOut() throws {
+    @Test("temporal starts default on while smart advance remains opt-in")
+    func raymarchAcceleratorDefaultsAndExplicitChoices() throws {
         let defaults = QualityConfig()
         #expect(defaults.computeTemporalReprojectionEnabled == true)
-        #expect(defaults.smartAdvanceEnabled == true)
+        #expect(defaults.smartAdvanceEnabled == false)
 
         let legacy = try JSONDecoder().decode(QualityConfig.self, from: Data("{}".utf8))
         #expect(legacy.computeTemporalReprojectionEnabled == true)
-        #expect(legacy.smartAdvanceEnabled == true)
+        #expect(legacy.smartAdvanceEnabled == false)
 
-        var optedOut = defaults
-        optedOut.computeTemporalReprojectionEnabled = false
-        optedOut.smartAdvanceEnabled = false
+        var explicitChoices = defaults
+        explicitChoices.computeTemporalReprojectionEnabled = false
+        explicitChoices.smartAdvanceEnabled = true
         let decoded = try JSONDecoder().decode(
             QualityConfig.self,
-            from: JSONEncoder().encode(optedOut)
+            from: JSONEncoder().encode(explicitChoices)
         )
         #expect(decoded.computeTemporalReprojectionEnabled == false)
-        #expect(decoded.smartAdvanceEnabled == false)
+        #expect(decoded.smartAdvanceEnabled == true)
     }
 
     @Test("coneCoverageAAEnabled survives encode → decode")

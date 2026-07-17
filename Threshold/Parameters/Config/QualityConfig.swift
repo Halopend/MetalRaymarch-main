@@ -177,10 +177,9 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // Foveated raymarching strength (0...1); peripheral 8x8 tiles march fewer steps.
     var foveationStrength: Float = 0.0
 
-    // Smart advance: grazing-aware lead-ahead sphere tracing. Reads the along-ray
-    // DE gradient to step further through grazing/receding regions, guarded by
-    // the overstep-failure retreat. On by default.
-    var smartAdvanceEnabled: Bool = true
+    // Smart advance: grazing-aware lead-ahead sphere tracing. It replaces fixed
+    // over-relaxation, and measured wins vary with the scene's ray mix, so opt in.
+    var smartAdvanceEnabled: Bool = false
 
     // Cone marching strength (0...1): grow the march hit-threshold with ray
     // distance so each ray stops once the distance field falls within ~N pixels
@@ -331,7 +330,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         computeTemporalReprojectionEnabled = try c.decodeIfPresent(Bool.self, forKey: .computeTemporalReprojectionEnabled) ?? true
         coarsePrepassWarmStartEnabled = try c.decodeIfPresent(Bool.self, forKey: .coarsePrepassWarmStartEnabled) ?? false
         foveationStrength     = try c.decodeIfPresent(Float.self, forKey: .foveationStrength)     ?? 0.0
-        smartAdvanceEnabled   = try c.decodeIfPresent(Bool.self,  forKey: .smartAdvanceEnabled)   ?? true
+        smartAdvanceEnabled   = try c.decodeIfPresent(Bool.self,  forKey: .smartAdvanceEnabled)   ?? false
         coneMarchStrength     = try c.decodeIfPresent(Float.self, forKey: .coneMarchStrength)     ?? 0.0
         coneCoverageAAEnabled = try c.decodeIfPresent(Bool.self,  forKey: .coneCoverageAAEnabled) ?? false
         overRelaxationMax     = try c.decodeIfPresent(Float.self, forKey: .overRelaxationMax)     ?? 1.4

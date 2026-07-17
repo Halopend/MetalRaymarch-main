@@ -218,7 +218,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _computeTemporalReprojectionEnabled: Bool = loadBool("computeTemporalReprojectionEnabled", default: true)  // Compute path: compatible-history, per-pixel predict-validate temporal starts
     private var _coarsePrepassWarmStartEnabled: Bool = loadBool("coarsePrepassWarmStartEnabled", default: false)  // visionOS fragment path: conservative cone coarse-prepass warm-start. A low-res cone pass writes a provable LOWER BOUND on each 8x8 block's nearest-surface entry distance; the full march raises its start t to it (skip-to-then-full-march). Off = no cone pass, byte-identical to before. Box/fold + un-warped domain only.
     private var _foveationStrength: Float = loadFloat("foveationStrength", default: 0.0)  // Peripheral step reduction on the 8x8 compute path (0 = off)
-    private var _smartAdvanceEnabled: Bool = loadBool("smartAdvanceEnabled", default: true)  // Grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient)
+    private var _smartAdvanceEnabled: Bool = loadBool("smartAdvanceEnabled", default: false)  // Experimental grazing-aware lead-ahead sphere tracing
     private var _adaptiveRenderQualityEnabled: Bool = loadBool("adaptiveRenderQualityEnabled", default: true)  // visionOS: auto-lower compositor Render Quality to hold FPS (slider = ceiling)
     private var _coneMarchStrength: Float = loadFloat("coneMarchStrength", default: 0.0)  // 0 = off; scales the distance-growing hit threshold (projected pixel footprint, ConeMarchingPen)
     private var _coneCoverageAAEnabled: Bool = loadBool("coneCoverageAAEnabled", default: false)  // CTSS-lite silhouette AA from the cone footprint (fragment path); lets Cone Marching run harder without blobby edges
@@ -1344,7 +1344,8 @@ final class RenderSettings: @unchecked Sendable {
     /// Smart advance: grazing-aware lead-ahead sphere tracing. When on, the
     /// march reads the along-ray DE gradient each step and steps further through
     /// grazing/receding regions (where plain tracing creeps), guarded by the same
-    /// overstep-failure retreat as the Keinert over-relaxation. On by default;
+    /// overstep-failure retreat as the Keinert over-relaxation. Opt-in because
+    /// it replaces the fixed over-relaxation policy and measured wins vary by scene;
     /// affects every raymarch path (Mac fragment + visionOS compute).
     var smartAdvanceEnabled: Bool {
         get { withLock { _smartAdvanceEnabled } }
