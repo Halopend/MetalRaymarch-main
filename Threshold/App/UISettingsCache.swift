@@ -63,6 +63,10 @@ final class UISettingsCache {
     var targetFoldingLimit: Float = 1.0
     var targetSphereRadius: Float = 0.5
     var formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()
+    /// Observable mirror of the composable Transform stack. Quick Controls use
+    /// this instead of reading RenderSettings directly so slider writes repaint
+    /// immediately even though RenderSettings itself is not observable.
+    var spaceWarpStack: [SpaceWarpOpValue] = []
 
     // === SAVED CUSTOM GRADIENTS (isolated in GradientLibrary to avoid observation cross-talk) ===
     let gradientLibrary = GradientLibrary()
@@ -209,6 +213,8 @@ final class UISettingsCache {
         if targetFoldingLimit != newFold { targetFoldingLimit = newFold }
         let newSphere = settings.targetSphereRadius
         if targetSphereRadius != newSphere { targetSphereRadius = newSphere }
+        let newSpaceWarpStack = settings.spaceWarpStack
+        if spaceWarpStack != newSpaceWarpStack { spaceWarpStack = newSpaceWarpStack }
 
     }
     
@@ -229,6 +235,25 @@ final class UISettingsCache {
 
     func dispatchParameterOperation(_ operation: ParameterOperation) {
         parameterPipeline?.dispatchUI([operation], cache: self)
+    }
+
+    /// Mutates one Transform-stack instance by stable identity and commits the
+    /// complete value array back to RenderSettings. Resolving the live slot from
+    /// the UUID also recenters any music mapping after a reorder instead of
+    /// accidentally targeting the transform that used to occupy that index.
+    @discardableResult
+    func updateSpaceWarpOp(
+        id: UUID,
+        _ mutate: (inout SpaceWarpOpValue) -> Void
+    ) -> Bool {
+        guard let settings else { return false }
+        var updated = settings.spaceWarpStack
+        guard let index = updated.firstIndex(where: { $0.id == id }) else { return false }
+        mutate(&updated[index])
+        settings.spaceWarpStack = updated
+        spaceWarpStack = updated
+        settings.requestMusicRecenter(targetID: ParameterTargetID.SpaceWarp.opStrength(slot: index))
+        return true
     }
 
     

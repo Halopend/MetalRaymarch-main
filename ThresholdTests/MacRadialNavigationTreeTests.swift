@@ -1,4 +1,5 @@
 #if os(macOS)
+import Foundation
 import Testing
 @testable import Threshold
 
@@ -7,6 +8,36 @@ struct MacRadialNavigationTreeTests {
     private final class SliderState {
         var isEnabled = false
         var value: Float = 2
+    }
+
+    private final class TransformStackState {
+        var ops: [SpaceWarpOpValue]
+
+        init(_ ops: [SpaceWarpOpValue]) {
+            self.ops = ops
+        }
+
+        func read(_ id: UUID) -> SpaceWarpOpValue? {
+            ops.first(where: { $0.id == id })
+        }
+
+        func update(_ id: UUID, _ mutate: (inout SpaceWarpOpValue) -> Void) {
+            guard let index = ops.firstIndex(where: { $0.id == id }) else { return }
+            mutate(&ops[index])
+        }
+    }
+
+    private func transformBranch(
+        _ op: SpaceWarpOpValue,
+        position: Int = 0,
+        state: TransformStackState
+    ) -> MacRadialNavNode {
+        MacRadialTransformNodeFactory.branch(
+            for: op,
+            position: position,
+            read: { state.read($0) },
+            update: { id, mutation in state.update(id, mutation) }
+        )
     }
 
     private func makeTree(clicked: @escaping (String) -> Void = { _ in }) -> [MacRadialNavNode] {
@@ -91,6 +122,80 @@ struct MacRadialNavigationTreeTests {
         #expect(tree.node(withID: "slider.a.1.x") != nil)
         #expect(tree.node(withID: "a.2") != nil)
         #expect(tree.node(withID: "missing") == nil)
+    }
+
+    @Test("Flattened keyboard targets use preorder and carry only ancestor ids")
+    func flattenedKeyboardTargets() {
+        let targets = makeTree().flattenedKeyboardTargets()
+
+        #expect(targets == [
+            MacRadialKeyboardTarget(id: "root.a", ancestorPath: []),
+            MacRadialKeyboardTarget(id: "a.1", ancestorPath: ["root.a"]),
+            MacRadialKeyboardTarget(
+                id: "slider.a.1.x",
+                ancestorPath: ["root.a", "a.1"]
+            ),
+            MacRadialKeyboardTarget(id: "a.2", ancestorPath: ["root.a"]),
+            MacRadialKeyboardTarget(id: "root.leaf", ancestorPath: [])
+        ])
+    }
+
+    @Test("Keyboard traversal wraps in both directions")
+    func keyboardTraversalWraps() {
+        let targets = makeTree().flattenedKeyboardTargets()
+
+        #expect(MacRadialKeyboardNavigation.nextID(
+            from: "root.a", in: targets, backward: false
+        ) == "a.1")
+        #expect(MacRadialKeyboardNavigation.nextID(
+            from: "root.leaf", in: targets, backward: false
+        ) == "root.a")
+        #expect(MacRadialKeyboardNavigation.nextID(
+            from: "root.a", in: targets, backward: true
+        ) == "root.leaf")
+        #expect(MacRadialKeyboardNavigation.nextID(
+            from: "root.leaf", in: targets, backward: true
+        ) == "a.2")
+    }
+
+    @Test("Nil and stale keyboard focus recover at the requested edge")
+    func keyboardTraversalRecovers() {
+        let targets = makeTree().flattenedKeyboardTargets()
+        let empty: [MacRadialKeyboardTarget] = []
+
+        #expect(MacRadialKeyboardNavigation.nextID(
+            from: nil, in: targets, backward: false
+        ) == "root.a")
+        #expect(MacRadialKeyboardNavigation.nextID(
+            from: nil, in: targets, backward: true
+        ) == "root.leaf")
+        #expect(MacRadialKeyboardNavigation.nextID(
+            from: "removed", in: targets, backward: false
+        ) == "root.a")
+        #expect(MacRadialKeyboardNavigation.nextID(
+            from: "removed", in: targets, backward: true
+        ) == "root.leaf")
+        #expect(MacRadialKeyboardNavigation.nextID(
+            from: nil, in: empty, backward: false
+        ) == nil)
+    }
+
+    @Test("Building and traversing keyboard targets never fires node actions")
+    func keyboardTraversalHasNoSideEffects() {
+        var clicked: [String] = []
+        let targets = makeTree { clicked.append($0) }.flattenedKeyboardTargets()
+        var focusedID: String?
+
+        for _ in targets {
+            focusedID = MacRadialKeyboardNavigation.nextID(
+                from: focusedID,
+                in: targets,
+                backward: false
+            )
+        }
+
+        #expect(focusedID == "root.leaf")
+        #expect(clicked.isEmpty)
     }
 
     @Test("Activation policy is carried by node shape")
@@ -187,6 +292,171 @@ struct MacRadialNavigationTreeTests {
         state.isEnabled = false
         binding.writeIfEnabled(4)
         #expect(state.value == 8)
+    }
+
+    @Test("Slider keyboard stepping uses range fractions, clamps, and stays disabled live")
+    func sliderKeyboardStep() {
+        let state = SliderState()
+        let binding = MacRadialSliderBinding(
+            range: 0...10,
+            read: { state.value },
+            write: { state.value = $0 },
+            isEnabled: { state.isEnabled }
+        )
+
+        binding.step(by: 1)
+        #expect(state.value == 2)
+
+        state.isEnabled = true
+        binding.step(by: 1)
+        #expect(state.value == 2.5)
+        binding.step(by: -1)
+        #expect(state.value == 2)
+
+        state.value = 9.8
+        binding.step(by: 1)
+        #expect(state.value == 10)
+        binding.step(by: -100)
+        #expect(state.value == 0)
+
+        state.isEnabled = false
+        binding.step(by: 1, fraction: 0.2)
+        #expect(state.value == 0)
+    }
+
+    @Test("Transform branches derive their complete control shape from the warp catalog")
+    func transformControlsFollowWarpCatalog() {
+        for kind in SpaceWarpKind.allCases {
+            let op = SpaceWarpOpValue(kind: kind)
+            let state = TransformStackState([op])
+            let branch = transformBranch(op, state: state)
+            let expectedCount = 1
+                + (kind == .coxeter ? 0 : 1)
+                + kind.params.count
+                + (kind.toggle == nil ? 0 : 1)
+                + (kind.usesAxis ? 3 : 0)
+
+            #expect(branch.children.count == expectedCount)
+            #expect(branch.title == "1 · \(kind.displayName)")
+            #expect(branch.children.first?.title == "Enabled")
+
+            if kind != .coxeter {
+                let strength = branch.children.first(where: { $0.title == kind.amountLabel })
+                #expect(strength?.slider?.range == kind.strengthRange)
+            }
+            for spec in kind.params {
+                let parameter = branch.children.first(where: { $0.title == spec.label })
+                #expect(parameter?.slider?.range == spec.range)
+            }
+            if kind.usesAxis {
+                #expect(branch.children.contains(where: { $0.title == "\(kind.axisLabel) X" }))
+                #expect(branch.children.contains(where: { $0.title == "\(kind.axisLabel) Y" }))
+                #expect(branch.children.contains(where: { $0.title == "\(kind.axisLabel) Z" }))
+            }
+        }
+    }
+
+    @Test("Duplicate transform kinds keep unique UUID-backed keyboard routes")
+    func duplicateTransformRoutesAreUnique() {
+        let first = SpaceWarpOpValue(kind: .twist)
+        let second = SpaceWarpOpValue(kind: .twist)
+        let state = TransformStackState([first, second])
+        let roots = [
+            transformBranch(first, position: 0, state: state),
+            transformBranch(second, position: 1, state: state)
+        ]
+        let targets = roots.flattenedKeyboardTargets()
+
+        #expect(Set(targets.map(\.id)).count == targets.count)
+        #expect(roots[0].id != roots[1].id)
+        #expect(targets.contains(where: {
+            $0.id.hasPrefix("slider.\(roots[1].id)") && $0.ancestorPath == [roots[1].id]
+        }))
+    }
+
+    @Test("Transform writes follow UUID after reorder and become inert after deletion")
+    func transformWriteFollowsLiveIdentity() {
+        var first = SpaceWarpOpValue(kind: .twist)
+        first.strength = 0.25
+        var second = SpaceWarpOpValue(kind: .twist)
+        second.strength = 1.25
+        let state = TransformStackState([first, second])
+        let secondBranch = transformBranch(second, position: 1, state: state)
+        let strength = secondBranch.children.first(where: { $0.title == second.kind.amountLabel })!.slider!
+
+        state.ops.swapAt(0, 1)
+        strength.writeIfEnabled(1.75)
+
+        #expect(state.read(second.id)?.strength == 1.75)
+        #expect(state.read(first.id)?.strength == 0.25)
+        #expect(state.ops.map(\.id) == [second.id, first.id])
+
+        state.ops.removeAll(where: { $0.id == second.id })
+        strength.writeIfEnabled(0.5)
+        #expect(state.ops.count == 1)
+        #expect(state.read(first.id)?.strength == 0.25)
+    }
+
+    @Test("Disabled transforms retain an enabled control while guarding their parameters")
+    func disabledTransformControls() {
+        var op = SpaceWarpOpValue(kind: .ripple)
+        op.isEnabled = false
+        let state = TransformStackState([op])
+        let branch = transformBranch(op, state: state)
+        let enabled = branch.children.first(where: { $0.title == "Enabled" })!.slider!
+        let strength = branch.children.first(where: { $0.title == op.kind.amountLabel })!.slider!
+
+        #expect(enabled.isEnabled())
+        #expect(!strength.isEnabled())
+        strength.writeIfEnabled(1.4)
+        #expect(state.read(op.id)?.strength == op.strength)
+
+        enabled.step(by: 1)
+        #expect(state.read(op.id)?.isEnabled == true)
+        #expect(strength.isEnabled())
+        strength.writeIfEnabled(1.4)
+        #expect(state.read(op.id)?.strength == 1.4)
+    }
+
+    @Test("Transform controls clamp authored ranges and step discrete values by one")
+    func transformControlRangesAndDiscreteSteps() {
+        var coxeter = SpaceWarpOpValue(kind: .coxeter)
+        coxeter.p1 = 5
+        var kaleidoscope = SpaceWarpOpValue(kind: .kaleidoscope)
+        kaleidoscope.p1 = 6
+        let state = TransformStackState([coxeter, kaleidoscope])
+
+        let coxeterBranch = transformBranch(coxeter, position: 0, state: state)
+        let p = coxeterBranch.children.first(where: { $0.title == "p" })!.slider!
+        p.step(by: 1)
+        #expect(state.read(coxeter.id)?.p1 == 6)
+        p.writeIfEnabled(99)
+        #expect(state.read(coxeter.id)?.p1 == 8)
+
+        let kaleidoscopeBranch = transformBranch(kaleidoscope, position: 1, state: state)
+        let segments = kaleidoscopeBranch.children.first(where: { $0.title == "Segments" })!.slider!
+        segments.step(by: 1)
+        #expect(state.read(kaleidoscope.id)?.p1 == 7)
+    }
+
+    @Test("UI cache commits transform edits by UUID to RenderSettings")
+    @MainActor
+    func cacheCommitsTransformByIdentity() {
+        let settings = RenderSettings()
+        var first = SpaceWarpOpValue(kind: .mirror)
+        first.strength = 0.4
+        var second = SpaceWarpOpValue(kind: .twist)
+        second.strength = 0.8
+        settings.spaceWarpStack = [first, second]
+        let cache = UISettingsCache(renderSettings: settings)
+
+        settings.spaceWarpStack = [second, first]
+        let changed = cache.updateSpaceWarpOp(id: second.id) { $0.strength = 1.6 }
+
+        #expect(changed)
+        #expect(settings.spaceWarpStack.map(\.id) == [second.id, first.id])
+        #expect(settings.spaceWarpStack.first?.strength == 1.6)
+        #expect(cache.spaceWarpStack == settings.spaceWarpStack)
     }
 }
 #endif

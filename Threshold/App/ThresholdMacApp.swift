@@ -213,6 +213,9 @@ private struct ThresholdMacRootView: View {
                             } else {
                                 appModel.endMenuAdjustment()
                             }
+                        },
+                        onDismiss: {
+                            hideRadialTabs(animated: true)
                         }
                     )
                     .opacity(isShiftPressed ? 0.16 : 1)
@@ -277,6 +280,18 @@ private struct ThresholdMacRootView: View {
                             y: proxy.size.height - locationInWindow.y
                         )
                         return hovered.frame.contains(point)
+                    },
+                    isPointerOverWindowDragHandle: { locationInWindow in
+                        guard !isShiftPressed else { return false }
+                        let point = CGPoint(
+                            x: locationInWindow.x,
+                            y: proxy.size.height - locationInWindow.y
+                        )
+                        return MacRadialTabMenu.windowDragHandleFrame(
+                            size: proxy.size,
+                            pointerAnchor: radialAnchor,
+                            layoutStyle: launcherStyle
+                        ).contains(point)
                     },
                     onSliderScroll: { upwardDelta in
                         applyRadialSliderScroll(upwardDelta)
@@ -806,7 +821,8 @@ private struct ThresholdMacRootView: View {
     /// Terminal slider rings mirror where each control lives in the panel, so
     /// the radial route and the full controls window never disagree about a
     /// control's home. Sections without in-place controls stay pure click
-    /// leaves. Rings are capped so the fan stays readable.
+    /// leaves. Radial rings are capped so the fan stays readable; the flattened
+    /// rectangle layout includes the complete formula-control list.
     private static let maxSlidersPerRing = 8
 
     private func shapeSliderNodes(for section: ShapeRailSection) -> [MacRadialNavNode] {
@@ -814,10 +830,13 @@ private struct ThresholdMacRootView: View {
         case .parameters:
             // Per-fractal formula params, exactly like FormulaParamsEditor —
             // plus the Mandelbox-only Scale row fractalShapeContent appends.
-            var nodes = ParameterNodeRegistry.shared
+            let formulaNodes = ParameterNodeRegistry.shared
                 .formulaBatch(for: radialCache.fractalType)
                 .floatNodes
-                .prefix(Self.maxSlidersPerRing - 1)
+            let visibleFormulaNodes = launcherStyle == .radial
+                ? Array(formulaNodes.prefix(Self.maxSlidersPerRing - 1))
+                : formulaNodes
+            var nodes = visibleFormulaNodes
                 .map(formulaSliderNode(for:))
             if radialCache.fractalType == .mandelbox,
                let scale = catalogSliderNode(ParameterTargetID.Core.fractalScale) {
@@ -830,14 +849,93 @@ private struct ThresholdMacRootView: View {
             guard radialCache.safetyBubble.enabled else { return [] }
             return [catalogSliderNode(ParameterTargetID.Effect.safetyBubbleRadius)].compactMap { $0 }
         case .transformations:
-            guard radialCache.display.sphereProjectionEnabled else { return [] }
-            return [
-                catalogSliderNode(ParameterTargetID.Space.sphereProjectionBlend),
-                catalogSliderNode(ParameterTargetID.Space.sphereProjectionRadius)
-            ].compactMap { $0 }
+            return transformationQuickControlNodes()
         case .formula, .hands, .bounding, .performance:
             return []
         }
+    }
+
+    /// Active space systems and composable stack instances exposed through the
+    /// same tree used by both radial and flattened Quick Controls. Structural
+    /// editing (add/delete/reorder/recipes) remains in the full Transform panel;
+    /// this surface is intentionally optimized for live tuning.
+    private func transformationQuickControlNodes() -> [MacRadialNavNode] {
+        var nodes: [MacRadialNavNode] = []
+
+        if radialCache.display.sphericalInversionMode != .off {
+            let cache = radialCache
+            let spec = ControlCatalog.sphericalInversionRadius
+            nodes.append(MacRadialNavNode(
+                id: "transform.system.sphericalInversion",
+                title: "Spherical Inversion",
+                systemImage: AppIcons.circleDashedInsetFilled,
+                children: [
+                    MacRadialNavNode(
+                        id: "slider.\(spec.id)",
+                        title: spec.name,
+                        systemImage: spec.icon,
+                        slider: MacRadialSliderBinding(
+                            range: spec.range,
+                            read: { cache.display.sphericalInversionRadius },
+                            write: {
+                                cache.display.sphericalInversionRadius = spec.clamp($0)
+                                cache.commitSphericalInversion()
+                            },
+                            format: Self.sliderValueFormat(for: spec.range)
+                        )
+                    )
+                ]
+            ))
+        }
+
+        if radialCache.display.sphereProjectionEnabled {
+            let projectionControls = [
+                catalogSliderNode(ParameterTargetID.Space.sphereProjectionBlend),
+                catalogSliderNode(ParameterTargetID.Space.sphereProjectionRadius)
+            ].compactMap { $0 }
+            if !projectionControls.isEmpty {
+                nodes.append(MacRadialNavNode(
+                    id: "transform.system.sphereProjection",
+                    title: "Sphere Projection",
+                    systemImage: AppIcons.globeAsiaAustralia,
+                    children: projectionControls
+                ))
+            }
+        }
+
+        let cache = radialCache
+        let stack = cache.spaceWarpStack
+        let opNodes = stack.enumerated().map { position, op in
+            MacRadialTransformNodeFactory.branch(
+                for: op,
+                position: position,
+                read: { id in
+                    cache.spaceWarpStack.first(where: { $0.id == id })
+                },
+                update: { id, mutate in
+                    cache.updateSpaceWarpOp(id: id, mutate)
+                }
+            )
+        }
+
+        guard launcherStyle == .radial else { return nodes + opNodes }
+
+        // The fan has an eight-item readability budget. Preserve a final route
+        // to the full editor rather than silently dropping the remainder; the
+        // flattened rectangle layout above always contains every instance.
+        let remainingCapacity = max(Self.maxSlidersPerRing - nodes.count, 0)
+        guard opNodes.count > remainingCapacity else { return nodes + opNodes }
+        let visibleCount = max(remainingCapacity - 1, 0)
+        nodes.append(contentsOf: opNodes.prefix(visibleCount))
+        if remainingCapacity > 0 {
+            nodes.append(MacRadialNavNode(
+                id: "transform.more",
+                title: "More Transforms",
+                systemImage: "ellipsis.circle",
+                clickAction: { activateShapeFromLauncher(.transformations) }
+            ))
+        }
+        return nodes
     }
 
     private func visualizationsSliderNodes(for section: VisualizationsRailSection) -> [MacRadialNavNode] {

@@ -442,6 +442,7 @@ struct MacRadialTabMenu: View {
     let suspendsHoverNavigation: Bool
     @Binding var hoveredSlider: MacRadialActiveSlider?
     let onSliderEditingChanged: (Bool) -> Void
+    let onDismiss: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focusedItemID: String?
@@ -456,6 +457,16 @@ struct MacRadialTabMenu: View {
     /// The layer currently under the pointer. A receded parent layer returns
     /// to full strength while the user moves back through it.
     @State private var hoveredRingDepth: Int?
+
+    /// Focus identifiers for launcher chrome live outside the navigation tree.
+    /// Keeping them in the same explicit order as tree nodes prevents SwiftUI's
+    /// implicit key loop from skipping the layout controls after we consume Tab.
+    private enum ChromeFocusID {
+        static let radialLayout = "launcher.chrome.layout.radial"
+        static let gridLayout = "launcher.chrome.layout.grid"
+        static let tighterCurvature = "launcher.chrome.curvature.tighter"
+        static let widerCurvature = "launcher.chrome.curvature.wider"
+    }
 
     /// Hovering a branch pill this long commits the selection. Long enough that
     /// sweeping across a pill en route to another does not thrash the deeper
@@ -477,9 +488,7 @@ struct MacRadialTabMenu: View {
     }
 
     private var anchor: CGPoint {
-        layoutStyle == .radial
-            ? pointerAnchor
-            : CGPoint(x: size.width - 18, y: pointerAnchor.y)
+        Self.resolvedAnchor(size: size, pointerAnchor: pointerAnchor, layoutStyle: layoutStyle)
     }
 
     private var opensLeft: Bool { anchor.x >= size.width * 0.5 }
@@ -490,11 +499,55 @@ struct MacRadialTabMenu: View {
         return anchor.x >= horizontalClearance && anchor.x <= size.width - horizontalClearance
     }
 
-    private let gridPrimaryWidth: CGFloat = 166
+    static let gridAnchorTrailingInset: CGFloat = 22
+    static let windowDragHandleSize: CGFloat = 44
+    static let gridPrimaryWidth: CGFloat = 166
+    static let gridRightInset: CGFloat = 30
+
+    private var gridPrimaryWidth: CGFloat { Self.gridPrimaryWidth }
     private let gridChildWidth: CGFloat = 116
     private let gridSliderWidth: CGFloat = 136
-    private let gridRightInset: CGFloat = 6
+    /// Leave a clear rail for the window-drag hub. The old 6pt inset put the
+    /// central primary pill underneath the hub in flattened/grid mode.
+    private var gridRightInset: CGFloat { Self.gridRightInset }
     private let radialSliderWidth: CGFloat = 118
+
+    static func resolvedAnchor(
+        size: CGSize,
+        pointerAnchor: CGPoint,
+        layoutStyle: MacTabLauncherStyle
+    ) -> CGPoint {
+        layoutStyle == .radial
+            ? pointerAnchor
+            : CGPoint(x: size.width - gridAnchorTrailingInset, y: pointerAnchor.y)
+    }
+
+    static func windowDragHandleFrame(
+        size: CGSize,
+        pointerAnchor: CGPoint,
+        layoutStyle: MacTabLauncherStyle
+    ) -> CGRect {
+        let center = resolvedAnchor(size: size, pointerAnchor: pointerAnchor, layoutStyle: layoutStyle)
+        return CGRect(
+            x: center.x - windowDragHandleSize * 0.5,
+            y: center.y - windowDragHandleSize * 0.5,
+            width: windowDragHandleSize,
+            height: windowDragHandleSize
+        )
+    }
+
+    /// Frame of the primary grid pill aligned with the hub's row. Used to keep
+    /// the draggable window target geometrically separate from menu controls.
+    static func gridCenterPrimaryPillFrame(size: CGSize, pointerAnchor: CGPoint) -> CGRect {
+        let center = resolvedAnchor(size: size, pointerAnchor: pointerAnchor, layoutStyle: .grid)
+        let centerX = center.x - gridRightInset - gridPrimaryWidth * 0.5
+        return CGRect(
+            x: centerX - gridPrimaryWidth * 0.5,
+            y: center.y - 18,
+            width: gridPrimaryWidth,
+            height: 36
+        )
+    }
 
     /// Grid mode is a right-edge rail: every primary capsule and the toolbar
     /// share this trailing boundary regardless of their label length.
@@ -504,7 +557,7 @@ struct MacRadialTabMenu: View {
 
     var body: some View {
         let rings = ringLayouts()
-        let focusable = rings.flatMap { ring in ring.nodes.filter { $0.slider == nil } }
+        let focusOrder = keyboardFocusOrder(rings: rings)
 
         ZStack {
             if layoutStyle == .radial {
@@ -519,7 +572,6 @@ struct MacRadialTabMenu: View {
             layoutPicker(primaryPositions: rings.first?.positions ?? [])
 
             anchorMark
-                .allowsHitTesting(false)
         }
         .frame(width: size.width, height: size.height)
         .coordinateSpace(name: Self.coordinateSpaceName)
@@ -540,12 +592,25 @@ struct MacRadialTabMenu: View {
                 pendingHoverNodeID = nil
             }
         }
-        .onKeyPress(.tab) {
-            moveFocus(through: focusable, backward: NSEvent.modifierFlags.contains(.shift))
+        .onKeyPress(.tab, phases: [.down, .repeat]) { press in
+            moveFocus(through: focusOrder, backward: press.modifiers.contains(.shift))
+            return .handled
+        }
+        .onKeyPress(
+            keys: [.upArrow, .downArrow, .leftArrow, .rightArrow],
+            phases: [.down, .repeat]
+        ) { press in
+            handleDirectionalKey(press, focusOrder: focusOrder)
+        }
+        .onKeyPress(keys: [.return, .space], phases: .down) { _ in
+            activateFocusedItem()
+        }
+        .onKeyPress(.escape, phases: .down) { _ in
+            retreatOrDismiss()
             return .handled
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Radial control tabs")
+        .accessibilityLabel("Control launcher")
     }
 
     static let coordinateSpaceName = "MacRadialTabMenu"
@@ -748,6 +813,7 @@ struct MacRadialTabMenu: View {
                         node: node,
                         slider: slider,
                         fixedWidth: width,
+                        isFocused: focusedItemID == node.id,
                         sceneAccent: sceneAccent,
                         onHoverChanged: { hovering in
                             updateHoveredRing(ring.depth, hovering: hovering)
@@ -759,6 +825,8 @@ struct MacRadialTabMenu: View {
                         },
                         onEditingChanged: onSliderEditingChanged
                     )
+                    .focusable()
+                    .focused($focusedItemID, equals: node.id)
                 } else {
                     MacRadialTabButton(
                         item: node,
@@ -890,7 +958,14 @@ struct MacRadialTabMenu: View {
 
     private func gridPositions(count: Int, depth: Int, centerY: CGFloat, sliderRing: Bool = false) -> [CGPoint] {
         guard count > 0 else { return [] }
-        let spacing: CGFloat = depth == 0 ? 44 : (sliderRing ? 40 : 32)
+        let preferredSpacing: CGFloat = depth == 0 ? 44 : (sliderRing ? 40 : 32)
+        // The flattened formula list can be longer than a readable radial ring.
+        // Tighten only as much as needed to retain every 30pt slider hit target
+        // inside the window's 30pt center margins.
+        let availableSpan = max(size.height - 60, 0)
+        let fittingSpacing = count > 1 ? availableSpan / CGFloat(count - 1) : preferredSpacing
+        let minimumSpacing: CGFloat = sliderRing ? 32 : 30
+        let spacing = min(preferredSpacing, max(minimumSpacing, fittingSpacing))
         // Columns tighten right-to-left: primary rail, branch column, slider
         // column. Centers keep a ~20pt gutter between capsule edges.
         let columnX: CGFloat
@@ -918,6 +993,8 @@ struct MacRadialTabMenu: View {
     private func layoutPicker(primaryPositions: [CGPoint]) -> some View {
         HStack(spacing: 3) {
             ForEach(MacTabLauncherStyle.allCases, id: \.self) { style in
+                let focusID = layoutFocusID(for: style)
+                let isKeyboardFocused = focusedItemID == focusID
                 Button {
                     withAnimation(.easeOut(duration: 0.16)) {
                         layoutStyle = style
@@ -928,13 +1005,21 @@ struct MacRadialTabMenu: View {
                         .frame(width: 24, height: 22)
                         .foregroundStyle(layoutStyle == style ? Color.white : Color.white.opacity(0.52))
                         .background(
-                            layoutStyle == style
+                            layoutStyle == style || isKeyboardFocused
                                 ? Color(red: 0.58, green: 0.13, blue: 0.84).opacity(0.88)
                                 : Color.clear,
                             in: Capsule()
                         )
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(
+                                    isKeyboardFocused ? sceneAccent.opacity(0.92) : Color.clear,
+                                    lineWidth: 1.2
+                                )
+                        )
                 }
                 .buttonStyle(.plain)
+                .focused($focusedItemID, equals: focusID)
                 .help("Use \(style.rawValue.lowercased()) tabs")
             }
 
@@ -944,8 +1029,16 @@ struct MacRadialTabMenu: View {
                     .frame(width: 1, height: 14)
                     .padding(.horizontal, 1)
 
-                curvatureButton(systemImage: "minus", delta: -0.08)
-                curvatureButton(systemImage: "plus", delta: 0.08)
+                curvatureButton(
+                    systemImage: "minus",
+                    delta: -0.08,
+                    focusID: ChromeFocusID.tighterCurvature
+                )
+                curvatureButton(
+                    systemImage: "plus",
+                    delta: 0.08,
+                    focusID: ChromeFocusID.widerCurvature
+                )
             }
         }
         .padding(3)
@@ -972,8 +1065,9 @@ struct MacRadialTabMenu: View {
         )
     }
 
-    private func curvatureButton(systemImage: String, delta: Double) -> some View {
-        Button {
+    private func curvatureButton(systemImage: String, delta: Double, focusID: String) -> some View {
+        let isKeyboardFocused = focusedItemID == focusID
+        return Button {
             withAnimation(.easeOut(duration: 0.14)) {
                 curvature = min(max(curvature + delta, 0.35), 1.35)
             }
@@ -981,9 +1075,14 @@ struct MacRadialTabMenu: View {
             Image(systemName: systemImage)
                 .font(.system(size: 9, weight: .bold))
                 .frame(width: 19, height: 22)
-                .foregroundStyle(Color.white.opacity(0.72))
+                .foregroundStyle(isKeyboardFocused ? Color.white : Color.white.opacity(0.72))
+                .background(
+                    isKeyboardFocused ? sceneAccent.opacity(0.34) : Color.clear,
+                    in: Capsule()
+                )
         }
         .buttonStyle(.plain)
+        .focused($focusedItemID, equals: focusID)
         .help(delta < 0 ? "Tighten radial curvature" : "Open radial curvature")
     }
 
@@ -1074,15 +1173,181 @@ struct MacRadialTabMenu: View {
                 .frame(width: 6, height: 6)
                 .shadow(color: Color.purple.opacity(0.9), radius: 7)
         }
+        .frame(width: Self.windowDragHandleSize, height: Self.windowDragHandleSize)
+        .contentShape(Circle())
+        .gesture(WindowDragGesture())
         .position(anchor)
+        .help("Drag to move the window")
+        .accessibilityElement()
+        .accessibilityLabel("Window drag handle")
+        .accessibilityHint("Drag to move the Threshold window")
     }
 
-    private func moveFocus(through items: [MacRadialNavNode], backward: Bool) {
-        guard !items.isEmpty else { return }
-        let currentIndex = focusedItemID.flatMap { id in items.firstIndex(where: { $0.id == id }) } ?? 0
-        let delta = backward ? -1 : 1
-        let nextIndex = (currentIndex + delta + items.count) % items.count
-        focusedItemID = items[nextIndex].id
+    // MARK: Keyboard navigation
+
+    /// Rectangle mode is intentionally flattened for keyboard traversal. Its
+    /// preorder contains every node in the tree, and focusing a deep target
+    /// reveals the ancestor columns needed to put that control on screen. The
+    /// radial fan keeps its spatial, currently-visible ring order.
+    private func keyboardFocusOrder(rings: [RingLayout]) -> [MacRadialKeyboardTarget] {
+        let flattened = roots.flattenedKeyboardTargets()
+        let nodeTargets: [MacRadialKeyboardTarget]
+        if layoutStyle == .grid {
+            nodeTargets = flattened
+        } else {
+            let targetsByID = Dictionary(uniqueKeysWithValues: flattened.map { ($0.id, $0) })
+            nodeTargets = rings.flatMap(\.nodes).compactMap { targetsByID[$0.id] }
+        }
+
+        let chromeTargets = chromeFocusIDs.map {
+            MacRadialKeyboardTarget(id: $0, ancestorPath: [])
+        }
+        return nodeTargets + chromeTargets
+    }
+
+    private var chromeFocusIDs: [String] {
+        var ids = [ChromeFocusID.radialLayout, ChromeFocusID.gridLayout]
+        if layoutStyle == .radial {
+            ids += [ChromeFocusID.tighterCurvature, ChromeFocusID.widerCurvature]
+        }
+        return ids
+    }
+
+    private func layoutFocusID(for style: MacTabLauncherStyle) -> String {
+        switch style {
+        case .radial: ChromeFocusID.radialLayout
+        case .grid: ChromeFocusID.gridLayout
+        }
+    }
+
+    private func moveFocus(through targets: [MacRadialKeyboardTarget], backward: Bool) {
+        guard let nextID = MacRadialKeyboardNavigation.nextID(
+            from: focusedItemID,
+            in: targets,
+            backward: backward
+        ) else { return }
+        focusKeyboardTarget(nextID)
+    }
+
+    private func focusKeyboardTarget(_ id: String) {
+        if layoutStyle == .grid,
+           let target = roots.flattenedKeyboardTargets().first(where: { $0.id == id }) {
+            setNavigationPath(target.ancestorPath)
+        }
+        focusedItemID = id
+    }
+
+    private func handleDirectionalKey(
+        _ press: KeyPress,
+        focusOrder: [MacRadialKeyboardTarget]
+    ) -> KeyPress.Result {
+        switch press.key {
+        case .upArrow:
+            moveFocus(through: focusOrder, backward: true)
+            return .handled
+        case .downArrow:
+            moveFocus(through: focusOrder, backward: false)
+            return .handled
+        case .leftArrow:
+            if let slider = focusedNode?.slider {
+                slider.step(by: -1)
+            } else {
+                retreatOrDismiss()
+            }
+            return .handled
+        case .rightArrow:
+            if let slider = focusedNode?.slider {
+                slider.step(by: 1)
+                return .handled
+            }
+            return expandFocusedBranch() ? .handled : .ignored
+        default:
+            return .ignored
+        }
+    }
+
+    private var focusedNode: MacRadialNavNode? {
+        guard let focusedItemID else { return nil }
+        return roots.node(withID: focusedItemID)
+    }
+
+    private func activateFocusedItem() -> KeyPress.Result {
+        guard let focusedItemID else { return .ignored }
+
+        switch focusedItemID {
+        case ChromeFocusID.radialLayout:
+            layoutStyle = .radial
+            return .handled
+        case ChromeFocusID.gridLayout:
+            layoutStyle = .grid
+            return .handled
+        case ChromeFocusID.tighterCurvature:
+            curvature = min(max(curvature - 0.08, 0.35), 1.35)
+            return .handled
+        case ChromeFocusID.widerCurvature:
+            curvature = min(max(curvature + 0.08, 0.35), 1.35)
+            return .handled
+        default:
+            break
+        }
+
+        guard let node = roots.node(withID: focusedItemID) else { return .ignored }
+        if node.slider != nil {
+            // Sliders use Left/Right for adjustment. Consuming activation avoids
+            // Space falling through to viewport playback while a slider owns focus.
+            return .handled
+        }
+        if let action = node.clickAction {
+            action()
+            return .handled
+        }
+        return expandFocusedBranch() ? .handled : .ignored
+    }
+
+    /// Right Arrow (or activation of a pure branch) descends without running a
+    /// combined branch's click action. This is the keyboard route to the child
+    /// sliders that pointer users reveal by hovering.
+    @discardableResult
+    private func expandFocusedBranch() -> Bool {
+        guard let focusedItemID,
+              let node = roots.node(withID: focusedItemID),
+              node.isBranch,
+              let target = roots.flattenedKeyboardTargets().first(where: { $0.id == focusedItemID })
+        else { return false }
+
+        setNavigationPath(target.ancestorPath + [node.id])
+        if let firstChild = node.children.first {
+            self.focusedItemID = firstChild.id
+        }
+        return true
+    }
+
+    private func retreatOrDismiss() {
+        if let focusedItemID,
+           let target = roots.flattenedKeyboardTargets().first(where: { $0.id == focusedItemID }),
+           let parentID = target.ancestorPath.last {
+            setNavigationPath(Array(target.ancestorPath.dropLast()))
+            self.focusedItemID = parentID
+            return
+        }
+
+        if let parentID = path.last {
+            setNavigationPath(Array(path.dropLast()))
+            focusedItemID = parentID
+        } else {
+            onDismiss()
+        }
+    }
+
+    private func setNavigationPath(_ newPath: [String]) {
+        guard path != newPath else { return }
+        if reduceMotion {
+            path = newPath
+        } else {
+            withAnimation(.easeOut(duration: 0.14)) {
+                path = newPath
+            }
+        }
     }
 }
 
@@ -1228,7 +1493,14 @@ private struct MacRadialTabButton: View {
                 }
             }
         }
-        .help(item.title)
+        .help(item.isBranch
+            ? "\(item.title): press Right Arrow to reveal its controls"
+            : item.title)
+        .accessibilityHint(item.isBranch
+            ? (item.clickAction != nil
+                ? "Press Right Arrow to reveal child controls. Press Return to open this section."
+                : "Press Right Arrow or Return to reveal child controls.")
+            : "Press Return to open this control.")
         .accessibilityAddTraits(item.isSelected ? .isSelected : [])
     }
 
@@ -1302,6 +1574,7 @@ private struct MacRadialSliderPill: View {
     let node: MacRadialNavNode
     let slider: MacRadialSliderBinding
     let fixedWidth: CGFloat
+    let isFocused: Bool
     let sceneAccent: Color
     let onHoverChanged: (Bool) -> Void
     let onEditingChanged: (Bool) -> Void
@@ -1314,7 +1587,7 @@ private struct MacRadialSliderPill: View {
     private let fullRangeTravel: CGFloat = 180
 
     private var isEnabled: Bool { slider.isEnabled() }
-    private var isEmphasized: Bool { isEnabled && (isHovering || isDragging) }
+    private var isEmphasized: Bool { isFocused || (isEnabled && (isHovering || isDragging)) }
 
     var body: some View {
         let value = slider.read()
@@ -1403,21 +1676,16 @@ private struct MacRadialSliderPill: View {
                     if !enabled { resetInteractionState() }
                 }
                 .help(isEnabled
-                    ? "\(node.title): drag right to increase, left to decrease, or scroll for fine adjustment"
+                    ? "\(node.title): use Left/Right, drag, or scroll to adjust"
                     : "\(node.title) is unavailable")
-                .disabled(!isEnabled)
                 .accessibilityElement()
                 .accessibilityLabel(node.title)
                 .accessibilityValue(isEnabled ? formattedValue : "\(formattedValue), unavailable")
                 .accessibilityHint(isEnabled
-                    ? "Drag, scroll, or use accessibility adjustment actions to change the value."
+                    ? "Use Left or Right, drag, scroll, or accessibility adjustment actions to change the value."
                     : "This setting is currently unavailable.")
                 .accessibilityAdjustableAction { direction in
-                    guard slider.isEnabled() else { return }
-                    let span = slider.range.upperBound - slider.range.lowerBound
-                    let step = span / 20
-                    let delta: Float = direction == .increment ? step : -step
-                    slider.writeIfEnabled((slider.read() + delta).clamped(to: slider.range))
+                    slider.step(by: direction == .increment ? 1 : -1)
                 }
         )
     }
@@ -1506,6 +1774,9 @@ struct MacTabInputMonitor: NSViewRepresentable {
     /// the slider works. Takes the location so the check stays geometric — a
     /// hover id whose exit event was dropped must not keep matching.
     let isPointerOverSlider: (CGPoint) -> Bool
+    /// Keeps double-click dismissal from swallowing the drag hub's second
+    /// mouse-down before WindowDragGesture can take ownership.
+    let isPointerOverWindowDragHandle: (CGPoint) -> Bool
     /// Physical-up-positive scroll delta to apply to the hovered slider.
     let onSliderScroll: (CGFloat) -> Void
 
@@ -1517,6 +1788,7 @@ struct MacTabInputMonitor: NSViewRepresentable {
             onTwoFingerSwipeUp: onTwoFingerSwipeUp,
             onDoubleClick: onDoubleClick,
             isPointerOverSlider: isPointerOverSlider,
+            isPointerOverWindowDragHandle: isPointerOverWindowDragHandle,
             onSliderScroll: onSliderScroll
         )
     }
@@ -1536,6 +1808,7 @@ struct MacTabInputMonitor: NSViewRepresentable {
         context.coordinator.onTwoFingerSwipeUp = onTwoFingerSwipeUp
         context.coordinator.onDoubleClick = onDoubleClick
         context.coordinator.isPointerOverSlider = isPointerOverSlider
+        context.coordinator.isPointerOverWindowDragHandle = isPointerOverWindowDragHandle
         context.coordinator.onSliderScroll = onSliderScroll
     }
 
@@ -1551,6 +1824,7 @@ struct MacTabInputMonitor: NSViewRepresentable {
         var onTwoFingerSwipeUp: () -> Void
         var onDoubleClick: () -> Void
         var isPointerOverSlider: (CGPoint) -> Bool
+        var isPointerOverWindowDragHandle: (CGPoint) -> Bool
         var onSliderScroll: (CGFloat) -> Void
         weak var hostView: NSView?
         private var monitor: Any?
@@ -1565,6 +1839,7 @@ struct MacTabInputMonitor: NSViewRepresentable {
             onTwoFingerSwipeUp: @escaping () -> Void,
             onDoubleClick: @escaping () -> Void,
             isPointerOverSlider: @escaping (CGPoint) -> Bool,
+            isPointerOverWindowDragHandle: @escaping (CGPoint) -> Bool,
             onSliderScroll: @escaping (CGFloat) -> Void
         ) {
             self.isPressed = isPressed
@@ -1573,6 +1848,7 @@ struct MacTabInputMonitor: NSViewRepresentable {
             self.onTwoFingerSwipeUp = onTwoFingerSwipeUp
             self.onDoubleClick = onDoubleClick
             self.isPointerOverSlider = isPointerOverSlider
+            self.isPointerOverWindowDragHandle = isPointerOverWindowDragHandle
             self.onSliderScroll = onSliderScroll
         }
 
@@ -1588,9 +1864,12 @@ struct MacTabInputMonitor: NSViewRepresentable {
                     isPressed.wrappedValue = event.modifierFlags.contains(.shift)
                 } else if event.type == .leftMouseDown {
                     if isRadialVisible, event.clickCount >= 2 {
-                        // A double-click on a slider is a quick re-grab, not a
-                        // dismissal — let it start the second drag.
-                        if isPointerOverSlider(event.locationInWindow) { return event }
+                        // A double-click on an interactive drag target is a quick
+                        // re-grab, not a dismissal — let it start the second drag.
+                        if isPointerOverSlider(event.locationInWindow)
+                            || isPointerOverWindowDragHandle(event.locationInWindow) {
+                            return event
+                        }
                         onDoubleClick()
                         return nil
                     }

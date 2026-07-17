@@ -5,6 +5,24 @@ import Testing
 
 @Suite("Mac radial tab geometry")
 struct MacRadialTabGeometryTests {
+    @Test("Flattened window-drag hub does not overlap its center primary control")
+    func gridWindowDragHubClearsPrimaryControl() {
+        let size = CGSize(width: 1_440, height: 640)
+        let pointerAnchor = CGPoint(x: 900, y: 320)
+        let handle = MacRadialTabMenu.windowDragHandleFrame(
+            size: size,
+            pointerAnchor: pointerAnchor,
+            layoutStyle: .grid
+        )
+        let primary = MacRadialTabMenu.gridCenterPrimaryPillFrame(
+            size: size,
+            pointerAnchor: pointerAnchor
+        )
+
+        #expect(!handle.intersects(primary))
+        #expect(primary.maxX < handle.minX)
+    }
+
     @Test("Primary pills remain separated when revealed against the top edge")
     func primaryRingDoesNotOverlapAtTopEdge() {
         let positions = MacRadialTabGeometry(curvature: 0.35).positions(
