@@ -424,10 +424,10 @@ struct MacRadialTabGeometry {
 /// Screen-position anchored, tree-driven launcher for the macOS render view.
 ///
 /// Renders one ring per level of the navigation `path` through `roots`.
-/// `.radial` is the public launcher; the retained `.grid` renderer stacks the
-/// same levels as right-edge columns for compatibility. Hovering a branch pill
-/// auto-selects it after a short dwell; only fallback leaves (which open the
-/// full controls surface) and slider drags perform side effects.
+/// Radial and grid are peer presentations of `hierarchy`: radial places levels
+/// on arcs around the pointer, while grid flattens the same routes into right-
+/// edge columns. Hovering a branch pill auto-selects it after a short dwell;
+/// only fallback leaves and slider drags perform side effects.
 struct MacQuickMenu: View {
     let size: CGSize
     let pointerAnchor: CGPoint
@@ -817,7 +817,7 @@ struct MacQuickMenu: View {
                         width: width + 16,
                         height: 30 + 16
                     )
-                    MacRadialSliderPill(
+                    MacQuickSliderPill(
                         node: node,
                         slider: slider,
                         fixedWidth: width,
@@ -836,7 +836,7 @@ struct MacQuickMenu: View {
                     .focusable()
                     .focused($focusedItemID, equals: node.id)
                 } else {
-                    MacRadialTabButton(
+                    MacQuickMenuButton(
                         item: node,
                         depth: ring.depth,
                         fixedWidth: layoutStyle == .grid
@@ -1361,7 +1361,7 @@ struct MacQuickMenu: View {
     }
 }
 
-private struct MacRadialTabButton: View {
+private struct MacQuickMenuButton: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let item: MacNavigationNode
@@ -1578,7 +1578,7 @@ private struct MacRadialTabButton: View {
 /// Static gradients + a proportional fill only — same performance contract as
 /// the tab pills: no blur, no control-tree mount, nothing re-rendering the
 /// Metal view underneath.
-private struct MacRadialSliderPill: View {
+private struct MacQuickSliderPill: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let node: MacNavigationNode
