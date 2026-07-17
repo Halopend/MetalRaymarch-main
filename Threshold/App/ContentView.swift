@@ -117,6 +117,16 @@ struct ContentView: View {
     #endif
     }
 
+    private var immersiveLayoutMinimumHeight: CGFloat? {
+    #if os(iOS)
+        // iPad windows can be shorter than the desktop workspace in Stage
+        // Manager, Split View, and while the software keyboard is visible.
+        nil
+    #else
+        576
+    #endif
+    }
+
     private var usesCompactWorkspaceLayout: Bool {
     #if os(iOS)
         horizontalSizeClass == .compact
@@ -653,7 +663,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .frame(minWidth: immersiveLayoutMinimumWidth, minHeight: 576)
+        .frame(minWidth: immersiveLayoutMinimumWidth, minHeight: immersiveLayoutMinimumHeight)
     }
 
     private var regularWorkspaceLayout: some View {

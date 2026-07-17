@@ -257,7 +257,11 @@ struct SaveDestinationSheet: View {
             }
         }
         .padding(16)
+        #if os(iOS)
+        .frame(maxWidth: 390)
+        #else
         .frame(width: 390)
+        #endif
         .alert("Replace the reset point?", isPresented: $isConfirmingResetReplacement) {
             Button("Cancel", role: .cancel) {}
             Button("Replace Reset Point", role: .destructive) {

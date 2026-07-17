@@ -36,13 +36,17 @@ private struct ThresholdiOSRootView: View {
     var body: some View {
         GeometryReader { proxy in
             let widths = inspectorColumnWidths(for: proxy.size)
+            let safeAreaInsets = proxy.safeAreaInsets
 
             ThresholdiOSRenderView(appModel: appModel)
                 .ignoresSafeArea()
                 .background(Color.black)
                 .overlay(alignment: .topTrailing) {
                     controlsToggle
-                        .padding(16)
+                        // The Metal surface stays edge-to-edge, but the control must
+                        // clear the status bar and Stage Manager window chrome.
+                        .padding(.top, max(16, safeAreaInsets.top + 8))
+                        .padding(.trailing, max(16, safeAreaInsets.trailing + 8))
                 }
                 .inspector(isPresented: $isShowingControls) {
                     ThresholdiOSInspectorContent(isShowingControls: $isShowingControls)
@@ -59,9 +63,15 @@ private struct ThresholdiOSRootView: View {
 
     private func inspectorColumnWidths(for size: CGSize) -> (min: CGFloat, ideal: CGFloat, max: CGFloat) {
         let availableWidth = max(size.width, 1)
-        let idealWidth = max(460, availableWidth * (size.width > size.height ? 0.66 : 0.72))
-        let minWidth = max(340, idealWidth * 0.72)
-        let maxWidth = max(idealWidth, availableWidth * 0.82)
+        // Leave a little room for the system's window/inspector chrome and never
+        // advertise a column wider than the current Stage Manager/Split View
+        // window. The normal 340-point floor yields only when the window is
+        // genuinely narrower than that.
+        let widthCeiling = max(1, availableWidth - 32)
+        let preferredIdeal = max(460, availableWidth * (size.width > size.height ? 0.66 : 0.72))
+        let idealWidth = min(preferredIdeal, widthCeiling)
+        let minWidth = min(340, idealWidth)
+        let maxWidth = min(widthCeiling, max(idealWidth, availableWidth * 0.82))
         return (min: minWidth, ideal: idealWidth, max: maxWidth)
     }
 

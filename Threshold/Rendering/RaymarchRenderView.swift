@@ -887,12 +887,18 @@ final class ThresholdMacRenderer {
             avgStepsHolder.withLock { $0 = avg }
         }
 
+        #if !targetEnvironment(simulator)
+        // CAMetalDrawable presentation callbacks are available on device but
+        // are absent from the iPad Simulator SDK. Simulator timing is not
+        // representative of display pacing, so leave these diagnostics empty
+        // there instead of substituting command-buffer completion timestamps.
         let framePacingTracker = self.framePacingTracker
         drawable.addPresentedHandler { drawable in
             framePacingTracker.withLock { tracker in
                 _ = tracker.recordPresentation(at: drawable.presentedTime)
             }
         }
+        #endif
 
         let activePipeline = resolveActivePipeline(appModel: appModel)
 

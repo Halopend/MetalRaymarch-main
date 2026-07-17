@@ -1,4 +1,4 @@
-#if os(macOS) || os(iOS)
+#if (os(macOS) || os(iOS)) && canImport(MetalFX)
 import Metal
 import MetalFX
 

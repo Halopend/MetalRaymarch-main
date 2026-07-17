@@ -233,7 +233,11 @@ struct SongPickerSheet: View {
                 }
             }
         }
+        #if os(iOS)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #else
         .frame(minWidth: 400, minHeight: 500)
+        #endif
     }
 
     private func filteredSongs(from provider: MusicServiceProvider) -> [UnifiedTrack] {
