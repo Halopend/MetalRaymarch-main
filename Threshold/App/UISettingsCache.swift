@@ -287,6 +287,15 @@ final class UISettingsCache {
 
     @MainActor
     func pushFractalType(_ type: FractalModelType, gestureController: GestureController?) {
+        if let appModel = _appModel {
+            appModel.switchFractalType(type)
+            activeCustomFormulaHash = nil
+            loadFromSettings()
+            return
+        }
+
+        // Standalone previews/tests can construct a cache without AppModel.
+        // Preserve the local fallback while production uses the canonical path.
         let oldType = settings?.fractalType
         settings?.fractalType = type
         activeCustomFormulaHash = nil

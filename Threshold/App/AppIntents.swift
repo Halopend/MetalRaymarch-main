@@ -13,7 +13,28 @@ struct PlayAnimationIntent: AppIntent {
             return .result(dialog: "Threshold app not available")
         }
 
-        appModel.animationManager?.play()
+        guard let animationManager = appModel.animationManager else {
+            return .result(dialog: "Animation controls aren't available")
+        }
+        guard !animationManager.isRecording else {
+            return .result(dialog: "Stop recording before playing an animation")
+        }
+
+        // A fresh launch has no selected scene. Match the in-app transport
+        // shortcut by selecting the first playable scene before starting.
+        if animationManager.currentScene?.keyframes.count ?? 0 < 2 {
+            animationManager.currentScene = animationManager.scenes.first {
+                $0.keyframes.count >= 2
+            }
+        }
+        guard animationManager.currentScene != nil else {
+            return .result(dialog: "No playable animation scene is available")
+        }
+
+        animationManager.play()
+        guard animationManager.isPlaying else {
+            return .result(dialog: "The animation couldn't be started")
+        }
         return .result(dialog: "Animation playing")
     }
 }
@@ -197,10 +218,15 @@ struct ToggleMusicPlaybackIntent: AppIntent {
             return .result(dialog: "Threshold app not available")
         }
 
-        appModel.musicService.togglePlayPause()
-        // Transport is fire-and-forget (the provider runs async), so isPlaying
-        // still reflects the pre-toggle state here. Report the action rather
-        // than a state that may be wrong by the time Siri speaks it.
+        guard let provider = appModel.musicService.activeProvider else {
+            #if os(macOS)
+            return .result(dialog: "Music transport isn't available in Threshold for Mac")
+            #else
+            return .result(dialog: "Connect Apple Music in Threshold first")
+            #endif
+        }
+
+        await provider.togglePlayPause()
         return .result(dialog: "Toggling music playback")
     }
 }
@@ -217,9 +243,15 @@ struct NextTrackIntent: AppIntent {
             return .result(dialog: "Threshold app not available")
         }
 
-        appModel.musicService.next()
-        // nowPlaying still reflects the previous track until the provider's
-        // async transport completes, so report the action, not a stale track.
+        guard let provider = appModel.musicService.activeProvider else {
+            #if os(macOS)
+            return .result(dialog: "Music transport isn't available in Threshold for Mac")
+            #else
+            return .result(dialog: "Connect Apple Music in Threshold first")
+            #endif
+        }
+
+        await provider.next()
         return .result(dialog: "Skipping to the next track")
     }
 }
@@ -236,8 +268,15 @@ struct PreviousTrackIntent: AppIntent {
             return .result(dialog: "Threshold app not available")
         }
 
-        appModel.musicService.previous()
-        // Same async caveat as next track: avoid announcing a stale track.
+        guard let provider = appModel.musicService.activeProvider else {
+            #if os(macOS)
+            return .result(dialog: "Music transport isn't available in Threshold for Mac")
+            #else
+            return .result(dialog: "Connect Apple Music in Threshold first")
+            #endif
+        }
+
+        await provider.previous()
         return .result(dialog: "Going to the previous track")
     }
 }
@@ -269,8 +308,8 @@ struct NowPlayingIntent: AppIntent {
 /// `modelType` maps back to the engine enum by raw value.
 enum FractalTypeAppEnum: String, AppEnum {
     // Each case's rawValue == the matching FractalModelType.codableString, so
-    // `modelType` resolves by lookup (no converter switch). Covers every
-    // selectable static type (previously missing 3 → unreachable via Siri).
+    // `modelType` resolves by lookup (no converter switch). The invariant test
+    // keeps this list aligned with every selectable built-in type.
     case mandelbox
     case mandelbulb
     case mandelbulbJulia
@@ -280,6 +319,7 @@ enum FractalTypeAppEnum: String, AppEnum {
     case mengerSphere
     case theliPseudoKleinian
     case kleinian
+    case boxFoldMandelbulb
 
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Fractal Type"
 
@@ -293,6 +333,7 @@ enum FractalTypeAppEnum: String, AppEnum {
         .mengerSphere: "Menger Sphere",
         .theliPseudoKleinian: "Theli Pseudo Kleinian",
         .kleinian: "Kleinian",
+        .boxFoldMandelbulb: "Box Fold Mandelbulb",
     ]
 
     /// Maps back to the engine enum by matching the shared codableString
@@ -321,7 +362,7 @@ struct SwitchFractalTypeIntent: AppIntent {
             return .result(dialog: "Threshold app not available")
         }
 
-        appModel.renderSettings.fractalType = fractal.modelType
+        appModel.switchFractalType(fractal.modelType)
         return .result(dialog: "Switched to \(appModel.renderSettings.fractalType.displayName)")
     }
 }
@@ -350,6 +391,66 @@ struct SetAudioSensitivityIntent: AppIntent {
         let clamped = percent.clamped(to: 0...100)
         appModel.renderSettings.fractalAudioAmount = Float(clamped) / 100.0
         return .result(dialog: "Audio sensitivity set to \(clamped)%")
+    }
+}
+
+/// Voice-friendly sensitivity levels. App Shortcut phrases can interpolate
+/// AppEnum/AppEntity parameters, but not primitive Int parameters, so the
+/// existing free-form Shortcuts action above remains intact while Siri uses
+/// these practical 10-percent steps.
+enum AudioSensitivityLevelAppEnum: Int, AppEnum {
+    case zero = 0
+    case ten = 10
+    case twenty = 20
+    case thirty = 30
+    case forty = 40
+    case fifty = 50
+    case sixty = 60
+    case seventy = 70
+    case eighty = 80
+    case ninety = 90
+    case oneHundred = 100
+
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Audio Sensitivity"
+
+    static let caseDisplayRepresentations: [AudioSensitivityLevelAppEnum: DisplayRepresentation] = [
+        .zero: "0%",
+        .ten: "10%",
+        .twenty: "20%",
+        .thirty: "30%",
+        .forty: "40%",
+        .fifty: "50%",
+        .sixty: "60%",
+        .seventy: "70%",
+        .eighty: "80%",
+        .ninety: "90%",
+        .oneHundred: "100%",
+    ]
+}
+
+/// AppEnum-backed companion used only by the curated Siri phrase. Keeping the
+/// original Int-backed intent preserves existing user shortcuts and arbitrary
+/// 0...100 values in the Shortcuts editor.
+struct SetSpokenAudioSensitivityIntent: AppIntent {
+    static let title: LocalizedStringResource = "Set audio sensitivity level"
+    static let description: LocalizedStringResource = "Set audio sensitivity in ten-percent steps"
+    static let openAppWhenRun = true
+
+    @Parameter(title: "Percent", default: .sixty)
+    var level: AudioSensitivityLevelAppEnum
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Set audio sensitivity to \(\.$level)")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard let appModel = AppModel.shared else {
+            return .result(dialog: "Threshold app not available")
+        }
+
+        appModel.renderSettings.fractalAudioAmount = Float(level.rawValue) / 100.0
+        return .result(dialog: "Audio sensitivity set to \(level.rawValue)%")
     }
 }
 
@@ -387,8 +488,9 @@ struct ThresholdAppShortcutsProvider: AppShortcutsProvider {
         )
 
         AppShortcut(
-            intent: SetAudioSensitivityIntent(),
-            phrases: ["Set audio sensitivity in \(.applicationName)"],
+            intent: SetSpokenAudioSensitivityIntent(),
+            phrases: ["Set \(.applicationName) audio sensitivity to \(\.$level)",
+                      "Set audio sensitivity in \(.applicationName)"],
             shortTitle: "Set Sensitivity",
             systemImageName: "dial.medium"
         )
@@ -403,8 +505,9 @@ struct ThresholdAppShortcutsProvider: AppShortcutsProvider {
 
         AppShortcut(
             intent: SwitchFractalTypeIntent(),
-            phrases: ["Switch fractal in \(.applicationName)",
-                      "Change \(.applicationName) fractal"],
+            phrases: ["Switch \(.applicationName) to \(\.$fractal)",
+                      "Change \(.applicationName) fractal to \(\.$fractal)",
+                      "Switch fractal in \(.applicationName)"],
             shortTitle: "Switch Fractal",
             systemImageName: "cube.transparent"
         )

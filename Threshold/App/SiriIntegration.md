@@ -16,7 +16,7 @@ four groups:
 ### Animation transport
 | Intent | Title | Action |
 |--------|-------|--------|
-| `PlayAnimationIntent`  | "Play animation"  | `animationManager?.play()` |
+| `PlayAnimationIntent`  | "Play animation"  | selects the first playable scene when needed, then starts playback |
 | `PauseAnimationIntent` | "Pause animation" | `animationManager?.pause()` |
 | `StopAnimationIntent`  | "Stop animation"  | `animationManager?.stop()` |
 
@@ -34,9 +34,9 @@ four groups:
 ### Music transport (Apple Music / Spotify via `MusicService`)
 | Intent | Title | Action |
 |--------|-------|--------|
-| `ToggleMusicPlaybackIntent` | "Play or pause music" | `musicService.togglePlayPause()` |
-| `NextTrackIntent`           | "Next track"          | `musicService.next()` |
-| `PreviousTrackIntent`       | "Previous track"      | `musicService.previous()` |
+| `ToggleMusicPlaybackIntent` | "Play or pause music" | awaits the connected provider's play/pause action |
+| `NextTrackIntent`           | "Next track"          | awaits the connected provider's next action |
+| `PreviousTrackIntent`       | "Previous track"      | awaits the connected provider's previous action |
 | `NowPlayingIntent`          | "What's playing"      | reads `musicService.nowPlaying` (query-only, does not open the app) |
 
 ### Parameterized intents
@@ -44,12 +44,14 @@ four groups:
 |--------|-------|-----------|
 | `SwitchFractalTypeIntent`   | "Switch fractal"        | `fractal: FractalTypeAppEnum` |
 | `SetAudioSensitivityIntent` | "Set audio sensitivity" | `percent: Int` (0–100, default 60) |
+| `SetSpokenAudioSensitivityIntent` | "Set audio sensitivity level" | `level: AudioSensitivityLevelAppEnum` (0–100 in 10% steps) |
 
-`FractalTypeAppEnum` (an `AppEnum`) is the only app enum that ships. Its cases
-mirror `FractalModelType`'s selectable set (mandelbox, mandelbulb, mandelbulbJulia,
-menger, quaternionJulia, octahedron, mengerSphere, theliPseudoKleinian, kleinian),
-and `.modelType` maps each case back to the engine enum by matching
-`FractalModelType.descriptor.codableString`.
+`FractalTypeAppEnum` mirrors every selectable built-in `FractalModelType`, including
+Box Fold Mandelbulb, and `.modelType` maps each case back to the engine enum by
+matching `FractalModelType.descriptor.codableString`. The companion
+`AudioSensitivityLevelAppEnum` exists because App Shortcut voice phrases can
+interpolate an `AppEnum`, but not the original intent's primitive `Int` parameter.
+The original action remains available for arbitrary values in the Shortcuts editor.
 
 There are **no** `AppEntity` types and **no** `EntityQuery` types in the shipping
 implementation.
@@ -64,7 +66,7 @@ Shortcuts app and Spotlight; the provider list is just the curated zero-config
 1. **Play** — `PlayAnimationIntent`
 2. **Pause** — `PauseAnimationIntent`
 3. **Toggle Audio** — `ToggleAudioReactivityIntent`
-4. **Set Sensitivity** — `SetAudioSensitivityIntent` (parameterized)
+4. **Set Sensitivity** — `SetSpokenAudioSensitivityIntent` (voice-parameterized)
 5. **Boost Beat** — `IncreaseBeatPunchIntent`
 6. **Switch Fractal** — `SwitchFractalTypeIntent` (parameterized)
 7. **Play/Pause Music** — `ToggleMusicPlaybackIntent`
@@ -82,26 +84,20 @@ the highest-value voice commands (parameterized ones especially).
   not available" dialog when it's nil.
 - Most intents set `openAppWhenRun = true`; `NowPlayingIntent` sets it `false`
   (pure query).
-- Music transport intents are **fire-and-forget** — `next`/`previous`/`toggle`
-  run async in the provider, so `nowPlaying` / `isPlaying` still reflect the
-  pre-action state inside `perform()`. The dialogs deliberately report the *action*
-  ("Skipping to the next track"), not a state that may be stale by the time Siri
-  speaks.
+- Music transport intents require an active provider and await its transport
+  action. If Apple Music is not connected, they return an actionable dialog
+  instead of claiming an action occurred.
+- Fractal switching goes through `AppModel.switchFractalType(_:)`, the same path
+  as the in-app picker, so custom-formula state, gesture defaults, parameter
+  stacks, reset state, and UI caches stay synchronized.
 
-### Info.plist keys (present in [`Info.plist`](Info.plist))
+### Info.plist and entitlements
 
-```xml
-<key>NSMicrophoneUsageDescription</key>
-<string>Threshold analyzes live audio input to create music-reactive fractal visualizations.</string>
-<key>NSAppIntentsUsageDescription</key>
-<string>Threshold uses App Intents to enable Siri controls for play/pause animations, lighting intensity, tempo/damping, mood-based tuning, and space transformation effects.</string>
-<key>NSAppIntentsSupported</key>
-<true/>
-```
-
-> Note: the `NSAppIntentsUsageDescription` string still describes an older intent
-> set (lighting/tempo/mood/space). It's user-facing copy, not code — update it to
-> match the shipping intents above when convenient.
+App Intents and App Shortcuts do not require a Siri entitlement or a usage prompt.
+The iPad app intentionally does not declare `NSAppIntentsUsageDescription` or
+`NSAppIntentsSupported`; Xcode extracts and packages `Metadata.appintents`
+automatically. The older visionOS plist still contains those legacy, unused keys.
+The microphone usage description is required separately for live audio input.
 
 ## Quarantined WIP — do not use as reference
 
@@ -126,5 +122,6 @@ shipping surface is entirely in `AppIntents.swift`.
 1. Build and run (see [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) for the
    toolchain pin).
 2. Open the **Shortcuts** app to see all intents (not just the 10 voice phrases).
-3. Try Siri with the app name in the phrase, e.g. "Hey Siri, play music in
-   Threshold" or "Hey Siri, switch fractal in Threshold".
+3. Try Siri with the app name and direct parameters, e.g. "Hey Siri, set Threshold
+   audio sensitivity to eighty percent" or "Hey Siri, switch Threshold to
+   Mandelbulb".

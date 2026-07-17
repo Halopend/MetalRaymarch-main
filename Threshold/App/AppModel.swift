@@ -887,6 +887,29 @@ class AppModel {
         gestureController?.suppressParameterGestures = interacting
     }
 
+    /// Switch to a built-in fractal through one canonical side-effect path.
+    /// App Intents and the in-app picker both use this so formula layers,
+    /// gesture defaults, reset state, and cached UI cannot drift apart.
+    func switchFractalType(_ type: FractalModelType) {
+        guard renderSettings.fractalType != type else { return }
+
+        // A custom distance estimator is tied to `.custom`; detach it before
+        // selecting a built-in type. Custom space warps intentionally survive
+        // type changes because they apply to every fractal.
+        if type != .custom, activeEmbeddedFormula?.effectKind == .fractal {
+            uninstallEmbeddedFormula()
+        }
+
+        renderSettings.fractalType = type
+        parameterPipeline.clearFormulaStacks()
+        gestureController?.applyFractalDefaults()
+        rememberActiveResetPresetFromCurrent()
+        NotificationCenter.default.post(
+            name: AppModel.fractalSettingsDidChangeNotification,
+            object: nil
+        )
+    }
+
     func rememberActiveResetPreset(_ preset: FractalPreset) {
         var snapshot = FractalPreset.fromSettings(
             renderSettings,
