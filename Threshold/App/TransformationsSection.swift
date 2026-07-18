@@ -3,10 +3,10 @@
 //  Threshold
 //
 //  Editor for the composable domain-transform STACK (`RenderSettings.spaceWarpStack`).
-//  Add any number of transforms (Twist / Bend / folds / inversion / kaleidoscope /
-//  ripple), reorder them (order = order of application), enable/disable, and tune
-//  each instance's own parameters. Multiple of the SAME kind can be stacked
-//  (e.g. two box folds, three sphere folds). EVERY edit — structural or slider —
+//  Add transforms, group a contiguous series into an iterated loop, reorder them
+//  (order = order of application), enable/disable, and tune each instance's own
+//  parameters. Multiple of the SAME kind can be stacked. EVERY edit — structural
+//  or slider —
 //  is a live uniform write: the GPU renders the stack via a count-driven runtime
 //  loop (`spaceWarpStackTransform` in Shaders.metal) repacked each frame by
 //  `cSpaceWarpStack`, so nothing ever recompiles a shader. The GPU early-outs to
@@ -29,8 +29,31 @@ struct TransformationsSection: View {
     // place and don't need it (mirrors TwistShapingSection). No edit recompiles a
     // shader — the runtime loop reads the per-frame-repacked uniforms (count + ops).
     @State private var refresh: Int = 0
+    @State private var isCreatingGroup = false
+    @State private var groupSelection: Set<UUID> = []
+    @State private var expandedGroups: Set<UUID> = []
 
     private var ops: [SpaceWarpOpValue] { renderSettings.spaceWarpStack }
+
+    /// The persisted/GPU stack stays flat, but the editor presents each contiguous
+    /// repeat group as a single parent unit containing its child transformations.
+    private struct StackUnit: Identifiable {
+        let id: UUID
+        let range: Range<Int>
+        let groupID: UUID?
+    }
+
+    private var stackUnits: [StackUnit] {
+        var result: [StackUnit] = []
+        var index = 0
+        while index < ops.count {
+            let range = unitRange(containing: index, in: ops)
+            let groupID = ops[index].groupID
+            result.append(StackUnit(id: groupID ?? ops[index].id, range: range, groupID: groupID))
+            index = range.upperBound
+        }
+        return result
+    }
 
     // ── Space "systems": Spherical Inversion + Sphere Projection ─────────────
     //
@@ -62,27 +85,52 @@ struct TransformationsSection: View {
                     .foregroundStyle(.orange)
                     .accessibilityLabel("Beta feature")
                 Spacer()
+                groupCreationControls
                 addMenu
             }
 
-            Text("Choose an embedded primitive, then stack domain transforms top → bottom to build a form. Reorder to change the result; add multiples to compound them. The Mandelbox construction stages expose its folds and recurrence one technique at a time.")
+            Text("Stack domain transforms top → bottom. A group repeats its complete child pipeline for a chosen number of passes; choose and size the base shape in Primitives.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if isCreatingGroup {
+                Label("Select two or more adjacent transformations, then choose Create Group.",
+                      systemImage: "cursorarrow.click.2")
+                    .font(.caption2)
+                    .foregroundStyle(canCreateSelectedGroup ? .indigo : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             // Active space systems first (they aren't part of the reorderable stack).
             if sphericalInversionActive { sphericalInversionCard }
             if sphereProjectionActive { sphereProjectionCard }
 
-            if ops.isEmpty && !sphericalInversionActive && !sphereProjectionActive {
-                Text("No transformations yet. Use ✚ to add one.")
+            HStack {
+                Label("Transformation Stack", systemImage: "square.stack.3d.up")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text("TOP → BOTTOM")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.tertiary)
+            }
+
+            if ops.isEmpty {
+                Text("No transformations yet. Use Add to add one.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 10)
             } else {
-                ForEach(Array(ops.enumerated()), id: \.element.id) { index, op in
-                    opCard(op, index: index, isFirst: index == 0, isLast: index == ops.count - 1)
+                ForEach(stackUnits) { unit in
+                    if let groupID = unit.groupID {
+                        transformationGroupCard(groupID: groupID, range: unit.range)
+                    } else if let index = unit.range.first, ops.indices.contains(index) {
+                        opCard(ops[index], index: index,
+                               isFirst: unit.range.lowerBound == 0,
+                               isLast: unit.range.upperBound == ops.count,
+                               insideGroup: false)
+                    }
                 }
             }
         }
@@ -91,17 +139,29 @@ struct TransformationsSection: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.mint.opacity(0.07)))
     }
 
+    @ViewBuilder
+    private var groupCreationControls: some View {
+        if isCreatingGroup {
+            Button("Cancel") { cancelGroupCreation() }
+                .font(.caption)
+            Button("Create Group") { createSelectedGroup() }
+                .font(.caption.weight(.semibold))
+                .disabled(!canCreateSelectedGroup)
+        } else {
+            Button { beginGroupCreation() } label: {
+                Label("Group", systemImage: "rectangle.inset.filled.and.person.filled")
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.borderless)
+            .disabled(ops.filter { $0.groupID == nil }.count < 2)
+            .help("Select adjacent transformations and place them in an iterated group")
+        }
+    }
+
     // MARK: - Add menu
 
     private var addMenu: some View {
         Menu {
-            Section("Primitives") {
-                ForEach(FractalPrimitiveKind.allCases) { primitive in
-                    Button { select(primitive) } label: {
-                        Label(primitive.name, systemImage: primitive.icon)
-                    }
-                }
-            }
             Section("Build a Mandelbox") {
                 ForEach(MandelboxConstructionStage.allCases) { stage in
                     Button { apply(stage) } label: {
@@ -147,10 +207,20 @@ struct TransformationsSection: View {
     // MARK: - One op card
 
     @ViewBuilder
-    private func opCard(_ op: SpaceWarpOpValue, index: Int, isFirst: Bool, isLast: Bool) -> some View {
+    private func opCard(_ op: SpaceWarpOpValue, index: Int, isFirst: Bool, isLast: Bool,
+                        insideGroup: Bool) -> some View {
         let kind = op.kind
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
+                if isCreatingGroup && !insideGroup {
+                    Button { toggleGroupSelection(op.id) } label: {
+                        Image(systemName: groupSelection.contains(op.id)
+                              ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(groupSelection.contains(op.id) ? .indigo : .secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Include \(kind.displayName) in the new group")
+                }
                 Text("\(index + 1)")
                     .font(.caption2.monospacedDigit().weight(.bold))
                     .foregroundStyle(.secondary)
@@ -183,9 +253,13 @@ struct TransformationsSection: View {
                     set: { v in update(op.id) { $0.isEnabled = v }; refresh &+= 1 }))
                     .labelsHidden()
                     .toggleStyle(.switch)
-                Button { move(op.id, by: -1) } label: { Image(systemName: "chevron.up") }
+                Button { moveTransform(op.id, by: -1, insideGroup: insideGroup) } label: {
+                    Image(systemName: "chevron.up")
+                }
                     .buttonStyle(.borderless).disabled(isFirst)
-                Button { move(op.id, by: 1) } label: { Image(systemName: "chevron.down") }
+                Button { moveTransform(op.id, by: 1, insideGroup: insideGroup) } label: {
+                    Image(systemName: "chevron.down")
+                }
                     .buttonStyle(.borderless).disabled(isLast)
                 Button(role: .destructive) { delete(op.id) } label: { Image(systemName: "trash") }
                     .buttonStyle(.borderless)
@@ -247,7 +321,154 @@ struct TransformationsSection: View {
             underTheHood(kind)
         }
         .padding(8)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+        .background(RoundedRectangle(cornerRadius: 8).fill(
+            groupSelection.contains(op.id) && !insideGroup
+                ? Color.indigo.opacity(0.15) : Color.primary.opacity(0.05)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(
+            groupSelection.contains(op.id) && !insideGroup
+                ? Color.indigo.opacity(0.65) : Color.clear, lineWidth: 1))
+    }
+
+    /// An explicit super-group in the editor. Its children remain ordinary
+    /// transformations, but move together and repeat as a single ordered unit.
+    private func transformationGroupCard(groupID: UUID, range: Range<Int>) -> some View {
+        let first = ops[range.lowerBound]
+        let fallbackIterations = first.effectiveGroupIterations
+        let passes = first.effectiveGroupIterations
+        let mode = first.effectiveGroupMode
+        let childKinds = range.map { ops[$0].kind }
+        let isMandelboxSequence = childKinds == [.boxFold, .sphereFold, .scale]
+        let title = mode == .mandelboxRecurrence && isMandelboxSequence
+            ? "Mandelbox Recurrence" : "Transformation Group"
+        let sequence = childKinds.map(\.displayName).joined(separator: "  →  ")
+        let transformWork = range.count * passes
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Label(title, systemImage: "repeat")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.indigo)
+                Text("\(range.count) STEPS")
+                    .font(.caption2.weight(.heavy))
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(Capsule().fill(.indigo.opacity(0.16)))
+                    .foregroundStyle(.indigo)
+                if mode == .mandelboxRecurrence {
+                    Text("+ p₀ FEEDBACK")
+                        .font(.caption2.weight(.heavy))
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(Capsule().fill(.orange.opacity(0.17)))
+                        .foregroundStyle(.orange)
+                        .accessibilityLabel("Adds the group input after every pass")
+                }
+                Spacer()
+                Button { move(ops[range.lowerBound].id, by: -1) } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .buttonStyle(.borderless)
+                .disabled(range.lowerBound == 0)
+                Button { move(ops[range.lowerBound].id, by: 1) } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .buttonStyle(.borderless)
+                .disabled(range.upperBound == ops.count)
+                Menu {
+                    Button { ungroup(groupID) } label: {
+                        Label("Dissolve Group", systemImage: "rectangle.split.3x1")
+                    }
+                    Button(role: .destructive) { deleteGroup(groupID) } label: {
+                        Label("Delete Group", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
+
+            Text(sequence)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Text("Passes")
+                    .font(.caption.weight(.semibold))
+                Stepper(value: Binding(
+                    get: {
+                        renderSettings.spaceWarpStack.first(where: { $0.groupID == groupID })?
+                            .effectiveGroupIterations ?? fallbackIterations
+                    },
+                    set: { updateGroupIterations(groupID, iterations: $0) }),
+                    in: 1...Int(kMaxSpaceWarpGroupIterations)) {
+                    Text("\(renderSettings.spaceWarpStack.first(where: { $0.groupID == groupID })?.effectiveGroupIterations ?? fallbackIterations)")
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                }
+                .fixedSize()
+                .help("Repeat the complete child pipeline this many times")
+                Spacer()
+                Text("\(transformWork) transform steps / distance sample")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(transformWork > 32 ? .orange : .secondary)
+            }
+
+            if mode == .mandelboxRecurrence {
+                Text("After each complete pass, the point that entered the group is added back (+p₀). That feedback is what makes this the Mandelbox recurrence.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("One pass runs every child top → bottom. The next pass receives the previous pass’s output.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if cache.fractalType == .constructionPrimitive {
+                Text("The analytic base shape is evaluated once after this loop; Formula Iterations do not apply.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else {
+                Text("This transform loop runs before the base formula. Formula Iterations are a separate loop, not another pass setting for this group.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            DisclosureGroup(isExpanded: groupExpandedBinding(groupID)) {
+                // DisclosureGroup still evaluates its content builder while closed.
+                // Gate the heavy slider cards explicitly so a collapsed group is
+                // genuinely cheap to open/scroll on a cold launch.
+                if expandedGroups.contains(groupID) {
+                    ForEach(Array(range), id: \.self) { index in
+                        if ops.indices.contains(index) {
+                            opCard(ops[index], index: index,
+                                   isFirst: index == range.lowerBound,
+                                   isLast: index == range.upperBound - 1,
+                                   insideGroup: true)
+                                .padding(.leading, 8)
+                        }
+                    }
+                }
+            } label: {
+                Label("Edit child transformations", systemImage: "slider.horizontal.3")
+                    .font(.caption.weight(.semibold))
+            }
+            .tint(.indigo)
+        }
+        .padding(9)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.09)))
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .stroke(Color.indigo.opacity(0.45), lineWidth: 1))
+    }
+
+    private func groupExpandedBinding(_ groupID: UUID) -> Binding<Bool> {
+        Binding(
+            get: { expandedGroups.contains(groupID) },
+            set: { isExpanded in
+                if isExpanded { expandedGroups.insert(groupID) }
+                else { expandedGroups.remove(groupID) }
+            }
+        )
     }
 
     /// Self-documenting panel: what this transform does, the math, and the EXACT
@@ -480,15 +701,6 @@ struct TransformationsSection: View {
         refresh &+= 1
     }
 
-    /// Start a new construction from a portable embedded primitive. Clearing the
-    /// stack is intentional: a primitive selection is the base of a new form,
-    /// while subsequent Add actions layer techniques onto it.
-    private func select(_ primitive: FractalPrimitiveKind) {
-        renderSettings.spaceWarpStack = []
-        cache.pushConstructionPrimitive(primitive, gestureController: gestureController)
-        refresh &+= 1
-    }
-
     /// Load one pedagogical Mandelbox stage. All stages use the same embedded
     /// terminal-sphere primitive, so a saved `.threshscene` carries its base DE;
     /// only the editable transformation stack changes between stages.
@@ -515,17 +727,137 @@ struct TransformationsSection: View {
         var arr = renderSettings.spaceWarpStack
         arr.removeAll { $0.id == id }
         renderSettings.spaceWarpStack = arr
+        groupSelection.remove(id)
+        refresh &+= 1
+    }
+
+    private func deleteGroup(_ groupID: UUID) {
+        var arr = renderSettings.spaceWarpStack
+        arr.removeAll { $0.groupID == groupID }
+        renderSettings.spaceWarpStack = arr
         refresh &+= 1
     }
 
     private func move(_ id: UUID, by delta: Int) {
         var arr = renderSettings.spaceWarpStack
         guard let i = arr.firstIndex(where: { $0.id == id }) else { return }
-        let j = i + delta
-        guard j >= 0, j < arr.count else { return }
-        arr.swapAt(i, j)
+        let current = unitRange(containing: i, in: arr)
+        if delta < 0 {
+            guard current.lowerBound > 0 else { return }
+            let previous = unitRange(containing: current.lowerBound - 1, in: arr)
+            arr = Array(arr[..<previous.lowerBound])
+                + Array(arr[current])
+                + Array(arr[previous])
+                + Array(arr[current.upperBound...])
+        } else {
+            guard current.upperBound < arr.count else { return }
+            let next = unitRange(containing: current.upperBound, in: arr)
+            arr = Array(arr[..<current.lowerBound])
+                + Array(arr[next])
+                + Array(arr[current])
+                + Array(arr[next.upperBound...])
+        }
         renderSettings.spaceWarpStack = arr
         refresh &+= 1
+    }
+
+    private func moveTransform(_ id: UUID, by delta: Int, insideGroup: Bool) {
+        if insideGroup {
+            moveWithinGroup(id, by: delta)
+        } else {
+            move(id, by: delta)
+        }
+    }
+
+    private func moveWithinGroup(_ id: UUID, by delta: Int) {
+        var arr = renderSettings.spaceWarpStack
+        guard let index = arr.firstIndex(where: { $0.id == id }),
+              let groupID = arr[index].groupID else { return }
+        let destination = index + delta
+        guard arr.indices.contains(destination), arr[destination].groupID == groupID else { return }
+        arr.swapAt(index, destination)
+        renderSettings.spaceWarpStack = arr
+        refresh &+= 1
+    }
+
+    private var selectedGroupIndices: [Int] {
+        ops.indices.filter { groupSelection.contains(ops[$0].id) }
+    }
+
+    private var canCreateSelectedGroup: Bool {
+        let indices = selectedGroupIndices
+        guard indices.count >= 2,
+              indices.allSatisfy({ ops[$0].groupID == nil }),
+              let first = indices.first,
+              let last = indices.last else { return false }
+        return last - first + 1 == indices.count
+    }
+
+    private func beginGroupCreation() {
+        groupSelection.removeAll()
+        isCreatingGroup = true
+    }
+
+    private func cancelGroupCreation() {
+        groupSelection.removeAll()
+        isCreatingGroup = false
+    }
+
+    private func toggleGroupSelection(_ id: UUID) {
+        if groupSelection.contains(id) {
+            groupSelection.remove(id)
+        } else {
+            groupSelection.insert(id)
+        }
+        refresh &+= 1
+    }
+
+    private func createSelectedGroup() {
+        guard canCreateSelectedGroup else { return }
+        var arr = renderSettings.spaceWarpStack
+        let groupID = UUID()
+        for index in selectedGroupIndices {
+            arr[index].groupID = groupID
+            arr[index].groupIterations = 1
+            arr[index].groupMode = .repeatOutput
+        }
+        renderSettings.spaceWarpStack = arr
+        groupSelection.removeAll()
+        isCreatingGroup = false
+        refresh &+= 1
+    }
+
+    private func ungroup(_ groupID: UUID) {
+        var arr = renderSettings.spaceWarpStack
+        for index in arr.indices where arr[index].groupID == groupID {
+            arr[index].groupID = nil
+            arr[index].groupIterations = nil
+            arr[index].groupMode = nil
+        }
+        renderSettings.spaceWarpStack = arr
+        refresh &+= 1
+    }
+
+    private func updateGroupIterations(_ groupID: UUID, iterations: Int) {
+        var arr = renderSettings.spaceWarpStack
+        let clamped = min(max(iterations, 1), Int(kMaxSpaceWarpGroupIterations))
+        for index in arr.indices where arr[index].groupID == groupID {
+            arr[index].groupIterations = clamped
+        }
+        renderSettings.spaceWarpStack = arr
+        refresh &+= 1
+    }
+
+    /// One reorderable unit is either an ungrouped op or a whole contiguous group.
+    private func unitRange(containing index: Int, in stack: [SpaceWarpOpValue]) -> Range<Int> {
+        guard stack.indices.contains(index), let groupID = stack[index].groupID else {
+            return index..<(index + 1)
+        }
+        var lower = index
+        var upper = index + 1
+        while lower > 0 && stack[lower - 1].groupID == groupID { lower -= 1 }
+        while upper < stack.count && stack[upper].groupID == groupID { upper += 1 }
+        return lower..<upper
     }
 
     /// Read-modify-write one op by id (slider drags). No `refresh` bump so the

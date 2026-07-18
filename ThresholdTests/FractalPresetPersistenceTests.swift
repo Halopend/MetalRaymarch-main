@@ -153,14 +153,11 @@ struct FractalPresetPersistenceTests {
         #expect(settings.snapshot().colorSchemeParams.edgeDetectionEnabled == 0)
     }
 
-    @Test("Bound to Space (removed 'Irregular Shape Bound') always loads OFF, even if a scene saved it on")
-    func boundToSpaceLoadsDisabled() throws {
-        // The feature was removed 2026-07-06: its UI and enable paths are gone.
-        // The CodingKeys are kept for save-file compatibility (old scenes still
-        // decode), but apply() force-disables it regardless of the saved value.
+    @Test("Bound to Space survives scene encode/decode/apply")
+    func boundToSpaceRoundTrips() throws {
         let settings = RenderSettings()
         settings.fractalType = .mandelbox
-        settings.boundToSpaceEnabled = true               // an old scene had it on
+        settings.boundToSpaceEnabled = true
         settings.boundToSpaceMode = BoundToSpaceMode.ceilingOpen.rawValue
         settings.boundSpaceWidth = 5.5
 
@@ -168,17 +165,17 @@ struct FractalPresetPersistenceTests {
         let decoded = try JSONDecoder().decode(
             FractalPreset.self, from: try JSONEncoder().encode(preset))
 
-        // Fields still decode (format compatibility with older saves).
         #expect(decoded.boundToSpaceEnabled == true)
 
         let fresh = RenderSettings()
         fresh.fractalType = .mandelbox
-        fresh.boundToSpaceEnabled = true                  // a stale live value
+        fresh.boundToSpaceEnabled = false
         decoded.apply(to: fresh)
 
-        // …but the removed feature always loads OFF.
-        #expect(fresh.boundToSpaceEnabled == false)
-        #expect(fresh.snapshot().resolvedBoundToSpaceMode == 0)
+        #expect(fresh.boundToSpaceEnabled == true)
+        #expect(fresh.boundToSpaceMode == BoundToSpaceMode.ceilingOpen.rawValue)
+        #expect(abs(fresh.boundSpaceWidth - 5.5) < 1e-5)
+        #expect(fresh.snapshot().resolvedBoundToSpaceMode == 2)
     }
 
     @Test("Bounding SHAPE (size + Inner Shadow depth + fog mode + enable) survives fromSettings → encode → decode → scene-load apply")
@@ -193,6 +190,7 @@ struct FractalPresetPersistenceTests {
         settings.boundingShapeRadius = 1.2                 // "1.2 bounding size", default 6.0
         settings.boundingShapeFogMode = BoundingFogMode.innerShadow.rawValue
         settings.boundingShapeShadowDepth = 0.5            // "inner shadow at 50%", default 0.35
+        settings.boundingShapeType = SafetyBubbleShapePreset.icosahedron.storedValue
 
         let preset = FractalPreset.fromSettings(settings, name: "Jelly bowl")
         let data = try JSONEncoder().encode(preset)
@@ -202,6 +200,7 @@ struct FractalPresetPersistenceTests {
         #expect(abs((decoded.boundingShapeRadius ?? -1) - 1.2) < 1e-5)
         #expect(decoded.boundingShapeFogMode == BoundingFogMode.innerShadow.rawValue)
         #expect(abs((decoded.boundingShapeShadowDepth ?? -1) - 0.5) < 1e-5)
+        #expect(decoded.boundingShapeType == SafetyBubbleShapePreset.icosahedron.storedValue)
 
         let fresh = RenderSettings()
         fresh.fractalType = .mandelbox
@@ -211,6 +210,7 @@ struct FractalPresetPersistenceTests {
         #expect(abs(fresh.boundingShapeRadius - 1.2) < 1e-5)
         #expect(fresh.boundingShapeFogMode == BoundingFogMode.innerShadow.rawValue)
         #expect(abs(fresh.boundingShapeShadowDepth - 0.5) < 1e-5)
+        #expect(fresh.boundingShapeType == SafetyBubbleShapePreset.icosahedron.storedValue)
     }
 
     @Test("Environment Scrunch PARAMETERS survive fromSettings → encode → decode → scene-load apply")
@@ -454,6 +454,9 @@ struct FractalPresetPersistenceTests {
         var cox = SpaceWarpOpValue(kind: .coxeter); cox.p1 = 5; cox.p2 = 3
         var plane = SpaceWarpOpValue(kind: .planeFold); plane.p1 = 0.5; plane.axis = SIMD3<Float>(1, -1, 0)
         plane.isEnabled = false   // disabled-state must survive too
+        let groupID = UUID()
+        box.groupID = groupID; box.groupIterations = 5; box.groupMode = .repeatOutput
+        sphere.groupID = groupID; sphere.groupIterations = 5; sphere.groupMode = .repeatOutput
         settings.spaceWarpStack = [box, sphere, twist, cox, plane]   // every recent kind, ordered
 
         let preset = FractalPreset.fromSettings(settings, name: "Stack")
@@ -465,6 +468,9 @@ struct FractalPresetPersistenceTests {
         #expect(decoded.spaceWarpOps?[0].type == SpaceWarpKind.boxFold.rawValue)   // order preserved
         #expect(decoded.spaceWarpOps?[1].type == SpaceWarpKind.sphereFold.rawValue)
         #expect(abs((decoded.spaceWarpOps?[1].strength ?? -1) - 0.8) < 1e-5)
+        #expect(decoded.spaceWarpOps?[0].groupID == decoded.spaceWarpOps?[1].groupID)
+        #expect(decoded.spaceWarpOps?[0].groupIterations == 5)
+        #expect(decoded.spaceWarpOps?[0].effectiveGroupMode == .repeatOutput)
 
         let fresh = RenderSettings()
         fresh.fractalType = .mandelbulb
@@ -478,6 +484,8 @@ struct FractalPresetPersistenceTests {
         #expect(abs(fresh.spaceWarpStack[3].p1 - 5) < 1e-5 && abs(fresh.spaceWarpStack[3].p2 - 3) < 1e-5)  // {5,3}
         #expect(fresh.spaceWarpStack[4].type == SpaceWarpKind.planeFold.rawValue)
         #expect(fresh.spaceWarpStack[4].isEnabled == false)             // disabled state preserved
+        #expect(fresh.spaceWarpStack[0].groupID == fresh.spaceWarpStack[1].groupID)
+        #expect(fresh.spaceWarpStack[0].effectiveGroupIterations == 5)
 
         // Load is AUTHORITATIVE: a scene with no transforms clears a live stack.
         let emptyPreset = FractalPreset.fromSettings(RenderSettings(), name: "Empty")
@@ -521,15 +529,21 @@ struct FractalPresetPersistenceTests {
         let many = (0..<(Int(kMaxSpaceWarpOps) + 4)).map { _ in SpaceWarpOpValue(kind: .inversion) }
         #expect(cSpaceWarpStack(from: many).count == kMaxSpaceWarpOps)
 
-        // Signed scales are structure, not disabled/identity amounts.
+        // A deconstructed Mandelbox recurrence occupies three packed ops regardless
+        // of iteration count; the first op carries group length + repeat count.
         let recurrence = MandelboxConstructionStage.sixIterations.stack
         let packedRecurrence = cSpaceWarpStack(from: recurrence)
-        #expect(packedRecurrence.count == 6)
+        #expect(packedRecurrence.count == 3)
         withUnsafePointer(to: packedRecurrence.ops) { tuplePtr in
             tuplePtr.withMemoryRebound(to: SpaceWarpOp.self, capacity: Int(kMaxSpaceWarpOps)) { base in
-                #expect(base[0].type == SpaceWarpKind.mandelboxStep.rawValue)
-                #expect(abs(base[0].strength - (-1.5)) < 1e-5)
-                #expect(abs(base[0].p2 - 0.25) < 1e-5) // min radius pre-squared
+                #expect(base[0].type == SpaceWarpKind.boxFold.rawValue)
+                #expect((base[0].groupControl & 0xff) == 3)
+                #expect(((base[0].groupControl >> 8) & 0xff) == 6)
+                #expect((base[0].groupControl & (1 << 16)) != 0)
+                #expect(base[1].type == SpaceWarpKind.sphereFold.rawValue)
+                #expect(abs(base[1].p1 - 0.25) < 1e-5) // min radius pre-squared
+                #expect(base[2].type == SpaceWarpKind.scale.rawValue)
+                #expect(abs(base[2].strength - (-1.5)) < 1e-5)
             }
         }
     }
@@ -540,8 +554,15 @@ struct FractalPresetPersistenceTests {
         #expect(MandelboxConstructionStage.boxFold.stack.map(\.kind) == [.boxFold])
         #expect(MandelboxConstructionStage.sphereFold.stack.map(\.kind) == [.boxFold, .sphereFold])
         #expect(MandelboxConstructionStage.scaled.stack.map(\.kind) == [.boxFold, .sphereFold, .scale])
-        #expect(MandelboxConstructionStage.threeIterations.stack.allSatisfy { $0.kind == .mandelboxStep })
-        #expect(MandelboxConstructionStage.sixIterations.stack.count == 6)
+        let three = MandelboxConstructionStage.threeIterations.stack
+        #expect(three.map(\.kind) == [.boxFold, .sphereFold, .scale])
+        #expect(three.first?.groupID != nil)
+        #expect(three.allSatisfy { $0.groupID == three.first?.groupID })
+        #expect(three.allSatisfy { $0.effectiveGroupIterations == 3 })
+        #expect(three.allSatisfy { $0.effectiveGroupMode == .mandelboxRecurrence })
+        let six = MandelboxConstructionStage.sixIterations.stack
+        #expect(six.count == 3)
+        #expect(six.allSatisfy { $0.effectiveGroupIterations == 6 })
     }
 
     @Test("Legacy runtime-compiled primitive scenes migrate to the precompiled type")
@@ -605,6 +626,17 @@ struct FractalPresetPersistenceTests {
         #expect(abs(pc.axisX - (-invSqrt2)) < 1e-4)   // n2.y
         #expect(abs(pc.axisY - invSqrt2) < 1e-4)      // n2.z
         #expect(SpaceWarpKind.coxeter.descriptor.gpuDEScaleFn == nil)   // reflections are isometric
+        // The named cut is always the finite {5,3} icosahedral chamber. Ignore
+        // stale scalar slots so saved scenes cannot silently change its geometry.
+        var ico = SpaceWarpOpValue(kind: .icosahedralCut); ico.p1 = 4; ico.p2 = 4
+        let pi = packed(ico)
+        var cox53 = SpaceWarpOpValue(kind: .coxeter); cox53.p1 = 5; cox53.p2 = 3
+        let p53 = packed(cox53)
+        #expect(pi.type == SpaceWarpKind.icosahedralCut.rawValue)
+        #expect(abs(pi.p1 - p53.p1) < 1e-5 && abs(pi.p2 - p53.p2) < 1e-5)
+        #expect(abs(pi.axisX - p53.axisX) < 1e-5 && abs(pi.axisY - p53.axisY) < 1e-5)
+        #expect(SpaceWarpKind.icosahedralCut.family == .spaceCutting)
+        #expect(SpaceWarpKind.icosahedralCut.descriptor.gpuApplyFn == "warpCoxeter")
         // Box Fold "Hall of Mirrors" option rides op.p2 untouched through precompute.
         var bf = SpaceWarpOpValue(kind: .boxFold); bf.p1 = 1.0; bf.p2 = 1
         let pbf = packed(bf)

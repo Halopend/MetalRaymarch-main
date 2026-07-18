@@ -38,7 +38,7 @@ enum BoundingFogMode: Int, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// Which faces of the assumed room bound the fractal (Shape → Bounding tab's
+/// Which faces of the authored space bound the fractal (Shape → Bounding tab's
 /// Bound to Space picker). Backed by `QualityConfig.boundToSpaceMode`'s raw Int.
 enum BoundToSpaceMode: Int, CaseIterable, Identifiable, Sendable {
     case matchSpace = 0
@@ -58,7 +58,7 @@ enum BoundToSpaceMode: Int, CaseIterable, Identifiable, Sendable {
     var help: String {
         switch self {
         case .matchSpace:
-            return "Closed box: the fractal only renders inside the assumed room — walls, floor, and ceiling."
+            return "Closed box: the fractal only renders inside the authored space — walls, floor, and ceiling."
         case .ceilingOpen:
             return "Walls and floor bound the fractal; it can extend upward past the ceiling."
         case .wallsOpen:
@@ -71,7 +71,7 @@ enum BoundToSpaceMode: Int, CaseIterable, Identifiable, Sendable {
 /// (`FractalPreset.recommendedQuality`). Deliberately distinct from iteration
 /// count: it targets the render RESOLUTION (MetalFX input scale on Mac; the
 /// compositor drawable scale on visionOS), never the fractal DE. A high/ultra
-/// scene lifts the adaptive FPS governor's floor so it resists being downscaled,
+/// scene lifts the adaptive FPS governor's preferred floor so it resists being downscaled,
 /// and raises the resolution toward the target ("aim for AT LEAST this" — it only
 /// ever raises, never lowers). `standard`/absent = no opinion.
 ///
@@ -111,10 +111,10 @@ enum SceneQualityTarget: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    /// Lowest compositor Render Quality the adaptive governor may drop this scene
-    /// to. A high/ultra scene declares it should stay sharp, so its floor is lifted
-    /// above the global minimum — the governor can still shed quality under load,
-    /// just not as far. `standard` keeps the global minimum (no lift).
+    /// Preferred compositor Render Quality for the adaptive governor. A high/ultra
+    /// scene declares that it should stay sharp, so downscaling slows at this
+    /// point. Sustained low FPS can still override it down to the global minimum;
+    /// `standard` keeps that minimum (no preference lift).
     var visionRenderQualityFloor: Float {
         switch self {
         case .standard: return QualityConfig.visionMinRenderQuality  // 0.05 (no lift)
@@ -142,13 +142,30 @@ struct QualityConfig: Codable, Equatable, Sendable {
     /// trade more sharpness for headroom on heavy scenes.
     static let visionMinRenderQuality: Float = 0.05
 
+    static let visionDefaultRenderQuality: Float = 0.5
+
+    /// Sanitizes values before they cross into CompositorServices. Passing NaN
+    /// or infinity to `LayerRenderer.RenderQuality` is a client-contract
+    /// violation that can terminate the immersive renderer rather than merely
+    /// producing a bad frame.
+    static func clampedVisionRenderQuality(
+        _ value: Float,
+        fallback: Float = visionDefaultRenderQuality
+    ) -> Float {
+        let safeFallback = fallback.isFinite
+            ? min(visionMaxRenderQuality, max(visionMinRenderQuality, fallback))
+            : visionDefaultRenderQuality
+        guard value.isFinite else { return safeFallback }
+        return min(visionMaxRenderQuality, max(visionMinRenderQuality, value))
+    }
+
     // User-set base values
     var baseFractalIterations: Int = 9
     var baseMaxRaySteps: Int = 64
 
     // Resolution / tiling
     var resolutionScale: Float = 0.5   // 0.33 - 1.0 (MetalFX spatial upscale input scale)
-    var renderQuality: Float = 0.5     // visionMinRenderQuality...visionMaxRenderQuality (visionOS compositor drawable scale). Default 0.5 favors framerate; the floor is for probing max framerate / the adaptive governor.
+    var renderQuality: Float = Self.visionDefaultRenderQuality // visionMinRenderQuality...visionMaxRenderQuality (visionOS compositor drawable scale). Default favors framerate; the floor is for probing max framerate / the adaptive governor.
     var tileSize: Int = 0              // 0=disabled (fragment), 8=adaptive hierarchical compute
 
     // Vision Pro: auto-lower Render Quality to hold the frame rate, recovering
@@ -285,7 +302,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         baseFractalIterations = baseFractalIterations.clamped(to: 2...24)
         baseMaxRaySteps = baseMaxRaySteps.clamped(to: 16...200)
         resolutionScale = resolutionScale.clamped(to: ControlCatalog.resolutionScale)
-        renderQuality = renderQuality.clamped(to: Self.visionMinRenderQuality...Self.visionMaxRenderQuality)
+        renderQuality = Self.clampedVisionRenderQuality(renderQuality)
         foveationStrength = foveationStrength.clamped(to: 0.0...1.0)
         coneMarchStrength = coneMarchStrength.clamped(to: 0.0...1.0)
         overRelaxationMax = overRelaxationMax.clamped(to: 1.0...1.6)
@@ -322,7 +339,9 @@ struct QualityConfig: Codable, Equatable, Sendable {
         baseFractalIterations = try c.decodeIfPresent(Int.self,   forKey: .baseFractalIterations) ?? 9
         baseMaxRaySteps       = try c.decodeIfPresent(Int.self,   forKey: .baseMaxRaySteps)       ?? 64
         resolutionScale       = try c.decodeIfPresent(Float.self, forKey: .resolutionScale)       ?? 1.0
-        renderQuality         = try c.decodeIfPresent(Float.self, forKey: .renderQuality)         ?? 0.5
+        renderQuality         = Self.clampedVisionRenderQuality(
+            try c.decodeIfPresent(Float.self, forKey: .renderQuality) ?? Self.visionDefaultRenderQuality
+        )
         let decodedTileSize   = try c.decodeIfPresent(Int.self,   forKey: .tileSize)              ?? 0
         tileSize              = decodedTileSize == 2 ? 0 : decodedTileSize  // Old "Quad Shared" mode removed → degrade to fragment
         debugHierarchical     = try c.decodeIfPresent(Bool.self,  forKey: .debugHierarchical)     ?? false

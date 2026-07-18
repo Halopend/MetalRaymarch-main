@@ -496,7 +496,7 @@ extension Renderer {
     /// 1. Fast-path: same params as last frame → return cached result
     /// 2. FT-specific exact match in unified cache
     /// 3. FT-specific neon-off fallback
-    /// 4. Shared quality key fallback (startup-prebuilt, no FC_FRACTAL_TYPE)
+    /// 4. Optional shared quality key fallback (no FC_FRACTAL_TYPE)
     /// 5. Generic pipeline fallback
     func selectPipeline(forIterations iterations: Int, raySteps: Int,
                         neonMode: Bool = false,
@@ -536,9 +536,8 @@ extension Renderer {
         // and cache key below treat nil as "no segment", leaving other platforms
         // byte-identical to before.
         #if os(macOS)
-        // Env Scrunch is device-local (never preset state); the hand field
-        // needs hand tracking, which macOS does not have — always off here.
-        let hasEnvScrunch: Bool? = appModel.renderSettings.qualityConfig.envScrunchEnabled
+        // Scanned surroundings and hand tracking are not desktop renderer inputs.
+        let hasEnvScrunch: Bool? = false
         let hasHandField: Bool? = false
         #else
         let hasEnvScrunch: Bool? = nil
@@ -766,7 +765,7 @@ extension Renderer {
                 result = pipeline
             }
             else {
-                // 4. Try shared quality key (built at startup without FC_FRACTAL_TYPE)
+                // 4. Try an optional shared quality key without FC_FRACTAL_TYPE.
                 let sharedExactKey = keyContext.sharedKey(neonEnabled: neonMode)
                 if let pipeline = pipelineCache[sharedExactKey] {
                     recordPipelineTelemetry(renderSource: "shared-exact")
@@ -974,7 +973,7 @@ extension Renderer {
     /// Lookup order:
     /// 1. Fast-path: same params as last frame → return cached result
     /// 2. Exact match in computePipelineCache (FT-specific)
-    /// 3. Shared quality key match (startup-prebuilt, no FC_FRACTAL_TYPE)
+    /// 3. Optional shared quality key match (no FC_FRACTAL_TYPE)
     /// 4. Builds on-demand for exact configuration (cached for future frames)
     /// 5. Falls back to generic (no function constants) pipeline — shader uses runtime params
     func selectComputePipeline(fractalIterations: Int,
@@ -1131,10 +1130,10 @@ extension Renderer {
         // 3. Powerless shared fallback — serve the FI/RS-specialized startup
         //    pipeline THIS frame while the exact build (enqueued above) runs.
         //    A baked Mandelbulb power makes `sharedKey` carry "P{n}", but the
-        //    startup shared tier is keyed plain "FI{fi}_RS{rs}" with power /
+        //    optional shared tier is keyed plain "FI{fi}_RS{rs}" with power /
         //    bubble / packet left as *undefined* function constants (built with
-        //    an empty MTLFunctionConstantValues — Renderer.init ~:492/:509, read
-        //    from uniforms at runtime). So the shared lookup at step 2 is dead for
+        //    an empty MTLFunctionConstantValues and read from uniforms at runtime).
+        //    So the shared lookup at step 2 is dead for
         //    every common integer power, and without this we'd drop straight to
         //    the fully-generic kernel during interaction with the heaviest
         //    fractal. Stripping `powerKey` reproduces exactly the startup key;
@@ -1142,7 +1141,7 @@ extension Renderer {
         //    reads those from uniforms. The exact (power-baked) pipeline still
         //    builds in the background and takes over in steady state.
         //
-        //    DEFAULT-LIBRARY ONLY. The startup shared tier is keyed plain
+        //    DEFAULT-LIBRARY ONLY. The optional shared tier is keyed plain
         //    "FI{fi}_RS{rs}" with NO custom prefix, so it can only ever serve a
         //    built-in with no active custom library. A custom space warp riding a
         //    built-in carries a non-empty "CX{hash}_" prefix (and Mandelbulb is
@@ -1159,7 +1158,7 @@ extension Renderer {
         if !powerKey.isEmpty, cacheKeyPrefix.isEmpty {
             let powerlessSharedKey = String(sharedKey.dropLast(powerKey.count))
             assert(powerlessSharedKey == "FI\(fractalIterations)_RS\(maxRaySteps)",
-                   "Powerless shared probe drifted from the startup compute key format (Renderer.init ~:492); re-check that the shared tier still omits power/scene bakes before trusting this fallback.")
+                   "Powerless shared probe drifted from the shared compute key format; re-check that any producer still omits power/scene bakes before trusting this fallback.")
             if let shared = computePipelineCache[powerlessSharedKey] {
                 recordPipelineTelemetry(computeHit: false, computeMissKey: exactKey, computeSource: "shared-powerless")
                 if RENDERER_DEBUG && lastComputePipelineKey != powerlessSharedKey {

@@ -4,7 +4,7 @@ import MetalKit
 
 extension Renderer {
     /// Setup screenshot capture resources
-    func setupScreenshotCapture() {
+    func setupScreenshotCapture() async {
         let screenshotSize = 512
 
         let colorDescriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -29,13 +29,22 @@ extension Renderer {
         screenshotDepthTexture = device.makeTexture(descriptor: depthDescriptor)
         screenshotDepthTexture?.label = "Screenshot Depth"
 
+        screenshotUniformBuffer = device.makeBuffer(
+            length: alignedUniformsSize,
+            options: [.storageModeShared]
+        )
+        screenshotUniformBuffer?.label = "Screenshot Uniforms"
+
         do {
             guard let library = Renderer.bundledDefaultLibrary(device: device) else {
                 if RENDERER_DEBUG { print("⚠️ Failed to load default Metal library for screenshot setup") }
                 return
             }
             let vertexFunction = library.makeFunction(name: "screenshotVertexShader")
-            let fragmentFunction = try library.makeFunction(name: "fragmentShader", constantValues: MTLFunctionConstantValues())
+            let fragmentFunction = try await library.makeFunction(
+                name: "fragmentShader",
+                constantValues: MTLFunctionConstantValues()
+            )
 
             let pipelineDescriptor = MTLRenderPipelineDescriptor()
             pipelineDescriptor.label = "Screenshot Pipeline"
@@ -47,7 +56,24 @@ extension Renderer {
             let mtlVertexDescriptor = Renderer.buildMetalVertexDescriptor()
             pipelineDescriptor.vertexDescriptor = mtlVertexDescriptor
 
-            screenshotPipeline = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+            let pipeline: MTLRenderPipelineState = try await withCheckedThrowingContinuation { continuation in
+                // Pipeline compilation can take long enough to starve the
+                // compositor when performed synchronously on the Renderer
+                // actor. Metal completes this on its own worker thread.
+                device.makeRenderPipelineState(descriptor: pipelineDescriptor) { pipeline, error in
+                    if let pipeline {
+                        continuation.resume(returning: pipeline)
+                    } else {
+                        continuation.resume(throwing: error ?? NSError(
+                            domain: "Threshold.RendererScreenshot",
+                            code: 1,
+                            userInfo: [NSLocalizedDescriptionKey: "Metal returned no screenshot pipeline"]
+                        ))
+                    }
+                }
+            }
+            guard !Task.isCancelled else { return }
+            screenshotPipeline = pipeline
             if RENDERER_DEBUG { print("✓ Screenshot capture pipeline ready") }
         } catch {
             if RENDERER_DEBUG { print("⚠️ Failed to create screenshot pipeline: \(error)") }
@@ -68,11 +94,22 @@ extension Renderer {
         guard let screenshotTexture = screenshotTexture,
               let screenshotPipeline = screenshotPipeline,
               let screenshotDepthTexture = screenshotDepthTexture,
+              let screenshotUniformBuffer = screenshotUniformBuffer,
               let commandBuffer = commandQueue.makeCommandBuffer() else {
             pendingScreenshotContinuation?.resume(returning: nil)
             pendingScreenshotContinuation = nil
             return
         }
+
+        // A screenshot command buffer is not part of the renderer's in-flight
+        // ring semaphore. Binding the live ring slot lets a later frame
+        // overwrite matrices and bindless addresses while the screenshot is
+        // still executing. Give capture an immutable copy of the latest slot.
+        screenshotUniformBuffer.contents().copyMemory(
+            from: dynamicUniformBuffer.contents().advanced(by: uniformBufferOffset),
+            byteCount: MemoryLayout<UniformsArray>.size
+        )
+        let screenshotEnvironmentGrid = lastSubmittedEnvironmentGrid
 
         let renderPassDescriptor = MTLRenderPassDescriptor()
         renderPassDescriptor.colorAttachments[0].texture = screenshotTexture
@@ -97,8 +134,18 @@ extension Renderer {
         renderEncoder.setRenderPipelineState(screenshotPipeline)
         renderEncoder.setDepthStencilState(depthState)
 
-        renderEncoder.setVertexBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
-        renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
+        renderEncoder.setVertexBuffer(screenshotUniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
+        renderEncoder.setFragmentBuffer(screenshotUniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
+        if let screenshotEnvironmentGrid {
+            // EnvScrunchParams carries a GPU address, so Metal needs both an
+            // explicit residency declaration and a strong lifetime through
+            // command-buffer completion.
+            renderEncoder.useResource(
+                screenshotEnvironmentGrid.buffer,
+                usage: .read,
+                stages: .fragment
+            )
+        }
         // fragmentShader declares the benchmark counter buffer; bind a dummy so
         // the screenshot pipeline validates (screenshots never benchmark).
         if let benchBuf = benchCounterBuffers.first {
@@ -139,9 +186,11 @@ extension Renderer {
         pendingScreenshotContinuation = nil
         let capturedTexture = screenshotTexture
 
-        commandBuffer.addCompletedHandler { [weak self] _ in
-            let imageData = self?.textureToImageData(capturedTexture)
-            continuation?.resume(returning: imageData)
+        commandBuffer.addCompletedHandler { [weak self, screenshotEnvironmentGrid] _ in
+            withExtendedLifetime(screenshotEnvironmentGrid) {
+                let imageData = self?.textureToImageData(capturedTexture)
+                continuation?.resume(returning: imageData)
+            }
         }
         commandBuffer.commit()
     }

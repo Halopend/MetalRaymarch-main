@@ -9,6 +9,15 @@
 import SwiftUI
 import simd
 
+private struct TransformationGroupBudget: Identifiable {
+    let id: UUID
+    let steps: Int
+    let passes: Int
+    let isMandelboxRecurrence: Bool
+
+    var workPerSample: Int { steps * passes }
+}
+
 extension ContentView {
     // ═══════════════════════════════════════════════════════════════════════════
     // MARK: - Fractal Tab
@@ -42,6 +51,11 @@ extension ContentView {
                             fractalShapeContent
                         case .formula:
                             fractalFormulaContent
+                        case .primitives:
+                            PrimitivesSection(
+                                cache: cache,
+                                gestureController: appModel.gestureController
+                            )
                         case .hands:
                             fractalHandsContent
                         }
@@ -755,12 +769,21 @@ extension ContentView {
     /// Bounding Shape/Radius/Fog controls, moved out of Acceleration into their
     /// own Shape rail tab — these are shape/framing choices, not perf knobs.
     var fractalBoundingContent: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Containment — the headline 4-way framing, so it sits at the very top
+        let selectedBoundingFamily = SafetyBubbleShapePreset.family(
+            for: cache.quality.boundingShapeType
+        )
+        let selectedBoundingPreset = SafetyBubbleShapePreset(
+            storedValue: cache.quality.boundingShapeType
+        )
+        let canPromoteBoundingShape = selectedBoundingPreset.seedPrimitiveKind != nil
+
+        return VStack(alignment: .leading, spacing: 10) {
+            #if os(visionOS)
+            // Containment — the headline mode framing, so it sits at the very top
             // of the tab. The MUTUALLY EXCLUSIVE picker sets a single canonical combo
-            // (Bounded / Surroundings / Free); the individual side toggles below are
+            // (Shape / Space / Surroundings / Free); individual toggles below are
             // independent and can override it (e.g. both on) — when they do, the
-            // picker shows a fourth, read-only "Custom" segment. The mode is derived
+            // picker shows the read-only "Custom" segment. The mode is derived
             // from the same enable flags.
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
@@ -792,6 +815,75 @@ extension ContentView {
             scrunchToSurroundingsSection
 
             Divider().padding(.vertical, 2)
+            #endif
+
+            // Authored space containment is deliberately platform-independent:
+            // unlike Surroundings Containment it does not use AR scene
+            // reconstruction, only the dimensions below.
+            HStack(spacing: 6) {
+                Image(systemName: "house").foregroundStyle(.cyan)
+                Text("Bound to Space").font(.headline)
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { cache.quality.boundToSpaceEnabled },
+                    set: { cache.setBoundToSpaceEnabled($0) }
+                ))
+                .labelsHidden()
+                .help("Clips the fractal to an authored rectangular space around the world origin. This does not scan or infer the room.")
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Picker("Faces", selection: Binding(
+                    get: { BoundToSpaceMode(rawValue: cache.quality.boundToSpaceMode) ?? .matchSpace },
+                    set: { mode in
+                        cache.quality.boundToSpaceMode = mode.rawValue
+                        cache.push(\.boundToSpaceMode, value: mode.rawValue)
+                    }
+                )) {
+                    ForEach(BoundToSpaceMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(BoundToSpaceMode(rawValue: cache.quality.boundToSpaceMode)?.help ?? BoundToSpaceMode.matchSpace.help)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                accelSliderCompact("Space Width",
+                            value: cache.quality.boundSpaceWidth, range: 1...20,
+                            display: String(format: "%.1f m", cache.quality.boundSpaceWidth),
+                            help: "Authored space width (left-right), in meters.") { value in
+                    cache.quality.boundSpaceWidth = value
+                    cache.push(\.boundSpaceWidth, value: value)
+                }
+                accelSliderCompact("Space Depth",
+                            value: cache.quality.boundSpaceDepth, range: 1...20,
+                            display: String(format: "%.1f m", cache.quality.boundSpaceDepth),
+                            help: "Authored space depth (forward-back), in meters.") { value in
+                    cache.quality.boundSpaceDepth = value
+                    cache.push(\.boundSpaceDepth, value: value)
+                }
+                accelSliderCompact("Space Height",
+                            value: cache.quality.boundSpaceHeight, range: 1...10,
+                            display: String(format: "%.1f m", cache.quality.boundSpaceHeight),
+                            help: "Authored space height above its floor, in meters.") { value in
+                    cache.quality.boundSpaceHeight = value
+                    cache.push(\.boundSpaceHeight, value: value)
+                }
+                accelSliderCompact("Space Ambient",
+                            value: cache.quality.boundAmbientStrength, range: 0...1,
+                            display: String(format: "%.0f%%", cache.quality.boundAmbientStrength * 100),
+                            help: "Contact shadow contributed by the authored space faces. 0% disables it.") { value in
+                    cache.quality.boundAmbientStrength = value
+                    cache.push(\.boundAmbientStrength, value: value)
+                }
+            }
+            .disabled(!cache.quality.boundToSpaceEnabled)
+            .opacity(cache.quality.boundToSpaceEnabled ? 1 : 0.45)
+
+            Divider().padding(.vertical, 2)
 
             HStack(spacing: 6) {
                 Image(systemName: "circle.dashed").foregroundStyle(.cyan)
@@ -799,19 +891,68 @@ extension ContentView {
                 Spacer()
                 Toggle("", isOn: Binding(
                     get: { cache.quality.boundingSphereSkipEnabled },
-                    // Independent toggle — does NOT turn Scrunch off. With Scrunch
-                    // also on, the Containment picker shows Custom.
+                    // Independent toggle — does not turn another containment
+                    // system off. A manual combination appears as Custom.
                     set: { v in cache.setBoundingShapeEnabled(v) }
                 ))
                 .labelsHidden()
-                .help("Bounds the visible fractal to the shape below: rays that miss it skip the march entirely. Large sizes just cull background; tight sizes deliberately clip the fractal to the shape (nice for Mixed immersion). Independent of Scrunch — turning both on is the Custom containment mode.")
+                .help("Bounds the visible fractal to the shape below: rays that miss it skip the march entirely. Large sizes just cull background; tight sizes deliberately clip the fractal to the shape. Independent of Bound to Space and Surroundings Containment; combinations appear as Custom.")
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Label("Sphere", systemImage: "circle")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Boundary Shape")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Text("Only the sphere shape is exposed for now; the other bounding shapes are hidden until their render path is reliable.")
+
+                Picker("Boundary Shape", selection: Binding<SafetyBubbleShapeFamily>(
+                    get: { selectedBoundingFamily },
+                    set: { family in
+                        let newValue = SafetyBubbleShapePreset.storedValue(
+                            for: family,
+                            currentValue: cache.quality.boundingShapeType
+                        )
+                        cache.quality.boundingShapeType = newValue
+                        cache.push(\.boundingShapeType, value: newValue)
+                    }
+                )) {
+                    ForEach(SafetyBubbleShapeFamily.allCases) { family in
+                        Text(family.rawValue).tag(family)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if selectedBoundingFamily == .platonic {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 120), spacing: 8)],
+                        spacing: 8
+                    ) {
+                        ForEach(SafetyBubbleShapePreset.platonicOptions) { preset in
+                            let isSelected = selectedBoundingPreset == preset
+                            Button {
+                                cache.quality.boundingShapeType = preset.storedValue
+                                cache.push(\.boundingShapeType, value: preset.storedValue)
+                            } label: {
+                                Text(preset.displayName)
+                                    .font(.caption.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(isSelected ? Color.black : Color.primary)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(isSelected ? Color.white.opacity(0.88) : Color.white.opacity(0.08))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(isSelected ? 0.14 : 0.08), lineWidth: 1)
+                            )
+                        }
+                    }
+                }
+
+                Text("The selected signed-distance shape defines both ray culling and the final clipping silhouette.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -822,11 +963,36 @@ extension ContentView {
             accelSliderCompact("Shape Size",
                         value: cache.quality.boundingShapeRadius, range: 0.05...30,
                         display: String(format: "%.1f", cache.quality.boundingShapeRadius),
-                        help: "Size of the sphere in model units. Only active while Shape is on.") { v in
+                        help: "Radius/half-size of the selected boundary in model units. Only active while Shape is on.") { v in
                 cache.quality.boundingShapeRadius = v; cache.push(\.boundingShapeRadius, value: v)
             }
             .disabled(!cache.quality.boundingSphereSkipEnabled)
             .opacity(cache.quality.boundingSphereSkipEnabled ? 1 : 0.45)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    cache.promoteBoundingShapeToSeed(
+                        gestureController: appModel.gestureController
+                    )
+                } label: {
+                    Label(
+                        "Use \(selectedBoundingPreset.displayName) as Seed",
+                        systemImage: "arrow.down.to.line"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    !cache.quality.boundingSphereSkipEnabled || !canPromoteBoundingShape
+                )
+
+                Text(canPromoteBoundingShape
+                     ? "Copies this shape and size into Primitives as editable base geometry, preserves Transform, then turns the clipping bound off."
+                     : "Negative Cube is a legacy clipping-only shape and cannot become solid seed geometry.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Fade Effect").font(.caption)
@@ -866,6 +1032,7 @@ extension ContentView {
         .background(Color.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
     }
 
+    #if os(visionOS)
     /// "Surroundings Containment" (Environment Scrunch): the scanned surroundings
     /// (scene reconstruction on visionOS) become a distance field the fractal
     /// scrunches and bulges around — a proximity field like the hands, not a
@@ -884,7 +1051,7 @@ extension ContentView {
                 set: { v in cache.setScrunchEnabled(v) }
             ))
             .labelsHidden()
-            .help("Scrunches the fractal around your scanned surroundings: it bulges toward nearby real surfaces while keeping a small clearance at the surface itself. Uses the headset's room scan; on Mac a synthetic environment can be injected via THRESHOLD_SYNTHETIC_ENV. Independent of the Bounding shape — turning both on is the Custom containment mode. Turning this on defaults Contain to Blend.")
+            .help("Scrunches the fractal around your scanned surroundings: it bulges toward nearby real surfaces while keeping a small clearance at the surface itself. Uses the headset's room scan. Independent of the Bounding shape — turning both on is the Custom containment mode. Turning this on defaults Contain to Blend.")
         }
 
         VStack(alignment: .leading, spacing: 6) {
@@ -938,11 +1105,11 @@ extension ContentView {
         .disabled(!cache.quality.envScrunchEnabled)
         .opacity(cache.quality.envScrunchEnabled ? 1 : 0.45)
     }
+    #endif
 
-    /// The Bounding Fog picker treats the edges of the Bounding shape, so it
-    /// stays active while the shape is on.
+    /// The edge treatment applies to both authored space and shape bounds.
     private var boundingEdgeTreatmentActive: Bool {
-        cache.quality.boundingSphereSkipEnabled
+        cache.quality.boundingSphereSkipEnabled || cache.quality.boundToSpaceEnabled
     }
 
     // MARK: - Performance tab (rail sub-tabs: Overview / Tuning — Overview hosts the
@@ -1020,11 +1187,34 @@ extension ContentView {
                     .frame(maxWidth: 220)
                 }
 
-                // Iteration budget (fractal iterations + ray steps).
-                Text("Iteration Budget")
+                // Formula and raymarch budgets. Transform-group passes are surfaced
+                // alongside them because they also run inside every distance sample.
+                Text("Raymarch & Formula Budget")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+
+                if cache.fractalType == .constructionPrimitive {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Label("Analytic Base Shape", systemImage: "function")
+                                .font(.caption.weight(.semibold))
+                            Spacer()
+                            Text("1 EVALUATION")
+                                .font(.caption2.monospacedDigit().weight(.bold))
+                                .foregroundStyle(.green)
+                        }
+                        Text("Formula Iterations do not apply to construction primitives. Group Passes control the repeated geometry; Max Ray Steps controls raymarch quality.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(8)
+                    .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                }
+
+                transformationGroupBudgetSummary
+
                 if qualityGoalPreference != .advanced {
                     HStack(spacing: 8) {
                         ForEach(QualityPreset.allCases, id: \.rawValue) { preset in
@@ -1052,30 +1242,37 @@ extension ContentView {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    if cache.fractalType == .constructionPrimitive {
+                        Text("For this analytic base, presets use their ray-step budget; their formula-iteration value is ignored.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
                 } else {
                     VStack(spacing: 12) {
-                        CompactValueSlider(
-                            title: "Fractal Iterations",
-                            value: Binding(
-                                get: { Float(cache.quality.baseFractalIterations) },
-                                set: {
-                                    cache.quality.baseFractalIterations = Int($0)
-                                    cache.push(\.baseFractalIterations, value: Int($0))
-                                    appModel.animationManager?.markIterationBudgetUserOverridden()
+                        if cache.fractalType != .constructionPrimitive {
+                            CompactValueSlider(
+                                title: "Formula Iterations",
+                                value: Binding(
+                                    get: { Float(cache.quality.baseFractalIterations) },
+                                    set: {
+                                        cache.quality.baseFractalIterations = Int($0)
+                                        cache.push(\.baseFractalIterations, value: Int($0))
+                                        appModel.animationManager?.markIterationBudgetUserOverridden()
+                                    }
+                                ),
+                                range: 4...32,
+                                step: 1,
+                                display: "\(cache.quality.baseFractalIterations)",
+                                tint: .cyan,
+                                onEditingChanged: { isEditing in
+                                    guard !isEditing else { return }
+                                    appModel.preparePipeline(
+                                        iterations: cache.quality.baseFractalIterations,
+                                        raySteps: cache.quality.baseMaxRaySteps
+                                    )
                                 }
-                            ),
-                            range: 4...32,
-                            step: 1,
-                            display: "\(cache.quality.baseFractalIterations)",
-                            tint: .cyan,
-                            onEditingChanged: { isEditing in
-                                guard !isEditing else { return }
-                                appModel.preparePipeline(
-                                    iterations: cache.quality.baseFractalIterations,
-                                    raySteps: cache.quality.baseMaxRaySteps
-                                )
-                            }
-                        )
+                            )
+                        }
 
                         CompactValueSlider(
                             title: "Max Ray Steps",
@@ -1145,6 +1342,66 @@ extension ContentView {
 
             // ── Acceleration card (already carries its own card chrome) ──
             fractalAccelerationSection
+        }
+    }
+
+    private var transformationGroupBudgets: [TransformationGroupBudget] {
+        let stack = appModel.renderSettings.spaceWarpStack
+        var result: [TransformationGroupBudget] = []
+        var index = 0
+        while index < stack.count {
+            guard let groupID = stack[index].groupID else {
+                index += 1
+                continue
+            }
+            var end = index + 1
+            while end < stack.count && stack[end].groupID == groupID { end += 1 }
+            let enabledSteps = stack[index..<end].filter(\.isEnabled).count
+            if enabledSteps > 0 {
+                result.append(TransformationGroupBudget(
+                    id: groupID,
+                    steps: enabledSteps,
+                    passes: stack[index].effectiveGroupIterations,
+                    isMandelboxRecurrence:
+                        stack[index].effectiveGroupMode == .mandelboxRecurrence
+                ))
+            }
+            index = end
+        }
+        return result
+    }
+
+    @ViewBuilder
+    private var transformationGroupBudgetSummary: some View {
+        let groups = transformationGroupBudgets
+        if !groups.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+                Label("Transform Group Work", systemImage: "repeat")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.indigo)
+                ForEach(Array(groups.enumerated()), id: \.element.id) { offset, group in
+                    HStack(spacing: 6) {
+                        Text(groups.count == 1 ? "Group" : "Group \(offset + 1)")
+                        if group.isMandelboxRecurrence {
+                            Text("+p₀")
+                                .foregroundStyle(.orange)
+                        }
+                        Spacer()
+                        Text("\(group.passes) passes × \(group.steps) steps = \(group.workPerSample)")
+                            .monospacedDigit()
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(group.workPerSample > 32 ? .orange : .secondary)
+                }
+                Text(cache.fractalType == .constructionPrimitive
+                     ? "This is the only geometry recurrence. It is not multiplied by Formula Iterations."
+                     : "Transforms run before the formula loop. The two costs are sequential, not multiplied together.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(8)
+            .background(Color.indigo.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 

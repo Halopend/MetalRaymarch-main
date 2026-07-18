@@ -24,15 +24,25 @@ import QuartzCore
 /// Stateful — store one instance per renderer and call `update` once per frame.
 /// Not thread-safe on its own; the visionOS `Renderer` actor serializes access.
 struct AdaptiveRenderQualityController {
-    /// Drop quality when smoothed FPS falls below this.
-    var lowFPS: Double = 50
+    /// Drop quality when smoothed FPS falls below this. Seventy-two is the
+    /// lowest cadence that still feels consistently fluid in-headset; waiting
+    /// until the old 50 FPS threshold made the governor tolerate visible judder.
+    var lowFPS: Double = 72
     /// Recover quality only once smoothed FPS climbs above this (hysteresis band).
-    var recoverFPS: Double = 72
+    var recoverFPS: Double = 84
+    /// Below this cadence the app is badly GPU-bound, so shed resolution faster.
+    var criticalFPS: Double = 50
     /// Quality change per adjustment.
     var step: Float = 0.05
-    /// Minimum spacing between adjustments — "semi-infrequent" so the compositor
-    /// can tween each step before the next one lands.
-    var adjustInterval: CFTimeInterval = 1.5
+    /// Larger step used only while the presentation cadence is critically low.
+    var criticalStep: Float = 0.10
+    /// Minimum spacing between ordinary downscale adjustments.
+    var adjustInterval: CFTimeInterval = 0.75
+    /// Critical downscaling reacts promptly, but still leaves time for the
+    /// compositor's smoothed render-quality transition to begin.
+    var criticalAdjustInterval: CFTimeInterval = 0.5
+    /// Recovery is deliberately slower than load shedding to prevent oscillation.
+    var recoverInterval: CFTimeInterval = 1.5
 
     /// Effective quality currently applied; `nil` until the first frame seeds it
     /// from the ceiling.
@@ -43,15 +53,21 @@ struct AdaptiveRenderQualityController {
     /// - Parameters:
     ///   - smoothedFPS: the renderer's smoothed frame rate (prior-frame value is fine).
     ///   - ceiling: the user's Render Quality slider (the maximum allowed).
-    ///   - sceneFloor: the loaded scene's quality floor (a high/ultra scene lifts
-    ///     this so it resists downscaling). Clamped into the global floor…ceiling
-    ///     band; the global minimum applies when the scene declares none.
+    ///   - sceneFloor: the loaded scene's preferred quality floor (a high/ultra
+    ///     scene lifts this so it resists downscaling). Sustained low FPS may move
+    ///     below it; only the global minimum is hard.
     ///   - now: a monotonic timestamp (`CACurrentMediaTime()`).
     ///   - enabled: the user's auto-adjust toggle.
     mutating func update(smoothedFPS: Double, ceiling: Float, sceneFloor: Float, now: CFTimeInterval, enabled: Bool) -> Float {
-        // The scene may lift the floor above the global minimum, but never above
-        // the user's ceiling — the slider is always the user's hard cap.
-        let floor = min(max(QualityConfig.visionMinRenderQuality, sceneFloor), ceiling)
+        let ceiling = QualityConfig.clampedVisionRenderQuality(ceiling)
+        let hardFloor = QualityConfig.visionMinRenderQuality
+        // A scene's authored target is a soft preference. It slows further
+        // downscaling once reached, but must never trap a heavy scene at a
+        // visibly stuttering cadence.
+        let preferredFloor = min(
+            ceiling,
+            QualityConfig.clampedVisionRenderQuality(sceneFloor, fallback: hardFloor)
+        )
 
         // Disabled → pass the ceiling through and re-seed, so re-enabling starts
         // from the user's current setting rather than a stale effective value.
@@ -60,18 +76,31 @@ struct AdaptiveRenderQualityController {
             return ceiling
         }
 
-        // Seed from the ceiling, then clamp into [floor, ceiling] every frame so a
+        // Seed from the ceiling, then clamp into [hardFloor, ceiling] every frame so a
         // slider move is honored immediately (the user can always cap quality).
         var quality = min(effective ?? ceiling, ceiling)
-        quality = max(quality, floor)
+        quality = max(quality.isFinite ? quality : ceiling, hardFloor)
 
-        // Only consider a step on the cooldown, and only once FPS is meaningful.
-        if smoothedFPS > 1, now - lastAdjust >= adjustInterval {
-            if smoothedFPS < lowFPS, quality > floor {
-                quality = max(floor, quality - step)   // shed load
+        // Only consider a step once FPS and the monotonic timestamp are valid.
+        if smoothedFPS.isFinite, smoothedFPS > 1, now.isFinite {
+            let elapsed = max(0, now - lastAdjust)
+            if smoothedFPS < criticalFPS,
+               quality > hardFloor,
+               elapsed >= criticalAdjustInterval {
+                quality = max(hardFloor, quality - criticalStep)
                 lastAdjust = now
-            } else if smoothedFPS > recoverFPS, quality < ceiling {
-                quality = min(ceiling, quality + step)  // recover toward the ceiling
+            } else if smoothedFPS < lowFPS,
+                      quality > hardFloor,
+                      elapsed >= adjustInterval {
+                // Below an authored quality preference, continue shedding load at
+                // half speed. Smoothness wins, but the hint still has weight.
+                let downStep = quality <= preferredFloor ? step * 0.5 : step
+                quality = max(hardFloor, quality - downStep)
+                lastAdjust = now
+            } else if smoothedFPS > recoverFPS,
+                      quality < ceiling,
+                      elapsed >= recoverInterval {
+                quality = min(ceiling, quality + step)
                 lastAdjust = now
             }
         }

@@ -204,6 +204,11 @@ struct ControlFinderDestination: Identifiable {
             keywords: ["fractal type", "distance estimator", "mandelbox", "mandelbulb", "menger", "julia"]
         ),
         destination(
+            ShapeRailSection.primitives,
+            description: "Choose and size analytic base solids independently of the transformation stack.",
+            keywords: ["primitive", "solid", "sphere", "box", "torus", "capsule", "cylinder", "cone", "hex prism", "pyramid"]
+        ),
+        destination(
             ShapeRailSection.hands,
             description: "Shape the fractal around tracked hands and forearms.",
             keywords: ["hand attraction", "tracking", "palm", "forearm", "pocket", "arkit"],
@@ -217,12 +222,24 @@ struct ControlFinderDestination: Identifiable {
         destination(
             ShapeRailSection.transformations,
             description: "Build a stack of domain warps and spatial transformations.",
-            keywords: ["transform", "warp", "sphere projection", "inversion", "twist", "fold stack"]
+            keywords: ["transform", "warp", "sphere projection", "inversion", "twist", "fold stack", "space cut", "icosahedral", "coxeter"]
         ),
         destination(
             ShapeRailSection.bounding,
-            description: "Control bounding shapes and how the fractal conforms to its surroundings.",
-            keywords: ["containment", "bound", "sphere", "scrunch", "shell", "environment", "room"]
+            description: {
+                #if os(visionOS)
+                "Control authored bounds, clipping shapes, and how the fractal conforms to scanned surroundings."
+                #else
+                "Control authored space bounds and clipping shapes."
+                #endif
+            }(),
+            keywords: {
+                #if os(visionOS)
+                ["containment", "bound", "sphere", "cube", "platonic", "seed", "scrunch", "shell", "environment", "room"]
+                #else
+                ["containment", "bound", "space", "sphere", "cube", "platonic", "seed", "room"]
+                #endif
+            }()
         ),
 
         // Visualizations

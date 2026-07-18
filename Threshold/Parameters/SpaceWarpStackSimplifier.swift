@@ -44,7 +44,16 @@ enum SpaceWarpStackSimplifier {
         // R1 — drop identity ops. Most warps use a non-negative amount and are
         // identity at strength ≤ 0. Scale and Mandelbox Step use SIGNED scale,
         // however, so negative values are meaningful and only zero is removable.
-        let live = ops.filter { !isIdentity($0) }
+        let live = ops.filter { op in
+            // In a +p₀ recurrence the complete group is affine: even an identity
+            // child participates in a pass whose final feedback is not identity.
+            // Preserve those editable slots so the recurrence marker and exact
+            // child sequence survive live strength edits (including zero).
+            if op.groupID != nil && op.effectiveGroupMode == .mandelboxRecurrence {
+                return true
+            }
+            return !isIdentity(op)
+        }
         guard live.count > 1 else { return live }
 
         // R2/R3 — left-to-right adjacent fusion. A successful fuse leaves the merged
@@ -64,7 +73,10 @@ enum SpaceWarpStackSimplifier {
     /// If applying `a` then `b` is EXACTLY a single op, return it; else `nil`.
     /// Extension point: add a `case` only with a closed-form proof of exactness.
     private static func fuse(_ a: SpaceWarpOpValue, _ b: SpaceWarpOpValue) -> SpaceWarpOpValue? {
-        guard a.type == b.type else { return nil }   // different kinds never fuse
+        // A group boundary changes execution (the left/right side may repeat), so
+        // algebraic fusion is legal only inside the same group or between two
+        // ordinary ungrouped neighbours.
+        guard a.type == b.type, a.groupID == b.groupID else { return nil }
 
         switch a.kind {
         // ── R2: idempotent folds (f∘f = f) at full strength, identical params ──

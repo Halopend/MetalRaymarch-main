@@ -6,7 +6,7 @@
 //
 
 @preconcurrency import CompositorServices
-import Metal
+@preconcurrency import Metal
 import MetalKit
 import simd
 import ARKit
@@ -89,11 +89,16 @@ actor Renderer {
     var edgeDetectionPipeline: MTLComputePipelineState?
     var tileUniformBuffer: MTLBuffer?
 
-    // Per-eye foveation rate-map parameter buffers for the adaptive compute path.
+    // Per-frame/per-eye foveation rate-map parameter buffers for the adaptive
+    // compute path. CPU copies are not covered by Metal hazard tracking, so the
+    // buffers must follow the same in-flight ring as the uniform buffers.
     // The kernel decodes physical→screen coordinates from these so it stops
     // distorting under foveation / renderQuality. `rateMapDummyBuffer` keeps the
     // kernel's buffer(1) argument bound when no usable rate map exists.
-    private var rateMapParamBuffers: [MTLBuffer?] = [nil, nil]
+    private var rateMapParamBuffers: [MTLBuffer?] = Array(
+        repeating: nil,
+        count: maxBuffersInFlight * 2
+    )
     private var rateMapDummyBuffer: MTLBuffer?
     private var loggedFoveationDecodeOnce = false
 
@@ -101,6 +106,11 @@ actor Renderer {
     var computeOutputTexture: MTLTexture?
     var edgeOutputTexture: MTLTexture?
     private var hasLoggedComputeMemoryFallback = false
+    /// A recoverable command-buffer failure on the adaptive kernel disables that
+    /// path for the rest of this renderer session. Repeating a known GPU fault on
+    /// every frame can escalate into a device reset or compositor termination.
+    var adaptiveComputeSuppressedAfterGPUFailure = false
+    private var hasLoggedAdaptiveComputeGPUFailure = false
 
     // ═══════════════════════════════════════════════════════════════════════════
     // TEMPORAL REPROJECTION STATE
@@ -173,6 +183,11 @@ actor Renderer {
     var screenshotTexture: MTLTexture?
     var screenshotPipeline: MTLRenderPipelineState?
     var screenshotDepthTexture: MTLTexture?
+    var screenshotUniformBuffer: MTLBuffer?
+    /// Grid referenced by the uniforms in the most recently submitted ring
+    /// slot. Screenshot capture copies those uniforms and must retain this
+    /// exact resource rather than whichever grid has since been published.
+    var lastSubmittedEnvironmentGrid: EnvironmentSDFGrid?
     var pendingScreenshotContinuation: CheckedContinuation<Data?, Never>?
     var shouldCaptureScreenshot: Bool = false
     
@@ -203,8 +218,6 @@ actor Renderer {
     var metalFXManager: MetalFXManager?
     var metalFXFence: MTLFence?
 
-    var lastMetalFXInputSize: SIMD2<Int> = .zero
-    var lastMetalFXOutputSize: SIMD2<Int> = .zero
     var hasLoggedMetalFXFallback = false
     var hasLoggedMetalFXLayout = false
     var hasLoggedMetalFXResolve = false
@@ -467,45 +480,10 @@ actor Renderer {
         warmStartDummyDepthTexture = device.makeTexture(descriptor: dummyDepthDesc)
         warmStartDummyDepthTexture?.label = "WarmStart Dummy Depth"
 
-        // === BUILD SPECIALIZED PIPELINES FOR QUALITY PRESETS ===
-        // Key optimization: Map() inner loop (50-100+ calls per pixel) can be fully unrolled
-        // when FC_FRACTAL_ITERATIONS is defined as a compile-time constant.
-        // Note: The outer raymarch loop does NOT unroll due to runtime quality scaling.
-        //
-        // Quality presets compile out neon for maximum performance.
-        // For features like neon, use saved presets which build fully-specialized pipelines.
-        
-        let qualityPresets = QualityPreset.allCases
-        
-        var pipelineCount = 0
-        if RENDERER_DEBUG { print("Building specialized pipelines for \(qualityPresets.count) quality presets...") }
-        
-        for preset in qualityPresets {
-            let iterCount = preset.fractalIterations
-            let raySteps = preset.raySteps
-            let config = FunctionConstantConfig.forQualityPreset(preset)
-            let constants = config.toMTLConstants()
-            
-            // Build unified cache key (quality presets have E=0, N=0)
-            let qualityMode: Int = iterCount <= 7 ? 2 : (iterCount <= 9 ? 1 : 0)
-            let colorIterations = config.colorIterations ?? Int32(iterCount)
-            let unifiedKey = "FI\(iterCount)_RS\(raySteps)_N0_Q\(qualityMode)_CI\(colorIterations)"
-            
-            // Standard pipeline
-            if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
-                device: device,
-                layerRenderer: layerRenderer,
-                rasterSampleCount: rasterSampleCount,
-                mtlVertexDescriptor: mtlVertexDescriptor,
-                functionConstants: constants,
-                archive: self.renderPipelineArchive
-            ) {
-                pipelineCache[unifiedKey] = pipeline
-                pipelineCount += 1
-                if RENDERER_DEBUG { print("  ✓ \(preset.rawValue): FI=\(iterCount), RS=\(raySteps) [\(unifiedKey)]") }
-            }
-        }
-        if RENDERER_DEBUG { print("✓ Built \(pipelineCount) specialized pipelines (\(pipelineCache.count) total)") }
+        // Quality-preset specializations are optional accelerators. Building
+        // all of them here can spend seconds in the driver before the compositor
+        // receives a first frame; the selectors build requested exact configs
+        // lazily off-actor while these generic pipelines render immediately.
 
         let depthStateDescriptor = MTLDepthStencilDescriptor()
         depthStateDescriptor.depthCompareFunction = MTLCompareFunction.less
@@ -538,26 +516,6 @@ actor Renderer {
                 throw RendererError.metalLibraryUnavailable
             }
             
-            // === COMPUTE PIPELINE CACHE ===
-            // Build specialized compute pipelines for each quality preset.
-            // Each pipeline bakes FC_FRACTAL_ITERATIONS / FC_SHADOW_ITERATIONS / FC_MAX_RAY_STEPS
-            // so the Map() inner loop is fully unrolled per iteration count.
-            if RENDERER_DEBUG { print("Building specialized compute pipelines for \(QualityPreset.allCases.count) quality presets...") }
-            var computeBuilt = 0
-            for preset in QualityPreset.allCases {
-                let fi = Int32(preset.fractalIterations)
-                let rs = Int32(preset.raySteps)
-                let si = Int32(max(preset.fractalIterations - 2, 2))
-                let key = "FI\(fi)_RS\(rs)"
-                
-                if let pipeline = Renderer.buildComputePipeline(device: device, library: library, kernelName: "adaptiveHierarchical8x8",
-                                                       fractalIterations: fi, shadowIterations: si, maxRaySteps: rs,
-                                                       archive: self.pipelineArchive) {
-                    computePipelineCache[key] = pipeline
-                    computeBuilt += 1
-                    if RENDERER_DEBUG { print("  ✓ Compute \(preset.rawValue): FI=\(fi), RS=\(rs) [\(key)]") }
-                }
-            }
             // Build a GENERIC fallback pipeline (no function constants baked in).
             // The shader reads iterations/steps from uniforms at runtime, so this
             // always matches precomputed absScalePow. Used only when exact-match
@@ -580,7 +538,7 @@ actor Renderer {
                                                                                           reflection: nil)
                 }
             }
-            if RENDERER_DEBUG { print("✓ Built \(computeBuilt) specialized compute pipelines + 1 generic fallback") }
+            if RENDERER_DEBUG { print("✓ Built generic compute fallback; preset specializations deferred until after first frame") }
 
             // Conservative cone coarse-prepass kernel. A single generic pipeline
             // (empty constants — reads iterations/type from TileUniforms at
@@ -610,8 +568,10 @@ actor Renderer {
                 if RENDERER_DEBUG { print("✓ Sliding-window edge detector pipeline ready: \(edgeDetectionPipeline != nil)") }
             }
 
-            // Uniform buffer for tile compute (one per eye)
-            let tileUniformSize = MemoryLayout<TileUniforms>.stride * 2
+            // Uniform buffer for tile compute (one per eye, per in-flight
+            // frame). Reusing a single two-eye block lets the CPU overwrite
+            // bindless grid addresses while an older GPU frame still reads it.
+            let tileUniformSize = MemoryLayout<TileUniforms>.stride * 2 * maxBuffersInFlight
             tileUniformBuffer = device.makeBuffer(length: tileUniformSize, options: .storageModeShared)
             tileUniformBuffer?.label = "TileUniforms"
             
@@ -628,8 +588,17 @@ actor Renderer {
             : nil
         arSession = ARKitSession()
         
-        // Defer actor-isolated setup to after init completes
-        // These methods access actor-isolated properties and must run on this actor
+        // Nonessential setup is deliberately started only after the first frame
+        // has been committed. Scheduling it here can let this task win the actor
+        // executor immediately after init and delay the compositor's first frame.
+    }
+
+    /// Starts nonessential renderer warm-up after CompositorServices has received
+    /// its first submitted frame. This is actor-isolated and idempotent because
+    /// every render path (including the GPU-stall fallback) reports submission.
+    private func startPostFirstFrameSetupIfNeeded() {
+        guard setupTask == nil else { return }
+
         setupTask = Task { [weak self] in
             guard let self else { return }
 
@@ -642,14 +611,14 @@ actor Renderer {
             await self.setupResidencySet()
             guard !Task.isCancelled else { return }
 
-            // === PRESET PIPELINE PRECOMPILATION ===
-            // Build specialized pipelines for saved presets to avoid hitches when loading
-            await self.precompilePresetPipelines()
-            guard !Task.isCancelled else { return }
+            // Preset variants are built lazily by the preparation handler. A
+            // full saved-preset sweep here still runs synchronously on this
+            // actor after the first frame and can starve subsequent compositor
+            // frames long enough for a Release launch to be terminated.
 
-            // Persist the pipeline binaries compiled during startup (compute +
-            // render) so the next cold launch loads them instead of re-running the
-            // GPU back-end compiler. Off-actor, low priority — never blocks a frame.
+            // Persist any pipeline binaries compiled during startup (compute +
+            // render) so the next cold launch can reuse them. Off-actor and low
+            // priority so serialization never blocks a frame.
             let computeArchive = self.pipelineArchive
             let renderArchive = self.renderPipelineArchive
             Task.detached(priority: .background) {
@@ -771,14 +740,15 @@ actor Renderer {
                 return
             }
             
-            await renderer.startARSession()
-
-            guard !Task.isCancelled else {
-                await MainActor.run {
-                    appModel.clearRendererHandlers(renderLoopID: renderLoopID)
-                }
-                return
+            // Authorization and ARKit provider startup can take long enough for
+            // CompositorServices to kill a non-debug launch that has not produced
+            // its first frame yet. Start them concurrently and render immediately;
+            // renderFrame uses the documented nil device-anchor path (identity
+            // pose, no late reprojection) until world tracking becomes available.
+            let arSessionStartupTask = Task {
+                await renderer.startARSession()
             }
+            defer { arSessionStartupTask.cancel() }
 
             await renderer.renderLoop()
 
@@ -897,15 +867,6 @@ actor Renderer {
 
         frame.endUpdate()
 
-        // After a drawable request, every early exit must still close the
-        // submission phase. Returning repeatedly while world tracking warms up
-        // leaves frames in flight and trips the compositor's client assertion.
-        // Before requesting a drawable, however, ending submission is invalid.
-        func finishSkippedFrameAfterDrawableRequest() {
-            frame.startSubmission()
-            frame.endSubmission()
-        }
-
         // Drive the compositor's runtime render quality before querying the
         // drawable, so the drawable is sized for the requested quality. This is the
         // visionOS-native (and foveation-aware) resolution control — see
@@ -937,18 +898,12 @@ actor Renderer {
 
         let presentationTime = timing.presentationTime
         let time = LayerRenderer.Clock.Instant.epoch.duration(to: presentationTime).timeInterval
-        let deviceAnchor: DeviceAnchor?
-        if worldTracking.state == .running {
-            deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
-        } else {
-            deviceAnchor = nil
-        }
-        guard let deviceAnchor else {
-            if !hasLoggedMissingDeviceAnchor {
-                hasLoggedMissingDeviceAnchor = true
-                print("⚠️ Device anchor unavailable; skipping immersive frame until world tracking is ready")
-            }
-            return
+        let deviceAnchor = worldTracking.state == .running
+            ? worldTracking.queryDeviceAnchor(atTimestamp: time)
+            : nil
+        if deviceAnchor == nil, !hasLoggedMissingDeviceAnchor {
+            hasLoggedMissingDeviceAnchor = true
+            print("⚠️ Device anchor unavailable; rendering with identity pose until world tracking is ready")
         }
 
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
@@ -973,13 +928,16 @@ actor Renderer {
         if #available(visionOS 26.0, *) {
             let drawables = frame.queryDrawables()
             guard let selectedDrawable = selectDrawable(from: drawables) else {
-                finishSkippedFrameAfterDrawableRequest()
+                // CompositorServices documents a zero-count result as a cancelled,
+                // invalid frame. Do not call start/endSubmission (or access the
+                // frame in any other way) after this point.
                 return
             }
             drawable = selectedDrawable
         } else {
             guard let legacyDrawable = frame.queryDrawable() else {
-                finishSkippedFrameAfterDrawableRequest()
+                // Nil means the layer is paused or invalidated. Discard the frame;
+                // beginning a submission on it is a compositor client violation.
                 return
             }
             drawable = legacyDrawable
@@ -1019,6 +977,7 @@ actor Renderer {
             }
             drawable.encodePresent(commandBuffer: commandBuffer)
             commandBuffer.commit()
+            startPostFirstFrameSetupIfNeeded()
             return
         }
 
@@ -1147,6 +1106,17 @@ actor Renderer {
         let updateGameStateStart = CACurrentMediaTime()
         let updateGameStateTraceState = RenderTrace.begin("Update Game State")
         let framePreparation = self.updateGameState(drawable: drawable, settingsSnapshot: settingsSnapshot)
+        lastSubmittedEnvironmentGrid = framePreparation.environmentGrid
+        // `EnvScrunchParams.gridAddress` is a bindless pointer, so Metal cannot
+        // infer its owner from an ordinary buffer binding. Hold the frame's exact
+        // grid snapshot until GPU completion in addition to declaring it on each
+        // encoder below. This is intentionally the same object used to build the
+        // address in updateGameState.
+        if let environmentGrid = framePreparation.environmentGrid {
+            commandBuffer.addCompletedHandler { _ in
+                withExtendedLifetime(environmentGrid) {}
+            }
+        }
         RenderTrace.end("Update Game State", updateGameStateTraceState)
         frameBreakdown.updateGameStateMs = (CACurrentMediaTime() - updateGameStateStart) * 1000.0
 
@@ -1171,6 +1141,20 @@ actor Renderer {
         let renderContextRequired = drawableRenderContextRequired
         var framePath = selectFramePath(settingsSnapshot: settingsSnapshot)
         if passthroughBackgroundActive { framePath = .fragment }
+
+        // The two offscreen paths each own several full-resolution stereo
+        // textures. Keep only the active family's resources alive; retaining both
+        // across a path switch creates a large transient working-set spike just as
+        // the compositor is also resizing its drawable pool.
+        switch framePath {
+        case .adaptiveCompute:
+            #if canImport(MetalFX)
+            metalFXManager = nil
+            #endif
+            warmStartGate.invalidate()
+        case .fragment:
+            releaseAdaptiveComputeAuxiliaryTextures()
+        }
         let useAdaptiveCompute: Bool
 
         if case .adaptiveCompute = framePath {
@@ -1191,8 +1175,10 @@ actor Renderer {
                     encodeDrawableRenderContextPass(commandBuffer: commandBuffer, drawable: drawable)
                 }
                 drawable.encodePresent(commandBuffer: commandBuffer)
+                observeAdaptiveComputeCompletion(commandBuffer)
                 shouldSignalInFlightSemaphore = false
                 commandBuffer.commit()
+                startPostFirstFrameSetupIfNeeded()
                 return  // Skip fragment-based rendering
             }
         } else {
@@ -1234,10 +1220,14 @@ actor Renderer {
             // so gestures and music reactivity keep the warm start alive.
             let warmStartOK: Int32 = (bundle.manager.depthHistoryValid
                 && warmStartGate.allowsWarmStart(for: settingsSnapshot)) ? 1 : 0
-            uniforms[uniformBufferIndex].uniforms.0.renderResolution = res
-            uniforms[uniformBufferIndex].uniforms.1.renderResolution = res
-            uniforms[uniformBufferIndex].uniforms.0.warmStartEnabled = warmStartOK
-            uniforms[uniformBufferIndex].uniforms.1.warmStartEnabled = warmStartOK
+            // `uniforms` is already rebound to the current ring slot by
+            // updateDynamicBufferState(). Indexing it by uniformBufferIndex a
+            // second time walks beyond that slot (and, in later slots, beyond
+            // the allocation), which is especially prone to crash in Release.
+            uniforms[0].uniforms.0.renderResolution = res
+            uniforms[0].uniforms.1.renderResolution = res
+            uniforms[0].uniforms.0.warmStartEnabled = warmStartOK
+            uniforms[0].uniforms.1.warmStartEnabled = warmStartOK
         }
         #endif
 
@@ -1254,6 +1244,9 @@ actor Renderer {
             && settingsSnapshot.sphericalInversionMode.rawValue == 0
             && !(settingsSnapshot.sphereProjectionEnabled && settingsSnapshot.sphereProjectionBlend > 0)
             && settingsSnapshot.spaceWarpStrength <= 0
+            // Environment Scrunch can add a hug shell to the base DE, so the
+            // analytic box/fold lower bound no longer proves that space is empty.
+            && !settingsSnapshot.envScrunchEnabled
 
         // Render-target dimensions the fragment pass writes into (MetalFX input, or
         // the drawable color texture for the direct path).
@@ -1298,11 +1291,12 @@ actor Renderer {
             drawable.encodePresent(commandBuffer: commandBuffer)
             shouldSignalInFlightSemaphore = false
             commandBuffer.commit()
+            startPostFirstFrameSetupIfNeeded()
             return
         }
         // Environment Scrunch grid is reached bindlessly (GPU address in the
         // uniforms) — make it resident for the fragment march.
-        if let envGrid = environmentSDF.withLock({ $0 }) {
+        if let envGrid = framePreparation.environmentGrid {
             renderEncoder.useResource(envGrid.buffer, usage: .read, stages: .fragment)
         }
 
@@ -1364,8 +1358,8 @@ actor Renderer {
 
         // Benchmark iteration counter (BufferIndexBenchCounters). Always bound —
         // the fragmentShader pipeline declares the buffer; it's only zeroed (and
-        // later read) while a sweep is collecting. benchPtr is read in the
-        // completion handler once the GPU has finished writing this slot.
+        // later read) while a sweep is collecting. The selected buffer is read in
+        // the completion handler once the GPU has finished writing this slot.
         // (Live dashboard step profiling is wired through the Mac path only; the
         // visionOS compute kernel isn't step-instrumented yet.)
         let benchCollecting = BenchmarkManager.shared.collectIterations
@@ -1375,7 +1369,10 @@ actor Renderer {
             if benchCollecting { memset(benchBuf.contents(), 0, MemoryLayout<UInt32>.stride * 2) }
             renderEncoder.setFragmentBuffer(benchBuf, offset: 0, index: BufferIndex.benchCounters.rawValue)
         }
-        let benchPtr: UnsafeMutableRawPointer? = benchCollecting ? benchBuf?.contents() : nil
+        // Retain the Metal buffer through GPU completion. Avoid carrying a raw
+        // pointer across the @Sendable completion callback; deriving it only after
+        // completion also makes the resource lifetime explicit to Swift's checker.
+        let completedBenchBuffer: MTLBuffer? = benchCollecting ? benchBuf : nil
 
         // Previous-frame depth for the temporal march warm-start. Pipelines built
         // via buildRenderPipelineWithDevice declare this argument (FC_WARM_START);
@@ -1451,7 +1448,7 @@ actor Renderer {
         let drawableWidth = drawable.colorTextures[0].width
         let drawableHeight = drawable.colorTextures[0].height
         let frameBreakdownSnapshot = frameBreakdown
-        commandBuffer.addCompletedHandler { [weak self, benchPtr] cb in
+        commandBuffer.addCompletedHandler { [weak self, completedBenchBuffer] cb in
             let gpuMs: Double?
             if cb.gpuEndTime > cb.gpuStartTime {
                 gpuMs = (cb.gpuEndTime - cb.gpuStartTime) * 1000.0
@@ -1460,8 +1457,8 @@ actor Renderer {
             }
             // Average march iterations to converge over this frame's hit rays.
             var iterationsAvg: Double? = nil
-            if let benchPtr {
-                let p = benchPtr.bindMemory(to: UInt32.self, capacity: 2)
+            if let completedBenchBuffer {
+                let p = completedBenchBuffer.contents().bindMemory(to: UInt32.self, capacity: 2)
                 let hitCount = p[1]
                 if hitCount > 0 { iterationsAvg = Double(p[0]) / Double(hitCount) }
             }
@@ -1491,6 +1488,7 @@ actor Renderer {
 
         shouldSignalInFlightSemaphore = false
         commandBuffer.commit()
+        startPostFirstFrameSetupIfNeeded()
     }
 
     // MARK: - Adaptive 8x8 Hierarchical Compute Rendering
@@ -1510,10 +1508,10 @@ actor Renderer {
         curDepthTexture: MTLTexture,
         uniformBuffer: MTLBuffer,
         bufferContents: UnsafeMutableRawPointer
-    ) {
+    ) -> SIMD2<Int>? {
         guard let pipeline = pipeline ?? adaptiveHierarchicalPipeline8x8 else {
             if RENDERER_DEBUG { print("⚠️ Adaptive compute pipeline not available") }
-            return
+            return nil
         }
         let eyePreparation = framePreparation.perEye[viewIndex]
         let modelView = eyePreparation.modelView
@@ -1599,11 +1597,12 @@ actor Renderer {
         var rateMapParamBuffer: MTLBuffer?
         if let map = selectedRateMap {
             let need = map.parameterDataSizeAndAlign.size
-            if rateMapParamBuffers[viewIndex] == nil || rateMapParamBuffers[viewIndex]!.length < need {
-                rateMapParamBuffers[viewIndex] = device.makeBuffer(length: max(need, 16), options: .storageModeShared)
-                rateMapParamBuffers[viewIndex]?.label = "RateMapParams eye\(viewIndex)"
+            let rateMapBufferIndex = uniformBufferIndex * 2 + viewIndex
+            if rateMapParamBuffers[rateMapBufferIndex] == nil || rateMapParamBuffers[rateMapBufferIndex]!.length < need {
+                rateMapParamBuffers[rateMapBufferIndex] = device.makeBuffer(length: max(need, 16), options: .storageModeShared)
+                rateMapParamBuffers[rateMapBufferIndex]?.label = "RateMapParams slot\(uniformBufferIndex) eye\(viewIndex)"
             }
-            if let buf = rateMapParamBuffers[viewIndex] {
+            if let buf = rateMapParamBuffers[rateMapBufferIndex] {
                 map.copyParameterData(buffer: buf, offset: 0)
                 rateMapParamBuffer = buf
             }
@@ -1743,13 +1742,14 @@ actor Renderer {
         )
 
         // Copy uniforms to buffer (pointer cached by caller across both eyes)
-        let uniformOffset = MemoryLayout<TileUniforms>.stride * viewIndex
+        let uniformOffset = MemoryLayout<TileUniforms>.stride
+            * (uniformBufferIndex * 2 + viewIndex)
         memcpy(bufferContents.advanced(by: uniformOffset), &tileUniforms, MemoryLayout<TileUniforms>.size)
         
         // Create compute encoder
         guard let computeEncoder = commandBuffer.makeComputeCommandEncoder() else {
             if RENDERER_DEBUG { print("⚠️ Failed to create compute encoder") }
-            return
+            return nil
         }
         
         computeEncoder.label = viewIndex == 0 ? "Adaptive Compute - Eye 0" : "Adaptive Compute - Eye 1"
@@ -1757,7 +1757,7 @@ actor Renderer {
         // Environment Scrunch grid is reached bindlessly (GPU address in the
         // uniforms), so it needs explicit residency on every encoder that
         // marches the DE.
-        if let envGrid = environmentSDF.withLock({ $0 }) {
+        if let envGrid = framePreparation.environmentGrid {
             computeEncoder.useResource(envGrid.buffer, usage: .read)
         }
         computeEncoder.setBuffer(uniformBuffer, offset: uniformOffset, index: 0)
@@ -1785,6 +1785,7 @@ actor Renderer {
         
         computeEncoder.dispatchThreadgroups(threadgroupsPerGrid, threadsPerThreadgroup: threadgroupSize)
         computeEncoder.endEncoding()
+        return SIMD2(renderWidth, renderHeight)
     }
     
     /// Creates or resizes the compute output texture to match drawable dimensions
@@ -1847,22 +1848,31 @@ actor Renderer {
         return texture
     }
 
-    private func estimatedAdaptiveComputeAuxiliaryBytes(for drawable: LayerRenderer.Drawable) -> Int {
+    private func estimatedAdaptiveComputeAuxiliaryBytes(
+        for drawable: LayerRenderer.Drawable,
+        edgeEnabled: Bool
+    ) -> Int {
         let width = drawable.colorTextures[0].width
         let height = drawable.colorTextures[0].height
         let viewCount = max(1, drawable.views.count)
         let pixelCount = width * height * viewCount
 
         // Adaptive compute needs one shader-writable color target plus two r32Float
-        // depth-history textures. At high compositor renderQuality these auxiliary
-        // textures can exceed the memory saved by foveation and push the process over
-        // the headset's working set. Keep the estimate conservative: common color
-        // formats here are 4 bytes/pixel, and depth is 4 bytes/pixel.
-        return pixelCount * (4 + 4 + 4)
+        // depth-history textures. Edge treatment adds a second color target. At
+        // high compositor renderQuality these auxiliary textures can push the
+        // process over the headset's working set. Common drawable color and r32
+        // depth formats here are 4 bytes/pixel.
+        return pixelCount * (4 + 4 + 4 + (edgeEnabled ? 4 : 0))
     }
 
-    private func canAllocateAdaptiveComputeAuxiliaryTextures(for drawable: LayerRenderer.Drawable) -> Bool {
-        let estimatedBytes = estimatedAdaptiveComputeAuxiliaryBytes(for: drawable)
+    private func canAllocateAdaptiveComputeAuxiliaryTextures(
+        for drawable: LayerRenderer.Drawable,
+        edgeEnabled: Bool
+    ) -> Bool {
+        let estimatedBytes = estimatedAdaptiveComputeAuxiliaryBytes(
+            for: drawable,
+            edgeEnabled: edgeEnabled
+        )
         let budgetBytes = 160 * 1024 * 1024
         if estimatedBytes <= budgetBytes { return true }
 
@@ -1873,6 +1883,43 @@ actor Renderer {
             print("⚠️ Adaptive compute disabled for this drawable: auxiliary textures would use \(Int(mb.rounded())) MB (budget \(Int(budgetMB)) MB). Falling back to fragment rendering.")
         }
         return false
+    }
+
+    /// Drops every drawable-sized allocation owned by the adaptive compute path.
+    /// Metal command buffers retain resources they reference, so an older in-flight
+    /// frame remains valid while the renderer stops retaining the inactive pool.
+    private func releaseAdaptiveComputeAuxiliaryTextures() {
+        guard computeOutputTexture != nil || edgeOutputTexture != nil ||
+              temporalDepthTextures[0] != nil || temporalDepthTextures[1] != nil else {
+            return
+        }
+        computeOutputTexture = nil
+        edgeOutputTexture = nil
+        temporalDepthTextures = [nil, nil]
+        temporalDepthIndex = 0
+        temporalFrameCount = 0
+        computeWarmStartGate.invalidate()
+    }
+
+    /// A command-buffer error is recoverable only if we stop resubmitting the
+    /// faulting adaptive kernel. The fragment path remains available as the safe
+    /// fallback for the rest of the immersive-session lifetime.
+    private func observeAdaptiveComputeCompletion(_ commandBuffer: MTLCommandBuffer) {
+        commandBuffer.addCompletedHandler { [weak self] completed in
+            guard completed.status == .error else { return }
+            let message = completed.error?.localizedDescription ?? "unknown Metal error"
+            guard let self else { return }
+            Task { await self.suppressAdaptiveComputeAfterGPUFailure(message) }
+        }
+    }
+
+    private func suppressAdaptiveComputeAfterGPUFailure(_ message: String) {
+        adaptiveComputeSuppressedAfterGPUFailure = true
+        releaseAdaptiveComputeAuxiliaryTextures()
+        if !hasLoggedAdaptiveComputeGPUFailure {
+            hasLoggedAdaptiveComputeGPUFailure = true
+            print("⚠️ Adaptive compute GPU failure: \(message). Using fragment rendering for the rest of this immersive session.")
+        }
     }
     
     /// Creates or resizes the double-buffered temporal depth textures for reprojection.
@@ -1954,7 +2001,6 @@ actor Renderer {
         }
         texture.label = "Cone Coarse Warm-Start"
         coarseStartTexture = texture
-        updateResidencySetForComputeTextures([texture])
         if RENDERER_DEBUG { print("📐 Created coarse warm-start texture: \(cw)×\(ch) × \(viewCount) layers") }
         return texture
     }
@@ -1977,7 +2023,6 @@ actor Renderer {
         guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
         texture.label = "Cone Coarse Warm-Start (dummy)"
         coarseStartDummyTexture = texture
-        updateResidencySetForComputeTextures([texture])
         return texture
     }
 
@@ -2061,12 +2106,14 @@ actor Renderer {
         renderWidth: Int,
         renderHeight: Int,
         uniformBuffer: MTLBuffer
-    ) {
+    ) -> Bool {
         guard let pipeline = edgeDetectionPipeline,
-              let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+              let encoder = commandBuffer.makeComputeCommandEncoder() else { return false }
         encoder.label = "Sliding Window Edge Detector Eye \(viewIndex)"
         encoder.setComputePipelineState(pipeline)
-        encoder.setBuffer(uniformBuffer, offset: MemoryLayout<TileUniforms>.stride * viewIndex, index: 0)
+        let uniformOffset = MemoryLayout<TileUniforms>.stride
+            * (uniformBufferIndex * 2 + viewIndex)
+        encoder.setBuffer(uniformBuffer, offset: uniformOffset, index: 0)
         encoder.setTexture(sourceTexture, index: 0)
         encoder.setTexture(destinationTexture, index: 1)
         let w = max(1, min(renderWidth, sourceTexture.width))
@@ -2078,6 +2125,7 @@ actor Renderer {
             threadsPerThreadgroup: MTLSize(width: min(tw, w), height: min(th, h), depth: 1)
         )
         encoder.endEncoding()
+        return true
     }
 
     // MARK: - Conservative Cone Coarse-Prepass Warm-Start
@@ -2110,7 +2158,7 @@ actor Renderer {
         guard let computeEncoder = commandBuffer.makeComputeCommandEncoder() else { return }
         computeEncoder.label = "Cone Coarse-Prepass"
         computeEncoder.setComputePipelineState(pipeline)
-        if let envGrid = environmentSDF.withLock({ $0 }) {
+        if let envGrid = framePreparation.environmentGrid {
             computeEncoder.useResource(envGrid.buffer, usage: .read)
         }
 
@@ -2165,11 +2213,12 @@ actor Renderer {
             var rateMapParamBuffer: MTLBuffer?
             if let map = selectedRateMap {
                 let need = map.parameterDataSizeAndAlign.size
-                if rateMapParamBuffers[viewIndex] == nil || rateMapParamBuffers[viewIndex]!.length < need {
-                    rateMapParamBuffers[viewIndex] = device.makeBuffer(length: max(need, 16), options: .storageModeShared)
-                    rateMapParamBuffers[viewIndex]?.label = "RateMapParams(cone) eye\(viewIndex)"
+                let rateMapBufferIndex = uniformBufferIndex * 2 + viewIndex
+                if rateMapParamBuffers[rateMapBufferIndex] == nil || rateMapParamBuffers[rateMapBufferIndex]!.length < need {
+                    rateMapParamBuffers[rateMapBufferIndex] = device.makeBuffer(length: max(need, 16), options: .storageModeShared)
+                    rateMapParamBuffers[rateMapBufferIndex]?.label = "RateMapParams(cone) slot\(uniformBufferIndex) eye\(viewIndex)"
                 }
-                if let buf = rateMapParamBuffers[viewIndex] {
+                if let buf = rateMapParamBuffers[rateMapBufferIndex] {
                     map.copyParameterData(buffer: buf, offset: 0)
                     rateMapParamBuffer = buf
                 }
@@ -2291,7 +2340,8 @@ actor Renderer {
                 boundingShapeCenter: settingsSnapshot.boundingShapeCenterModel(modelMatrix: framePreparation.modelMatrix)
             )
 
-            let uniformOffset = MemoryLayout<TileUniforms>.stride * viewIndex
+            let uniformOffset = MemoryLayout<TileUniforms>.stride
+                * (uniformBufferIndex * 2 + viewIndex)
             memcpy(bufferContents.advanced(by: uniformOffset), &tileUniforms, MemoryLayout<TileUniforms>.size)
 
             computeEncoder.setBuffer(uniformBuffer, offset: uniformOffset, index: 0)
@@ -2326,49 +2376,49 @@ actor Renderer {
             )
         )
         
-        guard computePipeline != nil else { return false }
-        guard let uniformBuffer = tileUniformBuffer else { return false }
+        guard computePipeline != nil else {
+            releaseAdaptiveComputeAuxiliaryTextures()
+            return false
+        }
+        guard let uniformBuffer = tileUniformBuffer else {
+            releaseAdaptiveComputeAuxiliaryTextures()
+            return false
+        }
         let bufferContents = uniformBuffer.contents()
 
-        guard canAllocateAdaptiveComputeAuxiliaryTextures(for: drawable) else {
-            computeOutputTexture = nil
-            temporalDepthTextures = [nil, nil]
-            temporalDepthIndex = 0
-            temporalFrameCount = 0
-            computeWarmStartGate.invalidate()
+        let edgeEnabled = settingsSnapshot.colorSchemeParams.edgeDetectionEnabled != 0
+        if !edgeEnabled {
+            // Edge output is another full-size stereo color target. Do not keep it
+            // resident after the effect is turned off.
+            edgeOutputTexture = nil
+        }
+        guard canAllocateAdaptiveComputeAuxiliaryTextures(
+            for: drawable,
+            edgeEnabled: edgeEnabled
+        ) else {
+            releaseAdaptiveComputeAuxiliaryTextures()
             return false
         }
         
-        // Track textures created this frame for batched residency update
-        let prevComputeOutput = computeOutputTexture
-        let prevEdgeOutput = edgeOutputTexture
-        let prevDepth0 = temporalDepthTextures[0]
-        
         guard let outputTexture = ensureComputeOutputTexture(for: drawable) else {
+            releaseAdaptiveComputeAuxiliaryTextures()
             return false
         }
 
-        let edgeEnabled = settingsSnapshot.colorSchemeParams.edgeDetectionEnabled != 0
         let edgeTexture = edgeEnabled ? ensureEdgeOutputTexture(for: drawable) : nil
         
         // Set up temporal reprojection depth textures (ping-pong)
         guard let depthPair = ensureTemporalDepthTextures(for: drawable) else {
             if RENDERER_DEBUG { print("⚠️ Temporal textures unavailable; falling back to fragment rendering") }
+            releaseAdaptiveComputeAuxiliaryTextures()
             return false
         }
         
-        // Batch residency set updates for any newly created textures (single commit)
-        var newTextures: [MTLTexture] = []
-        if computeOutputTexture !== prevComputeOutput { newTextures.append(outputTexture) }
-        if let edgeTexture, edgeOutputTexture !== prevEdgeOutput { newTextures.append(edgeTexture) }
-        if temporalDepthTextures[0] !== prevDepth0 {
-            newTextures.append(contentsOf: temporalDepthTextures.compactMap { $0 })
-        }
-        if !newTextures.isEmpty { updateResidencySetForComputeTextures(newTextures) }
-        
-        // Render each eye
+        // Render each eye. Propagate encoder creation failures so the caller can
+        // use the fragment path instead of presenting stale intermediate data.
+        var edgeAppliedToEveryView = edgeEnabled && edgeTexture != nil
         for viewIndex in 0..<drawable.views.count {
-            encodeAdaptiveCompute(
+            guard let renderExtent = encodeAdaptiveCompute(
                 commandBuffer: commandBuffer,
                 outputTexture: outputTexture,
                 drawable: drawable,
@@ -2380,17 +2430,24 @@ actor Renderer {
                 curDepthTexture: depthPair.write,
                 uniformBuffer: uniformBuffer,
                 bufferContents: bufferContents
-            )
-            if edgeEnabled, let edgeTexture {
-                encodeEdgeDetection(
+            ) else {
+                releaseAdaptiveComputeAuxiliaryTextures()
+                return false
+            }
+            if edgeAppliedToEveryView, let edgeTexture {
+                let encoded = encodeEdgeDetection(
                     commandBuffer: commandBuffer,
                     sourceTexture: outputTexture,
                     destinationTexture: edgeTexture,
                     viewIndex: viewIndex,
-                    renderWidth: outputTexture.width,
-                    renderHeight: outputTexture.height,
+                    // Only process the foveated physical region written by the
+                    // raymarch kernel. Running this at the backing texture's native
+                    // extent erased much of the governor's low-quality GPU saving.
+                    renderWidth: renderExtent.x,
+                    renderHeight: renderExtent.y,
                     uniformBuffer: uniformBuffer
                 )
+                edgeAppliedToEveryView = edgeAppliedToEveryView && encoded
             }
         }
         
@@ -2400,7 +2457,11 @@ actor Renderer {
         computeWarmStartGate.recordDepthWritten(settingsSnapshot)
         
         // Blit compute output to drawable for presentation
-        blitComputeOutputToDrawable(commandBuffer: commandBuffer, drawable: drawable, useEdgeOutput: edgeEnabled)
+        blitComputeOutputToDrawable(
+            commandBuffer: commandBuffer,
+            drawable: drawable,
+            useEdgeOutput: edgeAppliedToEveryView
+        )
         
         return true
     }

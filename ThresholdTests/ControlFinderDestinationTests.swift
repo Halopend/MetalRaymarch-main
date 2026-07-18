@@ -15,7 +15,7 @@ struct ControlFinderDestinationTests {
     @Test("Catalog IDs are unique and every destination is routable")
     func uniqueRoutableDestinations() {
         let catalog = ControlFinderDestination.catalog
-        #expect(catalog.count == 31)
+        #expect(catalog.count == 32)
         #expect(Set(catalog.map(\.id)).count == catalog.count)
         #expect(catalog.allSatisfy { !$0.title.isEmpty && !$0.path.isEmpty && !$0.description.isEmpty })
         #expect(catalog.allSatisfy { $0.route != nil })
@@ -63,9 +63,9 @@ struct ControlFinderDestinationTests {
         let iPad = ControlFinderDestination.results(matching: "", on: .iOS)
         let vision = ControlFinderDestination.results(matching: "", on: .visionOS)
 
-        #expect(mac.count == 26)
-        #expect(iPad.count == 29)
-        #expect(vision.count == 31)
+        #expect(mac.count == 27)
+        #expect(iPad.count == 30)
+        #expect(vision.count == 32)
 
         #expect(!mac.contains { $0.id == "music.Songs" })
         #expect(iPad.contains { $0.id == "music.Songs" })

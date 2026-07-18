@@ -202,7 +202,8 @@ struct EmbeddedFormula: Codable, Equatable {
 
 // MARK: - Bundled construction primitives
 
-/// Small analytic SDFs used as the seed geometry for the Transformations editor.
+/// Analytic SDFs selected and sized in the dedicated Primitives workspace, then
+/// optionally used as seed geometry for the Transformations editor.
 /// They deliberately use the same EmbeddedFormula contract as imported `.threshfx`
 /// content, so saving a scene embeds the selected primitive and its attribution.
 /// Current builds render these through the precompiled construction-primitive
@@ -213,9 +214,48 @@ enum FractalPrimitiveKind: String, CaseIterable, Identifiable {
     case box
     case torus
     case octahedron
+    case capsule
+    case cylinder
+    case cone
+    case hexagonalPrism
+    case pyramid
+    case tetrahedron
+    case icosahedron
+    case dodecahedron
     case mandelboxSeed
 
     var id: String { rawValue }
+
+    /// Selector values are persisted in FormulaParams, so existing values must
+    /// never be renumbered when the library grows.
+    var selector: Int {
+        switch self {
+        case .sphere: return 0
+        case .box: return 1
+        case .torus: return 2
+        case .octahedron: return 3
+        case .mandelboxSeed: return 4
+        case .capsule: return 5
+        case .cylinder: return 6
+        case .cone: return 7
+        case .hexagonalPrism: return 8
+        case .pyramid: return 9
+        case .tetrahedron: return 10
+        case .icosahedron: return 11
+        case .dodecahedron: return 12
+        }
+    }
+
+    init?(selector: Int) {
+        guard let match = Self.allCases.first(where: { $0.selector == selector }) else {
+            return nil
+        }
+        self = match
+    }
+
+    static var analyticCases: [Self] {
+        allCases.filter { $0 != .mandelboxSeed }
+    }
 
     var name: String {
         switch self {
@@ -223,6 +263,14 @@ enum FractalPrimitiveKind: String, CaseIterable, Identifiable {
         case .box: return "Box"
         case .torus: return "Torus"
         case .octahedron: return "Octahedron"
+        case .capsule: return "Capsule"
+        case .cylinder: return "Cylinder"
+        case .cone: return "Cone"
+        case .hexagonalPrism: return "Hex Prism"
+        case .pyramid: return "Pyramid"
+        case .tetrahedron: return "Tetrahedron"
+        case .icosahedron: return "Icosahedron"
+        case .dodecahedron: return "Dodecahedron"
         case .mandelboxSeed: return "Mandelbox Seed"
         }
     }
@@ -233,6 +281,90 @@ enum FractalPrimitiveKind: String, CaseIterable, Identifiable {
         case .box: return "cube.fill"
         case .torus: return "circle.dashed"
         case .octahedron: return "diamond.fill"
+        case .capsule: return "capsule.fill"
+        case .cylinder: return "cylinder.fill"
+        case .cone: return "triangle.fill"
+        case .hexagonalPrism: return "hexagon.fill"
+        case .pyramid: return "triangle.fill"
+        case .tetrahedron: return "triangle.fill"
+        case .icosahedron: return "hexagon.fill"
+        case .dodecahedron: return "pentagon.fill"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .sphere: return "A smooth radial solid with one radius."
+        case .box: return "A cube that can soften continuously into a rounded box."
+        case .torus: return "A ring with independent major and tube radii."
+        case .octahedron: return "A sharp eight-faced Platonic solid."
+        case .capsule: return "A line segment swept by a sphere."
+        case .cylinder: return "A flat-capped round column."
+        case .cone: return "A centered, flat-based pointed solid."
+        case .hexagonalPrism: return "A six-sided column with a controllable height."
+        case .pyramid: return "A centered square-based pyramid with a sharp apex."
+        case .tetrahedron: return "A four-faced Platonic seed matched to the Bounding system."
+        case .icosahedron: return "A twenty-faced Platonic seed matched to the Bounding system."
+        case .dodecahedron: return "A twelve-faced Platonic seed matched to the Bounding system."
+        case .mandelboxSeed: return "The terminal sphere used by the Mandelbox construction recipe."
+        }
+    }
+
+    struct Dimension: Identifiable {
+        let index: Int
+        let name: String
+        let icon: String
+        let range: ClosedRange<Float>
+
+        var id: Int { index }
+    }
+
+    /// Shape-specific labels for the statically compiled parameter slots.
+    var dimensions: [Dimension] {
+        switch self {
+        case .sphere:
+            return [Dimension(index: 1, name: "Radius", icon: "circle", range: 0.05...30)]
+        case .box:
+            return [
+                Dimension(index: 1, name: "Half Size", icon: "arrow.left.and.right", range: 0.05...30),
+                Dimension(index: 2, name: "Roundness", icon: "square", range: 0...2)
+            ]
+        case .torus:
+            return [
+                Dimension(index: 1, name: "Major Radius", icon: "circle.dashed", range: 0.05...6),
+                Dimension(index: 2, name: "Tube Radius", icon: "circle", range: 0.02...2)
+            ]
+        case .octahedron:
+            return [Dimension(index: 1, name: "Radius", icon: "diamond", range: 0.05...30)]
+        case .capsule:
+            return [
+                Dimension(index: 1, name: "Half Length", icon: "arrow.up.and.down", range: 0.05...6),
+                Dimension(index: 2, name: "Radius", icon: "circle", range: 0.02...2)
+            ]
+        case .cylinder:
+            return [
+                Dimension(index: 1, name: "Half Height", icon: "arrow.up.and.down", range: 0.05...6),
+                Dimension(index: 2, name: "Radius", icon: "circle", range: 0.02...2)
+            ]
+        case .cone:
+            return [
+                Dimension(index: 1, name: "Half Height", icon: "arrow.up.and.down", range: 0.05...6),
+                Dimension(index: 2, name: "Base Radius", icon: "arrow.left.and.right", range: 0.02...2)
+            ]
+        case .hexagonalPrism:
+            return [
+                Dimension(index: 1, name: "Half Height", icon: "arrow.up.and.down", range: 0.05...6),
+                Dimension(index: 2, name: "Radius", icon: "hexagon", range: 0.02...2)
+            ]
+        case .pyramid:
+            return [
+                Dimension(index: 1, name: "Height", icon: "arrow.up.and.down", range: 0.05...6),
+                Dimension(index: 2, name: "Base Half Width", icon: "arrow.left.and.right", range: 0.02...2)
+            ]
+        case .tetrahedron, .icosahedron, .dodecahedron:
+            return [Dimension(index: 1, name: "Radius", icon: icon, range: 0.05...30)]
+        case .mandelboxSeed:
+            return [Dimension(index: 1, name: "Terminal Radius", icon: "circle", range: 0.05...6)]
         }
     }
 
@@ -250,6 +382,22 @@ enum FractalPrimitiveKind: String, CaseIterable, Identifiable {
             fp.params.0 = 2; fp.params.1 = 1.0; fp.params.2 = 0.25
         case .octahedron:
             fp.params.0 = 3; fp.params.1 = 1.0; fp.params.2 = 0.0
+        case .capsule:
+            fp.params.0 = 5; fp.params.1 = 1.0; fp.params.2 = 0.35
+        case .cylinder:
+            fp.params.0 = 6; fp.params.1 = 1.0; fp.params.2 = 0.75
+        case .cone:
+            fp.params.0 = 7; fp.params.1 = 1.0; fp.params.2 = 0.85
+        case .hexagonalPrism:
+            fp.params.0 = 8; fp.params.1 = 1.0; fp.params.2 = 0.85
+        case .pyramid:
+            fp.params.0 = 9; fp.params.1 = 1.6; fp.params.2 = 0.9
+        case .tetrahedron:
+            fp.params.0 = 10; fp.params.1 = 1.0; fp.params.2 = 0.0
+        case .icosahedron:
+            fp.params.0 = 11; fp.params.1 = 1.0; fp.params.2 = 0.0
+        case .dodecahedron:
+            fp.params.0 = 12; fp.params.1 = 1.0; fp.params.2 = 0.0
         case .mandelboxSeed:
             fp.params.0 = 4; fp.params.1 = 2.5; fp.params.2 = 0.0
         }
@@ -267,7 +415,7 @@ enum FractalPrimitiveKind: String, CaseIterable, Identifiable {
         case .sphere:
             stem = "PrimitiveSphere"
             description = "Analytic sphere seed for building forms with the transformation stack."
-            params = [Self.param(0, "Radius", 1.0, 0.05, 4.0, 0.05)]
+            params = [Self.param(0, "Radius", 1.0, 0.05, 30.0, 0.05)]
             helper = """
             FORCE_INLINE float primitiveDistance(float3 p, FormulaParams fp) {
                 return length(p) - max(fp.params[0], 0.001f);
@@ -277,13 +425,13 @@ enum FractalPrimitiveKind: String, CaseIterable, Identifiable {
             stem = "PrimitiveBox"
             description = "Analytic rounded-box seed for building forms with the transformation stack."
             params = [
-                Self.param(0, "Half Size", 1.0, 0.05, 4.0, 0.05),
-                Self.param(1, "Roundness", 0.0, 0.0, 1.0, 0.01)
+                Self.param(0, "Half Size", 1.0, 0.05, 30.0, 0.05),
+                Self.param(1, "Roundness", 0.0, 0.0, 2.0, 0.01)
             ]
             helper = """
             FORCE_INLINE float primitiveDistance(float3 p, FormulaParams fp) {
                 float size = max(fp.params[0], 0.001f);
-                float roundness = max(fp.params[1], 0.0f);
+                float roundness = min(max(fp.params[1], 0.0f), size);
                 float3 q = abs(p) - float3(size - roundness);
                 return length(max(q, 0.0f)) + min(max(q.x, max(q.y, q.z)), 0.0f) - roundness;
             }
@@ -292,7 +440,7 @@ enum FractalPrimitiveKind: String, CaseIterable, Identifiable {
             stem = "PrimitiveTorus"
             description = "Analytic torus seed for building forms with the transformation stack."
             params = [
-                Self.param(0, "Major Radius", 1.0, 0.05, 4.0, 0.05),
+                Self.param(0, "Major Radius", 1.0, 0.05, 6.0, 0.05),
                 Self.param(1, "Tube Radius", 0.25, 0.02, 2.0, 0.02)
             ]
             helper = """
@@ -304,10 +452,148 @@ enum FractalPrimitiveKind: String, CaseIterable, Identifiable {
         case .octahedron:
             stem = "PrimitiveOctahedron"
             description = "Analytic octahedron seed for building forms with the transformation stack."
-            params = [Self.param(0, "Size", 1.0, 0.05, 4.0, 0.05)]
+            params = [Self.param(0, "Radius", 1.0, 0.05, 30.0, 0.05)]
             helper = """
             FORCE_INLINE float primitiveDistance(float3 p, FormulaParams fp) {
                 return (abs(p.x) + abs(p.y) + abs(p.z) - max(fp.params[0], 0.001f)) * 0.57735026919f;
+            }
+            """
+        case .capsule:
+            stem = "PrimitiveCapsule"
+            description = "Analytic vertical capsule seed for building forms with the transformation stack."
+            params = [
+                Self.param(0, "Half Length", 1.0, 0.05, 6.0, 0.05),
+                Self.param(1, "Radius", 0.35, 0.02, 2.0, 0.02)
+            ]
+            helper = """
+            FORCE_INLINE float primitiveDistance(float3 p, FormulaParams fp) {
+                float halfLength = max(fp.params[0], 0.001f);
+                p.y -= clamp(p.y, -halfLength, halfLength);
+                return length(p) - max(fp.params[1], 0.001f);
+            }
+            """
+        case .cylinder:
+            stem = "PrimitiveCylinder"
+            description = "Analytic capped-cylinder seed for building forms with the transformation stack."
+            params = [
+                Self.param(0, "Half Height", 1.0, 0.05, 6.0, 0.05),
+                Self.param(1, "Radius", 0.75, 0.02, 2.0, 0.02)
+            ]
+            helper = """
+            FORCE_INLINE float primitiveDistance(float3 p, FormulaParams fp) {
+                float2 d = abs(float2(length(p.xz), p.y))
+                         - float2(max(fp.params[1], 0.001f), max(fp.params[0], 0.001f));
+                return min(max(d.x, d.y), 0.0f) + length(max(d, 0.0f));
+            }
+            """
+        case .cone:
+            stem = "PrimitiveCone"
+            description = "Analytic centered capped-cone seed for building forms with the transformation stack."
+            params = [
+                Self.param(0, "Half Height", 1.0, 0.05, 6.0, 0.05),
+                Self.param(1, "Base Radius", 0.85, 0.02, 2.0, 0.02)
+            ]
+            helper = """
+            FORCE_INLINE float primitiveDistance(float3 p, FormulaParams fp) {
+                float h = max(fp.params[0], 0.001f);
+                float r = max(fp.params[1], 0.001f);
+                float2 q = float2(length(p.xz), p.y);
+                float2 k1 = float2(0.0f, h);
+                float2 k2 = float2(-r, 2.0f * h);
+                float2 ca = float2(q.x - min(q.x, q.y < 0.0f ? r : 0.0f), abs(q.y) - h);
+                float2 cb = q - k1 + k2 * clamp(dot(k1 - q, k2) / dot(k2, k2), 0.0f, 1.0f);
+                float signValue = (cb.x < 0.0f && ca.y < 0.0f) ? -1.0f : 1.0f;
+                return signValue * sqrt(min(dot(ca, ca), dot(cb, cb)));
+            }
+            """
+        case .hexagonalPrism:
+            stem = "PrimitiveHexagonalPrism"
+            description = "Analytic hexagonal-prism seed for building forms with the transformation stack."
+            params = [
+                Self.param(0, "Half Height", 1.0, 0.05, 6.0, 0.05),
+                Self.param(1, "Radius", 0.85, 0.02, 2.0, 0.02)
+            ]
+            helper = """
+            FORCE_INLINE float primitiveDistance(float3 p, FormulaParams fp) {
+                float3 q = abs(p);
+                float side = max(q.x * 0.86602540378f + q.z * 0.5f, q.z)
+                           - max(fp.params[1], 0.001f);
+                return max(q.y - max(fp.params[0], 0.001f), side);
+            }
+            """
+        case .pyramid:
+            stem = "PrimitivePyramid"
+            description = "Analytic centered square-pyramid seed for building forms with the transformation stack."
+            params = [
+                Self.param(0, "Height", 1.6, 0.05, 6.0, 0.05),
+                Self.param(1, "Base Half Width", 0.9, 0.02, 2.0, 0.02)
+            ]
+            helper = """
+            FORCE_INLINE float primitiveDistance(float3 p, FormulaParams fp) {
+                float baseScale = 2.0f * max(fp.params[1], 0.001f);
+                float h = max(fp.params[0], 0.001f) / baseScale;
+                float3 x = p / baseScale;
+                x.y += 0.5f * h;
+                x.xz = abs(x.xz);
+                if (x.z > x.x) { float swapValue = x.x; x.x = x.z; x.z = swapValue; }
+                x.xz -= float2(0.5f);
+                float m2 = h * h + 0.25f;
+                float3 q = float3(x.z, h * x.y - 0.5f * x.x, h * x.x + 0.5f * x.y);
+                float s = max(-q.x, 0.0f);
+                float t = clamp((q.y - 0.5f * x.z) / (m2 + 0.25f), 0.0f, 1.0f);
+                float a = m2 * (q.x + s) * (q.x + s) + q.y * q.y;
+                float b = m2 * (q.x + 0.5f * t) * (q.x + 0.5f * t)
+                        + (q.y - m2 * t) * (q.y - m2 * t);
+                float d2 = min(q.y, -q.x * m2 - q.y * 0.5f) > 0.0f ? 0.0f : min(a, b);
+                float d = sqrt((d2 + q.z * q.z) / m2) * sign(max(q.z, -x.y));
+                return d * baseScale;
+            }
+            """
+        case .tetrahedron:
+            stem = "PrimitiveTetrahedron"
+            description = "Analytic tetrahedral seed using the same radius convention as the Bounding system."
+            params = [Self.param(0, "Radius", 1.0, 0.05, 30.0, 0.05)]
+            helper = """
+            FORCE_INLINE float primitiveDistance(float3 p, FormulaParams fp) {
+                float radius = max(fp.params[0], 0.001f);
+                float invSqrt3 = 0.5773502691896258f;
+                float faceOffset = radius * invSqrt3;
+                float d1 = dot(p, float3( invSqrt3,  invSqrt3,  invSqrt3));
+                float d2 = dot(p, float3( invSqrt3, -invSqrt3, -invSqrt3));
+                float d3 = dot(p, float3(-invSqrt3,  invSqrt3, -invSqrt3));
+                float d4 = dot(p, float3(-invSqrt3, -invSqrt3,  invSqrt3));
+                return max(max(d1, d2), max(d3, d4)) - faceOffset;
+            }
+            """
+        case .icosahedron:
+            stem = "PrimitiveIcosahedron"
+            description = "Analytic icosahedral seed using the same radius convention as the Bounding system."
+            params = [Self.param(0, "Radius", 1.0, 0.05, 30.0, 0.05)]
+            helper = """
+            FORCE_INLINE float primitiveDistance(float3 p, FormulaParams fp) {
+                float radius = max(fp.params[0], 0.001f);
+                float phi = 1.618033988749895f;
+                float3 q = abs(p);
+                float d1 = dot(q, float3(1.0f, 1.0f, 1.0f) * 0.5773502691896258f);
+                float d2 = dot(q, float3(0.0f, 1.0f, phi) * 0.5257311121191336f);
+                float d3 = dot(q, float3(1.0f, phi, 0.0f) * 0.5257311121191336f);
+                float d4 = dot(q, float3(phi, 0.0f, 1.0f) * 0.5257311121191336f);
+                return max(max(d1, d2), max(d3, d4)) - radius * 0.85065080835204f;
+            }
+            """
+        case .dodecahedron:
+            stem = "PrimitiveDodecahedron"
+            description = "Analytic dodecahedral seed using the same radius convention as the Bounding system."
+            params = [Self.param(0, "Radius", 1.0, 0.05, 30.0, 0.05)]
+            helper = """
+            FORCE_INLINE float primitiveDistance(float3 p, FormulaParams fp) {
+                float radius = max(fp.params[0], 0.001f);
+                float phi = 1.618033988749895f;
+                float3 q = abs(p);
+                float d1 = dot(q, float3(phi, 1.0f, 0.0f) * 0.5257311121191336f);
+                float d2 = dot(q, float3(1.0f, 0.0f, phi) * 0.5257311121191336f);
+                float d3 = dot(q, float3(0.0f, phi, 1.0f) * 0.5257311121191336f);
+                return max(d1, max(d2, d3)) - radius * 0.85065080835204f;
             }
             """
         case .mandelboxSeed:

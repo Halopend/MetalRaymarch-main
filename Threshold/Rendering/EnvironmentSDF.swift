@@ -5,10 +5,10 @@
 //  Environment Scrunch's data side: a band-limited unsigned distance grid
 //  (world meters, ENV_SCRUNCH_DIM³ half floats) baked on the CPU from the
 //  scanned surroundings, sampled by the DE via its bindless GPU address
-//  (EnvScrunchParams.gridAddress). Two sources:
-//    • visionOS — scene-reconstruction mesh anchors (triangle soup, world space)
-//    • Mac/dev — synthetic analytic primitives via THRESHOLD_SYNTHETIC_ENV,
-//      so the whole GPU path is headless-verifiable without room sensing.
+//  (EnvScrunchParams.gridAddress). The shipping source is visionOS scene
+//  reconstruction (triangle soup, world space). Synthetic analytic primitives
+//  below are deterministic test/diagnostic fixtures only; desktop/iPad render
+//  pipelines do not create or bind an environment grid.
 //
 //  Distances are clamped to `clampFar`; the shader treats out-of-grid (and
 //  far-band) samples as "no effect", so inaccuracy beyond the splat radius
@@ -59,7 +59,7 @@ final class EnvironmentSDFGrid: @unchecked Sendable {
         buffer.contents().assumingMemoryBound(to: UInt16.self)
     }
 
-    // MARK: - Synthetic bake (Mac/dev)
+    // MARK: - Synthetic bake (tests/diagnostics only)
 
     /// Analytic primitive set for the Mac path — exact SDF per voxel, no mesh.
     enum SyntheticPrimitive {
@@ -81,7 +81,7 @@ final class EnvironmentSDFGrid: @unchecked Sendable {
         }
     }
 
-    /// Parses THRESHOLD_SYNTHETIC_ENV. Grammar: `;`-separated primitives —
+    /// Parses a deterministic fixture specification. Grammar: `;`-separated primitives —
     /// `floor:y` · `sphere:x,y,z,r` · `box:cx,cy,cz,hx,hy,hz`. The value "1"
     /// yields a default demo room (floor + sphere + box in front of the Mac
     /// camera, which sits at world (0,0,3) looking −Z).
@@ -168,27 +168,59 @@ final class EnvironmentSDFGrid: @unchecked Sendable {
                      sizeWorld: SIMD3<Float> = SIMD3(8.0, 4.0, 8.0),
                      splatRadius: Float = 1.25) -> EnvironmentSDFGrid? {
         guard triangles.count >= 3,
+              originWorld.x.isFinite, originWorld.y.isFinite, originWorld.z.isFinite,
+              sizeWorld.x.isFinite, sizeWorld.y.isFinite, sizeWorld.z.isFinite,
+              sizeWorld.x > 0, sizeWorld.y > 0, sizeWorld.z > 0,
+              splatRadius.isFinite, splatRadius >= 0,
               let grid = EnvironmentSDFGrid(device: device, originWorld: originWorld, sizeWorld: sizeWorld)
         else { return nil }
+
+        // AR scene meshes are external input. Drop malformed and degenerate
+        // faces before any Float→Int voxel conversion; NaN/Inf would otherwise
+        // trap in optimized Swift and zero-area faces can produce NaN distances.
+        var validTriangleOffsets: [Int] = []
+        validTriangleOffsets.reserveCapacity(triangles.count / 3)
+        for offset in stride(from: 0, to: triangles.count - 2, by: 3) {
+            let a = triangles[offset], b = triangles[offset + 1], c = triangles[offset + 2]
+            let finite = a.x.isFinite && a.y.isFinite && a.z.isFinite
+                && b.x.isFinite && b.y.isFinite && b.z.isFinite
+                && c.x.isFinite && c.y.isFinite && c.z.isFinite
+            guard finite else { continue }
+            let areaSquared = simd_length_squared(simd_cross(b - a, c - a))
+            guard areaSquared.isFinite, areaSquared > 1e-12 else { continue }
+            validTriangleOffsets.append(offset)
+        }
+        guard let firstOffset = validTriangleOffsets.first else { return nil }
+
         // Containment AABB = tight bounds of the scanned triangle soup (≈ the
         // room extent — walls/floor/ceiling dominate). Fixes the scrunch's
         // outside-shell/doubling by giving the shader a hard room boundary.
-        var lo = triangles[0], hi = triangles[0]
-        for t in triangles { lo = simd_min(lo, t); hi = simd_max(hi, t) }
+        var lo = triangles[firstOffset], hi = triangles[firstOffset]
+        for offset in validTriangleOffsets {
+            lo = simd_min(lo, simd_min(triangles[offset], simd_min(triangles[offset + 1], triangles[offset + 2])))
+            hi = simd_max(hi, simd_max(triangles[offset], simd_max(triangles[offset + 1], triangles[offset + 2])))
+        }
         grid.surfaceMinWorld = lo
         grid.surfaceMaxWorld = hi
         let cell = grid.cellSize
         let v = grid.values
         for i in 0..<(dim * dim * dim) { v[i] = Self.floatToHalfBits(clampFar) }
 
-        let triCount = triangles.count / 3
-        for t in 0..<triCount {
-            let a = triangles[t * 3], b = triangles[t * 3 + 1], c = triangles[t * 3 + 2]
+        let zeroIndex = SIMD3<Float>(repeating: 0)
+        let maxIndex = SIMD3<Float>(repeating: Float(dim - 1))
+        for offset in validTriangleOffsets {
+            let a = triangles[offset], b = triangles[offset + 1], c = triangles[offset + 2]
             let lo = simd_min(simd_min(a, b), c) - splatRadius
             let hi = simd_max(simd_max(a, b), c) + splatRadius
-            let loI = simd_max(SIMD3<Int32>((lo - originWorld) / cell), SIMD3<Int32>(repeating: 0))
-            let hiI = simd_min(SIMD3<Int32>((hi - originWorld) / cell),
-                               SIMD3<Int32>(repeating: Int32(dim - 1)))
+            let loGrid = (lo - originWorld) / cell
+            let hiGrid = (hi - originWorld) / cell
+            guard hiGrid.x >= 0, hiGrid.y >= 0, hiGrid.z >= 0,
+                  loGrid.x <= maxIndex.x, loGrid.y <= maxIndex.y, loGrid.z <= maxIndex.z
+            else { continue }
+            // Clamp while still in Float space. Converting an out-of-range
+            // Float (or NaN) directly to Int32 is a trapping operation in Swift.
+            let loI = SIMD3<Int32>(simd_clamp(loGrid, zeroIndex, maxIndex))
+            let hiI = SIMD3<Int32>(simd_clamp(hiGrid, zeroIndex, maxIndex))
             guard loI.x <= hiI.x, loI.y <= hiI.y, loI.z <= hiI.z else { continue }
             for z in Int(loI.z)...Int(hiI.z) {
                 for y in Int(loI.y)...Int(hiI.y) {

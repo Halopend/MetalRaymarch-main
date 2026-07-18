@@ -251,6 +251,7 @@ extension Renderer {
         // path depends only on the tile mode. The compute path writes a
         // drawable-sized texture and blits 1:1, so it honours renderQuality too.
         if settingsSnapshot.prefersAdaptiveComputePath,
+           !adaptiveComputeSuppressedAfterGPUFailure,
            adaptiveHierarchicalPipeline8x8 != nil {
             return .adaptiveCompute
         }
@@ -270,8 +271,11 @@ extension Renderer {
     func applyRenderQualityIfNeeded(renderQuality: Float) {
         if #available(visionOS 26.0, *) {
             guard layerRenderer.configuration.isFoveationEnabled else { return }
-            // maxRenderQuality is configured to 1.0; the system clamps to it.
-            let target = max(0.0, min(renderQuality, 1.0))
+            // CompositorServices treats a value above the configured ceiling as
+            // a client error. Keep this final GPU-boundary clamp even though the
+            // settings model also validates the value: restored state and future
+            // controller changes must never be able to violate the layer contract.
+            let target = QualityConfig.clampedVisionRenderQuality(renderQuality)
             guard abs(target - lastAppliedRenderQuality) > 0.001 else { return }
             lastAppliedRenderQuality = target
             layerRenderer.renderQuality = LayerRenderer.RenderQuality(target)
@@ -403,65 +407,29 @@ extension Renderer {
 
     // MARK: - visionOS 26+ Drawable Selection
 
-    /// Select a drawable from `frame.queryDrawables()`.
+    /// Select the headset drawable from `frame.queryDrawables()`.
     ///
-    /// CompositorServices may return multiple drawables per frame. Use the highest
-    /// resolution candidate here and let the app's own resolutionScale control
-    /// low-res rendering. Picking the smallest drawable first double-dips quality
-    /// loss before MetalFX ever sees the image.
+    /// visionOS 26 returns drawables for different *targets* (built-in display and
+    /// capture/AirPlay), not a menu of quality levels. Always prioritize `.builtIn`
+    /// as required by CompositorServices. The old largest-texture heuristic could
+    /// accidentally render the capture target while leaving the headset target
+    /// untouched, and allocated a candidate array on every multi-target frame.
     func selectDrawable(from drawables: [LayerRenderer.Drawable]) -> LayerRenderer.Drawable? {
-        guard !drawables.isEmpty else { return nil }
-        if drawables.count == 1 { return drawables[0] }
-
-        struct Candidate {
-            let drawable: LayerRenderer.Drawable
-            let width: Double
-            let height: Double
-            let area: Double
-        }
-
-        var candidates: [Candidate] = []
-        candidates.reserveCapacity(drawables.count)
-        for drawable in drawables {
-            // Prefer physical render-target size (actual pixel workload). On visionOS,
-            // viewports may be in rasterization-rate-map space and can exceed the
-            // underlying texture dimensions.
-            let tex = drawable.colorTextures.first
-            let width = Double(max(1, tex?.width ?? 1))
-            let height = Double(max(1, tex?.height ?? 1))
-            candidates.append(Candidate(drawable: drawable, width: width, height: height, area: width * height))
-        }
-
-        var bestIndex = 0
-        var bestArea = candidates[0].area
-        for (index, candidate) in candidates.enumerated() {
-            if candidate.area > bestArea {
-                bestArea = candidate.area
-                bestIndex = index
-            }
+        guard let selected = drawables.first(where: { $0.target == .builtIn }) ?? drawables.first else {
+            return nil
         }
 
         if RENDERER_DEBUG && !hasLoggedDrawableQualityOptions {
             hasLoggedDrawableQualityOptions = true
-            let maxTexWidth = Int(candidates.map(\.width).max() ?? 0)
-            let maxTexHeight = Int(candidates.map(\.height).max() ?? 0)
-            let maxVPWidth = Int(drawables.map { max(1.0, $0.views.first?.textureMap.viewport.width ?? 0) }.max() ?? 0)
-            let maxVPHeight = Int(drawables.map { max(1.0, $0.views.first?.textureMap.viewport.height ?? 0) }.max() ?? 0)
-            print("🔍 queryDrawables() returned \(drawables.count) candidates | maxTex=\(maxTexWidth)x\(maxTexHeight) maxVP=\(maxVPWidth)x\(maxVPHeight)")
-            for (i, c) in candidates.enumerated() {
-                let vp = c.drawable.views.first?.textureMap.viewport ?? MTLViewport()
-                let vpW = Int(max(1.0, vp.width))
-                let vpH = Int(max(1.0, vp.height))
-                let q = sqrt(c.area / bestArea)
-                print("   [\(i)] tex=\(Int(c.width))x\(Int(c.height)) vp=\(vpW)x\(vpH) q≈\(String(format: "%.2f", q))")
+            print("🔍 queryDrawables() returned \(drawables.count) target(s)")
+            for (index, drawable) in drawables.enumerated() {
+                let texture = drawable.colorTextures.first
+                print("   [\(index)] target=\(drawable.target) tex=\(texture?.width ?? 0)x\(texture?.height ?? 0)")
             }
-            let chosen = candidates[bestIndex]
-            let chosenVP = chosen.drawable.views.first?.textureMap.viewport ?? MTLViewport()
-            let chosenQ = sqrt(chosen.area / bestArea)
-            print("   → selected [\(bestIndex)] tex=\(Int(chosen.width))x\(Int(chosen.height)) vp=\(Int(max(1.0, chosenVP.width)))x\(Int(max(1.0, chosenVP.height))) q≈\(String(format: "%.2f", chosenQ))")
+            print("   → selected target=\(selected.target)")
         }
 
-        return candidates[bestIndex].drawable
+        return selected
     }
 
 
@@ -1055,15 +1023,6 @@ extension Renderer {
             return nil
         }
 
-        let resolutionChanged =
-            lastMetalFXInputSize.x != inputWidth ||
-            lastMetalFXInputSize.y != inputHeight ||
-            lastMetalFXOutputSize.x != outputWidth ||
-            lastMetalFXOutputSize.y != outputHeight
-
-        lastMetalFXInputSize = SIMD2(inputWidth, inputHeight)
-        lastMetalFXOutputSize = SIMD2(outputWidth, outputHeight)
-
         // Phase 1.2: fence is now created eagerly in Renderer.init().
         // Defensive fallback if construction failed there for any reason.
         if metalFXFence == nil {
@@ -1072,19 +1031,6 @@ extension Renderer {
         }
 
         guard let manager = metalFXManager else { return nil }
-
-        // Register the (possibly new) MetalFX textures with the residency set
-        // so the compositor can skip per-frame residency validation. Only needed
-        // when textures were actually recreated (on first init or resize).
-        if resolutionChanged {
-            var newTextures: [MTLTexture] = []
-            if let t = manager.inputTexture  { newTextures.append(t) }
-            if let t = manager.depthTexture  { newTextures.append(t) }
-            if let t = manager.outputTexture { newTextures.append(t) }
-            if !newTextures.isEmpty {
-                updateResidencySetForComputeTextures(newTextures)
-            }
-        }
 
         return (manager, inputWidth, inputHeight)
     }

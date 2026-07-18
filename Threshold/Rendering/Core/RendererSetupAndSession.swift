@@ -25,6 +25,11 @@ extension Renderer {
             do {
                 residencySet = try device.makeResidencySet(descriptor: descriptor)
 
+                // Keep only stable, renderer-lifetime buffers in this set.
+                // Resizeable compute/MetalFX textures are already referenced by
+                // their encoders; adding every replacement here without removing
+                // the old allocation pins all prior resolution buckets and grows
+                // the Vision Pro working set until jetsam.
                 residencySet?.addAllocation(dynamicUniformBuffer)
 
                 if let tileBuffer = tileUniformBuffer {
@@ -43,18 +48,6 @@ extension Renderer {
         #endif
     }
 
-    /// Batch-add multiple textures to the residency set with a single commit + requestResidency.
-    func updateResidencySetForComputeTextures(_ textures: [MTLTexture]) {
-        if #available(visionOS 2.0, iOS 18.0, macOS 15.0, *) {
-            guard let set = residencySet, !textures.isEmpty else { return }
-            for texture in textures {
-                set.addAllocation(texture)
-            }
-            set.commit()
-            set.requestResidency()
-        }
-    }
-
     func startARSession() async {
         guard WorldTrackingProvider.isSupported else {
             print("⚠️ World tracking is not supported on this device – hand gestures unavailable")
@@ -64,9 +57,11 @@ extension Renderer {
 
         if RENDERER_DEBUG { print("ℹ️ Requesting only world sensing (for pose) plus hand tracking; no extra sensors requested.") }
         var authStatus = await arSession.queryAuthorization(for: [.worldSensing, .handTracking])
+        guard !Task.isCancelled else { return }
         if authStatus[.worldSensing] == .notDetermined || authStatus[.handTracking] == .notDetermined {
             print("🔐 Requesting ARKit world-sensing + hand-tracking authorization")
             authStatus = await arSession.requestAuthorization(for: [.worldSensing, .handTracking])
+            guard !Task.isCancelled else { return }
         }
 
         if authStatus[.worldSensing] != .allowed {
@@ -87,6 +82,7 @@ extension Renderer {
         }
 
         do {
+            guard !Task.isCancelled else { return }
             var providers: [any DataProvider] = [worldTracking]
             if let ht = handTracking, handTrackingAllowed {
                 providers.append(ht)
@@ -102,12 +98,16 @@ extension Renderer {
                 print("✓ Scene reconstruction provider added (Environment Scrunch source)")
             }
             try await arSession.run(providers)
+            guard !Task.isCancelled else { return }
             print("✓ ARKit session started with \(providers.count) providers")
             startEnvironmentMeshTasks()
             if RENDERER_DEBUG {
                 print("  World tracking state: \(worldTracking.state)")
             }
         } catch {
+            // Closing the immersive space cancels this startup task. That is a
+            // normal lifecycle transition, not an authorization/session error.
+            guard !Task.isCancelled, !(error is CancellationError) else { return }
             if !hasLoggedWorldTrackingWarning {
                 print("⚠️ ARKit session failed: \(error)")
                 await MainActor.run {
@@ -146,25 +146,39 @@ extension Renderer {
         let bakeDevice = device
         envBakeTask = Task.detached(priority: .utility) { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2))
                 guard let self else { return }
                 let dirty = self.environmentMeshesDirty.withLock { d -> Bool in
                     let was = d; d = false; return was
                 }
-                guard dirty else { continue }
-                let tris = self.environmentMeshes.withLock { Array($0.values) }.flatMap { $0 }
-                guard tris.count >= 3 else { continue }
-                // Center the 8×4×8 m grid on the scanned geometry's footprint;
-                // floor margin comes from the fixed -0.5 m origin offset.
-                var lo = tris[0], hi = tris[0]
-                for t in tris { lo = simd_min(lo, t); hi = simd_max(hi, t) }
-                let center = (lo + hi) * 0.5
-                let origin = SIMD3<Float>(center.x - 4.0, -0.5, center.z - 4.0)
-                if let grid = EnvironmentSDFGrid.bake(device: bakeDevice,
-                                                      triangles: tris,
-                                                      originWorld: origin) {
-                    self.environmentSDF.withLock { $0 = grid }
+                guard dirty else {
+                    // Poll quickly until the first anchors arrive so selecting
+                    // Environment containment does not appear inert for two
+                    // seconds at launch. Full rebakes remain throttled below.
+                    try? await Task.sleep(for: .milliseconds(250))
+                    continue
                 }
+                let tris = self.environmentMeshes.withLock { Array($0.values) }.flatMap { $0 }
+                if tris.count < 3 {
+                    // Do not keep clipping against a room that ARKit has removed
+                    // (session reset, tracking relocation, or anchor teardown).
+                    self.environmentSDF.withLock { $0 = nil }
+                } else {
+                    // Center the 8×4×8 m grid on the scanned geometry. ARKit's
+                    // world origin is session-relative and is not guaranteed to
+                    // put the floor at y=0; a fixed y=-0.5 grid can therefore
+                    // miss most of a room when tracking starts near head height.
+                    var lo = tris[0], hi = tris[0]
+                    for t in tris { lo = simd_min(lo, t); hi = simd_max(hi, t) }
+                    let center = (lo + hi) * 0.5
+                    let origin = center - SIMD3<Float>(4.0, 2.0, 4.0)
+                    if let grid = EnvironmentSDFGrid.bake(device: bakeDevice,
+                                                          triangles: tris,
+                                                          originWorld: origin) {
+                        self.environmentSDF.withLock { $0 = grid }
+                    }
+                }
+                // Coalesce the continuous scene-reconstruction update stream.
+                try? await Task.sleep(for: .seconds(2))
             }
         }
     }
@@ -174,28 +188,64 @@ extension Renderer {
         let geometry = anchor.geometry
         let vertices = geometry.vertices
         let faces = geometry.faces
-        guard vertices.format == .float3 else { return [] }
+        let indicesPerFace = faces.primitive.indexCount
+        guard vertices.format == .float3,
+              vertices.stride >= MemoryLayout<Float>.stride * 3,
+              vertices.offset >= 0,
+              vertices.offset <= vertices.buffer.length,
+              indicesPerFace == 3,
+              faces.bytesPerIndex == 2 || faces.bytesPerIndex == 4
+        else { return [] }
+
+        let (indexCount, indexCountOverflow) = faces.count.multipliedReportingOverflow(by: indicesPerFace)
+        let (indexBytes, indexBytesOverflow) = indexCount.multipliedReportingOverflow(by: faces.bytesPerIndex)
+        guard !indexCountOverflow, !indexBytesOverflow,
+              indexBytes <= faces.buffer.length else { return [] }
+
         let vBase = vertices.buffer.contents().advanced(by: vertices.offset)
-        func vertex(_ i: Int) -> SIMD3<Float> {
-            let ptr = vBase.advanced(by: i * vertices.stride).assumingMemoryBound(to: Float.self)
-            return SIMD3<Float>(ptr[0], ptr[1], ptr[2])
+        func vertex(_ i: Int) -> SIMD3<Float>? {
+            guard i >= 0, i < vertices.count else { return nil }
+            let (relativeOffset, multiplyOverflow) = i.multipliedReportingOverflow(by: vertices.stride)
+            let (absoluteOffset, addOverflow) = vertices.offset.addingReportingOverflow(relativeOffset)
+            guard !multiplyOverflow, !addOverflow,
+                  absoluteOffset >= 0,
+                  absoluteOffset <= vertices.buffer.length - MemoryLayout<Float>.stride * 3
+            else { return nil }
+            let ptr = vBase.advanced(by: relativeOffset).assumingMemoryBound(to: Float.self)
+            let p = SIMD3<Float>(ptr[0], ptr[1], ptr[2])
+            return p.x.isFinite && p.y.isFinite && p.z.isFinite ? p : nil
         }
         let toWorld = anchor.originFromAnchorTransform
-        func world(_ i: Int) -> SIMD3<Float> {
-            let p = vertex(i)
+        func world(_ i: Int) -> SIMD3<Float>? {
+            guard let p = vertex(i) else { return nil }
             let w = toWorld * SIMD4<Float>(p.x, p.y, p.z, 1)
-            return SIMD3<Float>(w.x, w.y, w.z)
+            let result = SIMD3<Float>(w.x, w.y, w.z)
+            return result.x.isFinite && result.y.isFinite && result.z.isFinite
+                ? result
+                : nil
         }
         let iBase = faces.buffer.contents()
-        let indexCount = faces.count * 3
         var out: [SIMD3<Float>] = []
         out.reserveCapacity(indexCount)
-        if faces.bytesPerIndex == 4 {
-            let idx = iBase.assumingMemoryBound(to: UInt32.self)
-            for i in 0..<indexCount { out.append(world(Int(idx[i]))) }
-        } else if faces.bytesPerIndex == 2 {
-            let idx = iBase.assumingMemoryBound(to: UInt16.self)
-            for i in 0..<indexCount { out.append(world(Int(idx[i]))) }
+
+        func index(at position: Int) -> Int {
+            if faces.bytesPerIndex == 4 {
+                return Int(iBase.assumingMemoryBound(to: UInt32.self)[position])
+            }
+            return Int(iBase.assumingMemoryBound(to: UInt16.self)[position])
+        }
+
+        for face in 0..<faces.count {
+            let base = face * indicesPerFace
+            guard let a = world(index(at: base)),
+                  let b = world(index(at: base + 1)),
+                  let c = world(index(at: base + 2))
+            else { continue }
+            let areaSquared = simd_length_squared(simd_cross(b - a, c - a))
+            guard areaSquared.isFinite, areaSquared > 1e-12 else { continue }
+            out.append(a)
+            out.append(b)
+            out.append(c)
         }
         return out
     }

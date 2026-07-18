@@ -294,7 +294,7 @@ private final class MandelboxDescriptor: FractalTypeDescriptor, @unchecked Senda
         super.init(rawValue: 0, displayName: "Mandelbox", icon: "cube.transparent",
                    category: "Box Folds", codableString: "mandelbox", isSelectableInUI: true)
     }
-    override func primaryEquation() -> String? { "p_{n+1} = scale * boxFold(sphereFold(p_n)) + c" }
+    override func primaryEquation() -> String? { "p_{n+1} = scale * sphereFold(boxFold(p_n)) + c" }
     override var supportedCoreGestureActions: [FingerGestureAction] {
         [.none, .grab, .minDistance, .foldingLimit, .sphereRadius, .fractalScale, .translate]
     }

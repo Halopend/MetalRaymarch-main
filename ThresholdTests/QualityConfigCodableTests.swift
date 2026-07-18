@@ -17,6 +17,18 @@ import Foundation
 @Suite("QualityConfig — raymarch accelerator persistence")
 struct QualityConfigCodableTests {
 
+    @Test("render quality rejects non-finite values")
+    func renderQualitySanitization() {
+        #expect(QualityConfig.clampedVisionRenderQuality(.nan) == QualityConfig.visionDefaultRenderQuality)
+        #expect(QualityConfig.clampedVisionRenderQuality(.infinity) == QualityConfig.visionDefaultRenderQuality)
+        #expect(QualityConfig.clampedVisionRenderQuality(-.infinity) == QualityConfig.visionDefaultRenderQuality)
+
+        var config = QualityConfig()
+        config.renderQuality = .nan
+        config.clamp()
+        #expect(config.renderQuality == QualityConfig.visionDefaultRenderQuality)
+    }
+
     @Test("temporal starts default on while smart advance remains opt-in")
     func raymarchAcceleratorDefaultsAndExplicitChoices() throws {
         let defaults = QualityConfig()

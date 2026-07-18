@@ -187,12 +187,9 @@ extension Renderer {
             // defaults-ON path, so visionOS/iOS prewarm is byte-identical to before
             // and pairs with the empty (non-Mac) preset-key deTail segment.
             #if os(macOS)
-            // Environment Scrunch is DEVICE-LOCAL (never preset state — see the
-            // envScrunchStaysDeviceLocal test), so presets prewarm the default-OFF
-            // variant; the key's `_ES0` segment pairs with this bake. When the
-            // device toggle is ON, selectPipeline computes `_ES1` and simply
-            // misses the prewarm (rebuild, never a wrong pipeline). The hand field
-            // needs hand tracking, which macOS lacks — always off, pairs with `_HF0`.
+            // Scanned-environment and hand fields are visionOS-only renderer
+            // inputs. Desktop preset variants always bake both tails out and
+            // pair them with the `_ES0` / `_HF0` cache-key segments.
             let bakeEnvScrunch: Bool? = false
             let bakeHandField: Bool? = false
             #else

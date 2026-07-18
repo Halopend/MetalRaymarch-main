@@ -254,6 +254,11 @@ typedef struct
 // An empty stack (count == 0) early-outs to identity. Scalars are packed (no
 // vector_float3) to keep the array's Swift<->Metal layout tuple-free & 4-aligned.
 #define kMaxSpaceWarpOps 8
+#define kMaxSpaceWarpGroupIterations 16
+#define kSpaceWarpGroupLengthMask 0xff
+#define kSpaceWarpGroupIterationShift 8
+#define kSpaceWarpGroupIterationMask 0xff
+#define kSpaceWarpGroupMandelboxFeedback (1 << 16)
 typedef struct
 {
     // p1/p2/axis are GPU-READY (precomputed by cSpaceWarpStack each frame so the
@@ -265,7 +270,11 @@ typedef struct
     float axisX;      // PRE-NORMALIZED axis (Twist/Bend/Ripple)
     float axisY;
     float axisZ;
-    float _pad;       // 32-byte stride
+    // First op in a repeat group: low 8 bits = contiguous group length, next
+    // 8 bits = pass count, and bit 16 enables Mandelbox `+ original point`
+    // feedback after each complete pass. Zero means an ordinary one-pass op.
+    // This occupies the former padding slot, preserving the 32-byte ABI stride.
+    int   groupControl;
 } SpaceWarpOp;
 typedef struct
 {
@@ -275,9 +284,9 @@ typedef struct
 } SpaceWarpStack;
 
 // === ENVIRONMENT SCRUNCH (scanned-room proximity field) ===
-// The scanned surroundings (visionOS scene-reconstruction mesh; synthetic
-// primitives on Mac) are baked on the CPU into a band-limited unsigned
-// distance grid in WORLD meters. The DE samples it and applies a mixed
+// The scanned surroundings (visionOS scene-reconstruction mesh) are baked on
+// the CPU into a band-limited unsigned distance grid in WORLD meters. Desktop
+// pipelines compile this field out entirely. The DE samples it and applies a mixed
 // positive/negative field — a smooth-union "hug" shell at a small standoff
 // above real surfaces plus a smooth-subtraction clearance at the surface
 // itself — so the fractal scrunches/bulges around the room and its objects

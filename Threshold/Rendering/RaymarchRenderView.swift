@@ -360,16 +360,6 @@ final class ThresholdMacRenderer {
     }()
     nonisolated(unsafe) static var benchAblateMode: UInt32 = benchAblateModeEnvDefault
 
-    /// Synthetic environment for headless/dev testing (THRESHOLD_SYNTHETIC_ENV:
-    /// `floor:y` · `sphere:x,y,z,r` · `box:cx,cy,cz,hx,hy,hz` joined by `;`,
-    /// or "1" for a default demo room) — Mac has no room sensing to scan. nil
-    /// (the normal case) leaves Environment Scrunch driven by its toggle alone,
-    /// which on this platform means off.
-    private static let syntheticEnvSpec: String? =
-        ProcessInfo.processInfo.environment["THRESHOLD_SYNTHETIC_ENV"]
-    private var macEnvGrid: EnvironmentSDFGrid?
-    private var macEnvGridBakeAttempted = false
-
     /// Fractal distance cache (conservative distance-field grid) prototype,
     /// opt-in via THRESHOLD_DIST_CACHE=1 so the benchmark harness can A/B it.
     private static let distCacheRequested =
@@ -1041,11 +1031,6 @@ final class ThresholdMacRenderer {
         }
         encoder.setVertexBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
         encoder.setFragmentBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
-        // Environment Scrunch grid is reached bindlessly (GPU address in the
-        // uniforms) — make it resident for the fragment march.
-        if let envGrid = macEnvGrid {
-            encoder.useResource(envGrid.buffer, usage: .read, stages: .fragment)
-        }
         // Fractal distance cache grid is also bindless (GPU address in the
         // uniforms) — declare residency whenever it's enabled this frame.
         if let distCache, distCachePendingKey != nil {
@@ -1128,13 +1113,10 @@ final class ThresholdMacRenderer {
         // first transform flips the key → cache miss → the generic pipeline (FC unset
         // → defaults ON) renders correctly while the new variant compiles.
         let hasSpaceWarp = !settings.spaceWarpStack.isEmpty || custom.hash != nil
-        // Environment Scrunch and the hand field each add a tail to EVERY DE
-        // evaluation, inflating the megakernel's register footprint and slowing
-        // the whole march even when runtime-disabled (~4 ms + ~6 ms at 1080p).
-        // Bake them out (FC 16/18 → DCE) unless live state needs them, exactly
-        // like FC_HAS_SPACEWARP above. Env Scrunch is device-local (its toggle);
-        // the hand field needs hand tracking, which macOS lacks — always off.
-        let hasEnvScrunch = settings.qualityConfig.envScrunchEnabled
+        // Environment Scrunch and the hand field each add a tail to EVERY DE.
+        // Scanned surroundings and hand tracking are visionOS-only renderer
+        // inputs, so the desktop variants always compile both tails out.
+        let hasEnvScrunch = false
         let hasHandField = false
         let key = customPrefix + "FT\(fractalType)_FI\(iterations)_RS\(raySteps)_CI\(colorIterations)\(powerKey)_B\(safetyBubbleEnabled ? 1 : 0)_SH\(shadowsEnabled ? 1 : 0)_SP\(sphereProjectionEnabled ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)_ES\(hasEnvScrunch ? 1 : 0)_HF\(hasHandField ? 1 : 0)"
 
@@ -1663,14 +1645,6 @@ final class ThresholdMacRenderer {
     }
 
     private func makeUniforms(settings: RenderSettingsSnapshot, elapsedTime: Float, deltaTime: Float) -> Uniforms {
-        // Environment Scrunch (Mac): bake the synthetic environment once on
-        // first need — the grid is world-anchored and static on this platform.
-        if settings.envScrunchEnabled, !macEnvGridBakeAttempted, let spec = Self.syntheticEnvSpec {
-            macEnvGridBakeAttempted = true
-            macEnvGrid = EnvironmentSDFGrid.bakeSynthetic(
-                device: device,
-                primitives: EnvironmentSDFGrid.parseSynthetic(spec))
-        }
         // Fractal distance cache: decide eligibility + bake key for this frame.
         // The bake itself is encoded in draw() (same command buffer, before the
         // render pass) so the grid the fragment march reads is never stale.
@@ -1789,16 +1763,8 @@ final class ThresholdMacRenderer {
             precomputedFog,
             enabled: settings.zoomFogCompensationEnabled,
             effectiveScale: effectiveScale)
-        // Env Scrunch (Mac): synthetic room only, injected via THRESHOLD_SYNTHETIC_ENV.
-        let envScrunch = settings.makeEnvScrunchParams(
-            modelToWorld: modelMatrix,
-            viewerWorld: SIMD3<Float>(0, 0, 3),
-            gridOrigin: macEnvGrid?.originWorld ?? .zero,
-            gridCell: macEnvGrid?.cellSize ?? .zero,
-            gridAddress: macEnvGrid?.gpuAddress ?? 0,
-            surfaceMinWorld: macEnvGrid?.surfaceMinWorld ?? .zero,
-            surfaceMaxWorld: macEnvGrid?.surfaceMaxWorld ?? .zero,
-            farClampMeters: EnvironmentSDFGrid.clampFar)
+        // Scanned-environment containment is a visionOS renderer feature.
+        let envScrunch = EnvScrunchParams()
 
         // Shared assembler (TECH_DEBT.md #2): the ~76-field list + the derived math
         // (bubble scaling, epsilon/LOD, spring, animated color/glow) live once in
@@ -1863,6 +1829,14 @@ final class ThresholdMacRenderer {
         }
 
         let constants = MTLFunctionConstantValues()
+        // Scene reconstruction and tracked-hand fields belong to the visionOS
+        // compositor renderer. Compile both tails out of the desktop/iPad
+        // fallback from its very first (generic) pipeline, not only after an
+        // asynchronous scene specialization arrives.
+        var hasEnvScrunch = false
+        constants.setConstantValue(&hasEnvScrunch, type: .bool, index: 16)
+        var hasHandField = false
+        constants.setConstantValue(&hasHandField, type: .bool, index: 18)
         let fragmentFunction = try library.makeFunction(name: "fragmentShaderMono", constantValues: constants)
 
         let descriptor = MTLRenderPipelineDescriptor()

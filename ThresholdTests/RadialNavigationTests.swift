@@ -1,10 +1,9 @@
-#if os(macOS)
 import Foundation
 import Testing
 @testable import Threshold
 
-@Suite("Mac navigation hierarchy")
-struct MacNavigationHierarchyTests {
+@Suite("Radial navigation projection")
+struct RadialNavigationProjectionTests {
     private final class SliderState {
         var isEnabled = false
         var value: Float = 2
@@ -31,8 +30,8 @@ struct MacNavigationHierarchyTests {
         _ op: SpaceWarpOpValue,
         position: Int = 0,
         state: TransformStackState
-    ) -> MacNavigationNode {
-        MacQuickTransformNodeFactory.branch(
+    ) -> RadialNavigationNode {
+        RadialTransformNodeFactory.branch(
             for: op,
             position: position,
             read: { state.read($0) },
@@ -40,23 +39,23 @@ struct MacNavigationHierarchyTests {
         )
     }
 
-    private func makeTree(clicked: @escaping (String) -> Void = { _ in }) -> [MacNavigationNode] {
+    private func makeTree(clicked: @escaping (String) -> Void = { _ in }) -> [RadialNavigationNode] {
         [
-            MacNavigationNode(
+            RadialNavigationNode(
                 id: "root.a",
                 title: "A",
                 systemImage: "a.circle",
                 children: [
-                    MacNavigationNode(
+                    RadialNavigationNode(
                         id: "a.1",
                         title: "A1",
                         systemImage: "1.circle",
                         children: [
-                            MacNavigationNode(
+                            RadialNavigationNode(
                                 id: "slider.a.1.x",
                                 title: "X",
                                 systemImage: "x.circle",
-                                slider: MacQuickSliderBinding(
+                                slider: RadialSliderBinding(
                                     range: 0...2,
                                     read: { 0.5 },
                                     write: { _ in }
@@ -64,7 +63,7 @@ struct MacNavigationHierarchyTests {
                             )
                         ]
                     ),
-                    MacNavigationNode(
+                    RadialNavigationNode(
                         id: "a.2",
                         title: "A2",
                         systemImage: "2.circle",
@@ -72,7 +71,7 @@ struct MacNavigationHierarchyTests {
                     )
                 ]
             ),
-            MacNavigationNode(
+            RadialNavigationNode(
                 id: "root.leaf",
                 title: "Leaf",
                 systemImage: "l.circle",
@@ -81,18 +80,18 @@ struct MacNavigationHierarchyTests {
         ]
     }
 
-    private func makeOverflowHierarchy(clicked: @escaping () -> Void = {}) -> MacNavigationHierarchy {
+    private func makeOverflowHierarchy(clicked: @escaping () -> Void = {}) -> RadialNavigationProjection {
         let children = (1...4).map { index in
-            MacNavigationNode(
+            RadialNavigationNode(
                 id: "section.\(index)",
                 title: "Section \(index)",
                 systemImage: "\(index).circle",
                 children: [
-                    MacNavigationNode(
+                    RadialNavigationNode(
                         id: "slider.section.\(index)",
                         title: "Value \(index)",
                         systemImage: "slider.horizontal.3",
-                        slider: MacQuickSliderBinding(
+                        slider: RadialSliderBinding(
                             range: 0...1,
                             read: { 0.5 },
                             write: { _ in }
@@ -101,15 +100,15 @@ struct MacNavigationHierarchyTests {
                 ]
             )
         }
-        return MacNavigationHierarchy(roots: [
-            MacNavigationNode(
+        return RadialNavigationProjection(roots: [
+            RadialNavigationNode(
                 id: "root",
                 title: "Root",
                 systemImage: "square.grid.2x2",
                 children: children,
                 compactChildrenLimit: 3,
-                overflowFallback: MacNavigationOverflowFallback(
-                    MacNavigationNode(
+                overflowFallback: RadialOverflowFallback(
+                    RadialNavigationNode(
                         id: "root.more",
                         title: "More",
                         systemImage: "ellipsis.circle",
@@ -120,129 +119,40 @@ struct MacNavigationHierarchyTests {
         ])
     }
 
-    private func makeDeepHierarchy() -> MacNavigationHierarchy {
-        func slider(_ id: String, _ title: String) -> MacNavigationNode {
-            MacNavigationNode(
-                id: id,
-                title: title,
-                systemImage: "slider.horizontal.3",
-                slider: MacQuickSliderBinding(
-                    range: 0...1,
-                    read: { 0.5 },
-                    write: { _ in }
-                )
-            )
-        }
+    @Test("Radial projection applies an explicit compact fallback")
+    func compactProjection() {
+        let projection = makeOverflowHierarchy()
+        let children = projection.rings(along: ["root"])[1]
 
-        return MacNavigationHierarchy(roots: [
-            MacNavigationNode(
-                id: "shape",
-                title: "Shape",
-                systemImage: "cube",
-                children: [
-                    MacNavigationNode(
-                        id: "shape.grading",
-                        title: "Grading",
-                        systemImage: "camera.filters",
-                        children: [
-                            MacNavigationNode(
-                                id: "shape.grading.contrast",
-                                title: "Contrast",
-                                systemImage: "circle.lefthalf.filled",
-                                children: [
-                                    slider("contrast.strength", "Strength"),
-                                    slider("contrast.pivot", "Pivot")
-                                ]
-                            ),
-                            slider("grading.exposure", "Exposure")
-                        ]
-                    )
-                ]
-            )
-        ])
+        #expect(children.map(\.id) == ["section.1", "section.2", "root.more"])
+        #expect(projection.roots[0].children.count == 4)
     }
 
-    @Test("Grid and radial project the same complete hierarchy at different densities")
-    func presentationProjection() {
-        let hierarchy = makeOverflowHierarchy()
+    @Test("Radial keyboard traversal follows the compact projection")
+    func compactKeyboardProjection() {
+        let ids = makeOverflowHierarchy().flattenedKeyboardTargets().map(\.id)
 
-        let gridChildren = hierarchy.rings(along: ["root"], for: .grid)[1]
-        let radialChildren = hierarchy.rings(along: ["root"], for: .radial)[1]
-
-        #expect(gridChildren.map(\.id) == ["section.1", "section.2", "section.3", "section.4"])
-        #expect(radialChildren.map(\.id) == ["section.1", "section.2", "root.more"])
-        #expect(hierarchy.roots[0].children.count == 4)
+        #expect(!ids.contains("section.4"))
+        #expect(ids.contains("root.more"))
     }
 
-    @Test("Flattened keyboard traversal follows each presentation without redefining the tree")
-    func presentationKeyboardProjection() {
-        let hierarchy = makeOverflowHierarchy()
-        let gridIDs = hierarchy.flattenedKeyboardTargets(for: .grid).map(\.id)
-        let radialIDs = hierarchy.flattenedKeyboardTargets(for: .radial).map(\.id)
+    @Test("Dynamic inputs keep the longest path visible in radial")
+    func radialPathReconciliation() {
+        let projection = makeOverflowHierarchy()
 
-        #expect(gridIDs.contains("section.4"))
-        #expect(!gridIDs.contains("root.more"))
-        #expect(!radialIDs.contains("section.4"))
-        #expect(radialIDs.contains("root.more"))
-    }
-
-    @Test("Switching presentation keeps the longest visible hierarchy path")
-    func presentationPathReconciliation() {
-        let hierarchy = makeOverflowHierarchy()
-        let deepGridPath = ["root", "section.4"]
-
-        #expect(hierarchy.reconciledPath(deepGridPath, for: .grid) == deepGridPath)
-        #expect(hierarchy.reconciledPath(deepGridPath, for: .radial) == ["root"])
+        #expect(projection.reconciledPath(["root", "section.4"]) == ["root"])
+        #expect(projection.reconciledPath(["root", "section.1"]) == ["root", "section.1"])
     }
 
     @Test("Compact overflow is an explicit full-controls fallback")
     func compactOverflowFallback() {
         var clicked = false
-        let hierarchy = makeOverflowHierarchy { clicked = true }
-        let fallback = hierarchy.node(withID: "root.more", for: .radial)
+        let projection = makeOverflowHierarchy { clicked = true }
+        let fallback = projection.node(withID: "root.more")
 
         #expect(fallback?.fallbackAction != nil)
         fallback?.fallbackAction?()
         #expect(clicked)
-    }
-
-    @Test("Grid keeps two navigation levels and flattens deeper quick inputs")
-    func gridFlattensAfterInnerSidebar() {
-        let hierarchy = makeDeepHierarchy()
-        let gridRings = hierarchy.rings(
-            along: ["shape", "shape.grading"],
-            for: .grid
-        )
-        let radialRings = hierarchy.rings(
-            along: ["shape", "shape.grading", "shape.grading.contrast"],
-            for: .radial
-        )
-
-        #expect(gridRings.count == 3)
-        #expect(gridRings[2].map(\.id) == [
-            "contrast.strength", "contrast.pivot", "grading.exposure"
-        ])
-        #expect(gridRings[2].map(\.title) == [
-            "Contrast › Strength", "Contrast › Pivot", "Exposure"
-        ])
-        #expect(radialRings.count == 4)
-        #expect(radialRings[2].map(\.id) == [
-            "shape.grading.contrast", "grading.exposure"
-        ])
-        #expect(hierarchy.reconciledPath(
-            ["shape", "shape.grading", "shape.grading.contrast"],
-            for: .grid
-        ) == ["shape", "shape.grading"])
-    }
-
-    @Test("Keyboard targets use the same grid flattening projection")
-    func gridKeyboardUsesFlattenedProjection() {
-        let targets = makeDeepHierarchy().flattenedKeyboardTargets(for: .grid)
-
-        #expect(!targets.contains { $0.id == "shape.grading.contrast" })
-        #expect(targets.first(where: { $0.id == "contrast.strength" })?.ancestorPath == [
-            "shape", "shape.grading"
-        ])
     }
 
     @Test("Path walk yields one ring per selected branch level")
@@ -292,14 +202,14 @@ struct MacNavigationHierarchyTests {
         let targets = makeTree().flattenedKeyboardTargets()
 
         #expect(targets == [
-            MacNavigationKeyboardTarget(id: "root.a", ancestorPath: []),
-            MacNavigationKeyboardTarget(id: "a.1", ancestorPath: ["root.a"]),
-            MacNavigationKeyboardTarget(
+            NavigationHierarchy.KeyboardTarget(id: "root.a", ancestorPath: []),
+            NavigationHierarchy.KeyboardTarget(id: "a.1", ancestorPath: ["root.a"]),
+            NavigationHierarchy.KeyboardTarget(
                 id: "slider.a.1.x",
                 ancestorPath: ["root.a", "a.1"]
             ),
-            MacNavigationKeyboardTarget(id: "a.2", ancestorPath: ["root.a"]),
-            MacNavigationKeyboardTarget(id: "root.leaf", ancestorPath: [])
+            NavigationHierarchy.KeyboardTarget(id: "a.2", ancestorPath: ["root.a"]),
+            NavigationHierarchy.KeyboardTarget(id: "root.leaf", ancestorPath: [])
         ])
     }
 
@@ -307,16 +217,16 @@ struct MacNavigationHierarchyTests {
     func keyboardTraversalWraps() {
         let targets = makeTree().flattenedKeyboardTargets()
 
-        #expect(MacNavigationKeyboardTraversal.nextID(
+        #expect(NavigationKeyboardTraversal.nextID(
             from: "root.a", in: targets, backward: false
         ) == "a.1")
-        #expect(MacNavigationKeyboardTraversal.nextID(
+        #expect(NavigationKeyboardTraversal.nextID(
             from: "root.leaf", in: targets, backward: false
         ) == "root.a")
-        #expect(MacNavigationKeyboardTraversal.nextID(
+        #expect(NavigationKeyboardTraversal.nextID(
             from: "root.a", in: targets, backward: true
         ) == "root.leaf")
-        #expect(MacNavigationKeyboardTraversal.nextID(
+        #expect(NavigationKeyboardTraversal.nextID(
             from: "root.leaf", in: targets, backward: true
         ) == "a.2")
     }
@@ -324,21 +234,21 @@ struct MacNavigationHierarchyTests {
     @Test("Nil and stale keyboard focus recover at the requested edge")
     func keyboardTraversalRecovers() {
         let targets = makeTree().flattenedKeyboardTargets()
-        let empty: [MacNavigationKeyboardTarget] = []
+        let empty: [NavigationHierarchy.KeyboardTarget] = []
 
-        #expect(MacNavigationKeyboardTraversal.nextID(
+        #expect(NavigationKeyboardTraversal.nextID(
             from: nil, in: targets, backward: false
         ) == "root.a")
-        #expect(MacNavigationKeyboardTraversal.nextID(
+        #expect(NavigationKeyboardTraversal.nextID(
             from: nil, in: targets, backward: true
         ) == "root.leaf")
-        #expect(MacNavigationKeyboardTraversal.nextID(
+        #expect(NavigationKeyboardTraversal.nextID(
             from: "removed", in: targets, backward: false
         ) == "root.a")
-        #expect(MacNavigationKeyboardTraversal.nextID(
+        #expect(NavigationKeyboardTraversal.nextID(
             from: "removed", in: targets, backward: true
         ) == "root.leaf")
-        #expect(MacNavigationKeyboardTraversal.nextID(
+        #expect(NavigationKeyboardTraversal.nextID(
             from: nil, in: empty, backward: false
         ) == nil)
     }
@@ -350,7 +260,7 @@ struct MacNavigationHierarchyTests {
         var focusedID: String?
 
         for _ in targets {
-            focusedID = MacNavigationKeyboardTraversal.nextID(
+            focusedID = NavigationKeyboardTraversal.nextID(
                 from: focusedID,
                 in: targets,
                 backward: false
@@ -390,7 +300,7 @@ struct MacNavigationHierarchyTests {
 
     @Test("Slider binding normalization round-trips and clamps")
     func sliderNormalization() {
-        let binding = MacQuickSliderBinding(range: -2...6, read: { 0 }, write: { _ in })
+        let binding = RadialSliderBinding(range: -2...6, read: { 0 }, write: { _ in })
 
         #expect(abs(binding.normalized(-2) - 0) < 0.0001)
         #expect(abs(binding.normalized(6) - 1) < 0.0001)
@@ -402,14 +312,14 @@ struct MacNavigationHierarchyTests {
         #expect(abs(binding.denormalized(-0.3) - -2) < 0.0001)
 
         // Degenerate range must not divide by zero.
-        let flat = MacQuickSliderBinding(range: 3...3, read: { 3 }, write: { _ in })
+        let flat = RadialSliderBinding(range: 3...3, read: { 3 }, write: { _ in })
         #expect(flat.normalized(3) == 0)
         #expect(flat.denormalized(0.5) == 3)
     }
 
     @Test("Horizontal slider travel increases to the right")
     func horizontalSliderDirection() {
-        let binding = MacQuickSliderBinding(range: 0...10, read: { 5 }, write: { _ in })
+        let binding = RadialSliderBinding(range: 0...10, read: { 5 }, write: { _ in })
 
         #expect(binding.value(startingAt: 5, horizontalTranslation: 90, fullRangeTravel: 180) == 10)
         #expect(binding.value(startingAt: 5, horizontalTranslation: -90, fullRangeTravel: 180) == 0)
@@ -419,12 +329,12 @@ struct MacNavigationHierarchyTests {
     @Test("Slider binding is enabled by default and evaluates availability live")
     func sliderEnabledState() {
         let state = SliderState()
-        let defaultBinding = MacQuickSliderBinding(
+        let defaultBinding = RadialSliderBinding(
             range: 0...10,
             read: { 5 },
             write: { _ in }
         )
-        let dynamicBinding = MacQuickSliderBinding(
+        let dynamicBinding = RadialSliderBinding(
             range: 0...10,
             read: { state.value },
             write: { state.value = $0 },
@@ -441,7 +351,7 @@ struct MacNavigationHierarchyTests {
     @Test("Guarded slider writes are ignored while disabled")
     func disabledSliderWriteGuard() {
         let state = SliderState()
-        let binding = MacQuickSliderBinding(
+        let binding = RadialSliderBinding(
             range: 0...10,
             read: { state.value },
             write: { state.value = $0 },
@@ -463,7 +373,7 @@ struct MacNavigationHierarchyTests {
     @Test("Slider keyboard stepping uses range fractions, clamps, and stays disabled live")
     func sliderKeyboardStep() {
         let state = SliderState()
-        let binding = MacQuickSliderBinding(
+        let binding = RadialSliderBinding(
             range: 0...10,
             read: { state.value },
             write: { state.value = $0 },
@@ -625,4 +535,3 @@ struct MacNavigationHierarchyTests {
         #expect(cache.spaceWarpStack == settings.spaceWarpStack)
     }
 }
-#endif

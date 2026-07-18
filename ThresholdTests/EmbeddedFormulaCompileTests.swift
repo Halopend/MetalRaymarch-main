@@ -96,6 +96,38 @@ struct EmbeddedFormulaCompileTests {
         }
     }
 
+    @Test("Construction primitive selectors remain stable as the library grows")
+    func bundledPrimitiveSelectorsRemainStable() {
+        let expected: [(FractalPrimitiveKind, Int)] = [
+            (.sphere, 0),
+            (.box, 1),
+            (.torus, 2),
+            (.octahedron, 3),
+            (.mandelboxSeed, 4),
+            (.capsule, 5),
+            (.cylinder, 6),
+            (.cone, 7),
+            (.hexagonalPrism, 8),
+            (.pyramid, 9),
+            (.tetrahedron, 10),
+            (.icosahedron, 11),
+            (.dodecahedron, 12)
+        ]
+
+        #expect(Set(expected.map { $0.1 }).count == expected.count)
+        #expect(FractalPrimitiveKind.analyticCases.count == 12)
+        #expect(!FractalPrimitiveKind.analyticCases.contains(.mandelboxSeed))
+
+        for (primitive, selector) in expected {
+            #expect(primitive.selector == selector)
+            #expect(FractalPrimitiveKind(selector: selector) == primitive)
+            #expect(Int(FormulaCatalog.getParam(
+                primitive.bundledFormulaParams,
+                index: 0
+            ).rounded()) == selector)
+        }
+    }
+
     @Test("At least one embedded-formula example exists to exercise the compiler")
     func haveEmbeddedFormulas() throws {
         let formulas = try Self.collectEmbeddedFormulas()

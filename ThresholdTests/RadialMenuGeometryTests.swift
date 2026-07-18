@@ -1,31 +1,26 @@
-#if os(macOS)
 import CoreGraphics
 import Testing
 @testable import Threshold
 
-@Suite("Mac radial tab geometry")
-struct MacRadialTabGeometryTests {
-    @Test("Flattened window-drag hub does not overlap its center primary control")
-    func gridWindowDragHubClearsPrimaryControl() {
+@Suite("Radial menu geometry")
+struct RadialMenuGeometryTests {
+    @Test("Window-drag hub remains centered on the radial anchor")
+    @MainActor
+    func windowDragHubUsesRadialAnchor() {
         let size = CGSize(width: 1_440, height: 640)
         let pointerAnchor = CGPoint(x: 900, y: 320)
-        let handle = MacQuickMenu.windowDragHandleFrame(
-            size: size,
-            pointerAnchor: pointerAnchor,
-            layoutStyle: .grid
-        )
-        let primary = MacQuickMenu.gridCenterPrimaryPillFrame(
+        let handle = RadialMenu.windowDragHandleFrame(
             size: size,
             pointerAnchor: pointerAnchor
         )
 
-        #expect(!handle.intersects(primary))
-        #expect(primary.maxX < handle.minX)
+        #expect(handle.midX == pointerAnchor.x)
+        #expect(handle.midY == pointerAnchor.y)
     }
 
     @Test("Primary pills remain separated when revealed against the top edge")
     func primaryRingDoesNotOverlapAtTopEdge() {
-        let positions = MacRadialTabGeometry(curvature: 0.35).positions(
+        let positions = RadialMenuGeometry(curvature: 0.35).positions(
             count: 7,
             depth: 0,
             anchor: CGPoint(x: 1_220, y: 30),
@@ -39,7 +34,7 @@ struct MacRadialTabGeometryTests {
 
     @Test("Primary pills remain separated when revealed against the bottom edge")
     func primaryRingDoesNotOverlapAtBottomEdge() {
-        let positions = MacRadialTabGeometry(curvature: 1.35).positions(
+        let positions = RadialMenuGeometry(curvature: 1.35).positions(
             count: 7,
             depth: 0,
             anchor: CGPoint(x: 1_220, y: 738),
@@ -53,7 +48,7 @@ struct MacRadialTabGeometryTests {
     @Test("Branch rings stay compact around their parent pill")
     func branchRingStaysCompact() {
         let anchor = CGPoint(x: 520, y: 380)
-        let children = MacRadialTabGeometry(curvature: 0.82).positions(
+        let children = RadialMenuGeometry(curvature: 0.82).positions(
             count: 5,
             depth: 1,
             anchor: anchor,
@@ -67,14 +62,14 @@ struct MacRadialTabGeometryTests {
             let distance = hypot(child.x - anchor.x, child.y - anchor.y)
             // Distance from the parent grows past the arc radius only through
             // the vertical minimum-spacing stretch.
-            #expect(distance >= MacRadialTabGeometry.localBranchRadius * 0.9)
+            #expect(distance >= RadialMenuGeometry.localBranchRadius * 0.9)
         }
         expectMinimumVerticalSpacing(children, minimum: 32)
     }
 
     @Test("Radial fan mirrors toward the open side of the screen")
     func radialFanMirrorsHorizontally() {
-        let geometry = MacRadialTabGeometry(curvature: 0.82)
+        let geometry = RadialMenuGeometry(curvature: 0.82)
         let anchor = CGPoint(x: 700, y: 380)
         let left = geometry.positions(
             count: 5,
@@ -101,7 +96,7 @@ struct MacRadialTabGeometryTests {
     @Test("Bifurcated radial fan forms horizontal pairs")
     func bifurcatedFanFormsHorizontalPairs() {
         let anchor = CGPoint(x: 700, y: 380)
-        let positions = MacRadialTabGeometry(curvature: 0.82).positions(
+        let positions = RadialMenuGeometry(curvature: 0.82).positions(
             count: 7,
             depth: 0,
             anchor: anchor,
@@ -115,7 +110,7 @@ struct MacRadialTabGeometryTests {
             index.isMultiple(of: 2) ? point.x < anchor.x : point.x > anchor.x
         })
         #expect(positions.allSatisfy {
-            abs($0.x - anchor.x) <= MacRadialTabGeometry.primaryRadius + 0.001
+            abs($0.x - anchor.x) <= RadialMenuGeometry.primaryRadius + 0.001
         })
         for rowStart in stride(from: 0, to: positions.count - 1, by: 2) {
             #expect(abs(positions[rowStart].y - positions[rowStart + 1].y) < 0.001)
@@ -124,12 +119,12 @@ struct MacRadialTabGeometryTests {
 
     @Test("Hierarchy levels occupy exact concentric arcs")
     func hierarchyLevelsUseConcentricArcs() {
-        let geometry = MacRadialTabGeometry(curvature: 0.82)
+        let geometry = RadialMenuGeometry(curvature: 0.82)
         let center = CGPoint(x: 700, y: 380)
 
         for depth in 1...2 {
-            let radius = MacRadialTabGeometry.primaryRadius
-                + CGFloat(depth) * MacRadialTabGeometry.concentricRingStep
+            let radius = RadialMenuGeometry.primaryRadius
+                + CGFloat(depth) * RadialMenuGeometry.concentricRingStep
             let points = geometry.concentricPositions(
                 count: depth == 1 ? 5 : 8,
                 anchor: center,
@@ -146,7 +141,7 @@ struct MacRadialTabGeometryTests {
 
     @Test("Branches fan radially outward from edge pills")
     func branchFansOutwardFromEdgePill() {
-        let geometry = MacRadialTabGeometry(curvature: 0.82)
+        let geometry = RadialMenuGeometry(curvature: 0.82)
         let anchor = CGPoint(x: 1_220, y: 384)
         let primary = geometry.positions(
             count: 7,
@@ -164,7 +159,7 @@ struct MacRadialTabGeometryTests {
             anchor: pill,
             baseAngle: atan2(pill.y - anchor.y, pill.x - anchor.x),
             prior: primary.map { point in
-                MacRadialTabGeometry.PlacedPill(center: point, halfWidth: 94, halfHeight: 22.5)
+                RadialMenuGeometry.PlacedPill(center: point, halfWidth: 94, halfHeight: 22.5)
             },
             parentPillIndex: 0,
             halfWidth: 61,
@@ -193,7 +188,7 @@ struct MacRadialTabGeometryTests {
         let sliderHalf = (w: CGFloat(71), h: CGFloat(18))
 
         for curvature in [0.35, 0.82, 1.35] {
-            let geometry = MacRadialTabGeometry(curvature: CGFloat(curvature))
+            let geometry = RadialMenuGeometry(curvature: CGFloat(curvature))
             for anchorY in [CGFloat(30), 384, 738] {
                 let anchor = CGPoint(x: 1_220, y: anchorY)
                 let primary = geometry.positions(
@@ -205,7 +200,7 @@ struct MacRadialTabGeometryTests {
                 for selectedIndex in 0..<7 {
                     let pill = primary[selectedIndex]
                     let prior = primary.map {
-                        MacRadialTabGeometry.PlacedPill(
+                        RadialMenuGeometry.PlacedPill(
                             center: $0, halfWidth: primaryHalf.w, halfHeight: primaryHalf.h
                         )
                     }
@@ -231,7 +226,7 @@ struct MacRadialTabGeometryTests {
                         for childIndex in [0, childCount - 1] {
                             let childPill = branch.positions[childIndex]
                             let sliderPrior = prior + branch.positions.map {
-                                MacRadialTabGeometry.PlacedPill(
+                                RadialMenuGeometry.PlacedPill(
                                     center: $0, halfWidth: childHalf.w, halfHeight: childHalf.h
                                 )
                             }
@@ -297,4 +292,3 @@ struct MacRadialTabGeometryTests {
         }
     }
 }
-#endif

@@ -303,9 +303,9 @@ struct SceneState: Codable, Equatable {
         mergedQuality.boundingShapeFogMode = quality.boundingShapeFogMode
         mergedQuality.boundingShapeShadowDepth = quality.boundingShapeShadowDepth
         mergedQuality.boundingShapeType = quality.boundingShapeType
-        // The old assumed-room box was removed. Keep decoding its dimensions,
-        // but never reactivate it from a file.
-        mergedQuality.boundToSpaceEnabled = false
+        // Bound to Space is scene-authored containment, just like the shape
+        // bound. Preserve its enable bit as well as its dimensions.
+        mergedQuality.boundToSpaceEnabled = quality.boundToSpaceEnabled
         mergedQuality.boundToSpaceMode = quality.boundToSpaceMode
         mergedQuality.boundSpaceWidth = quality.boundSpaceWidth
         mergedQuality.boundSpaceDepth = quality.boundSpaceDepth
@@ -1482,12 +1482,10 @@ struct FractalPreset: Codable, Identifiable {
         }
         settings.boundingShapeShadowDepth = boundingShapeShadowDepth ?? 0.35
         settings.boundingShapeType = boundingShapeType ?? 0.0
-        // Bound to Space (the removed "Irregular Shape Bound" feature) — the UI
-        // and enable paths are gone, so it always loads OFF regardless of any
-        // value an older scene saved. The dim fields stay at defaults (inert
-        // while disabled); the CodingKeys are kept only for save-file
-        // compatibility so old scenes still decode.
-        settings.boundToSpaceEnabled = false
+        // Bound to Space — AUTHORITATIVE to the declaration defaults. An
+        // explicit saved value must survive scene switches; an older scene
+        // without the field clears a previously-live room bound back to OFF.
+        settings.boundToSpaceEnabled = boundToSpaceEnabled ?? false
         settings.boundToSpaceMode = boundToSpaceMode ?? 0
         settings.boundSpaceWidth = boundSpaceWidth ?? 4.0
         settings.boundSpaceDepth = boundSpaceDepth ?? 4.0

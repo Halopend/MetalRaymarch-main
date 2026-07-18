@@ -1,10 +1,8 @@
 //
-//  ContentViewNavigation.swift
+//  NavigationDestinations.swift
 //  MetalProject
 //
-//  Navigation taxonomy enums for ContentView (sidebar tabs, top-dock tabs,
-//  rail sections, sub-tabs). Extracted from ContentView.swift during the
-//  Phase 3 architecture refactor.
+//  Shared navigation destinations and presentation-state enums.
 //
 
 import SwiftUI
@@ -102,6 +100,7 @@ enum ExploreRailSection: String, CaseIterable {
 enum ShapeRailSection: String, CaseIterable {
     case parameters = "Parameters"
     case formula = "Formula"
+    case primitives = "Primitives"
     case hands = "Hands"
     case space = "Space"
     case transformations = "Transform"
@@ -112,6 +111,7 @@ enum ShapeRailSection: String, CaseIterable {
         switch self {
         case .parameters: return "slider.horizontal.3"
         case .formula: return "function"
+        case .primitives: return "cube.transparent"
         case .hands: return "hand.raised.fingers.spread"
         case .space: return "rotate.3d"
         case .transformations: return "square.stack.3d.up"
@@ -265,6 +265,7 @@ enum PinnedRailControl: String, CaseIterable {
     case exploreCustomScenes
     case shapeParameters
     case shapeFormula
+    case shapePrimitives
     case shapeHands
     case shapeSpace
     case shapeTransformations
@@ -314,6 +315,7 @@ enum PinnedRailControl: String, CaseIterable {
         case .exploreCustomScenes: return ExploreRailSection.customScenes.rawValue
         case .shapeParameters: return ShapeRailSection.parameters.rawValue
         case .shapeFormula: return ShapeRailSection.formula.rawValue
+        case .shapePrimitives: return ShapeRailSection.primitives.rawValue
         case .shapeHands: return ShapeRailSection.hands.rawValue
         case .shapeSpace: return ShapeRailSection.space.rawValue
         case .shapeTransformations: return ShapeRailSection.transformations.rawValue
@@ -345,6 +347,7 @@ enum PinnedRailControl: String, CaseIterable {
         case .exploreCustomScenes: return ExploreRailSection.customScenes.icon
         case .shapeParameters: return ShapeRailSection.parameters.icon
         case .shapeFormula: return ShapeRailSection.formula.icon
+        case .shapePrimitives: return ShapeRailSection.primitives.icon
         case .shapeHands: return ShapeRailSection.hands.icon
         case .shapeSpace: return ShapeRailSection.space.icon
         case .shapeTransformations: return ShapeRailSection.transformations.icon
@@ -369,7 +372,7 @@ enum PinnedRailControl: String, CaseIterable {
 }
 
 enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shape", space = "Space", transform = "Transform", bounding = "Bounding", render = "Render" }
-enum ShapeInnerTab: String, CaseIterable { case parameters = "Parameters", formula = "Formula", hands = "Hands" }
+enum ShapeInnerTab: String, CaseIterable { case parameters = "Parameters", formula = "Formula", primitives = "Primitives", hands = "Hands" }
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
 enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic Color", `static` = "Atmosphere" }
 
@@ -392,6 +395,8 @@ enum QuickToggleHome {
 ///
 ///  - `.bounded`      — a bounding shape holds the fractal. The safe default:
 ///                      big/overwhelming fractals stay pre-gated behind a shape.
+///  - `.space`        — an authored room-sized box holds the fractal in world
+///                      space without depending on a scanned environment.
 ///  - `.surroundings` — no bounding shape; the fractal conforms to the scanned
 ///                      room (Scrunch), grounding it to real surfaces. Best in
 ///                      Mixed immersion.
@@ -399,16 +404,17 @@ enum QuickToggleHome {
 ///                      walls/objects, leaving open space empty.
 ///  - `.free`         — no containment; the fractal fills the space unbounded.
 ///
-/// Derived from the underlying enable flags (both scene-persisted), so it needs
+/// Derived from the underlying enable flags (all scene-persisted), so it needs
 /// no separate saved field — a scene records its mode simply by saving its
 /// Bounding Shape / Scrunch toggles.
 enum MixedContainment: String, CaseIterable, Identifiable {
     case bounded = "Shape"
+    case space = "Space"
     case surroundings = "Surroundings"
     case environment = "Environment"
     case free = "Free"
-    /// Derived, read-only override state: BOTH a bounding shape and Scrunch are
-    /// on at once. Only reachable by flipping the individual side/quick toggles
+    /// Derived, read-only override state: multiple containment systems are on
+    /// at once. Only reachable by flipping the individual side/quick toggles
     /// (the top-bar picker is mutually exclusive); tapping it in the picker is a
     /// no-op. Pick Shape/Surroundings/Environment/Free to snap back to a
     /// single mode.
@@ -420,6 +426,8 @@ enum MixedContainment: String, CaseIterable, Identifiable {
         switch self {
         case .bounded:
             return "The fractal is held inside a sphere shape instead of filling your space."
+        case .space:
+            return "The fractal is clipped to the authored room dimensions, independent of scanned surroundings."
         case .surroundings:
             return "No bounding shape — Scrunch makes the fractal conform to scanned surroundings, grounding it to the real room."
         case .environment:
@@ -427,7 +435,7 @@ enum MixedContainment: String, CaseIterable, Identifiable {
         case .free:
             return "No containment — the fractal fills the space unbounded. Most immersive, least predictable."
         case .custom:
-            return "A manual mix — both Shape and surroundings containment are on at once. Pick Shape, Surroundings, Environment, or Free to snap back to a single mode."
+            return "A manual mix — more than one containment system is on. Pick Shape, Space, Surroundings, Environment, or Free to snap back to a single mode."
         }
     }
 }

@@ -231,8 +231,8 @@ final class RenderSettings: @unchecked Sendable {
     //     device's Cone Marching setting applies as usual. It only gates/forbids;
     //     it never turns cone marching ON.
     //   • _recommendedQuality / _sceneRenderQualityFloor — a high/ultra scene lifts
-    //     the visionOS adaptive-governor floor (and raises the resolution toward the
-    //     target) so it resists FPS-driven downscaling. See applyRecommendedQuality.
+    //     the visionOS adaptive-governor preference (and raises resolution toward
+    //     the target) so it resists FPS-driven downscaling. See applyRecommendedQuality.
     private var _sceneConeMarchCompatible: Bool = true
     private var _recommendedQuality: SceneQualityTarget? = nil
     private var _sceneRenderQualityFloor: Float = QualityConfig.visionMinRenderQuality
@@ -1071,7 +1071,7 @@ final class RenderSettings: @unchecked Sendable {
     var renderQuality: Float {
         get { withLock { _renderQuality } }
         set {
-            withLock { _renderQuality = max(QualityConfig.visionMinRenderQuality, min(QualityConfig.visionMaxRenderQuality, newValue)) }
+            withLock { _renderQuality = QualityConfig.clampedVisionRenderQuality(newValue) }
             persistQuality()
         }
     }
@@ -1400,27 +1400,29 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _recommendedQuality = newValue } }
     }
 
-    /// Lowest compositor Render Quality the visionOS adaptive governor may drop the
-    /// loaded scene to (see `AdaptiveRenderQualityController`). A high/ultra scene
-    /// lifts this above the global minimum; a standard/absent scene leaves it there.
+    /// Preferred compositor Render Quality for the visionOS adaptive governor
+    /// (see `AdaptiveRenderQualityController`). A high/ultra scene lifts this above
+    /// the global minimum, but sustained low FPS may override the preference.
     var sceneRenderQualityFloor: Float {
         get { withLock { _sceneRenderQualityFloor } }
         set {
             withLock {
-                _sceneRenderQualityFloor = max(QualityConfig.visionMinRenderQuality,
-                                               min(QualityConfig.visionMaxRenderQuality, newValue))
+                _sceneRenderQualityFloor = QualityConfig.clampedVisionRenderQuality(
+                    newValue,
+                    fallback: QualityConfig.visionMinRenderQuality
+                )
             }
         }
     }
 
     /// Apply a scene's declared render-quality target on load.
     ///
-    /// AUTHORITATIVE for the governor floor: it is reset every load (so a previous
-    /// high scene's floor never leaks into the next). A high/ultra target also
+    /// AUTHORITATIVE for the governor preference: it is reset every load (so a
+    /// previous high scene's preference never leaks into the next). A high/ultra target also
     /// raises the render resolution toward its target — `max(current, target)`, so
     /// it can only ask for MORE sharpness ("aim for at least this"), never less, and
     /// never past the user's own ceiling on visionOS. `nil`/`.standard` resets the
-    /// floor to the global minimum and leaves resolution untouched.
+    /// preference to the global minimum and leaves resolution untouched.
     ///
     /// This only ever RAISES quality, so it can't force a device into a heavier perf
     /// technique — consistent with the rest of the Quality domain staying device-local.
@@ -1430,7 +1432,7 @@ final class RenderSettings: @unchecked Sendable {
         guard let target, target.raisesQuality else { return }
         #if os(visionOS)
         // Lift the ceiling toward the target so the scene can actually reach the
-        // higher quality; the governor still sheds it under load, down to the floor.
+        // higher quality; the governor may still shed below the preference under load.
         renderQuality = max(renderQuality, target.visionRenderQuality)
         #else
         resolutionScale = max(resolutionScale, target.macResolutionScale)
@@ -1580,8 +1582,8 @@ final class RenderSettings: @unchecked Sendable {
     }
 
     /// Environment Scrunch: the scanned surroundings (visionOS scene
-    /// reconstruction; synthetic primitives on Mac via THRESHOLD_SYNTHETIC_ENV)
-    /// baked to a distance grid the fractal scrunches/bulges around — a mixed
+    /// reconstruction) baked to a distance grid the fractal scrunches/bulges
+    /// around — a mixed
     /// positive/negative proximity field, the hand-attraction model applied to
     /// the room instead of a see-through cut.
     var envScrunchEnabled: Bool {
@@ -4336,7 +4338,7 @@ final class RenderSettings: @unchecked Sendable {
                 _baseMaxRaySteps = newValue.baseMaxRaySteps
                 _maxRaySteps = newValue.baseMaxRaySteps
                 _resolutionScale = ControlCatalog.resolutionScale.clamp(newValue.resolutionScale)
-                _renderQuality = max(QualityConfig.visionMinRenderQuality, min(QualityConfig.visionMaxRenderQuality, newValue.renderQuality))
+                _renderQuality = QualityConfig.clampedVisionRenderQuality(newValue.renderQuality)
                 _tileSize = newValue.tileSize
                 _debugHierarchical = newValue.debugHierarchical
                 _coherentPacketEnabled = newValue.coherentPacketEnabled

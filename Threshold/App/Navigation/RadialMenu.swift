@@ -1,22 +1,43 @@
-#if os(macOS)
-import AppKit
 import SwiftUI
 
-enum MacTabLauncherStyle: String, CaseIterable {
+enum NavigationPresentationStyle: String, CaseIterable {
+    case separateWindow = "Window"
     case radial = "Radial"
-    case grid = "Grid"
+    // Keep the legacy raw value so existing `Grid` preferences migrate to the
+    // newly named mode instead of silently falling back to Radial.
+    case controlPanel = "Grid"
+
+    var displayName: String {
+        switch self {
+        case .separateWindow: return "Separate Window"
+        case .radial: return "Radial Menu"
+        case .controlPanel: return "Control Panel"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .separateWindow:
+            return "Keeps the complete navigation and controls in their own movable window, leaving the viewport unobscured."
+        case .radial:
+            return "Opens navigation around the pointer. Destinations that need a full page open a compact content panel without repeating the top dock or section rail."
+        case .controlPanel:
+            return "Uses the complete top dock, section rail, and controls together in a panel that reveals from the viewport edge."
+        }
+    }
 
     var systemImage: String {
         switch self {
+        case .separateWindow: return "macwindow"
         case .radial: return "circle.grid.cross"
-        case .grid: return "rectangle.grid.2x2"
+        case .controlPanel: return "sidebar.right"
         }
     }
 }
 
 /// Derives a bright UI accent from the active scene gradient while preserving
 /// enough contrast against the launcher's dark-purple capsule surface.
-enum MacTabSceneAccent {
+enum RadialMenuSceneAccent {
     static func color(from gradient: GradientColorMap) -> Color {
         let samples = gradient.stops.map(\.color) + [
             gradient.evaluate(at: 0.28),
@@ -84,12 +105,12 @@ enum MacTabSceneAccent {
     }
 }
 
-/// Pure radial layout used by the macOS edge launcher.
+/// Pure radial layout shared by pointer- and touch-driven launchers.
 ///
 /// `curvature` is intentionally a parameter rather than a visual constant. A
 /// larger value opens the fan farther, while `depth` adds a restrained amount of
 /// extra bend so nested controls read as a deeper ring in the hierarchy.
-struct MacRadialTabGeometry {
+struct RadialMenuGeometry {
     let curvature: CGFloat
 
     /// Capsules are taller than the raw arc spacing near its ends. Keep enough
@@ -107,7 +128,7 @@ struct MacRadialTabGeometry {
     /// that still clear a 184×46 primary pill against a 120×34 branch pill at
     /// EVERY curvature — at the tightest curvature the primary pills stack
     /// almost vertically, which is the binding constraint (see
-    /// MacRadialTabGeometryTests.childRingClearsPrimaryRing).
+    /// RadialMenuGeometryTests.childRingClearsPrimaryRing).
     static let primaryRadius: CGFloat = 106
     /// Radial center clearance between a selected pill and its child arc.
     /// The value clears the widest compact capsules when the arc points
@@ -421,26 +442,22 @@ struct MacRadialTabGeometry {
     }
 }
 
-/// Screen-position anchored, tree-driven launcher for the macOS render view.
-///
-/// Renders the visible projection of `hierarchy` for the chosen input layout.
-/// Radial places authored levels on arcs around the pointer. Grid reserves a
-/// top rail and inner-sidebar rail for navigation, then tiles every descendant
-/// quick input in a flat control surface. Hovering a branch pill auto-selects
-/// it after a short dwell; only fallback leaves and slider drags have effects.
-struct MacQuickMenu: View {
+/// Screen-position anchored radial presentation of the shared application
+/// navigation hierarchy. Platform hosts decide how the anchor is invoked and
+/// how fallback destinations reveal the standard controls.
+struct RadialMenu: View {
     let size: CGSize
     let pointerAnchor: CGPoint
     @Binding var curvature: Double
-    let hierarchy: MacNavigationHierarchy
+    let projection: RadialNavigationProjection
     @Binding var path: [String]
-    @Binding var layoutStyle: MacTabLauncherStyle
     let sceneAccent: Color
     /// True while the user shift-peeks at the fractal: the menu stays mounted
     /// but hover must not re-navigate underneath the faded pills.
     let suspendsHoverNavigation: Bool
-    @Binding var hoveredSlider: MacQuickActiveSlider?
+    @Binding var hoveredSlider: RadialActiveSlider?
     let onSliderEditingChanged: (Bool) -> Void
+    let onSelectPresentation: (NavigationPresentationStyle) -> Void
     let onDismiss: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -459,8 +476,9 @@ struct MacQuickMenu: View {
 
     /// Focus identifiers for launcher chrome live outside the hierarchy.
     private enum ChromeFocusID {
+        static let windowLayout = "launcher.chrome.layout.window"
         static let radialLayout = "launcher.chrome.layout.radial"
-        static let gridLayout = "launcher.chrome.layout.grid"
+        static let panelLayout = "launcher.chrome.layout.panel"
         static let tighterCurvature = "launcher.chrome.curvature.tighter"
         static let widerCurvature = "launcher.chrome.curvature.wider"
     }
@@ -472,7 +490,7 @@ struct MacQuickMenu: View {
 
     private struct RingLayout {
         let depth: Int
-        let nodes: [MacNavigationNode]
+        let nodes: [RadialNavigationNode]
         let positions: [CGPoint]
         /// Center the ring fans around — the pointer anchor for ring 0, the
         /// pointer anchor shared by all concentric rings. Also the pivot radial
@@ -485,50 +503,28 @@ struct MacQuickMenu: View {
     }
 
     private var anchor: CGPoint {
-        Self.resolvedAnchor(size: size, pointerAnchor: pointerAnchor, layoutStyle: layoutStyle)
+        pointerAnchor
     }
 
-    private var roots: [MacNavigationNode] {
-        hierarchy.presentedRoots(for: layoutStyle)
+    private var roots: [RadialNavigationNode] {
+        projection.roots
     }
 
     private var opensLeft: Bool { anchor.x >= size.width * 0.5 }
     private var bifurcates: Bool {
-        guard layoutStyle == .radial else { return false }
         // Enough room for the compact slider ring and its 118pt pill.
         let horizontalClearance: CGFloat = 422
         return anchor.x >= horizontalClearance && anchor.x <= size.width - horizontalClearance
     }
 
-    static let gridAnchorTrailingInset: CGFloat = 22
     static let windowDragHandleSize: CGFloat = 44
-    static let gridPrimaryWidth: CGFloat = 166
-    static let gridRightInset: CGFloat = 30
-
-    private var gridPrimaryWidth: CGFloat { Self.gridPrimaryWidth }
-    private let gridChildWidth: CGFloat = 116
-    private let gridSliderWidth: CGFloat = 154
-    /// Leave a clear rail for the window-drag hub. The old 6pt inset put the
-    /// central primary pill underneath the hub in flattened/grid mode.
-    private var gridRightInset: CGFloat { Self.gridRightInset }
     private let radialSliderWidth: CGFloat = 118
-
-    static func resolvedAnchor(
-        size: CGSize,
-        pointerAnchor: CGPoint,
-        layoutStyle: MacTabLauncherStyle
-    ) -> CGPoint {
-        layoutStyle == .radial
-            ? pointerAnchor
-            : CGPoint(x: size.width - gridAnchorTrailingInset, y: pointerAnchor.y)
-    }
 
     static func windowDragHandleFrame(
         size: CGSize,
-        pointerAnchor: CGPoint,
-        layoutStyle: MacTabLauncherStyle
+        pointerAnchor: CGPoint
     ) -> CGRect {
-        let center = resolvedAnchor(size: size, pointerAnchor: pointerAnchor, layoutStyle: layoutStyle)
+        let center = pointerAnchor
         return CGRect(
             x: center.x - windowDragHandleSize * 0.5,
             y: center.y - windowDragHandleSize * 0.5,
@@ -537,34 +533,13 @@ struct MacQuickMenu: View {
         )
     }
 
-    /// Frame of the primary grid pill aligned with the hub's row. Used to keep
-    /// the draggable window target geometrically separate from menu controls.
-    static func gridCenterPrimaryPillFrame(size: CGSize, pointerAnchor: CGPoint) -> CGRect {
-        let center = resolvedAnchor(size: size, pointerAnchor: pointerAnchor, layoutStyle: .grid)
-        let centerX = center.x - gridRightInset - gridPrimaryWidth * 0.5
-        return CGRect(
-            x: centerX - gridPrimaryWidth * 0.5,
-            y: center.y - 18,
-            width: gridPrimaryWidth,
-            height: 36
-        )
-    }
-
-    /// Grid mode is a right-edge rail: every primary capsule and the toolbar
-    /// share this trailing boundary regardless of their label length.
-    private var gridPrimaryColumnX: CGFloat {
-        anchor.x - gridRightInset - gridPrimaryWidth * 0.5
-    }
-
     var body: some View {
         let rings = ringLayouts()
         let focusOrder = keyboardFocusOrder(rings: rings)
 
         ZStack {
-            if layoutStyle == .radial {
-                radialGuide(rings: rings)
-                    .allowsHitTesting(false)
-            }
+            radialGuide(rings: rings)
+                .allowsHitTesting(false)
 
             ForEach(rings, id: \.depth) { ring in
                 ringView(ring)
@@ -593,13 +568,6 @@ struct MacQuickMenu: View {
                 pendingHoverNodeID = nil
             }
         }
-        .onChange(of: layoutStyle) { _, style in
-            path = hierarchy.reconciledPath(path, for: style)
-            if let focusedItemID,
-               hierarchy.node(withID: focusedItemID, for: style) == nil {
-                self.focusedItemID = roots.first(where: \.isSelected)?.id ?? roots.first?.id
-            }
-        }
         .onKeyPress(.tab, phases: [.down, .repeat]) { press in
             moveFocus(through: focusOrder, backward: press.modifiers.contains(.shift))
             return .handled
@@ -621,19 +589,17 @@ struct MacQuickMenu: View {
         .accessibilityLabel("Control launcher")
     }
 
-    static let coordinateSpaceName = "MacQuickMenu"
+    static let coordinateSpaceName = "RadialMenu"
 
     // MARK: Ring layout
 
-    /// Walks `path` through the hierarchy's current projection. Radial uses
-    /// concentric arcs for every authored level. Grid stops after its two
-    /// navigation levels and lays the hierarchy's flattened leaves into tiles.
+    /// Walks `path` through the current radial projection, using concentric
+    /// arcs for every authored hierarchy level.
     private func ringLayouts() -> [RingLayout] {
         var layouts: [RingLayout] = []
         var nodes = roots
-        var ringAnchor = anchor
         var ringBaseAngle: CGFloat = opensLeft ? .pi : 0
-        var radialRingRadius = MacRadialTabGeometry.primaryRadius
+        var radialRingRadius = RadialMenuGeometry.primaryRadius
         var depth = 0
 
         while !nodes.isEmpty {
@@ -643,39 +609,26 @@ struct MacQuickMenu: View {
             let layoutCenter: CGPoint
             var resolvedBaseAngle = ringBaseAngle
 
-            if layoutStyle == .radial {
-                layoutCenter = anchor
-                ringRadius = radialRingRadius
-                if depth == 0 {
-                    positions = itemPositions(
-                        count: nodes.count,
-                        depth: depth,
-                        centeredAt: anchor,
-                        baseAngle: ringBaseAngle,
-                        sliderRing: false
-                    )
-                } else {
-                    let resolved = fittedConcentricPositions(
-                        count: nodes.count,
-                        radius: ringRadius,
-                        baseAngle: ringBaseAngle,
-                        sliderRing: isSliderRing,
-                        priorLayouts: layouts
-                    )
-                    positions = resolved.positions
-                    resolvedBaseAngle = resolved.baseAngle
-                }
-            } else {
-                layoutCenter = ringAnchor
-                ringRadius = MacRadialTabGeometry.primaryRadius
-                    + CGFloat(depth) * MacRadialTabGeometry.concentricRingStep
+            layoutCenter = anchor
+            ringRadius = radialRingRadius
+            if depth == 0 {
                 positions = itemPositions(
                     count: nodes.count,
                     depth: depth,
-                    centeredAt: ringAnchor,
+                    centeredAt: anchor,
                     baseAngle: ringBaseAngle,
-                    sliderRing: isSliderRing
+                    sliderRing: false
                 )
+            } else {
+                let resolved = fittedConcentricPositions(
+                    count: nodes.count,
+                    radius: ringRadius,
+                    baseAngle: ringBaseAngle,
+                    sliderRing: isSliderRing,
+                    priorLayouts: layouts
+                )
+                positions = resolved.positions
+                resolvedBaseAngle = resolved.baseAngle
             }
             layouts.append(RingLayout(
                 depth: depth,
@@ -694,33 +647,15 @@ struct MacQuickMenu: View {
             let pill = positions[selectedIndex]
             // Deeper concentric rings stay in the selected pill's angular
             // sector while retaining the shared pointer center.
-            let angleCenter = layoutStyle == .radial ? anchor : ringAnchor
-            let dx = pill.x - angleCenter.x
-            let dy = pill.y - angleCenter.y
+            let dx = pill.x - anchor.x
+            let dy = pill.y - anchor.y
             if dx*dx + dy*dy > 1 {
-                if layoutStyle == .radial {
-                    // Follow the selected sector, but damp its vertical offset
-                    // at each hop. Without this, selecting an upper primary
-                    // row centered the entire child arc unnecessarily high.
-                    ringBaseAngle = atan2(dy * 0.62, dx)
-                } else {
-                    ringBaseAngle = atan2(dy, dx)
-                }
+                // Follow the selected sector, but damp its vertical offset at
+                // each hop so an upper primary does not pull the whole arc high.
+                ringBaseAngle = atan2(dy * 0.62, dx)
             }
-            if layoutStyle == .radial {
-                // The primary fan may be bifurcated and vertically offset, so
-                // its pills are not all at `primaryRadius`. Derive the next
-                // concentric radius from the tab actually being followed.
-                radialRingRadius = hypot(dx, dy) + MacRadialTabGeometry.concentricRingStep
-            }
-            if layoutStyle == .grid {
-                ringAnchor = pill
-            }
-            nodes = hierarchy.presentedChildren(
-                of: nodes[selectedIndex],
-                atDepth: depth,
-                for: layoutStyle
-            )
+            radialRingRadius = hypot(dx, dy) + RadialMenuGeometry.concentricRingStep
+            nodes = projection.presentedChildren(of: nodes[selectedIndex])
             depth += 1
         }
         return layouts
@@ -736,7 +671,7 @@ struct MacQuickMenu: View {
         sliderRing: Bool,
         priorLayouts: [RingLayout]
     ) -> (positions: [CGPoint], baseAngle: CGFloat) {
-        let geometry = MacRadialTabGeometry(curvature: CGFloat(curvature))
+        let geometry = RadialMenuGeometry(curvature: CGFloat(curvature))
         let offsets: [CGFloat] = [0, 0.10, -0.10, 0.20, -0.20, 0.32, -0.32]
         let halfWidth: CGFloat = sliderRing ? radialSliderWidth * 0.5 : 52
         let halfHeight: CGFloat = sliderRing ? 17 : 16
@@ -811,16 +746,16 @@ struct MacQuickMenu: View {
 
             Group {
                 if let slider = node.slider {
-                    let width = layoutStyle == .grid ? gridSliderWidth : radialSliderWidth
-                    // Hit frame for the NSEvent monitor's geometric check,
-                    // inflated past the pill's hit outset and hover scale.
+                    let width = radialSliderWidth
+                    // Inflated hit frame for platform pointer/indirect-input
+                    // adapters, extending past the pill's hover scale.
                     let hitFrame = CGRect(
                         x: position.x - width * 0.5 - 8,
                         y: position.y - 15 - 8,
                         width: width + 16,
                         height: 30 + 16
                     )
-                    MacQuickSliderPill(
+                    RadialSliderPill(
                         node: node,
                         slider: slider,
                         fixedWidth: width,
@@ -829,7 +764,7 @@ struct MacQuickMenu: View {
                         onHoverChanged: { hovering in
                             updateHoveredRing(ring.depth, hovering: hovering)
                             if hovering {
-                                hoveredSlider = MacQuickActiveSlider(id: node.id, frame: hitFrame)
+                                hoveredSlider = RadialActiveSlider(id: node.id, frame: hitFrame)
                             } else if hoveredSlider?.id == node.id {
                                 hoveredSlider = nil
                             }
@@ -839,12 +774,10 @@ struct MacQuickMenu: View {
                     .focusable()
                     .focused($focusedItemID, equals: node.id)
                 } else {
-                    MacQuickMenuButton(
+                    RadialMenuButton(
                         item: node,
                         depth: ring.depth,
-                        fixedWidth: layoutStyle == .grid
-                            ? (ring.depth == 0 ? gridPrimaryWidth : gridChildWidth)
-                            : nil,
+                        fixedWidth: nil,
                         isFocused: focusedItemID == node.id,
                         retreatDirection: position.x < anchor.x ? -1 : 1,
                         sceneAccent: sceneAccent,
@@ -895,7 +828,7 @@ struct MacQuickMenu: View {
     /// Hover enter on a branch pill schedules the selection after a dwell.
     /// Leaves never re-navigate on hover — only their own click acts — so a
     /// deeper ring stays open while the pointer visits a sibling leaf.
-    private func handleNodeHover(_ node: MacNavigationNode, depth: Int, hovering: Bool) {
+    private func handleNodeHover(_ node: RadialNavigationNode, depth: Int, hovering: Bool) {
         guard hovering else {
             if pendingHoverNodeID == node.id {
                 pendingHoverSelection?.cancel()
@@ -921,7 +854,7 @@ struct MacQuickMenu: View {
         }
     }
 
-    private func commitHoverSelection(_ node: MacNavigationNode, depth: Int) {
+    private func commitHoverSelection(_ node: RadialNavigationNode, depth: Int) {
         pendingHoverSelection?.cancel()
         pendingHoverSelection = nil
         pendingHoverNodeID = nil
@@ -943,98 +876,38 @@ struct MacQuickMenu: View {
         radiusBoost: CGFloat = 0,
         sliderRing: Bool = false
     ) -> [CGPoint] {
-        switch layoutStyle {
-        case .radial:
-            // The primary ring is exempt from the width clamp: shifting it
-            // would divorce the fan from the anchor mark, guide arc, and
-            // picker. Only deep branches near a side edge need rescuing, and
-            // their decorations are recomputed from the shifted pills.
-            return MacRadialTabGeometry(curvature: CGFloat(curvature)).positions(
-                count: count,
-                depth: depth,
-                anchor: layoutAnchor,
-                availableHeight: size.height,
-                opensLeft: opensLeft,
-                bifurcates: depth == 0 ? bifurcates : false,
-                localBranch: depth > 0,
-                branchBaseAngle: depth > 0 ? baseAngle : nil,
-                radiusBoost: radiusBoost,
-                sliderRing: sliderRing,
-                availableWidth: depth == 0 ? .infinity : size.width
-            )
-        case .grid:
-            return gridPositions(count: count, depth: depth, centerY: layoutAnchor.y, sliderRing: sliderRing)
-        }
-    }
-
-    private func gridPositions(count: Int, depth: Int, centerY: CGFloat, sliderRing: Bool = false) -> [CGPoint] {
-        guard count > 0 else { return [] }
-        let preferredSpacing: CGFloat = depth == 0 ? 44 : (sliderRing ? 40 : 32)
-        let availableSpan = max(size.height - 60, 0)
-        let minimumSpacing: CGFloat = sliderRing ? 32 : 30
-        // Columns tighten right-to-left: primary rail, branch column, slider
-        // surface. Centers keep a ~20pt gutter between capsule edges.
-        let baseColumnX: CGFloat
-        switch depth {
-        case 0: baseColumnX = gridPrimaryColumnX
-        case 1: baseColumnX = anchor.x - 252
-        default: baseColumnX = anchor.x - 252 - (gridChildWidth + gridSliderWidth) * 0.5 - 20
-        }
-
-        // Top and inner-sidebar navigation remain single columns. The complete
-        // quick-input projection tiles into additional columns when it is too
-        // tall, instead of inventing deeper navigational levels or clipping.
-        let rowsPerColumn: Int
-        if depth < MacNavigationHierarchy.gridNavigationDepth {
-            rowsPerColumn = count
-        } else {
-            rowsPerColumn = max(Int(availableSpan / preferredSpacing) + 1, 1)
-        }
-        let columnStride = max(gridChildWidth, gridSliderWidth) + 20
-        let margin: CGFloat = 30
-
-        return (0..<count).map { index in
-            let column = index / rowsPerColumn
-            let row = index % rowsPerColumn
-            let firstIndex = column * rowsPerColumn
-            let itemsInColumn = min(rowsPerColumn, count - firstIndex)
-            let fittingSpacing = itemsInColumn > 1
-                ? availableSpan / CGFloat(itemsInColumn - 1)
-                : preferredSpacing
-            let spacing = min(preferredSpacing, max(minimumSpacing, fittingSpacing))
-            let rawTop = centerY - CGFloat(itemsInColumn - 1) * spacing * 0.5
-            let rawBottom = rawTop + CGFloat(itemsInColumn - 1) * spacing
-            let correction: CGFloat
-            if rawTop < margin {
-                correction = margin - rawTop
-            } else if rawBottom > size.height - margin {
-                correction = size.height - margin - rawBottom
-            } else {
-                correction = 0
-            }
-            return CGPoint(
-                x: baseColumnX - CGFloat(column) * columnStride,
-                y: rawTop + CGFloat(row) * spacing + correction
-            )
-        }
+        // The primary ring is exempt from the width clamp: shifting it would
+        // divorce the fan from the anchor mark, guide arc, and picker. Only
+        // deep branches near a side edge need rescuing.
+        return RadialMenuGeometry(curvature: CGFloat(curvature)).positions(
+            count: count,
+            depth: depth,
+            anchor: layoutAnchor,
+            availableHeight: size.height,
+            opensLeft: opensLeft,
+            bifurcates: depth == 0 ? bifurcates : false,
+            localBranch: depth > 0,
+            branchBaseAngle: depth > 0 ? baseAngle : nil,
+            radiusBoost: radiusBoost,
+            sliderRing: sliderRing,
+            availableWidth: depth == 0 ? .infinity : size.width
+        )
     }
 
     private func layoutPicker(primaryPositions: [CGPoint]) -> some View {
         HStack(spacing: 3) {
-            ForEach(MacTabLauncherStyle.allCases, id: \.self) { style in
+            ForEach(NavigationPresentationStyle.allCases, id: \.self) { style in
                 let focusID = layoutFocusID(for: style)
                 let isKeyboardFocused = focusedItemID == focusID
                 Button {
-                    withAnimation(.easeOut(duration: 0.16)) {
-                        layoutStyle = style
-                    }
+                    onSelectPresentation(style)
                 } label: {
                     Image(systemName: style.systemImage)
                         .font(.system(size: 11, weight: .semibold))
                         .frame(width: 24, height: 22)
-                        .foregroundStyle(layoutStyle == style ? Color.white : Color.white.opacity(0.52))
+                        .foregroundStyle(style == .radial ? Color.white : Color.white.opacity(0.52))
                         .background(
-                            layoutStyle == style || isKeyboardFocused
+                            style == .radial || isKeyboardFocused
                                 ? Color(red: 0.58, green: 0.13, blue: 0.84).opacity(0.88)
                                 : Color.clear,
                             in: Capsule()
@@ -1049,34 +922,28 @@ struct MacQuickMenu: View {
                 }
                 .buttonStyle(.plain)
                 .focused($focusedItemID, equals: focusID)
-                .help("Use \(style.rawValue.lowercased()) tabs")
+                .help(style.displayName)
             }
 
-            if layoutStyle == .radial {
-                Rectangle()
-                    .fill(Color.white.opacity(0.12))
-                    .frame(width: 1, height: 14)
-                    .padding(.horizontal, 1)
+            Rectangle()
+                .fill(Color.white.opacity(0.12))
+                .frame(width: 1, height: 14)
+                .padding(.horizontal, 1)
 
-                curvatureButton(
-                    systemImage: "minus",
-                    delta: -0.08,
-                    focusID: ChromeFocusID.tighterCurvature
-                )
-                curvatureButton(
-                    systemImage: "plus",
-                    delta: 0.08,
-                    focusID: ChromeFocusID.widerCurvature
-                )
-            }
+            curvatureButton(
+                systemImage: "minus",
+                delta: -0.08,
+                focusID: ChromeFocusID.tighterCurvature
+            )
+            curvatureButton(
+                systemImage: "plus",
+                delta: 0.08,
+                focusID: ChromeFocusID.widerCurvature
+            )
         }
         .padding(3)
         .background(Color(red: 0.055, green: 0.012, blue: 0.09).opacity(0.96), in: Capsule())
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8))
-        .frame(
-            width: layoutStyle == .grid ? gridPrimaryWidth : nil,
-            alignment: .trailing
-        )
         .position(layoutPickerPosition(primaryPositions: primaryPositions))
         .accessibilityLabel("Quick menu layout")
     }
@@ -1087,9 +954,7 @@ struct MacQuickMenu: View {
         let desiredY = top - 32
         let resolvedY = desiredY >= 24 ? desiredY : min(bottom + 32, size.height - 24)
         return CGPoint(
-            x: layoutStyle == .grid
-                ? gridPrimaryColumnX
-                : bifurcates ? anchor.x : anchor.x + (opensLeft ? -70 : 70),
+            x: bifurcates ? anchor.x : anchor.x + (opensLeft ? -70 : 70),
             y: resolvedY
         )
     }
@@ -1130,7 +995,7 @@ struct MacQuickMenu: View {
                 } else {
                     radius = ring.radius
                     baseAngles = [ring.baseAngle]
-                    halfSweep = MacRadialTabGeometry.localBranchMaxSpread * 0.5 + 0.16
+                    halfSweep = RadialMenuGeometry.localBranchMaxSpread * 0.5 + 0.16
                     opacity = ring.depth == 1 ? 0.20 : 0.15
                 }
 
@@ -1192,7 +1057,21 @@ struct MacQuickMenu: View {
         }
     }
 
+    @ViewBuilder
     private var anchorMark: some View {
+        #if os(macOS)
+        anchorMarkContent
+            .gesture(WindowDragGesture())
+            .help("Drag to move the window")
+            .accessibilityLabel("Window drag handle")
+            .accessibilityHint("Drag to move the Threshold window")
+        #else
+        anchorMarkContent
+            .accessibilityLabel("Radial menu anchor")
+        #endif
+    }
+
+    private var anchorMarkContent: some View {
         ZStack {
             Circle()
                 .fill(Color(red: 0.54, green: 0.12, blue: 0.82).opacity(0.22))
@@ -1204,51 +1083,44 @@ struct MacQuickMenu: View {
         }
         .frame(width: Self.windowDragHandleSize, height: Self.windowDragHandleSize)
         .contentShape(Circle())
-        .gesture(WindowDragGesture())
         .position(anchor)
-        .help("Drag to move the window")
         .accessibilityElement()
-        .accessibilityLabel("Window drag handle")
-        .accessibilityHint("Drag to move the Threshold window")
     }
 
     // MARK: Keyboard navigation
 
-    /// Grid traversal follows the same two-level navigation + flat quick-input
-    /// projection shown on screen. Radial keeps its spatial visible-ring order.
-    private func keyboardFocusOrder(rings: [RingLayout]) -> [MacNavigationKeyboardTarget] {
-        let flattened = hierarchy.flattenedKeyboardTargets(for: layoutStyle)
-        let nodeTargets: [MacNavigationKeyboardTarget]
-        if layoutStyle == .grid {
-            nodeTargets = flattened
-        } else {
-            let targetsByID = Dictionary(uniqueKeysWithValues: flattened.map { ($0.id, $0) })
-            nodeTargets = rings.flatMap(\.nodes).compactMap { targetsByID[$0.id] }
-        }
+    /// Keyboard traversal follows the visible radial ring order.
+    private func keyboardFocusOrder(rings: [RingLayout]) -> [NavigationHierarchy.KeyboardTarget] {
+        let flattened = projection.flattenedKeyboardTargets()
+        let targetsByID = Dictionary(uniqueKeysWithValues: flattened.map { ($0.id, $0) })
+        let nodeTargets = rings.flatMap(\.nodes).compactMap { targetsByID[$0.id] }
 
         let chromeTargets = chromeFocusIDs.map {
-            MacNavigationKeyboardTarget(id: $0, ancestorPath: [])
+            NavigationHierarchy.KeyboardTarget(id: $0, ancestorPath: [])
         }
         return nodeTargets + chromeTargets
     }
 
     private var chromeFocusIDs: [String] {
-        var ids = [ChromeFocusID.radialLayout, ChromeFocusID.gridLayout]
-        if layoutStyle == .radial {
-            ids += [ChromeFocusID.tighterCurvature, ChromeFocusID.widerCurvature]
-        }
-        return ids
+        [
+            ChromeFocusID.windowLayout,
+            ChromeFocusID.radialLayout,
+            ChromeFocusID.panelLayout,
+            ChromeFocusID.tighterCurvature,
+            ChromeFocusID.widerCurvature
+        ]
     }
 
-    private func layoutFocusID(for style: MacTabLauncherStyle) -> String {
+    private func layoutFocusID(for style: NavigationPresentationStyle) -> String {
         switch style {
+        case .separateWindow: ChromeFocusID.windowLayout
         case .radial: ChromeFocusID.radialLayout
-        case .grid: ChromeFocusID.gridLayout
+        case .controlPanel: ChromeFocusID.panelLayout
         }
     }
 
-    private func moveFocus(through targets: [MacNavigationKeyboardTarget], backward: Bool) {
-        guard let nextID = MacNavigationKeyboardTraversal.nextID(
+    private func moveFocus(through targets: [NavigationHierarchy.KeyboardTarget], backward: Bool) {
+        guard let nextID = NavigationKeyboardTraversal.nextID(
             from: focusedItemID,
             in: targets,
             backward: backward
@@ -1257,16 +1129,12 @@ struct MacQuickMenu: View {
     }
 
     private func focusKeyboardTarget(_ id: String) {
-        if layoutStyle == .grid,
-           let target = hierarchy.flattenedKeyboardTargets(for: .grid).first(where: { $0.id == id }) {
-            setNavigationPath(target.ancestorPath)
-        }
         focusedItemID = id
     }
 
     private func handleDirectionalKey(
         _ press: KeyPress,
-        focusOrder: [MacNavigationKeyboardTarget]
+        focusOrder: [NavigationHierarchy.KeyboardTarget]
     ) -> KeyPress.Result {
         switch press.key {
         case .upArrow:
@@ -1293,20 +1161,23 @@ struct MacQuickMenu: View {
         }
     }
 
-    private var focusedNode: MacNavigationNode? {
+    private var focusedNode: RadialNavigationNode? {
         guard let focusedItemID else { return nil }
-        return hierarchy.node(withID: focusedItemID, for: layoutStyle)
+        return projection.node(withID: focusedItemID)
     }
 
     private func activateFocusedItem() -> KeyPress.Result {
         guard let focusedItemID else { return .ignored }
 
         switch focusedItemID {
-        case ChromeFocusID.radialLayout:
-            layoutStyle = .radial
+        case ChromeFocusID.windowLayout:
+            onSelectPresentation(.separateWindow)
             return .handled
-        case ChromeFocusID.gridLayout:
-            layoutStyle = .grid
+        case ChromeFocusID.radialLayout:
+            onSelectPresentation(.radial)
+            return .handled
+        case ChromeFocusID.panelLayout:
+            onSelectPresentation(.controlPanel)
             return .handled
         case ChromeFocusID.tighterCurvature:
             curvature = min(max(curvature - 0.08, 0.35), 1.35)
@@ -1318,7 +1189,7 @@ struct MacQuickMenu: View {
             break
         }
 
-        guard let node = hierarchy.node(withID: focusedItemID, for: layoutStyle) else { return .ignored }
+        guard let node = projection.node(withID: focusedItemID) else { return .ignored }
         if node.slider != nil {
             // Sliders use Left/Right for adjustment. Consuming activation avoids
             // Space falling through to viewport playback while a slider owns focus.
@@ -1337,18 +1208,14 @@ struct MacQuickMenu: View {
     @discardableResult
     private func expandFocusedBranch() -> Bool {
         guard let focusedItemID,
-              let node = hierarchy.node(withID: focusedItemID, for: layoutStyle),
+              let node = projection.node(withID: focusedItemID),
               node.isBranch,
-              let target = hierarchy.flattenedKeyboardTargets(for: layoutStyle)
+              let target = projection.flattenedKeyboardTargets()
                 .first(where: { $0.id == focusedItemID })
         else { return false }
 
         setNavigationPath(target.ancestorPath + [node.id])
-        if let firstChild = hierarchy.presentedChildren(
-            of: node,
-            atDepth: target.ancestorPath.count,
-            for: layoutStyle
-        ).first {
+        if let firstChild = projection.presentedChildren(of: node).first {
             self.focusedItemID = firstChild.id
         }
         return true
@@ -1356,7 +1223,7 @@ struct MacQuickMenu: View {
 
     private func retreatOrDismiss() {
         if let focusedItemID,
-           let target = hierarchy.flattenedKeyboardTargets(for: layoutStyle)
+           let target = projection.flattenedKeyboardTargets()
             .first(where: { $0.id == focusedItemID }),
            let parentID = target.ancestorPath.last {
             setNavigationPath(Array(target.ancestorPath.dropLast()))
@@ -1384,10 +1251,10 @@ struct MacQuickMenu: View {
     }
 }
 
-private struct MacQuickMenuButton: View {
+private struct RadialMenuButton: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    let item: MacNavigationNode
+    let item: RadialNavigationNode
     let depth: Int
     let fixedWidth: CGFloat?
     let isFocused: Bool
@@ -1601,11 +1468,11 @@ private struct MacQuickMenuButton: View {
 /// Static gradients + a proportional fill only — same performance contract as
 /// the tab pills: no blur, no control-tree mount, nothing re-rendering the
 /// Metal view underneath.
-private struct MacQuickSliderPill: View {
+private struct RadialSliderPill: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    let node: MacNavigationNode
-    let slider: MacQuickSliderBinding
+    let node: RadialNavigationNode
+    let slider: RadialSliderBinding
     let fixedWidth: CGFloat
     let isFocused: Bool
     let sceneAccent: Color
@@ -1724,7 +1591,7 @@ private struct MacQuickSliderPill: View {
     }
 
     private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .named(MacQuickMenu.coordinateSpaceName))
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(RadialMenu.coordinateSpaceName))
             .onChanged { gesture in
                 guard slider.isEnabled() else { return }
                 if !isDragging {
@@ -1791,184 +1658,3 @@ private struct MacQuickSliderPill: View {
     }
 
 }
-
-/// Tracks window-local pointer motion and Shift without polling. Unlike a thin
-/// SwiftUI hover strip, this sees the pointer's full rightward approach to the
-/// edge, including a single fast event that crosses the reveal threshold.
-struct MacTabInputMonitor: NSViewRepresentable {
-    @Binding var isPressed: Bool
-    let isRadialVisible: Bool
-    let onMouseMoved: (CGPoint) -> Void
-    let onTwoFingerSwipeUp: () -> Void
-    let onDoubleClick: () -> Void
-    /// Whether the given AppKit locationInWindow rests on a radial slider
-    /// pill. Scroll then adjusts that slider instead of accumulating toward
-    /// swipe-dismiss, and double-clicks pass through so a quick re-grab of
-    /// the slider works. Takes the location so the check stays geometric — a
-    /// hover id whose exit event was dropped must not keep matching.
-    let isPointerOverSlider: (CGPoint) -> Bool
-    /// Keeps double-click dismissal from swallowing the drag hub's second
-    /// mouse-down before WindowDragGesture can take ownership.
-    let isPointerOverWindowDragHandle: (CGPoint) -> Bool
-    /// Physical-up-positive scroll delta to apply to the hovered slider.
-    let onSliderScroll: (CGFloat) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(
-            isPressed: $isPressed,
-            isRadialVisible: isRadialVisible,
-            onMouseMoved: onMouseMoved,
-            onTwoFingerSwipeUp: onTwoFingerSwipeUp,
-            onDoubleClick: onDoubleClick,
-            isPointerOverSlider: isPointerOverSlider,
-            isPointerOverWindowDragHandle: isPointerOverWindowDragHandle,
-            onSliderScroll: onSliderScroll
-        )
-    }
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        context.coordinator.hostView = view
-        context.coordinator.start()
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        context.coordinator.hostView = nsView
-        context.coordinator.isPressed = $isPressed
-        context.coordinator.isRadialVisible = isRadialVisible
-        context.coordinator.onMouseMoved = onMouseMoved
-        context.coordinator.onTwoFingerSwipeUp = onTwoFingerSwipeUp
-        context.coordinator.onDoubleClick = onDoubleClick
-        context.coordinator.isPointerOverSlider = isPointerOverSlider
-        context.coordinator.isPointerOverWindowDragHandle = isPointerOverWindowDragHandle
-        context.coordinator.onSliderScroll = onSliderScroll
-    }
-
-    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
-        coordinator.stop()
-    }
-
-    @MainActor
-    final class Coordinator {
-        var isPressed: Binding<Bool>
-        var isRadialVisible: Bool
-        var onMouseMoved: (CGPoint) -> Void
-        var onTwoFingerSwipeUp: () -> Void
-        var onDoubleClick: () -> Void
-        var isPointerOverSlider: (CGPoint) -> Bool
-        var isPointerOverWindowDragHandle: (CGPoint) -> Bool
-        var onSliderScroll: (CGFloat) -> Void
-        weak var hostView: NSView?
-        private var monitor: Any?
-        private var swipeUpDistance: CGFloat = 0
-        private var didTriggerSwipe = false
-        private let swipeDismissThreshold: CGFloat = 24
-
-        init(
-            isPressed: Binding<Bool>,
-            isRadialVisible: Bool,
-            onMouseMoved: @escaping (CGPoint) -> Void,
-            onTwoFingerSwipeUp: @escaping () -> Void,
-            onDoubleClick: @escaping () -> Void,
-            isPointerOverSlider: @escaping (CGPoint) -> Bool,
-            isPointerOverWindowDragHandle: @escaping (CGPoint) -> Bool,
-            onSliderScroll: @escaping (CGFloat) -> Void
-        ) {
-            self.isPressed = isPressed
-            self.isRadialVisible = isRadialVisible
-            self.onMouseMoved = onMouseMoved
-            self.onTwoFingerSwipeUp = onTwoFingerSwipeUp
-            self.onDoubleClick = onDoubleClick
-            self.isPointerOverSlider = isPointerOverSlider
-            self.isPointerOverWindowDragHandle = isPointerOverWindowDragHandle
-            self.onSliderScroll = onSliderScroll
-        }
-
-        func start() {
-            guard monitor == nil else { return }
-            monitor = NSEvent.addLocalMonitorForEvents(
-                matching: [.flagsChanged, .mouseMoved, .leftMouseDown, .leftMouseDragged, .scrollWheel]
-            ) { [weak self] event in
-                guard let self else { return event }
-                guard let hostWindow = hostView?.window, event.window === hostWindow else { return event }
-
-                if event.type == .flagsChanged {
-                    isPressed.wrappedValue = event.modifierFlags.contains(.shift)
-                } else if event.type == .leftMouseDown {
-                    if isRadialVisible, event.clickCount >= 2 {
-                        // A double-click on an interactive drag target is a quick
-                        // re-grab, not a dismissal — let it start the second drag.
-                        if isPointerOverSlider(event.locationInWindow)
-                            || isPointerOverWindowDragHandle(event.locationInWindow) {
-                            return event
-                        }
-                        onDoubleClick()
-                        return nil
-                    }
-                    onMouseMoved(event.locationInWindow)
-                } else if event.type == .scrollWheel {
-                    guard isRadialVisible else {
-                        resetSwipeTracking()
-                        return event
-                    }
-
-                    // Normalize away the user's natural-scrolling preference so
-                    // scrolling stays a physical finger gesture: up = adjust
-                    // up / dismiss, regardless of the system setting.
-                    let upwardDelta = event.isDirectionInvertedFromDevice
-                        ? -event.scrollingDeltaY
-                        : event.scrollingDeltaY
-
-                    if isPointerOverSlider(event.locationInWindow) {
-                        resetSwipeTracking()
-                        if upwardDelta != 0 { onSliderScroll(upwardDelta) }
-                        return nil
-                    }
-
-                    guard event.hasPreciseScrollingDeltas else { return event }
-
-                    if event.phase == .began {
-                        resetSwipeTracking()
-                    }
-
-                    // Opposite travel drains the gesture instead of letting a
-                    // jittery reversal dismiss the launcher accidentally.
-                    if upwardDelta > 0 {
-                        swipeUpDistance += upwardDelta
-                    } else if upwardDelta < 0 {
-                        swipeUpDistance = max(0, swipeUpDistance + upwardDelta)
-                    }
-
-                    if !didTriggerSwipe, swipeUpDistance >= swipeDismissThreshold {
-                        didTriggerSwipe = true
-                        onTwoFingerSwipeUp()
-                    }
-
-                    if event.phase == .ended || event.phase == .cancelled {
-                        resetSwipeTracking()
-                    }
-                    return nil
-                } else {
-                    onMouseMoved(event.locationInWindow)
-                }
-                return event
-            }
-        }
-
-        func stop() {
-            if let monitor {
-                NSEvent.removeMonitor(monitor)
-            }
-            monitor = nil
-            resetSwipeTracking()
-            isPressed.wrappedValue = false
-        }
-
-        private func resetSwipeTracking() {
-            swipeUpDistance = 0
-            didTriggerSwipe = false
-        }
-    }
-}
-#endif

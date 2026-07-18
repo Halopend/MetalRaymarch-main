@@ -207,20 +207,41 @@ extension RenderSettingsSnapshot {
                                         -gridOrigin.z / gridCell.z, 1.0)
         p.modelToGrid = toGrid * modelToWorld
         p.gridAddress = gridAddress
+        // Shell-mode gradients need the real voxel step even when containment
+        // is off or the scan has not established a full 3-D envelope yet.
+        p.cellModel = gridCell * metersToModel
         // Containment box: scanned surface AABB → grid texel coords (so the same
-        // modelToGrid transform handles rotation). Off if degenerate.
+        // modelToGrid transform handles rotation). Scene reconstruction often
+        // arrives as one floor/wall plane first. When two axes are established,
+        // use the grid extent for the one unconstrained axis so containment can
+        // become useful immediately without collapsing the fractal to a plane.
+        // A line/point scan remains too underconstrained and stays off.
         let dimF = Float(ENV_SCRUNCH_DIM)
         let zero = SIMD3<Float>(repeating: 0)
         let dimV = SIMD3<Float>(repeating: dimF)
-        let cmin = simd_clamp((surfaceMinWorld - gridOrigin) / gridCell, zero, dimV)
-        let cmax = simd_clamp((surfaceMaxWorld - gridOrigin) / gridCell, zero, dimV)
-        if envScrunchContain > 0,
-           cmax.x > cmin.x, cmax.y > cmin.y, cmax.z > cmin.z {
+        var cmin = simd_clamp((surfaceMinWorld - gridOrigin) / gridCell, zero, dimV)
+        var cmax = simd_clamp((surfaceMaxWorld - gridOrigin) / gridCell, zero, dimV)
+        let extent = cmax - cmin
+        // Treat sub-voxel thickness as reconstruction noise, not a resolved
+        // room dimension. Real AR floor/wall meshes are rarely mathematically
+        // flat, so an epsilon-scale test turns them into razor-thin clip boxes.
+        let resolvedAxisThreshold: Float = 1.0
+        let xResolved = extent.x > resolvedAxisThreshold
+        let yResolved = extent.y > resolvedAxisThreshold
+        let zResolved = extent.z > resolvedAxisThreshold
+        let resolvedAxisCount = (xResolved ? 1 : 0)
+            + (yResolved ? 1 : 0)
+            + (zResolved ? 1 : 0)
+        if resolvedAxisCount >= 2 {
+            if !xResolved { cmin.x = 0; cmax.x = dimF }
+            if !yResolved { cmin.y = 0; cmax.y = dimF }
+            if !zResolved { cmin.z = 0; cmax.z = dimF }
+        }
+        if envScrunchContain > 0, resolvedAxisCount >= 2 {
             p.containMode = Int32(envScrunchContain)
             p.containFeatherModel = envScrunchContainFeather * metersToModel
             p.containMinGrid = cmin
             p.containMaxGrid = cmax
-            p.cellModel = gridCell * metersToModel
         }
         return p
     }

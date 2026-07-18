@@ -20,6 +20,16 @@ import AppKit
 // ═══════════════════════════════════════════════════════════════════════════════
 
 struct ContentView: View {
+    /// Radial navigation already supplies the app hierarchy around the pointer.
+    /// Its fallback panel therefore renders only the selected destination and
+    /// persistent actions; standalone and conventional panel presentations keep
+    /// the complete top dock and section rail.
+    let showsOuterNavigation: Bool
+
+    init(showsOuterNavigation: Bool = true) {
+        self.showsOuterNavigation = showsOuterNavigation
+    }
+
     @Environment(AppModel.self) var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
@@ -53,7 +63,7 @@ struct ContentView: View {
     @AppStorage("MusicTabContent.innerTab") private var musicPanelTab: MusicPanelTab = .music
     @AppStorage("ContentView.settingsSubTab") var settingsSubTab: SettingsSubTab = .display
 #if os(macOS)
-    @AppStorage("MacTabLauncher.enabled") var isMacTabLauncherEnabled = true
+    @AppStorage("MacTabLauncher.style") var macTabLauncherStyle: NavigationPresentationStyle = .radial
 #endif
     @AppStorage("ContentView.showPerformanceInMenu") var showPerformanceInMenu: Bool = false
     @AppStorage("ContentView.showFPSInHUD") var showFPSInHUD: Bool = true
@@ -113,7 +123,7 @@ struct ContentView: View {
     #elseif os(iOS)
         nil
     #else
-        980
+        showsOuterNavigation ? 980 : 720
     #endif
     }
 
@@ -135,15 +145,17 @@ struct ContentView: View {
     #endif
     }
 
-    private var availableShapeRailSections: [ShapeRailSection] {
-        ShapeRailSection.allCases.filter { section in
-            guard section != .performance else { return false }
-            #if os(visionOS)
-            return true
-            #else
-            return section != .hands
-            #endif
-        }
+    /// Shared definition consumed by the regular top-dock/rail grid, compact
+    /// iPad grid, keyboard navigation, and any radial presentation.
+    private var navigationHierarchy: NavigationHierarchy {
+        NavigationHierarchy.application(availability: .current(
+            allowsCustomScenes: allowCustomScenes,
+            includesGestureEditing: supportsGestureEditing
+        ))
+    }
+
+    private var activeWorkspaceNavigationNodes: [NavigationHierarchy.Node] {
+        navigationHierarchy.children(ofWorkspace: topDockTab)
     }
 
     private var activeMusicPermutationCount: Int {
@@ -669,16 +681,20 @@ struct ContentView: View {
     private var regularWorkspaceLayout: some View {
         VStack(spacing: 10) {
 #if os(macOS) || os(iOS)
-            HStack(spacing: 0) {
-                topDockOrnament
-                Spacer(minLength: 0)
+            if showsOuterNavigation {
+                HStack(spacing: 0) {
+                    topDockOrnament
+                    Spacer(minLength: 0)
+                }
             }
 #endif
             HStack(spacing: 0) {
-                // ── LEFT: Context Rail ──
-                sectionRail
-                
-                Divider()
+                if showsOuterNavigation {
+                    // ── LEFT: Context Rail ──
+                    sectionRail
+
+                    Divider()
+                }
                 
                 // ── RIGHT: Content Panel ──
                 VStack(spacing: 0) {
@@ -716,69 +732,24 @@ struct ContentView: View {
     private var compactSectionBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                switch topDockTab {
-                case .explore:
-                    ForEach(ExploreRailSection.allCases.filter { $0 != .customScenes || allowCustomScenes }, id: \.self) { section in
-                        compactSectionButton(
-                            title: section.rawValue,
-                            systemImage: section.icon,
-                            isSelected: selectedTab != .settings && selectedTab != .quickToggles && exploreRailSection == section
-                        ) { activateExploreSection(section) }
-                    }
-                case .shape:
-                    ForEach(availableShapeRailSections, id: \.self) { section in
-                        compactSectionButton(
-                            title: section.rawValue,
-                            systemImage: section.icon,
-                            isSelected: selectedTab != .settings && selectedTab != .quickToggles && shapeRailSection == section
-                        ) { activateShapeSection(section) }
-                    }
-                case .visualizations:
-                    ForEach(VisualizationsRailSection.visibleCases, id: \.self) { section in
-                        compactSectionButton(
-                            title: section.title,
-                            systemImage: section.icon,
-                            isSelected: selectedTab != .settings && selectedTab != .quickToggles && visualizationsRailSection == section
-                        ) { activateVisualizationsSection(section) }
-                    }
-                case .music:
-                    ForEach(MusicRailSection.availableCases, id: \.self) { section in
-                        compactSectionButton(
-                            title: section.title,
-                            systemImage: section.icon,
-                            isSelected: selectedTab != .settings && selectedTab != .quickToggles && musicRailSection == section
-                        ) { activateMusicSection(section) }
-                    }
-                case .performance:
-                    ForEach(PerformanceRailSection.allCases, id: \.self) { section in
-                        compactSectionButton(
-                            title: section.rawValue,
-                            systemImage: section.icon,
-                            isSelected: selectedTab != .settings && selectedTab != .quickToggles && performanceRailSection == section
-                        ) { activatePerformanceSection(section) }
-                    }
+                ForEach(activeWorkspaceNavigationNodes) { node in
+                    compactSectionButton(
+                        title: node.title,
+                        systemImage: node.systemImage,
+                        isSelected: isNavigationNodeSelected(node)
+                    ) { activateNavigationNode(node) }
                 }
 
                 Divider()
                     .frame(height: 28)
 
-                compactSectionButton(
-                    title: "Animation Editor",
-                    systemImage: AppIcons.pencilAndListClipboard,
-                    isSelected: false
-                ) { openAnimationEditor() }
-
-                compactSectionButton(
-                    title: "Quick Toggles",
-                    systemImage: SidebarTab.quickToggles.icon,
-                    isSelected: selectedTab == .quickToggles
-                ) { selectedTab = .quickToggles }
-
-                compactSectionButton(
-                    title: "Settings",
-                    systemImage: SidebarTab.settings.icon,
-                    isSelected: selectedTab == .settings
-                ) { selectedTab = .settings }
+                ForEach(navigationHierarchy.utilityRoots) { node in
+                    compactSectionButton(
+                        title: node.title,
+                        systemImage: node.systemImage,
+                        isSelected: isNavigationNodeSelected(node)
+                    ) { activateNavigationNode(node) }
+                }
             }
             .padding(.horizontal, 2)
         }
@@ -826,37 +797,38 @@ struct ContentView: View {
     // MARK: - Top Dock
 
     private var topDockBar: some View {
-        let visibleTabs = TopDockTab.allCases
         return HStack(spacing: 10) {
-            ForEach(visibleTabs, id: \.self) { tab in
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        activateTopDock(tab)
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: tab.icon)
-                                .font(.system(size: IconSize.medium, weight: .semibold))
-                            topDockBadge(for: tab)
+            ForEach(navigationHierarchy.workspaceRoots) { node in
+                if case .workspace(let tab) = node.destination {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            activateNavigationNode(node)
                         }
-                        Text(tab.title)
-                            .font(.subheadline.weight(.semibold))
+                    } label: {
+                        HStack(spacing: 8) {
+                            ZStack(alignment: .topTrailing) {
+                                Image(systemName: node.systemImage)
+                                    .font(.system(size: IconSize.medium, weight: .semibold))
+                                topDockBadge(for: tab)
+                            }
+                            Text(node.title)
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(
+                            Capsule()
+                                .fill(topDockTab == tab && isPrimaryWorkspaceSelection ? Color.blue.opacity(0.18) : Color.clear)
+                        )
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(topDockTab == tab && isPrimaryWorkspaceSelection ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.14), lineWidth: 1)
+                        )
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(
-                        Capsule()
-                            .fill(topDockTab == tab && isPrimaryWorkspaceSelection ? Color.blue.opacity(0.18) : Color.clear)
-                    )
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(topDockTab == tab && isPrimaryWorkspaceSelection ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.14), lineWidth: 1)
-                    )
+                    .buttonStyle(.plain)
+                    .foregroundStyle(topDockTab == tab && isPrimaryWorkspaceSelection ? .primary : .secondary)
+                    .accessibilityAddTraits(topDockTab == tab && isPrimaryWorkspaceSelection ? .isSelected : [])
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(topDockTab == tab && isPrimaryWorkspaceSelection ? .primary : .secondary)
-                .accessibilityAddTraits(topDockTab == tab && isPrimaryWorkspaceSelection ? .isSelected : [])
             }
 
             Divider()
@@ -925,62 +897,14 @@ struct ContentView: View {
         VStack(spacing: 0) {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 8) {
-                    switch topDockTab {
-                    case .explore:
-                        let exploreSections = ExploreRailSection.allCases.filter { $0 != .customScenes || allowCustomScenes }
-                        ForEach(exploreSections, id: \.self) { section in
-                            railButton(
-                                title: section.rawValue,
-                                systemImage: section.icon,
-                                isSelected: isPrimaryWorkspaceSelection && topDockTab == .explore && exploreRailSection == section,
-                                pinControl: pinnedRailControl(for: section)
-                            ) {
-                                activateExploreSection(section)
-                            }
-                        }
-                    case .shape:
-                        // Performance moved out to its own top-dock tab; drop it here.
-                        ForEach(availableShapeRailSections, id: \.self) { section in
-                            railButton(
-                                title: section.rawValue,
-                                systemImage: section.icon,
-                                isSelected: isPrimaryWorkspaceSelection && topDockTab == .shape && shapeRailSection == section,
-                                pinControl: pinnedRailControl(for: section)
-                            ) {
-                                activateShapeSection(section)
-                            }
-                        }
-                    case .visualizations:
-                        ForEach(VisualizationsRailSection.visibleCases, id: \.self) { section in
-                            railButton(
-                                title: section.title,
-                                systemImage: section.icon,
-                                isSelected: isPrimaryWorkspaceSelection && topDockTab == .visualizations && visualizationsRailSection == section,
-                                pinControl: pinnedRailControl(for: section)
-                            ) {
-                                activateVisualizationsSection(section)
-                            }
-                        }
-                    case .music:
-                        ForEach(MusicRailSection.availableCases, id: \.self) { section in
-                            railButton(
-                                title: section.title,
-                                systemImage: section.icon,
-                                isSelected: isPrimaryWorkspaceSelection && topDockTab == .music && musicRailSection == section,
-                                pinControl: pinnedRailControl(for: section)
-                            ) {
-                                activateMusicSection(section)
-                            }
-                        }
-                    case .performance:
-                        ForEach(PerformanceRailSection.allCases, id: \.self) { section in
-                            railButton(
-                                title: section.rawValue,
-                                systemImage: section.icon,
-                                isSelected: isPrimaryWorkspaceSelection && topDockTab == .performance && performanceRailSection == section
-                            ) {
-                                activatePerformanceSection(section)
-                            }
+                    ForEach(activeWorkspaceNavigationNodes) { node in
+                        railButton(
+                            title: node.title,
+                            systemImage: node.systemImage,
+                            isSelected: isNavigationNodeSelected(node),
+                            pinControl: pinnedRailControl(for: node.destination)
+                        ) {
+                            activateNavigationNode(node)
                         }
                     }
                 }
@@ -992,21 +916,14 @@ struct ContentView: View {
                 Divider()
                     .padding(.vertical, 4)
 
-                if supportsGestureEditing {
-                    railButton(title: "Gestures", systemImage: SidebarTab.gestures.icon, isSelected: selectedTab == .gestures) {
-                        selectedTab = .gestures
+                ForEach(navigationHierarchy.utilityRoots.filter(isLeadingUtilityNode)) { node in
+                    railButton(
+                        title: node.title,
+                        systemImage: node.systemImage,
+                        isSelected: isNavigationNodeSelected(node)
+                    ) {
+                        activateNavigationNode(node)
                     }
-                }
-
-                // Animated scenes remain discoverable in Explore, but authoring
-                // them needs a persistent path as well.  Keep the editor one
-                // click away instead of hiding it behind a scene-card action.
-                railButton(
-                    title: "Animation Editor",
-                    systemImage: AppIcons.pencilAndListClipboard,
-                    isSelected: false
-                ) {
-                    openAnimationEditor()
                 }
 
                 if !pinnedRailControls.isEmpty {
@@ -1046,12 +963,14 @@ struct ContentView: View {
                     }
                 }
 
-                railButton(title: "Quick Toggles", systemImage: SidebarTab.quickToggles.icon, isSelected: selectedTab == .quickToggles) {
-                    selectedTab = .quickToggles
-                }
-
-                railButton(title: "Settings", systemImage: SidebarTab.settings.icon, isSelected: selectedTab == .settings) {
-                    selectedTab = .settings
+                ForEach(navigationHierarchy.utilityRoots.filter { !isLeadingUtilityNode($0) }) { node in
+                    railButton(
+                        title: node.title,
+                        systemImage: node.systemImage,
+                        isSelected: isNavigationNodeSelected(node)
+                    ) {
+                        activateNavigationNode(node)
+                    }
                 }
             }
             .padding(.top, 8)
@@ -1239,6 +1158,77 @@ struct ContentView: View {
 #endif
     }
 
+    private func activateNavigationNode(_ node: NavigationHierarchy.Node) {
+        switch node.destination {
+        case .workspace(let tab):
+            activateTopDock(tab)
+        case .explore(let section):
+            activateExploreSection(section)
+        case .shape(let section):
+            activateShapeSection(section)
+        case .visualizations(let section):
+            activateVisualizationsSection(section)
+        case .performance(let section):
+            activatePerformanceSection(section)
+        case .music(let section):
+            activateMusicSection(section)
+        case .animationEditor:
+            openAnimationEditor()
+        case .quickToggles:
+            selectedTab = .quickToggles
+        case .gestures:
+            selectedTab = .gestures
+        case .settings:
+            selectedTab = .settings
+        }
+    }
+
+    private func isNavigationNodeSelected(_ node: NavigationHierarchy.Node) -> Bool {
+        switch node.destination {
+        case .workspace(let tab): return isPrimaryWorkspaceSelection && topDockTab == tab
+        case .explore(let section):
+            return isPrimaryWorkspaceSelection && topDockTab == .explore && exploreRailSection == section
+        case .shape(let section):
+            return isPrimaryWorkspaceSelection && topDockTab == .shape && shapeRailSection == section
+        case .visualizations(let section):
+            return isPrimaryWorkspaceSelection
+                && topDockTab == .visualizations
+                && visualizationsRailSection == section
+        case .performance(let section):
+            return isPrimaryWorkspaceSelection
+                && topDockTab == .performance
+                && performanceRailSection == section
+        case .music(let section):
+            return isPrimaryWorkspaceSelection
+                && topDockTab == .music
+                && musicRailSection.canonical == section.canonical
+        case .quickToggles: return selectedTab == .quickToggles
+        case .gestures: return selectedTab == .gestures
+        case .settings: return selectedTab == .settings
+        case .animationEditor: return false
+        }
+    }
+
+    private func isLeadingUtilityNode(_ node: NavigationHierarchy.Node) -> Bool {
+        switch node.destination {
+        case .gestures, .animationEditor: return true
+        default: return false
+        }
+    }
+
+    private func pinnedRailControl(
+        for destination: NavigationHierarchy.Destination
+    ) -> PinnedRailControl? {
+        switch destination {
+        case .explore(let section): return pinnedRailControl(for: section)
+        case .shape(let section): return pinnedRailControl(for: section)
+        case .visualizations(let section): return pinnedRailControl(for: section)
+        case .music(let section): return pinnedRailControl(for: section)
+        case .workspace, .performance, .animationEditor, .quickToggles, .gestures, .settings:
+            return nil
+        }
+    }
+
     private func activateTopDock(_ tab: TopDockTab) {
         guard tab == .explore || isRendererNavigationReady else {
             activateExploreSection(.jumpingOff)
@@ -1278,6 +1268,9 @@ struct ContentView: View {
         case .formula:
             fractalSubTab = .shape
             shapeInnerTab = .formula
+        case .primitives:
+            fractalSubTab = .shape
+            shapeInnerTab = .primitives
         case .hands:
             fractalSubTab = .shape
             shapeInnerTab = .hands
@@ -1395,6 +1388,8 @@ struct ContentView: View {
             return topDockTab == .shape && shapeRailSection == .parameters && selectedTab != .gestures && selectedTab != .settings
         case .shapeFormula:
             return topDockTab == .shape && shapeRailSection == .formula && selectedTab != .gestures && selectedTab != .settings
+        case .shapePrimitives:
+            return topDockTab == .shape && shapeRailSection == .primitives && selectedTab != .gestures && selectedTab != .settings
         case .shapeHands:
             return topDockTab == .shape && shapeRailSection == .hands && selectedTab != .gestures && selectedTab != .settings
         case .shapeSpace:
@@ -1447,6 +1442,8 @@ struct ContentView: View {
                 activateShapeSection(.parameters)
             case .shapeFormula:
                 activateShapeSection(.formula)
+            case .shapePrimitives:
+                activateShapeSection(.primitives)
             case .shapeHands:
                 activateShapeSection(.hands)
             case .shapeSpace:
@@ -1497,6 +1494,7 @@ struct ContentView: View {
         switch section {
         case .parameters: return .shapeParameters
         case .formula: return .shapeFormula
+        case .primitives: return .shapePrimitives
         case .hands: return .shapeHands
         case .space: return .shapeSpace
         case .transformations: return .shapeTransformations
@@ -1540,6 +1538,7 @@ struct ContentView: View {
                 topDockTab = .shape
                 switch shapeInnerTab {
                 case .formula: shapeRailSection = .formula
+                case .primitives: shapeRailSection = .primitives
                 case .hands: shapeRailSection = .hands
                 case .parameters: shapeRailSection = .parameters
                 }

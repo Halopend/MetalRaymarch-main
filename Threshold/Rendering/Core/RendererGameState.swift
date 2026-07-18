@@ -25,6 +25,11 @@ struct RendererFramePreparation {
     var perEye: [RendererPreparedEyeState]
     var handAttraction: HandAttractionUniforms
     var envScrunch: EnvScrunchParams
+    /// The exact grid whose GPU address is stored in `envScrunch`. A scene-
+    /// reconstruction rebake can publish a replacement at any time, so every
+    /// encoder in this frame must declare and retain this same buffer rather
+    /// than looking the grid up again.
+    var environmentGrid: EnvironmentSDFGrid?
 }
 
 /// Hand Attraction (visionOS only): per-hand interaction sphere state, already
@@ -277,10 +282,17 @@ extension Renderer {
             effectiveScale: effectiveScale,
             deviceTransform: deviceTransform
         )
+        // Snapshot the published grid exactly once for this frame. Keeping the
+        // object beside the derived bindless address prevents a rebake from
+        // pairing grid A's address with grid B's residency declaration.
+        let environmentGrid = settingsSnapshot.envScrunchEnabled
+            ? environmentSDF.withLock { $0 }
+            : nil
         let envScrunchParams = makeEnvScrunchParams(
             settingsSnapshot: settingsSnapshot,
             modelMatrix: modelMatrix,
-            deviceTransform: deviceTransform
+            deviceTransform: deviceTransform,
+            grid: environmentGrid
         )
 
         // One-time logging of device anchor to verify position tracking is working
@@ -439,7 +451,8 @@ extension Renderer {
             animatedGlow: animatedGlow,
             perEye: preparedEyeStates,
             handAttraction: handAttraction,
-            envScrunch: envScrunchParams
+            envScrunch: envScrunchParams,
+            environmentGrid: environmentGrid
         )
     }
 
@@ -450,10 +463,11 @@ extension Renderer {
     private func makeEnvScrunchParams(
         settingsSnapshot: RenderSettingsSnapshot,
         modelMatrix: matrix_float4x4,
-        deviceTransform: matrix_float4x4
+        deviceTransform: matrix_float4x4,
+        grid: EnvironmentSDFGrid?
     ) -> EnvScrunchParams {
         guard settingsSnapshot.envScrunchEnabled,
-              let grid = environmentSDF.withLock({ $0 }) else { return EnvScrunchParams() }
+              let grid else { return EnvScrunchParams() }
         let viewerWorld = SIMD3<Float>(
             deviceTransform.columns.3.x,
             deviceTransform.columns.3.y,

@@ -196,11 +196,21 @@ class AppModel {
             if oldValue != immersionStylePreference && !immersionChangeIsSceneDriven {
                 if immersionStylePreference != .immersive {
                     renderSettings.boundingSphereSkipEnabled = true
+                    renderSettings.boundToSpaceEnabled = false
                     renderSettings.envScrunchEnabled = false
                 } else {
                     renderSettings.boundingSphereSkipEnabled = false
+                    renderSettings.boundToSpaceEnabled = false
                     renderSettings.envScrunchEnabled = false
                 }
+                // RenderSettings is intentionally lock-backed/non-observable.
+                // Resync every UISettingsCache after this coupled write so the
+                // next containment tap cannot push stale pre-immersion values
+                // back into the renderer.
+                NotificationCenter.default.post(
+                    name: Self.fractalSettingsDidChangeNotification,
+                    object: nil
+                )
             }
         }
     }
@@ -957,7 +967,7 @@ class AppModel {
     /// left/right shortcut.
     @MainActor
     func cycleJumpingOffScene(forward: Bool) {
-        let scenes = presetManager.presets
+        let scenes = presetManager.sceneCatalogPresets
             .filter { $0.name != "__lastState__" && $0.isKeyboardSwitchableStaticPreset }
         guard !scenes.isEmpty else { return }
 

@@ -78,13 +78,26 @@ struct WarmStartGate {
             hasher.combine(s.fractalIterations)
             hasher.combine(s.sphericalInversionMode.rawValue)
             hasher.combine(s.formulaParams.rotationFlags)
+            // Containment toggles are hard geometry cuts. In particular, a
+            // previous unbounded depth must never warm-start a newly bounded
+            // frame past the room/shape surface.
+            hasher.combine(s.boundingSphereSkipEnabled)
+            hasher.combine(s.boundToSpaceEnabled)
+            hasher.combine(s.boundToSpaceMode)
             discrete = hasher.finalize()
 
             var values: [Float] = [
                 s.scale, s.fractalScale, s.minDistance, s.detailScale,
                 s.foldingLimit, s.sphereRadius, s.sphericalInversionRadius,
+                s.position.x, s.position.y, s.position.z,
+                s.worldRotation.vector.x, s.worldRotation.vector.y,
+                s.worldRotation.vector.z, s.worldRotation.vector.w,
+                s.linearRailWorldOffset.x, s.linearRailWorldOffset.y,
+                s.linearRailWorldOffset.z,
+                s.boundingShapeRadius, s.boundingShapeType,
+                s.boundSpaceSize.x, s.boundSpaceSize.y, s.boundSpaceSize.z,
             ]
-            values.reserveCapacity(7 + 16 + 18)
+            values.reserveCapacity(values.count + 16 + 18)
             // The 16 formula param slots (C float[16] imports as a tuple of
             // Floats — raw bytes are exactly the packed floats, no padding).
             withUnsafeBytes(of: s.formulaParams.params) { raw in
@@ -124,12 +137,19 @@ struct WarmStartGate {
 
     /// A fragment+MetalFX frame just wrote depth under this snapshot.
     mutating func recordDepthWritten(_ s: RenderSettingsSnapshot) {
-        recordedKey = GeometryKey(s)
+        // Scanned grids and tracked hands change outside RenderSettings, so the
+        // snapshot has no stable identity/position to key those dynamic CSG
+        // fields. Never retain their depth: a newly-near surface or hand could
+        // otherwise be skipped using the old frame's start distance.
+        recordedKey = (s.envScrunchEnabled || s.handAttractionEnabled)
+            ? nil
+            : GeometryKey(s)
     }
 
     /// May this frame's rays warm-start from the recorded depth history?
     func allowsWarmStart(for s: RenderSettingsSnapshot) -> Bool {
         guard let recordedKey else { return false }
+        guard !s.envScrunchEnabled, !s.handAttractionEnabled else { return false }
         // Spherical inversion warps the march ray; reprojection math assumes
         // the unwarped camera ray, so warm start is off entirely there.
         guard s.sphericalInversionMode.rawValue == 0 else { return false }

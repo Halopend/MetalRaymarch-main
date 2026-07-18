@@ -48,6 +48,66 @@ struct UISettingsCacheTests {
         }
     }
 
+    @Test("Bounding toggle preserves the authored non-sphere silhouette")
+    func boundingTogglePreservesShape() {
+        let settings = RenderSettings()
+        settings.withPersistenceSuppressed {
+            settings.boundingSphereSkipEnabled = false
+            settings.boundingShapeType = SafetyBubbleShapePreset.dodecahedron.storedValue
+            let cache = UISettingsCache(renderSettings: settings)
+
+            cache.setBoundingShapeEnabled(true)
+
+            #expect(cache.quality.boundingSphereSkipEnabled)
+            #expect(cache.quality.boundingShapeType == SafetyBubbleShapePreset.dodecahedron.storedValue)
+            #expect(settings.boundingShapeType == SafetyBubbleShapePreset.dodecahedron.storedValue)
+        }
+    }
+
+    @Test("Containment picker makes authored space latch exclusively")
+    func authoredSpaceContainmentLatches() {
+        let settings = RenderSettings()
+        settings.withPersistenceSuppressed {
+            settings.boundingSphereSkipEnabled = true
+            settings.boundToSpaceEnabled = false
+            settings.envScrunchEnabled = true
+            let cache = UISettingsCache(renderSettings: settings)
+
+            #expect(cache.mixedContainment == .custom)
+            cache.applyMixedContainment(.space)
+
+            #expect(cache.mixedContainment == .space)
+            #expect(cache.quality.boundToSpaceEnabled)
+            #expect(!cache.quality.boundingSphereSkipEnabled)
+            #expect(!cache.quality.envScrunchEnabled)
+            #expect(settings.boundToSpaceEnabled)
+            #expect(!settings.boundingSphereSkipEnabled)
+            #expect(!settings.envScrunchEnabled)
+        }
+    }
+
+    @Test("A Bounding silhouette promotes to a same-sized primitive seed")
+    func boundingShapePromotesToSeed() {
+        let settings = RenderSettings()
+        settings.withPersistenceSuppressed {
+            settings.boundingSphereSkipEnabled = true
+            settings.boundingShapeRadius = 2.75
+            settings.boundingShapeType = SafetyBubbleShapePreset.icosahedron.storedValue
+            settings.spaceWarpStack = [SpaceWarpOpValue(kind: .icosahedralCut)]
+            let cache = UISettingsCache(renderSettings: settings)
+
+            cache.promoteBoundingShapeToSeed(gestureController: nil)
+
+            #expect(settings.fractalType == .constructionPrimitive)
+            #expect(FractalPrimitiveKind(
+                selector: Int(FormulaCatalog.getParam(settings.formulaParams, index: 0).rounded())
+            ) == .icosahedron)
+            #expect(abs(FormulaCatalog.getParam(settings.formulaParams, index: 1) - 2.75) < 1e-5)
+            #expect(!settings.boundingSphereSkipEnabled)
+            #expect(settings.spaceWarpStack.map(\.kind) == [.icosahedralCut])
+        }
+    }
+
     @Test("live stats refresh according to the renderer lifecycle on each platform")
     func liveStatsUsePlatformLifecycle() {
         let settings = RenderSettings()

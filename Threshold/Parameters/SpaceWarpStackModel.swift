@@ -42,6 +42,7 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable {
     case scale = 15        // uniform domain scale (IFS glue; strength = factor, deScale = factor)
     case offsetFold = 16   // p ↦ |p + c| — mirror fold about an off-origin centre
     case mandelboxStep = 17 // one exact box-fold → sphere-fold → scale → +original-p recurrence
+    case icosahedralCut = 18 // fixed {5,3} reflection chamber — named icosahedral space cut
 
     var id: Int32 { rawValue }
 
@@ -117,6 +118,7 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable {
         case .scale:        return "p ↦ p · scale   — uniform domain scale (DE ÷ scale); the fold→scale IFS step"
         case .offsetFold:   return "p ↦ mix(p, |p + c|, strength)   — mirror fold about an off-origin centre c"
         case .mandelboxStep:return "z ↦ scale · sphereFold(boxFold(z)) + p₀   — one Mandelbox recurrence step"
+        case .icosahedralCut:return "reflect p into the fixed {5,3} icosahedral chamber across 3 mirror normals"
         }
     }
 }
@@ -170,6 +172,7 @@ struct WarpToggleSpec {
 /// Sphere Inversion / Tube Fold sit side by side under one heading, etc.).
 enum WarpFamily: String, CaseIterable {
     case mirror      = "Mirrors & Folds"
+    case spaceCutting = "Space Cutting"
     case spherical   = "Spherical & Radial"
     case selfSimilar = "Self-Similar Repeats"
     case distortion  = "Bend & Wave"
@@ -238,13 +241,19 @@ enum WarpCatalog {
                        gpuApplyFn: "warpKaleido",
                        blurb: "Folds the angle around the vertical (Y) axis into N identical pie-slice wedges — classic flat kaleidoscope symmetry in the XZ plane. Contrast: Coxeter is full 3-D polyhedral symmetry; this is 2-D rotational."),
         WarpDescriptor(.coxeter, "Coxeter", icon: "hexagon",
-                       family: .mirror, tagline: "{p,q} polyhedral mirror symmetry",
+                       family: .spaceCutting, tagline: "{p,q} polyhedral mirror symmetry",
                        amountLabel: "Mirror",
                        defaultStrength: 1.0, strengthRange: 0.0...1.0,
                        params: [WarpParamSpec(slot: 1, label: "p", icon: "hexagon", range: 2.0...8.0, defaultValue: 5.0),
                                 WarpParamSpec(slot: 2, label: "q", icon: "hexagon", range: 2.0...8.0, defaultValue: 3.0)],
                        gpuApplyFn: "warpCoxeter",   // isometric (reflections) → no DE divisor
                        blurb: "Folds space into a {p,q} reflection group — full 3-D polyhedral mirror symmetry. {5,3}=icosahedral, {4,3}=octahedral, {3,3}=tetrahedral; 1/p+1/q<1/2 goes hyperbolic. Contrast: Kaleidoscope is flat N-fold; this is the polyhedral generalization."),
+        WarpDescriptor(.icosahedralCut, "Icosahedral Space Cut", icon: "hexagon.fill",
+                       family: .spaceCutting, tagline: "Cut space into a fixed {5,3} chamber",
+                       amountLabel: "Cut",
+                       defaultStrength: 1.0, strengthRange: 0.0...1.0,
+                       gpuApplyFn: "warpCoxeter",   // fixed {5,3}; shares the reflection kernel
+                       blurb: "Folds the entire domain into one fundamental chamber of icosahedral {5,3} symmetry. Its three mirror planes create twenty-face spatial repetition without exposing Coxeter notation. Cut blends from the untouched domain to the fully reflected chamber; use the general Coxeter option when you want tetrahedral, octahedral, Euclidean, or hyperbolic groups."),
         WarpDescriptor(.mengerFold, "Menger Fold", icon: "square.grid.3x3",
                        family: .mirror, tagline: "Fold + sort into one octant (Menger)",
                        gpuApplyFn: "warpMengerFold",   // abs + permutation → isometric, no DE divisor
@@ -339,7 +348,7 @@ enum WarpCatalog {
     static let recipes: [WarpRecipe] = [
         WarpRecipe("Icosahedral Bloom", icon: "hexagon.fill",
                    blurb: "A {5,3} icosahedral reflection group with a soft sphere-fold core — dense polyhedral mirror symmetry.") {
-            [ warpOp(.coxeter, p1: 5, p2: 3),
+            [ warpOp(.icosahedralCut),
               warpOp(.sphereFold, strength: 0.6, p1: 0.5, p2: 1.4),
               warpOp(.scaleRepeat, strength: 1.0, p1: 2.0) ]
         },
@@ -410,10 +419,17 @@ struct WarpRecipe: Identifiable, Sendable {
     }
 }
 
+/// How a repeat group feeds one pass into the next. Ordinary groups simply repeat
+/// their child pipeline. A Mandelbox recurrence additionally adds the point that
+/// entered the group after each pass (the visible group-level `+ p₀` feedback).
+enum SpaceWarpGroupMode: String, Codable, Hashable, Sendable {
+    case repeatOutput
+    case mandelboxRecurrence
+}
+
 /// Pedagogical snapshots for constructing a Mandelbox from a terminal sphere.
-/// The first four stages expose the individual techniques. The last two replace
-/// those one-shot transforms with repeatable Mandelbox Step ops, which preserve
-/// the original point and therefore implement the actual recurrence.
+/// The first four stages expose the individual techniques. The last two place the
+/// same three editable transforms in a recurrence group and iterate that series.
 enum MandelboxConstructionStage: Int, CaseIterable, Identifiable {
     case primitive
     case boxFold
@@ -466,9 +482,28 @@ enum MandelboxConstructionStage: Int, CaseIterable, Identifiable {
     }
 
     private static func recurrence(count: Int) -> [SpaceWarpOpValue] {
-        (0..<count).map { _ in
-            warpOp(.mandelboxStep, strength: -1.5, p1: 1.0, p2: 0.5)
-        }
+        warpGroup([
+            warpOp(.boxFold, p1: 1.0),
+            warpOp(.sphereFold, strength: 1.0, p1: 0.5, p2: 1.0),
+            warpOp(.scale, strength: -1.5),
+        ], iterations: count, mode: .mandelboxRecurrence)
+    }
+}
+
+/// Mark a contiguous series as one repeat group. The flat editable array remains
+/// backward-compatible; shared metadata tells the packer/GPU to feed each pass's
+/// output into the next without duplicating the operators.
+func warpGroup(_ ops: [SpaceWarpOpValue], iterations: Int,
+               mode: SpaceWarpGroupMode = .repeatOutput) -> [SpaceWarpOpValue] {
+    guard !ops.isEmpty else { return [] }
+    let groupID = UUID()
+    let clamped = min(max(iterations, 1), Int(kMaxSpaceWarpGroupIterations))
+    return ops.map { value in
+        var op = value
+        op.groupID = groupID
+        op.groupIterations = clamped
+        op.groupMode = mode
+        return op
     }
 }
 
@@ -495,6 +530,11 @@ struct SpaceWarpOpValue: Codable, Identifiable, Hashable {
     var p2: Float
     var axis: SIMD3<Float>
     var isEnabled: Bool
+    /// Contiguous ops sharing an id execute as one repeat group. Optional fields
+    /// make pre-group scene files decode as the original flat, one-pass stack.
+    var groupID: UUID?
+    var groupIterations: Int?
+    var groupMode: SpaceWarpGroupMode?
 
     var kind: SpaceWarpKind { SpaceWarpKind(rawValue: type) ?? .twist }
 
@@ -508,12 +548,26 @@ struct SpaceWarpOpValue: Codable, Identifiable, Hashable {
         self.p2 = d.params.first(where: { $0.slot == 2 })?.defaultValue ?? 0
         self.axis = d.defaultAxis
         self.isEnabled = true
+        self.groupID = nil
+        self.groupIterations = nil
+        self.groupMode = nil
     }
 
     init(id: UUID = UUID(), type: Int32, strength: Float, p1: Float, p2: Float,
-         axis: SIMD3<Float>, isEnabled: Bool) {
+         axis: SIMD3<Float>, isEnabled: Bool, groupID: UUID? = nil,
+         groupIterations: Int? = nil, groupMode: SpaceWarpGroupMode? = nil) {
         self.id = id; self.type = type; self.strength = strength
         self.p1 = p1; self.p2 = p2; self.axis = axis; self.isEnabled = isEnabled
+        self.groupID = groupID; self.groupIterations = groupIterations
+        self.groupMode = groupMode
+    }
+
+    var effectiveGroupIterations: Int {
+        min(max(groupIterations ?? 1, 1), Int(kMaxSpaceWarpGroupIterations))
+    }
+
+    var effectiveGroupMode: SpaceWarpGroupMode {
+        groupMode ?? .repeatOutput
     }
 
     /// Add a music offset to one field, clamped to that field's range for this kind.
@@ -571,7 +625,7 @@ private func precomputedGPUOp(from v: SpaceWarpOpValue) -> SpaceWarpOp {
         // Offset fold uses the axis as a RAW translation (crease centre), NOT a
         // normalized direction — return it unchanged, bypassing the normalize below.
         return SpaceWarpOp(type: v.type, strength: v.strength, p1: v.p1, p2: v.p2,
-                           axisX: v.axis.x, axisY: v.axis.y, axisZ: v.axis.z, _pad: 0)
+                           axisX: v.axis.x, axisY: v.axis.y, axisZ: v.axis.z, groupControl: 0)
     case .mandelboxStep:
         p1 = max(v.p1, 0.01)                                    // box-fold limit
         let minR = min(max(v.p2, 0.01), 0.99)
@@ -594,7 +648,7 @@ private func precomputedGPUOp(from v: SpaceWarpOpValue) -> SpaceWarpOp {
         p1 = max(v.p1, 0.1)                                      // spacing d
     case .scaleRepeat:
         p1 = logf(max(v.p1, 1.1))                                // log(scale), float-precision (matches GPU log)
-    case .coxeter:
+    case .coxeter, .icosahedralCut:
         // [p,q] rank-3 reflection group → the 3 mirror normals (through the origin):
         //   n0 = (1, 0, 0)                            [implicit in the shader]
         //   n1 = (−cos π/p, sin π/p, 0)               → p1, p2
@@ -602,18 +656,18 @@ private func precomputedGPUOp(from v: SpaceWarpOpValue) -> SpaceWarpOp {
         // Their Gram inner products encode the dihedral orders (n0·n1→p, n1·n2→q,
         // n0·n2 = 0). Real n2.z needs 1/p+1/q ≥ 1/2 (finite/Euclidean); the hyperbolic
         // case clamps to 0 and still folds gracefully (just no convergence).
-        let pp = max(v.p1.rounded(), 2)
-        let qq = max(v.p2.rounded(), 2)
+        let pp: Float = v.kind == .icosahedralCut ? 5 : max(v.p1.rounded(), 2)
+        let qq: Float = v.kind == .icosahedralCut ? 3 : max(v.p2.rounded(), 2)
         let sp = sinf(Float.pi / pp)
         let cp = cosf(Float.pi / pp)
         let cq = cosf(Float.pi / qq)
         let a = -cq / sp
         let b = (1 - a * a > 0) ? sqrtf(1 - a * a) : 0
         return SpaceWarpOp(type: v.type, strength: v.strength,
-                           p1: -cp, p2: sp, axisX: a, axisY: b, axisZ: 0, _pad: 0)
+                           p1: -cp, p2: sp, axisX: a, axisY: b, axisZ: 0, groupControl: 0)
     }
     return SpaceWarpOp(type: v.type, strength: v.strength, p1: p1, p2: p2,
-                       axisX: n.x, axisY: n.y, axisZ: n.z, _pad: 0)
+                       axisX: n.x, axisY: n.y, axisZ: n.z, groupControl: 0)
 }
 
 /// Pack the enabled ops (in order) into the GPU `SpaceWarpStack`, precomputing each
@@ -628,6 +682,23 @@ func cSpaceWarpStack(from ops: [SpaceWarpOpValue]) -> SpaceWarpStack {
         tuplePtr.withMemoryRebound(to: SpaceWarpOp.self, capacity: maxN) { base in
             for (i, v) in active.enumerated() {
                 base[i] = precomputedGPUOp(from: v)
+            }
+            // Encode each contiguous repeat group on its first packed operator.
+            // Disabled/identity operators have already been removed, so the encoded
+            // length describes exactly the operators the GPU will execute.
+            var start = 0
+            while start < active.count {
+                guard let groupID = active[start].groupID else { start += 1; continue }
+                var end = start + 1
+                while end < active.count && active[end].groupID == groupID { end += 1 }
+                let length = min(end - start, 0xff)
+                let iterations = active[start].effectiveGroupIterations
+                // Layout stays inside the former 32-bit padding slot:
+                // low byte = group length, next byte = passes, bit 16 = +p₀ feedback.
+                let feedback = active[start].effectiveGroupMode == .mandelboxRecurrence
+                    ? (1 << 16) : 0
+                base[start].groupControl = Int32(feedback | (iterations << 8) | length)
+                start = end
             }
         }
     }

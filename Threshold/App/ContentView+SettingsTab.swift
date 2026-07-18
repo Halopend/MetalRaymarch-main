@@ -166,7 +166,7 @@ extension ContentView {
     }
 
     private var quickToggleSpaceRows: [QuickToggleRow] {
-        [
+        var rows = [
             // Sphere Projection now lives in the Transformations section (Shape →
             // Transform) alongside the warp stack, so long-press jumps there.
             QuickToggleRow("Sphere Projection", "globe.asia.australia",
@@ -174,16 +174,23 @@ extension ContentView {
                 available: { cache.fractalType.supports(.sphereProjection) },
                 get: { cache.display.sphereProjectionEnabled },
                 set: { cache.display.sphereProjectionEnabled = $0; cache.commitSphereProjection() }),
+            QuickToggleRow("Bound to Space", "house", home: .shapeBounding,
+                get: { cache.quality.boundToSpaceEnabled },
+                set: { cache.setBoundToSpaceEnabled($0) }),
             QuickToggleRow("Shape", "circle.dashed", home: .shapeBounding,
-                // Independent toggle — does NOT turn Scrunch off.
                 get: { cache.quality.boundingSphereSkipEnabled },
                 set: { cache.setBoundingShapeEnabled($0) }),
+        ]
+        #if os(visionOS)
+        rows.append(
             QuickToggleRow("Surroundings Containment", "square.3.layers.3d",
                 home: .shapeBounding,
                 // Independent toggle — does NOT turn the Bounding shape off.
                 get: { cache.quality.envScrunchEnabled },
-                set: { cache.setScrunchEnabled($0) }),
-        ]
+                set: { cache.setScrunchEnabled($0) })
+        )
+        #endif
+        return rows
     }
 
     /// Individual audio components: the master reactive switch, beat-driven
@@ -469,10 +476,17 @@ extension ContentView {
 
     private var macLauncherSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Viewport Control Launcher", systemImage: "circle.grid.cross")
+            Label("Menu Navigation", systemImage: macTabLauncherStyle.systemImage)
                 .font(.headline)
-            Toggle("Enable hierarchical quick menu", isOn: $isMacTabLauncherEnabled)
-            Text("Click the viewport or push right at the screen edge, then choose radial or grid presentation. Both use the same navigation hierarchy; full controls open only for fallback destinations.")
+
+            Picker("Navigation style", selection: $macTabLauncherStyle) {
+                ForEach(NavigationPresentationStyle.allCases, id: \.self) { style in
+                    Label(style.displayName, systemImage: style.systemImage).tag(style)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text(macTabLauncherStyle.explanation)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

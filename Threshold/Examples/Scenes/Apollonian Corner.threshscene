@@ -1,0 +1,105 @@
+{
+  "id" : "00000000-0007-0000-0000-000000000001",
+  "name" : "Apollonian Corner",
+  "createdAt" : "2026-07-17T00:00:00Z",
+  "updatedAt" : "2026-07-17T00:00:00Z",
+  "rating" : 0,
+  "schemaVersion" : 3,
+  "fractalType" : "mandelbox",
+  "fractalIterations" : 15,
+  "maxRaySteps" : 192,
+  "minDistance" : 1.0,
+  "fractalScale" : -1.5,
+  "foldingLimit" : 1.0,
+  "sphereRadius" : 0.5,
+  "colorIterations" : 15,
+  "colorMix" : 0.68,
+  "colorScheme" : "twilight",
+  "colorSchemeSaturation" : 0.9,
+  "colorSchemeContrast" : 1.18,
+  "colorSchemeGamma" : 0.58,
+  "colorSchemeVibrance" : 0.55,
+  "colorSchemeCurve" : 0.04,
+  "colorSchemeShadows" : 0.035,
+  "colorSchemeHighlights" : 0.34,
+  "gradientState" : {
+    "gradientPreset" : "twilight",
+    "gradient" : {
+      "id" : "00000000-0007-0000-0000-000000000002",
+      "name" : "Apollonian Brass",
+      "mappingMode" : 5,
+      "repeatCount" : 1.6,
+      "offset" : 0.06,
+      "smoothing" : 0.9,
+      "stops" : [
+        {
+          "id" : "00000000-0007-0000-0000-000000000003",
+          "position" : 0.0,
+          "color" : [0.015, 0.02, 0.055]
+        },
+        {
+          "id" : "00000000-0007-0000-0000-000000000004",
+          "position" : 0.28,
+          "color" : [0.04, 0.24, 0.34]
+        },
+        {
+          "id" : "00000000-0007-0000-0000-000000000005",
+          "position" : 0.55,
+          "color" : [1.0, 0.52, 0.075]
+        },
+        {
+          "id" : "00000000-0007-0000-0000-000000000006",
+          "position" : 0.78,
+          "color" : [1.0, 0.64, 0.16]
+        },
+        {
+          "id" : "00000000-0007-0000-0000-000000000007",
+          "position" : 1.0,
+          "color" : [0.24, 0.72, 0.76]
+        }
+      ]
+    }
+  },
+  "position" : [0.0, 0.0, -1.4],
+  "scale" : 1.0,
+  "detailScale" : 1.25,
+  "worldRotationX" : 0.0,
+  "worldRotationY" : 0.0,
+  "worldRotationZ" : 0.0,
+  "worldRotationW" : 1.0,
+  "safetyBubbleEnabled" : false,
+  "lightingMode" : "staticLight",
+  "lightingPreset" : "Custom",
+  "lightingSoftness" : 0.42,
+  "glowEffect" : {
+    "enabled" : true,
+    "intensity" : 0.16
+  },
+  "bloomEffect" : {
+    "enabled" : true,
+    "strength" : 0.12
+  },
+  "fogEffect" : {
+    "enabled" : false,
+    "intensity" : 0.0
+  },
+  "hueRotationEffect" : {
+    "enabled" : false,
+    "intensity" : 0.0,
+    "speed" : 0.0
+  },
+  "pulseEffect" : {
+    "enabled" : false,
+    "amount" : 0.0,
+    "speed" : 0.0
+  },
+  "gradientCycleEffect" : {
+    "enabled" : false,
+    "mirrorLoop" : false,
+    "speed" : 0.0
+  },
+  "aoStrength" : 0.38,
+  "tonemapStrength" : 0.65,
+  "coneMarchCompatible" : false,
+  "recommendedQuality" : "high"
+}

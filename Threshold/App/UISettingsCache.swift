@@ -334,27 +334,56 @@ final class UISettingsCache {
     /// retaining its EmbeddedFormula payload for scene attribution/portability.
     @MainActor
     func pushConstructionPrimitive(_ primitive: FractalPrimitiveKind,
-                                   gestureController: GestureController?) {
+                                   gestureController: GestureController?,
+                                   primarySize: Float? = nil,
+                                   disablesBoundingShape: Bool = false) {
+        var authoredParams = primitive.bundledFormulaParams
+        if let primarySize {
+            FormulaCatalog.setParam(
+                &authoredParams,
+                index: 1,
+                value: min(max(primarySize, 0.05), 30.0)
+            )
+        }
+
         guard let appModel = _appModel else {
             settings?.fractalType = .constructionPrimitive
-            settings?.formulaParams = primitive.bundledFormulaParams
+            settings?.formulaParams = authoredParams
+            if disablesBoundingShape { setBoundingShapeEnabled(false) }
             loadFromSettings()
             return
         }
 
         Task { @MainActor in
             // Switch first: the canonical built-in path detaches any previous
-            // runtime custom fractal. Then register metadata without compiling.
+            // runtime custom fractal. Apply type defaults before writing the
+            // selected primitive params so defaults cannot replace it with Sphere.
             appModel.switchFractalType(.constructionPrimitive)
-            settings?.formulaParams = primitive.bundledFormulaParams
-            let result = await appModel.installEmbeddedFormulaIfNeededAndWait(primitive.formula)
-            guard result == .ready else { return }
-            activeCustomFormulaHash = primitive.formula.shortHash
             parameterPipeline?.clearFormulaStacks()
             gestureController?.applyFractalDefaults()
+            settings?.formulaParams = authoredParams
+            let result = await appModel.installEmbeddedFormulaIfNeededAndWait(primitive.formula)
+            guard result == .ready else { return }
+            if disablesBoundingShape { setBoundingShapeEnabled(false) }
+            activeCustomFormulaHash = primitive.formula.shortHash
             loadFromSettings()
             appModel.rememberActiveResetPresetFromCurrent()
         }
+    }
+
+    /// Convert the current Bounding silhouette into editable construction seed
+    /// geometry at the same model-space size. The clip turns off after promotion
+    /// so its fade band cannot erase the newly-created surface; Transform stays.
+    @MainActor
+    func promoteBoundingShapeToSeed(gestureController: GestureController?) {
+        let preset = SafetyBubbleShapePreset(storedValue: quality.boundingShapeType)
+        guard let primitive = preset.seedPrimitiveKind else { return }
+        pushConstructionPrimitive(
+            primitive,
+            gestureController: gestureController,
+            primarySize: quality.boundingShapeRadius,
+            disablesBoundingShape: true
+        )
     }
     
     func pushGradientMap(_ map: GradientColorMap) {
@@ -484,24 +513,23 @@ final class UISettingsCache {
         settings?.platformEnabled = enabled
     }
 
-    /// The current containment mode, derived from the bounding-shape and scrunch
-    /// enable flags. Bounded/Surroundings/Free are the three canonical single-mode
-    /// combos; `.custom` is the overridden state where BOTH are on at once (only
-    /// reachable via the individual side toggles, never the picker). See
-    /// `MixedContainment`.
+    /// The current containment mode, derived from the shape, authored-space,
+    /// and scanned-surroundings enable flags. `.custom` is any manual
+    /// combination with more than one system enabled.
     var mixedContainment: MixedContainment {
         let bounded = quality.boundingSphereSkipEnabled
+        let space = quality.boundToSpaceEnabled
         let scrunch = quality.envScrunchEnabled
-        switch (bounded, scrunch) {
-        case (true, true):   return .custom
-        case (true, false):  return .bounded
-        case (false, true):  return quality.envScrunchMode == 1 ? .environment : .surroundings
-        case (false, false): return .free
-        }
+        let enabledCount = [bounded, space, scrunch].filter { $0 }.count
+        guard enabledCount <= 1 else { return .custom }
+        if bounded { return .bounded }
+        if space { return .space }
+        if scrunch { return quality.envScrunchMode == 1 ? .environment : .surroundings }
+        return .free
     }
 
     /// Apply a canonical containment mode from the top-bar picker: sets the
-    /// bounding-shape and scrunch flags MUTUALLY EXCLUSIVELY. Entering
+    /// shape, authored-space, and scrunch flags MUTUALLY EXCLUSIVELY. Entering
     /// `.surroundings` also defaults Contain to Blend when it was still Off —
     /// without Contain the scrunch mirrors past scanned walls (the room scan is
     /// an unsigned distance field). `.custom` is a derived, read-only state, so
@@ -510,9 +538,12 @@ final class UISettingsCache {
     func applyMixedContainment(_ mode: MixedContainment) {
         guard mode != .custom else { return }
         let bounded = (mode == .bounded)
+        let space = (mode == .space)
         let scrunch = (mode == .surroundings || mode == .environment)
         quality.boundingSphereSkipEnabled = bounded
         push(\.boundingSphereSkipEnabled, value: bounded)
+        quality.boundToSpaceEnabled = space
+        push(\.boundToSpaceEnabled, value: space)
         quality.envScrunchEnabled = scrunch
         push(\.envScrunchEnabled, value: scrunch)
         if mode == .surroundings || mode == .environment {
@@ -529,16 +560,18 @@ final class UISettingsCache {
         }
     }
 
-    /// Toggle the bounding shape INDEPENDENTLY — the individual side/quick
-    /// toggle, which does not touch Scrunch. Leaving both bounding and scrunch
-    /// on moves the Containment picker to `.custom`.
+    /// Toggle the bounding shape independently. It does not alter authored
+    /// space or scanned-surroundings containment; combinations become Custom.
     func setBoundingShapeEnabled(_ on: Bool) {
         quality.boundingSphereSkipEnabled = on
         push(\.boundingSphereSkipEnabled, value: on)
-        if on && quality.boundingShapeType != SafetyBubbleShapePreset.sphere.storedValue {
-            quality.boundingShapeType = SafetyBubbleShapePreset.sphere.storedValue
-            push(\.boundingShapeType, value: quality.boundingShapeType)
-        }
+    }
+
+    /// Toggle the authored room bound independently. Combining it with Shape
+    /// or scanned Surroundings intentionally produces the Custom state.
+    func setBoundToSpaceEnabled(_ on: Bool) {
+        quality.boundToSpaceEnabled = on
+        push(\.boundToSpaceEnabled, value: on)
     }
 
     /// Toggle Scrunch INDEPENDENTLY — the individual side/quick toggle, which

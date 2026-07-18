@@ -3,17 +3,20 @@ import ARKit
 import simd
 
 extension Renderer {
-    /// Hand Attraction: world-space palm position for one hand anchor, or `.zero`
-    /// when untracked. Mirrors GestureController.buildHandData's own extraction
-    /// (middle-finger metacarpal reads as the palm).
+    /// Hand Attraction: world-space palm position plus the validity of the palm
+    /// joint itself. An anchor can remain tracked while that joint is not; using
+    /// the anchor flag alone would activate a phantom hand at world origin.
     @available(visionOS 2.0, *)
-    static func palmPosition(from anchor: HandAnchor?) -> SIMD3<Float> {
+    static func palmPosition(from anchor: HandAnchor?) -> (position: SIMD3<Float>, tracked: Bool) {
         guard let anchor, anchor.isTracked,
               let joint = anchor.handSkeleton?.joint(.middleFingerMetacarpal), joint.isTracked else {
-            return .zero
+            return (.zero, false)
         }
         let worldTransform = anchor.originFromAnchorTransform * joint.anchorFromJointTransform
-        return SIMD3<Float>(worldTransform.columns.3.x, worldTransform.columns.3.y, worldTransform.columns.3.z)
+        return (
+            SIMD3<Float>(worldTransform.columns.3.x, worldTransform.columns.3.y, worldTransform.columns.3.z),
+            true
+        )
     }
 
     /// Wrist + elbow world positions for the Hand Attraction forearm capsule.
@@ -31,6 +34,22 @@ extension Renderer {
         return (world(wristJoint), world(elbowJoint), true)
     }
 
+    /// Clear every renderer-side tracking mirror as soon as the provider or
+    /// required joints drop. Otherwise the last valid hand remains latched into
+    /// the DE while ARKit is paused/stopped.
+    private func clearHandAttractionTrackingState() {
+        lastLeftHandPalmPosition = .zero
+        lastLeftHandTrackedForAttraction = false
+        lastRightHandPalmPosition = .zero
+        lastRightHandTrackedForAttraction = false
+        lastLeftForearmWrist = .zero
+        lastLeftForearmElbow = .zero
+        lastLeftForearmTracked = false
+        lastRightForearmWrist = .zero
+        lastRightForearmElbow = .zero
+        lastRightForearmTracked = false
+    }
+
     func updateDynamicBufferState() {
         /// Update the state of our uniform buffers before rendering
         /// OPTIMIZATION: Use bitwise AND for modulo when maxBuffersInFlight is power of 2
@@ -42,6 +61,7 @@ extension Renderer {
     /// Update hand tracking data and process gesture controls
     func updateHandTracking(atTime time: TimeInterval) {
         guard let ht = handTracking else {
+            clearHandAttractionTrackingState()
             // Log once if handTracking provider is nil (should never happen after init)
             if !hasLoggedHandTrackingNil {
                 hasLoggedHandTrackingNil = true
@@ -52,6 +72,7 @@ extension Renderer {
 
         // Only process if hand tracking is running
         guard ht.state == .running else {
+            clearHandAttractionTrackingState()
             // Throttled log for non-running state (once per 5 seconds)
             if time - lastHandTrackingStateLogTime > 5.0 {
                 lastHandTrackingStateLogTime = time
@@ -92,10 +113,12 @@ extension Renderer {
             // is @MainActor and updateGameState runs on the render loop, so routing
             // through it would require an actor hop. These mirror buildHandData's own
             // extraction and are read back in makeHandAttractionUniforms this same frame.
-            lastLeftHandPalmPosition = Self.palmPosition(from: leftAnchor)
-            lastLeftHandTrackedForAttraction = leftAnchor?.isTracked ?? false
-            lastRightHandPalmPosition = Self.palmPosition(from: rightAnchor)
-            lastRightHandTrackedForAttraction = rightAnchor?.isTracked ?? false
+            let leftPalm = Self.palmPosition(from: leftAnchor)
+            lastLeftHandPalmPosition = leftPalm.position
+            lastLeftHandTrackedForAttraction = leftPalm.tracked
+            let rightPalm = Self.palmPosition(from: rightAnchor)
+            lastRightHandPalmPosition = rightPalm.position
+            lastRightHandTrackedForAttraction = rightPalm.tracked
             let leftForearm = Self.forearmSegment(from: leftAnchor)
             lastLeftForearmWrist = leftForearm.wrist
             lastLeftForearmElbow = leftForearm.elbow

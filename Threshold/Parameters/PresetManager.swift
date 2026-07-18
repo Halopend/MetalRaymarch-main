@@ -310,6 +310,45 @@ class PresetManager {
         bundledPresets()
     }
 
+    /// Presets suitable for the user-facing scene catalog on this platform.
+    ///
+    /// `presets` deliberately remains the unfiltered source of truth so bundled
+    /// seeding, iCloud sync, export, and diagnostics retain every scene. Catalog
+    /// filtering keys off bundled source IDs, which also catches copies already
+    /// seeded into the preset store without hiding user-authored environment scenes.
+    var sceneCatalogPresets: [FractalPreset] {
+        Self.filterSceneCatalogPresets(
+            presets,
+            bundledPresets: Self.bundledPresets(),
+            supportsEnvironmentReconstruction: Self.supportsEnvironmentReconstructionInSceneCatalog
+        )
+    }
+
+    private static var supportsEnvironmentReconstructionInSceneCatalog: Bool {
+#if os(visionOS)
+        true
+#else
+        false
+#endif
+    }
+
+    nonisolated static func filterSceneCatalogPresets(
+        _ presets: [FractalPreset],
+        bundledPresets: [FractalPreset],
+        supportsEnvironmentReconstruction: Bool
+    ) -> [FractalPreset] {
+        guard !supportsEnvironmentReconstruction else { return presets }
+
+        let environmentBundledIDs = Set(bundledPresets.compactMap { preset -> UUID? in
+            let requiresEnvironment = preset.envScrunchEnabled == true
+                || preset.sceneState?.quality.envScrunchEnabled == true
+            return requiresEnvironment ? preset.id : nil
+        })
+
+        guard !environmentBundledIDs.isEmpty else { return presets }
+        return presets.filter { !environmentBundledIDs.contains($0.id) }
+    }
+
     // MARK: - Folder store: scan / migrate / seed
 
     /// Decode changed preset files under Scenes/ + Music Presets/. Directory I/O,

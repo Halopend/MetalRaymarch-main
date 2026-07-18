@@ -411,7 +411,7 @@ struct FractalGridView: View {
     }
 
     private func filteredStaticPresets() -> [FractalPreset] {
-        (presetManager?.presets ?? []).filter { preset in
+        (presetManager?.sceneCatalogPresets ?? []).filter { preset in
             // Skip transient utility entries if they ever leak into the shared preset list.
             preset.name != "__lastState__"
         }

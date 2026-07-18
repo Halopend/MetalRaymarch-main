@@ -912,12 +912,13 @@ FORCE_INLINE float3 warpMandelboxStep(float3 p, float3 p0, SpaceWarpOp op) { // 
     float sphereScale = mandelboxStepSphereScale(folded, op);
     return fma(folded, sphereScale * op.strength, p0);
 }
-// Mandelbox derivative recurrence is affine, not purely multiplicative:
-//   dr' = dr * abs(scale) * sphereScale + 1
-FORCE_INLINE float warpMandelboxDEUpdate(float3 p, float currentDE, SpaceWarpOp op) {
+// Mandelbox derivative recurrence is affine, not purely multiplicative. originDE
+// is 1 for a legacy standalone step and the captured group-input derivative when
+// the step is iterated inside a repeat group.
+FORCE_INLINE float warpMandelboxDEUpdate(float3 p, float currentDE, float originDE, SpaceWarpOp op) {
     float3 folded = fma(clamp(p, -op.p1, op.p1), float3(2.0f), -p);
     float localScale = abs(op.strength) * mandelboxStepSphereScale(folded, op);
-    return fma(currentDE, localScale, 1.0f);
+    return fma(currentDE, localScale, originDE);
 }
 
 // Runtime dispatch (default path): a coherent switch over op.type.
@@ -942,6 +943,7 @@ FORCE_INLINE float3 applyWarpOp(float3 p, float3 stackOrigin, SpaceWarpOp op) {
         case 15: return warpScale(p, op);
         case 16: return warpOffsetFold(p, op);
         case 17: return warpMandelboxStep(p, stackOrigin, op);
+        case 18: return warpCoxeter(p, op);
     }
 }
 // Conservative DE divisor for one op (only radial / scaling warps stretch distance).
@@ -957,14 +959,68 @@ FORCE_INLINE float warpOpDEScale(float3 p, SpaceWarpOp op) {
 }
 // Update the accumulated DE divisor. Most transforms are multiplicative; the
 // Mandelbox recurrence has the standard derivative +1 term and is special-cased.
-FORCE_INLINE float warpOpDEUpdate(float3 p, float currentDE, SpaceWarpOp op) {
-    if (op.type == 17) return warpMandelboxDEUpdate(p, currentDE, op);
+FORCE_INLINE float warpOpDEUpdate(float3 p, float currentDE, float originDE, SpaceWarpOp op) {
+    if (op.type == 17) return warpMandelboxDEUpdate(p, currentDE, originDE, op);
     return currentDE * warpOpDEScale(p, op);
 }
 
 // Warped sample point + its combined DE divisor. Declared here (above the codegen
 // marker) so the injected codegen stack can return it too.
 struct SpaceTransform { float3 point; float deScale; };
+
+// The deconstructed Mandelbox is the overwhelmingly common repeated group. Keep
+// its three editable uniform ops, but execute their fixed type sequence directly:
+// one coherent group branch and no inner-loop switches. This preserves live child
+// parameters while avoiding 2 dynamic dispatches per child, per distance sample.
+FORCE_INLINE bool isBoxSphereScaleGroup(constant SpaceWarpOp* ops,
+                                        int start, int groupLength) {
+    return groupLength == 3
+        && ops[start].type == 3
+        && ops[start + 1].type == 4
+        && ops[start + 2].type == 15;
+}
+
+FORCE_INLINE float3 applyBoxSphereScaleGroupFast(float3 point, float3 origin,
+                                                  constant SpaceWarpOp* ops,
+                                                  int start, int passes,
+                                                  bool addOriginFeedback) {
+    SpaceWarpOp boxOp = ops[start];
+    SpaceWarpOp sphereOp = ops[start + 1];
+    SpaceWarpOp scaleOp = ops[start + 2];
+    for (int pass = 0; pass < passes; ++pass) {
+        point = warpBoxFold(point, boxOp);
+        point = warpSphereFold(point, sphereOp);
+        point = warpScale(point, scaleOp);
+        if (addOriginFeedback) point += origin;
+    }
+    return point;
+}
+
+FORCE_INLINE SpaceTransform transformBoxSphereScaleGroupFast(
+    float3 point, float deScale, float3 origin, float originDE,
+    constant SpaceWarpOp* ops, int start, int passes,
+    bool addOriginFeedback
+) {
+    SpaceTransform r;
+    r.point = point;
+    r.deScale = deScale;
+    SpaceWarpOp boxOp = ops[start];
+    SpaceWarpOp sphereOp = ops[start + 1];
+    SpaceWarpOp scaleOp = ops[start + 2];
+    float scaleStretch = warpScaleDEScale(point, scaleOp);
+    for (int pass = 0; pass < passes; ++pass) {
+        r.point = warpBoxFold(r.point, boxOp);
+        r.deScale *= warpSphereFoldDEScale(r.point, sphereOp);
+        r.point = warpSphereFold(r.point, sphereOp);
+        r.deScale *= scaleStretch;
+        r.point = warpScale(r.point, scaleOp);
+        if (addOriginFeedback) {
+            r.point += origin;
+            r.deScale += originDE;
+        }
+    }
+    return r;
+}
 
 // ── Composable domain-transform STACK ───────────────────────────────────────
 // Apply the user-ordered stack to the sample point before the fractal DE.
@@ -989,8 +1045,34 @@ struct SpaceTransform { float3 point; float deScale; };
 FORCE_INLINE float3 spaceWarpStackApply(float3 p, FractalParams params) {
     float3 stackOrigin = p;
     int n = min(params.spaceWarpCount, kMaxSpaceWarpOps);
-    for (int i = 0; i < n; ++i) {
-        p = applyWarpOp(p, stackOrigin, params.spaceWarpOps[i]);
+    for (int i = 0; i < n; ) {
+        SpaceWarpOp first = params.spaceWarpOps[i];
+        int groupLength = first.groupControl & kSpaceWarpGroupLengthMask;
+        int iterations = min(
+            (first.groupControl >> kSpaceWarpGroupIterationShift) & kSpaceWarpGroupIterationMask,
+            kMaxSpaceWarpGroupIterations);
+        bool addOriginFeedback =
+            (first.groupControl & kSpaceWarpGroupMandelboxFeedback) != 0;
+        if (groupLength > 0 && iterations > 0) {
+            groupLength = min(groupLength, n - i);
+            float3 groupOrigin = p;
+            if (isBoxSphereScaleGroup(params.spaceWarpOps, i, groupLength)) {
+                p = applyBoxSphereScaleGroupFast(
+                    p, groupOrigin, params.spaceWarpOps, i, iterations,
+                    addOriginFeedback);
+            } else {
+                for (int iteration = 0; iteration < iterations; ++iteration) {
+                    for (int j = 0; j < groupLength; ++j) {
+                        p = applyWarpOp(p, groupOrigin, params.spaceWarpOps[i + j]);
+                    }
+                    if (addOriginFeedback) p += groupOrigin;
+                }
+            }
+            i += groupLength;
+        } else {
+            p = applyWarpOp(p, stackOrigin, first);
+            ++i;
+        }
     }
     return p;
 }
@@ -999,10 +1081,43 @@ FORCE_INLINE float spaceWarpStackDEScale(float3 p, FractalParams params) {
     float3 stackOrigin = p;
     float3 pt = p;
     int n = min(params.spaceWarpCount, kMaxSpaceWarpOps);
-    for (int i = 0; i < n; ++i) {
-        SpaceWarpOp op = params.spaceWarpOps[i];
-        scale = warpOpDEUpdate(pt, scale, op);
-        pt = applyWarpOp(pt, stackOrigin, op);
+    for (int i = 0; i < n; ) {
+        SpaceWarpOp first = params.spaceWarpOps[i];
+        int groupLength = first.groupControl & kSpaceWarpGroupLengthMask;
+        int iterations = min(
+            (first.groupControl >> kSpaceWarpGroupIterationShift) & kSpaceWarpGroupIterationMask,
+            kMaxSpaceWarpGroupIterations);
+        bool addOriginFeedback =
+            (first.groupControl & kSpaceWarpGroupMandelboxFeedback) != 0;
+        if (groupLength > 0 && iterations > 0) {
+            groupLength = min(groupLength, n - i);
+            float3 groupOrigin = pt;
+            float groupOriginScale = scale;
+            if (isBoxSphereScaleGroup(params.spaceWarpOps, i, groupLength)) {
+                SpaceTransform fast = transformBoxSphereScaleGroupFast(
+                    pt, scale, groupOrigin, groupOriginScale,
+                    params.spaceWarpOps, i, iterations, addOriginFeedback);
+                pt = fast.point;
+                scale = fast.deScale;
+            } else {
+                for (int iteration = 0; iteration < iterations; ++iteration) {
+                    for (int j = 0; j < groupLength; ++j) {
+                        SpaceWarpOp op = params.spaceWarpOps[i + j];
+                        scale = warpOpDEUpdate(pt, scale, groupOriginScale, op);
+                        pt = applyWarpOp(pt, groupOrigin, op);
+                    }
+                    if (addOriginFeedback) {
+                        pt += groupOrigin;
+                        scale += groupOriginScale;
+                    }
+                }
+            }
+            i += groupLength;
+        } else {
+            scale = warpOpDEUpdate(pt, scale, 1.0f, first);
+            pt = applyWarpOp(pt, stackOrigin, first);
+            ++i;
+        }
     }
     return scale;
 }
@@ -1015,10 +1130,42 @@ FORCE_INLINE SpaceTransform spaceWarpStackTransform(float3 p, FractalParams para
     r.deScale = 1.0f;
     float3 stackOrigin = p;
     int n = min(params.spaceWarpCount, kMaxSpaceWarpOps);
-    for (int i = 0; i < n; ++i) {
-        SpaceWarpOp op = params.spaceWarpOps[i];
-        r.deScale = warpOpDEUpdate(r.point, r.deScale, op); // update from PRE-op point
-        r.point    = applyWarpOp(r.point, stackOrigin, op);
+    for (int i = 0; i < n; ) {
+        SpaceWarpOp first = params.spaceWarpOps[i];
+        int groupLength = first.groupControl & kSpaceWarpGroupLengthMask;
+        int iterations = min(
+            (first.groupControl >> kSpaceWarpGroupIterationShift) & kSpaceWarpGroupIterationMask,
+            kMaxSpaceWarpGroupIterations);
+        bool addOriginFeedback =
+            (first.groupControl & kSpaceWarpGroupMandelboxFeedback) != 0;
+        if (groupLength > 0 && iterations > 0) {
+            groupLength = min(groupLength, n - i);
+            float3 groupOrigin = r.point;
+            float groupOriginScale = r.deScale;
+            if (isBoxSphereScaleGroup(params.spaceWarpOps, i, groupLength)) {
+                r = transformBoxSphereScaleGroupFast(
+                    r.point, r.deScale, groupOrigin, groupOriginScale,
+                    params.spaceWarpOps, i, iterations, addOriginFeedback);
+            } else {
+                for (int iteration = 0; iteration < iterations; ++iteration) {
+                    for (int j = 0; j < groupLength; ++j) {
+                        SpaceWarpOp op = params.spaceWarpOps[i + j];
+                        r.deScale = warpOpDEUpdate(
+                            r.point, r.deScale, groupOriginScale, op);
+                        r.point = applyWarpOp(r.point, groupOrigin, op);
+                    }
+                    if (addOriginFeedback) {
+                        r.point += groupOrigin;
+                        r.deScale += groupOriginScale;
+                    }
+                }
+            }
+            i += groupLength;
+        } else {
+            r.deScale = warpOpDEUpdate(r.point, r.deScale, 1.0f, first);
+            r.point   = applyWarpOp(r.point, stackOrigin, first);
+            ++i;
+        }
     }
     return r;
 }
@@ -1313,7 +1460,10 @@ FORCE_INLINE float envScrunchSample(float3 pos, constant EnvScrunchParams& es, d
     // the two can't drift — TECH_DEBT.md #19), NOT the band, so Shell mode
     // cuts space beyond the grid instead of skinning its boundary. Scrunch
     // mode treats anything >= band the same, unaffected.
-    if (any(g < float3(0.5f)) || any(g > float3(DIMf - 1.5f))) return es.farClampModel;
+    // `i0 + 1` remains valid until g reaches the outermost center + 1 cell
+    // (DIM - 0.5). The old DIM - 1.5 check discarded an entire valid
+    // interpolation slab on each positive grid edge.
+    if (any(g < float3(0.5f)) || any(g >= float3(DIMf - 0.5f))) return es.farClampModel;
     float3 gf = g - 0.5f;
     int3 i0 = int3(floor(gf));
     float3 f = gf - float3(i0);
@@ -1450,6 +1600,23 @@ FORCE_INLINE float applyHandAttraction(float d, float3 pos, FractalParams params
     return d;
 }
 
+// The Mandelbox analytic Jacobian describes only its raw fractal DE. Any active
+// model/world-space CSG field changes the final gradient and therefore requires
+// the finite-difference normal path.
+FORCE_INLINE bool worldFieldsMayAlterDistance(FractalParams params) {
+    const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED)
+        ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
+    bool environmentEnabled = FC_HAS_ENVSCRUNCH_ON
+        && params.envScrunch != nullptr
+        && params.envScrunch->enabled != 0
+        && params.envGrid != nullptr;
+    bool handEnabled = FC_HAS_HANDFIELD_ON
+        && params.handField != nullptr
+        && params.handField->enabled != 0;
+    return (bubbleEnabled && params.bubbleStrength >= 0.001f)
+        || environmentEnabled || handEnabled;
+}
+
 // OPTIMIZED: Use precomputed values from CPU to avoid per-pixel powr() and division
 // This version is preferred when PrecomputedFractalParams is available in uniforms
 FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
@@ -1504,7 +1671,8 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
 // When FC_FRACTAL_ITERATIONS is defined (via function constants), loopCount becomes
 // a compile-time constant and the Metal compiler automatically fully unrolls the loop.
 // No pragma hints needed - the compiler is smart enough to optimize constant-bound loops.
-FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int iterations) 
+FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int iterations,
+                       bool applyWorldFields = true)
 {
     float4 p = float4(pos, 1.0);
     float4 p0 = p;
@@ -1528,9 +1696,12 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
     // Final distance estimate
     float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
     
-    // Safety bubble: carve out a shape around the camera to prevent clipping
-    d = applySafetyBubble(d, pos, params);
-    d = applyHandAttraction(d, pos, params);
+    if (applyWorldFields) {
+        // Camera/environment fields live in model space, outside any fractal
+        // domain warp. Unified callers pass false and compose them afterward.
+        d = applySafetyBubble(d, pos, params);
+        d = applyHandAttraction(d, pos, params);
+    }
     return d;
 }
 // =============================================================================
@@ -1540,7 +1711,8 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
 // Removes ALL tracking: no trap, no trapIter, no trapPos, no Jacobian.
 // Just pure box fold → sphere fold → scale, returning distance.
 // This saves ~6 extra ops per iteration vs the full tracking variant.
-FORCE_INLINE float MapDistOnly(float3 pos, FractalParams params, float foldingLimit, int iterations)
+FORCE_INLINE float MapDistOnly(float3 pos, FractalParams params, float foldingLimit, int iterations,
+                               bool applyWorldFields = true)
 {
     float4 p = float4(pos, 1.0);
     float4 p0 = p;
@@ -1561,9 +1733,10 @@ FORCE_INLINE float MapDistOnly(float3 pos, FractalParams params, float foldingLi
     
     float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
     
-    // Safety bubble check (compile-time eliminated when disabled)
-    d = applySafetyBubble(d, pos, params);
-    d = applyHandAttraction(d, pos, params);
+    if (applyWorldFields) {
+        d = applySafetyBubble(d, pos, params);
+        d = applyHandAttraction(d, pos, params);
+    }
     return d;
 }
 
@@ -1588,7 +1761,8 @@ FORCE_INLINE float MapDistOnly(float3 pos, FractalParams params, float foldingLi
 // Runs the fold iteration in half precision since this is only used in
 // coarse passes where distance thresholds are large.
 
-FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float foldingLimit, float fractionalIterations)
+FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float foldingLimit,
+                                 float fractionalIterations, bool applyWorldFields = true)
 {
     int itersFloor = int(fractionalIterations);
     float frac = fractionalIterations - float(itersFloor);
@@ -1624,8 +1798,10 @@ FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float folding
     
     // If fractional part is negligible, skip the extra iteration
     if (frac < 0.01f) {
-        dFloor = applySafetyBubble(dFloor, pos, params);
-        dFloor = applyHandAttraction(dFloor, pos, params);
+        if (applyWorldFields) {
+            dFloor = applySafetyBubble(dFloor, pos, params);
+            dFloor = applyHandAttraction(dFloor, pos, params);
+        }
         return dFloor;
     }
     
@@ -1640,8 +1816,10 @@ FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float folding
     // Smooth interpolation between floor and ceil distance estimates
     float d = mix(dFloor, dCeil, frac);
     
-    d = applySafetyBubble(d, pos, params);
-    d = applyHandAttraction(d, pos, params);
+    if (applyWorldFields) {
+        d = applySafetyBubble(d, pos, params);
+        d = applyHandAttraction(d, pos, params);
+    }
     return d;
 }
 
@@ -1705,8 +1883,9 @@ FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLim
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
     SpaceTransform w = applySpaceTransforms(pos, type, params);
     if (type == FractalTypeMandelbox) {
-        // Bubble applied inside Map(); |w.point| == |pos| for rotational warps.
-        return Map(w.point, params, foldingLimit, iterations) / w.deScale;
+        float d = Map(w.point, params, foldingLimit, iterations, false) / w.deScale;
+        d = applySafetyBubble(d, pos, params);
+        return applyHandAttraction(d, pos, params);
     }
     int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
     float d = FractalDE_Dispatch(w.point, type, fp, loopCount) / w.deScale;
@@ -1719,7 +1898,9 @@ FORCE_INLINE float MapDistOnlyUnified(float3 pos, FractalParams params, float fo
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
     SpaceTransform w = applySpaceTransforms(pos, type, params);
     if (type == FractalTypeMandelbox) {
-        return MapDistOnly(w.point, params, foldingLimit, iterations) / w.deScale;
+        float d = MapDistOnly(w.point, params, foldingLimit, iterations, false) / w.deScale;
+        d = applySafetyBubble(d, pos, params);
+        return applyHandAttraction(d, pos, params);
     }
     int loopCount = is_function_constant_defined(FC_SHADOW_ITERATIONS) ? FC_SHADOW_ITERATIONS : iterations;
     float d = FractalDE_Dispatch(w.point, type, fp, loopCount) / w.deScale;
@@ -1732,7 +1913,9 @@ FORCE_INLINE float MapContinuousUnified(float3 pos, FractalParams params, float 
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
     SpaceTransform w = applySpaceTransforms(pos, type, params);
     if (type == FractalTypeMandelbox) {
-        return MapContinuous(w.point, params, foldingLimit, fractionalIterations) / w.deScale;
+        float d = MapContinuous(w.point, params, foldingLimit, fractionalIterations, false) / w.deScale;
+        d = applySafetyBubble(d, pos, params);
+        return applyHandAttraction(d, pos, params);
     }
     // Formula DEs do not support Mandelbox-style fractional interpolation yet.
     // For Mandelbulb/MandelbulbJulia, rounding up keeps the coarse pass
@@ -2066,7 +2249,9 @@ half3 ColourWithScheme(float3 pos, float quality, float minRad2Val, float fracta
 // === MapWithOrbitCache ===
 //
 // Lean orbit tracking: Jacobian + trap values (normals + colors).
-FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float foldingLimit, int iterations, thread OrbitCache& cache)
+FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float foldingLimit,
+                                     int iterations, thread OrbitCache& cache,
+                                     bool applyWorldFields = true)
 {
     float4 p = float4(pos, 1.0);
     float4 p0 = p;
@@ -2133,8 +2318,10 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
 
     float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
 
-    d = applySafetyBubble(d, pos, params);
-    d = applyHandAttraction(d, pos, params);
+    if (applyWorldFields) {
+        d = applySafetyBubble(d, pos, params);
+        d = applyHandAttraction(d, pos, params);
+    }
 
     cache.p = p;
     cache.trap = trap;
@@ -2160,13 +2347,19 @@ FORCE_INLINE float MapWithOrbitCacheUnified(float3 pos, FractalParams params, fl
     // as the marching DE. No-op when off.
     SpaceTransform w = applySpaceTransforms(pos, type, params);
     if (type == FractalTypeMandelbox) {
-        float d = MapWithOrbitCache(w.point, params, foldingLimit, iterations, cache) / w.deScale;
-        if (params.spaceWarpStrength > 0.0f || params.spaceWarpCount > 0) {
+        float d = MapWithOrbitCache(
+            w.point, params, foldingLimit, iterations, cache, false) / w.deScale;
+        d = applySafetyBubble(d, pos, params);
+        d = applyHandAttraction(d, pos, params);
+        if (params.spaceWarpStrength > 0.0f || params.spaceWarpCount > 0
+            || worldFieldsMayAlterDistance(params)) {
             // The analytic Jacobian in `cache` is now in warped space — invalidate
             // it so GetNormal uses the (correct) warped finite-difference path.
             cache.hasJacobian = false;
-            cache.distance = d;
         }
+        // The base evaluator cached its raw, pre-scale distance. Downstream
+        // normal probes must compare against the final composed model-space DE.
+        cache.distance = d;
         return d;
     }
 
@@ -2246,8 +2439,9 @@ FORCE_INLINE float3 ApproximateMandelbulbNormal(float3 pos, float distance, Frac
 FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations, int fractalType, FormulaParams fp = {}, OrbitCache cache = {})
 {
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
+    const bool worldFieldsActive = worldFieldsMayAlterDistance(params);
 
-    if (cache.hasJacobian && type == FractalTypeMandelbox) {
+    if (cache.hasJacobian && type == FractalTypeMandelbox && !worldFieldsActive) {
         // === ANALYTIC JACOBIAN PATH — no extra Map() calls ===
         float3 pDir = cache.p.xyz * rsqrt(dot(cache.p.xyz, cache.p.xyz) + kPowEpsilon);
         float3 gradient = float3(
@@ -2258,7 +2452,8 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
         return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
     } else if ((type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia)
                && cache.valid && params.sphereProjBlend <= 0.0f
-               && params.spaceWarpStrength <= 0.0f && params.spaceWarpCount <= 0) {
+               && params.spaceWarpStrength <= 0.0f && params.spaceWarpCount <= 0
+               && !worldFieldsActive) {
         // Mandelbulb-specific fast path: use cached escape direction as the base
         // normal and refine it with only two tangent-space DE probes. Skipped
         // when sphere projection is active so the warped finite-difference path
@@ -2268,14 +2463,19 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
         // Fallback: use cached center distance, reduced iterations.
         int normalIters = ReducedSecondaryIterations(iterations, type, false);
         float e = max(distance * 0.0005f, 0.0001f);
-        // Custom space warp: warp the probes + recover the unscaled warped center
-        // (cache.distance is post-scale when warped). Reduces to the original when off.
-        float d0 = cache.distance * applySpaceWarpDEScale(pos, params);
-
-        OrbitCache dummy;
-        float dx = MapWithOrbitCache(applySpaceWarp(pos + float3(e, 0, 0), params), params, foldingLimit, normalIters, dummy);
-        float dy = MapWithOrbitCache(applySpaceWarp(pos + float3(0, e, 0), params), params, foldingLimit, normalIters, dummy);
-        float dz = MapWithOrbitCache(applySpaceWarp(pos + float3(0, 0, e), params), params, foldingLimit, normalIters, dummy);
+        // Probe the same final composed field as the primary march. In
+        // particular, Environment Scrunch stays anchored in original model/world
+        // space instead of being sampled at the warped Mandelbox coordinates.
+        // Use the same reduced iteration count for center and probes. Comparing
+        // reduced probes against the full-iteration cached center injects a
+        // constant offset into every gradient component.
+        float d0 = MapUnified(pos, params, foldingLimit, normalIters, type, fp);
+        float dx = MapUnified(pos + float3(e, 0, 0), params, foldingLimit,
+                              normalIters, type, fp);
+        float dy = MapUnified(pos + float3(0, e, 0), params, foldingLimit,
+                              normalIters, type, fp);
+        float dz = MapUnified(pos + float3(0, 0, e), params, foldingLimit,
+                              normalIters, type, fp);
 
         float3 gradient = float3(dx - d0, dy - d0, dz - d0);
         return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
@@ -2292,6 +2492,18 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
         // when both warps are off.
         float blend = params.sphereProjBlend;
         float prad = params.sphereProjRadius;
+        if (worldFieldsActive) {
+            // Environment, hand, and safety fields are composed outside the raw
+            // formula DE. Probe MapUnified so normals follow their clipped or
+            // generated surfaces instead of the underlying fractal alone.
+            float d0 = MapUnified(pos, params, foldingLimit, normalIters, type, fp);
+            float3 gradient = float3(
+                MapUnified(pos + float3(e,0,0), params, foldingLimit, normalIters, type, fp) - d0,
+                MapUnified(pos + float3(0,e,0), params, foldingLimit, normalIters, type, fp) - d0,
+                MapUnified(pos + float3(0,0,e), params, foldingLimit, normalIters, type, fp) - d0
+            );
+            return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
+        }
         float d0;
         if (type == FractalTypeCustom) {
             // Custom embedded DEs often run at low iteration counts (e.g. ported
@@ -3210,12 +3422,18 @@ kernel void adaptiveHierarchical8x8(
     const uint ADAPTIVE_TILE_SIZE = 8;
     const uint ADAPTIVE_SUPERTILE_SIZE = 32;
     const uint ADAPTIVE_SUPERTILE_TILE_COUNT = ADAPTIVE_SUPERTILE_SIZE / ADAPTIVE_TILE_SIZE;
-    uint2 viewportPixelCoord = tileId * ADAPTIVE_TILE_SIZE + localId;
+    uint2 rawViewportPixelCoord = tileId * ADAPTIVE_TILE_SIZE + localId;
     uint2 viewportSize = uint2(uniforms.resolution);
-    
-    if (viewportPixelCoord.x >= viewportSize.x || viewportPixelCoord.y >= viewportSize.y) {
-        return;
-    }
+
+    // The dispatch rounds up to whole 8x8 threadgroups. Edge groups therefore
+    // contain lanes outside a non-multiple-of-8 viewport, but every lane still
+    // has to reach every threadgroup barrier below. Returning only those lanes
+    // is undefined Metal behavior and can hang the GPU. Keep them alive using a
+    // clamped, read-safe coordinate, then mask their texture writes.
+    if (viewportSize.x == 0 || viewportSize.y == 0) return; // group-uniform
+    const bool laneInBounds = rawViewportPixelCoord.x < viewportSize.x
+                           && rawViewportPixelCoord.y < viewportSize.y;
+    uint2 viewportPixelCoord = min(rawViewportPixelCoord, viewportSize - uint2(1));
 
     uint2 viewportOrigin = uint2(uniforms.viewportOrigin);
     uint2 pixelCoord = viewportOrigin + viewportPixelCoord;
@@ -3405,10 +3623,10 @@ kernel void adaptiveHierarchical8x8(
     }
     
     // === SHARED TILE STATE ===
-    threadgroup float tileStartT = 0.05f;
-    threadgroup int tileIsEmpty = 0;       // 1 = entire tile missed, skip fine march
-    threadgroup half tg_shaSpot = 0.0h;    // Shared spotlight shadow (1 eval per tile)
-    threadgroup half tg_shaSun = 0.0h;     // Shared sun shadow (1 eval per tile)
+    threadgroup float tileStartT;
+    threadgroup int tileIsEmpty;       // 1 = entire tile missed, skip fine march
+    threadgroup half tg_shaSpot;       // Shared spotlight shadow (1 eval per tile)
+    threadgroup half tg_shaSun;        // Shared sun shadow (1 eval per tile)
     // Coherent-packet Stage 3: anchor's surface frame for normal-coherence gate.
     // NOTE: threadgroup vars cannot be reliably initialized in their declaration
     // in Metal — initialize from thread 0 then barrier so all lanes see the value.
@@ -3416,6 +3634,10 @@ kernel void adaptiveHierarchical8x8(
     threadgroup float3 tg_anchorNormal;
     threadgroup int tg_anchorHasHit;
     if (localIndex == 0) {
+        tileStartT = 0.05f;
+        tileIsEmpty = 0;
+        tg_shaSpot = 0.0h;
+        tg_shaSun = 0.0h;
         tg_anchorPos = float3(0.0f);
         tg_anchorNormal = float3(0.0f, 1.0f, 0.0f);
         tg_anchorHasHit = 0;
@@ -3430,10 +3652,7 @@ kernel void adaptiveHierarchical8x8(
     // OPTIMIZATION: When thread 0 has valid temporal reprojection, skip the
     // coarse pass entirely — we already know the surface is near reprojectedStartT.
     // This saves a 24-step SceneCoarse + 2 MapContinuous probes (~50 Map evals).
-    tileIsEmpty = 0;
     if (localIndex == 0) {
-        tileIsEmpty = 0;
-        
         // === BOUNDING SPHERE / BOUND TO SPACE TILE EARLY-EXIT ===
         // Before coarse raymarching, test rays at the tile center + 4 corners
         // against the bounding volumes. Only declare empty if ALL 5 rays miss.
@@ -3601,9 +3820,11 @@ kernel void adaptiveHierarchical8x8(
         FloorCircleHit floorHit = evaluateFloorCircle(cameraPos, rd, kRayMissThreshold + 100.0f, uniforms.floorPlane, uniforms.floorCenterRadius);
         col = compositeFloorCircle(col, floorHit);
         float4 currentColor = float4(linearToSRGB(float3(col)), 1.0);
-        outputTexture.write(currentColor, pixelCoord, uniforms.eyeIndex);
-        // Write miss depth so next frame knows this pixel was empty
-        curDepthTexture.write(float4(kRayMissThreshold + 100.0, 0, 0, 0), pixelCoord, uniforms.eyeIndex);
+        if (laneInBounds) {
+            outputTexture.write(currentColor, pixelCoord, uniforms.eyeIndex);
+            // Write miss depth so next frame knows this pixel was empty
+            curDepthTexture.write(float4(kRayMissThreshold + 100.0, 0, 0, 0), pixelCoord, uniforms.eyeIndex);
+        }
         return;
     }
 
@@ -3683,7 +3904,9 @@ kernel void adaptiveHierarchical8x8(
     
     // Write current frame depth for next frame's temporal reprojection
     float depthToWrite = (adjustedDist < kRayMissThreshold) ? adjustedDist : (kRayMissThreshold + 100.0);
-    curDepthTexture.write(float4(depthToWrite, 0, 0, 0), pixelCoord, uniforms.eyeIndex);
+    if (laneInBounds) {
+        curDepthTexture.write(float4(depthToWrite, 0, 0, 0), pixelCoord, uniforms.eyeIndex);
+    }
     
     // === PER-LANE HIT STATE (computed for EVERY lane before the shared-shadow barrier) ===
     // Hit/miss is a per-pixel property of this lane's march. We must NOT branch on it
@@ -3691,7 +3914,7 @@ kernel void adaptiveHierarchical8x8(
     // barrier the hit lanes execute — threadgroup_barrier under thread-divergent
     // control flow is Metal UB (GPU hang / corrupted threadgroup memory on every
     // tile that straddles a silhouette, which is most tiles).
-    bool didHit = (sceneResult.distGlow.x < kRayMissThreshold);
+    bool didHit = laneInBounds && (sceneResult.distGlow.x < kRayMissThreshold);
 
     // Surface point + normal. GetNormal is expensive, so only the hit lanes pay it;
     // miss lanes get harmless placeholders (their shading block never runs).
@@ -3857,7 +4080,9 @@ kernel void adaptiveHierarchical8x8(
         }
     }
 
-    outputTexture.write(finalColor, pixelCoord, uniforms.eyeIndex);
+    if (laneInBounds) {
+        outputTexture.write(finalColor, pixelCoord, uniforms.eyeIndex);
+    }
 }
 
 // =============================================================================

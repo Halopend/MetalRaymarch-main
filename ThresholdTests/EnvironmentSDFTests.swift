@@ -185,6 +185,21 @@ struct EnvironmentSDFTests {
 
         // Fewer than 3 vertices refuses to bake.
         #expect(EnvironmentSDFGrid.bake(device: device, triangles: [a, b], originWorld: origin) == nil)
+
+        // External scene-mesh input is validated before voxel-index conversion:
+        // malformed/degenerate faces are ignored, while an all-invalid mesh is
+        // rejected instead of trapping or writing NaNs into the grid.
+        let nan = SIMD3<Float>(.nan, 0, 0)
+        let mixed = try #require(EnvironmentSDFGrid.bake(
+            device: device,
+            triangles: [nan, b, c, a, b, c],
+            originWorld: origin))
+        #expect(mixed.surfaceMinWorld == SIMD3<Float>(0, 0, 0))
+        #expect(mixed.surfaceMaxWorld == SIMD3<Float>(1, 0, 1))
+        #expect(EnvironmentSDFGrid.bake(
+            device: device,
+            triangles: [a, a, a],
+            originWorld: origin) == nil)
     }
 
     // MARK: - makeEnvScrunchParams conversion (world → grid, farClamp pin)
@@ -235,6 +250,29 @@ struct EnvironmentSDFTests {
         // Degenerate surface AABB → containment off, scrunch still on.
         let pd = make(contain: .zero)
         #expect(pd.enabled == 1 && pd.containMode == 0)
+        #expect(pd.cellModel == gridCell,
+                "Shell gradients still need the voxel step when containment is unavailable")
+
+        // A planar early scan (floor or wall) constrains two axes. Containment
+        // uses the grid volume for the unknown normal axis instead of silently
+        // staying disabled until a third surface arrives.
+        let planar = make(contain: SIMD3<Float>(1, 0, 1))
+        #expect(planar.containMode == 1)
+        #expect(planar.containMinGrid.y == 0)
+        #expect(planar.containMaxGrid.y == Float(ENV_SCRUNCH_DIM))
+
+        // ARKit planes carry small normal-axis jitter. Sub-voxel thickness must
+        // still resolve as a plane, not a nearly zero-height containment slab.
+        let noisyPlanar = snap.makeEnvScrunchParams(
+            modelToWorld: matrix_identity_float4x4,
+            viewerWorld: .zero,
+            gridOrigin: gridOrigin, gridCell: gridCell, gridAddress: 0xDEAD_BEEF,
+            surfaceMinWorld: SIMD3(-1, -0.015, -1),
+            surfaceMaxWorld: SIMD3(1, 0.015, 1),
+            farClampMeters: EnvironmentSDFGrid.clampFar)
+        #expect(noisyPlanar.containMode == 1)
+        #expect(noisyPlanar.containMinGrid.y == 0)
+        #expect(noisyPlanar.containMaxGrid.y == Float(ENV_SCRUNCH_DIM))
 
         // Contain setting 0 → containMode 0 even with a valid AABB.
         settings.envScrunchContain = 0
@@ -245,6 +283,7 @@ struct EnvironmentSDFTests {
             surfaceMinWorld: SIMD3(-1, -1, -1), surfaceMaxWorld: SIMD3(1, 1, 1),
             farClampMeters: EnvironmentSDFGrid.clampFar)
         #expect(p0.containMode == 0)
+        #expect(p0.cellModel == gridCell)
 
         // Grid address 0 → whole feature disabled (never dereferenced).
         let poff = settings.snapshot().makeEnvScrunchParams(
