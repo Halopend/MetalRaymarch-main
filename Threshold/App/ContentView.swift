@@ -37,6 +37,10 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openWindow) var openWindow
     @Environment(\.dismissWindow) var dismissWindow
+    #if os(visionOS)
+    @Environment(SpatialRadialMenuModel.self) private var spatialRadialMenu
+    @State private var spatialActivationOwner = UUID()
+    #endif
     
     @State var cache = UISettingsCache()
     @AppStorage("ContentView.topDockTab") private var topDockTab: TopDockTab = .explore
@@ -352,10 +356,21 @@ struct ContentView: View {
             cache.startSync(with: appModel.renderSettings, appModel: appModel)
             normalizeDesktopSelectionIfNeeded()
             syncNavigationChromeFromLegacySelection()
+            #if os(visionOS)
+            spatialRadialMenu.installActivationHandler(owner: spatialActivationOwner) { nodeID in
+                guard let node = navigationHierarchy.node(withID: nodeID) else { return }
+                withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) {
+                    activateNavigationNode(node)
+                }
+            }
+            #endif
         }
         .onDisappear {
             cache.stopSync()
             appModel.openSavePresetMenuHandler = nil
+            #if os(visionOS)
+            spatialRadialMenu.removeActivationHandler(owner: spatialActivationOwner)
+            #endif
         }
         .onReceive(NotificationCenter.default.publisher(for: AppModel.fractalSettingsDidChangeNotification)) { _ in
             cache.loadFromSettings()

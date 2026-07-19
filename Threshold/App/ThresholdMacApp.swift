@@ -193,6 +193,14 @@ private struct ThresholdMacRootView: View {
                     .background(Color.black)
                     .ignoresSafeArea()
 
+                // Read-only teaching HUD. Kept outside the Metal view so enabling
+                // Math Lens cannot change the distance field or render pipeline.
+                MathLensViewportOverlay(appModel: appModel)
+                    .padding(.leading, panelPadding)
+                    .padding(.bottom, panelPadding)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .zIndex(1)
+
                 if launcherStyle == .radial && isRadialVisible && !appModel.isControlsWindowOpen {
                     RadialMenu(
                         size: proxy.size,

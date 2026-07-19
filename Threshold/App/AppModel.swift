@@ -325,6 +325,7 @@ class AppModel {
     // The window is physically dismissed when closed; visionOS currently preserves
     // its placement when reopened, which keeps the user's chosen location intact.
     var isMenuWindowVisible: Bool = true
+    var isSpatialMenuVisible: Bool = false
     var isMenuInteractionActive: Bool = false
     @ObservationIgnored private(set) var activeResetPreset: FractalPreset?
 
@@ -700,6 +701,12 @@ class AppModel {
     /// Callback to dismiss the menu window (set by App scene)
     var dismissMenuWindowHandler: (() -> Void)?
 
+    /// visionOS volumetric radial controls. Kept as closure seams so AppModel
+    /// remains independent of SwiftUI's window environment and other platforms
+    /// keep their existing menu behavior.
+    var presentSpatialMenuHandler: ((String?) -> Void)?
+    var dismissSpatialMenuHandler: (() -> Void)?
+
     /// Callback to navigate directly to the Fractal > Shape tab.
     var openShapeMenuHandler: (() -> Void)?
 
@@ -728,6 +735,16 @@ class AppModel {
     /// Toggle menu window visibility.
     /// Closing dismisses the actual window; opening reuses the system-restored placement.
     func toggleMenuWindow() {
+        if immersiveSpaceState == .open, let presentSpatialMenuHandler {
+            if isSpatialMenuVisible {
+                setSpatialMenuVisible(false)
+                dismissSpatialMenuHandler?()
+            } else {
+                presentSpatialMenuHandler(nil)
+            }
+            return
+        }
+
         if isMenuWindowVisible {
             guard canCloseMenuWindowNow() else {
                 refreshMenuInteractionState()
@@ -740,6 +757,10 @@ class AppModel {
     }
 
     func openShapeMenuFromGesture() {
+        if immersiveSpaceState == .open, let presentSpatialMenuHandler {
+            presentSpatialMenuHandler(NavigationHierarchy.rootID(for: .shape))
+            return
+        }
         toggleFractalMenuFromGesture(
             isRequestedTabAlreadyOpen: isShapeMenuActiveHandler?() ?? false,
             openRequestedTab: openShapeMenuHandler,
@@ -748,6 +769,10 @@ class AppModel {
     }
 
     func openRenderMenuFromGesture() {
+        if immersiveSpaceState == .open, let presentSpatialMenuHandler {
+            presentSpatialMenuHandler(NavigationHierarchy.rootID(for: .performance))
+            return
+        }
         toggleFractalMenuFromGesture(
             isRequestedTabAlreadyOpen: isRenderMenuActiveHandler?() ?? false,
             openRequestedTab: openRenderMenuHandler,
@@ -756,6 +781,10 @@ class AppModel {
     }
 
     func openQuickTogglesFromGesture() {
+        if immersiveSpaceState == .open, let presentSpatialMenuHandler {
+            presentSpatialMenuHandler("utility.quickToggles")
+            return
+        }
         toggleFractalMenuFromGesture(
             isRequestedTabAlreadyOpen: isQuickTogglesActiveHandler?() ?? false,
             openRequestedTab: openQuickTogglesHandler,
@@ -772,6 +801,10 @@ class AppModel {
     /// auto-hide signal for the Mac/iPad panels, then closes the visionOS window.
     func dismissMenuWindowForSceneLoad() {
         menuAutoHideRequestID &+= 1
+        if isSpatialMenuVisible {
+            setSpatialMenuVisible(false)
+            dismissSpatialMenuHandler?()
+        }
         guard isMenuWindowVisible else { return }
         closeMenuWindow(reason: "scene load", bypassGuard: true)
     }
@@ -851,6 +884,23 @@ class AppModel {
         lastHoverEventTime = CACurrentMediaTime()
         refreshMenuInteractionState()
     }
+
+    func setSpatialMenuVisible(_ visible: Bool) {
+        guard isSpatialMenuVisible != visible else { return }
+        isSpatialMenuVisible = visible
+        refreshMenuInteractionState()
+    }
+
+    /// Spatial leaves call this before routing to a dense destination. If the
+    /// conventional menu was dismissed, reconstruct it; otherwise simply keep
+    /// its interaction state current while the route is delivered.
+    func revealMenuWindowForSpatialNavigation() {
+        if !isMenuWindowVisible {
+            showMenuWindow(reason: "spatial navigation")
+        } else {
+            refreshMenuInteractionState()
+        }
+    }
     
     /// Timestamp of the last `.onHover` event received.  Used to detect stuck hover state.
     @ObservationIgnored private var lastHoverEventTime: CFTimeInterval = 0
@@ -889,9 +939,10 @@ class AppModel {
         // control that relies on `beginMenuAdjustment()`/`endMenuAdjustment()`
         // (color pickers, popovers, sheets) for the rest of the session.
         #if os(macOS)
-        let interacting = isMenuHovering || menuAdjustmentDepth > 0
+        let interacting = isSpatialMenuVisible || isMenuHovering || menuAdjustmentDepth > 0
         #else
-        let interacting = isMenuWindowVisible && (isMenuHovering || menuAdjustmentDepth > 0)
+        let interacting = isSpatialMenuVisible
+            || (isMenuWindowVisible && (isMenuHovering || menuAdjustmentDepth > 0))
         #endif
         isMenuInteractionActive = interacting
         renderSettings.isMenuInteractionActive = interacting

@@ -61,6 +61,7 @@ struct ContentStageConfiguration: CompositorLayerConfiguration {
 @main
 struct MetalProjectTestApp: App {
     @State private var appModel = AppModel()
+    @State private var spatialRadialMenu = SpatialRadialMenuModel()
 
     /// Keep the entire morph in one progressive compositor style. The previous
     /// progressive-to-Mixed handoff changed alpha/depth semantics mid-animation,
@@ -76,8 +77,9 @@ struct MetalProjectTestApp: App {
         Window(appModel.menuWindowID, id: appModel.menuWindowID) {
             ContentView()
                 .environment(appModel)
+                .environment(spatialRadialMenu)
                 .background(ImmersiveSpaceAutoOpener().environment(appModel))
-                .onAppear {
+                .onAppear { [appModel, spatialRadialMenu, openWindow, dismissWindow] in
                     // PGO: if this is an instrumented "Generate Optimization
                     // Profile" build, start periodic counter flushing so the
                     // profile survives the SIGKILL teardown typical of
@@ -99,6 +101,50 @@ struct MetalProjectTestApp: App {
                     // Set up handler to dismiss the menu window for real
                     appModel.dismissMenuWindowHandler = { [dismissWindow] in
                         dismissWindow(id: appModel.menuWindowID)
+                    }
+                    spatialRadialMenu.installWindowHandlers(
+                        reveal: { [weak appModel] in
+                            appModel?.revealMenuWindowForSpatialNavigation()
+                        },
+                        dismiss: { [weak appModel] in
+                            appModel?.setSpatialMenuVisible(false)
+                            dismissWindow(id: SpatialRadialMenuModel.windowID)
+                        }
+                    )
+                    appModel.presentSpatialMenuHandler = { [weak appModel, weak spatialRadialMenu] nodeID in
+                        guard let appModel, let spatialRadialMenu else { return }
+                        let mathLens = SpatialMathLensSnapshot.capture(
+                            formula: appModel.renderSettings.fractalType,
+                            transforms: appModel.renderSettings.spaceWarpStack
+                        )
+                        let gestureMap = SpatialGestureMapSnapshot.capture(
+                            isEnabled: appModel.renderSettings.perFingerTapGestureEnabled,
+                            menuGestureIsEnabled: appModel.renderSettings.menuToggleGestureEnabled,
+                            menuGestureMode: appModel.renderSettings.menuToggleGestureMode,
+                            leftActions: appModel.renderSettings.perFingerTapLeftActions,
+                            rightActions: appModel.renderSettings.perFingerTapRightActions
+                        )
+                        let requestID = spatialRadialMenu.prepare(
+                            focusing: nodeID,
+                            mathLens: mathLens,
+                            gestureMap: gestureMap
+                        )
+                        appModel.setSpatialMenuVisible(true)
+                        openWindow(id: SpatialRadialMenuModel.windowID)
+                        // openWindow has no failure result. Do not let a failed
+                        // system presentation suppress parameter gestures for
+                        // the rest of the immersive session.
+                        Task { @MainActor [weak appModel, weak spatialRadialMenu] in
+                            try? await Task.sleep(for: .seconds(2))
+                            guard let appModel, let spatialRadialMenu,
+                                  spatialRadialMenu.presentationRequestID == requestID,
+                                  !spatialRadialMenu.isPresented else { return }
+                            appModel.setSpatialMenuVisible(false)
+                        }
+                    }
+                    appModel.dismissSpatialMenuHandler = { [weak appModel] in
+                        appModel?.setSpatialMenuVisible(false)
+                        dismissWindow(id: SpatialRadialMenuModel.windowID)
                     }
 
                     if !hasCompletedIntroOnboarding {
@@ -159,6 +205,21 @@ struct MetalProjectTestApp: App {
             return WindowPlacement(nil)
         }
         .windowResizability(.contentMinSize)
+
+        WindowGroup("Spatial Controls", id: SpatialRadialMenuModel.windowID) {
+            SpatialRadialMenuView()
+                .environment(appModel)
+                .environment(spatialRadialMenu)
+        }
+        .defaultSize(
+            width: SpatialRadialGeometry.volumeWidth,
+            height: SpatialRadialGeometry.volumeHeight,
+            depth: SpatialRadialGeometry.volumeDepth,
+            in: .meters
+        )
+        .windowStyle(.volumetric)
+        .windowResizability(.contentSize)
+
         ImmersiveSpace(id: appModel.immersiveSpaceID) {
             CompositorLayer(configuration: ContentStageConfiguration()) { @MainActor layerRenderer in
                 Renderer.startRenderLoop(layerRenderer, appModel: appModel)
@@ -192,6 +253,10 @@ struct MetalProjectTestApp: App {
         .onChange(of: appModel.immersiveSpaceState) { oldValue, newValue in
             if newValue == .closed {
                 appModel.cancelActiveRenderLoop()
+                if appModel.isSpatialMenuVisible {
+                    appModel.setSpatialMenuVisible(false)
+                    dismissWindow(id: SpatialRadialMenuModel.windowID)
+                }
                 // PGO: capture render-path coverage at the moment the
                 // immersive space tears down — the data a profiling run is
                 // really after. No-op when not instrumented.
