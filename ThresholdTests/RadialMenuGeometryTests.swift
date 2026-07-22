@@ -292,3 +292,68 @@ struct RadialMenuGeometryTests {
         }
     }
 }
+
+/// Hover exits can be dropped by the system, so the dwell state machine
+/// reconciles from enters alone: every enter either re-arms or disarms —
+/// never leaves a stale dwell armed to fire under a stationary pointer.
+@Suite("Radial menu hover dwell policy")
+struct RadialHoverDwellPolicyTests {
+    private func response(
+        nodeID: String,
+        isBranch: Bool = true,
+        depth: Int = 0,
+        path: [String] = [],
+        suspendsHoverNavigation: Bool = false
+    ) -> RadialHoverDwellPolicy.EnterResponse {
+        RadialHoverDwellPolicy.enterResponse(
+            nodeID: nodeID,
+            isBranch: isBranch,
+            depth: depth,
+            path: path,
+            suspendsHoverNavigation: suspendsHoverNavigation
+        )
+    }
+
+    @Test("Unselected branches arm; first discovery uses the short dwell")
+    func unselectedBranchArms() {
+        #expect(response(nodeID: "root.shape")
+            == .arm(dwell: RadialHoverDwellPolicy.selectDwell))
+        #expect(response(nodeID: "shape.transform", depth: 1, path: ["root.shape"])
+            == .arm(dwell: RadialHoverDwellPolicy.selectDwell))
+    }
+
+    @Test("Switching a parent with a visible child ring widens the intent window")
+    func parentSwitchUsesWideDwell() {
+        #expect(response(
+            nodeID: "shape.transform",
+            depth: 1,
+            path: ["root.shape", "shape.parameters"]
+        ) == .arm(dwell: RadialHoverDwellPolicy.parentSwitchDwell))
+    }
+
+    @Test("Enters that must not navigate disarm a stale dwell instead of ignoring it")
+    func nonNavigatingEntersDisarm() {
+        // Leaf pills: a crossed sibling branch must not steal the ring after
+        // the pointer settles on a leaf whose exit event was dropped.
+        #expect(response(nodeID: "root.leaf", isBranch: false) == .disarm)
+
+        // Slider pills — the reported repro: sweep from a slider across a
+        // sibling branch and back within the dwell window.
+        #expect(response(
+            nodeID: "slider.shape.power",
+            isBranch: false,
+            depth: 2,
+            path: ["root.shape", "shape.parameters"]
+        ) == .disarm)
+
+        // The branch already selected at its depth re-enters without re-arming.
+        #expect(response(
+            nodeID: "shape.parameters",
+            depth: 1,
+            path: ["root.shape", "shape.parameters"]
+        ) == .disarm)
+
+        // Shift-peek suspension disarms everything, including fresh branches.
+        #expect(response(nodeID: "root.shape", suspendsHoverNavigation: true) == .disarm)
+    }
+}

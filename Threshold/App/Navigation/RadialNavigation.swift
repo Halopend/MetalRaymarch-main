@@ -321,15 +321,30 @@ struct RadialNavigationProjection {
     let roots: [RadialNavigationNode]
 
     init(roots: [RadialNavigationNode]) {
-        self.roots = roots
+        self.roots = Self.uniquedByID(roots)
     }
 
     func presentedChildren(of node: RadialNavigationNode) -> [RadialNavigationNode] {
+        // De-duplicate before the compact budget so a duplicate never counts
+        // toward the limit or displaces a unique sibling into overflow.
+        let children = Self.uniquedByID(node.children)
         guard let limit = node.compactChildrenLimit,
-              node.children.count > limit,
+              children.count > limit,
               let overflowFallback = node.overflowFallback?.node,
-              limit > 0 else { return node.children }
-        return Array(node.children.prefix(max(limit - 1, 0))) + [overflowFallback]
+              limit > 0 else { return children }
+        return Array(children.prefix(max(limit - 1, 0))) + [overflowFallback]
+    }
+
+    /// Node id uniqueness is not a structural guarantee: transform quick
+    /// controls derive their ids from persisted `SpaceWarpOpValue` UUIDs,
+    /// which an imported scene file can duplicate (hand-edited, merged, or
+    /// produced by another client). Every projection consumer is id-addressed
+    /// — ForEach identity, keyboard-focus dictionaries, `path` walks — so a
+    /// duplicate cannot be presented meaningfully; keep the first occurrence
+    /// instead of letting the collision reach those consumers.
+    private static func uniquedByID(_ nodes: [RadialNavigationNode]) -> [RadialNavigationNode] {
+        var seen = Set<String>()
+        return nodes.filter { seen.insert($0.id).inserted }
     }
 
     /// All presented nodes in stable preorder. Each target carries the branch

@@ -442,6 +442,48 @@ struct RadialMenuGeometry {
     }
 }
 
+/// Pure reconciliation policy for the hover-to-navigate dwell, separated from
+/// the menu's task state so the invariant is regression-testable.
+///
+/// The invariant: an armed dwell is trusted only while the most recent hover
+/// *enter* anywhere in the menu is the arming pill itself. Hover exits can be
+/// dropped by the system (see `RadialMenu.pendingHoverSelection`), so an enter
+/// is the only reliable report of where the pointer actually is — which is why
+/// `EnterResponse` deliberately has no "leave it armed" case. A dwell that the
+/// entered target does not itself re-arm is stale by definition: the pointer
+/// has provably left the arming pill, and letting the dwell fire would tear
+/// the ring down under a stationary pointer.
+enum RadialHoverDwellPolicy {
+    /// Hovering a branch pill this long commits the selection. Long enough
+    /// that sweeping across a pill en route to another does not thrash the
+    /// deeper rings, short enough to read as instantaneous when aiming at it.
+    static let selectDwell: Duration = .milliseconds(90)
+    /// Switching a parent after its child ring is visible gets a wider intent
+    /// window. This protects diagonal travel toward the child arc without
+    /// making first-time branch discovery feel sluggish.
+    static let parentSwitchDwell: Duration = .milliseconds(175)
+
+    enum EnterResponse: Equatable {
+        case arm(dwell: Duration)
+        case disarm
+    }
+
+    /// Targets that must not navigate — leaves, slider pills, the branch that
+    /// is already selected at its depth, and everything while shift-peek
+    /// suspends hover navigation — all disarm.
+    static func enterResponse(
+        nodeID: String,
+        isBranch: Bool,
+        depth: Int,
+        path: [String],
+        suspendsHoverNavigation: Bool
+    ) -> EnterResponse {
+        guard !suspendsHoverNavigation, isBranch,
+              depth >= path.count || path[depth] != nodeID else { return .disarm }
+        return .arm(dwell: depth < path.count ? parentSwitchDwell : selectDwell)
+    }
+}
+
 /// Screen-position anchored radial presentation of the shared application
 /// navigation hierarchy. Platform hosts decide how the anchor is invoked and
 /// how fallback destinations reveal the standard controls.
@@ -464,7 +506,9 @@ struct RadialMenu: View {
     @FocusState private var focusedItemID: String?
     /// The single dwell timer for hover-to-select. One task, not one per pill:
     /// hover exit events can be dropped by the system, so navigation always
-    /// reconciles from the most recent hover *enter* instead of enter/exit pairs.
+    /// reconciles from the most recent hover *enter* instead of enter/exit
+    /// pairs — `RadialHoverDwellPolicy` decides per enter whether that means
+    /// re-arming or disarming.
     @State private var pendingHoverSelection: Task<Void, Never>?
     /// Which node scheduled the pending dwell. SwiftUI does not order hover
     /// exit/enter between pills, so only the owning pill's exit may cancel —
@@ -482,11 +526,6 @@ struct RadialMenu: View {
         static let tighterCurvature = "launcher.chrome.curvature.tighter"
         static let widerCurvature = "launcher.chrome.curvature.wider"
     }
-
-    /// Hovering a branch pill this long commits the selection. Long enough that
-    /// sweeping across a pill en route to another does not thrash the deeper
-    /// rings, short enough to read as instantaneous when aiming at it.
-    private let hoverSelectDwell: Duration = .milliseconds(90)
 
     private struct RingLayout {
         let depth: Int
@@ -555,17 +594,13 @@ struct RadialMenu: View {
             focusedItemID = roots.first(where: \.isSelected)?.id ?? roots.first?.id
         }
         .onDisappear {
-            pendingHoverSelection?.cancel()
-            pendingHoverSelection = nil
-            pendingHoverNodeID = nil
+            disarmPendingHover()
         }
         .onChange(of: suspendsHoverNavigation) { _, suspended in
             // Shift-peek must not let an already-armed dwell re-navigate
             // under the faded pills.
             if suspended {
-                pendingHoverSelection?.cancel()
-                pendingHoverSelection = nil
-                pendingHoverNodeID = nil
+                disarmPendingHover()
             }
         }
         .onKeyPress(.tab, phases: [.down, .repeat]) { press in
@@ -763,7 +798,13 @@ struct RadialMenu: View {
                         sceneAccent: sceneAccent,
                         onHoverChanged: { hovering in
                             updateHoveredRing(ring.depth, hovering: hovering)
-                            if hovering {
+                            // Slider pills never arm the dwell, but their
+                            // enters must still disarm a stale one (see
+                            // RadialHoverDwellPolicy). The pill reports raw
+                            // hover so even a disabled pill reconciles;
+                            // availability gates only the scroll target below.
+                            handleNodeHover(node, depth: ring.depth, hovering: hovering)
+                            if hovering, slider.isEnabled() {
                                 hoveredSlider = RadialActiveSlider(id: node.id, frame: hitFrame)
                             } else if hoveredSlider?.id == node.id {
                                 hoveredSlider = nil
@@ -825,39 +866,55 @@ struct RadialMenu: View {
         }
     }
 
-    /// Hover enter on a branch pill schedules the selection after a dwell.
+    /// Hover enter on a branch pill schedules the selection after a dwell;
+    /// every other enter disarms a stale one (`RadialHoverDwellPolicy`).
     /// Leaves never re-navigate on hover — only their own click acts — so a
     /// deeper ring stays open while the pointer visits a sibling leaf.
     private func handleNodeHover(_ node: RadialNavigationNode, depth: Int, hovering: Bool) {
         guard hovering else {
+            // Only the owning pill's exit cancels: SwiftUI does not order
+            // hover exit/enter between pills, so a trailing exit from the
+            // pill just left must not kill the dwell its successor armed.
             if pendingHoverNodeID == node.id {
-                pendingHoverSelection?.cancel()
-                pendingHoverSelection = nil
-                pendingHoverNodeID = nil
+                disarmPendingHover()
             }
             return
         }
-        guard !suspendsHoverNavigation, node.isBranch else { return }
-        guard path.count <= depth || path[depth] != node.id else { return }
 
-        pendingHoverSelection?.cancel()
-        pendingHoverNodeID = node.id
-        // Switching a parent after its child is visible gets a wider intent
-        // window. This protects diagonal travel toward the child arc without
-        // making first-time branch discovery feel sluggish.
-        let dwell: Duration = path.count > depth ? .milliseconds(175) : hoverSelectDwell
-        pendingHoverSelection = Task { @MainActor in
-            try? await Task.sleep(for: dwell)
-            guard !Task.isCancelled else { return }
-            pendingHoverNodeID = nil
-            commitHoverSelection(node, depth: depth)
+        switch RadialHoverDwellPolicy.enterResponse(
+            nodeID: node.id,
+            isBranch: node.isBranch,
+            depth: depth,
+            path: path,
+            suspendsHoverNavigation: suspendsHoverNavigation
+        ) {
+        case .disarm:
+            disarmPendingHover()
+        case .arm(let dwell):
+            pendingHoverSelection?.cancel()
+            pendingHoverNodeID = node.id
+            pendingHoverSelection = Task { @MainActor in
+                try? await Task.sleep(for: dwell)
+                guard !Task.isCancelled else { return }
+                pendingHoverNodeID = nil
+                commitHoverSelection(node, depth: depth)
+            }
         }
     }
 
-    private func commitHoverSelection(_ node: RadialNavigationNode, depth: Int) {
+    /// The single dwell teardown. Every hover enter that does not itself
+    /// re-arm routes here (see `RadialHoverDwellPolicy`), as do the owning
+    /// pill's exit and the lifecycle resets (dismiss, shift-peek, commit) —
+    /// so a stale dwell can only outlive a dropped exit while the pointer
+    /// produces no enter at all.
+    private func disarmPendingHover() {
         pendingHoverSelection?.cancel()
         pendingHoverSelection = nil
         pendingHoverNodeID = nil
+    }
+
+    private func commitHoverSelection(_ node: RadialNavigationNode, depth: Int) {
+        disarmPendingHover()
         let newPath = Array(path.prefix(depth)) + [node.id]
         if reduceMotion {
             path = newPath
@@ -944,6 +1001,12 @@ struct RadialMenu: View {
         .padding(3)
         .background(Color(red: 0.055, green: 0.012, blue: 0.09).opacity(0.96), in: Capsule())
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8))
+        .onHover { hovering in
+            // Chrome takes no part in hover navigation, but it sits within
+            // dwell-travel range of the primary ring, so entering it must
+            // still disarm a stale dwell (see RadialHoverDwellPolicy).
+            if hovering { disarmPendingHover() }
+        }
         .position(layoutPickerPosition(primaryPositions: primaryPositions))
         .accessibilityLabel("Quick menu layout")
     }
@@ -1083,6 +1146,11 @@ struct RadialMenu: View {
         }
         .frame(width: Self.windowDragHandleSize, height: Self.windowDragHandleSize)
         .contentShape(Circle())
+        .onHover { hovering in
+            // The hub is a natural pointer rest at the shared ring center;
+            // entering it must disarm a stale dwell (see RadialHoverDwellPolicy).
+            if hovering { disarmPendingHover() }
+        }
         .position(anchor)
         .accessibilityElement()
     }
@@ -1092,7 +1160,12 @@ struct RadialMenu: View {
     /// Keyboard traversal follows the visible radial ring order.
     private func keyboardFocusOrder(rings: [RingLayout]) -> [NavigationHierarchy.KeyboardTarget] {
         let flattened = projection.flattenedKeyboardTargets()
-        let targetsByID = Dictionary(uniqueKeysWithValues: flattened.map { ($0.id, $0) })
+        // Node ids originate in persisted scene data (transform ops keep
+        // their imported UUIDs), so uniqueness is not guaranteed here. The
+        // projection collapses duplicate siblings; keeping the first target
+        // covers any remaining collision instead of trapping on every body
+        // evaluation while such a scene is loaded.
+        let targetsByID = Dictionary(flattened.map { ($0.id, $0) }) { first, _ in first }
         let nodeTargets = rings.flatMap(\.nodes).compactMap { targetsByID[$0.id] }
 
         let chromeTargets = chromeFocusIDs.map {
@@ -1482,6 +1555,10 @@ private struct RadialSliderPill: View {
     @State private var isHovering = false
     @State private var isDragging = false
     @State private var dragStartValue: Float = 0
+    /// Raw pointer containment, tracked apart from the availability-gated
+    /// `isHovering` emphasis: unmount must retract exactly the raw hover
+    /// report the host last received.
+    @State private var isPointerInside = false
 
     /// Horizontal points that sweep the complete value range.
     private let fullRangeTravel: CGFloat = 180
@@ -1568,9 +1645,7 @@ private struct RadialSliderPill: View {
             content
                 .contentShape(Capsule().inset(by: -2))
                 .gesture(dragGesture, including: isEnabled ? .all : .none)
-                .onHover { hovering in
-                    updateHover(isEnabled && hovering)
-                }
+                .onHover(perform: updateHover)
                 .onDisappear(perform: resetInteractionState)
                 .onChange(of: isEnabled) { _, enabled in
                     if !enabled { resetInteractionState() }
@@ -1646,15 +1721,21 @@ private struct RadialSliderPill: View {
             isDragging = false
             onEditingChanged(false)
         }
-        if isHovering {
+        if isPointerInside {
+            isPointerInside = false
+            isHovering = false
             onHoverChanged(false)
         }
     }
 
     private func updateHover(_ hovering: Bool) {
-        let resolved = slider.isEnabled() && hovering
-        isHovering = resolved
-        onHoverChanged(resolved)
+        isPointerInside = hovering
+        // Emphasis stays availability-gated, but the report upward is raw:
+        // the menu reconciles its hover-dwell state from every real
+        // enter/exit, including ones over disabled pills, and re-checks
+        // availability itself before treating the pill as a scroll target.
+        isHovering = slider.isEnabled() && hovering
+        onHoverChanged(hovering)
     }
 
 }

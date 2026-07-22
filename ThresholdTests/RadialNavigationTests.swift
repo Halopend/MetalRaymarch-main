@@ -515,6 +515,104 @@ struct RadialNavigationProjectionTests {
         #expect(state.read(kaleidoscope.id)?.p1 == 7)
     }
 
+    @Test("Imported duplicate op ids collapse to the first occurrence instead of colliding")
+    func duplicatePersistedOpIDsCollapse() {
+        // Scene files decode SpaceWarpOpValue.id verbatim, so a hand-edited or
+        // merged file can carry the same UUID twice. Every projection consumer
+        // is id-addressed; presenting both twins used to trap the menu's
+        // keyboard-focus dictionary on every body evaluation.
+        let sharedID = UUID()
+        var original = SpaceWarpOpValue(kind: .twist)
+        original.id = sharedID
+        var duplicate = SpaceWarpOpValue(kind: .twist)
+        duplicate.id = sharedID
+        duplicate.strength = 1.3
+        let state = TransformStackState([original, duplicate])
+        let projection = RadialNavigationProjection(roots: [
+            RadialNavigationNode(
+                id: "root.transform",
+                title: "Transform",
+                systemImage: "arrow.triangle.2.circlepath",
+                children: [
+                    transformBranch(original, position: 0, state: state),
+                    transformBranch(duplicate, position: 1, state: state)
+                ]
+            )
+        ])
+
+        let targets = projection.flattenedKeyboardTargets()
+        #expect(Set(targets.map(\.id)).count == targets.count)
+
+        let presented = projection.rings(along: ["root.transform"])[1]
+        #expect(presented.map(\.id) == ["transform.op.\(sharedID.uuidString.lowercased())"])
+        #expect(presented.first?.title == "1 · \(SpaceWarpKind.twist.displayName)")
+    }
+
+    @Test("Duplicate roots and duplicate siblings keep only their first occurrence")
+    func duplicateNodesKeepFirstOccurrence() {
+        let projection = RadialNavigationProjection(roots: [
+            RadialNavigationNode(id: "dup", title: "First", systemImage: "1.circle"),
+            RadialNavigationNode(id: "dup", title: "Second", systemImage: "2.circle"),
+            RadialNavigationNode(
+                id: "branch",
+                title: "Branch",
+                systemImage: "b.circle",
+                children: [
+                    RadialNavigationNode(id: "child", title: "Kept", systemImage: "1.circle"),
+                    RadialNavigationNode(id: "child", title: "Dropped", systemImage: "2.circle")
+                ]
+            )
+        ])
+
+        #expect(projection.roots.map(\.title) == ["First", "Branch"])
+        let branch = projection.node(withID: "branch")!
+        #expect(projection.presentedChildren(of: branch).map(\.title) == ["Kept"])
+    }
+
+    @Test("Duplicates never consume the compact item budget")
+    func duplicatesDoNotConsumeCompactBudget() {
+        func child(_ id: String) -> RadialNavigationNode {
+            RadialNavigationNode(
+                id: id,
+                title: id,
+                systemImage: "circle",
+                children: [
+                    RadialNavigationNode(
+                        id: "slider.\(id)",
+                        title: id,
+                        systemImage: "slider.horizontal.3",
+                        slider: RadialSliderBinding(range: 0...1, read: { 0 }, write: { _ in })
+                    )
+                ]
+            )
+        }
+        func projection(_ children: [RadialNavigationNode]) -> RadialNavigationProjection {
+            RadialNavigationProjection(roots: [RadialNavigationNode(
+                id: "root",
+                title: "Root",
+                systemImage: "square.grid.2x2",
+                children: children,
+                compactChildrenLimit: 3,
+                overflowFallback: RadialOverflowFallback(RadialNavigationNode(
+                    id: "root.more",
+                    title: "More",
+                    systemImage: "ellipsis.circle",
+                    fallbackAction: {}
+                ))
+            )])
+        }
+
+        // Three unique ids fit the budget once the duplicate is dropped.
+        let fitting = projection([child("a"), child("a"), child("b"), child("c")])
+        #expect(fitting.rings(along: ["root"])[1].map(\.id) == ["a", "b", "c"])
+
+        // Four unique ids still overflow into the explicit fallback.
+        let overflowing = projection(
+            [child("a"), child("a"), child("b"), child("c"), child("d")]
+        )
+        #expect(overflowing.rings(along: ["root"])[1].map(\.id) == ["a", "b", "root.more"])
+    }
+
     @Test("UI cache commits transform edits by UUID to RenderSettings")
     @MainActor
     func cacheCommitsTransformByIdentity() {
