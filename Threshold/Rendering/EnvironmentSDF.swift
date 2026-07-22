@@ -19,6 +19,175 @@ import Foundation
 import Metal
 import simd
 
+/// A gravity-aligned rectangular approximation of the sensed room. `yawRadians`
+/// rotates the room's local X axis in the world XZ plane; Y remains aligned to
+/// gravity. Bound to Space uses this instead of assuming that the AR session
+/// origin is the room center or that the room walls follow world X/Z.
+struct EnvironmentRoomBounds: Sendable, Equatable {
+    var centerWorld: SIMD3<Float>
+    var sizeWorld: SIMD3<Float>
+    var yawRadians: Float
+
+    static func manual(sizeWorld: SIMD3<Float>) -> EnvironmentRoomBounds {
+        let safeSize = simd_max(sizeWorld, SIMD3<Float>(repeating: 0.01))
+        return EnvironmentRoomBounds(
+            centerWorld: SIMD3<Float>(0, safeSize.y * 0.5, 0),
+            sizeWorld: safeSize,
+            yawRadians: 0
+        )
+    }
+
+    /// World meters -> room-local meters, with the room centered at the local
+    /// origin. The shader can therefore clip against `+-sizeWorld / 2`.
+    var worldToRoomMatrix: matrix_float4x4 {
+        let c = cos(yawRadians)
+        let s = sin(yawRadians)
+        let axisX = SIMD3<Float>(c, 0, s)
+        let axisZ = SIMD3<Float>(-s, 0, c)
+        return matrix_float4x4(columns: (
+            SIMD4<Float>(c, 0, -s, 0),
+            SIMD4<Float>(0, 1, 0, 0),
+            SIMD4<Float>(s, 0, c, 0),
+            SIMD4<Float>(-simd_dot(centerWorld, axisX),
+                         -centerWorld.y,
+                         -simd_dot(centerWorld, axisZ),
+                         1)
+        ))
+    }
+
+    /// Fits a gravity-aligned oriented box to triangle soup. Dominant vertical
+    /// triangle normals establish the two orthogonal wall axes. Trimmed
+    /// projected extents reject sparse reconstruction outliers while keeping
+    /// the enclosing room surfaces. Returns nil for partial scans that do not
+    /// yet establish a usable footprint and floor-to-ceiling height.
+    static func estimateRectangularRoom(
+        triangles: [SIMD3<Float>],
+        trimFraction: Float = 0.0025
+    ) -> EnvironmentRoomBounds? {
+        guard triangles.count >= 3 else { return nil }
+
+        var orientationCos: Float = 0
+        var orientationSin: Float = 0
+        var verticalArea: Float = 0
+        for offset in stride(from: 0, to: triangles.count - 2, by: 3) {
+            let a = triangles[offset]
+            let b = triangles[offset + 1]
+            let c = triangles[offset + 2]
+            guard a.allFinite, b.allFinite, c.allFinite else { continue }
+            let cross = simd_cross(b - a, c - a)
+            let doubleArea = simd_length(cross)
+            guard doubleArea.isFinite, doubleArea > 1e-6 else { continue }
+            let normal = cross / doubleArea
+            // Walls are nearly vertical. Four-angle averaging makes both
+            // opposite normals and the perpendicular wall pair agree.
+            guard abs(normal.y) < 0.35 else { continue }
+            let area = doubleArea * 0.5
+            let theta = atan2(normal.z, normal.x)
+            orientationCos += area * cos(4 * theta)
+            orientationSin += area * sin(4 * theta)
+            verticalArea += area
+        }
+
+        let orientationStrength = hypot(orientationCos, orientationSin)
+        let yaw: Float = verticalArea > 0.25 && orientationStrength > verticalArea * 0.08
+            ? atan2(orientationSin, orientationCos) * 0.25
+            : 0
+        let axisX = SIMD2<Float>(cos(yaw), sin(yaw))
+        let axisZ = SIMD2<Float>(-sin(yaw), cos(yaw))
+
+        // Scene meshes can contain hundreds of thousands of repeated triangle
+        // vertices. A uniform bounded sample keeps sorting cost predictable on
+        // Vision Pro while retaining coverage across the anchor stream.
+        let maxSamples = 12_000
+        let sampleStride = max(1, triangles.count / maxSamples)
+        var xs: [Float] = []
+        var ys: [Float] = []
+        var zs: [Float] = []
+        xs.reserveCapacity(min(triangles.count, maxSamples))
+        ys.reserveCapacity(min(triangles.count, maxSamples))
+        zs.reserveCapacity(min(triangles.count, maxSamples))
+        var index = 0
+        while index < triangles.count {
+            let point = triangles[index]
+            if point.allFinite {
+                let xz = SIMD2<Float>(point.x, point.z)
+                xs.append(simd_dot(xz, axisX))
+                ys.append(point.y)
+                zs.append(simd_dot(xz, axisZ))
+            }
+            index += sampleStride
+        }
+        guard xs.count >= 24 else { return nil }
+        xs.sort(); ys.sort(); zs.sort()
+
+        let trim = max(0, min(0.04, trimFraction))
+        func trimmedRange(_ values: [Float]) -> (Float, Float) {
+            let last = values.count - 1
+            let inset = min(last / 3, Int(Float(last) * trim))
+            return (values[inset], values[last - inset])
+        }
+        var (minX, maxX) = trimmedRange(xs)
+        var (minY, maxY) = trimmedRange(ys)
+        var (minZ, maxZ) = trimmedRange(zs)
+
+        // Pull the virtual boundary just inside the reconstructed wall/ceiling
+        // surfaces. This suppresses the thin outside shell caused by mesh noise
+        // without noticeably shrinking the usable room.
+        let wallInset: Float = 0.025
+        let ceilingInset: Float = 0.025
+        minX += wallInset; maxX -= wallInset
+        minZ += wallInset; maxZ -= wallInset
+        maxY -= ceilingInset
+
+        let size = SIMD3<Float>(maxX - minX, maxY - minY, maxZ - minZ)
+        guard size.allFinite,
+              size.x >= 0.8, size.y >= 1.6, size.z >= 0.8,
+              size.x <= 40, size.y <= 12, size.z <= 40
+        else { return nil }
+
+        let centerX = (minX + maxX) * 0.5
+        let centerZ = (minZ + maxZ) * 0.5
+        let centerXZ = axisX * centerX + axisZ * centerZ
+        return EnvironmentRoomBounds(
+            centerWorld: SIMD3<Float>(centerXZ.x, (minY + maxY) * 0.5, centerXZ.y),
+            sizeWorld: size,
+            yawRadians: yaw
+        )
+    }
+
+    /// Smooths normal reconstruction refinement while treating a 90-degree axis
+    /// relabel as the same rectangle (and swapping width/depth accordingly).
+    func blended(toward candidate: EnvironmentRoomBounds, alpha: Float) -> EnvironmentRoomBounds {
+        let t = max(0, min(1, alpha))
+        var alignedYaw = candidate.yawRadians
+        var alignedSize = candidate.sizeWorld
+        let quarterTurn = Float.pi * 0.5
+        while alignedYaw - yawRadians > Float.pi * 0.25 {
+            alignedYaw -= quarterTurn
+            alignedSize = SIMD3<Float>(alignedSize.z, alignedSize.y, alignedSize.x)
+        }
+        while alignedYaw - yawRadians < -Float.pi * 0.25 {
+            alignedYaw += quarterTurn
+            alignedSize = SIMD3<Float>(alignedSize.z, alignedSize.y, alignedSize.x)
+        }
+        return EnvironmentRoomBounds(
+            centerWorld: simd_mix(centerWorld, candidate.centerWorld, SIMD3<Float>(repeating: t)),
+            sizeWorld: simd_mix(sizeWorld, alignedSize, SIMD3<Float>(repeating: t)),
+            yawRadians: yawRadians + (alignedYaw - yawRadians) * t
+        )
+    }
+
+    func isMeaningfullyDifferent(from other: EnvironmentRoomBounds) -> Bool {
+        simd_length(centerWorld - other.centerWorld) > 0.02
+            || simd_length(sizeWorld - other.sizeWorld) > 0.03
+            || abs(yawRadians - other.yawRadians) > (.pi / 180)
+    }
+}
+
+private extension SIMD3 where Scalar == Float {
+    var allFinite: Bool { x.isFinite && y.isFinite && z.isFinite }
+}
+
 /// One immutable baked grid. Rebakes produce a NEW instance (fresh buffer), so
 /// a frame that captured the old one keeps a valid buffer for its lifetime —
 /// publication is a Mutex swap, no in-place mutation after publish.

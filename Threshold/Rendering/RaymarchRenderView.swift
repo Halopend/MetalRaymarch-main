@@ -1774,6 +1774,7 @@ final class ThresholdMacRenderer {
             modelViewMatrix: modelView,
             inverseModelViewMatrix: inverseModelView,
             modelToWorldMatrix: modelMatrix,
+            boundSpaceWorldToLocalMatrix: manualBoundSpaceWorldToLocalMatrix(size: settings.boundSpaceSize),
             // Warm start is visionOS-only (FC_WARM_START compiled out of the Mac
             // pipelines); these stay inert here.
             previousViewProjMatrix: matrix_identity_float4x4,

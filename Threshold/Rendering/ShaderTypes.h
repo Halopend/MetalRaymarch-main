@@ -497,11 +497,11 @@ typedef struct
     // SafetyBubbleShapePreset). Feeds safetyBubbleDistance() directly.
     float boundingShapeType;
 
-    // === BOUND TO SPACE (assumed-room clip) ===
-    // Clips the fractal to an axis-aligned rectangular room in WORLD space
-    // (meters): x in [-w/2, w/2], y in [0, h], z in [-d/2, d/2] — the visionOS
-    // world origin sits on the floor at the user's starting position. Open
-    // faces extend to infinity. 0 = off, 1 = Match Space (closed box),
+    // === BOUND TO SPACE (sensed/manual rectangular-room clip) ===
+    // `modelToBoundSpaceMatrix` maps march/model coordinates into a centered,
+    // gravity-aligned room coordinate system. This lets the room be translated
+    // and yaw-rotated independently of the AR session origin. Open faces extend
+    // to infinity. 0 = off, 1 = Match Space (closed box),
     // 2 = Ceiling Open (walls + floor), 3 = Walls Open (floor + ceiling only).
     int boundToSpaceMode;
     vector_float3 boundSpaceSize;       // full room size, meters (w, h, d)
@@ -510,7 +510,7 @@ typedef struct
     // near the bounded room's walls/floor/ceiling read as ambiently shadowed
     // by the room. Only meaningful while boundToSpaceMode != 0.
     float boundAmbientStrength;
-    matrix_float4x4 modelToWorldMatrix; // march/model space → world meters
+    matrix_float4x4 modelToBoundSpaceMatrix; // march/model space → centered room meters
 
     EnvScrunchParams envScrunch;        // scanned-environment scrunch field (grid via bindless address)
 
@@ -644,11 +644,11 @@ typedef struct
     int rateMapValid;                // 1 = rateMapData (buffer 1) is a valid rate map to decode
     uint32_t rateMapLayer;           // rate-map layer for this eye (layered: eyeIndex; dedicated: 0)
 
-    // === BOUND TO SPACE (assumed-room clip) — see Uniforms for semantics ===
+    // === BOUND TO SPACE (sensed/manual rectangular-room clip) — see Uniforms ===
     int boundToSpaceMode;               // 0 = off, 1 = Match Space, 2 = Ceiling Open, 3 = Walls Open
     vector_float3 boundSpaceSize;       // full room size, meters (w, h, d)
     float boundAmbientStrength;         // room-derived ambient occlusion, 0 = off (see Uniforms)
-    matrix_float4x4 modelToWorldMatrix; // march/model space → world meters
+    matrix_float4x4 modelToBoundSpaceMatrix; // march/model space → centered room meters
 
     EnvScrunchParams envScrunch;        // scanned-environment scrunch field (grid via bindless address)
     // Bounding Shape family/preset — same encoding as Uniforms.boundingShapeType /

@@ -484,27 +484,29 @@ inline float rayIntersectBoundingSphere(float3 ro, float3 rd, float3 center, flo
     return (t > 0.0) ? t : -1.0;  // Behind the camera → treat as miss
 }
 
-// === BOUND TO SPACE (assumed-room clip) ===
-// The room is an axis-aligned box in WORLD space (meters): x in [-w/2, w/2],
-// y in [0, h], z in [-d/2, d/2] — the visionOS world origin sits on the floor
-// at the user's starting position. Mode picks which faces bound the volume
+// === BOUND TO SPACE (sensed/manual rectangular-room clip) ===
+// Positions arrive in a centered, gravity-aligned room coordinate system via
+// modelToBoundSpaceMatrix. The room may therefore be translated and yaw-rotated
+// relative to the AR session origin. Mode picks which faces bound the volume
 // (open faces extend to infinity): 1 = Match Space (closed box), 2 = Ceiling
 // Open (walls + floor), 3 = Walls Open (floor + ceiling slab only).
 
 inline void spaceBoundsForMode(float3 size, int mode, thread float3& lo, thread float3& hi) {
     const float kOpen = 1e8f;
-    lo = float3(-0.5f * size.x, 0.0f, -0.5f * size.z);
-    hi = float3( 0.5f * size.x, size.y, 0.5f * size.z);
+    lo = -0.5f * size;
+    hi =  0.5f * size;
     if (mode == 2) hi.y = kOpen;
     if (mode == 3) { lo.xz = float2(-kOpen); hi.xz = float2(kOpen); }
 }
 
 // Signed Chebyshev-style distance to the room volume (negative inside) — same
 // convention as safetyBubbleCubeDistance; drives the bounding-edge fade.
-inline float spaceBoundsDistance(float3 posWorld, float3 size, int mode) {
+inline float spaceBoundsDistance(float3 posModel, float4x4 modelToBoundSpace,
+                                 float3 size, int mode) {
+    float3 posRoom = (modelToBoundSpace * float4(posModel, 1.0f)).xyz;
     float3 lo, hi;
     spaceBoundsForMode(size, mode, lo, hi);
-    float3 d = max(lo - posWorld, posWorld - hi);
+    float3 d = max(lo - posRoom, posRoom - hi);
     return max(d.x, max(d.y, d.z));
 }
 
@@ -514,9 +516,12 @@ inline float spaceBoundsDistance(float3 posWorld, float3 size, int mode) {
 // surfaces in the open room center are unaffected. Open faces (Ceiling Open /
 // Walls Open push bounds to ±1e8 m) contribute nothing because proximity is 0.
 // Returns a multiplier for the ambient term, 1 = unoccluded.
-inline half roomAmbientOcclusion(float3 posWorld, float3 norWorld,
+inline half roomAmbientOcclusion(float3 posModel, float3 norModel,
+                                 float4x4 modelToBoundSpace,
                                  float3 size, int mode, float strength) {
     if (mode == 0 || strength <= 0.001f) return 1.0h;
+    float3 posRoom = (modelToBoundSpace * float4(posModel, 1.0f)).xyz;
+    float3 norRoom = normalize((modelToBoundSpace * float4(norModel, 0.0f)).xyz);
     float3 lo, hi;
     spaceBoundsForMode(size, mode, lo, hi);
 
@@ -528,9 +533,9 @@ inline half roomAmbientOcclusion(float3 posWorld, float3 norWorld,
         float3(0, 0, -1), float3(0, 0, 1)
     };
     const float faceD[6] = {
-        posWorld.x - lo.x, hi.x - posWorld.x,
-        posWorld.y - lo.y, hi.y - posWorld.y,
-        posWorld.z - lo.z, hi.z - posWorld.z
+        posRoom.x - lo.x, hi.x - posRoom.x,
+        posRoom.y - lo.y, hi.y - posRoom.y,
+        posRoom.z - lo.z, hi.z - posRoom.z
     };
 
     float occ = 0.0f;
@@ -539,7 +544,7 @@ inline half roomAmbientOcclusion(float3 posWorld, float3 norWorld,
         if (prox <= 0.0f) continue;
         // Fraction of the ambient hemisphere the face blocks: 1 when the
         // surface faces the wall head-on, 0 when it faces away.
-        float facing = saturate(dot(norWorld, faceN[i]) * 0.5f + 0.5f);
+        float facing = saturate(dot(norRoom, faceN[i]) * 0.5f + 0.5f);
         occ += prox * prox * facing;
     }
     // Cap so a corner (3 near faces) can't drive ambient fully black.
@@ -558,26 +563,26 @@ inline bool spaceSlabClip(float o, float d, float lo, float hi, thread float& t0
 }
 
 // Clamps a MODEL-space march interval [startT, endT] to the Bound to Space
-// room. The room lives in world meters, so the ray is transformed through
-// modelToWorld and the resulting world interval is converted back to model
-// units (uniform scale ⇒ t_world = t_model · |modelToWorld · rD|). Returns
+// room. The room lives in real meters, so the ray is transformed through
+// modelToBoundSpace and the resulting interval is converted back to model
+// units (uniform scale => t_room = t_model * |modelToBoundSpace * rD|). Returns
 // false when the ray never crosses the room volume — the march can be skipped.
 inline bool clampMarchToSpaceBounds(float3 rO, float3 rD,
-                                    float4x4 modelToWorld, float3 spaceSize, int mode,
+                                    float4x4 modelToBoundSpace, float3 spaceSize, int mode,
                                     thread float& startT, thread float& endT) {
     if (mode == 0) return true;
-    float3 worldO = (modelToWorld * float4(rO, 1.0f)).xyz;
-    float3 worldD = (modelToWorld * float4(rD, 0.0f)).xyz;
-    float dirScale = length(worldD);
+    float3 roomO = (modelToBoundSpace * float4(rO, 1.0f)).xyz;
+    float3 roomD = (modelToBoundSpace * float4(rD, 0.0f)).xyz;
+    float dirScale = length(roomD);
     if (dirScale < 1e-12f) return true;
-    worldD /= dirScale;
+    roomD /= dirScale;
 
     float3 lo, hi;
     spaceBoundsForMode(spaceSize, mode, lo, hi);
     float t0 = 0.0f, t1 = 1e8f;
-    if (!spaceSlabClip(worldO.x, worldD.x, lo.x, hi.x, t0, t1) ||
-        !spaceSlabClip(worldO.y, worldD.y, lo.y, hi.y, t0, t1) ||
-        !spaceSlabClip(worldO.z, worldD.z, lo.z, hi.z, t0, t1)) return false;
+    if (!spaceSlabClip(roomO.x, roomD.x, lo.x, hi.x, t0, t1) ||
+        !spaceSlabClip(roomO.y, roomD.y, lo.y, hi.y, t0, t1) ||
+        !spaceSlabClip(roomO.z, roomD.z, lo.z, hi.z, t0, t1)) return false;
     if (t1 <= t0) return false;
 
     startT = max(startT, t0 / dirScale);
@@ -1603,9 +1608,42 @@ FORCE_INLINE float applyHandAttraction(float d, float3 pos, FractalParams params
 // The Mandelbox analytic Jacobian describes only its raw fractal DE. Any active
 // model/world-space CSG field changes the final gradient and therefore requires
 // the finite-difference normal path.
-FORCE_INLINE bool worldFieldsMayAlterDistance(FractalParams params) {
+//
+// The safety-bubble term is POSITION-AWARE. applySafetyBubble's smooth-max
+// weight h = saturate(0.5 + 0.5*(-bubbleDist - d)/k) saturates to 0 whenever
+// bubbleDist + d >= k (hard mode is the k→0 case), and then dBubbled == d
+// bit-exactly — including through the temporal mix, since mix(d, d, s) == d.
+// So outside a thin shell hugging the bubble wall the composed field IS the
+// raw fractal field and the analytic/2-probe fast normal paths stay exact.
+// The bubble is camera-centered and ON by default on visionOS (comfort), so
+// gating on "enabled" alone would force 2-4 full DE probes onto every hit
+// pixel per eye per frame even with the bubble meters away from the surface.
+//
+// Margin: the identity condition must hold at the finite-difference PROBE
+// points, not just the hit point, and the hit itself sits at d ≈ 0 (it may
+// penetrate by up to the march hit threshold, ~0.02·epsilonScale). Probes
+// reach e ≤ 0.001·hitT, and hits near the band have hitT ≤ ~1.8·radius + band
+// (camera-centered bubble, max radius 2.5) → e ≤ ~5e-3. Most bubble shapes
+// are Lipschitz-1 in this pseudo-distance, but the Negative Cube
+// superellipsoid's gradient spikes near the coordinate planes (worst drop
+// ≈ 12·e over a probe step). 0.15 covers penetration + probe reach for every
+// shape with headroom; the only cost of generosity is a slightly wider
+// finite-difference shell around the wall, where FD is cheap relative to the
+// carved-wall pixels that genuinely need it.
+constant float kSafetyBubbleNormalBandMargin = 0.15f;
+
+FORCE_INLINE bool worldFieldsMayAlterDistance(float3 pos, FractalParams params) {
     const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED)
         ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
+    bool bubbleActive = bubbleEnabled && params.bubbleStrength >= 0.001f;
+    if (bubbleActive) {
+        // Same predicate applySafetyBubble saturates on: outside
+        // band(+margin) the CSG compose is a bit-exact identity.
+        float band = ((params.bubbleFadeEnabled != 0) ? params.bubbleFadeWidth : 0.0f)
+                   + kSafetyBubbleNormalBandMargin;
+        bubbleActive = safetyBubbleDistance(pos, params.bubbleCenter,
+                                            params.bubbleRadius, params.bubbleShape) < band;
+    }
     bool environmentEnabled = FC_HAS_ENVSCRUNCH_ON
         && params.envScrunch != nullptr
         && params.envScrunch->enabled != 0
@@ -1613,8 +1651,7 @@ FORCE_INLINE bool worldFieldsMayAlterDistance(FractalParams params) {
     bool handEnabled = FC_HAS_HANDFIELD_ON
         && params.handField != nullptr
         && params.handField->enabled != 0;
-    return (bubbleEnabled && params.bubbleStrength >= 0.001f)
-        || environmentEnabled || handEnabled;
+    return bubbleActive || environmentEnabled || handEnabled;
 }
 
 // OPTIMIZED: Use precomputed values from CPU to avoid per-pixel powr() and division
@@ -2352,9 +2389,12 @@ FORCE_INLINE float MapWithOrbitCacheUnified(float3 pos, FractalParams params, fl
         d = applySafetyBubble(d, pos, params);
         d = applyHandAttraction(d, pos, params);
         if (params.spaceWarpStrength > 0.0f || params.spaceWarpCount > 0
-            || worldFieldsMayAlterDistance(params)) {
+            || worldFieldsMayAlterDistance(pos, params)) {
             // The analytic Jacobian in `cache` is now in warped space — invalidate
             // it so GetNormal uses the (correct) warped finite-difference path.
+            // The world-fields check is position-aware: this Map is only called
+            // at hit points, and GetNormal re-evaluates the same predicate at
+            // the same pos, so the two gates always agree.
             cache.hasJacobian = false;
         }
         // The base evaluator cached its raw, pre-scale distance. Downstream
@@ -2439,7 +2479,7 @@ FORCE_INLINE float3 ApproximateMandelbulbNormal(float3 pos, float distance, Frac
 FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations, int fractalType, FormulaParams fp = {}, OrbitCache cache = {})
 {
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
-    const bool worldFieldsActive = worldFieldsMayAlterDistance(params);
+    const bool worldFieldsActive = worldFieldsMayAlterDistance(pos, params);
 
     if (cache.hasJacobian && type == FractalTypeMandelbox && !worldFieldsActive) {
         // === ANALYTIC JACOBIAN PATH — no extra Map() calls ===
@@ -3681,7 +3721,7 @@ kernel void adaptiveHierarchical8x8(
                 }
                 if (!rayDead && uniforms.boundToSpaceMode != 0) {
                     float probeStartT = 0.0f, probeEndT = uniforms.maxViewDistance;
-                    rayDead = !clampMarchToSpaceBounds(marchOrigin, bsRd, uniforms.modelToWorldMatrix,
+                    rayDead = !clampMarchToSpaceBounds(marchOrigin, bsRd, uniforms.modelToBoundSpaceMatrix,
                                                        uniforms.boundSpaceSize, uniforms.boundToSpaceMode,
                                                        probeStartT, probeEndT);
                 }
@@ -3860,7 +3900,7 @@ kernel void adaptiveHierarchical8x8(
         // boundToSpaceMode == 0.
         float marchStartT = -1.0f;
         float marchEndT = uniforms.maxViewDistance;
-        if (!clampMarchToSpaceBounds(marchOrigin, marchDir, uniforms.modelToWorldMatrix,
+        if (!clampMarchToSpaceBounds(marchOrigin, marchDir, uniforms.modelToBoundSpaceMatrix,
                                      uniforms.boundSpaceSize, uniforms.boundToSpaceMode,
                                      marchStartT, marchEndT)) {
             sceneResult.distGlow = float2(kRayMissThreshold + 100.0, 0.0);
@@ -3878,8 +3918,9 @@ kernel void adaptiveHierarchical8x8(
     // sliced open right at a wall from speckling into misses. Written back
     // into sceneResult so every downstream read (didHit, depth) agrees.
     if (uniforms.boundToSpaceMode != 0 && sceneResult.distGlow.x < kRayMissThreshold) {
-        float3 hitWorld = (uniforms.modelToWorldMatrix * float4(marchOrigin + sceneResult.distGlow.x * marchDir, 1.0f)).xyz;
-        if (spaceBoundsDistance(hitWorld, uniforms.boundSpaceSize, uniforms.boundToSpaceMode) > 0.01f) {
+        float3 hitModel = marchOrigin + sceneResult.distGlow.x * marchDir;
+        if (spaceBoundsDistance(hitModel, uniforms.modelToBoundSpaceMatrix,
+                                uniforms.boundSpaceSize, uniforms.boundToSpaceMode) > 0.01f) {
             sceneResult.distGlow.x = kRayMissThreshold + 100.0f;
         }
     }
@@ -4022,9 +4063,8 @@ kernel void adaptiveHierarchical8x8(
         float3 V = -marchDir;
         half roomAmb = 1.0h;
         if (uniforms.boundToSpaceMode != 0 && uniforms.boundAmbientStrength > 0.001f) {
-            float3 hitWorld = (uniforms.modelToWorldMatrix * float4(p, 1.0f)).xyz;
-            float3 norWorld = normalize((uniforms.modelToWorldMatrix * float4(nor, 0.0f)).xyz);
-            roomAmb = roomAmbientOcclusion(hitWorld, norWorld, uniforms.boundSpaceSize,
+            roomAmb = roomAmbientOcclusion(p, nor, uniforms.modelToBoundSpaceMatrix,
+                                           uniforms.boundSpaceSize,
                                            uniforms.boundToSpaceMode, uniforms.boundAmbientStrength);
         }
         col = ShadeSurface(p, nor, V, spot, atten, sunDir, sunDiffuseScale, lightIntensity,
@@ -4128,9 +4168,20 @@ kernel void coneCoarsePrepass8x8(uint2 texel [[thread_position_in_grid]],
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : uniforms.fractalType;
     bool coneTrusted; coneSafetyForFamily(type, coneTrusted);
     // GUARD 1: only box/fold + un-warped domain may write a real warmT.
+    // "Warped" must cover BOTH warp systems: the legacy single-warp uniform
+    // (spaceWarpStrength) AND the composable SpaceWarpOp stack, which runs
+    // whenever count > 0 regardless of spaceWarpStrength. Stack ops (twist,
+    // ripple, kaleido, and especially the iterated repeat groups' additive
+    // deScale recurrence) do not preserve the Lipschitz-1 lower-bound property
+    // the empty-ball argument below requires, so a populated stack means the
+    // cone's warmT could overshoot real surfaces. Must stay in lockstep with
+    // the CPU dispatch gate `coneAllowed` (Renderer.swift) — but this kernel
+    // guard is the safety authority: it writes the cold sentinel even if the
+    // CPU gate wrongly dispatches.
     bool domainWarped = (uniforms.sphericalInversionMode != 0)
                      || (uniforms.sphereProjectionBlend > 0.0f)
-                     || (uniforms.spaceWarpStrength > 0.0f);
+                     || (uniforms.spaceWarpStrength > 0.0f)
+                     || (uniforms.spaceWarpStack.count > 0);
     // Full-target pixel center of this 8x8 block; convert to viewport-LOCAL coords
     // (reconstructModelPoint expects local pixels) and skip texels whose block
     // center falls outside this eye's viewport (write the cold sentinel there).
@@ -4346,7 +4397,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         // boundToSpaceMode == 0.
         float marchStartT = coarseWarmStartT;
         float marchEndT = uniforms.maxViewDistance;
-        if (!clampMarchToSpaceBounds(marchOrigin, marchDir, uniforms.modelToWorldMatrix,
+        if (!clampMarchToSpaceBounds(marchOrigin, marchDir, uniforms.modelToBoundSpaceMatrix,
                                      uniforms.boundSpaceSize, uniforms.boundToSpaceMode,
                                      marchStartT, marchEndT)) {
             sceneResult.distGlow = float2(kRayMissThreshold + 100.0, 0.0);
@@ -4364,8 +4415,9 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     // temporal depth warm-start path above can. The 1cm tolerance keeps hits
     // sliced open right at a wall from speckling into misses.
     if (uniforms.boundToSpaceMode != 0 && ret.x < kRayMissThreshold) {
-        float3 hitWorld = (uniforms.modelToWorldMatrix * float4(marchOrigin + ret.x * marchDir, 1.0f)).xyz;
-        if (spaceBoundsDistance(hitWorld, uniforms.boundSpaceSize, uniforms.boundToSpaceMode) > 0.01f) {
+        float3 hitModel = marchOrigin + ret.x * marchDir;
+        if (spaceBoundsDistance(hitModel, uniforms.modelToBoundSpaceMatrix,
+                                uniforms.boundSpaceSize, uniforms.boundToSpaceMode) > 0.01f) {
             ret.x = kRayMissThreshold + 100.0;
         }
     }
@@ -4434,9 +4486,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             float3 V = -marchDir;
             half roomAmb = 1.0h;
             if (uniforms.boundToSpaceMode != 0 && uniforms.boundAmbientStrength > 0.001f) {
-                float3 hitWorld = (uniforms.modelToWorldMatrix * float4(p, 1.0f)).xyz;
-                float3 norWorld = normalize((uniforms.modelToWorldMatrix * float4(nor, 0.0f)).xyz);
-                roomAmb = roomAmbientOcclusion(hitWorld, norWorld, uniforms.boundSpaceSize,
+                roomAmb = roomAmbientOcclusion(p, nor, uniforms.modelToBoundSpaceMatrix,
+                                               uniforms.boundSpaceSize,
                                                uniforms.boundToSpaceMode, uniforms.boundAmbientStrength);
             }
             col = ShadeSurface(p, nor, V, spot, atten, sunDir, sunDiffuseScale, lightIntensity,
@@ -4472,8 +4523,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         // The march is already clipped to the room, so this only softens the
         // slice at the boundary; composes with the shape fade via min().
         if (uniforms.boundToSpaceMode != 0) {
-            float3 hitWorld = (uniforms.modelToWorldMatrix * float4(p, 1.0f)).xyz;
-            float spaceDist = spaceBoundsDistance(hitWorld, uniforms.boundSpaceSize, uniforms.boundToSpaceMode);
+            float spaceDist = spaceBoundsDistance(p, uniforms.modelToBoundSpaceMatrix,
+                                                  uniforms.boundSpaceSize, uniforms.boundToSpaceMode);
             half spaceFade;
             if (uniforms.boundingFogEnabled == 2) {
                 float depth = clamp(uniforms.boundingShadowDepth, 0.02f, 0.95f);

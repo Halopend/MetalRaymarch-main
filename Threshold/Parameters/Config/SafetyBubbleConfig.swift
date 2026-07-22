@@ -161,6 +161,15 @@ struct SafetyBubbleConfig: Codable, Equatable, Sendable {
 
     // MARK: - Validation
 
+    /// GPU coupling: the fast-normal gate in Shaders.metal
+    /// (`worldFieldsMayAlterDistance` + `kSafetyBubbleNormalBandMargin`) treats
+    /// the bubble as inert outside `fadeWidth + margin` of the wall so hit
+    /// pixels away from the bubble keep the zero-probe analytic normal paths.
+    /// That margin was derived against THESE ranges — radius ≤ 2.5 bounds the
+    /// hit distance (and therefore the normal-probe epsilon) near the wall, and
+    /// fadeWidth ≤ 1 bounds the influence band. Widening either range requires
+    /// re-deriving the margin (see the shader comment), or normals just outside
+    /// the band could seam.
     mutating func clamp() {
         radius = ControlCatalog.safetyBubbleRadius.clamp(radius)
         shape = shape.clamped(to: 0.0...SafetyBubbleShapePreset.maxStoredValue)

@@ -22,6 +22,8 @@ struct RendererFramePreparation {
     var effectiveScale: Float
     var animatedColorMix: Float
     var animatedGlow: Float
+    var boundSpaceSize: SIMD3<Float>
+    var boundSpaceWorldToLocalMatrix: matrix_float4x4
     var perEye: [RendererPreparedEyeState]
     var handAttraction: HandAttractionUniforms
     var envScrunch: EnvScrunchParams
@@ -294,6 +296,13 @@ extension Renderer {
             deviceTransform: deviceTransform,
             grid: environmentGrid
         )
+        // Prefer ARKit's current-room anchor, then the broader scene mesh, and
+        // retain authored dimensions as the deterministic fallback until a
+        // complete rectangular room fit is available.
+        let sensedRoomBounds = trackedRoomBounds.withLock { $0?.bounds }
+            ?? meshRoomBounds.withLock { $0 }
+        let resolvedRoomBounds = sensedRoomBounds
+            ?? EnvironmentRoomBounds.manual(sizeWorld: settingsSnapshot.boundSpaceSize)
 
         // One-time logging of device anchor to verify position tracking is working
         if !hasLoggedDeviceAnchorInfo, let anchor = drawable.deviceAnchor {
@@ -397,6 +406,7 @@ extension Renderer {
                 modelViewMatrix: modelView,
                 inverseModelViewMatrix: inverseModelView,
                 modelToWorldMatrix: modelMatrix,
+                boundSpaceWorldToLocalMatrix: resolvedRoomBounds.worldToRoomMatrix,
                 previousViewProjMatrix: prevViewProj,
                 previousInvViewProjMatrix: prevViewProj.inverse,
                 maxViewDistance: maxViewDistance,
@@ -421,7 +431,7 @@ extension Renderer {
                 // Pin the Bounding Shape while the Linear Rail slides content through it.
                 boundingShapeCenter: settingsSnapshot.boundingShapeCenterModel(modelMatrix: modelMatrix),
                 boundToSpaceMode: settingsSnapshot.resolvedBoundToSpaceMode,
-                boundSpaceSize: settingsSnapshot.boundSpaceSize,
+                boundSpaceSize: resolvedRoomBounds.sizeWorld,
                 boundAmbientStrength: settingsSnapshot.boundAmbientStrength,
                 envScrunch: envScrunchParams,
                 // Fractal distance cache is a Mac fragment-path prototype; inert here.
@@ -449,6 +459,8 @@ extension Renderer {
             effectiveScale: effectiveScale,
             animatedColorMix: animatedColorMix,
             animatedGlow: animatedGlow,
+            boundSpaceSize: resolvedRoomBounds.sizeWorld,
+            boundSpaceWorldToLocalMatrix: resolvedRoomBounds.worldToRoomMatrix,
             perEye: preparedEyeStates,
             handAttraction: handAttraction,
             envScrunch: envScrunchParams,

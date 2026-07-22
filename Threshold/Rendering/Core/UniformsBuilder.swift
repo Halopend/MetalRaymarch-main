@@ -35,6 +35,7 @@ struct UniformsPlatformInputs {
     var modelViewMatrix: matrix_float4x4
     var inverseModelViewMatrix: matrix_float4x4
     var modelToWorldMatrix: matrix_float4x4    // march/model space → world meters
+    var boundSpaceWorldToLocalMatrix: matrix_float4x4 // world meters → centered room meters
 
     // Temporal warm-start (visionOS fragment path only; identity elsewhere).
     var previousViewProjMatrix: matrix_float4x4
@@ -89,6 +90,15 @@ struct UniformsPlatformInputs {
     // Scanned-environment scrunch + fractal distance cache (bindless grids).
     var envScrunch: EnvScrunchParams
     var distCache: DistanceCacheParams
+}
+
+/// Manual/fallback Bound to Space transform. Authored dimensions retain their
+/// historical placement: footprint centered on world X/Z with the floor at
+/// world Y=0. Automatic room sensing replaces this transform on Vision Pro.
+func manualBoundSpaceWorldToLocalMatrix(size: SIMD3<Float>) -> matrix_float4x4 {
+    var result = matrix_identity_float4x4
+    result.columns.3.y = -max(size.y, 0.01) * 0.5
+    return result
 }
 
 /// Assemble the shader-facing `Uniforms` from the frame snapshot, the resolved
@@ -205,7 +215,7 @@ func assembleUniforms(settings: RenderSettingsSnapshot,
                     boundToSpaceMode: platform.boundToSpaceMode,
                     boundSpaceSize: platform.boundSpaceSize,
                     boundAmbientStrength: platform.boundAmbientStrength,
-                    modelToWorldMatrix: platform.modelToWorldMatrix,
+                    modelToBoundSpaceMatrix: platform.boundSpaceWorldToLocalMatrix * platform.modelToWorldMatrix,
                     envScrunch: platform.envScrunch,
                     distCache: platform.distCache,
                     boundingShapeCenter: platform.boundingShapeCenter)

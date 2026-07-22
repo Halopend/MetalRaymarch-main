@@ -189,6 +189,14 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // low-res cone pass writes a provable LOWER BOUND on each 8x8 block's
     // nearest-surface entry distance; the full march raises its start t to it.
     // Off by default — when off, the code path is byte-identical to before.
+    // Trusted ONLY for box/fold fractals on an UN-warped domain: no spherical
+    // inversion, no sphere projection, no legacy spaceWarpStrength, and an
+    // EMPTY SpaceWarpOp stack (stack ops — twist/ripple/kaleido and the
+    // iterated repeat groups' additive DE recurrence — void the Lipschitz-1
+    // lower-bound proof). The kernel's `domainWarped` guard (Shaders.metal,
+    // coneCoarsePrepass8x8) is the safety authority and writes the cold
+    // sentinel otherwise; the CPU dispatch gate (`coneAllowed`, Renderer.swift)
+    // must mirror the same conditions to avoid dispatching a no-op pass.
     var coarsePrepassWarmStartEnabled: Bool = false
 
     // Foveated raymarching strength (0...1); peripheral 8x8 tiles march fewer steps.

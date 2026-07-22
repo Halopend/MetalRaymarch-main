@@ -161,6 +161,12 @@ final class RenderSettings: @unchecked Sendable {
     // music engine each frame and folded into each op's chosen field at snapshot time.
     // NOT persisted (it's live modulation, not authored state); empty = no modulation.
     private var _spaceWarpAudioOffsets: [SpaceWarpFieldKey: Float] = [:]
+    // Runtime-only education access boundary. RenderSettings defaults to permissive
+    // for lower-level render/test callers; AppModel applies the persisted user mode
+    // before a renderer starts, and the Transformations UI updates it immediately
+    // whenever mode or mapped progress changes.
+    private var _spaceWarpAllowsUnmappedInteraction = true
+    private var _spaceWarpMappedKindIDs: Set<Int32> = []
     // Cached GPU-packed stack (simplify + transcendental precompute + pack). It is a
     // pure function of `_spaceWarpStack` + `_spaceWarpAudioOffsets`, so it only needs
     // rebuilding when one of those changes — nil = dirty. Rebuilding it every frame
@@ -721,7 +727,36 @@ final class RenderSettings: @unchecked Sendable {
     /// order of application; an empty stack means no transforms.
     var spaceWarpStack: [SpaceWarpOpValue] {
         get { withLock { _spaceWarpStack } }
-        set { withLock { _spaceWarpStack = newValue; _cachedPackedSpaceWarpStack = nil } }
+        set {
+            withLock {
+                _spaceWarpStack = newValue
+                _spaceWarpAudioOffsets = allowedSpaceWarpAudioOffsetsLocked(
+                    _spaceWarpAudioOffsets
+                )
+                _cachedPackedSpaceWarpStack = nil
+            }
+        }
+    }
+
+    /// Apply the user-level transformation access policy without making it scene
+    /// state. Locked Education operations can keep rendering as imported black boxes,
+    /// but hidden music mappings cannot continue manipulating them behind the lesson
+    /// gate. Passing `allowsUnmapped: true` is the Just Use policy.
+    func setSpaceWarpInteractionAccess(allowsUnmapped: Bool,
+                                       mappedKindIDs: Set<Int32>) {
+        withLock {
+            guard _spaceWarpAllowsUnmappedInteraction != allowsUnmapped
+                    || _spaceWarpMappedKindIDs != mappedKindIDs else { return }
+            _spaceWarpAllowsUnmappedInteraction = allowsUnmapped
+            _spaceWarpMappedKindIDs = mappedKindIDs
+            let allowedOffsets = allowedSpaceWarpAudioOffsetsLocked(
+                _spaceWarpAudioOffsets
+            )
+            if allowedOffsets != _spaceWarpAudioOffsets {
+                _spaceWarpAudioOffsets = allowedOffsets
+                _cachedPackedSpaceWarpStack = nil
+            }
+        }
     }
 
     /// Replace the music-driven per-(slot, field) offsets atomically. Called once per
@@ -729,12 +764,30 @@ final class RenderSettings: @unchecked Sendable {
     /// off). Folded into each op's chosen field at snapshot time.
     func setSpaceWarpAudioOffsets(_ offsets: [SpaceWarpFieldKey: Float]) {
         withLock {
+            let allowedOffsets = allowedSpaceWarpAudioOffsetsLocked(offsets)
             // Called every audio frame ("always publish"). Only invalidate the packed
             // cache when the offsets actually change, so the common no-transform-binding
             // case (an empty set re-published each frame) keeps the cache warm.
-            guard _spaceWarpAudioOffsets != offsets else { return }
-            _spaceWarpAudioOffsets = offsets
+            guard _spaceWarpAudioOffsets != allowedOffsets else { return }
+            _spaceWarpAudioOffsets = allowedOffsets
             _cachedPackedSpaceWarpStack = nil
+        }
+    }
+
+    /// Filter at the render-settings mutation boundary, not only in SwiftUI. That
+    /// keeps stale/imported mappings and delayed control callbacks from bypassing
+    /// Education mode. Lock-free — call only from inside `withLock`.
+    private func allowedSpaceWarpAudioOffsetsLocked(
+        _ offsets: [SpaceWarpFieldKey: Float]
+    ) -> [SpaceWarpFieldKey: Float] {
+        return offsets.reduce(into: [:]) { allowed, entry in
+            let slot = entry.key.slot
+            guard _spaceWarpStack.indices.contains(slot) else { return }
+            let rawKindID = _spaceWarpStack[slot].type
+            guard SpaceWarpKind(rawValue: rawKindID) != nil,
+                  _spaceWarpAllowsUnmappedInteraction
+                    || _spaceWarpMappedKindIDs.contains(rawKindID) else { return }
+            allowed[entry.key] = entry.value
         }
     }
 
@@ -1523,9 +1576,9 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    /// Bound to Space: clip the fractal to an assumed rectangular room in WORLD
-    /// meters — floor at y = 0 (the visionOS floor), footprint centered on the
-    /// user's starting position.
+    /// Bound to Space: clip the fractal to a rectangular room in real meters.
+    /// Vision Pro automatically follows the sensed current room; these authored
+    /// dimensions and the historical world-origin placement are the fallback.
     var boundToSpaceEnabled: Bool {
         get { withLock { _boundToSpaceEnabled } }
         set {
@@ -1544,7 +1597,7 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    /// Assumed room width (world x), meters.
+    /// Fallback room width, meters, used until sensing establishes the room.
     var boundSpaceWidth: Float {
         get { withLock { _boundSpaceWidth } }
         set {
@@ -1553,7 +1606,7 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    /// Assumed room depth (world z), meters.
+    /// Fallback room depth, meters, used until sensing establishes the room.
     var boundSpaceDepth: Float {
         get { withLock { _boundSpaceDepth } }
         set {
@@ -1562,7 +1615,7 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    /// Assumed room height (world y), meters. Floor is always at y = 0.
+    /// Fallback room height, meters, used until sensing establishes the room.
     var boundSpaceHeight: Float {
         get { withLock { _boundSpaceHeight } }
         set {

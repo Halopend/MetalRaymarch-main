@@ -341,7 +341,12 @@ actor Renderer {
     let worldTracking: WorldTrackingProvider
     var handTracking: HandTrackingProvider?
 
-    // === ENVIRONMENT SCRUNCH (scene-reconstruction source) ===
+    // === ENVIRONMENT UNDERSTANDING ===
+    // Room tracking supplies a current-room mesh whose oriented rectangular fit
+    // drives Bound to Space. Scene reconstruction remains the denser source for
+    // Environment Scrunch and provides a lower-confidence bounds fallback until
+    // Room Tracking identifies the current room.
+    var roomTracking: RoomTrackingProvider?
     // The scanned surroundings as world-space triangle soup per mesh anchor.
     // The anchorUpdates stream task writes the cache and flags it dirty; a
     // throttled bake task periodically folds all anchors into a fresh
@@ -351,6 +356,13 @@ actor Renderer {
     let environmentMeshes = Mutex<[UUID: [SIMD3<Float>]]>([:])  // world tri soup (v0,v1,v2 triples)
     let environmentMeshesDirty = Mutex<Bool>(false)
     let environmentSDF = Mutex<EnvironmentSDFGrid?>(nil)
+    struct TrackedRoomBoundsState: Sendable {
+        var anchorID: UUID
+        var bounds: EnvironmentRoomBounds
+    }
+    let trackedRoomBounds = Mutex<TrackedRoomBoundsState?>(nil)
+    let meshRoomBounds = Mutex<EnvironmentRoomBounds?>(nil)
+    nonisolated(unsafe) var roomUpdatesTask: Task<Void, Never>?
     nonisolated(unsafe) var meshUpdatesTask: Task<Void, Never>?
     nonisolated(unsafe) var envBakeTask: Task<Void, Never>?
     let layerRenderer: LayerRenderer
@@ -583,6 +595,9 @@ actor Renderer {
         
         worldTracking = WorldTrackingProvider()
         handTracking = HandTrackingProvider()
+        roomTracking = RoomTrackingProvider.isSupported
+            ? RoomTrackingProvider()
+            : nil
         sceneReconstruction = SceneReconstructionProvider.isSupported
             ? SceneReconstructionProvider()
             : nil
@@ -636,6 +651,7 @@ actor Renderer {
         setupTask?.cancel()
         archiveSerializeTask?.cancel()
         handTrackingDispatchTask?.cancel()
+        roomUpdatesTask?.cancel()
         meshUpdatesTask?.cancel()
         envBakeTask?.cancel()
         for task in backgroundRenderPipelineBuildTasks.values {
@@ -1247,6 +1263,11 @@ actor Renderer {
             // Environment Scrunch can add a hug shell to the base DE, so the
             // analytic box/fold lower bound no longer proves that space is empty.
             && !settingsSnapshot.envScrunchEnabled
+            // Stack warp ops (twist/ripple/kaleido, repeat-group recurrence) void
+            // the Lipschitz-1 lower-bound proof the same way. The kernel guards
+            // this independently and writes cold sentinels; checking the packed
+            // stack here just skips dispatching that guaranteed no-op pass.
+            && settingsSnapshot.spaceWarpStack.count == 0
 
         // Render-target dimensions the fragment pass writes into (MetalFX input, or
         // the drawable color texture for the direct path).
@@ -1731,9 +1752,9 @@ actor Renderer {
             rateMapValid: tileRateMapValid,
             rateMapLayer: UInt32(rateMapLayer),
             boundToSpaceMode: settingsSnapshot.resolvedBoundToSpaceMode,
-            boundSpaceSize: settingsSnapshot.boundSpaceSize,
+            boundSpaceSize: framePreparation.boundSpaceSize,
             boundAmbientStrength: settingsSnapshot.boundAmbientStrength,
-            modelToWorldMatrix: framePreparation.modelMatrix,
+            modelToBoundSpaceMatrix: framePreparation.boundSpaceWorldToLocalMatrix * framePreparation.modelMatrix,
             envScrunch: framePreparation.envScrunch,
             boundingShapeType: settingsSnapshot.boundingShapeType,
             // Pin the Bounding Shape while the Linear Rail slides content through
@@ -2330,9 +2351,9 @@ actor Renderer {
                 rateMapValid: rateMapValid ? 1 : 0,
                 rateMapLayer: UInt32(rateMapLayer),
                 boundToSpaceMode: settingsSnapshot.resolvedBoundToSpaceMode,
-                boundSpaceSize: settingsSnapshot.boundSpaceSize,
+                boundSpaceSize: framePreparation.boundSpaceSize,
                 boundAmbientStrength: settingsSnapshot.boundAmbientStrength,
-                modelToWorldMatrix: framePreparation.modelMatrix,
+                modelToBoundSpaceMatrix: framePreparation.boundSpaceWorldToLocalMatrix * framePreparation.modelMatrix,
                 envScrunch: framePreparation.envScrunch,
                 boundingShapeType: settingsSnapshot.boundingShapeType,
                 // Pin the Bounding Shape while the Linear Rail slides content

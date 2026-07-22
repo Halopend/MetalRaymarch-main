@@ -116,6 +116,56 @@ struct EnvironmentSDFTests {
         if case .box = partial[0] {} else { Issue.record("expected the box to survive") }
     }
 
+    // MARK: - automatic rectangular room fit
+
+    @Test("Room bounds fit follows a translated and yaw-rotated rectangular room")
+    func orientedRoomBoundsFit() throws {
+        let expectedCenter = SIMD3<Float>(1.4, 1.4, -2.1)
+        let expectedSize = SIMD3<Float>(5.0, 2.8, 3.2)
+        let yaw: Float = 0.31
+        let c = cos(yaw), s = sin(yaw)
+        func world(_ p: SIMD3<Float>) -> SIMD3<Float> {
+            expectedCenter + SIMD3<Float>(c * p.x - s * p.z, p.y, s * p.x + c * p.z)
+        }
+        let h = expectedSize * 0.5
+        let local: [SIMD3<Float>] = [
+            SIMD3(-h.x, -h.y, -h.z), SIMD3(h.x, -h.y, -h.z),
+            SIMD3(h.x, -h.y, h.z), SIMD3(-h.x, -h.y, h.z),
+            SIMD3(-h.x, h.y, -h.z), SIMD3(h.x, h.y, -h.z),
+            SIMD3(h.x, h.y, h.z), SIMD3(-h.x, h.y, h.z)
+        ]
+        // Two triangles per face, with winding irrelevant to the four-angle
+        // wall-axis estimator.
+        let faceIndices: [[Int]] = [
+            [0, 1, 2, 0, 2, 3], [4, 6, 5, 4, 7, 6],
+            [0, 4, 5, 0, 5, 1], [3, 2, 6, 3, 6, 7],
+            [0, 3, 7, 0, 7, 4], [1, 5, 6, 1, 6, 2]
+        ]
+        let triangles = faceIndices.flatMap { $0 }.map { world(local[$0]) }
+        let bounds = try #require(EnvironmentRoomBounds.estimateRectangularRoom(
+            triangles: triangles,
+            trimFraction: 0
+        ))
+
+        #expect(simd_length(bounds.centerWorld - SIMD3(expectedCenter.x, expectedCenter.y - 0.0125, expectedCenter.z)) < 0.03)
+        #expect(abs(bounds.sizeWorld.x - 4.95) < 0.04)
+        #expect(abs(bounds.sizeWorld.y - 2.775) < 0.04)
+        #expect(abs(bounds.sizeWorld.z - 3.15) < 0.04)
+        #expect(abs(bounds.yawRadians - yaw) < 0.02)
+
+        let mappedCenter = bounds.worldToRoomMatrix * SIMD4<Float>(bounds.centerWorld, 1)
+        #expect(simd_length(SIMD3(mappedCenter.x, mappedCenter.y, mappedCenter.z)) < 1e-4)
+    }
+
+    @Test("Room bounds wait for a complete floor-to-ceiling scan")
+    func roomBoundsRejectPartialScan() {
+        let floorOnly: [SIMD3<Float>] = [
+            SIMD3(-2, 0, -2), SIMD3(2, 0, -2), SIMD3(2, 0, 2),
+            SIMD3(-2, 0, -2), SIMD3(2, 0, 2), SIMD3(-2, 0, 2)
+        ]
+        #expect(EnvironmentRoomBounds.estimateRectangularRoom(triangles: floorOnly) == nil)
+    }
+
     // MARK: - bakes (need a Metal device for the output buffer only)
 
     @Test("bakeSynthetic: voxel distances match the analytic SDF (unsigned, clamped) + containment AABB")

@@ -62,7 +62,7 @@ struct RenderSettingsSnapshot {
     let boundingShapeType: Float
     let boundToSpaceEnabled: Bool
     let boundToSpaceMode: Int              // 0 = Match Space, 1 = Ceiling Open, 2 = Walls Open
-    let boundSpaceSize: SIMD3<Float>       // assumed room size, world meters (w, h, d)
+    let boundSpaceSize: SIMD3<Float>       // fallback room size, real meters (w, h, d)
     let boundAmbientStrength: Float        // room-derived ambient occlusion, 0 = off
     let envScrunchEnabled: Bool
     let envScrunchMode: Int                // 0 = Scrunch (bulge), 1 = Shell (only near surfaces)
