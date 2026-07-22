@@ -512,6 +512,41 @@ struct FractalPresetPersistenceTests {
         #expect(SpaceWarpKind.mandelboxStep.descriptor.gpuApplyFn == "warpMandelboxStep")
     }
 
+    @Test("Pack recipes have stable identity, declared requirements, and fresh ops")
+    func warpRecipePackSeam() {
+        let recipes = WarpCatalog.recipes
+        #expect(recipes.map(\.id.rawValue) == [
+            "core.icosahedral-bloom",
+            "core.menger-blocks",
+            "core.kaleido-tunnel",
+            "core.nested-spheres",
+            "core.sierpinski-web",
+        ])
+        #expect(Set(recipes.map(\.id)).count == recipes.count)
+        #expect(recipes.map(\.requiredKinds) == [
+            [.icosahedralCut, .sphereFold, .scaleRepeat],
+            [.mengerFold, .scale, .offsetFold],
+            [.tiling, .kaleidoscope, .twist],
+            [.inversion, .shells, .mirror],
+            [.planeFold, .scale],
+        ])
+
+        for recipe in recipes {
+            let first = recipe.instantiate(ifAllowed: { _ in true })!
+            let second = recipe.instantiate(ifAllowed: { _ in true })!
+            #expect(Set(first.map(\.kind)) == Set(recipe.requiredKinds))
+            #expect(Set(recipe.requiredKinds).count == recipe.requiredKinds.count)
+            #expect(Set(first.map(\.id)).isDisjoint(with: Set(second.map(\.id))))
+        }
+
+        #expect(WarpCatalog.randomStack(from: []).map(\.isEmpty) == nil)
+        for _ in 0..<20 {
+            let stack = WarpCatalog.randomStack(from: [.twist])
+            #expect(stack?.count ?? 0 >= 2)
+            #expect(stack?.allSatisfy { $0.kind == .twist } == true)
+        }
+    }
+
     @Test("cSpaceWarpStack packs enabled ops in order, drops disabled, caps at kMaxSpaceWarpOps")
     func spaceWarpStackPacking() throws {
         var disabled = SpaceWarpOpValue(kind: .twist); disabled.isEnabled = false
@@ -588,6 +623,43 @@ struct FractalPresetPersistenceTests {
         #expect(migrated.sceneState?.geometry.fractalType == .constructionPrimitive)
         #expect(migrated.formulaParamValues?[0] == 4)
         #expect(migrated.formulaParamValues?[1] == 2.5)
+    }
+
+    @Test("Primitive scenes embedding an older payload revision restore as the primitive, not .custom")
+    func stalePayloadPrimitiveSceneRestores() throws {
+        // The box payload exactly as embedded by builds before its roundness
+        // clamp gained the `size` upper bound (commit 56d01f55) — i.e. what sits
+        // in a user's saved scenes and auto-saved last session today. Decode
+        // must recognize it through the historical trust ledger; if it doesn't,
+        // the else-branch rewrites fractalType to `.custom` and the restore
+        // path refuses the scene ("Custom scenes are experimental") even though
+        // the user only ever saved a bundled primitive.
+        var stale = FractalPrimitiveKind.box.formula
+        stale.metalSource = stale.metalSource.replacingOccurrences(
+            of: "float roundness = min(max(fp.params[1], 0.0f), size);",
+            with: "float roundness = max(fp.params[1], 0.0f);"
+        )
+        #expect(stale.sourceHash != FractalPrimitiveKind.box.formula.sourceHash)
+
+        let settings = RenderSettings()
+        settings.fractalType = .constructionPrimitive
+        settings.formulaParams = FractalPrimitiveKind.box.bundledFormulaParams
+        let preset = FractalPreset.fromSettings(
+            settings,
+            name: "Stale box payload",
+            embeddedFormula: stale
+        )
+
+        let restored = try JSONDecoder().decode(
+            FractalPreset.self,
+            from: try JSONEncoder().encode(preset)
+        )
+
+        #expect(restored.fractalType == .constructionPrimitive)
+        #expect(restored.sceneState?.geometry.fractalType == .constructionPrimitive)
+        #expect(restored.embeddedFormula?.bundledConstructionPrimitiveKind == .box)
+        #expect(restored.formulaParamValues?[0] == 1)   // box selector
+        #expect(restored.formulaParamValues?[1] == 1.0) // canonical half size
     }
 
     @Test("cSpaceWarpStack precomputes GPU-ready fields (axis-normalize, squares, log, π/N)")

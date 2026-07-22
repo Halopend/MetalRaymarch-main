@@ -492,6 +492,7 @@ class AppModel {
 
         // Publish the shared reference only after all stored properties are
         // initialized — `self` cannot escape an initializer before then.
+        synchronizeTransformationInteractionAccessFromDefaults()
         AppModel.shared = self
         runtimeViewModeForRenderer = runtimeViewMode
 
@@ -602,6 +603,47 @@ class AppModel {
             }
             storageWatcherObservers.append(observer)
         }
+        let transformationDefaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.synchronizeTransformationInteractionAccessFromDefaults()
+            }
+        }
+        storageWatcherObservers.append(transformationDefaultsObserver)
+    }
+
+    /// The learning mode is a user preference, not scene data, but render-side
+    /// modulation still needs the same access boundary as SwiftUI. Seed the shared
+    /// lock-backed settings before either renderer starts; the Transformations view
+    /// keeps it synchronized when the user changes mode or maps an equation.
+    private func synchronizeTransformationInteractionAccessFromDefaults() {
+        if SettingsPersistence.benchmarkHermetic {
+            renderSettings.setSpaceWarpInteractionAccess(
+                allowsUnmapped: true,
+                mappedKindIDs: []
+            )
+            return
+        }
+        let defaults = UserDefaults.standard
+        let mode = TransformationExperienceMode.decode(
+            defaults.string(forKey: TransformationExperienceMode.defaultsKey) ?? ""
+        )
+        let mappedLessonIDs = TransformationUnlockProgress.decode(
+            defaults.string(forKey: TransformationUnlockProgress.defaultsKey) ?? "",
+            legacyEncoded: defaults.string(
+                forKey: TransformationUnlockProgress.legacyDefaultsKey
+            ) ?? ""
+        )
+        let mappedIDs = TransformationUnlockProgress.runtimeKindIDs(
+            from: mappedLessonIDs
+        )
+        renderSettings.setSpaceWarpInteractionAccess(
+            allowsUnmapped: mode == .justUse,
+            mappedKindIDs: mappedIDs
+        )
     }
     
     /// Save current state for restore on next launch

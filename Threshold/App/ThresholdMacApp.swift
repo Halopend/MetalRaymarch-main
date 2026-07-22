@@ -143,6 +143,12 @@ private struct ThresholdMacRootView: View {
     @AppStorage("MusicTabContent.innerTab") private var radialMusicPanelTab: MusicPanelTab = .music
     @AppStorage("ContentView.settingsSubTab") private var radialSettingsSubTab: SettingsSubTab = .display
     @AppStorage("allowCustomScenes") private var allowCustomScenes = false
+    @AppStorage(TransformationExperienceMode.defaultsKey)
+    private var radialTransformationModeRaw = TransformationExperienceMode.education.rawValue
+    @AppStorage(TransformationUnlockProgress.defaultsKey)
+    private var radialMappedLessonIDsRaw = ""
+    @AppStorage(TransformationUnlockProgress.legacyDefaultsKey)
+    private var radialLegacyMappedTransformationIDsRaw = ""
 
     private let contentMinimumSize = CGSize(width: 980, height: 576)
     private let minimumWindowSize = CGSize(width: 1440, height: 640)
@@ -192,14 +198,6 @@ private struct ThresholdMacRootView: View {
                     .frame(minWidth: minimumWindowSize.width, minHeight: minimumWindowSize.height)
                     .background(Color.black)
                     .ignoresSafeArea()
-
-                // Read-only teaching HUD. Kept outside the Metal view so enabling
-                // Math Lens cannot change the distance field or render pipeline.
-                MathLensViewportOverlay(appModel: appModel)
-                    .padding(.leading, panelPadding)
-                    .padding(.bottom, panelPadding)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                    .zIndex(1)
 
                 if launcherStyle == .radial && isRadialVisible && !appModel.isControlsWindowOpen {
                     RadialMenu(
@@ -905,8 +903,12 @@ private struct ThresholdMacRootView: View {
     private func primitiveQuickControlNodes() -> [RadialNavigationNode] {
         let selected: FractalPrimitiveKind? = {
             guard radialCache.fractalType == .constructionPrimitive else { return nil }
-            let selector = Int(FormulaCatalog.getParam(radialCache.formulaParams, index: 0).rounded())
-            return FractalPrimitiveKind(selector: selector)
+            // rawSelector: scene files carry slot 0 unclamped, and this runs on
+            // every radial-menu mount — a plain Int(Float) here traps on a
+            // corrupt/hand-edited file before the user navigates anywhere.
+            return FractalPrimitiveKind(
+                rawSelector: FormulaCatalog.getParam(radialCache.formulaParams, index: 0)
+            )
         }()
 
         return FractalPrimitiveKind.analyticCases.map { primitive in
@@ -927,7 +929,7 @@ private struct ThresholdMacRootView: View {
 
     /// Active space systems and composable stack instances exposed through
     /// the shared hierarchy's Transform destination. Structural
-    /// editing (add/delete/reorder/recipes) remains in the full Transform panel;
+    /// editing (equation mapping/add/delete/reorder) remains in the full Transform panel;
     /// this surface is intentionally optimized for live tuning.
     private func transformationQuickControlNodes() -> [RadialNavigationNode] {
         var nodes: [RadialNavigationNode] = []
@@ -975,14 +977,49 @@ private struct ThresholdMacRootView: View {
 
         let cache = radialCache
         let stack = cache.spaceWarpStack
-        let opNodes = stack.enumerated().map { position, op in
-            RadialTransformNodeFactory.branch(
+        let mode = TransformationExperienceMode.decode(radialTransformationModeRaw)
+        let mappedIDs = TransformationUnlockProgress.runtimeKindIDs(
+            from: TransformationUnlockProgress.decode(
+                radialMappedLessonIDsRaw,
+                legacyEncoded: radialLegacyMappedTransformationIDsRaw
+            )
+        )
+        let hasCurrentAccess: (SpaceWarpOpValue) -> Bool = { liveOp in
+            let defaults = UserDefaults.standard
+            let liveMode = TransformationExperienceMode.decode(
+                defaults.string(forKey: TransformationExperienceMode.defaultsKey) ?? ""
+            )
+            let liveMappedIDs = TransformationUnlockProgress.runtimeKindIDs(
+                from: TransformationUnlockProgress.decode(
+                    defaults.string(forKey: TransformationUnlockProgress.defaultsKey) ?? "",
+                    legacyEncoded: defaults.string(
+                        forKey: TransformationUnlockProgress.legacyDefaultsKey
+                    ) ?? ""
+                )
+            )
+            return TransformationAccessPolicy.canInteract(
+                withRawKindID: liveOp.type,
+                mode: liveMode,
+                mappedIDs: liveMappedIDs
+            )
+        }
+        let opNodes: [RadialNavigationNode] = stack.enumerated().compactMap { position, op in
+            guard TransformationAccessPolicy.canInteract(
+                withRawKindID: op.type,
+                mode: mode,
+                mappedIDs: mappedIDs
+            ) else { return nil }
+            return RadialTransformNodeFactory.branch(
                 for: op,
                 position: position,
                 read: { id in
-                    cache.spaceWarpStack.first(where: { $0.id == id })
+                    guard let liveOp = cache.renderSettings?.spaceWarpStack.first(where: { $0.id == id }),
+                          hasCurrentAccess(liveOp) else { return nil }
+                    return liveOp
                 },
                 update: { id, mutate in
+                    guard let liveOp = cache.renderSettings?.spaceWarpStack.first(where: { $0.id == id }),
+                          hasCurrentAccess(liveOp) else { return }
                     cache.updateSpaceWarpOp(id: id, mutate)
                 }
             )

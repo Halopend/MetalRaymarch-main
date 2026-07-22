@@ -221,7 +221,7 @@ struct ControlFinderDestination: Identifiable {
         ),
         destination(
             ShapeRailSection.transformations,
-            description: "Build a stack of domain warps and spatial transformations.",
+            description: "Learn by mapping Metal equations, or switch to Just Use for the full transformation catalog.",
             keywords: ["transform", "warp", "sphere projection", "inversion", "twist", "fold stack", "space cut", "icosahedral", "coxeter"]
         ),
         destination(

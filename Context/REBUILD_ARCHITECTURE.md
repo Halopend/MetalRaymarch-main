@@ -828,16 +828,53 @@ covers scalars/vectors/enums/toggles, not arbitrary curve authoring.
 
 ### 12.5 Space-warp stack editor (Shape ▸ Transform)
 
-Add menu: **Recipes** (Icosahedral Bloom, Menger Blocks, Kaleido Tunnel, Nested
-Spheres, Sierpinski Web) and **Surprise Me** (random weighted stack), plus individual
-transforms grouped by family: *Mirrors & Folds · Spherical & Radial · Self-Similar
-Repeats · Bend & Wave*.
+Transformations has two persistent, user-level experience modes. **Just Use**
+exposes the complete built-in catalog and exact per-op source without changing
+Education progress. **Education** asks the user to translate written mathematical
+equations into guided Metal; a recognized equation marks that lesson as mapped,
+adds its first instance when possible, and makes it reusable from Add. Switching
+modes never changes the stack, draft equation, or mapped-lesson set.
 
-Per-op card: slot index, name + tagline, music badge (field + bound-count), enable
-toggle, reorder (up/down), delete, Master Amount slider, up to 2 kind-specific params,
-an optional toggle option, and up to 3 axis sliders.
+Education is an authored five-level path: Foundations; Folds & Directions; Curved
+& Repeating Space; Composition & Motion; Systems & Recurrence. Mapping roughly
+two-thirds of a level opens the next, so one difficult equation cannot halt the
+trail. Locked levels expose only their title and requirement. Each current map gets
+a compact, context-relevant Metal math cheat sheet, an opt-in implementation hint,
+and only then an explicit full-answer reveal. Even first-level answers stay hidden
+initially. Until a mapping succeeds, lesson titles, clues, and accessibility
+announcements avoid catalog product names—including sibling names written with
+spaces, hyphens, or camel case—so the feature itself remains the discovery. Mapped
+IDs remain user progression rather than scene state, so imported or Just Use-created
+stacks continue to render without silently completing lessons. Back in Education,
+an unmapped scene op is deliberately shown as an unknown transformation: its
+identity, parameter controls, source, music-field names, audio modulation, grouping,
+reordering, and radial quick controls stay locked until the learner maps it. Removal
+remains available so a locked black box never traps the learner inside a scene.
+Unknown future raw transform IDs also fail closed instead of inheriting a current
+built-in's fallback identity or unlock state.
 
-**All 17 transform kinds** (current `SpaceWarpKind` — this is the op-kind vocabulary
+The learner's draft and current lesson are scene-scoped, while mapped IDs and the
+mode choice are app-scoped. Mapping merges the latest persisted ID snapshot before
+writing, so two open windows do not discard each other's progress. The same access
+policy guards Add-menu presentation, stack mutations, music-mapping authoring, and
+the render-settings audio-offset boundary: Just Use can manipulate any built-in;
+Education can manipulate only mapped transforms. Help is a monotonic
+vocabulary → hint → full-answer state, with mapped lessons allowed to review their
+source directly. Automatic focus always opens the focused lesson's level. Authored
+spoken math, accessibility announcements, adaptive headers, and full-size touch
+targets keep that trail usable with VoiceOver, larger text, and narrow inspectors.
+
+Curated recipes and randomized stacks remain pure `[WarpOp]` data for a later
+optional transformations pack. Just Use exposes individual built-ins, not those
+pack recipes.
+
+For a mapped op—or any op in Just Use—the per-op card shows slot index, name +
+tagline, music badge (field + bound-count), enable toggle, reorder (up/down), delete,
+Master Amount slider, up to 2 kind-specific params, an optional toggle option, and
+up to 3 axis sliders. An unmapped Education op gets only its anonymous identity and
+a removal action until mapping succeeds.
+
+**All 19 transform kinds** (current `SpaceWarpKind` — this is the op-kind vocabulary
 §5.2's `WarpOp.kind` must cover on day one of the rebuild):
 
 | Kind | Family | Params | Notes |
@@ -852,6 +889,7 @@ an optional toggle option, and up to 3 axis sliders.
 | Coxeter | Mirrors & Folds | p, q | {p,q} reflection group |
 | Menger Fold | Mirrors & Folds | — | abs + sort octant |
 | Offset Fold | Mirrors & Folds | axis | off-centre mirror |
+| Icosahedral Space Cut | Space Cutting | — | fixed {5,3} Coxeter chamber |
 | Sphere Fold | Spherical & Radial | min R, max R | inflate core |
 | Sphere Inversion | Spherical & Radial | radius | turn inside-out |
 | Tube Fold ("Circle") | Spherical & Radial | inner R, outer R | sphere fold in XZ plane |
@@ -859,10 +897,11 @@ an optional toggle option, and up to 3 axis sliders.
 | Scale Repeat | Self-Similar Repeats | scale factor | log-radial Droste |
 | Tiling | Self-Similar Repeats | cell size | infinite lattice |
 | Scale | Self-Similar Repeats | — (master only) | uniform domain scale |
+| Mandelbox Step | Self-Similar Repeats | fold limit, min R, scale | one complete recurrence with +p0 feedback |
 
 → This table **is** the seed data for §5.2's op-kind enum and §2.1 catalog entries
-for each op field (`warp.slot{N}.{field}`, per §5.3). Recipes and Surprise Me are
-just named/randomized `[WarpOp]` arrays — pure data, no new mechanism. The
+for each op field (`warp.slot{N}.{field}`, per §5.3). Pack recipes are
+named/randomized `[WarpOp]` arrays — pure data, no new mechanism. The
 sphere-projection and hand-attract/bounding ops from §12.3 slot into this exact
 same table as three more rows, which is the whole point of unifying them.
 

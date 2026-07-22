@@ -19,7 +19,7 @@ import simd
 
 /// The built-in domain-warp catalog. Raw values MUST match the GPU `applyWarpOp`
 /// switch + `warp<Name>` functions in Shaders.metal.
-enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable {
+enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable, Sendable {
     case twist = 0
     case bend = 1
     case mirror = 2
@@ -338,40 +338,43 @@ enum WarpCatalog {
         byKind[kind] ?? all[0]
     }
 
-    // MARK: - Recipes (curated starting stacks)
+    // MARK: - Pack recipes (not exposed by the first-run equation mapper)
 
-    /// One-tap curated stacks for the add menu. Each `make()` returns a FRESH set of
-    /// editable ops (new UUIDs) that REPLACE the current stack — a starting point to
-    /// explore from, not a locked preset. They lean on the many-to-one folds/repeats,
-    /// which produce their character robustly regardless of fine tuning, so they read
-    /// as "something" immediately even before the user starts dialing.
+    /// Curated stacks retained for a future optional transformations pack. The base
+    /// experience does not surface them: users map individual equations first. Each
+    /// `make()` returns a fresh set of editable ops with new UUIDs.
     static let recipes: [WarpRecipe] = [
-        WarpRecipe("Icosahedral Bloom", icon: "hexagon.fill",
+        WarpRecipe(id: "core.icosahedral-bloom", "Icosahedral Bloom",
+                   icon: "hexagon.fill",
                    blurb: "A {5,3} icosahedral reflection group with a soft sphere-fold core — dense polyhedral mirror symmetry.") {
             [ warpOp(.icosahedralCut),
               warpOp(.sphereFold, strength: 0.6, p1: 0.5, p2: 1.4),
               warpOp(.scaleRepeat, strength: 1.0, p1: 2.0) ]
         },
-        WarpRecipe("Menger Blocks", icon: "square.grid.3x3.fill",
+        WarpRecipe(id: "core.menger-blocks", "Menger Blocks",
+                   icon: "square.grid.3x3.fill",
                    blurb: "Abs-sort fold → scale → offset → fold: two levels of the Menger sponge's boxy self-similarity.") {
             [ warpOp(.mengerFold),
               warpOp(.scale, strength: 2.6),
               warpOp(.offsetFold, strength: 1.0, axis: SIMD3<Float>(1, 1, 0)),
               warpOp(.mengerFold) ]
         },
-        WarpRecipe("Kaleido Tunnel", icon: "snowflake",
+        WarpRecipe(id: "core.kaleido-tunnel", "Kaleido Tunnel",
+                   icon: "snowflake",
                    blurb: "Lattice repeat → 6-fold kaleidoscope → a slow twist: a receding tunnel with rotational symmetry.") {
             [ warpOp(.tiling, strength: 1.0, p1: 3.0),
               warpOp(.kaleidoscope, strength: 1.0, p1: 6.0),
               warpOp(.twist, strength: 0.4, axis: SIMD3<Float>(0, 1, 0)) ]
         },
-        WarpRecipe("Nested Spheres", icon: "circle.circle.fill",
+        WarpRecipe(id: "core.nested-spheres", "Nested Spheres",
+                   icon: "circle.circle.fill",
                    blurb: "Turn space inside-out, then repeat it in concentric shells — Apollonian-flavoured nested bubbles.") {
             [ warpOp(.inversion, strength: 1.0, p1: 1.0),
               warpOp(.shells, strength: 1.0, p1: 1.0),
               warpOp(.mirror, strength: 1.0) ]
         },
-        WarpRecipe("Sierpinski Web", icon: "triangle.fill",
+        WarpRecipe(id: "core.sierpinski-web", "Sierpinski Web",
+                   icon: "triangle.fill",
                    blurb: "Three aimed plane-fold mirrors then a ×2 scale — the classic tetrahedral kaleidoscopic-IFS step, a couple levels deep.") {
             [ warpOp(.planeFold, strength: 1.0, p1: 0.0, axis: SIMD3<Float>(1, -1, 0)),
               warpOp(.planeFold, strength: 1.0, p1: 0.0, axis: SIMD3<Float>(0, 1, -1)),
@@ -383,14 +386,21 @@ enum WarpCatalog {
     /// A random "Surprise Me" stack (2–4 ops) drawn from a palette weighted toward the
     /// structure-forming folds/repeats so the result reliably looks like *something*.
     /// Params and axes are randomized within each op's valid ranges.
-    static func randomStack() -> [SpaceWarpOpValue] {
-        let palette: [SpaceWarpKind] = [
+    static let randomPalette: [SpaceWarpKind] = [
             .mirror, .boxFold, .sphereFold, .inversion, .kaleidoscope, .mengerFold,
             .tiling, .scaleRepeat, .shells, .coxeter, .twist, .offsetFold, .circle,
         ]
+
+    /// Eligibility is mandatory so a future pack UI cannot accidentally construct
+    /// locked Education operators. Just Use can pass the complete palette.
+    static func randomStack(
+        from eligibleKinds: Set<SpaceWarpKind>
+    ) -> [SpaceWarpOpValue]? {
+        let palette = randomPalette.filter(eligibleKinds.contains)
+        guard !palette.isEmpty else { return nil }
         let n = Int.random(in: 2...4)
         return (0..<n).map { _ in
-            let kind = palette.randomElement() ?? .mirror
+            let kind = palette.randomElement()!
             var op = SpaceWarpOpValue(kind: kind)
             let sr = kind.strengthRange
             op.strength = Float.random(in: Swift.max(sr.lowerBound, 0.4)...sr.upperBound)
@@ -406,16 +416,53 @@ enum WarpCatalog {
     }
 }
 
-/// A named, curated starting stack surfaced in the Transformations add menu.
+/// A named, curated starting stack reserved for an optional transformations pack.
+struct WarpRecipeID: RawRepresentable, Hashable, Codable, Sendable {
+    let rawValue: String
+
+    init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+}
+
 struct WarpRecipe: Identifiable, Sendable {
-    let id = UUID()
+    let id: WarpRecipeID
     let name: String
     let icon: String
     let blurb: String
-    let make: @Sendable () -> [SpaceWarpOpValue]
+    private let build: @Sendable () -> [SpaceWarpOpValue]
 
-    init(_ name: String, icon: String, blurb: String, make: @escaping @Sendable () -> [SpaceWarpOpValue]) {
-        self.name = name; self.icon = icon; self.blurb = blurb; self.make = make
+    /// Ordered unique requirements are derived from the actual constructed stack,
+    /// so a pack author cannot accidentally omit a produced operator from gating.
+    var requiredKinds: [SpaceWarpKind] {
+        var seen: Set<SpaceWarpKind> = []
+        return build().compactMap { op in
+            guard let kind = SpaceWarpKind(rawValue: op.type),
+                  seen.insert(kind).inserted else { return nil }
+            return kind
+        }
+    }
+
+    init(id: String, _ name: String, icon: String, blurb: String,
+         make: @escaping @Sendable () -> [SpaceWarpOpValue]) {
+        self.id = WarpRecipeID(rawValue: id)
+        self.name = name
+        self.icon = icon
+        self.blurb = blurb
+        self.build = make
+    }
+
+    /// Construction requires an explicit per-kind authorization. Validation uses
+    /// each produced op's raw discriminator, so unknown imported kinds fail closed.
+    func instantiate(
+        ifAllowed isAllowed: (SpaceWarpKind) -> Bool
+    ) -> [SpaceWarpOpValue]? {
+        let ops = build()
+        guard ops.allSatisfy({ op in
+            guard let kind = SpaceWarpKind(rawValue: op.type) else { return false }
+            return isAllowed(kind)
+        }) else { return nil }
+        return ops
     }
 }
 
@@ -427,7 +474,7 @@ enum SpaceWarpGroupMode: String, Codable, Hashable, Sendable {
     case mandelboxRecurrence
 }
 
-/// Pedagogical snapshots for constructing a Mandelbox from a terminal sphere.
+/// Pack-ready snapshots for constructing a Mandelbox from a terminal sphere.
 /// The first four stages expose the individual techniques. The last two place the
 /// same three editable transforms in a recurrence group and iterate that series.
 enum MandelboxConstructionStage: Int, CaseIterable, Identifiable {
@@ -583,6 +630,42 @@ struct SpaceWarpOpValue: Codable, Identifiable, Hashable {
         case .axisY:    axis.y = clamp(axis.y)
         case .axisZ:    axis.z = clamp(axis.z)
         }
+    }
+}
+
+extension Array where Element == SpaceWarpOpValue {
+    /// Re-establish the "one groupID names ONE contiguous run" invariant on a stack
+    /// decoded from a file. Every in-app edit preserves contiguity (grouping requires
+    /// adjacency, moves carry whole units, `warpGroup` mints a fresh id per slice),
+    /// but scene/preset JSON is external input: a hand-edited, merged, or foreign
+    /// file can repeat a groupID after an interloper op. The Transformations editor
+    /// (StackUnit ForEach identity, group cards, groupID-scoped mutations) all assume
+    /// the invariant, so heal at decode instead of trusting it: each later fragment
+    /// keeps its ops and repeat metadata but becomes its OWN group with a fresh id
+    /// ([G, x, G] → [G, x, G′]). The GPU packer already encodes non-adjacent runs as
+    /// independent groups, so this changes nothing about how the stack renders.
+    func normalizingGroupContiguity() -> [SpaceWarpOpValue] {
+        var healed: [SpaceWarpOpValue] = []
+        healed.reserveCapacity(count)
+        var closedGroups: Set<UUID> = []  // ids whose contiguous run has already ended
+        var currentRun: UUID?             // groupID of the run being walked (nil = ungrouped)
+        var replacementID: UUID?          // fresh id while the current run re-uses a closed id
+        for var op in self {
+            if op.groupID != currentRun {
+                // Run boundary: the group that just ended can never legally continue.
+                if let finished = currentRun { closedGroups.insert(finished) }
+                currentRun = op.groupID
+                // Per-FRAGMENT replacement (not a per-groupID map): [G, x, G, y, G]
+                // must yield THREE distinct groups, or the heal re-splits itself.
+                replacementID = nil
+                if let groupID = op.groupID, closedGroups.contains(groupID) {
+                    replacementID = UUID()
+                }
+            }
+            if let replacementID { op.groupID = replacementID }
+            healed.append(op)
+        }
+        return healed
     }
 }
 

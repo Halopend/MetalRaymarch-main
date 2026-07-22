@@ -320,8 +320,7 @@ extension ContentView {
     private var fractalTransformContent: some View {
         VStack(spacing: 12) {
             TransformationsSection(renderSettings: appModel.renderSettings,
-                                   cache: cache,
-                                   gestureController: appModel.gestureController)
+                                   cache: cache)
         }
     }
 
@@ -817,9 +816,8 @@ extension ContentView {
             Divider().padding(.vertical, 2)
             #endif
 
-            // Authored space containment is deliberately platform-independent:
-            // unlike Surroundings Containment it does not use AR scene
-            // reconstruction, only the dimensions below.
+            // On Vision Pro this follows the sensed current room. Authored
+            // dimensions remain the cross-platform and incomplete-scan fallback.
             HStack(spacing: 6) {
                 Image(systemName: "house").foregroundStyle(.cyan)
                 Text("Bound to Space").font(.headline)
@@ -829,7 +827,7 @@ extension ContentView {
                     set: { cache.setBoundToSpaceEnabled($0) }
                 ))
                 .labelsHidden()
-                .help("Clips the fractal to an authored rectangular space around the world origin. This does not scan or infer the room.")
+                .help("Clips the fractal to the sensed rectangular room on Vision Pro, with the authored dimensions below as a fallback.")
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -851,31 +849,38 @@ extension ContentView {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                accelSliderCompact("Space Width",
+                #if os(visionOS)
+                Text("Room Tracking automatically follows the current room's center, wall angle, footprint, floor, and ceiling. Fallback dimensions are used until the room scan is complete.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                #endif
+
+                accelSliderCompact("Fallback Width",
                             value: cache.quality.boundSpaceWidth, range: 1...20,
                             display: String(format: "%.1f m", cache.quality.boundSpaceWidth),
-                            help: "Authored space width (left-right), in meters.") { value in
+                            help: "Fallback width used until a complete room scan is available.") { value in
                     cache.quality.boundSpaceWidth = value
                     cache.push(\.boundSpaceWidth, value: value)
                 }
-                accelSliderCompact("Space Depth",
+                accelSliderCompact("Fallback Depth",
                             value: cache.quality.boundSpaceDepth, range: 1...20,
                             display: String(format: "%.1f m", cache.quality.boundSpaceDepth),
-                            help: "Authored space depth (forward-back), in meters.") { value in
+                            help: "Fallback depth used until a complete room scan is available.") { value in
                     cache.quality.boundSpaceDepth = value
                     cache.push(\.boundSpaceDepth, value: value)
                 }
-                accelSliderCompact("Space Height",
+                accelSliderCompact("Fallback Height",
                             value: cache.quality.boundSpaceHeight, range: 1...10,
                             display: String(format: "%.1f m", cache.quality.boundSpaceHeight),
-                            help: "Authored space height above its floor, in meters.") { value in
+                            help: "Fallback height used until a complete room scan is available.") { value in
                     cache.quality.boundSpaceHeight = value
                     cache.push(\.boundSpaceHeight, value: value)
                 }
                 accelSliderCompact("Space Ambient",
                             value: cache.quality.boundAmbientStrength, range: 0...1,
                             display: String(format: "%.0f%%", cache.quality.boundAmbientStrength * 100),
-                            help: "Contact shadow contributed by the authored space faces. 0% disables it.") { value in
+                            help: "Contact shadow contributed by the room boundary. 0% disables it.") { value in
                     cache.quality.boundAmbientStrength = value
                     cache.push(\.boundAmbientStrength, value: value)
                 }

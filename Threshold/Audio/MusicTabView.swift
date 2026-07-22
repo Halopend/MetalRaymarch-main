@@ -46,8 +46,27 @@ struct MusicTabContent: View {
     @State private var viewModel: MusicTabViewModel
     var tabSelection: Binding<MusicPanelTab>? = nil
     @AppStorage("MusicTabContent.innerTab") private var storedTabSelection: MusicPanelTab = .music
+    @AppStorage(TransformationExperienceMode.defaultsKey)
+    private var transformationExperienceModeRaw = TransformationExperienceMode.education.rawValue
+    @AppStorage(TransformationUnlockProgress.defaultsKey)
+    private var mappedLessonIDsRaw = ""
+    @AppStorage(TransformationUnlockProgress.legacyDefaultsKey)
+    private var legacyMappedTransformationIDsRaw = ""
     @State private var isShowingVisualizationAddPopover = false
     @State private var isHoldingVisualizationAddAdjustment = false
+
+    private var transformationExperienceMode: TransformationExperienceMode {
+        TransformationExperienceMode.decode(transformationExperienceModeRaw)
+    }
+
+    private var mappedTransformationIDs: Set<Int32> {
+        TransformationUnlockProgress.runtimeKindIDs(
+            from: TransformationUnlockProgress.decode(
+                mappedLessonIDsRaw,
+                legacyEncoded: legacyMappedTransformationIDsRaw
+            )
+        )
+    }
 
     private var effectiveTabSelection: Binding<MusicPanelTab> {
         Binding(
@@ -1324,65 +1343,73 @@ struct MusicTabContent: View {
                                     Spacer()
                                 }
 
-                                // Transform slots can drive any field of the op, not
-                                // just its strength — pick from the fields the live
-                                // transform at this slot actually has.
-                                if mapping.target.isSpaceWarp,
-                                   let slot = mapping.target.spaceWarpSlot,
-                                   let stack = cache.renderSettings?.spaceWarpStack,
-                                   slot < stack.count {
-                                    let kind = stack[slot].kind
-                                    let fields = kind.musicFields
-                                    if fields.count > 1 {
-                                        Picker("Drives", selection: Binding(
-                                            get: { mappingAt(index)?.spaceWarpField ?? .strength },
-                                            set: { newValue in updateMapping(index) { $0.spaceWarpField = newValue } }
-                                        )) {
-                                            ForEach(fields, id: \.self) { f in
-                                                Text(kind.musicFieldLabel(f)).tag(f)
+                                if canEditMappingTarget(mapping.target) {
+                                    // Transform slots can drive any field of the op, not
+                                    // just its strength — pick from the fields the live
+                                    // transform at this slot actually has.
+                                    if mapping.target.isSpaceWarp,
+                                       let slot = mapping.target.spaceWarpSlot,
+                                       let stack = cache.renderSettings?.spaceWarpStack,
+                                       slot < stack.count {
+                                        let kind = stack[slot].kind
+                                        let fields = kind.musicFields
+                                        if fields.count > 1 {
+                                            Picker("Drives", selection: Binding(
+                                                get: { mappingAt(index)?.spaceWarpField ?? .strength },
+                                                set: { newValue in updateMapping(index) { $0.spaceWarpField = newValue } }
+                                            )) {
+                                                ForEach(fields, id: \.self) { f in
+                                                    Text(kind.musicFieldLabel(f)).tag(f)
+                                                }
                                             }
+                                            .pickerStyle(.menu)
+                                            .font(.caption)
                                         }
-                                        .pickerStyle(.menu)
-                                        .font(.caption)
                                     }
-                                }
 
-                                Picker("Source", selection: Binding(
-                                    get: { mappingAt(index)?.source ?? .composite },
-                                    set: { newValue in updateMapping(index) { $0.source = newValue } }
-                                )) {
-                                    ForEach(MusicReactiveSource.pickerCases, id: \.self) { source in
-                                        Text(source.displayName).tag(source)
+                                    Picker("Source", selection: Binding(
+                                        get: { mappingAt(index)?.source ?? .composite },
+                                        set: { newValue in updateMapping(index) { $0.source = newValue } }
+                                    )) {
+                                        ForEach(MusicReactiveSource.pickerCases, id: \.self) { source in
+                                            Text(source.displayName).tag(source)
+                                        }
                                     }
-                                }
-                                .pickerStyle(.segmented)
+                                    .pickerStyle(.segmented)
 
-                                Picker("Curve", selection: Binding(
-                                    get: { mappingAt(index)?.responseCurve ?? .drift },
-                                    set: { newValue in updateMapping(index) { $0.responseCurve = newValue } }
-                                )) {
-                                    ForEach(ResponseCurve.pickerCases, id: \.self) { curve in
-                                        Label(curve.displayName, systemImage: curve.icon).tag(curve)
+                                    Picker("Curve", selection: Binding(
+                                        get: { mappingAt(index)?.responseCurve ?? .drift },
+                                        set: { newValue in updateMapping(index) { $0.responseCurve = newValue } }
+                                    )) {
+                                        ForEach(ResponseCurve.pickerCases, id: \.self) { curve in
+                                            Label(curve.displayName, systemImage: curve.icon).tag(curve)
+                                        }
                                     }
+                                    .pickerStyle(.segmented)
+
+                                    if (mappingAt(index)?.responseCurve ?? .drift) == .hybrid {
+                                        sliderRow(label: "Living", value: Binding(
+                                            get: { mappingAt(index)?.hybridCombo ?? 0.35 },
+                                            set: { newValue in updateMapping(index) { $0.hybridCombo = newValue; $0.sanitizeInPlace() } }
+                                        ), range: 0...1)
+                                    }
+
+                                    sliderRow(label: "Intensity", value: Binding(
+                                        get: { mappingAt(index)?.amount ?? 1.0 },
+                                        set: { newValue in updateMapping(index) { $0.amount = newValue; $0.sanitizeInPlace() } }
+                                    ), range: 0...3)
+
+                                    sliderRow(label: "Smooth", value: Binding(
+                                        get: { mappingAt(index)?.smoothingWindow ?? 0.0 },
+                                        set: { newValue in updateMapping(index) { $0.smoothingWindow = newValue; $0.sanitizeInPlace() } }
+                                    ), range: 0...2)
+                                } else {
+                                    Label("Map this transformation to unlock its audio mapping",
+                                          systemImage: "lock")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
-                                .pickerStyle(.segmented)
-
-                                if (mappingAt(index)?.responseCurve ?? .drift) == .hybrid {
-                                    sliderRow(label: "Living", value: Binding(
-                                        get: { mappingAt(index)?.hybridCombo ?? 0.35 },
-                                        set: { newValue in updateMapping(index) { $0.hybridCombo = newValue; $0.sanitizeInPlace() } }
-                                    ), range: 0...1)
-                                }
-
-                                sliderRow(label: "Intensity", value: Binding(
-                                    get: { mappingAt(index)?.amount ?? 1.0 },
-                                    set: { newValue in updateMapping(index) { $0.amount = newValue; $0.sanitizeInPlace() } }
-                                ), range: 0...3)
-
-                                sliderRow(label: "Smooth", value: Binding(
-                                    get: { mappingAt(index)?.smoothingWindow ?? 0.0 },
-                                    set: { newValue in updateMapping(index) { $0.smoothingWindow = newValue; $0.sanitizeInPlace() } }
-                                ), range: 0...2)
 
                                 // Remove control: comfortably sized and bottom-leading so it's
                                 // an easy tap target and stays clear of the right-edge scrollbar.
@@ -1440,7 +1467,9 @@ struct MusicTabContent: View {
         cache.push(\.trebleSensitivity, value: s.trebleSensitivity)
         cache.push(\.beatSensitivity, value: s.beatSensitivity)
         
-        let mappings = preset.defaultMappings(for: cache.fractalType)
+        let mappings = preset.defaultMappings(for: cache.fractalType).filter {
+            canEditMappingTarget($0.target)
+        }
         cache.audioReactive.musicReactiveMappings = mappings
         cache.push(\.musicReactiveMappings, value: mappings)
     }
@@ -1451,7 +1480,20 @@ struct MusicTabContent: View {
         let warpCount = cache.renderSettings?.spaceWarpStack.count ?? 0
         let all = MusicReactiveTarget.availableCases(for: cache.fractalType)
                 + MusicReactiveTarget.availableSpaceWarpCases(count: warpCount)
-        return all.filter { !existing.contains($0) }
+        return all.filter {
+            !existing.contains($0) && canEditMappingTarget($0)
+        }
+    }
+
+    private func canEditMappingTarget(_ target: MusicReactiveTarget) -> Bool {
+        guard let slot = target.spaceWarpSlot else { return true }
+        guard let stack = cache.renderSettings?.spaceWarpStack,
+              stack.indices.contains(slot) else { return false }
+        return TransformationAccessPolicy.canInteract(
+            withRawKindID: stack[slot].type,
+            mode: transformationExperienceMode,
+            mappedIDs: mappedTransformationIDs
+        )
     }
 
     private func mappingAt(_ index: Int) -> MusicReactiveMapping? {
@@ -1462,6 +1504,7 @@ struct MusicTabContent: View {
     private func updateMapping(_ index: Int, mutate: (inout MusicReactiveMapping) -> Void) {
         guard cache.audioReactive.musicReactiveMappings.indices.contains(index) else { return }
         var mappings = cache.audioReactive.musicReactiveMappings
+        guard canEditMappingTarget(mappings[index].target) else { return }
         mutate(&mappings[index])
         mappings[index].sanitizeInPlace()
         cache.audioReactive.musicReactiveMappings = mappings
@@ -1470,7 +1513,8 @@ struct MusicTabContent: View {
 
     private func addMapping(_ target: MusicReactiveTarget) {
         var mappings = cache.audioReactive.musicReactiveMappings
-        guard !mappings.contains(where: { $0.target == target }) else { return }
+        guard canEditMappingTarget(target),
+              !mappings.contains(where: { $0.target == target }) else { return }
         var mapping = target.defaultMapping(for: cache.fractalType, enabled: true)
         // Newly added controls default to Follow (the calm, drift response).
         mapping.responseCurve = .drift

@@ -267,6 +267,10 @@ struct SceneState: Codable, Equatable {
         handAttraction = (try? c.decodeIfPresent(HandAttractionConfig.self, forKey: .handAttraction)) ?? HandAttractionConfig()
         audioReactive = (try? c.decodeIfPresent(AudioReactiveConfig.self, forKey: .audioReactive)) ?? AudioReactiveConfig()
         space = (try? c.decodeIfPresent(SceneSpaceState.self, forKey: .space)) ?? SceneSpaceState()
+        // Heal repeat groups split by an interloper op — scene files are external
+        // input, and everything downstream (the Transformations editor above all)
+        // assumes one groupID names one contiguous run.
+        space.warpStack = space.warpStack.normalizingGroupContiguity()
         motion = (try? c.decodeIfPresent(SceneMotionState.self, forKey: .motion)) ?? SceneMotionState()
         presentation = (try? c.decodeIfPresent(ScenePresentationState.self, forKey: .presentation)) ?? ScenePresentationState()
     }
@@ -708,7 +712,10 @@ struct FractalPreset: Codable, Identifiable {
         sphereProjectionBlend = try container.decodeIfPresent(Float.self, forKey: .sphereProjectionBlend)
         sphereProjectionRadius = try container.decodeIfPresent(Float.self, forKey: .sphereProjectionRadius)
         deIterationMismatch = try container.decodeIfPresent(Float.self, forKey: .deIterationMismatch)
-        spaceWarpOps = try container.decodeIfPresent([SpaceWarpOpValue].self, forKey: .spaceWarpOps)
+        // Heal repeat groups split by an interloper op — external files can't be
+        // trusted to keep one groupID contiguous (see `normalizingGroupContiguity`).
+        spaceWarpOps = try container.decodeIfPresent([SpaceWarpOpValue].self, forKey: .spaceWarpOps)?
+            .normalizingGroupContiguity()
 
         // Legacy "mandelboxSphereProjection" migration: the dedicated MSP type read
         // the projection blend/radius from formula params[4]/[5] and always projected.

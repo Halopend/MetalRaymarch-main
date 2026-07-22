@@ -913,7 +913,12 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         safetyBubbleRadius    = try c.decodeIfPresent(Float.self, forKey: .safetyBubbleRadius)
         safetyBubbleShape     = try c.decodeIfPresent(Float.self, forKey: .safetyBubbleShape)
         safetyBubbleBlend     = try c.decodeIfPresent(Float.self, forKey: .safetyBubbleBlend)
-        spaceWarpOps          = try c.decodeIfPresent([SpaceWarpOpValue].self, forKey: .spaceWarpOps)
+        // Animation documents are an external input lane like scene files: a
+        // hand-edited/corrupt file may split a repeat group's contiguous run,
+        // which the editor and GPU packer are only trusted to receive healed
+        // (see `normalizingGroupContiguity`).
+        spaceWarpOps          = try c.decodeIfPresent([SpaceWarpOpValue].self, forKey: .spaceWarpOps)?
+            .normalizingGroupContiguity()
         mixedModeScene        = try c.decodeIfPresent(Bool.self, forKey: .mixedModeScene)
         attachedSong          = try c.decodeIfPresent(SongAttachment.self, forKey: .attachedSong)
         playbackSpeedOverride = try c.decodeIfPresent(Double.self, forKey: .playbackSpeedOverride)

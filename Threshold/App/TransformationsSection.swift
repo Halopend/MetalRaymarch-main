@@ -3,9 +3,10 @@
 //  Threshold
 //
 //  Editor for the composable domain-transform STACK (`RenderSettings.spaceWarpStack`).
-//  Add transforms, group a contiguous series into an iterated loop, reorder them
-//  (order = order of application), enable/disable, and tune each instance's own
-//  parameters. Multiple of the SAME kind can be stacked. EVERY edit — structural
+//  Learn transforms by mapping Metal equations or open the direct-use catalog,
+//  then group a contiguous series into an iterated loop, reorder them (order =
+//  order of application), enable/disable,
+//  and tune each instance's own parameters. Multiple of the SAME kind can be stacked. EVERY edit — structural
 //  or slider —
 //  is a live uniform write: the GPU renders the stack via a count-driven runtime
 //  loop (`spaceWarpStackTransform` in Shaders.metal) repacked each frame by
@@ -14,15 +15,26 @@
 //
 
 import SwiftUI
+import Foundation
 import simd
+#if os(macOS)
+import AppKit
+#elseif os(iOS) || os(visionOS)
+import UIKit
+#endif
 
 struct TransformationsSection: View {
+    private enum EquationAccessibilityTarget: Hashable {
+        case hint(TransformationLessonID)
+        case answer(TransformationLessonID)
+        case result(TransformationLessonID)
+    }
+
     let renderSettings: RenderSettings
     /// Live UI store. `UISettingsCache` is `@Observable`, so reading its sphere-system
     /// flags in `body` auto-subscribes this view — the system cards below track the
     /// same state the Space tab / quick toggles drive (DisplayConfig, scene-persisted).
     let cache: UISettingsCache
-    let gestureController: GestureController?
 
     // RenderSettings is not Observable; bump to force a re-read of the op LIST after
     // structural edits (add / delete / reorder / enable). Slider drags mutate in
@@ -32,13 +44,142 @@ struct TransformationsSection: View {
     @State private var isCreatingGroup = false
     @State private var groupSelection: Set<UUID> = []
     @State private var expandedGroups: Set<UUID> = []
+    @SceneStorage("Transformations.educationEquationDraft.v1")
+    private var legacyEquationDraft = ""
+    @SceneStorage("Transformations.focusedEquationRawID.v1")
+    private var legacyFocusedEquationRawID = -1
+    @SceneStorage("Transformations.educationEquationDrafts.v2")
+    private var equationDraftsRaw = ""
+    @SceneStorage("Transformations.focusedEquationLessonID.v2")
+    private var focusedEquationLessonIDRaw = ""
+    @State private var mappedKind: SpaceWarpKind?
+    @State private var pendingNextEquationID: TransformationLessonID?
+    @State private var mappingResultMessage = ""
+    @State private var equationError: String?
+    @State private var isEquationGuideExpanded = true
+    @State private var expandedEducationLevelIDs: Set<Int> = []
+    @State private var didInitializeEducationExpansion = false
+    @State private var assistanceStages: [TransformationLessonID: TransformationAssistanceStage] = [:]
+    @FocusState private var isEquationEditorFocused: Bool
+    @AccessibilityFocusState private var equationAccessibilityTarget: EquationAccessibilityTarget?
+    @AppStorage(TransformationExperienceMode.defaultsKey)
+    private var experienceModeRaw = TransformationExperienceMode.education.rawValue
+    @AppStorage(TransformationUnlockProgress.defaultsKey)
+    private var mappedLessonIDsRaw = ""
+    @AppStorage(TransformationUnlockProgress.legacyDefaultsKey)
+    private var legacyMappedTransformationIDsRaw = ""
 
     private var ops: [SpaceWarpOpValue] { renderSettings.spaceWarpStack }
+    private var hasStackCapacity: Bool { ops.count < Int(kMaxSpaceWarpOps) }
+    private var experienceMode: TransformationExperienceMode {
+        TransformationExperienceMode.decode(experienceModeRaw)
+    }
+    private var experienceModeBinding: Binding<TransformationExperienceMode> {
+        Binding(
+            get: { experienceMode },
+            set: { newMode in
+                experienceModeRaw = newMode.rawValue
+                synchronizeRuntimeInteractionAccess(
+                    mode: newMode,
+                    mappedIDs: mappedTransformationIDs
+                )
+            }
+        )
+    }
+    private var mappedLessonIDs: Set<TransformationLessonID> {
+        TransformationUnlockProgress.decode(
+            mappedLessonIDsRaw,
+            legacyEncoded: legacyMappedTransformationIDsRaw
+        )
+    }
+    private var mappedTransformationIDs: Set<Int32> {
+        TransformationUnlockProgress.runtimeKindIDs(from: mappedLessonIDs)
+    }
+    private var mappedLessons: [TransformationEquationLesson] {
+        TransformationEquationCatalog.lessons.filter {
+            mappedLessonIDs.contains($0.id)
+        }
+    }
+    private var addableLessons: [TransformationEquationLesson] {
+        TransformationAccessPolicy.addMenuLessons(
+            mode: experienceMode,
+            mappedIDs: mappedTransformationIDs
+        )
+    }
+    private var educationGuideLessons: [TransformationEquationLesson] {
+        TransformationEducationPath.guideLessons(mappedIDs: mappedLessonIDs)
+    }
+    private var focusedEquationID: TransformationLessonID? {
+        guard !focusedEquationLessonIDRaw.isEmpty else { return nil }
+        return TransformationLessonID(rawValue: focusedEquationLessonIDRaw)
+    }
+    private var focusedEquationLesson: TransformationEquationLesson? {
+        if let focusedEquationID,
+           let focused = educationGuideLessons.first(where: { $0.id == focusedEquationID }) {
+            return focused
+        }
+        return TransformationEducationPath.preferredLesson(
+            mappedIDs: mappedLessonIDs
+        )
+    }
+    private var equationInput: String {
+        guard let lessonID = focusedEquationLesson?.id else { return "" }
+        return TransformationEquationDraftStore.draft(
+            for: lessonID,
+            in: equationDraftsRaw
+        )
+    }
+    private var equationInputBinding: Binding<String> {
+        Binding(
+            get: { equationInput },
+            set: { draft in
+                guard let lessonID = focusedEquationLesson?.id else { return }
+                equationDraftsRaw = TransformationEquationDraftStore.update(
+                    draft,
+                    for: lessonID,
+                    in: equationDraftsRaw
+                )
+                mappedKind = nil
+                mappingResultMessage = ""
+                equationError = nil
+                pendingNextEquationID = nil
+                equationAccessibilityTarget = nil
+            }
+        )
+    }
+    private var currentEducationLevel: TransformationEducationLevel {
+        TransformationEducationPath.deepestUnlockedLevel(mappedIDs: mappedLessonIDs)
+    }
+    private var focusedEducationLevel: TransformationEducationLevel {
+        if let kind = focusedEquationLesson?.kind,
+           let level = TransformationEducationPath.level(containing: kind) {
+            return level
+        }
+        return currentEducationLevel
+    }
+    private var focusedEducationMappedCount: Int {
+        TransformationEducationPath.mappedCount(
+            in: focusedEducationLevel,
+            mappedIDs: mappedLessonIDs
+        )
+    }
 
     /// The persisted/GPU stack stays flat, but the editor presents each contiguous
     /// repeat group as a single parent unit containing its child transformations.
     private struct StackUnit: Identifiable {
-        let id: UUID
+        /// ForEach identity. Decoded stacks are healed so a groupID names exactly one
+        /// contiguous run (`normalizingGroupContiguity`), but the live stack can also
+        /// be replaced wholesale by paths that skip that healing (legacy animation
+        /// scenes apply their flat `spaceWarpOps` directly), and duplicate ForEach
+        /// identifiers are undefined behavior in SwiftUI. Folding in the run's start
+        /// index keeps twin fragments of a split group distinct regardless. Position
+        /// churn is harmless: `.id(refresh)` already re-identifies the whole stack
+        /// listing on every structural edit.
+        struct ID: Hashable {
+            let base: UUID
+            let start: Int
+        }
+        let id: ID
         let range: Range<Int>
         let groupID: UUID?
     }
@@ -49,7 +190,9 @@ struct TransformationsSection: View {
         while index < ops.count {
             let range = unitRange(containing: index, in: ops)
             let groupID = ops[index].groupID
-            result.append(StackUnit(id: groupID ?? ops[index].id, range: range, groupID: groupID))
+            result.append(StackUnit(id: StackUnit.ID(base: groupID ?? ops[index].id,
+                                                     start: range.lowerBound),
+                                    range: range, groupID: groupID))
             index = range.upperBound
         }
         return result
@@ -75,24 +218,22 @@ struct TransformationsSection: View {
         // Per-card cost is kept low by the WarpSource.metalFunction cache: the 247 KB
         // shader-source scan that used to run per card, per scroll, is now memoized.
         LazyVStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Label("Transformations", systemImage: "circle.hexagongrid")
-                    .font(.headline)
-                Text("BETA")
-                    .font(.caption2.weight(.heavy))
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(Capsule().fill(.orange.opacity(0.22)))
-                    .foregroundStyle(.orange)
-                    .accessibilityLabel("Beta feature")
-                Spacer()
-                groupCreationControls
-                addMenu
-            }
+            transformationsHeader
 
-            Text("Stack domain transforms top → bottom. A group repeats its complete child pipeline for a chosen number of passes; choose and size the base shape in Primitives.")
+            experienceModePicker
+
+            Text(experienceMode == .education
+                 ? "Map equations to complete lessons and open deeper levels. Mapped transforms stack top → bottom; global space systems remain separate."
+                 : "Direct controls, no equations. Education progress is unchanged.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if experienceMode == .education {
+                equationWorkbench
+            } else {
+                justUseSummary
+            }
 
             if isCreatingGroup {
                 Label("Select two or more adjacent transformations, then choose Create Group.",
@@ -116,7 +257,7 @@ struct TransformationsSection: View {
             }
 
             if ops.isEmpty {
-                Text("No transformations yet. Use Add to add one.")
+                Text(emptyStackMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -132,11 +273,155 @@ struct TransformationsSection: View {
                                insideGroup: false)
                     }
                 }
+                // Structural edits need fresh row identities because RenderSettings is
+                // lock-backed rather than Observable. Keep that invalidation confined to
+                // the stack: rebuilding the whole section would discard the equation
+                // editor's keyboard cursor and VoiceOver focus after a successful map.
+                .id(refresh)
             }
         }
-        .id(refresh)
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.mint.opacity(0.07)))
+        .onAppear {
+            migrateLegacyLessonProgressIfNeeded()
+            initializeFocusedEquationIfNeeded()
+            migrateLegacyEquationDraftIfNeeded()
+            synchronizeRuntimeInteractionAccess(
+                mode: experienceMode,
+                mappedIDs: mappedTransformationIDs
+            )
+            guard !didInitializeEducationExpansion else { return }
+            expandedEducationLevelIDs = [focusedEducationLevel.id]
+            didInitializeEducationExpansion = true
+        }
+        .onChange(of: mappedLessonIDsRaw) { previousRaw, currentRaw in
+            synchronizeRuntimeInteractionAccess(
+                mode: experienceMode,
+                mappedIDs: TransformationUnlockProgress.runtimeKindIDs(
+                    from: TransformationUnlockProgress.decode(
+                        currentRaw,
+                        legacyEncoded: legacyMappedTransformationIDsRaw
+                    )
+                )
+            )
+            reconcileEducationPresentation(
+                previousRaw: previousRaw,
+                currentRaw: currentRaw
+            )
+        }
+        .onChange(of: legacyMappedTransformationIDsRaw) { _, _ in
+            migrateLegacyLessonProgressIfNeeded()
+            synchronizeRuntimeInteractionAccess(
+                mode: experienceMode,
+                mappedIDs: mappedTransformationIDs
+            )
+        }
+        .onChange(of: experienceModeRaw) { _, currentRaw in
+            let mode = TransformationExperienceMode.decode(currentRaw)
+            synchronizeRuntimeInteractionAccess(
+                mode: mode,
+                mappedIDs: mappedTransformationIDs
+            )
+            let progress = mappedLessons.count
+            switch mode {
+            case .education:
+                postAccessibilityAnnouncement(
+                    "Education mode. \(progress) \(progress == 1 ? "lesson" : "lessons") mapped."
+                )
+            case .justUse:
+                postAccessibilityAnnouncement(
+                    "Just Use mode. The full catalog is available and \(progress) Education \(progress == 1 ? "mapping is" : "mappings are") preserved."
+                )
+            }
+        }
+    }
+
+    private var transformationsHeader: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                transformationsTitle
+                Spacer()
+                transformationsHeaderActions
+            }
+            VStack(alignment: .leading, spacing: 7) {
+                transformationsTitle
+                HStack(spacing: 8) {
+                    Spacer()
+                    transformationsHeaderActions
+                }
+            }
+        }
+    }
+
+    private var transformationsTitle: some View {
+        HStack(spacing: 8) {
+            Label("Transformations", systemImage: "circle.hexagongrid")
+                .font(.headline)
+            Text("BETA")
+                .font(.caption2.weight(.heavy))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Capsule().fill(.orange.opacity(0.22)))
+                .foregroundStyle(.orange)
+                .accessibilityLabel("Beta feature")
+        }
+    }
+
+    private var transformationsHeaderActions: some View {
+        HStack(spacing: 8) {
+            groupCreationControls
+            addMenu
+        }
+    }
+
+    private var experienceModePicker: some View {
+        Picker("Transformation experience", selection: experienceModeBinding) {
+            ForEach(TransformationExperienceMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .accessibilityLabel("Transformation experience mode")
+        .accessibilityValue(experienceMode.displayName)
+        .accessibilityHint("Education maps equations. Just Use opens the full catalog without completing lessons.")
+    }
+
+    private var justUseSummary: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "slider.horizontal.3")
+                .foregroundStyle(.mint)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Full Catalog")
+                    .font(.caption.weight(.semibold))
+                Text("Choose any built-in transformation from Add. Return to Education whenever you want to map equations and reach deeper lessons.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(educationProgressSummary)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.mint)
+            }
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 9).fill(Color.mint.opacity(0.08)))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var educationProgressSummary: String {
+        let count = mappedLessons.count
+        return "Education: Level \(currentEducationLevel.numeral) open · \(count) \(count == 1 ? "lesson" : "lessons") mapped."
+    }
+
+    private var emptyStackMessage: String {
+        switch experienceMode {
+        case .justUse:
+            return "No transformations yet. Choose Add to browse the full catalog."
+        case .education where mappedLessons.isEmpty:
+            return "No transformations yet. Map an equation to discover the first one."
+        case .education:
+            return "No transformations yet. Use Add to reuse a mapped transformation."
+        }
     }
 
     @ViewBuilder
@@ -144,8 +429,10 @@ struct TransformationsSection: View {
         if isCreatingGroup {
             Button("Cancel") { cancelGroupCreation() }
                 .font(.caption)
+                .transformationActionHitTarget()
             Button("Create Group") { createSelectedGroup() }
                 .font(.caption.weight(.semibold))
+                .transformationActionHitTarget()
                 .disabled(!canCreateSelectedGroup)
         } else {
             Button { beginGroupCreation() } label: {
@@ -153,7 +440,10 @@ struct TransformationsSection: View {
                     .font(.caption.weight(.semibold))
             }
             .buttonStyle(.borderless)
-            .disabled(ops.filter { $0.groupID == nil }.count < 2)
+            .transformationActionHitTarget()
+            .disabled(ops.filter {
+                $0.groupID == nil && isOpRevealed($0)
+            }.count < 2)
             .help("Select adjacent transformations and place them in an iterated group")
         }
     }
@@ -162,23 +452,19 @@ struct TransformationsSection: View {
 
     private var addMenu: some View {
         Menu {
-            Section("Build a Mandelbox") {
-                ForEach(MandelboxConstructionStage.allCases) { stage in
-                    Button { apply(stage) } label: {
-                        Label(stage.name, systemImage: stage.icon)
-                    }
+            if experienceMode == .education && mappedLessons.isEmpty {
+                Section("Transformations") {
+                    Text("Map an equation below to complete a lesson")
                 }
             }
-            // Curated starting stacks up top — each REPLACES the current stack.
-            Section("Recipes") {
-                Button { surprise() } label: { Label("Surprise Me", systemImage: "dice") }
-                ForEach(WarpCatalog.recipes) { recipe in
-                    Button { apply(recipe) } label: { Label(recipe.name, systemImage: recipe.icon) }
+            if !hasStackCapacity {
+                Section("Stack Capacity") {
+                    Text("Remove a transformation before adding another")
                 }
             }
             // Standalone space systems (Spherical Inversion + Sphere Projection) —
             // not stack ops; adding one flips its DisplayConfig flag on.
-            Section("Space Systems") {
+            Section("Global Space Systems") {
                 Button { addSpaceSystem(.sphericalInversion) } label: {
                     Label("Spherical Inversion", systemImage: AppIcons.circleDashedInsetFilled)
                 }
@@ -188,11 +474,17 @@ struct TransformationsSection: View {
                 }
                 .disabled(sphereProjectionActive || !cache.fractalType.supports(.sphereProjection))
             }
-            // Individual transforms, grouped by family so the look-alikes cluster.
+            // Education lists mapped lessons; Just Use lists the whole catalog.
             ForEach(WarpFamily.allCases, id: \.self) { family in
-                Section(family.rawValue) {
-                    ForEach(SpaceWarpKind.allCases.filter { $0.family == family }) { kind in
-                        Button { add(kind) } label: { Label(kind.displayName, systemImage: kind.icon) }
+                let familyLessons = addableLessons.filter { $0.kind.family == family }
+                if !familyLessons.isEmpty {
+                    Section(family.rawValue) {
+                        ForEach(familyLessons) { lesson in
+                            Button { add(lesson.kind) } label: {
+                                Label(lesson.kind.displayName, systemImage: lesson.kind.icon)
+                            }
+                            .disabled(!hasStackCapacity)
+                        }
                     }
                 }
             }
@@ -202,6 +494,797 @@ struct TransformationsSection: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .transformationActionHitTarget()
+    }
+
+    // MARK: - Equation mapping
+
+    /// The first-release catalog is deliberately learned, not browsed. The guide
+    /// exposes the mathematical map and a small Metal vocabulary; entering a known
+    /// expression unlocks the production GPU operator. User input is only matched
+    /// against the local lesson catalog — it is never compiled or executed.
+    private var equationWorkbench: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            educationWorkbenchHeader
+
+            Text("Translate the current map into Metal notation. A match completes its lesson, adds the first instance, and moves you toward the next level.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("The mapper recognizes authored patterns; it never runs entered text as shader code.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
+            if let focusedEquationLesson {
+                equationCheatSheet(focusedEquationLesson)
+            }
+
+            VStack(alignment: .trailing, spacing: 7) {
+                TextField("p = …;", text: equationInputBinding, axis: .vertical)
+                    .font(.system(.caption, design: .monospaced))
+                    .lineLimit(4...16)
+                    .textFieldStyle(.roundedBorder)
+                    #if !os(macOS)
+                    .textInputAutocapitalization(.never)
+                    #endif
+                    .autocorrectionDisabled()
+                    .focused($isEquationEditorFocused)
+                    .accessibilityLabel("Metal equation")
+                    .accessibilityHint("Enter the complete Metal point transformation for the current map.")
+
+                Button(action: mapEquation) {
+                    Label("Map", systemImage: "arrow.turn.down.right")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .transformationActionHitTarget()
+                .disabled(equationInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if let mappedKind {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        mappingResult(mappedKind)
+                        Spacer(minLength: 4)
+                        nextEquationButton
+                    }
+                    VStack(alignment: .leading, spacing: 7) {
+                        mappingResult(mappedKind)
+                        nextEquationButton
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            } else if let equationError {
+                Label(equationError, systemImage: "questionmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .transition(.opacity)
+            }
+
+            DisclosureGroup(isExpanded: $isEquationGuideExpanded) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Each point-map receives mutable `float3 p`, original `float3 p0`, and a GPU-ready `SpaceWarpOp op`. Leave the result in `p`; each clue explains the fields it uses. Distance correction stays in the proven renderer.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    ForEach(TransformationEducationPath.levels) { level in
+                        educationLevelSection(level)
+                    }
+                }
+                .padding(.top, 7)
+            } label: {
+                Label("Equation Guide", systemImage: "book.closed")
+                    .font(.caption.weight(.semibold))
+                    .transformationActionHitTarget()
+            }
+        }
+        .padding(9)
+        .background(RoundedRectangle(cornerRadius: 9).fill(Color.indigo.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 9)
+            .stroke(Color.indigo.opacity(0.28), lineWidth: 1))
+    }
+
+    private var educationWorkbenchHeader: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                educationWorkbenchTitle
+                Spacer()
+                educationWorkbenchProgress
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                educationWorkbenchTitle
+                educationWorkbenchProgress
+            }
+        }
+    }
+
+    private var educationWorkbenchTitle: some View {
+        Label("Map an Equation", systemImage: "function")
+            .font(.subheadline.weight(.semibold))
+    }
+
+    private var educationWorkbenchProgress: some View {
+        Text("LEVEL \(focusedEducationLevel.numeral) · \(focusedEducationMappedCount)/\(focusedEducationLevel.kinds.count) MAPPED")
+            .font(.caption2.monospacedDigit().weight(.bold))
+            .foregroundStyle(mappedLessons.isEmpty ? Color.secondary : Color.mint)
+            .accessibilityLabel(
+                "Level \(focusedEducationLevel.id), \(focusedEducationLevel.title), "
+                + "\(focusedEducationMappedCount) of \(focusedEducationLevel.kinds.count) mapped"
+            )
+    }
+
+    private func mappingResult(_ kind: SpaceWarpKind) -> some View {
+        Label(mappingResultMessage, systemImage: kind.icon)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.mint)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityFocused(
+                $equationAccessibilityTarget,
+                equals: .result(.core(kind))
+            )
+    }
+
+    @ViewBuilder
+    private var nextEquationButton: some View {
+        if pendingNextEquationID != nil {
+            Button("Next map") {
+                moveToNextEquation()
+            }
+            .font(.caption.weight(.semibold))
+            .buttonStyle(.bordered)
+            .transformationActionHitTarget()
+            .accessibilityHint("Moves the workbench to the next unfinished lesson.")
+        }
+    }
+
+    @ViewBuilder
+    private func educationLevelSection(_ level: TransformationEducationLevel) -> some View {
+        let isOpen = TransformationEducationPath.isUnlocked(
+            level,
+            mappedIDs: mappedLessonIDs
+        )
+        let mappedCount = TransformationEducationPath.mappedCount(
+            in: level,
+            mappedIDs: mappedLessonIDs
+        )
+        let isComplete = TransformationEducationPath.isComplete(
+            level,
+            mappedIDs: mappedLessonIDs
+        )
+        let mappedPriorKnowledge = level.lessons.filter {
+            mappedLessonIDs.contains($0.id)
+        }
+
+        if isOpen {
+            DisclosureGroup(isExpanded: educationLevelExpansionBinding(level.id)) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(level.subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let advancement = educationAdvancementMessage(
+                        for: level,
+                        mappedCount: mappedCount
+                    ) {
+                        Text(advancement)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.indigo)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    ForEach(level.lessons) { lesson in
+                        equationLessonRow(lesson)
+                    }
+                }
+                .padding(.top, 6)
+            } label: {
+                educationLevelHeader(
+                    level,
+                    mappedCount: mappedCount,
+                    isComplete: isComplete,
+                    isLocked: false
+                )
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                educationLevelHeader(
+                    level,
+                    mappedCount: mappedCount,
+                    isComplete: isComplete,
+                    isLocked: true
+                )
+
+                Text(educationGateMessage(for: level))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !mappedPriorKnowledge.isEmpty {
+                    Text("MAPPED FROM PRIOR KNOWLEDGE")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.mint)
+                    ForEach(mappedPriorKnowledge) { lesson in
+                        equationLessonRow(lesson)
+                    }
+                }
+            }
+            .padding(8)
+            .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.035)))
+        }
+    }
+
+    private func educationLevelHeader(_ level: TransformationEducationLevel,
+                                      mappedCount: Int,
+                                      isComplete: Bool,
+                                      isLocked: Bool) -> some View {
+        let status = isLocked
+            ? "LOCKED"
+            : (isComplete ? "COMPLETE" : "\(mappedCount) OF \(level.kinds.count)")
+        let icon = isLocked ? "lock.fill" : (isComplete ? "checkmark.seal.fill" : "seal")
+
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                Label("LEVEL \(level.numeral) · \(level.title.uppercased())", systemImage: icon)
+                Spacer()
+                Text(status)
+                    .font(.caption2.monospacedDigit().weight(.bold))
+                    .foregroundStyle(isComplete ? Color.mint : Color.secondary)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Label("LEVEL \(level.numeral) · \(level.title.uppercased())", systemImage: icon)
+                Text(status)
+                    .font(.caption2.monospacedDigit().weight(.bold))
+                    .foregroundStyle(isComplete ? Color.mint : Color.secondary)
+            }
+        }
+        .font(.caption.weight(.semibold))
+        .transformationActionHitTarget()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Level \(level.id), \(level.title)")
+        .accessibilityValue(
+            isLocked ? "Locked" : (isComplete
+                ? "Complete"
+                : "\(mappedCount) of \(level.kinds.count) mapped")
+        )
+    }
+
+    private func educationLevelExpansionBinding(_ levelID: Int) -> Binding<Bool> {
+        Binding(
+            get: { expandedEducationLevelIDs.contains(levelID) },
+            set: { isExpanded in
+                if isExpanded { expandedEducationLevelIDs.insert(levelID) }
+                else { expandedEducationLevelIDs.remove(levelID) }
+            }
+        )
+    }
+
+    private func focusEquation(_ id: TransformationLessonID?) {
+        focusedEquationLessonIDRaw = id?.rawValue ?? ""
+    }
+
+    private func migrateLegacyLessonProgressIfNeeded() {
+        let migrated = TransformationUnlockProgress.migratedEncoding(
+            mappedLessonIDsRaw,
+            legacyEncoded: legacyMappedTransformationIDsRaw
+        )
+        guard migrated != mappedLessonIDsRaw else { return }
+        mappedLessonIDsRaw = migrated
+    }
+
+    private func initializeFocusedEquationIfNeeded() {
+        guard focusedEquationID == nil else { return }
+        if !legacyEquationDraft.isEmpty,
+           let legacyLessonID = legacyDraftLessonID,
+           educationGuideLessons.contains(where: { $0.id == legacyLessonID }) {
+            focusEquation(legacyLessonID)
+            return
+        }
+        guard let initial = TransformationEducationPath.preferredLesson(
+            mappedIDs: mappedLessonIDs
+        ) else { return }
+        focusEquation(initial.id)
+    }
+
+    private func migrateLegacyEquationDraftIfNeeded() {
+        guard !legacyEquationDraft.isEmpty,
+              let lessonID = legacyDraftLessonID else { return }
+        if TransformationEquationDraftStore.draft(
+            for: lessonID,
+            in: equationDraftsRaw
+        ).isEmpty {
+            equationDraftsRaw = TransformationEquationDraftStore.update(
+                legacyEquationDraft,
+                for: lessonID,
+                in: equationDraftsRaw
+            )
+        }
+        legacyEquationDraft = ""
+        legacyFocusedEquationRawID = -1
+    }
+
+    /// V1 stored one draft plus a renderer raw ID. `-1` meant the original
+    /// default lesson (Mirror); preserve that historical meaning even though V2
+    /// intentionally starts new learners with the simpler Scale lesson.
+    private var legacyDraftLessonID: TransformationLessonID? {
+        TransformationEquationDraftStore.legacyLessonID(
+            focusedRawID: legacyFocusedEquationRawID
+        )
+    }
+
+    private func reconcileEducationPresentation(previousRaw: String,
+                                                currentRaw: String) {
+        let previous = TransformationUnlockProgress.decode(
+            previousRaw,
+            legacyEncoded: legacyMappedTransformationIDsRaw
+        )
+        let current = TransformationUnlockProgress.decode(
+            currentRaw,
+            legacyEncoded: legacyMappedTransformationIDsRaw
+        )
+        guard previous != current else { return }
+
+        if pendingNextEquationID != nil {
+            pendingNextEquationID = resolvedNextEquationID(
+                preferredID: pendingNextEquationID,
+                mappedIDs: current
+            )
+        }
+
+        let guideIDs = Set(TransformationEducationPath.guideLessons(
+            mappedIDs: current
+        ).map(\.id))
+        let focusIsInvalid = focusedEquationID.map { !guideIDs.contains($0) } ?? true
+
+        if focusIsInvalid,
+           let preferred = TransformationEducationPath.preferredLesson(mappedIDs: current) {
+            focusEquation(preferred.id)
+            if let level = TransformationEducationPath.level(containing: preferred.kind) {
+                expandedEducationLevelIDs = [level.id]
+            }
+            return
+        }
+
+        let previousDeepest = TransformationEducationPath.deepestUnlockedLevel(
+            mappedIDs: previous
+        )
+        let currentDeepest = TransformationEducationPath.deepestUnlockedLevel(
+            mappedIDs: current
+        )
+        if previousDeepest.id != currentDeepest.id {
+            expandedEducationLevelIDs.insert(currentDeepest.id)
+        }
+    }
+
+    private func assistanceStage(for lesson: TransformationEquationLesson) -> TransformationAssistanceStage {
+        assistanceStages[lesson.id] ?? .vocabulary
+    }
+
+    private func advanceAssistance(for lesson: TransformationEquationLesson,
+                                   event: TransformationAssistanceEvent) {
+        let current = assistanceStage(for: lesson)
+        let isMapped = mappedLessonIDs.contains(lesson.id)
+        let next = TransformationAssistancePolicy.advance(
+            from: current,
+            event: event,
+            isMapped: isMapped,
+            isFocused: focusedEquationLesson?.id == lesson.id
+        )
+        guard next != current else { return }
+        withAnimation(.easeInOut(duration: 0.15)) {
+            assistanceStages[lesson.id] = next
+        }
+        switch next {
+        case .hint:
+            let subject = isMapped ? lesson.kind.displayName : "the current map"
+            moveAccessibilityFocus(to: .hint(lesson.id))
+            postAccessibilityAnnouncement("Hint for \(subject). \(lesson.hint)")
+        case .fullAnswer:
+            let subject = isMapped ? lesson.kind.displayName : "the current map"
+            moveAccessibilityFocus(to: .answer(lesson.id))
+            postAccessibilityAnnouncement("Full Metal answer revealed for \(subject).")
+        case .vocabulary:
+            break
+        }
+    }
+
+    private func postAccessibilityAnnouncement(_ message: String, urgent: Bool = false) {
+        #if os(macOS)
+        NSAccessibility.post(
+            element: NSApplication.shared,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: message,
+                .priority: (urgent
+                    ? NSAccessibilityPriorityLevel.high
+                    : NSAccessibilityPriorityLevel.medium).rawValue,
+            ]
+        )
+        #elseif os(iOS) || os(visionOS)
+        UIAccessibility.post(notification: .announcement, argument: message)
+        #endif
+    }
+
+    private func educationAdvancementMessage(for level: TransformationEducationLevel,
+                                             mappedCount: Int) -> String? {
+        guard let threshold = level.requiredToAdvance,
+              let index = TransformationEducationPath.levels.firstIndex(where: { $0.id == level.id }),
+              TransformationEducationPath.levels.indices.contains(index + 1) else {
+            let remainingLessons = TransformationEducationPath.unmappedLessonCount(
+                mappedIDs: mappedLessonIDs
+            )
+            if remainingLessons == 0 {
+                return "Education path complete. Every built-in transformation has been mapped."
+            }
+            if mappedCount == level.kinds.count {
+                return "Final level complete · \(remainingLessons) earlier \(remainingLessons == 1 ? "lesson remains" : "lessons remain")."
+            }
+            return "Final level — map these systems in any order."
+        }
+
+        let next = TransformationEducationPath.levels[index + 1]
+        let remaining = max(0, threshold - mappedCount)
+        if remaining == 0 {
+            return "Level \(next.numeral) — \(next.title) is open."
+        }
+        return "Map \(remaining) more \(remaining == 1 ? "equation" : "equations") here to open Level \(next.numeral)."
+    }
+
+    private func educationGateMessage(for level: TransformationEducationLevel) -> String {
+        guard let blocker = TransformationEducationPath.blockingLevel(
+            for: level,
+            mappedIDs: mappedLessonIDs
+        ) else { return "This level is ready." }
+        let remaining = TransformationEducationPath.mappingsRemainingToAdvance(
+            from: blocker,
+            mappedIDs: mappedLessonIDs
+        )
+        return "Map \(remaining) more \(remaining == 1 ? "equation" : "equations") in Level \(blocker.numeral) to continue toward Level \(level.numeral)."
+    }
+
+    @ViewBuilder
+    private func equationCheatSheet(_ lesson: TransformationEquationLesson) -> some View {
+        let isMapped = mappedLessonIDs.contains(lesson.id)
+        let stage = assistanceStage(for: lesson)
+
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                Label("Math Cheat Sheet", systemImage: "list.bullet.rectangle")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text(isMapped ? lesson.kind.displayName.uppercased() : "CURRENT MAP")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(isMapped ? Color.mint : Color.secondary)
+            }
+
+            Text(lesson.mathematicalNotation)
+                .font(.system(.caption2, design: .monospaced))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(lesson.spokenMathematicalNotation)
+
+            ForEach(TransformationEquationCatalog.cheatSheet(for: lesson)) { entry in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(entry.notation)
+                        .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(.indigo)
+                        .textSelection(.enabled)
+                    Text(entry.meaning)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(entry.notation). \(entry.meaning)")
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    assistanceControls(for: lesson, isMapped: isMapped, stage: stage)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    assistanceControls(for: lesson, isMapped: isMapped, stage: stage)
+                }
+            }
+
+            if stage >= .hint {
+                Label(lesson.hint, systemImage: "lightbulb")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityFocused(
+                        $equationAccessibilityTarget,
+                        equals: .hint(lesson.id)
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            if stage >= .fullAnswer {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("FULL METAL ANSWER")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.indigo)
+                    codeBlock(lesson.metalNotation)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Full Metal answer. \(lesson.metalNotation)")
+                .accessibilityFocused(
+                    $equationAccessibilityTarget,
+                    equals: .answer(lesson.id)
+                )
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            Text("Choose a different map in the guide below.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 7).fill(Color.indigo.opacity(0.07)))
+        .overlay(RoundedRectangle(cornerRadius: 7)
+            .stroke(Color.indigo.opacity(0.2), lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private func assistanceControls(for lesson: TransformationEquationLesson,
+                                    isMapped: Bool,
+                                    stage: TransformationAssistanceStage) -> some View {
+        if stage < .hint {
+            Button("Get a hint") {
+                advanceAssistance(for: lesson, event: .requestHint)
+            }
+            .font(.caption.weight(.semibold))
+            .buttonStyle(.bordered)
+            #if !os(macOS)
+            .frame(minHeight: 44)
+            #endif
+        }
+
+        if stage < .fullAnswer,
+           TransformationAssistancePolicy.canRevealAnswer(
+               from: stage,
+               isMapped: isMapped,
+               isFocused: focusedEquationLesson?.id == lesson.id
+           ) {
+            Button(isMapped ? "Review Metal answer" : "Reveal full Metal answer") {
+                advanceAssistance(for: lesson, event: .revealAnswer)
+            }
+            .font(.caption.weight(.semibold))
+            .buttonStyle(.bordered)
+            #if !os(macOS)
+            .frame(minHeight: 44)
+            #endif
+        }
+    }
+
+    @ViewBuilder
+    private func equationLessonRow(_ lesson: TransformationEquationLesson) -> some View {
+        let isMapped = mappedLessonIDs.contains(lesson.id)
+        let isFocused = focusedEquationLesson?.id == lesson.id
+
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Label(isMapped ? lesson.kind.displayName : "Unknown transformation",
+                      systemImage: isMapped ? lesson.kind.icon : "questionmark.diamond")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(isMapped ? Color.mint : Color.primary)
+                Spacer()
+                if isMapped {
+                    Text("MAPPED")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.mint)
+                }
+            }
+
+            Text(lesson.mathematicalNotation)
+                .font(.system(.caption2, design: .monospaced))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(lesson.spokenMathematicalNotation)
+
+            if isFocused {
+                Label("Current map", systemImage: "checkmark.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.indigo)
+                    .accessibilityAddTraits(.isSelected)
+            } else {
+                Button("Assemble this map") {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        focusEquation(lesson.id)
+                        mappedKind = nil
+                        mappingResultMessage = ""
+                        equationError = nil
+                        pendingNextEquationID = nil
+                        equationAccessibilityTarget = nil
+                    }
+                    isEquationEditorFocused = true
+                    let subject = isMapped ? lesson.kind.displayName : "This equation"
+                    postAccessibilityAnnouncement("\(subject) is now the current map.")
+                }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.bordered)
+                #if !os(macOS)
+                .frame(minHeight: 44)
+                #endif
+            }
+
+            Text(isFocused
+                 ? (isMapped
+                    ? "Use the cheat sheet above to review its hint or Metal answer."
+                    : "Use the cheat sheet above to request hints and assemble the answer.")
+                 : "Select this map to load its relevant cheat sheet.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 7).fill(
+            isMapped ? Color.mint.opacity(0.08) : Color.primary.opacity(0.04)))
+        .overlay(RoundedRectangle(cornerRadius: 7)
+            .stroke(isFocused ? Color.indigo.opacity(0.45) : Color.clear, lineWidth: 1))
+    }
+
+    private func mapEquation() {
+        guard experienceMode == .education else { return }
+        guard let lesson = focusedEquationLesson else { return }
+        let attempt = TransformationEquationCatalog.assess(
+            equationInput,
+            for: lesson
+        )
+        guard attempt == .matched else {
+            let message = attempt.guidance
+            withAnimation(.easeInOut(duration: 0.15)) {
+                mappedKind = nil
+                mappingResultMessage = ""
+                equationError = message
+                pendingNextEquationID = nil
+            }
+            postAccessibilityAnnouncement(message, urgent: true)
+            return
+        }
+        let kind = lesson.kind
+
+        let freshlyPersistedProgress = UserDefaults.standard.string(
+            forKey: TransformationUnlockProgress.defaultsKey
+        ) ?? ""
+        let freshlyPersistedLegacyProgress = UserDefaults.standard.string(
+            forKey: TransformationUnlockProgress.legacyDefaultsKey
+        ) ?? ""
+        let mappedIDsBefore = mappedLessonIDs.union(
+            TransformationUnlockProgress.decode(
+                freshlyPersistedProgress,
+                legacyEncoded: freshlyPersistedLegacyProgress
+            )
+        )
+        let wasMapped = mappedIDsBefore.contains(.core(kind))
+        let updatedProgress = TransformationUnlockProgress.unlock(
+            kind,
+            merging: [mappedLessonIDsRaw, freshlyPersistedProgress],
+            legacyEncodedValues: [
+                legacyMappedTransformationIDsRaw,
+                freshlyPersistedLegacyProgress,
+            ]
+        )
+        mappedLessonIDsRaw = updatedProgress
+        let mappedIDsAfter = TransformationUnlockProgress.decode(
+            updatedProgress,
+            legacyEncoded: freshlyPersistedLegacyProgress
+        )
+        let runtimeKindIDsAfter = TransformationUnlockProgress.runtimeKindIDs(
+            from: mappedIDsAfter
+        )
+        synchronizeRuntimeInteractionAccess(
+            mode: experienceMode,
+            mappedIDs: runtimeKindIDsAfter
+        )
+        let newlyOpenedLevels = TransformationEducationPath.newlyUnlockedLevels(
+            before: mappedIDsBefore,
+            after: mappedIDsAfter
+        )
+        assistanceStages[.core(kind)] = .fullAnswer
+        let preferredLesson = TransformationEducationPath.preferredLesson(
+            mappedIDs: mappedIDsAfter
+        )
+        let nextLesson = preferredLesson.flatMap {
+            $0.id != lesson.id && !mappedIDsAfter.contains($0.id) ? $0 : nil
+        }
+
+        let canAdd = ops.count < Int(kMaxSpaceWarpOps)
+        let alreadyInStack = TransformationAccessPolicy.hasExactInstance(
+            of: kind,
+            in: ops
+        )
+        if !wasMapped && canAdd && !alreadyInStack {
+            add(kind, mappedIDs: runtimeKindIDsAfter)
+        }
+
+        withAnimation(.easeInOut(duration: 0.18)) {
+            mappedKind = kind
+            equationError = nil
+            if wasMapped {
+                mappingResultMessage = "\(kind.displayName) is already mapped and available in Add."
+            } else if alreadyInStack {
+                mappingResultMessage = "\(kind.displayName) mapped. Its existing scene instance is now fully revealed."
+            } else if canAdd {
+                mappingResultMessage = "\(kind.displayName) mapped and added to the stack."
+            } else {
+                mappingResultMessage = "\(kind.displayName) mapped. The stack is full, so use it later from Add."
+            }
+            if newlyOpenedLevels.count == 1, let openedLevel = newlyOpenedLevels.first {
+                mappingResultMessage += " Level \(openedLevel.numeral) — \(openedLevel.title) is now open."
+            } else if let firstOpened = newlyOpenedLevels.first,
+                      let deepestOpened = newlyOpenedLevels.last {
+                mappingResultMessage += " Levels \(firstOpened.numeral)–\(deepestOpened.numeral) are now open; continue with Level \(deepestOpened.numeral) — \(deepestOpened.title)."
+            }
+            pendingNextEquationID = nextLesson?.id
+            equationDraftsRaw = TransformationEquationDraftStore.update(
+                "",
+                for: lesson.id,
+                in: equationDraftsRaw
+            )
+        }
+        moveAccessibilityFocus(to: .result(lesson.id))
+        let nextAnnouncement = nextLesson == nil ? "" : " Next map is ready."
+        postAccessibilityAnnouncement(mappingResultMessage + nextAnnouncement)
+    }
+
+    private func moveToNextEquation() {
+        guard pendingNextEquationID != nil,
+              let nextID = resolvedNextEquationID(
+                preferredID: pendingNextEquationID,
+                mappedIDs: mappedLessonIDs
+              ),
+              let lesson = educationGuideLessons.first(where: { $0.id == nextID }) else {
+            pendingNextEquationID = nil
+            return
+        }
+        withAnimation(.easeInOut(duration: 0.15)) {
+            focusEquation(nextID)
+            pendingNextEquationID = nil
+            mappedKind = nil
+            mappingResultMessage = ""
+            equationError = nil
+            equationAccessibilityTarget = nil
+            if let level = TransformationEducationPath.level(containing: lesson.kind) {
+                expandedEducationLevelIDs = [level.id]
+            }
+        }
+        isEquationEditorFocused = true
+        let subject = mappedLessonIDs.contains(lesson.id)
+            ? lesson.kind.displayName
+            : "The next equation"
+        postAccessibilityAnnouncement("\(subject) is ready to assemble.")
+    }
+
+    private func resolvedNextEquationID(
+        preferredID: TransformationLessonID?,
+        mappedIDs: Set<TransformationLessonID>
+    ) -> TransformationLessonID? {
+        let guideIDs = Set(TransformationEducationPath.guideLessons(
+            mappedIDs: mappedIDs
+        ).map(\.id))
+        if let preferredID,
+           preferredID != focusedEquationID,
+           !mappedIDs.contains(preferredID),
+           guideIDs.contains(preferredID) {
+            return preferredID
+        }
+        guard let preferred = TransformationEducationPath.preferredLesson(
+            mappedIDs: mappedIDs
+        ), preferred.id != focusedEquationID,
+           !mappedIDs.contains(preferred.id),
+           guideIDs.contains(preferred.id) else { return nil }
+        return preferred.id
+    }
+
+    private func moveAccessibilityFocus(to target: EquationAccessibilityTarget) {
+        equationAccessibilityTarget = nil
+        Task { @MainActor in
+            await Task.yield()
+            equationAccessibilityTarget = target
+        }
     }
 
     // MARK: - One op card
@@ -211,114 +1294,84 @@ struct TransformationsSection: View {
                         insideGroup: Bool) -> some View {
         let kind = op.kind
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                if isCreatingGroup && !insideGroup {
-                    Button { toggleGroupSelection(op.id) } label: {
-                        Image(systemName: groupSelection.contains(op.id)
-                              ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(groupSelection.contains(op.id) ? .indigo : .secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    opHeaderIdentity(op, index: index, insideGroup: insideGroup)
+                    Spacer(minLength: 4)
+                    opHeaderActions(op, index: index, isFirst: isFirst, isLast: isLast,
+                                    insideGroup: insideGroup)
+                }
+                VStack(alignment: .leading, spacing: 5) {
+                    opHeaderIdentity(op, index: index, insideGroup: insideGroup)
+                    HStack(spacing: 8) {
+                        Spacer()
+                        opHeaderActions(op, index: index, isFirst: isFirst, isLast: isLast,
+                                        insideGroup: insideGroup)
                     }
-                    .buttonStyle(.borderless)
-                    .help("Include \(kind.displayName) in the new group")
                 }
-                Text("\(index + 1)")
-                    .font(.caption2.monospacedDigit().weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16)
-                VStack(alignment: .leading, spacing: 1) {
-                    Label(kind.displayName, systemImage: kind.icon)
-                        .font(.subheadline.weight(.medium))
-                    Text(kind.tagline)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                // ♪ badge: which field(s) of this slot are music-linked (bind/edit in
-                // the Music tab). Shows the first link's field + a count if there's more.
-                if let m = musicMappings(forSlot: index).first {
-                    let all = musicMappings(forSlot: index)
-                    let extra = all.count > 1 ? " +\(all.count - 1)" : ""
-                    Label(kind.musicFieldLabel(m.spaceWarpField) + extra, systemImage: "music.note")
-                        .font(.caption2.weight(.semibold))
-                        .labelStyle(.titleAndIcon)
-                        .padding(.horizontal, 5).padding(.vertical, 2)
-                        .background(Capsule().fill(.tint.opacity(0.18)))
-                        .foregroundStyle(.tint)
-                        .help(all.map { "\(kind.musicFieldLabel($0.spaceWarpField)) ← \($0.source.displayName) (\($0.responseCurve.displayName))" }
-                            .joined(separator: "\n") + "\nEdit in the Music tab.")
-                }
-                Spacer()
-                Toggle("", isOn: Binding(
-                    get: { liveOp(op.id)?.isEnabled ?? op.isEnabled },
-                    set: { v in update(op.id) { $0.isEnabled = v }; refresh &+= 1 }))
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                Button { moveTransform(op.id, by: -1, insideGroup: insideGroup) } label: {
-                    Image(systemName: "chevron.up")
-                }
-                    .buttonStyle(.borderless).disabled(isFirst)
-                Button { moveTransform(op.id, by: 1, insideGroup: insideGroup) } label: {
-                    Image(systemName: "chevron.down")
-                }
-                    .buttonStyle(.borderless).disabled(isLast)
-                Button(role: .destructive) { delete(op.id) } label: { Image(systemName: "trash") }
-                    .buttonStyle(.borderless)
             }
             .font(.caption)
 
-            Group {
-                if kind == .coxeter {
-                    coxeterEditor(op)
-                } else {
-                // Master amount.
-                EffectSliderRow(
-                    icon: kind.icon, label: kind.amountLabel,
-                    value: Binding(get: { liveOp(op.id)?.strength ?? op.strength },
-                                   set: { v in update(op.id) { $0.strength = v } }),
-                    range: kind.strengthRange,
-                    enabled: .constant(true), onChanged: {}, showToggle: false,
-                    valueFormat: { String(format: "%.2f", $0) })
-
-                // Per-operator scalars.
-                ForEach(kind.params) { spec in
+            if isOpRevealed(op) {
+                Group {
+                    if kind == .coxeter {
+                        coxeterEditor(op)
+                    } else {
+                    // Master amount.
                     EffectSliderRow(
-                        icon: spec.icon, label: spec.label,
-                        value: Binding(
-                            get: { let o = liveOp(op.id) ?? op; return spec.slot == 1 ? o.p1 : o.p2 },
-                            set: { v in update(op.id) { if spec.slot == 1 { $0.p1 = v } else { $0.p2 = v } } }),
-                        range: spec.range,
+                        icon: kind.icon, label: kind.amountLabel,
+                        value: Binding(get: { liveOp(op.id)?.strength ?? op.strength },
+                                       set: { v in update(op.id) { $0.strength = v } }),
+                        range: kind.strengthRange,
                         enabled: .constant(true), onChanged: {}, showToggle: false,
                         valueFormat: { String(format: "%.2f", $0) })
-                }
 
-                // Per-transform boolean option (e.g. Box Fold "Hall of Mirrors"),
-                // stored in op.p2 — a live uniform value, no recompile.
-                if let toggle = kind.toggle {
-                    HStack(spacing: 8) {
-                        Label(toggle.label, systemImage: toggle.icon)
-                            .font(.caption)
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { (liveOp(op.id) ?? op).p2 > 0.5 },
-                            set: { v in update(op.id) { $0.p2 = v ? 1 : 0 }; refresh &+= 1 }))
-                            .labelsHidden()
-                            .toggleStyle(.switch)
-                            .controlSize(.mini)
+                    // Per-operator scalars.
+                    ForEach(kind.params) { spec in
+                        EffectSliderRow(
+                            icon: spec.icon, label: spec.label,
+                            value: Binding(
+                                get: { let o = liveOp(op.id) ?? op; return spec.slot == 1 ? o.p1 : o.p2 },
+                                set: { v in update(op.id) { if spec.slot == 1 { $0.p1 = v } else { $0.p2 = v } } }),
+                            range: spec.range,
+                            enabled: .constant(true), onChanged: {}, showToggle: false,
+                            valueFormat: { String(format: "%.2f", $0) })
+                    }
+
+                    // Per-transform boolean option, stored in op.p2 as a live uniform.
+                    if let toggle = kind.toggle {
+                        HStack(spacing: 8) {
+                            Label(toggle.label, systemImage: toggle.icon)
+                                .font(.caption)
+                            Spacer()
+                            Toggle("", isOn: Binding(
+                                get: { (liveOp(op.id) ?? op).p2 > 0.5 },
+                                set: { v in update(op.id) { $0.p2 = v ? 1 : 0 }; refresh &+= 1 }))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.mini)
+                                .accessibilityLabel("\(kind.displayName), \(toggle.label)")
+                        }
+                    }
+
+                    if kind.usesAxis {
+                        axisRow(op, "\(kind.axisLabel) X", "arrow.left.and.right", \.x)
+                        axisRow(op, "\(kind.axisLabel) Y", "arrow.up.and.down", \.y)
+                        axisRow(op, "\(kind.axisLabel) Z", "arrow.up.left.and.arrow.down.right", \.z)
+                    }
                     }
                 }
+                .opacity(op.isEnabled ? 1.0 : 0.4)
+                .disabled(!op.isEnabled)
 
-                // Direction axis / offset vector (Twist / Bend / Ripple / Plane Fold / Offset Fold).
-                if kind.usesAxis {
-                    axisRow(op, "\(kind.axisLabel) X", "arrow.left.and.right", \.x)
-                    axisRow(op, "\(kind.axisLabel) Y", "arrow.up.and.down", \.y)
-                    axisRow(op, "\(kind.axisLabel) Z", "arrow.up.left.and.arrow.down.right", \.z)
-                }
-                }
+                underTheHood(kind)
+            } else {
+                Label("Used in this scene · map its equation to reveal its controls and add another",
+                      systemImage: "lock")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .opacity(op.isEnabled ? 1.0 : 0.4)
-            .disabled(!op.isEnabled)
-
-            underTheHood(kind)
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 8).fill(
@@ -329,60 +1382,217 @@ struct TransformationsSection: View {
                 ? Color.indigo.opacity(0.65) : Color.clear, lineWidth: 1))
     }
 
+    @ViewBuilder
+    private func opHeaderIdentity(_ op: SpaceWarpOpValue, index: Int,
+                                  insideGroup: Bool) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                opHeaderPrimary(op, index: index, insideGroup: insideGroup)
+                opMusicBadge(op, index: index)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                opHeaderPrimary(op, index: index, insideGroup: insideGroup)
+                HStack(spacing: 6) {
+                    Spacer()
+                    opMusicBadge(op, index: index)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func opHeaderPrimary(_ op: SpaceWarpOpValue, index: Int,
+                                 insideGroup: Bool) -> some View {
+        let kind = op.kind
+        let revealed = isOpRevealed(op)
+        let subject = stackOpSubject(op, index: index)
+        HStack(spacing: 8) {
+            if isCreatingGroup && !insideGroup && revealed {
+                Button { toggleGroupSelection(op.id) } label: {
+                    Image(systemName: groupSelection.contains(op.id)
+                          ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(groupSelection.contains(op.id) ? .indigo : .secondary)
+                }
+                .buttonStyle(.borderless)
+                .transformationActionHitTarget()
+                .help("Include \(subject) in the new group")
+                .accessibilityLabel(
+                    groupSelection.contains(op.id)
+                        ? "Remove \(subject) from the new group"
+                        : "Include \(subject) in the new group"
+                )
+            }
+            Text("\(index + 1)")
+                .font(.caption2.monospacedDigit().weight(.bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Label(revealed ? kind.displayName : "Unknown transformation",
+                      systemImage: revealed ? kind.icon : "questionmark.diamond")
+                    .font(.subheadline.weight(.medium))
+                Text(revealed ? kind.tagline : "Map its equation to reveal this scene operation")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .layoutPriority(1)
+        }
+    }
+
+    @ViewBuilder
+    private func opMusicBadge(_ op: SpaceWarpOpValue, index: Int) -> some View {
+        let kind = op.kind
+        if isOpRevealed(op), let mapping = musicMappings(forSlot: index).first {
+            let all = musicMappings(forSlot: index)
+            let extra = all.count > 1 ? " +\(all.count - 1)" : ""
+            Label(kind.musicFieldLabel(mapping.spaceWarpField) + extra,
+                  systemImage: "music.note")
+                .font(.caption2.weight(.semibold))
+                .labelStyle(.titleAndIcon)
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .background(Capsule().fill(.tint.opacity(0.18)))
+                .foregroundStyle(.tint)
+                .help(all.map {
+                    "\(kind.musicFieldLabel($0.spaceWarpField)) ← \($0.source.displayName) (\($0.responseCurve.displayName))"
+                }.joined(separator: "\n") + "\nEdit in the Music tab.")
+        }
+    }
+
+    @ViewBuilder
+    private func opHeaderActions(_ op: SpaceWarpOpValue, index: Int, isFirst: Bool,
+                                 isLast: Bool, insideGroup: Bool) -> some View {
+        let subject = stackOpSubject(op, index: index)
+        if isOpRevealed(op) {
+            Toggle("", isOn: Binding(
+                get: { liveOp(op.id)?.isEnabled ?? op.isEnabled },
+                set: { value in
+                    update(op.id) { $0.isEnabled = value }
+                    refresh &+= 1
+                }))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .transformationActionHitTarget()
+                .accessibilityLabel("\(subject) enabled")
+            Button { moveTransform(op.id, by: -1, insideGroup: insideGroup) } label: {
+                Image(systemName: "chevron.up")
+            }
+            .buttonStyle(.borderless)
+            .transformationActionHitTarget()
+            .disabled(isFirst || !canMoveTransform(op.id, by: -1, insideGroup: insideGroup))
+            .accessibilityLabel("Move \(subject) up")
+            Button { moveTransform(op.id, by: 1, insideGroup: insideGroup) } label: {
+                Image(systemName: "chevron.down")
+            }
+            .buttonStyle(.borderless)
+            .transformationActionHitTarget()
+            .disabled(isLast || !canMoveTransform(op.id, by: 1, insideGroup: insideGroup))
+            .accessibilityLabel("Move \(subject) down")
+        }
+        Button(role: .destructive) { delete(op.id) } label: {
+            Image(systemName: "trash")
+        }
+        .buttonStyle(.borderless)
+        .transformationActionHitTarget()
+        .accessibilityLabel("Remove \(subject)")
+    }
+
+    private func isOpRevealed(_ op: SpaceWarpOpValue) -> Bool {
+        TransformationAccessPolicy.canInteract(
+            withRawKindID: op.type,
+            mode: experienceMode,
+            mappedIDs: mappedTransformationIDs
+        )
+    }
+
+    private func synchronizeRuntimeInteractionAccess(
+        mode: TransformationExperienceMode,
+        mappedIDs: Set<Int32>
+    ) {
+        renderSettings.setSpaceWarpInteractionAccess(
+            allowsUnmapped: mode == .justUse,
+            mappedKindIDs: mappedIDs
+        )
+    }
+
+    private func stackOpSubject(_ op: SpaceWarpOpValue, index: Int) -> String {
+        isOpRevealed(op) ? op.kind.displayName : "unknown transformation \(index + 1)"
+    }
+
     /// An explicit super-group in the editor. Its children remain ordinary
     /// transformations, but move together and repeat as a single ordered unit.
+    ///
+    /// `range` was captured when the ForEach data was built, but `ops` re-reads the
+    /// LIVE stack — and the stack can be replaced underneath this view with NO
+    /// invalidation it observes: RenderSettings is deliberately not Observable, and
+    /// animation playback (`AnimationManager.play()` via hand gesture / App Intent),
+    /// scene cycling, and the fractal browser window all swap the stack without a
+    /// notification this body watches. A LazyVStack row can therefore (re)instantiate
+    /// against a shorter stack than the one its range indexed. Bounds-check against a
+    /// single snapshot — mirroring the `ops.indices.contains` guards on the ungrouped
+    /// and child rows — and render nothing when stale; the next structural edit or
+    /// tab open rebuilds fresh units.
+    @ViewBuilder
     private func transformationGroupCard(groupID: UUID, range: Range<Int>) -> some View {
-        let first = ops[range.lowerBound]
+        let snapshot = ops
+        if snapshot.indices.contains(range.lowerBound),
+           range.upperBound <= snapshot.count,
+           snapshot[range.lowerBound].groupID == groupID {
+            groupCardBody(groupID: groupID, range: range, snapshot: snapshot)
+        }
+    }
+
+    /// The card content proper. Reads ONLY `snapshot` (bounds-checked by the caller)
+    /// so every subscript in one card describes the same instant of the stack.
+    private func groupCardBody(groupID: UUID, range: Range<Int>,
+                               snapshot: [SpaceWarpOpValue]) -> some View {
+        let first = snapshot[range.lowerBound]
         let fallbackIterations = first.effectiveGroupIterations
         let passes = first.effectiveGroupIterations
         let mode = first.effectiveGroupMode
-        let childKinds = range.map { ops[$0].kind }
+        let children = range.map { snapshot[$0] }
+        let childKinds = children.map(\.kind)
         let isMandelboxSequence = childKinds == [.boxFold, .sphereFold, .scale]
-        let title = mode == .mandelboxRecurrence && isMandelboxSequence
+        let allChildrenRevealed = children.allSatisfy(isOpRevealed)
+        let title = mode == .mandelboxRecurrence && isMandelboxSequence && allChildrenRevealed
             ? "Mandelbox Recurrence" : "Transformation Group"
-        let sequence = childKinds.map(\.displayName).joined(separator: "  →  ")
+        let sequence = children.map { child in
+            isOpRevealed(child) ? child.kind.displayName : "Unknown transformation"
+        }.joined(separator: "  →  ")
         let transformWork = range.count * passes
         return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Label(title, systemImage: "repeat")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.indigo)
-                Text("\(range.count) STEPS")
-                    .font(.caption2.weight(.heavy))
-                    .padding(.horizontal, 5).padding(.vertical, 2)
-                    .background(Capsule().fill(.indigo.opacity(0.16)))
-                    .foregroundStyle(.indigo)
-                if mode == .mandelboxRecurrence {
-                    Text("+ p₀ FEEDBACK")
-                        .font(.caption2.weight(.heavy))
-                        .padding(.horizontal, 5).padding(.vertical, 2)
-                        .background(Capsule().fill(.orange.opacity(0.17)))
-                        .foregroundStyle(.orange)
-                        .accessibilityLabel("Adds the group input after every pass")
-                }
-                Spacer()
-                Button { move(ops[range.lowerBound].id, by: -1) } label: {
-                    Image(systemName: "chevron.up")
-                }
-                .buttonStyle(.borderless)
-                .disabled(range.lowerBound == 0)
-                Button { move(ops[range.lowerBound].id, by: 1) } label: {
-                    Image(systemName: "chevron.down")
-                }
-                .buttonStyle(.borderless)
-                .disabled(range.upperBound == ops.count)
-                Menu {
-                    Button { ungroup(groupID) } label: {
-                        Label("Dissolve Group", systemImage: "rectangle.split.3x1")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    groupHeaderIdentity(title: title, stepCount: range.count, mode: mode)
+                    Spacer(minLength: 4)
+                    if allChildrenRevealed {
+                        groupHeaderActions(
+                            firstID: first.id,
+                            groupID: groupID,
+                            title: title,
+                            canMoveUp: canMoveTransform(first.id, by: -1, insideGroup: false),
+                            canMoveDown: canMoveTransform(first.id, by: 1, insideGroup: false)
+                        )
+                    } else {
+                        lockedGroupRemovalAction(groupID: groupID)
                     }
-                    Button(role: .destructive) { deleteGroup(groupID) } label: {
-                        Label("Delete Group", systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
+                VStack(alignment: .leading, spacing: 5) {
+                    groupHeaderIdentity(title: title, stepCount: range.count, mode: mode)
+                    HStack(spacing: 8) {
+                        Spacer()
+                        if allChildrenRevealed {
+                            groupHeaderActions(
+                                firstID: first.id,
+                                groupID: groupID,
+                                title: title,
+                                canMoveUp: canMoveTransform(first.id, by: -1, insideGroup: false),
+                                canMoveDown: canMoveTransform(first.id, by: 1, insideGroup: false)
+                            )
+                        } else {
+                            lockedGroupRemovalAction(groupID: groupID)
+                        }
+                    }
+                }
             }
 
             Text(sequence)
@@ -390,29 +1600,37 @@ struct TransformationsSection: View {
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            HStack(spacing: 8) {
-                Text("Passes")
-                    .font(.caption.weight(.semibold))
-                Stepper(value: Binding(
-                    get: {
-                        renderSettings.spaceWarpStack.first(where: { $0.groupID == groupID })?
-                            .effectiveGroupIterations ?? fallbackIterations
-                    },
-                    set: { updateGroupIterations(groupID, iterations: $0) }),
-                    in: 1...Int(kMaxSpaceWarpGroupIterations)) {
-                    Text("\(renderSettings.spaceWarpStack.first(where: { $0.groupID == groupID })?.effectiveGroupIterations ?? fallbackIterations)")
-                        .font(.caption.monospacedDigit().weight(.semibold))
+            if allChildrenRevealed {
+                HStack(spacing: 8) {
+                    Text("Passes")
+                        .font(.caption.weight(.semibold))
+                    Stepper(value: Binding(
+                        get: {
+                            renderSettings.spaceWarpStack.first(where: { $0.groupID == groupID })?
+                                .effectiveGroupIterations ?? fallbackIterations
+                        },
+                        set: { updateGroupIterations(groupID, iterations: $0) }),
+                        in: 1...Int(kMaxSpaceWarpGroupIterations)) {
+                        Text("\(renderSettings.spaceWarpStack.first(where: { $0.groupID == groupID })?.effectiveGroupIterations ?? fallbackIterations)")
+                            .font(.caption.monospacedDigit().weight(.semibold))
+                    }
+                    .fixedSize()
+                    .help("Repeat the complete child pipeline this many times")
+                    Spacer()
+                    Text("\(transformWork) transform steps / distance sample")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(transformWork > 32 ? .orange : .secondary)
                 }
-                .fixedSize()
-                .help("Repeat the complete child pipeline this many times")
-                Spacer()
-                Text("\(transformWork) transform steps / distance sample")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(transformWork > 32 ? .orange : .secondary)
+            } else {
+                Label("Map every unknown step to edit this group", systemImage: "lock")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
 
             if mode == .mandelboxRecurrence {
-                Text("After each complete pass, the point that entered the group is added back (+p₀). That feedback is what makes this the Mandelbox recurrence.")
+                Text(allChildrenRevealed && isMandelboxSequence
+                     ? "After each complete pass, the point that entered the group is added back (+p₀). That feedback is what makes this the Mandelbox recurrence."
+                     : "After each complete pass, the point that entered the group is added back as recurrence feedback (+p₀).")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -452,6 +1670,7 @@ struct TransformationsSection: View {
             } label: {
                 Label("Edit child transformations", systemImage: "slider.horizontal.3")
                     .font(.caption.weight(.semibold))
+                    .transformationActionHitTarget()
             }
             .tint(.indigo)
         }
@@ -459,6 +1678,89 @@ struct TransformationsSection: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.09)))
         .overlay(RoundedRectangle(cornerRadius: 10)
             .stroke(Color.indigo.opacity(0.45), lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private func groupHeaderIdentity(title: String, stepCount: Int,
+                                     mode: SpaceWarpGroupMode) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                Label(title, systemImage: "repeat")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.indigo)
+                groupHeaderBadges(stepCount: stepCount, mode: mode)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Label(title, systemImage: "repeat")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.indigo)
+                HStack(spacing: 6) {
+                    groupHeaderBadges(stepCount: stepCount, mode: mode)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func groupHeaderBadges(stepCount: Int, mode: SpaceWarpGroupMode) -> some View {
+        Text("\(stepCount) STEPS")
+            .font(.caption2.weight(.heavy))
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(Capsule().fill(.indigo.opacity(0.16)))
+            .foregroundStyle(.indigo)
+        if mode == .mandelboxRecurrence {
+            Text("+ p₀ FEEDBACK")
+                .font(.caption2.weight(.heavy))
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .background(Capsule().fill(.orange.opacity(0.17)))
+                .foregroundStyle(.orange)
+                .accessibilityLabel("Adds the group input after every pass")
+        }
+    }
+
+    @ViewBuilder
+    private func groupHeaderActions(firstID: UUID, groupID: UUID, title: String,
+                                    canMoveUp: Bool, canMoveDown: Bool) -> some View {
+        // Resolve by stable UUIDs captured at render time. The live stack can be
+        // replaced before a click arrives, and every mutation safely no-ops then.
+        Button { move(firstID, by: -1) } label: {
+            Image(systemName: "chevron.up")
+        }
+        .buttonStyle(.borderless)
+        .transformationActionHitTarget()
+        .disabled(!canMoveUp)
+        .accessibilityLabel("Move \(title) up")
+        Button { move(firstID, by: 1) } label: {
+            Image(systemName: "chevron.down")
+        }
+        .buttonStyle(.borderless)
+        .transformationActionHitTarget()
+        .disabled(!canMoveDown)
+        .accessibilityLabel("Move \(title) down")
+        Menu {
+            Button { ungroup(groupID) } label: {
+                Label("Dissolve Group", systemImage: "rectangle.split.3x1")
+            }
+            Button(role: .destructive) { deleteGroup(groupID) } label: {
+                Label("Delete Group", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .transformationActionHitTarget()
+        .fixedSize()
+        .accessibilityLabel("\(title) actions")
+    }
+
+    private func lockedGroupRemovalAction(groupID: UUID) -> some View {
+        Button(role: .destructive) { deleteGroup(groupID) } label: {
+            Image(systemName: "trash")
+        }
+        .buttonStyle(.borderless)
+        .transformationActionHitTarget()
+        .accessibilityLabel("Remove locked transformation group")
+        .help("Remove this locked group from the scene")
     }
 
     private func groupExpandedBinding(_ groupID: UUID) -> Binding<Bool> {
@@ -500,6 +1802,7 @@ struct TransformationsSection: View {
             Label("Under the hood — ƒ \(d.gpuApplyFn)", systemImage: "function")
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.tint)
+                .transformationActionHitTarget()
         }
     }
 
@@ -646,24 +1949,19 @@ struct TransformationsSection: View {
         remove: @escaping () -> Void,
         @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Label(title, systemImage: icon)
-                        .font(.subheadline.weight(.medium))
-                    Text(tagline)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    spaceSystemHeaderIdentity(title: title, icon: icon, tagline: tagline)
+                    Spacer(minLength: 4)
+                    spaceSystemHeaderActions(title: title, remove: remove)
                 }
-                Spacer()
-                Text("SPACE")
-                    .font(.caption2.weight(.heavy))
-                    .padding(.horizontal, 5).padding(.vertical, 2)
-                    .background(Capsule().fill(.teal.opacity(0.20)))
-                    .foregroundStyle(.teal)
-                    .accessibilityLabel("Global space system")
-                Button(role: .destructive) { remove() } label: { Image(systemName: "trash") }
-                    .buttonStyle(.borderless)
+                VStack(alignment: .leading, spacing: 5) {
+                    spaceSystemHeaderIdentity(title: title, icon: icon, tagline: tagline)
+                    HStack(spacing: 8) {
+                        Spacer()
+                        spaceSystemHeaderActions(title: title, remove: remove)
+                    }
+                }
             }
             .font(.caption)
 
@@ -671,6 +1969,37 @@ struct TransformationsSection: View {
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.teal.opacity(0.08)))
+    }
+
+    @ViewBuilder
+    private func spaceSystemHeaderIdentity(title: String, icon: String,
+                                           tagline: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Label(title, systemImage: icon)
+                .font(.subheadline.weight(.medium))
+            Text(tagline)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .layoutPriority(1)
+    }
+
+    @ViewBuilder
+    private func spaceSystemHeaderActions(title: String,
+                                          remove: @escaping () -> Void) -> some View {
+        Text("SPACE")
+            .font(.caption2.weight(.heavy))
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(Capsule().fill(.teal.opacity(0.20)))
+            .foregroundStyle(.teal)
+            .accessibilityLabel("Global space system")
+        Button(role: .destructive) { remove() } label: {
+            Image(systemName: "trash")
+        }
+        .buttonStyle(.borderless)
+        .transformationActionHitTarget()
+        .accessibilityLabel("Remove \(title)")
     }
 
     // MARK: - Mutations
@@ -693,33 +2022,17 @@ struct TransformationsSection: View {
         refresh &+= 1
     }
 
-    private func add(_ kind: SpaceWarpKind) {
+    private func add(_ kind: SpaceWarpKind,
+                     mappedIDs: Set<Int32>? = nil) {
         var arr = renderSettings.spaceWarpStack
-        guard arr.count < Int(kMaxSpaceWarpOps) else { return }
+        let effectiveMappedIDs = mappedIDs ?? mappedTransformationIDs
+        guard TransformationAccessPolicy.canAdd(
+            kind,
+            mode: experienceMode,
+            mappedIDs: effectiveMappedIDs
+        ), arr.count < Int(kMaxSpaceWarpOps) else { return }
         arr.append(SpaceWarpOpValue(kind: kind))
         renderSettings.spaceWarpStack = arr
-        refresh &+= 1
-    }
-
-    /// Load one pedagogical Mandelbox stage. All stages use the same embedded
-    /// terminal-sphere primitive, so a saved `.threshscene` carries its base DE;
-    /// only the editable transformation stack changes between stages.
-    private func apply(_ stage: MandelboxConstructionStage) {
-        renderSettings.spaceWarpStack = Array(stage.stack.prefix(Int(kMaxSpaceWarpOps)))
-        cache.pushConstructionPrimitive(.mandelboxSeed, gestureController: gestureController)
-        refresh &+= 1
-    }
-
-    /// Load a curated recipe — REPLACES the current stack with its ops (capped at
-    /// the GPU limit). A starting point to tweak, not a locked preset.
-    private func apply(_ recipe: WarpRecipe) {
-        renderSettings.spaceWarpStack = Array(recipe.make().prefix(Int(kMaxSpaceWarpOps)))
-        refresh &+= 1
-    }
-
-    /// Drop a random structure-forming stack.
-    private func surprise() {
-        renderSettings.spaceWarpStack = Array(WarpCatalog.randomStack().prefix(Int(kMaxSpaceWarpOps)))
         refresh &+= 1
     }
 
@@ -742,9 +2055,11 @@ struct TransformationsSection: View {
         var arr = renderSettings.spaceWarpStack
         guard let i = arr.firstIndex(where: { $0.id == id }) else { return }
         let current = unitRange(containing: i, in: arr)
+        guard current.allSatisfy({ isOpRevealed(arr[$0]) }) else { return }
         if delta < 0 {
             guard current.lowerBound > 0 else { return }
             let previous = unitRange(containing: current.lowerBound - 1, in: arr)
+            guard previous.allSatisfy({ isOpRevealed(arr[$0]) }) else { return }
             arr = Array(arr[..<previous.lowerBound])
                 + Array(arr[current])
                 + Array(arr[previous])
@@ -752,6 +2067,7 @@ struct TransformationsSection: View {
         } else {
             guard current.upperBound < arr.count else { return }
             let next = unitRange(containing: current.upperBound, in: arr)
+            guard next.allSatisfy({ isOpRevealed(arr[$0]) }) else { return }
             arr = Array(arr[..<current.lowerBound])
                 + Array(arr[next])
                 + Array(arr[current])
@@ -762,6 +2078,7 @@ struct TransformationsSection: View {
     }
 
     private func moveTransform(_ id: UUID, by delta: Int, insideGroup: Bool) {
+        guard canMoveTransform(id, by: delta, insideGroup: insideGroup) else { return }
         if insideGroup {
             moveWithinGroup(id, by: delta)
         } else {
@@ -772,12 +2089,42 @@ struct TransformationsSection: View {
     private func moveWithinGroup(_ id: UUID, by delta: Int) {
         var arr = renderSettings.spaceWarpStack
         guard let index = arr.firstIndex(where: { $0.id == id }),
-              let groupID = arr[index].groupID else { return }
+              let groupID = arr[index].groupID,
+              isOpRevealed(arr[index]) else { return }
         let destination = index + delta
-        guard arr.indices.contains(destination), arr[destination].groupID == groupID else { return }
+        guard arr.indices.contains(destination),
+              arr[destination].groupID == groupID,
+              isOpRevealed(arr[destination]) else { return }
         arr.swapAt(index, destination)
         renderSettings.spaceWarpStack = arr
         refresh &+= 1
+    }
+
+    private func canMoveTransform(_ id: UUID, by delta: Int,
+                                  insideGroup: Bool) -> Bool {
+        let arr = renderSettings.spaceWarpStack
+        guard let index = arr.firstIndex(where: { $0.id == id }),
+              isOpRevealed(arr[index]) else { return false }
+
+        if insideGroup {
+            guard let groupID = arr[index].groupID else { return false }
+            let destination = index + delta
+            return arr.indices.contains(destination)
+                && arr[destination].groupID == groupID
+                && isOpRevealed(arr[destination])
+        }
+
+        let current = unitRange(containing: index, in: arr)
+        let neighbor: Range<Int>
+        if delta < 0 {
+            guard current.lowerBound > 0 else { return false }
+            neighbor = unitRange(containing: current.lowerBound - 1, in: arr)
+        } else {
+            guard current.upperBound < arr.count else { return false }
+            neighbor = unitRange(containing: current.upperBound, in: arr)
+        }
+        return current.allSatisfy { isOpRevealed(arr[$0]) }
+            && neighbor.allSatisfy { isOpRevealed(arr[$0]) }
     }
 
     private var selectedGroupIndices: [Int] {
@@ -788,12 +2135,16 @@ struct TransformationsSection: View {
         let indices = selectedGroupIndices
         guard indices.count >= 2,
               indices.allSatisfy({ ops[$0].groupID == nil }),
+              indices.allSatisfy({ isOpRevealed(ops[$0]) }),
               let first = indices.first,
               let last = indices.last else { return false }
         return last - first + 1 == indices.count
     }
 
     private func beginGroupCreation() {
+        guard ops.filter({
+            $0.groupID == nil && isOpRevealed($0)
+        }).count >= 2 else { return }
         groupSelection.removeAll()
         isCreatingGroup = true
     }
@@ -804,6 +2155,8 @@ struct TransformationsSection: View {
     }
 
     private func toggleGroupSelection(_ id: UUID) {
+        guard let op = ops.first(where: { $0.id == id }),
+              isOpRevealed(op) else { return }
         if groupSelection.contains(id) {
             groupSelection.remove(id)
         } else {
@@ -829,6 +2182,9 @@ struct TransformationsSection: View {
 
     private func ungroup(_ groupID: UUID) {
         var arr = renderSettings.spaceWarpStack
+        let members = arr.filter { $0.groupID == groupID }
+        guard !members.isEmpty,
+              members.allSatisfy(isOpRevealed) else { return }
         for index in arr.indices where arr[index].groupID == groupID {
             arr[index].groupID = nil
             arr[index].groupIterations = nil
@@ -840,6 +2196,9 @@ struct TransformationsSection: View {
 
     private func updateGroupIterations(_ groupID: UUID, iterations: Int) {
         var arr = renderSettings.spaceWarpStack
+        let members = arr.filter { $0.groupID == groupID }
+        guard !members.isEmpty,
+              members.allSatisfy(isOpRevealed) else { return }
         let clamped = min(max(iterations, 1), Int(kMaxSpaceWarpGroupIterations))
         for index in arr.indices where arr[index].groupID == groupID {
             arr[index].groupIterations = clamped
@@ -864,7 +2223,8 @@ struct TransformationsSection: View {
     /// drag stays smooth — the binding reads the stored value back directly.
     private func update(_ id: UUID, _ mutate: (inout SpaceWarpOpValue) -> Void) {
         var arr = renderSettings.spaceWarpStack
-        guard let i = arr.firstIndex(where: { $0.id == id }) else { return }
+        guard let i = arr.firstIndex(where: { $0.id == id }),
+              isOpRevealed(arr[i]) else { return }
         mutate(&arr[i])
         renderSettings.spaceWarpStack = arr
     }
@@ -885,6 +2245,18 @@ struct TransformationsSection: View {
         renderSettings.musicReactiveMappings.filter {
             $0.isEnabled && $0.target.spaceWarpSlot == index
         }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func transformationActionHitTarget() -> some View {
+        #if os(macOS)
+        self
+        #else
+        frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+        #endif
     }
 }
 
@@ -917,8 +2289,11 @@ enum WarpSource {
 
     private static func scan(named fn: String) -> String? {
         let src = EmbeddedMetalSources.shadersMetal
-        // Locate the definition by its signature: "warpFoo(float3 p, SpaceWarpOp op)".
-        guard let sig = src.range(of: "\(fn)(float3 p, SpaceWarpOp op)") else { return nil }
+        // Warp kernels have different arities (the Mandelbox step also receives
+        // p0; its DE update receives derivative state), so locate the authored
+        // definition by name rather than assuming the common two-argument shape.
+        // Definitions precede every call site in the embedded shader source.
+        guard let sig = src.range(of: "\(fn)(") else { return nil }
         // Back up to the start of the declaration line (the FORCE_INLINE return type).
         let lineStart = src[..<sig.lowerBound].lastIndex(of: "\n").map { src.index(after: $0) } ?? src.startIndex
         // First "{" after the signature, then balance braces to the matching "}".
