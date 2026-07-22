@@ -33,11 +33,9 @@ else
 fi
 
 # --- Toolchain selection -----------------------------------------------------
-# Pin to the Xcode beta this project requires unless the caller overrides it.
-# The beta has been installed under two names on different machines, so pick
-# whichever actually exists rather than hard-coding one (verified 2026-07-07:
-# only "Xcode-beta.app" is present here; the old "Xcode-beta 2.app" default was
-# stale and made a fresh `build.sh` fail the existence check below).
+# Prefer the local beta used during development, then fall back to the active
+# Xcode selected by xcode-select. CI uses the latter because GitHub runner app
+# names are versioned (for example, Xcode_26.5.app).
 if [[ -z "${DEVELOPER_DIR:-}" ]]; then
     for candidate in \
         "/Applications/Xcode-beta.app/Contents/Developer" \
@@ -48,15 +46,26 @@ if [[ -z "${DEVELOPER_DIR:-}" ]]; then
         fi
     done
 fi
-export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}"
+if [[ -z "${DEVELOPER_DIR:-}" ]]; then
+    DEVELOPER_DIR="$(xcode-select -p 2>/dev/null || true)"
+fi
+export DEVELOPER_DIR
 
-if [[ ! -d "$DEVELOPER_DIR" ]]; then
-    echo "ERROR: DEVELOPER_DIR does not exist: $DEVELOPER_DIR" >&2
-    echo "       Set DEVELOPER_DIR to your Xcode beta, e.g.:" >&2
-    echo "       DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer Scripts/build.sh $*" >&2
+if [[ -z "$DEVELOPER_DIR" || ! -x "$DEVELOPER_DIR/usr/bin/xcodebuild" ]]; then
+    echo "ERROR: no full Xcode developer directory was found: ${DEVELOPER_DIR:-<empty>}" >&2
+    echo "       Select Xcode 26+ with xcode-select or set DEVELOPER_DIR explicitly." >&2
+    exit 1
+fi
+
+SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+SDK_MAJOR="${SDK_VERSION%%.*}"
+if [[ ! "$SDK_MAJOR" =~ ^[0-9]+$ || "$SDK_MAJOR" -lt 26 ]]; then
+    echo "ERROR: Threshold requires the macOS 26+ SDK; found $SDK_VERSION." >&2
+    echo "       DEVELOPER_DIR=$DEVELOPER_DIR" >&2
     exit 1
 fi
 echo "Using DEVELOPER_DIR=$DEVELOPER_DIR"
+echo "Using macOS SDK $SDK_VERSION"
 
 COMMON_FLAGS=(-project "$PROJECT" -configuration Debug CODE_SIGNING_ALLOWED=NO THRESHOLD_GIT_SHA="$GIT_SHA" THRESHOLD_GIT_DIRTY="$GIT_DIRTY")
 
@@ -72,12 +81,16 @@ COMMON_FLAGS=(-project "$PROJECT" -configuration Debug CODE_SIGNING_ALLOWED=NO T
 #    phantom 0.000s "failures". Serial = one host = deterministic.
 # Use `testfast` (incremental) only for tight iteration; re-confirm with `test`.
 TEST_FLAGS=(-parallel-testing-enabled NO)
+RESULT_FLAGS=()
+if [[ -n "${THRESHOLD_RESULT_BUNDLE_PATH:-}" ]]; then
+    RESULT_FLAGS=(-resultBundlePath "$THRESHOLD_RESULT_BUNDLE_PATH")
+fi
 
 build_mac()      { xcodebuild build "${COMMON_FLAGS[@]}" -scheme ThresholdMac  -destination 'platform=macOS'; }
 build_vision()   { xcodebuild build "${COMMON_FLAGS[@]}" -scheme Threshold     -destination 'generic/platform=visionOS'; }
 build_ios()      { xcodebuild build "${COMMON_FLAGS[@]}" -scheme ThresholdiOS  -destination 'generic/platform=iOS'; }
-run_tests()      { xcodebuild clean test "${COMMON_FLAGS[@]}" "${TEST_FLAGS[@]}" -scheme ThresholdMac -destination 'platform=macOS'; }
-run_tests_fast() { xcodebuild test       "${COMMON_FLAGS[@]}" "${TEST_FLAGS[@]}" -scheme ThresholdMac -destination 'platform=macOS'; }
+run_tests()      { xcodebuild clean test "${COMMON_FLAGS[@]}" "${TEST_FLAGS[@]}" "${RESULT_FLAGS[@]}" -scheme ThresholdMac -destination 'platform=macOS'; }
+run_tests_fast() { xcodebuild test       "${COMMON_FLAGS[@]}" "${TEST_FLAGS[@]}" "${RESULT_FLAGS[@]}" -scheme ThresholdMac -destination 'platform=macOS'; }
 regen_embeds()   { "$REPO_ROOT/Scripts/generate_metal_embeds.sh"; }
 
 case "${1:-mac}" in

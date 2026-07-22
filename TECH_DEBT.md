@@ -1,4 +1,12 @@
-# Threshold — Tech Debt Register (updated 2026-07-16)
+# Threshold — Tech Debt Register (updated 2026-07-18)
+
+> **2026-07-18 progression refresh:** #5 (CI) and #8c (Mixed-scene resource
+> validation) are closed. The active order now lives in [`ROADMAP.md`](ROADMAP.md),
+> while this file remains the evidence-backed debt register. Current branch metrics:
+> `RenderSettings.swift` is **4,656 lines / 495 `withLock` sites**; tests are **33
+> files / 219 passing tests**; concurrency markers are **69 `nonisolated(unsafe)`
+> + 60 `@unchecked Sendable`**. The next regression leverage is #3, #20, then
+> the #21/#22 lockstep seams.
 
 > **2026-07-16 refresh** (full item re-verify + scan of the input-menu, iPad, formula,
 > construction-primitive, and persistence commits since 07-09:
@@ -72,12 +80,12 @@ shader's hardcoded `2.0f` far-clamp is comment-lockstepped to `EnvironmentSDFGri
 
 Still unusually clean for its size: **zero TODO/FIXME/HACK markers** (4 `XXX` are the
 `DE_XXX` codegen-macro placeholder, not debt), no `try!`, no third-party dependencies.
-Refreshed counts (**2026-07-16**): `RenderSettings` is now **4,654 lines / 495 `withLock`
-sites**; tests are **28 files**; concurrency markers **66 `nonisolated(unsafe)` +
-57 `@unchecked Sendable`**.
+Refreshed counts (**2026-07-18**): `RenderSettings` is now **4,656 lines / 495 `withLock`
+sites**; tests are **33 files / 219 passing tests**; concurrency markers **69
+`nonisolated(unsafe)` + 60 `@unchecked Sendable`**.
 
-The debt now concentrates in four places (comment-lockstep seams — #21/#22 are the live
-ones; missing pure-logic tests — #3/#20; no CI — #5; the RenderSettings god object) — **plus one new strategic fact**:
+The debt now concentrates in three places (comment-lockstep seams — #21/#22 are the live
+ones; missing pure-logic tests — #3/#20; the RenderSettings god object) — **plus one new strategic fact**:
 [`Context/REBUILD_ARCHITECTURE.md`](Context/REBUILD_ARCHITECTURE.md) (2026-07-04,
 uncommitted) designs a ground-up rebuild whose three core systems (ParameterCatalog,
 Modulation Engine, Shader IR) would subsume arch items #8/#10/#12/#13 wholesale. Until a
@@ -100,11 +108,11 @@ go/no-go exists (#16), **don't invest in big in-place arch refactors**; seam-har
 | 14 | ~~**`objectCutout*` preset persistence asymmetry**~~ | Test | – | – | – | – | **DECIDED + PINNED 2026-07-04**: cutouts are **device-local by design** (they describe the user's physical room, not the scene — same family as the safety bubble and Quality accel fields; they also persist per-device via their own UserDefaults keys). Pinned by `objectCutoutsStayDeviceLocal` (asserts no `objectCutout` key ever serializes into `FractalPreset` AND scene apply never stomps the live device config); test header documents the boundToSpace-vs-cutout rationale. |
 | 8d | ~~**`FractalParams`/`Uniforms` size watch**~~ | Perf-adjacent | – | – | – | – | **DONE 2026-07-04**: `static_assert` gates added — `FractalParams ≤ 304 B` next to its definition in `Shaders.metal` (with a do-not-bump-without-harness-measurement comment), `Uniforms ≤ 1856` / `TileUniforms ≤ 1888` / `FormulaParams ≤ 176` at the end of `ShaderTypes.h` (Metal-only guard). Asserts also fire in every runtime `.threshfx` compile via the embeds. **⚠️ Measured finding: `FractalParams` is 304 B by value — ABOVE the 272 B that caused the documented occupancy collapse** (hand+forearm fields, 4×float4 = 80 B). Logged as a candidate for the PERF_PUSH backlog: pack forearms/hands or move them behind the pointer like `spaceWarpOps`. **↑ 2026-07-04 PM: gate RAISED 304→320 B** — Env Scrunch added `EnvScrunchParams` by value (Uniforms gate 1856→1888→**1936**, TileUniforms 1888→1920→**1968** after containment grew the struct 112→160 B; those live in `constant` space, so growth there is awareness-only). The grid *itself* is correctly behind a bindless pointer (`gpuAddress`). **RESOLVED 2026-07-09:** the hand field, space-warp stack, and Env Scrunch were all moved behind pointers, dropping by-value `FractalParams` well under the 272 B collapse size — the `static_assert` is now `FractalParams ≤ 160` (`Shaders.metal:628`), and `Uniforms` / `TileUniforms` are gated `≤ 2048` (`ShaderTypes.h`; both live in `constant` space). The 304/320/1936/1968 B figures above are historical. |
 | 16 | ~~**Rebuild go/no-go record**~~ | Arch | – | – | – | – | **DONE 2026-07-04**: `Context/REBUILD_ARCHITECTURE.md` committed with a PROPOSED status block + explicit decision inputs (deferred-shading outcome, next parameter-heavy feature's wiring cost, Vision Pro baseline). #10–13 stay parked until the call is made. |
-| 5 | **CI skeleton**: build (Mac + visionOS schemes) + unit tests + QL render check + perf gate, on push | Infra | 3 | 3 | 2 | 24 | **OPEN, but cheaper now** (E 3→2): `Scripts/perf-gate.sh` and `Scripts/ql_render_check.sh` exist as ready-made steps; still nothing runs them automatically (no `.github/`). Absorbs #8a/#8c as steps. |
+| 5 | ~~**CI skeleton**~~ | Infra | – | – | – | – | **DONE 2026-07-18:** `.github/workflows/ci.yml` runs clean serial tests, iPadOS/visionOS builds, the Quick Look all-scenes render gate, and repository hygiene on every push/PR; failed tests retain an `.xcresult`. GPU timing remains deliberately local/on-device because hosted-runner timing is not stable evidence. |
 | 4 | ~~**Benchmark persistence isolation**~~ | Infra | – | – | – | – | **ALREADY DONE** (register was stale): `SettingsPersistence.benchmarkHermetic` gates BOTH `save` and `load` on the `THRESHOLD_BENCHMARK` env (`SettingsPersistence.swift:131` — checks the env directly, not `BenchmarkMode`, so the QL source closure still compiles; the 2026-07-04 re-verify grep missed it for that reason). |
 | 8a | **QL source-closure drift**: derive `wire_quicklook.rb SHARED_SOURCES` from the pbxproj target, or add a freshness check next to #1 | Infra | 2 | 3 | 2 | 20 | **OPEN.** Hit 2026-07-02 (`HandAttractionConfig.swift` missing → QL gate broke mid-session). |
 | 8b | **Config Codable-tolerance rule**: audit remaining `cfg.*` domain configs for `decodeIfPresent`; add a test decoding each config from `{}` | Test | 2 | 2 | 1 | 20 | **NEAR-DONE (re-verified 2026-07-13).** The audit half is complete: all 9 Codable domain configs have tolerant custom decoders (`GestureDefaults` is constants-only and `PerFractalGestureStore` a store helper — N/A). The `{}` pin covers 3/9 (Geometry+Color in `SceneStatePersistenceTests:148`, Quality in `QualityConfigCodableTests`). Remaining: add the other six configs to that one existing test — fold into any sitting. |
-| 8c | **Bundled-resource flattening workaround**: fold `Scripts/mark_mixed_scenes.py` check into #5's CI (fail if a file under `Examples/Mixed` lacks `mixedModeScene: true`) | Infra | 2 | 2 | 1 | 20 | **OPEN.** |
+| 8c | ~~**Bundled-resource flattening workaround**~~ | Infra | – | – | – | – | **DONE 2026-07-18:** `Scripts/mark_mixed_scenes.py --check` fails without modifying files when a bundled Mixed scene lacks `mixedModeScene: true`; CI runs it on every change. |
 | 15 | ~~**Legacy compute-cache toggle is trap code**~~ | Code | – | – | – | – | **DONE (verified 2026-07-13)**: `recreateLegacyComputeCacheBug` — 0 hits in the tree; the toggle was removed and only the scene-persisted `deIterationMismatch` δ path remains. |
 | 17 | ~~**`handEffectsBeta` gate scatter**~~ | Code | – | – | – | – | **DONE** (verified 2026-07-09 + 07-07 audit): `handEffectsBeta` returns **0 code hits** — the beta gate was fully removed, so there is nothing left to centralize. |
 | 6 | **Concurrency-safety pass**: audit the 66 `nonisolated(unsafe)` + 57 `@unchecked Sendable` occurrences; keep documented racy-by-design gates, annotate WHY per-site, fix the drift | Code | 3 | 3 | 3 | 18 | **OPEN** (counts refreshed 2026-07-16; +10 `@unchecked Sendable` since 07-09, with new resource and renderer types documented where applicable). Swift-6 strict concurrency will force this eventually. Sequence #24's 2.7 (`@Locked` shrink) with this pass — same lock-discipline review. |

@@ -1,0 +1,35 @@
+name: Progression
+description: Define a product or engineering improvement as a measurable outcome.
+title: "[Progression] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Current constraint
+      description: What currently prevents progress or creates repeated cost?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the observable result, not the implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition of done
+      description: List the evidence that will prove this is complete.
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Regression risks and guards
+      description: Which behaviors could break, and which tests or gates will protect them?
+  - type: textarea
+    id: exclusions
+    attributes:
+      label: Deliberate exclusions
+      description: Record adjacent work that is explicitly not part of this progression.

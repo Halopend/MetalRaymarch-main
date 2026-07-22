@@ -16,17 +16,14 @@ Scripts/build.sh all      # embeds + mac + vision + test
 
 ## The toolchain trap (read this first)
 
-The command-line `xcodebuild` default toolchain is frequently the **wrong Xcode**
-for this project — it builds against an older SDK and fails or silently misbehaves.
-This project must build with the Xcode **beta** whose SDK matches the code
-(macOS 26 / visionOS 26). `Scripts/build.sh` auto-detects the beta: it sets
-`DEVELOPER_DIR` to the first that exists, preferring
-`/Applications/Xcode-beta.app` and falling back to `/Applications/Xcode-beta 2.app`
-(the old hardcoded `Xcode-beta 2.app` default was stale and broke fresh clones).
-Override it when your beta lives elsewhere:
+The command-line `xcodebuild` default toolchain can point at an older SDK and
+fail or silently misbehave. Threshold requires Xcode 26+ with the macOS/iOS/
+visionOS 26 SDKs. `Scripts/build.sh` prefers `/Applications/Xcode-beta.app`,
+then uses the active full Xcode selected by `xcode-select`, and rejects an SDK
+older than 26. Override it when Xcode lives elsewhere:
 
 ```sh
-DEVELOPER_DIR="/Applications/Xcode-beta.app/Contents/Developer" Scripts/build.sh mac
+DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer" Scripts/build.sh mac
 ```
 
 ## Schemes & targets
@@ -39,6 +36,21 @@ DEVELOPER_DIR="/Applications/Xcode-beta.app/Contents/Developer" Scripts/build.sh
 | —             | `ThresholdTests` | macOS   | Swift Testing unit suite.              |
 
 Builds pass `CODE_SIGNING_ALLOWED=NO` to avoid provisioning friction locally.
+
+## Continuous integration
+
+Every push and pull request runs the same repository-owned commands used
+locally:
+
+- clean, serial `ThresholdTests` on macOS;
+- generic-device iPadOS and visionOS builds;
+- the Quick Look all-scenes render gate;
+- shell/resource hygiene checks.
+
+Failed test jobs upload a seven-day `.xcresult` artifact. CI deliberately does
+not judge GPU performance: use `Scripts/perf-gate.sh` locally and Vision Pro
+measurements for performance-sensitive work. See [`ROADMAP.md`](ROADMAP.md) for
+the active progression and completion rules.
 
 ## Running the tests
 

@@ -1,0 +1,52 @@
+name: Regression or bug
+description: Capture enough evidence to reproduce, fix, and permanently guard a failure.
+title: "[Bug] "
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Broken outcome
+      description: What were you trying to accomplish, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include the smallest scene, preset, gesture, or action sequence that reproduces it.
+      placeholder: |
+        1. Open …
+        2. Set …
+        3. Observe …
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options:
+        - macOS
+        - iPadOS
+        - visionOS
+        - Quick Look
+        - Shared/non-UI logic
+    validations:
+      required: true
+  - type: input
+    id: last_known_good
+    attributes:
+      label: Last known good version
+      description: Commit, build, or approximate date; write "unknown" if necessary.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Attach screenshots, scene files, logs, crash reports, or benchmark output.
+  - type: textarea
+    id: guard
+    attributes:
+      label: Permanent regression guard
+      description: What automated test or gate should fail if this returns?

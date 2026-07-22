@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Validate scripts
+        run: bash -n Scripts/*.sh .githooks/pre-commit
+      - name: Reject duplicate artifacts
+        run: Scripts/check_no_duplicate_suffix.sh --all
+      - name: Validate mixed-scene metadata
+        run: python3 Scripts/mark_mixed_scenes.py --check
+
+  tests:
+    name: Clean unit tests
+    needs: hygiene
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Report toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+      - name: Run trustworthy test suite
+        env:
+          THRESHOLD_RESULT_BUNDLE_PATH: ${{ runner.temp }}/ThresholdTests.xcresult
+        run: Scripts/build.sh test
+      - name: Upload failed test result
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ThresholdTests-xcresult
+          path: ${{ runner.temp }}/ThresholdTests.xcresult
+          if-no-files-found: ignore
+          retention-days: 7
+
+  platform-builds:
+    name: Build ${{ matrix.platform }}
+    needs: hygiene
+    runs-on: macos-26
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ios, vision]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Build ${{ matrix.platform }}
+        run: Scripts/build.sh ${{ matrix.platform }}
+
+  quick-look:
+    name: Quick Look render gate
+    needs: hygiene
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Render bundled scenes
+        run: Scripts/ql_render_check.sh

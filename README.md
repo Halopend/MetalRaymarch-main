@@ -4,15 +4,16 @@ An artistic real-time fractal renderer (SDF ray-marching in Metal) for **macOS, 
 
 This file is the fast orientation for a fresh clone. Deeper docs:
 [`CONTRIBUTING.md`](CONTRIBUTING.md) (full build/test guide) ·
+[`ROADMAP.md`](ROADMAP.md) (ordered active work) ·
 [`TECH_DEBT.md`](TECH_DEBT.md) + [`Context/TECH_DEBT_AUDIT_2026-07-07.md`](Context/TECH_DEBT_AUDIT_2026-07-07.md) (debt register) ·
 [`PERF_PUSH.md`](PERF_PUSH.md) (perf backlog) · [`Context/`](Context/) (architecture).
 
 ## Requirements
 
-- **Xcode beta with the 26.0 SDKs** (Swift 6). All three targets set `*_DEPLOYMENT_TARGET = 26.0`, so a released Xcode will not build this.
-- The build scripts auto-detect the beta at `/Applications/Xcode-beta.app` (falling back to `Xcode-beta 2.app`). Override explicitly if yours lives elsewhere:
+- **Xcode 26 or newer with the macOS/iOS/visionOS 26 SDKs** (Swift 6). All three targets set `*_DEPLOYMENT_TARGET = 26.0`.
+- The build scripts prefer `/Applications/Xcode-beta.app`, then use the active full Xcode selected by `xcode-select`. Override explicitly when needed:
   ```sh
-  DEVELOPER_DIR="/path/to/Xcode-beta.app/Contents/Developer" Scripts/build.sh mac
+  DEVELOPER_DIR="/path/to/Xcode.app/Contents/Developer" Scripts/build.sh mac
   ```
 
 ## Build & run
@@ -39,7 +40,7 @@ Local builds run with `CODE_SIGNING_ALLOWED=NO` (no provisioning needed).
 
 4. **Unsigned build + signed into iCloud = a CloudKit trap.** With `CODE_SIGNING_ALLOWED=NO` the app has no iCloud entitlement, but if you're signed into iCloud the analytics uploader used to throw an *uncaught* ObjC exception and **freeze the app in a crash-reporter modal** (looks like "the app hangs"). Guarded since 2026-07-07 by `UsageAnalytics.hasCloudKitEntitlement` (`SecTaskCopyValueForEntitlement`). If a freeze-on-launch ever returns, look there first — `sample <pid>` the process to confirm.
 
-5. **There is no CI.** Nothing runs the tests/perf/Quick Look gates for you. Before pushing, run `Scripts/build.sh test` (and `Scripts/perf-gate.sh` / `Scripts/ql_render_check.sh` if you touched rendering).
+5. **CI protects every push and pull request.** It runs repository hygiene, clean serial tests, iPadOS/visionOS builds, and the Quick Look render gate. Performance timing remains local/on-device because hosted-runner GPU numbers are not stable evidence.
 
 ## Local commit guard (opt-in)
 
