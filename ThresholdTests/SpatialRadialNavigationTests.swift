@@ -60,15 +60,16 @@ struct SpatialRadialNavigationTests {
     #expect(state.path.isEmpty)
   }
 
-  @Test("Spatial rings use real depth and preserve useful separation")
+  @Test("Spatial fan uses shallow depth and preserves useful separation")
   func threeDimensionalGeometry() {
     let placements = SpatialRadialGeometry.placements(count: 8, depth: 2)
     #expect(placements.count == 8)
     #expect(Set(placements.map { Int(($0.position.z * 100_000).rounded()) }).count > 1)
 
-    for index in placements.indices {
-      let next = placements[(index + 1) % placements.count]
-      #expect(simd_distance(placements[index].position, next.position) > 0.12)
+    for first in placements.indices {
+      for second in placements.indices where second > first {
+        #expect(simd_distance(placements[first].position, placements[second].position) > 0.07)
+      }
     }
   }
 
@@ -86,7 +87,7 @@ struct SpatialRadialNavigationTests {
     #expect(deepRing == cappedRing)
   }
 
-  @Test("Rotation is rigid and does not change ring radius")
+  @Test("Rotation is rigid and does not change fan reach")
   func rotationPreservesRadius() {
     let base = SpatialRadialGeometry.placements(count: 7, depth: 0, rotation: 0)
     let rotated = SpatialRadialGeometry.placements(count: 7, depth: 0, rotation: 0.7)
@@ -96,32 +97,174 @@ struct SpatialRadialNavigationTests {
     }
   }
 
-  @Test("Recurrence layout matches direct trigonometry without drift")
-  func recurrenceAccuracy() {
-    let count = 32
-    let rotation: Float = 1.137
-    let placements = SpatialRadialGeometry.placements(
-      count: count,
-      depth: 3,
-      rotation: rotation
-    )
-    let radius =
-      SpatialRadialGeometry.baseRadius
-      + 3 * SpatialRadialGeometry.depthRadiusStep
-    let step = 2 * Float.pi / Float(count)
-    let start = -Float.pi / 2 + rotation
+  @Test("Fan tilt is bounded so every target remains inward")
+  func boundedFanTilt() {
+    let maximum = SpatialRadialGeometry.maximumFanTilt
+    #expect(SpatialRadialGeometry.constrainedRotation(.infinity) == 0)
+    #expect(SpatialRadialGeometry.constrainedRotation(-.infinity) == 0)
+    #expect(SpatialRadialGeometry.constrainedRotation(.nan) == 0)
+    #expect(SpatialRadialGeometry.constrainedRotation(10) == maximum)
+    #expect(SpatialRadialGeometry.constrainedRotation(-10) == -maximum)
 
-    for (index, placement) in placements.enumerated() {
-      let angle = start + Float(index) * step
-      let vertical = sin(angle) * radius
-      let expected = SIMD3<Float>(
-        cos(angle) * radius,
-        vertical * cos(SpatialRadialGeometry.ringTilt),
-        vertical * sin(SpatialRadialGeometry.ringTilt)
-          - 3 * SpatialRadialGeometry.depthStep
-      )
-      #expect(simd_distance(placement.position, expected) < 0.000_002)
+    for isLeftHanded in [false, true] {
+      let sign = SpatialRadialGeometry.inwardSign(isLeftHanded: isLeftHanded)
+      for rotation in [-maximum, maximum] {
+        let placements = SpatialRadialGeometry.placements(
+          count: 10,
+          depth: 2,
+          rotation: rotation,
+          isLeftHanded: isLeftHanded
+        )
+        #expect(placements.allSatisfy { $0.position.x * sign > 0 })
+
+        let overRotated = SpatialRadialGeometry.placements(
+          count: 10,
+          depth: 2,
+          rotation: rotation * 100,
+          isLeftHanded: isLeftHanded
+        )
+        #expect(overRotated == placements)
+      }
     }
+  }
+
+  @Test("Visual rail mirrors with handedness and follows the bounded tilt")
+  func handRailGeometry() {
+    let maximum = SpatialRadialGeometry.maximumFanTilt
+    for rotation in [-maximum, Float(0), maximum] {
+      let right = SpatialRadialGeometry.railPosition(
+        depth: 3,
+        rotation: rotation,
+        isLeftHanded: false
+      )
+      let left = SpatialRadialGeometry.railPosition(
+        depth: 3,
+        rotation: rotation,
+        isLeftHanded: true
+      )
+      #expect(abs(right.x + left.x) < 0.000_001)
+      #expect(abs(right.y + left.y) < 0.000_001)
+      #expect(abs(right.z - left.z) < 0.000_001)
+    }
+  }
+
+  @Test("Fan items follow their planar arc while keeping an edge aimed at the hub")
+  func itemOrientationFollowsArc() {
+    for isLeftHanded in [false, true] {
+      let sign = SpatialRadialGeometry.inwardSign(isLeftHanded: isLeftHanded)
+      for rotation in [
+        -SpatialRadialGeometry.maximumFanTilt,
+        Float(0),
+        SpatialRadialGeometry.maximumFanTilt,
+      ] {
+        let placements = SpatialRadialGeometry.placements(
+          count: 9,
+          depth: 2,
+          rotation: rotation,
+          isLeftHanded: isLeftHanded
+        )
+
+        for placement in placements {
+          let orientation = SpatialRadialGeometry.itemOrientation(
+            angle: placement.angle,
+            isLeftHanded: isLeftHanded
+          )
+          let planarPosition = SIMD3<Float>(
+            placement.position.x,
+            placement.position.y,
+            0
+          )
+          let expectedInward = -simd_normalize(planarPosition)
+          let localInwardEdge = SIMD3<Float>(-sign, 0, 0)
+          let actualInward = simd_act(orientation, localInwardEdge)
+          let facingNormal = simd_act(orientation, SIMD3<Float>(0, 0, 1))
+
+          #expect(simd_distance(actualInward, expectedInward) < 0.000_001)
+          #expect(simd_distance(facingNormal, SIMD3<Float>(0, 0, 1)) < 0.000_001)
+        }
+      }
+    }
+  }
+
+  @Test("An invalid arc angle has a stable identity orientation")
+  func itemOrientationInvalidAngleFallback() {
+    for isLeftHanded in [false, true] {
+      let orientation = SpatialRadialGeometry.itemOrientation(
+        angle: .nan,
+        isLeftHanded: isLeftHanded
+      )
+      #expect(
+        simd_distance(
+          orientation.vector,
+          SIMD4<Float>(0, 0, 0, 1)
+        ) < 0.000_001
+      )
+    }
+  }
+
+  @Test("Spatial controls require both a menu request and a tracked hand")
+  func trackedHandVisibility() {
+    #expect(
+      SpatialRadialGeometry.shouldShowContent(
+        menuRequested: true,
+        handIsAnchored: true
+      )
+    )
+    #expect(
+      !SpatialRadialGeometry.shouldShowContent(
+        menuRequested: true,
+        handIsAnchored: false
+      )
+    )
+    #expect(
+      !SpatialRadialGeometry.shouldShowContent(
+        menuRequested: false,
+        handIsAnchored: true
+      )
+    )
+    #expect(
+      !SpatialRadialGeometry.shouldShowContent(
+        menuRequested: false,
+        handIsAnchored: false
+      )
+    )
+  }
+
+  @Test("Fan mirrors from either hand toward the body center")
+  func handedFanDirection() {
+    let right = SpatialRadialGeometry.placements(
+      count: 10,
+      depth: 1,
+      isLeftHanded: false
+    )
+    let left = SpatialRadialGeometry.placements(
+      count: 10,
+      depth: 1,
+      isLeftHanded: true
+    )
+
+    #expect(right.allSatisfy { $0.position.x < 0 })
+    #expect(left.allSatisfy { $0.position.x > 0 })
+    for (rightPlacement, leftPlacement) in zip(right, left) {
+      #expect(abs(rightPlacement.position.x + leftPlacement.position.x) < 0.000_001)
+      #expect(abs(rightPlacement.position.y - leftPlacement.position.y) < 0.000_001)
+      #expect(abs(rightPlacement.position.z - leftPlacement.position.z) < 0.000_001)
+    }
+  }
+
+  @Test("Above-hand coordinates become an upright user-facing menu plane")
+  func handAnchorOrientation() {
+    let facing = simd_act(
+      SpatialRadialGeometry.anchorToFacingOrientation,
+      SIMD3<Float>(0, 0, 1)
+    )
+    let upright = simd_act(
+      SpatialRadialGeometry.anchorToFacingOrientation,
+      SIMD3<Float>(0, 1, 0)
+    )
+
+    #expect(simd_distance(facing, SIMD3<Float>(0, 1, 0)) < 0.000_001)
+    #expect(simd_distance(upright, SIMD3<Float>(0, 0, -1)) < 0.000_001)
   }
 
   @Test("Gesture-cadence layout stays comfortably below frame budget")
@@ -139,89 +282,40 @@ struct SpatialRadialNavigationTests {
       }
     }
 
-    // 20k full ring layouts in under half a second leaves several orders of
+    // 20k full fan layouts in under half a second leaves several orders of
     // magnitude of headroom for one layout at 90 Hz, while remaining broad
     // enough not to flake under ordinary CI contention.
     #expect(elapsed < .milliseconds(500))
     #expect(checksum.isFinite)
   }
 
-  @Test("Worst-case gesture ring and teaching overlays fit the volume")
-  func volumeBounds() {
-    let halfWidth = Float(SpatialRadialGeometry.volumeWidth / 2)
-    let halfHeight = Float(SpatialRadialGeometry.volumeHeight / 2)
-    let halfDepth = Float(SpatialRadialGeometry.volumeDepth / 2)
-
-    // Sweep a full rotation because extrema can fall between the initial
-    // ten evenly-spaced card positions.
-    for sample in 0..<72 {
-      let rotation = Float(sample) * 2 * .pi / 72
-      for placement in SpatialRadialGeometry.placements(
-        count: 10,
-        depth: 1,
-        rotation: rotation
-      ) {
-        #expect(abs(placement.position.x) + SpatialRadialGeometry.ringItemHalfSize.x < halfWidth)
-        #expect(abs(placement.position.y) + SpatialRadialGeometry.ringItemHalfSize.y < halfHeight)
-        #expect(abs(placement.position.z) < halfDepth)
+  @Test("Worst-case fan stays in a compact hand-scale envelope")
+  func compactBounds() {
+    let rotations: [Float] = [
+      -SpatialRadialGeometry.maximumFanTilt,
+      0,
+      SpatialRadialGeometry.maximumFanTilt,
+    ]
+    for isLeftHanded in [false, true] {
+      for rotation in rotations {
+        for placement in SpatialRadialGeometry.placements(
+          count: 10,
+          depth: 1,
+          rotation: rotation,
+          isLeftHanded: isLeftHanded
+        ) {
+          #expect(abs(placement.position.x) + SpatialRadialGeometry.ringItemHalfSize.x < 0.34)
+          #expect(abs(placement.position.y) + SpatialRadialGeometry.ringItemHalfSize.y < 0.25)
+          #expect(abs(placement.position.z) < 0.04)
+        }
       }
+
+      let header = SpatialRadialGeometry.headerPosition(isLeftHanded: isLeftHanded)
+      #expect(abs(header.x) + SpatialRadialGeometry.headerHalfSize.x < 0.28)
+      #expect(abs(header.y) + SpatialRadialGeometry.headerHalfSize.y < 0.30)
     }
 
-    #expect(
-      abs(SpatialRadialGeometry.headerPosition.y)
-        + SpatialRadialGeometry.headerHalfHeight < halfHeight
-    )
-    #expect(
-      SpatialRadialGeometry.mathLensHalfWidth < halfWidth
-    )
-    #expect(
-      abs(SpatialRadialGeometry.mathLensPosition.y)
-        + SpatialRadialGeometry.mathLensHalfHeight < halfHeight
-    )
-    #expect(abs(SpatialRadialGeometry.mathLensPosition.z) < halfDepth)
-  }
-
-  @Test("Spatial Math Lens snapshots only the enabled construction")
-  func mathLensSnapshot() {
-    var disabled = SpaceWarpOpValue(kind: .bend)
-    disabled.isEnabled = false
-    let snapshot = SpatialMathLensSnapshot.capture(
-      formula: .mandelbox,
-      transforms: [
-        SpaceWarpOpValue(kind: .mirror),
-        disabled,
-        SpaceWarpOpValue(kind: .sphereFold),
-        SpaceWarpOpValue(kind: .scale),
-        SpaceWarpOpValue(kind: .twist),
-      ]
-    )
-
-    #expect(snapshot.transformCount == 4)
-    #expect(snapshot.constructionRoute.hasPrefix("p"))
-    #expect(snapshot.constructionRoute.contains("Mirror"))
-    #expect(!snapshot.constructionRoute.contains("Bend"))
-    #expect(snapshot.constructionRoute.contains("+…"))
-    #expect(snapshot.constructionRoute.hasSuffix("d(p)"))
-    #expect(snapshot.pages.count == 5)
-    #expect(snapshot.pages.first?.title == FractalModelType.mandelbox.displayName)
-    #expect(
-      snapshot.pages.dropFirst().map(\.title) == [
-        SpaceWarpKind.mirror.displayName,
-        SpaceWarpKind.sphereFold.displayName,
-        SpaceWarpKind.scale.displayName,
-        SpaceWarpKind.twist.displayName,
-      ])
-  }
-
-  @Test("Math Lens cross-references the active spatial branch")
-  func mathLensCrossReference() {
-    let tree = hierarchy()
-    let snapshot = SpatialMathLensSnapshot.capture(formula: .mandelbulb, transforms: [])
-    let shape = tree.node(withID: NavigationHierarchy.rootID(for: .shape))
-    let performance = tree.node(withID: NavigationHierarchy.rootID(for: .performance))
-
-    #expect(snapshot.crossReference(for: shape).contains("signed distance"))
-    #expect(snapshot.crossReference(for: performance).contains("not the field itself"))
+    #expect(simd_length(SpatialRadialGeometry.handRelativeOffset) < 0.05)
   }
 
   @Test("Gesture map preserves hand, finger, action, and configured menu gesture")

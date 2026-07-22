@@ -98,153 +98,151 @@ struct SpatialRadialPlacement: Equatable {
   let position: SIMD3<Float>
 }
 
-/// A shallow, tilted ring that uses actual volume depth without placing controls
-/// so far apart that eye-and-hand targeting becomes tiring. Values are meters in
-/// the visionOS RealityView; the pure SIMD output is also straightforward to test.
+/// A compact fan that grows from the menu hand toward the center of the body.
+/// Values are meters in the visionOS RealityView; the pure SIMD output is also
+/// straightforward to test on every platform.
 enum SpatialRadialGeometry {
-  static let volumeWidth: Double = 0.72
-  static let volumeHeight: Double = 0.84
-  static let volumeDepth: Double = 0.24
+  static let singleTrackReach: Float = 0.150
+  static let nearTrackReach: Float = 0.115
+  static let farTrackReach: Float = 0.225
+  static let trackCurve: Float = 0.018
+  static let verticalStep: Float = 0.078
+  static let depthStep: Float = 0.006
+  /// A small amount of two-hand adjustment is useful, but a 15-degree cap
+  /// keeps even the outermost target inside the hand-scale interaction zone.
+  static let maximumFanTilt: Float = .pi / 12
+  static let railLength: Float = farTrackReach + trackCurve
+  static let hubPosition = SIMD3<Float>(0, 0, 0.012)
+  static let handRelativeOffset = SIMD3<Float>(0, 0.035, -0.025)
 
-  static let baseRadius: Float = 0.225
-  static let depthRadiusStep: Float = 0.018
-  static let ringTilt: Float = .pi / 12
-  static let depthStep: Float = 0.018
-  static let hubPosition = SIMD3<Float>(0, 0, 0.035)
-  static let headerPosition = SIMD3<Float>(0, 0.315, 0.025)
-  static let mathLensPosition = SIMD3<Float>(0, -0.315, -0.055)
+  /// `aboveHand` points +y toward the person's head and +z toward the ground.
+  /// Rotate the menu plane so its normal points at the person and its top points
+  /// against gravity, independent of palm roll and pitch.
+  static let anchorToFacingOrientation = simd_quatf(
+    angle: -.pi / 2,
+    axis: SIMD3<Float>(1, 0, 0)
+  )
 
-  /// Conservative physical half-extents for layout regression tests. SwiftUI
-  /// attachment typography can vary, so these intentionally exceed the fixed
-  /// button frames and expected Lens/header content heights.
-  static let ringItemHalfSize = SIMD2<Float>(0.064, 0.038)
-  static let headerHalfHeight: Float = 0.060
-  static let mathLensHalfWidth: Float = 0.180
-  static let mathLensHalfHeight: Float = 0.090
+  /// Conservative physical extents for layout regression tests. SwiftUI
+  /// attachment typography can vary, so these slightly exceed the fixed frames.
+  static let ringItemHalfSize = SIMD2<Float>(0.058, 0.034)
+  static let headerHalfSize = SIMD2<Float>(0.145, 0.050)
+
+  static func inwardSign(isLeftHanded: Bool) -> Float {
+    isLeftHanded ? 1 : -1
+  }
+
+  static func constrainedRotation(_ rotation: Float) -> Float {
+    guard rotation.isFinite else { return 0 }
+    return min(max(rotation, -maximumFanTilt), maximumFanTilt)
+  }
+
+  static func shouldShowContent(menuRequested: Bool, handIsAnchored: Bool) -> Bool {
+    menuRequested && handIsAnchored
+  }
+
+  static func headerPosition(isLeftHanded: Bool) -> SIMD3<Float> {
+    SIMD3<Float>(inwardSign(isLeftHanded: isLeftHanded) * 0.120, 0.235, 0.004)
+  }
+
+  static func railPosition(
+    depth: Int,
+    rotation: Float,
+    isLeftHanded: Bool
+  ) -> SIMD3<Float> {
+    let safeDepth = Float(min(max(depth, 0), 5))
+    let safeRotation = constrainedRotation(rotation)
+    let midpoint = inwardSign(isLeftHanded: isLeftHanded) * railLength * 0.5
+    return SIMD3<Float>(
+      midpoint * cos(safeRotation),
+      midpoint * sin(safeRotation),
+      -safeDepth * depthStep - 0.016
+    )
+  }
+
+  static func railOrientation(rotation: Float) -> simd_quatf {
+    simd_quatf(
+      angle: constrainedRotation(rotation),
+      axis: SIMD3<Float>(0, 0, 1)
+    )
+  }
+
+  /// Rolls an attachment in the menu plane so its inward horizontal edge follows
+  /// the circular plane/sphere section toward the hub. Rotation is constrained to
+  /// the plane normal: the attachment continues to face the person rather than
+  /// pitching edge-on as it moves around the arc.
+  static func itemOrientation(
+    angle: Float,
+    isLeftHanded: Bool
+  ) -> simd_quatf {
+    guard angle.isFinite else {
+      return simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+    }
+
+    // The fan mirrors across the hub. Pick the naturally inward horizontal edge
+    // on each hand so the mirrored fan does not turn its labels upside down.
+    let referenceAngle: Float = isLeftHanded ? 0 : .pi
+    var roll = angle - referenceAngle
+    if roll > .pi {
+      roll -= 2 * .pi
+    } else if roll < -.pi {
+      roll += 2 * .pi
+    }
+    return simd_quatf(
+      angle: roll,
+      axis: SIMD3<Float>(0, 0, 1)
+    )
+  }
 
   static func placements(
     count: Int,
     depth: Int,
-    rotation: Float = 0
+    rotation: Float = 0,
+    isLeftHanded: Bool = false
   ) -> [SpatialRadialPlacement] {
     guard count > 0 else { return [] }
-    let radius = baseRadius + Float(min(max(depth, 0), 3)) * depthRadiusStep
     let safeDepth = Float(min(max(depth, 0), 5))
-    let step = 2 * Float.pi / Float(count)
-    let start = -Float.pi / 2 + rotation
-    let cosineTilt = cos(ringTilt)
-    let sineTilt = sin(ringTilt)
-    let stepCosine = cos(step)
-    let stepSine = sin(step)
-    var radialX = cos(start)
-    var radialY = sin(start)
+    let sign = inwardSign(isLeftHanded: isLeftHanded)
+    let safeRotation = constrainedRotation(rotation)
+    let rotationCosine = cos(safeRotation)
+    let rotationSine = sin(safeRotation)
+    let nearCount = count <= 5 ? count : (count + 1) / 2
+    let farCount = count - nearCount
     var result: [SpatialRadialPlacement] = []
     result.reserveCapacity(count)
 
-    // RealityView may request a layout at gesture cadence. Rotate the unit
-    // vector by one fixed complex multiply per item instead of evaluating
-    // sin/cos twice for every attachment (four trig calls total per ring,
-    // independent of item count).
-    for index in 0..<count {
-      let angle = start + Float(index) * step
-      let vertical = radialY * radius
-      result.append(
-        SpatialRadialPlacement(
-          index: index,
-          angle: angle,
-          position: SIMD3<Float>(
-            radialX * radius,
-            vertical * cosineTilt,
-            vertical * sineTilt - safeDepth * depthStep
-          )
-        ))
-      let nextX = radialX * stepCosine - radialY * stepSine
-      radialY = radialX * stepSine + radialY * stepCosine
-      radialX = nextX
+    func appendTrack(itemCount: Int, reach: Float, indexOffset: Int, track: Int) {
+      guard itemCount > 0 else { return }
+      let midpoint = Float(itemCount - 1) * 0.5
+      let maxDistanceFromCenter = max(midpoint, 1)
+      for trackIndex in 0..<itemCount {
+        let centeredIndex = Float(trackIndex) - midpoint
+        let vertical = centeredIndex * verticalStep
+        let centerWeight = 1 - abs(centeredIndex) / maxDistanceFromCenter
+        let inward = sign * (reach + centerWeight * trackCurve)
+        let x = inward * rotationCosine - vertical * rotationSine
+        let y = inward * rotationSine + vertical * rotationCosine
+        let index = indexOffset + trackIndex
+        result.append(
+          SpatialRadialPlacement(
+            index: index,
+            angle: atan2(y, x),
+            position: SIMD3<Float>(
+              x,
+              y,
+              -safeDepth * depthStep - Float(track) * 0.008
+            )
+          ))
+      }
+    }
+
+    if farCount == 0 {
+      appendTrack(itemCount: nearCount, reach: singleTrackReach, indexOffset: 0, track: 0)
+    } else {
+      appendTrack(itemCount: nearCount, reach: nearTrackReach, indexOffset: 0, track: 0)
+      appendTrack(itemCount: farCount, reach: farTrackReach, indexOffset: nearCount, track: 1)
     }
     return result
-  }
-}
-
-/// A compact, immutable teaching snapshot for spatial controls. Capturing only
-/// when the volume opens avoids polling lock-backed RenderSettings from a
-/// RealityView update and keeps the compositor render loop completely separate.
-struct SpatialMathLensSnapshot: Equatable {
-  struct Page: Equatable {
-    let field: String
-    let title: String
-    let formal: String
-    let notice: String
-  }
-
-  let pages: [Page]
-  let constructionRoute: String
-  let transformCount: Int
-
-  var field: String { pages.first?.field ?? "" }
-  var title: String { pages.first?.title ?? "" }
-  var formal: String { pages.first?.formal ?? "" }
-
-  static func capture(
-    formula: FractalModelType,
-    transforms: [SpaceWarpOpValue]
-  ) -> SpatialMathLensSnapshot {
-    let concept = MathLensConcept.formula(formula)
-    let enabled = transforms.filter(\.isEnabled)
-    let namedSteps = enabled.prefix(3).map { $0.kind.displayName }
-    var route = ["p"] + namedSteps
-    if enabled.count > namedSteps.count { route.append("+…") }
-    route.append("d(p)")
-    let pages =
-      [
-        Page(
-          field: concept.field,
-          title: concept.title,
-          formal: concept.formal,
-          notice: concept.notice
-        )
-      ]
-      + enabled.map { operation in
-        let transform = MathLensConcept.transform(operation.kind)
-        return Page(
-          field: transform.field,
-          title: transform.title,
-          formal: transform.formal,
-          notice: transform.notice
-        )
-      }
-
-    return SpatialMathLensSnapshot(
-      pages: pages,
-      constructionRoute: route.joined(separator: "  →  "),
-      transformCount: enabled.count
-    )
-  }
-
-  /// Relates application navigation to the same mathematical object instead
-  /// of showing an isolated equation with no explanation of why the control
-  /// branch matters.
-  func crossReference(for node: NavigationHierarchy.Node?) -> String {
-    guard let destination = node?.destination else {
-      return "Choose a ring to see which part of the construction it changes."
-    }
-    switch destination {
-    case .workspace(.shape), .shape:
-      return "Shape controls change the function that maps p to signed distance d(p)."
-    case .workspace(.visualizations), .visualizations:
-      return "Visualization controls reveal samples, normals, and structure derived from d(p)."
-    case .workspace(.performance), .performance:
-      return
-        "Performance controls change how often and how precisely the ray samples d(p), not the field itself."
-    case .workspace(.explore), .explore:
-      return "A scene selects the formula, parameters, and transform composition shown below."
-    case .workspace(.music), .music:
-      return "Music modulation changes parameters over time, turning d(p) into d(p, t)."
-    case .gestures:
-      return "Hand gestures choose controls; they do not alter d(p) until an action is confirmed."
-    case .quickToggles, .settings, .animationEditor:
-      return "This branch changes how the construction is controlled or presented."
-    }
   }
 }
 
