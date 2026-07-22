@@ -48,11 +48,6 @@ private struct ThresholdiOSRootView: View {
                         .padding(.top, max(16, safeAreaInsets.top + 8))
                         .padding(.trailing, max(16, safeAreaInsets.trailing + 8))
                 }
-                .overlay(alignment: .bottomLeading) {
-                    MathLensViewportOverlay(appModel: appModel)
-                        .padding(.leading, max(16, safeAreaInsets.leading + 8))
-                        .padding(.bottom, max(16, safeAreaInsets.bottom + 8))
-                }
                 .inspector(isPresented: $isShowingControls) {
                     ThresholdiOSInspectorContent(isShowingControls: $isShowingControls)
                         .environment(appModel)

@@ -21,28 +21,14 @@ does not duplicate destination IDs or invent a second information architecture.
   cards identify hand, finger, and action, then follow the same spatial route as
   the real shortcut.
 
-## Explanation model
-
-The spatial Math Lens is captured when the volume opens. It shows the active
-distance-field family, formal equation, and the enabled transform composition
-`p -> transforms -> d(p)`. Its cross-reference sentence changes with the active
-ring to distinguish controls that alter the field, sample the field, visualize
-it, or modulate it over time. The Lens is itself a spatial button: successive
-pinches walk from the formula through each enabled transform in exact stack
-order, showing that operation's formal map and an observation prompt.
-
-The snapshot is intentionally event-driven. It does not poll lock-backed render
-settings and cannot add work to Threshold's compositor render loop.
-
 ## Performance contract
 
 - The volume is a separate `RealityView` window; the raymarch compositor loop is
   unchanged.
 - Spatial layout has at most nine ordinary navigation attachments. Gesture and
   quick-control modes replace that ring rather than layering another live ring.
-- The default volume is 72 x 84 x 24 cm. The taller teaching envelope keeps the
-  expanded Math Lens clear of the lower ring; a full-rotation bounds test covers
-  the worst-case ten-card gesture map plus conservative attachment extents.
+- The default volume is 72 x 84 x 24 cm. A full-rotation bounds test covers the
+  worst-case ten-card gesture map plus conservative attachment extents.
 - Ring placement evaluates four trigonometric functions per update, independent
   of item count, then advances by a complex multiply.
 - RealityKit positions are written only when they actually change. Label/status
@@ -61,8 +47,8 @@ layout).
 ## Verification and next depth
 
 Pure tests cover navigation/backtracking, focus semantics, 3-D separation,
-rotation rigidity, recurrence accuracy, Math Lens filtering/cross-references,
-gesture-map bounds, and layout throughput. The feature is compile-checked on
+rotation rigidity, recurrence accuracy, gesture-map bounds, and layout
+throughput. The feature is compile-checked on
 visionOS, while shared model changes are built on macOS and iPadOS.
 
 The next depth is direct spatial scalar editing. It should project the existing
