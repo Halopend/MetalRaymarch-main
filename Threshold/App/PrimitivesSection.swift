@@ -15,8 +15,11 @@ struct PrimitivesSection: View {
 
     private var selectedPrimitive: FractalPrimitiveKind? {
         guard cache.fractalType == .constructionPrimitive else { return nil }
-        let selector = Int(FormulaCatalog.getParam(cache.formulaParams, index: 0).rounded())
-        return FractalPrimitiveKind(selector: selector)
+        // rawSelector: scene files carry slot 0 unclamped; a plain Int(Float)
+        // here traps on a corrupt/hand-edited file the moment this section opens.
+        return FractalPrimitiveKind(
+            rawSelector: FormulaCatalog.getParam(cache.formulaParams, index: 0)
+        )
     }
 
     var body: some View {

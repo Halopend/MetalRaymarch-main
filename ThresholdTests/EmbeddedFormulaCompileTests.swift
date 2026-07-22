@@ -96,6 +96,89 @@ struct EmbeddedFormulaCompileTests {
         }
     }
 
+    /// The box payload exactly as generated before its roundness clamp gained
+    /// the `size` upper bound (commit 56d01f55) — the revision embedded in every
+    /// scene and auto-saved session written by earlier builds. Only the helper
+    /// line differs, so reconstruct it from the current formula.
+    private static var staleBoxPayload: EmbeddedFormula {
+        var stale = FractalPrimitiveKind.box.formula
+        stale.metalSource = stale.metalSource.replacingOccurrences(
+            of: "float roundness = min(max(fp.params[1], 0.0f), size);",
+            with: "float roundness = max(fp.params[1], 0.0f);"
+        )
+        return stale
+    }
+
+    @Test("Payloads embedded by earlier builds keep their trusted primitive identity")
+    func staleBundledPayloadStillTrusted() {
+        let stale = Self.staleBoxPayload
+        // Guard the reconstruction itself: this hex is the ledger entry in
+        // FractalPrimitiveKind.historicalBundledSourceHashes. If it mismatches,
+        // the test rebuilt the wrong payload, not the one old builds shipped.
+        #expect(stale.sourceHash
+            == "ed1daccfbc870c8fa6915210fae8614eabd012624e2059651bc0350022105b8e")
+        #expect(stale.sourceHash != FractalPrimitiveKind.box.formula.sourceHash)
+        #expect(stale.bundledConstructionPrimitiveKind == .box)
+    }
+
+    @Test("Bundled payload edits must extend the historical trust ledger")
+    func bundledPayloadSourceHashesArePinned() {
+        // `bundledConstructionPrimitiveKind` trusts payloads by source hash, so
+        // editing a shipped primitive's Metal source silently orphans every
+        // scene saved by earlier builds unless the outgoing hash is kept. If a
+        // pin below fails: append the hash pinned HERE (the pre-edit value) to
+        // FractalPrimitiveKind.historicalBundledSourceHashes for that kind,
+        // then update the pin to the new `sourceHash`. New kinds only need a
+        // pin — no scenes embed them yet.
+        let pinned: [FractalPrimitiveKind: String] = [
+            .sphere: "741b5b3a773cc14b34b7ceacb944c352b54f7b0776b7a4f122995403266c8b3d",
+            .box: "a177b1d1db51e3bf9cf0382c59e5c222d6451fbbb779d29e5d0e7663e1f2b2a4",
+            .torus: "0f3cdea5c9204e59727704044142a7be4f873409ce06495cbf47e10b62475663",
+            .octahedron: "4fbe1ed64ba13851b96fd1b87fe9d54221847f9976c86c2a092ffdfa68879eec",
+            .capsule: "4440ffbcb8bf7ba1421f0db3af8bbc4177a41e515038f9afd84256ac70ba485a",
+            .cylinder: "e18d980a6c2d2aba4f1ddabdc607a3b870d548519ad46c80a1f65e2dc283c89e",
+            .cone: "b909ef549c1545c5180b4e17587531cbc84a628559ed8505be2b2fcac41f8e0d",
+            .hexagonalPrism: "ecdeeaa2d3e2b461ee68a2ea344d048ca22b49d679138d043348486e0e7be0f3",
+            .pyramid: "40d5e3f2823cd203c4704418ad963acb67544815686a672a31b073d2dbeb6333",
+            .tetrahedron: "449b3aa1f96afbfb741786fe664332294dedce3ef1be419fe17bf3ff8380cfd1",
+            .icosahedron: "6d717a8406d75a0fd33f8be082277495f3e93cb513aa591f5ddb886464777b53",
+            .dodecahedron: "2bc3fdfe56f45c357ddaad9890c245c696882eee2f441bda7c8d9e6d89149325",
+            .mandelboxSeed: "9503f36d41b58b08ab7adccd916dda6e1413a7bb586bb0de8996bbc16c06342b"
+        ]
+        for kind in FractalPrimitiveKind.allCases {
+            #expect(
+                kind.formula.sourceHash == pinned[kind],
+                "\(kind.name) payload changed — move the old pin into historicalBundledSourceHashes before repinning"
+            )
+        }
+        // Every ledger entry must still be recognized as its kind, and none may
+        // duplicate a current payload (that would mean a pointless entry).
+        for (kind, hashes) in FractalPrimitiveKind.historicalBundledSourceHashes {
+            for hash in hashes {
+                #expect(hash != kind.formula.sourceHash)
+                #expect(hash.count == 64)
+            }
+        }
+    }
+
+    @Test("Raw float selectors from scene files convert without trapping")
+    func rawSelectorConversionIsTotal() {
+        // Scene decode applies formulaParamValues verbatim, so slot 0 can hold
+        // any Float. `Int(Float)` traps on NaN/±inf/|v| > Int.max — the UI must
+        // reject those instead of converting (the shader clamps the same slot).
+        for primitive in FractalPrimitiveKind.allCases {
+            #expect(FractalPrimitiveKind(rawSelector: Float(primitive.selector)) == primitive)
+        }
+        #expect(FractalPrimitiveKind(rawSelector: 0.4) == .sphere)   // rounds down
+        #expect(FractalPrimitiveKind(rawSelector: 1e30) == nil)      // > Int.max: trapped before
+        #expect(FractalPrimitiveKind(rawSelector: -1e30) == nil)
+        #expect(FractalPrimitiveKind(rawSelector: .nan) == nil)      // trapped before
+        #expect(FractalPrimitiveKind(rawSelector: .infinity) == nil)
+        #expect(FractalPrimitiveKind(rawSelector: -.infinity) == nil)
+        #expect(FractalPrimitiveKind(rawSelector: -1) == nil)
+        #expect(FractalPrimitiveKind(rawSelector: 13) == nil)        // past the library
+    }
+
     @Test("Construction primitive selectors remain stable as the library grows")
     func bundledPrimitiveSelectorsRemainStable() {
         let expected: [(FractalPrimitiveKind, Int)] = [

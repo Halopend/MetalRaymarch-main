@@ -139,11 +139,24 @@ struct EmbeddedFormula: Codable, Equatable {
     /// Built-in construction primitives are shipped as embedded formulas so a
     /// scene remains self-contained, but unlike imported `.threshfx` files they
     /// are trusted app content and do not require the experimental-import flag.
+    /// Trust is granted by source hash, never by id alone: the payload must be
+    /// byte-identical to the formula this build generates or to a revision an
+    /// earlier build shipped (`historicalBundledSourceHashes`). The historical
+    /// set is what keeps saved scenes and the auto-saved last session restoring
+    /// as primitives across payload edits — without it, editing a primitive's
+    /// Metal source demotes every previously saved scene embedding it to the
+    /// gated `.custom` path ("Custom scenes are experimental"). Accepting a
+    /// historical payload is safe: recognition always routes rendering to the
+    /// precompiled `.constructionPrimitive` type, so the embedded source of a
+    /// trusted primitive is never runtime-compiled.
     var bundledConstructionPrimitiveKind: FractalPrimitiveKind? {
         let prefix = "com.puppypower.threshold.primitive."
         guard id.hasPrefix(prefix),
               let kind = FractalPrimitiveKind(rawValue: String(id.dropFirst(prefix.count))),
-              self == kind.formula else { return nil }
+              self == kind.formula
+                || FractalPrimitiveKind.historicalBundledSourceHashes[kind]?
+                    .contains(sourceHash) == true
+        else { return nil }
         return kind
     }
 
@@ -252,6 +265,34 @@ enum FractalPrimitiveKind: String, CaseIterable, Identifiable {
         }
         self = match
     }
+
+    /// Selector slot 0 reaches the UI as a raw, unclamped Float — preset decode
+    /// applies `formulaParamValues` verbatim — and Swift's `Int(Float)` traps on
+    /// NaN or magnitudes beyond `Int`'s range. This is the Swift-side twin of
+    /// the shader's `clamp(int(round(fp.params[0])), 0, 12)` guard, except it
+    /// rejects instead of clamping so a corrupt selector reads as "no primitive
+    /// selected" rather than snapping to an arbitrary shape.
+    init?(rawSelector: Float) {
+        let rounded = rawSelector.rounded()
+        guard rounded.isFinite,
+              rounded >= 0,
+              rounded <= Float(Self.allCases.count - 1) else { return nil }
+        self.init(selector: Int(rounded))
+    }
+
+    /// Source hashes of payload revisions that EARLIER builds embedded in saved
+    /// scenes and the auto-saved last session. `bundledConstructionPrimitiveKind`
+    /// accepts these alongside the current payload so old files keep restoring
+    /// as trusted primitives after `formula`'s Metal source evolves.
+    /// RULE: when changing an existing primitive's helper (or the shared
+    /// `metalSource` template), append the outgoing `sourceHash` for every
+    /// affected kind — the pinned-hash test in EmbeddedFormulaCompileTests
+    /// fails until this ledger is updated.
+    static let historicalBundledSourceHashes: [FractalPrimitiveKind: Set<String>] = [
+        // Box before the roundness clamp gained its `size` upper bound
+        // (`max(fp.params[1], 0.0f)` → `min(max(fp.params[1], 0.0f), size)`).
+        .box: ["ed1daccfbc870c8fa6915210fae8614eabd012624e2059651bc0350022105b8e"]
+    ]
 
     static var analyticCases: [Self] {
         allCases.filter { $0 != .mandelboxSeed }
