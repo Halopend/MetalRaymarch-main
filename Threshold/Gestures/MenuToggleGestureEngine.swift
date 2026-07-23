@@ -1,9 +1,16 @@
 import Foundation
 
+private struct MenuToggleGestureState {
+    var isActive = false
+    var holdTimer: Float = 0
+    var cooldown: Float = 0
+    var consecutiveFramesAboveActivate = 0
+}
+
 final class MenuToggleGestureEngine {
     private static let activationDebounceFrames = 2
 
-    var state = MenuToggleGestureState()
+    private var state = MenuToggleGestureState()
     #if DEBUG
     private var debugFrameCounter: Int = 0
     #endif

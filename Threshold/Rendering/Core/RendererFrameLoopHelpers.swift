@@ -118,6 +118,8 @@ extension Renderer {
             if shouldPublishDiagnostics { lastHandDiagnosticsPublishTime = time }
             let gesturesEnabled = appModel.handTrackingEnabledForRenderer
             let processor = appModel.gestureProcessor
+            let parameterPipeline = appModel.parameterPipeline
+            let renderSettings = appModel.renderSettings
             let model = appModel
 
             let dispatchTask = Task.detached(priority: .userInitiated) { [weak self] in
@@ -139,6 +141,15 @@ extension Renderer {
                 }
 
                 let output = await processor.process(snapshot)
+                if !output.parameterOperations.isEmpty {
+                    parameterPipeline.dispatchGesture(
+                        output.parameterOperations,
+                        settings: renderSettings
+                    )
+                }
+                for mutation in output.renderMutations {
+                    mutation.apply(to: renderSettings)
+                }
                 guard shouldPublishDiagnostics || output.didUseGesture || !output.commands.isEmpty else {
                     return
                 }
