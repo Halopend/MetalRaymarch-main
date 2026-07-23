@@ -15,7 +15,7 @@ import Synchronization
 /// `Mutex` keeps the access synchronous while giving compiler-checked `Sendable`
 /// isolation, so the async `makeRenderPipelineState` completion handler can safely
 /// store results without manual lock management.
-final class MacSpecializedPipelineCache: Sendable {
+final class ViewportSpecializedPipelineCache: Sendable {
     private struct State {
         var cache: [String: MTLRenderPipelineState] = [:]
         var pending: Set<String> = []

@@ -37,7 +37,7 @@ struct MusicTabContent: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.menuAdjustmentActions) private var menuAdjustmentActions
-    @Bindable var cache: UISettingsCache
+    @Bindable var cache: ControlStateStore
 
     private let musicService: MusicService
     private let audioHub: AudioHub
@@ -47,7 +47,7 @@ struct MusicTabContent: View {
     var tabSelection: Binding<MusicPanelTab>? = nil
     @AppStorage("MusicTabContent.innerTab") private var storedTabSelection: MusicPanelTab = .music
     @AppStorage(TransformationExperienceMode.defaultsKey)
-    private var transformationExperienceModeRaw = TransformationExperienceMode.education.rawValue
+    private var transformationExperienceModeRaw = TransformationExperienceMode.justUse.rawValue
     @AppStorage(TransformationUnlockProgress.defaultsKey)
     private var mappedLessonIDsRaw = ""
     @AppStorage(TransformationUnlockProgress.legacyDefaultsKey)
@@ -107,7 +107,7 @@ struct MusicTabContent: View {
     }
 
     init(
-        cache: UISettingsCache,
+        cache: ControlStateStore,
         musicService: MusicService,
         audioHub: AudioHub,
         renderSettings: RenderSettings,
@@ -1659,7 +1659,7 @@ private final class PreviewMusicProvider: MusicServiceProvider {
 
 @MainActor
 private struct MusicTabPreviewHarness: View {
-    @State private var cache = UISettingsCache()
+    @State private var cache = ControlStateStore()
 
     let musicService: MusicService
     let audioHub: AudioHub

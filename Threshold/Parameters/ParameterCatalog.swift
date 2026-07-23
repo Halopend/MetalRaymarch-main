@@ -55,10 +55,10 @@ enum ParameterCapability: Sendable {
 }
 
 /// UI-path binding. `@MainActor` because it reads/writes the MainActor-isolated
-/// `UISettingsCache`; only ever invoked on the cache dispatch path.
+/// `ControlStateStore`; only ever invoked on the cache dispatch path.
 struct UIBinding: Sendable {
-    let read: @MainActor @Sendable (UISettingsCache) -> Float
-    let write: @MainActor @Sendable (UISettingsCache, Float) -> Void
+    let read: @MainActor @Sendable (ControlStateStore) -> Float
+    let write: @MainActor @Sendable (ControlStateStore, Float) -> Void
     let persists: Bool
 }
 
@@ -76,12 +76,41 @@ struct SettingsBinding: Sendable {
     let audioOffsetActiveDuringPlayback: (@Sendable (RenderSettings) -> Bool)?
 }
 
-/// UI placement. Unused in Slice 1 (route is nil everywhere); a later slice activates
-/// data-driven section rendering from it.
-struct ParameterRoute: Sendable {
-    let tab: String
-    let section: String
-    let order: Int
+struct ControlPresentation: OptionSet, Codable, Hashable, Sendable {
+    let rawValue: UInt16
+
+    static let fullControls    = Self(rawValue: 1 << 0)
+    static let quickToggles    = Self(rawValue: 1 << 1)
+    static let radial2D        = Self(rawValue: 1 << 2)
+    static let spatialRadial   = Self(rawValue: 1 << 3)
+    static let controlFinder   = Self(rawValue: 1 << 4)
+    static let gestureBinding  = Self(rawValue: 1 << 5)
+    static let musicMapping    = Self(rawValue: 1 << 6)
+
+    static let all: Self = [
+        .fullControls, .quickToggles, .radial2D, .spatialRadial,
+        .controlFinder, .gestureBinding, .musicMapping
+    ]
+}
+
+enum ControlPlacement: Hashable, Sendable {
+    case presented(
+        route: AppRoute,
+        section: String,
+        order: Int,
+        presentations: ControlPresentation
+    )
+    case internalOnly
+
+    var route: AppRoute? {
+        guard case .presented(let route, _, _, _) = self else { return nil }
+        return route
+    }
+
+    var presentations: ControlPresentation {
+        guard case .presented(_, _, _, let presentations) = self else { return [] }
+        return presentations
+    }
 }
 
 /// The vertically-integrated node: authored metadata (via `spec`) + routing +
@@ -90,7 +119,8 @@ struct ParameterRoute: Sendable {
 /// validator's range checks.
 struct ParameterDescriptor: Sendable, Identifiable {
     let spec: ControlSpec
-    let route: ParameterRoute?
+    let placement: ControlPlacement
+    let requiredPlatformCapabilities: PlatformCapability
     let capability: ParameterCapability
     let gesture: GestureFacet?
     let music: MusicFacet?
@@ -98,7 +128,85 @@ struct ParameterDescriptor: Sendable, Identifiable {
     let settings: SettingsBinding
 
     var id: String { spec.id }
+    var controlID: ControlID { spec.controlID }
     func clamp(_ value: Float) -> Float { spec.clamp(value) }
+}
+
+struct ToggleDescriptor: Sendable, Identifiable {
+    let controlID: ControlID
+    let name: String
+    let icon: String
+    let placement: ControlPlacement
+    let requiredPlatformCapabilities: PlatformCapability
+    let isAvailable: @MainActor @Sendable (ControlStateStore) -> Bool
+    let read: @MainActor @Sendable (ControlStateStore) -> Bool
+    let write: @MainActor @Sendable (ControlStateStore, Bool) -> Void
+    var id: ControlID { controlID }
+
+    init(
+        controlID: ControlID,
+        name: String,
+        icon: String,
+        placement: ControlPlacement,
+        requiredPlatformCapabilities: PlatformCapability,
+        isAvailable: @escaping @MainActor @Sendable (ControlStateStore) -> Bool = { _ in true },
+        read: @escaping @MainActor @Sendable (ControlStateStore) -> Bool,
+        write: @escaping @MainActor @Sendable (ControlStateStore, Bool) -> Void
+    ) {
+        self.controlID = controlID
+        self.name = name
+        self.icon = icon
+        self.placement = placement
+        self.requiredPlatformCapabilities = requiredPlatformCapabilities
+        self.isAvailable = isAvailable
+        self.read = read
+        self.write = write
+    }
+}
+
+struct ActionDescriptor: Sendable, Identifiable {
+    let controlID: ControlID
+    let name: String
+    let icon: String
+    let placement: ControlPlacement
+    let requiredPlatformCapabilities: PlatformCapability
+    let command: AppCommand
+    var id: ControlID { controlID }
+}
+
+enum SemanticControlDescriptor: Sendable, Identifiable {
+    case scalar(ParameterDescriptor)
+    case toggle(ToggleDescriptor)
+    case action(ActionDescriptor)
+
+    var id: ControlID {
+        switch self {
+        case .scalar(let descriptor): return descriptor.controlID
+        case .toggle(let descriptor): return descriptor.controlID
+        case .action(let descriptor): return descriptor.controlID
+        }
+    }
+
+    var placement: ControlPlacement {
+        switch self {
+        case .scalar(let descriptor): return descriptor.placement
+        case .toggle(let descriptor): return descriptor.placement
+        case .action(let descriptor): return descriptor.placement
+        }
+    }
+
+    var requiredPlatformCapabilities: PlatformCapability {
+        switch self {
+        case .scalar(let descriptor): return descriptor.requiredPlatformCapabilities
+        case .toggle(let descriptor): return descriptor.requiredPlatformCapabilities
+        case .action(let descriptor): return descriptor.requiredPlatformCapabilities
+        }
+    }
+
+    func isAvailable(for fractalType: FractalModelType) -> Bool {
+        guard case .scalar(let descriptor) = self else { return true }
+        return descriptor.capability.isAvailable(fractalType)
+    }
 }
 
 // MARK: - The authored catalog
@@ -113,7 +221,8 @@ enum ParameterCatalog {
 
         ParameterDescriptor(
             spec: ControlCatalog.fractalScale,
-            route: nil,
+            placement: .presented(route: .shape(.parameters), section: "Geometry", order: 0, presentations: .all),
+            requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, tripletGroupKey: nil),
             music: MusicFacet(category: .geometry, defaultSource: .composite, defaultResponseCurve: .sinusoidal, hasFlashingRisk: false),
@@ -129,7 +238,8 @@ enum ParameterCatalog {
 
         ParameterDescriptor(
             spec: ControlCatalog.colorMix,
-            route: nil,
+            placement: .presented(route: .look(.mapping), section: "Gradient Mapping", order: 0, presentations: .all),
+            requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, tripletGroupKey: nil),
             music: MusicFacet(category: .color, defaultSource: .composite, defaultResponseCurve: .drift, hasFlashingRisk: false),
@@ -145,7 +255,8 @@ enum ParameterCatalog {
 
         ParameterDescriptor(
             spec: ControlCatalog.iterations,
-            route: nil,
+            placement: .presented(route: .quality(.tuning), section: "Render Budget", order: 0, presentations: [.fullControls, .radial2D, .spatialRadial, .controlFinder, .musicMapping]),
+            requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
             music: MusicFacet(category: .geometry, defaultSource: .mid, defaultResponseCurve: .sinusoidal, hasFlashingRisk: false),
@@ -167,7 +278,8 @@ enum ParameterCatalog {
 
         ParameterDescriptor(
             spec: ControlCatalog.glow,
-            route: nil,
+            placement: .presented(route: .look(.atmosphere), section: "Atmosphere", order: 0, presentations: .all),
+            requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
             music: MusicFacet(category: .light, defaultSource: .beat, defaultResponseCurve: .pulse, hasFlashingRisk: true),
@@ -183,7 +295,8 @@ enum ParameterCatalog {
 
         ParameterDescriptor(
             spec: ControlCatalog.fog,
-            route: nil,
+            placement: .presented(route: .look(.atmosphere), section: "Atmosphere", order: 2, presentations: .all),
+            requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
             music: MusicFacet(category: .light, defaultSource: .composite, defaultResponseCurve: .drift, hasFlashingRisk: false),
@@ -199,7 +312,8 @@ enum ParameterCatalog {
 
         ParameterDescriptor(
             spec: ControlCatalog.bloom,
-            route: nil,
+            placement: .presented(route: .look(.atmosphere), section: "Atmosphere", order: 1, presentations: .all),
+            requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
             music: MusicFacet(category: .light, defaultSource: .beat, defaultResponseCurve: .pulse, hasFlashingRisk: true),
@@ -215,7 +329,8 @@ enum ParameterCatalog {
 
         ParameterDescriptor(
             spec: ControlCatalog.hueSpeed,
-            route: nil,
+            placement: .presented(route: .look(.motion), section: "Color Motion", order: 0, presentations: .all),
+            requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
             music: MusicFacet(category: .color, defaultSource: .treble, defaultResponseCurve: .drift, hasFlashingRisk: true),
@@ -231,7 +346,8 @@ enum ParameterCatalog {
 
         ParameterDescriptor(
             spec: ControlCatalog.saturation,
-            route: nil,
+            placement: .presented(route: .look(.grading), section: "Color Grade", order: 0, presentations: .all),
+            requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
             music: MusicFacet(category: .color, defaultSource: .mid, defaultResponseCurve: .drift, hasFlashingRisk: true),
@@ -247,7 +363,8 @@ enum ParameterCatalog {
 
         ParameterDescriptor(
             spec: ControlCatalog.safetyBubbleRadius,
-            route: nil,
+            placement: .presented(route: .shape(.space), section: "Safety", order: 0, presentations: .all),
+            requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
             music: MusicFacet(category: .geometry, defaultSource: .composite, defaultResponseCurve: .drift, hasFlashingRisk: false),
@@ -265,7 +382,8 @@ enum ParameterCatalog {
         // the animation-playback offset path (no writeAudioOffset), matching colorMix.
         ParameterDescriptor(
             spec: ControlCatalog.gradientOffset,
-            route: nil,
+            placement: .presented(route: .look(.mapping), section: "Gradient Mapping", order: 1, presentations: .all),
+            requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
             music: MusicFacet(category: .color, defaultSource: .composite, defaultResponseCurve: .drift, hasFlashingRisk: false),
@@ -283,7 +401,8 @@ enum ParameterCatalog {
 
         ParameterDescriptor(
             spec: ControlCatalog.sphereProjectionBlend,
-            route: nil,
+            placement: .presented(route: .shape(.transformations), section: "Sphere Projection", order: 0, presentations: .all),
+            requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, surfacesAsScalarGesture: true),
             music: MusicFacet(category: .geometry, defaultSource: .composite, defaultResponseCurve: .drift, hasFlashingRisk: false),
@@ -299,7 +418,8 @@ enum ParameterCatalog {
 
         ParameterDescriptor(
             spec: ControlCatalog.sphereProjectionRadius,
-            route: nil,
+            placement: .presented(route: .shape(.transformations), section: "Sphere Projection", order: 1, presentations: .all),
+            requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, surfacesAsScalarGesture: true),
             music: MusicFacet(category: .geometry, defaultSource: .bass, defaultResponseCurve: .drift, hasFlashingRisk: false),
@@ -317,7 +437,8 @@ enum ParameterCatalog {
         // NOT music-reactive (no MusicReactiveTarget case), so `music` is nil.
         ParameterDescriptor(
             spec: ControlCatalog.spaceWarpStrength,
-            route: nil,
+            placement: .presented(route: .shape(.transformations), section: "Transform Stack", order: 0, presentations: [.fullControls, .radial2D, .spatialRadial, .gestureBinding]),
+            requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, surfacesAsScalarGesture: true),
             music: nil,
@@ -333,7 +454,8 @@ enum ParameterCatalog {
 
         ParameterDescriptor(
             spec: ControlCatalog.spaceWarpOriginX,
-            route: nil,
+            placement: .presented(route: .shape(.transformations), section: "Transform Stack", order: 1, presentations: [.fullControls, .radial2D, .spatialRadial, .gestureBinding]),
+            requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, tripletGroupKey: "space.spaceWarpOrigin", surfacesAsScalarGesture: true),
             music: nil,
@@ -349,7 +471,8 @@ enum ParameterCatalog {
 
         ParameterDescriptor(
             spec: ControlCatalog.spaceWarpOriginY,
-            route: nil,
+            placement: .presented(route: .shape(.transformations), section: "Transform Stack", order: 2, presentations: [.fullControls, .radial2D, .spatialRadial, .gestureBinding]),
+            requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, tripletGroupKey: "space.spaceWarpOrigin", surfacesAsScalarGesture: true),
             music: nil,
@@ -365,7 +488,8 @@ enum ParameterCatalog {
 
         ParameterDescriptor(
             spec: ControlCatalog.spaceWarpOriginZ,
-            route: nil,
+            placement: .presented(route: .shape(.transformations), section: "Transform Stack", order: 3, presentations: [.fullControls, .radial2D, .spatialRadial, .gestureBinding]),
+            requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, tripletGroupKey: "space.spaceWarpOrigin", surfacesAsScalarGesture: true),
             music: nil,
@@ -380,9 +504,399 @@ enum ParameterCatalog {
                 audioOffsetActiveDuringPlayback: nil))
     ]
 
+    private static let standardPresentations: ControlPresentation = [
+        .fullControls, .radial2D, .spatialRadial, .controlFinder
+    ]
+
+    private static func staticDescriptor(
+        _ spec: ControlSpec,
+        route: AppRoute,
+        section: String,
+        order: Int,
+        uiRead: @escaping @MainActor @Sendable (ControlStateStore) -> Float,
+        uiWrite: @escaping @MainActor @Sendable (ControlStateStore, Float) -> Void,
+        settingsRead: @escaping @Sendable (RenderSettings) -> Float,
+        settingsWrite: @escaping @Sendable (RenderSettings, Float) -> Void
+    ) -> ParameterDescriptor {
+        ParameterDescriptor(
+            spec: spec,
+            placement: .presented(
+                route: route,
+                section: section,
+                order: order,
+                presentations: standardPresentations
+            ),
+            requiredPlatformCapabilities: [],
+            capability: .universal,
+            gesture: nil,
+            music: nil,
+            ui: UIBinding(read: uiRead, write: uiWrite, persists: true),
+            settings: SettingsBinding(
+                read: settingsRead,
+                write: settingsWrite,
+                writeAudioOffset: nil,
+                audioOffsetActiveDuringPlayback: nil
+            )
+        )
+    }
+
+    /// Static UI scalars that previously had a ControlSpec but were excluded
+    /// from the vertically integrated descriptor catalog. They remain outside
+    /// automation layer stacks while sharing IDs, placement, bindings, and
+    /// presentation metadata with every UI surface.
+    static let presentationDescriptors: [ParameterDescriptor] = [
+        staticDescriptor(
+            ControlCatalog.sphericalInversionRadius,
+            route: .shape(.transformations), section: "Spherical Inversion", order: 0,
+            uiRead: { $0.display.sphericalInversionRadius },
+            uiWrite: { cache, value in cache.display.sphericalInversionRadius = value; cache.commitSphericalInversion() },
+            settingsRead: { $0.sphericalInversionRadius },
+            settingsWrite: { $0.sphericalInversionRadius = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.colorIterations,
+            route: .look(.mapping), section: "Color Detail", order: 0,
+            uiRead: { $0.color.colorIterations },
+            uiWrite: { cache, value in cache.color.colorIterations = value; cache.push(\.colorIterations, value: value) },
+            settingsRead: { $0.colorIterations },
+            settingsWrite: { $0.colorIterations = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.resolutionScale,
+            route: .quality(.tuning), section: "Resolution", order: 0,
+            uiRead: { $0.quality.resolutionScale },
+            uiWrite: { cache, value in cache.quality.resolutionScale = value; cache.push(\.resolutionScale, value: value) },
+            settingsRead: { $0.resolutionScale },
+            settingsWrite: { $0.resolutionScale = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.colorSchemeContrast,
+            route: .look(.grading), section: "Color Grade", order: 1,
+            uiRead: { $0.color.colorSchemeContrast },
+            uiWrite: { cache, value in cache.color.colorSchemeContrast = value; cache.push(\.colorSchemeContrast, value: value) },
+            settingsRead: { $0.colorSchemeContrast }, settingsWrite: { $0.colorSchemeContrast = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.colorSchemeVibrance,
+            route: .look(.grading), section: "Color Grade", order: 2,
+            uiRead: { $0.color.colorSchemeVibrance },
+            uiWrite: { cache, value in cache.color.colorSchemeVibrance = value; cache.push(\.colorSchemeVibrance, value: value) },
+            settingsRead: { $0.colorSchemeVibrance }, settingsWrite: { $0.colorSchemeVibrance = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.colorSchemeCurve,
+            route: .look(.grading), section: "Color Grade", order: 3,
+            uiRead: { $0.color.colorSchemeCurve },
+            uiWrite: { cache, value in cache.color.colorSchemeCurve = value; cache.push(\.colorSchemeCurve, value: value) },
+            settingsRead: { $0.colorSchemeCurve }, settingsWrite: { $0.colorSchemeCurve = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.colorSchemeShadows,
+            route: .look(.grading), section: "Color Grade", order: 4,
+            uiRead: { $0.color.colorSchemeShadows },
+            uiWrite: { cache, value in cache.color.colorSchemeShadows = value; cache.push(\.colorSchemeShadows, value: value) },
+            settingsRead: { $0.colorSchemeShadows }, settingsWrite: { $0.colorSchemeShadows = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.colorSchemeHighlights,
+            route: .look(.grading), section: "Color Grade", order: 5,
+            uiRead: { $0.color.colorSchemeHighlights },
+            uiWrite: { cache, value in cache.color.colorSchemeHighlights = value; cache.push(\.colorSchemeHighlights, value: value) },
+            settingsRead: { $0.colorSchemeHighlights }, settingsWrite: { $0.colorSchemeHighlights = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.colorSchemeGamma,
+            route: .look(.grading), section: "Color Grade", order: 6,
+            uiRead: { $0.color.colorSchemeGamma },
+            uiWrite: { cache, value in cache.color.colorSchemeGamma = value; cache.push(\.colorSchemeGamma, value: value) },
+            settingsRead: { $0.colorSchemeGamma }, settingsWrite: { $0.colorSchemeGamma = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.lightingSoftness,
+            route: .look(.grading), section: "Lighting Finish", order: 0,
+            uiRead: { $0.color.lightingSoftness },
+            uiWrite: { cache, value in cache.color.lightingSoftness = value; cache.push(\.lightingSoftness, value: value) },
+            settingsRead: { $0.lightingSoftness }, settingsWrite: { $0.lightingSoftness = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.cellShadingLevels,
+            route: .look(.grading), section: "Lighting Finish", order: 1,
+            uiRead: { $0.color.cellShadingLevels },
+            uiWrite: { cache, value in cache.color.cellShadingLevels = value; cache.push(\.cellShadingLevels, value: value) },
+            settingsRead: { $0.cellShadingLevels }, settingsWrite: { $0.cellShadingLevels = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.aoStrength,
+            route: .look(.grading), section: "Lighting Finish", order: 2,
+            uiRead: { $0.color.aoStrength },
+            uiWrite: { cache, value in cache.color.aoStrength = value; cache.push(\.aoStrength, value: value) },
+            settingsRead: { $0.aoStrength }, settingsWrite: { $0.aoStrength = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.tonemapStrength,
+            route: .look(.grading), section: "Lighting Finish", order: 3,
+            uiRead: { $0.color.tonemapStrength },
+            uiWrite: { cache, value in cache.color.tonemapStrength = value; cache.push(\.tonemapStrength, value: value) },
+            settingsRead: { $0.tonemapStrength }, settingsWrite: { $0.tonemapStrength = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.vignetteStrength,
+            route: .look(.grading), section: "Lighting Finish", order: 4,
+            uiRead: { $0.color.vignetteStrength },
+            uiWrite: { cache, value in cache.color.vignetteStrength = value; cache.push(\.vignetteStrength, value: value) },
+            settingsRead: { $0.vignetteStrength }, settingsWrite: { $0.vignetteStrength = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.colorSchemeAutoInterval,
+            route: .look(.motion), section: "Automatic Color", order: 0,
+            uiRead: { $0.color.colorSchemeAutoInterval },
+            uiWrite: { cache, value in cache.color.colorSchemeAutoInterval = value; cache.push(\.colorSchemeAutoInterval, value: value) },
+            settingsRead: { $0.colorSchemeAutoInterval }, settingsWrite: { $0.colorSchemeAutoInterval = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.colorSchemeTransitionDuration,
+            route: .look(.motion), section: "Automatic Color", order: 1,
+            uiRead: { $0.color.colorSchemeTransitionDuration },
+            uiWrite: { cache, value in cache.color.colorSchemeTransitionDuration = value; cache.push(\.colorSchemeTransitionDuration, value: value) },
+            settingsRead: { $0.colorSchemeTransitionDuration }, settingsWrite: { $0.colorSchemeTransitionDuration = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.edgeStrength,
+            route: .look(.grading), section: "Edge Detection", order: 0,
+            uiRead: { $0.lighting.edgeDetectionEffect.strength },
+            uiWrite: { cache, value in cache.lighting.edgeDetectionEffect.setStrength(value); cache.commitEdgeDetectionEffect() },
+            settingsRead: { $0.edgeDetectionEffect.strength },
+            settingsWrite: { settings, value in var effect = settings.edgeDetectionEffect; effect.setStrength(value); settings.edgeDetectionEffect = effect }
+        ),
+        staticDescriptor(
+            ControlCatalog.edgeThreshold,
+            route: .look(.grading), section: "Edge Detection", order: 1,
+            uiRead: { $0.lighting.edgeDetectionEffect.threshold },
+            uiWrite: { cache, value in cache.lighting.edgeDetectionEffect.threshold = value; cache.commitEdgeDetectionEffect() },
+            settingsRead: { $0.edgeDetectionEffect.threshold },
+            settingsWrite: { settings, value in var effect = settings.edgeDetectionEffect; effect.threshold = value; settings.edgeDetectionEffect = effect }
+        ),
+        staticDescriptor(
+            ControlCatalog.edgeSoftness,
+            route: .look(.grading), section: "Edge Detection", order: 2,
+            uiRead: { $0.lighting.edgeDetectionEffect.softness },
+            uiWrite: { cache, value in cache.lighting.edgeDetectionEffect.softness = value; cache.commitEdgeDetectionEffect() },
+            settingsRead: { $0.edgeDetectionEffect.softness },
+            settingsWrite: { settings, value in var effect = settings.edgeDetectionEffect; effect.softness = value; settings.edgeDetectionEffect = effect }
+        ),
+        staticDescriptor(
+            ControlCatalog.edgeWindowRadius,
+            route: .look(.grading), section: "Edge Detection", order: 3,
+            uiRead: { Float($0.lighting.edgeDetectionEffect.windowRadius) },
+            uiWrite: { cache, value in cache.lighting.edgeDetectionEffect.windowRadius = Int(value.rounded()); cache.commitEdgeDetectionEffect() },
+            settingsRead: { Float($0.edgeDetectionEffect.windowRadius) },
+            settingsWrite: { settings, value in var effect = settings.edgeDetectionEffect; effect.windowRadius = Int(value.rounded()); settings.edgeDetectionEffect = effect }
+        )
+    ]
+
+    static let allDescriptors: [ParameterDescriptor] = routedDescriptors + presentationDescriptors
+
+    static let toggleDescriptors: [ToggleDescriptor] = [
+        ToggleDescriptor(
+            controlID: ControlID("toggle.effect.glow"), name: "Glow", icon: "sun.max",
+            placement: .presented(route: .look(.atmosphere), section: "Lighting & Color", order: 0, presentations: [.fullControls, .quickToggles, .radial2D]),
+            requiredPlatformCapabilities: [],
+            read: { $0.lighting.glowEffect.enabled },
+            write: { cache, value in cache.lighting.glowEffect.enabled = value; cache.commitGlowEffect() }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.effect.bloom"), name: "Bloom", icon: "sparkles",
+            placement: .presented(route: .look(.atmosphere), section: "Lighting & Color", order: 1, presentations: [.fullControls, .quickToggles, .radial2D]),
+            requiredPlatformCapabilities: [],
+            read: { $0.lighting.bloomEffect.enabled },
+            write: { cache, value in cache.lighting.bloomEffect.enabled = value; cache.commitBloomEffect() }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.effect.fog"), name: "Fog", icon: "cloud.fog",
+            placement: .presented(route: .look(.atmosphere), section: "Lighting & Color", order: 2, presentations: [.fullControls, .quickToggles, .radial2D]),
+            requiredPlatformCapabilities: [],
+            read: { $0.lighting.fogEffect.enabled },
+            write: { cache, value in cache.lighting.fogEffect.enabled = value; cache.commitFogEffect() }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.input.audioReactive"), name: "Audio Reactive", icon: "waveform",
+            placement: .presented(route: .input(.reactive), section: "Audio", order: 0, presentations: [.fullControls, .quickToggles, .radial2D, .spatialRadial]),
+            requiredPlatformCapabilities: [],
+            read: { $0.audioReactive.fractalAudioReactiveEnabled },
+            write: { cache, value in
+                cache.audioReactive.fractalAudioReactiveEnabled = value
+                cache.push(\.fractalAudioReactiveEnabled, value: value)
+            }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.quality.smartAdvance"), name: "Smart Advance", icon: "bolt",
+            placement: .presented(route: .quality(.tuning), section: "Performance", order: 0, presentations: [.fullControls, .quickToggles, .radial2D, .spatialRadial]),
+            requiredPlatformCapabilities: [],
+            read: { $0.quality.smartAdvanceEnabled },
+            write: { cache, value in cache.quality.smartAdvanceEnabled = value; cache.push(\.smartAdvanceEnabled, value: value) }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.quality.selfShadows"), name: "Self-Shadows", icon: "moon",
+            placement: .presented(route: .quality(.tuning), section: "Performance", order: 2, presentations: [.fullControls, .quickToggles, .radial2D, .spatialRadial]),
+            requiredPlatformCapabilities: [],
+            read: { $0.quality.shadowsEnabled },
+            write: { cache, value in cache.quality.shadowsEnabled = value; cache.push(\.shadowsEnabled, value: value) }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.formula.polarRotation"), name: "Polar Rotation", icon: AppIcons.arrowTriangleheadCounterclockwiseRotate90,
+            placement: .presented(route: .look(.motion), section: "Formula", order: 0, presentations: [.fullControls, .quickToggles, .radial2D]),
+            requiredPlatformCapabilities: [],
+            isAvailable: { $0.fractalType.supports(.polarRotation) },
+            read: { $0.lighting.polarRotationEffect.enabled },
+            write: { cache, value in cache.lighting.polarRotationEffect.enabled = value; cache.push(\.polarRotationEffect, value: cache.lighting.polarRotationEffect) }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.formula.juliaDrift"), name: "Julia Drift", icon: "wind",
+            placement: .presented(route: .look(.motion), section: "Formula", order: 1, presentations: [.fullControls, .quickToggles, .radial2D]),
+            requiredPlatformCapabilities: [],
+            isAvailable: { $0.fractalType.supports(.juliaDrift) },
+            read: { $0.lighting.juliaDriftEffect.enabled },
+            write: { cache, value in cache.lighting.juliaDriftEffect.enabled = value; cache.commitJuliaDriftEffect() }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.effect.hueRotation"), name: "Hue Rotation", icon: "paintpalette",
+            placement: .presented(route: .look(.motion), section: "Lighting & Color", order: 3, presentations: [.fullControls, .quickToggles, .radial2D]),
+            requiredPlatformCapabilities: [],
+            read: { $0.lighting.hueRotationEffect.enabled },
+            write: { cache, value in cache.lighting.hueRotationEffect.enabled = value; cache.commitHueRotationEffect() }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.effect.pulse"), name: "Pulse", icon: "waveform.path.ecg",
+            placement: .presented(route: .look(.motion), section: "Lighting & Color", order: 4, presentations: [.fullControls, .quickToggles, .radial2D]),
+            requiredPlatformCapabilities: [],
+            read: { $0.lighting.pulseEffect.enabled },
+            write: { cache, value in cache.lighting.pulseEffect.enabled = value; cache.commitPulseEffect() }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.effect.gradientCycle"), name: "Gradient Cycle", icon: "circle.hexagongrid",
+            placement: .presented(route: .look(.motion), section: "Lighting & Color", order: 5, presentations: [.fullControls, .quickToggles, .radial2D]),
+            requiredPlatformCapabilities: [],
+            read: { $0.lighting.gradientCycleEffect.enabled },
+            write: { cache, value in cache.lighting.gradientCycleEffect.enabled = value; cache.commitGradientCycleEffect() }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.effect.linearRail"), name: "Linear Rail", icon: "slider.horizontal.below.rectangle",
+            placement: .presented(route: .look(.motion), section: "Lighting & Color", order: 6, presentations: [.fullControls, .quickToggles, .radial2D]),
+            requiredPlatformCapabilities: [],
+            read: { $0.lighting.linearRailEffect.enabled },
+            write: { cache, value in cache.lighting.linearRailEffect.enabled = value; cache.commitLinearRailEffect() }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.space.sphereProjection"), name: "Sphere Projection", icon: "globe.asia.australia",
+            placement: .presented(route: .shape(.transformations), section: "Space", order: 0, presentations: [.fullControls, .quickToggles, .radial2D]),
+            requiredPlatformCapabilities: [],
+            isAvailable: { $0.fractalType.supports(.sphereProjection) },
+            read: { $0.display.sphereProjectionEnabled },
+            write: { cache, value in cache.display.sphereProjectionEnabled = value; cache.commitSphereProjection() }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.space.boundToSpace"), name: "Bound to Space", icon: "house",
+            placement: .presented(route: .shape(.bounding), section: "Space", order: 1, presentations: [.fullControls, .quickToggles, .radial2D]),
+            requiredPlatformCapabilities: [],
+            read: { $0.quality.boundToSpaceEnabled },
+            write: { $0.setBoundToSpaceEnabled($1) }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.space.boundingShape"), name: "Bounding Shape", icon: "circle.dashed",
+            placement: .presented(route: .shape(.bounding), section: "Space", order: 2, presentations: [.fullControls, .quickToggles, .radial2D, .spatialRadial]),
+            requiredPlatformCapabilities: [],
+            read: { $0.quality.boundingSphereSkipEnabled },
+            write: { $0.setBoundingShapeEnabled($1) }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.space.surroundings"), name: "Surroundings", icon: "square.3.layers.3d",
+            placement: .presented(route: .shape(.bounding), section: "Space", order: 3, presentations: [.fullControls, .quickToggles, .spatialRadial]),
+            requiredPlatformCapabilities: [.spatialMenu],
+            read: { $0.quality.envScrunchEnabled },
+            write: { $0.setScrunchEnabled($1) }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.effect.beatFlash"), name: "Beat Flash", icon: "bolt",
+            placement: .presented(route: .look(.motion), section: "Audio", order: 1, presentations: [.fullControls, .quickToggles, .radial2D]),
+            requiredPlatformCapabilities: [],
+            read: { $0.lighting.beatFlashEffect.enabled },
+            write: { cache, value in cache.lighting.beatFlashEffect.enabled = value; cache.commitBeatFlashEffect() }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.audio.bass"), name: "Bass", icon: "speaker.wave.1",
+            placement: .presented(route: .input(.reactive), section: "Audio", order: 2, presentations: [.quickToggles]),
+            requiredPlatformCapabilities: [],
+            isAvailable: { $0.audioReactive.fractalAudioReactiveEnabled },
+            read: { $0.audioReactive.bassSensitivity > 0 },
+            write: { cache, value in cache.audioReactive.bassSensitivity = value ? 1 : 0; cache.push(\.bassSensitivity, value: value ? 1 : 0) }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.audio.mid"), name: "Mid", icon: "speaker.wave.2",
+            placement: .presented(route: .input(.reactive), section: "Audio", order: 3, presentations: [.quickToggles]),
+            requiredPlatformCapabilities: [],
+            isAvailable: { $0.audioReactive.fractalAudioReactiveEnabled },
+            read: { $0.audioReactive.midSensitivity > 0 },
+            write: { cache, value in cache.audioReactive.midSensitivity = value ? 1 : 0; cache.push(\.midSensitivity, value: value ? 1 : 0) }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.audio.treble"), name: "Treble", icon: "speaker.wave.3",
+            placement: .presented(route: .input(.reactive), section: "Audio", order: 4, presentations: [.quickToggles]),
+            requiredPlatformCapabilities: [],
+            isAvailable: { $0.audioReactive.fractalAudioReactiveEnabled },
+            read: { $0.audioReactive.trebleSensitivity > 0 },
+            write: { cache, value in cache.audioReactive.trebleSensitivity = value ? 1 : 0; cache.push(\.trebleSensitivity, value: value ? 1 : 0) }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.audio.beat"), name: "Beat", icon: "metronome",
+            placement: .presented(route: .input(.reactive), section: "Audio", order: 5, presentations: [.quickToggles]),
+            requiredPlatformCapabilities: [],
+            isAvailable: { $0.audioReactive.fractalAudioReactiveEnabled },
+            read: { $0.audioReactive.beatSensitivity > 0 },
+            write: { cache, value in cache.audioReactive.beatSensitivity = value ? 1 : 0; cache.push(\.beatSensitivity, value: value ? 1 : 0) }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.quality.coherentPacket"), name: "Coherent Packet", icon: "square.grid.3x3",
+            placement: .presented(route: .quality(.tuning), section: "Performance", order: 1, presentations: [.fullControls, .quickToggles, .radial2D]),
+            requiredPlatformCapabilities: [],
+            read: { $0.renderSettings?.coherentPacketEnabled ?? false },
+            write: { $0.renderSettings?.coherentPacketEnabled = $1 }
+        ),
+        ToggleDescriptor(
+            controlID: ControlID("toggle.quality.zoomFog"), name: "Zoom Fog Comp", icon: "cloud.fog",
+            placement: .presented(route: .quality(.tuning), section: "Performance", order: 3, presentations: [.fullControls, .quickToggles, .radial2D]),
+            requiredPlatformCapabilities: [],
+            read: { $0.quality.zoomFogCompensationEnabled },
+            write: { cache, value in cache.quality.zoomFogCompensationEnabled = value; cache.push(\.zoomFogCompensationEnabled, value: value) }
+        )
+    ]
+
+    static let actionDescriptors: [ActionDescriptor] = [
+        ActionDescriptor(
+            controlID: ControlID("action.viewport.reset"), name: "Reset View", icon: "arrow.counterclockwise",
+            placement: .presented(route: .shape(.space), section: "Viewport", order: 0, presentations: [.fullControls, .radial2D, .spatialRadial]),
+            requiredPlatformCapabilities: [], command: .resetViewport
+        ),
+        ActionDescriptor(
+            controlID: ControlID("action.animation.editor"), name: "Animation Editor", icon: AppIcons.pencilAndListClipboard,
+            placement: .presented(route: .animationLibrary, section: "Animation", order: 0, presentations: [.fullControls, .radial2D, .spatialRadial, .controlFinder]),
+            requiredPlatformCapabilities: [], command: .openAnimationEditor
+        )
+    ]
+
+    static let semanticDescriptors: [SemanticControlDescriptor] =
+        allDescriptors.map(SemanticControlDescriptor.scalar)
+        + toggleDescriptors.map(SemanticControlDescriptor.toggle)
+        + actionDescriptors.map(SemanticControlDescriptor.action)
+
+    static let semanticByID: [ControlID: SemanticControlDescriptor] =
+        Dictionary(uniqueKeysWithValues: semanticDescriptors.map { ($0.id, $0) })
+
     /// Routed descriptors keyed by id.
     static let byID: [String: ParameterDescriptor] =
         Dictionary(uniqueKeysWithValues: routedDescriptors.map { ($0.id, $0) })
+
+    static let allByID: [String: ParameterDescriptor] =
+        Dictionary(uniqueKeysWithValues: allDescriptors.map { ($0.id, $0) })
 
     /// Narrowed off-main projection: the dispatch path looks up ONLY the `@Sendable`
     /// settings pair, never the full descriptor (which carries the @MainActor ui pair).

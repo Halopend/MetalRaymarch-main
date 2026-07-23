@@ -89,6 +89,14 @@ struct ExternalFileImportRequest: Identifiable {
 @MainActor
 @Observable
 class AppModel {
+    /// The sole support matrix consumed by shared navigation, controls, and
+    /// input models. Native adapters are responsible for constructing it.
+    nonisolated let platformProfile: PlatformProfile
+    let navigationStore: NavigationStore
+    let controlStateStore = ControlStateStore()
+    let controlProjectionCache = ControlCatalogProjectionCache()
+    let inputOwnershipStore = InputOwnershipStore()
+    @ObservationIgnored lazy var controlAccessService = ControlAccessService(store: controlStateStore)
     let immersiveSpaceID = "ImmersiveSpace"
     let menuWindowID = "MenuWindow"
     static let onboardingWindowID = "OnboardingWindow"
@@ -204,7 +212,7 @@ class AppModel {
                     renderSettings.envScrunchEnabled = false
                 }
                 // RenderSettings is intentionally lock-backed/non-observable.
-                // Resync every UISettingsCache after this coupled write so the
+                // Resync every ControlStateStore after this coupled write so the
                 // next containment tap cannot push stale pre-immersion values
                 // back into the renderer.
                 NotificationCenter.default.post(
@@ -270,14 +278,16 @@ class AppModel {
         return UserDefaults.standard.bool(forKey: key)
     }() {
         didSet {
+            handTrackingEnabledForRenderer = handTrackingEnabled
             UserDefaults.standard.set(handTrackingEnabled, forKey: "handTrackingEnabled")
             if !handTrackingEnabled {
                 leftHandTracked = false
                 rightHandTracked = false
-                gestureController?.syncWithSettings()
+                syncGestureProcessor()
             }
         }
     }
+    @ObservationIgnored nonisolated(unsafe) var handTrackingEnabledForRenderer = true
     /// Forwarding accessors for hand tracking UI state.
     /// Reads/writes route to the isolated `handTrackingState` container so that
     /// high-frequency updates don't invalidate all AppModel observers.
@@ -300,7 +310,7 @@ class AppModel {
 
     
     // Gesture controller for mapping hand gestures to parameters
-    var gestureController: GestureController?
+    nonisolated let gestureProcessor: GestureProcessor
 
     // Preset management
     let presetManager = PresetManager()
@@ -454,7 +464,7 @@ class AppModel {
     var triggerProfilerHandler: (() -> Void)?
 
     // Force shader/pipeline recompile (set by the live renderer — the visionOS
-    // `Renderer` actor or the macOS/iOS `ThresholdMacRenderer`). Clears the
+    // `Renderer` actor or the macOS/iOS `ViewportRenderer`). Clears the
     // specialized pipeline caches and recompiles the active custom `.threshfx`
     // library from source. Returns a short status summary for the UI.
     var forceShaderRecompileHandler: (() async -> String)?
@@ -477,11 +487,17 @@ class AppModel {
     var parameterOperationDebugTrace: Bool = false {
         didSet {
             parameterPipeline.setDebugTraceEnabled(parameterOperationDebugTrace)
-            gestureController?.setDebugTraceEnabled(parameterOperationDebugTrace)
+            Task { await gestureProcessor.setDebugTraceEnabled(parameterOperationDebugTrace) }
         }
     }
     
-    init() {
+    init(platformProfile: PlatformProfile = .current) {
+        self.platformProfile = platformProfile
+        self.navigationStore = NavigationStore(profile: platformProfile)
+        self.gestureProcessor = GestureProcessor(
+            renderSettings: renderSettings,
+            parameterPipeline: parameterPipeline
+        )
         ParameterRoutingValidation.validateStartupRouting()
 
         // Initialize media control and the independent signal hub before any
@@ -489,6 +505,7 @@ class AppModel {
         musicService = MusicService(appleMusic: appleMusicManager)
         audioHub = AudioHub(microphoneAnalyzer: audioAnalyzer,
                             appleMusicManager: appleMusicManager)
+        handTrackingEnabledForRenderer = handTrackingEnabled
 
         // Publish the shared reference only after all stored properties are
         // initialized — `self` cannot escape an initializer before then.
@@ -496,10 +513,10 @@ class AppModel {
         AppModel.shared = self
         runtimeViewModeForRenderer = runtimeViewMode
 
-        // Initialize gesture controller with render settings
-        gestureController = GestureController(renderSettings: renderSettings, parameterPipeline: parameterPipeline)
+        // Serial off-main gesture processor. ARKit anchors never cross into it;
+        // the Renderer supplies one Sendable pose snapshot per accepted frame.
         parameterPipeline.setDebugTraceEnabled(parameterOperationDebugTrace)
-        gestureController?.setDebugTraceEnabled(parameterOperationDebugTrace)
+        Task { await gestureProcessor.setDebugTraceEnabled(parameterOperationDebugTrace) }
         
         // Initialize animation manager
         animationManager = AnimationManager(renderSettings: renderSettings)
@@ -544,23 +561,6 @@ class AppModel {
         // Initialize SharePlay session
         shareSession = FractalShareSession(renderSettings: renderSettings)
         
-        // Setup gesture callbacks
-        gestureController?.onMenuToggle = { [weak self] in
-            self?.toggleMenuWindow()
-        }
-        gestureController?.onAnimationPlayerToggle = { [weak self] in
-            self?.toggleAnimationPlayback()
-        }
-        gestureController?.onOpenShapeMenu = { [weak self] in
-            self?.openShapeMenuFromGesture()
-        }
-        gestureController?.onOpenRenderMenu = { [weak self] in
-            self?.openRenderMenuFromGesture()
-        }
-        gestureController?.onOpenQuickToggles = { [weak self] in
-            self?.openQuickTogglesFromGesture()
-        }
-
         refreshMenuInteractionState()
         
         // Add built-in presets if this is first launch
@@ -770,6 +770,13 @@ class AppModel {
     /// Callback to present the save preset sheet from the active content view.
     var openSavePresetMenuHandler: (() -> Void)?
 
+    /// Native presentation edge for the typed animation-editor command.
+    var openAnimationEditorHandler: (() -> Void)?
+
+    /// Installed by the active viewport adapter. Semantic UI surfaces dispatch
+    /// renderer commands without retaining a platform view or input controller.
+    var viewportCommandHandler: ((AppCommand) -> Void)?
+
     /// Callback to present the global control finder. The macOS root installs
     /// this so Command-K works even while the slide-over control panel is hidden.
     var openControlFinderHandler: (() -> Void)?
@@ -929,6 +936,11 @@ class AppModel {
 
     func setSpatialMenuVisible(_ visible: Bool) {
         guard isSpatialMenuVisible != visible else { return }
+        if visible {
+            guard inputOwnershipStore.claim(.spatialControls) else { return }
+        } else {
+            inputOwnershipStore.release(.spatialControls)
+        }
         isSpatialMenuVisible = visible
         refreshMenuInteractionState()
     }
@@ -988,7 +1000,69 @@ class AppModel {
         #endif
         isMenuInteractionActive = interacting
         renderSettings.isMenuInteractionActive = interacting
-        gestureController?.suppressParameterGestures = interacting
+        Task { await gestureProcessor.setParameterGesturesSuppressed(interacting) }
+    }
+
+    func syncGestureProcessor() {
+        Task { await gestureProcessor.syncWithSettings() }
+    }
+
+    func applyFractalDefaults() {
+        FractalDefaultsStore.applyFractalDefaults(for: renderSettings.fractalType, to: renderSettings)
+        syncGestureProcessor()
+    }
+
+    @discardableResult
+    func saveCurrentAsFractalDefaults() -> Bool {
+        FractalDefaultsStore.saveCurrentAsFractalDefaults(from: renderSettings)
+    }
+
+    /// The sole MainActor application edge for off-main gesture output.
+    func applyGestureOutput(_ output: GestureOutput, publishDiagnostics: Bool) {
+        for command in output.commands {
+            switch command {
+            case .toggleRadialMenu:
+                toggleMenuWindow()
+            case .dismissRadialMenu:
+                setSpatialMenuVisible(false)
+                dismissSpatialMenuHandler?()
+            case .toggleAnimationPlayback:
+                toggleAnimationPlayback()
+            case .selectRoute(let route):
+                navigationStore.activate(.command(.selectRoute(route)))
+                switch route {
+                case .shape: openShapeMenuFromGesture()
+                case .quality: openRenderMenuFromGesture()
+                case .quickToggles: openQuickTogglesFromGesture()
+                default: break
+                }
+            case .openAnimationEditor:
+                openAnimationEditorHandler?()
+            case .resetViewport:
+                viewportCommandHandler?(.resetViewport)
+            }
+        }
+
+        if output.didUseGesture {
+            UsageAnalytics.shared.trackHandGestureUsed()
+        }
+        guard publishDiagnostics else { return }
+        leftHandTracked = output.diagnostics.leftTracked
+        rightHandTracked = output.diagnostics.rightTracked
+        if output.diagnostics.parametersSuppressed {
+            gestureStatus = "Suppressed (interacting with controls)"
+        } else if !output.diagnostics.leftTracked && !output.diagnostics.rightTracked {
+            gestureStatus = "No hands detected"
+        } else if output.diagnostics.activeGestureIndex > 0 {
+            let names = ["", "Index", "Middle", "Ring"]
+            gestureStatus = "Active: \(names[min(output.diagnostics.activeGestureIndex, 3)])"
+        } else {
+            let hands = [output.diagnostics.leftTracked ? "L" : nil,
+                         output.diagnostics.rightTracked ? "R" : nil]
+                .compactMap { $0 }
+                .joined(separator: "+")
+            gestureStatus = "Ready (\(hands) tracked)"
+        }
     }
 
     /// Switch to a built-in fractal through one canonical side-effect path.
@@ -1006,7 +1080,7 @@ class AppModel {
 
         renderSettings.fractalType = type
         parameterPipeline.clearFormulaStacks()
-        gestureController?.applyFractalDefaults()
+        applyFractalDefaults()
         rememberActiveResetPresetFromCurrent()
         NotificationCenter.default.post(
             name: AppModel.fractalSettingsDidChangeNotification,

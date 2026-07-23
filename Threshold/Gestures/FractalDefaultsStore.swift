@@ -3,7 +3,7 @@
 //  Threshold
 //
 //  Per-fractal-type parameter snapshot persistence.
-//  Extracted from GestureController as part of Phase 6 decomposition.
+//  AppModel-owned fractal defaults service.
 //
 
 import Foundation

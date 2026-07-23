@@ -15,13 +15,13 @@ import AppKit
 /// NSLock-guarded holder for the active runtime-compiled custom `MTLLibrary` and
 /// its `EmbeddedFormula.shortHash`, plus the per-renderer `CustomShaderCompiler`.
 ///
-/// `ThresholdMacRenderer` is a plain class touched from two threads — the render
+/// `ViewportRenderer` is a plain class touched from two threads — the render
 /// thread reads `library`/`hash` every frame (in `resolveActivePipeline`), while
 /// the activation handler writes them after an off-thread compile — so this box
 /// serializes those accesses. It mirrors the visionOS `CustomShaderState`, and
 /// because it owns the compile logic the activation handler can capture only
 /// Sendable values (box + cache + device), never the non-Sendable renderer.
-final class MacCustomShaderBox: @unchecked Sendable {
+final class ViewportCustomShaderBox: @unchecked Sendable {
     private let lock = NSLock()
     private var _library: MTLLibrary?
     private var _hash: String?
@@ -60,7 +60,7 @@ final class MacCustomShaderBox: @unchecked Sendable {
                   warpStackSource: String? = nil,
                   warpStackSignature: String = "s0",
                   device: MTLDevice,
-                  cache: MacSpecializedPipelineCache) async throws {
+                  cache: ViewportSpecializedPipelineCache) async throws {
         // Effect set = optional .threshfx (fractal DE OR space warp) + the composable
         // transform-stack codegen. Key the library + pipelines by the combined hash so
         // distinct effect sets never alias. A built-in fractal + non-empty stack rides
@@ -91,7 +91,7 @@ final class MacCustomShaderBox: @unchecked Sendable {
     /// the render thread is live. Returns a short status summary for the UI.
     func forceRecompile(formula: EmbeddedFormula?,
                         device: MTLDevice,
-                        cache: MacSpecializedPipelineCache) async -> String {
+                        cache: ViewportSpecializedPipelineCache) async -> String {
         cache.evict(prefix: "")                       // drop ALL specialized pipelines
         await sharedCompiler(device: device).evictAll()  // force a true source recompile
         set(library: nil, hash: nil)                  // bypass activate()'s no-op guard
@@ -130,7 +130,10 @@ struct ThresholdMacRenderView: NSViewRepresentable {
         view.isPaused = false
         view.framebufferOnly = true
         view.autoResizeDrawable = true
-        view.inputDelegate = context.coordinator
+        view.inputSink = context.coordinator.inputAccumulator
+        view.shouldAcceptViewportInput = { [weak appModel] in
+            appModel?.inputOwnershipStore.canConsume(.viewport) ?? false
+        }
         view.delegate = context.coordinator
         context.coordinator.configure(view)
         return view
@@ -138,19 +141,22 @@ struct ThresholdMacRenderView: NSViewRepresentable {
 
     func updateNSView(_ nsView: MTKView, context: Context) {
         context.coordinator.appModel = appModel
-        (nsView as? ThresholdMacInteractiveView)?.inputDelegate = context.coordinator
+        (nsView as? ThresholdMacInteractiveView)?.inputSink = context.coordinator.inputAccumulator
+        (nsView as? ThresholdMacInteractiveView)?.shouldAcceptViewportInput = { [weak appModel] in
+            appModel?.inputOwnershipStore.canConsume(.viewport) ?? false
+        }
     }
 
     static func dismantleNSView(_ nsView: MTKView, coordinator: Coordinator) {
         nsView.delegate = nil
-        (nsView as? ThresholdMacInteractiveView)?.inputDelegate = nil
+        (nsView as? ThresholdMacInteractiveView)?.inputSink = nil
         coordinator.tearDown()
     }
 
-    final class Coordinator: NSObject, MTKViewDelegate, ThresholdMacViewportInputDelegate {
+    final class Coordinator: NSObject, MTKViewDelegate {
         var appModel: AppModel
-        private let inputController = ThresholdMacInputController()
-        private var renderer: ThresholdMacRenderer?
+        let inputAccumulator = ViewportInputAccumulator()
+        private var renderer: ViewportRenderer?
 
         init(appModel: AppModel) {
             self.appModel = appModel
@@ -166,9 +172,9 @@ struct ThresholdMacRenderView: NSViewRepresentable {
             metalLayer.pixelFormat = view.colorPixelFormat
             metalLayer.framebufferOnly = true
             metalLayer.drawableSize = view.drawableSize
-            renderer = ThresholdMacRenderer(device: device,
+            renderer = ViewportRenderer(device: device,
                                             appModel: appModel,
-                                            inputController: inputController,
+                                            inputController: inputAccumulator,
                                             metalLayer: metalLayer,
                                             colorPixelFormat: view.colorPixelFormat,
                                             depthPixelFormat: view.depthStencilPixelFormat,
@@ -182,14 +188,22 @@ struct ThresholdMacRenderView: NSViewRepresentable {
                 appModel.activateEmbeddedFormulaHandler = renderer.embeddedFormulaActivator(renderSettings: appModel.renderSettings)
                 appModel.forceShaderRecompileHandler = renderer.shaderRecompiler(appModel: appModel)
             }
+            appModel.viewportCommandHandler = { [weak inputAccumulator] command in
+                switch command {
+                case .resetViewport: inputAccumulator?.requestReset()
+                case .toggleRadialMenu, .dismissRadialMenu, .openAnimationEditor,
+                     .toggleAnimationPlayback, .selectRoute: break
+                }
+            }
         }
 
         func tearDown() {
-            inputController.setFocus(false)
+            inputAccumulator.setFocus(false)
             renderer = nil
             Task { @MainActor [appModel] in
                 appModel.activateEmbeddedFormulaHandler = nil
                 appModel.forceShaderRecompileHandler = nil
+                appModel.viewportCommandHandler = nil
                 appModel.rendererStartupWarmupComplete = false
             }
         }
@@ -202,47 +216,12 @@ struct ThresholdMacRenderView: NSViewRepresentable {
             renderer?.draw(appModel: appModel)
         }
 
-        func viewportDidChangeFocus(_ isFocused: Bool) {
-            inputController.setFocus(isFocused)
-        }
-
-        func viewportDidOrbit(delta: SIMD2<Float>) {
-            inputController.addOrbit(delta: delta)
-        }
-
-        func viewportDidPan(delta: SIMD2<Float>) {
-            inputController.addPan(delta: delta)
-        }
-
-        func viewportDidZoom(delta: Float) {
-            inputController.addZoom(delta: delta)
-        }
-
-        func viewportDidChangeKey(_ key: ThresholdMacMovementKey, isPressed: Bool) {
-            inputController.setMovementKey(key, isPressed: isPressed)
-        }
-
-        func viewportDidChangeShift(_ isPressed: Bool) {
-            inputController.setShiftPressed(isPressed)
-        }
-
-        func viewportDidTogglePlayback() {
-            inputController.requestPlaybackToggle()
-        }
-
-        func viewportDidRequestReset() {
-            inputController.requestReset()
-        }
-
-        func viewportDidRequestSceneStep(_ step: Int) {
-            inputController.requestSceneStep(step)
-        }
     }
 }
 #endif
 
 
-final class ThresholdMacRenderer {
+final class ViewportRenderer {
     private enum SetupError: Error {
         case badVertexDescriptor
         case metalLibraryUnavailable
@@ -254,19 +233,19 @@ final class ThresholdMacRenderer {
         let offset: Int
     }
 
-    /// Mirrors the `MacMotionParams` struct in Shaders.metal (Stage B temporal
+    /// Mirrors the motion-parameter struct in Shaders.metal (Stage B temporal
     /// upscaling). Bound only to the motion-vector pass — never the shared
     /// `Uniforms`.
-    private struct MacMotionParams {
+    private struct ViewportMotionParams {
         var currentInvViewProj: matrix_float4x4
         var currentViewProjNoJitter: matrix_float4x4
         var previousViewProjNoJitter: matrix_float4x4
     }
 
-    /// Mirrors `MacBlitParams` in Shaders.metal. Edge detection is deferred to
+    /// Mirrors the blit parameters in Shaders.metal. Edge detection is deferred to
     /// the full-resolution MetalFX resolve so its outline is measured in output
     /// pixels instead of being enlarged with the low-resolution source image.
-    private struct MacBlitParams {
+    private struct ViewportBlitParams {
         /// x = enabled window radius (0 means off), y = strength,
         /// z = threshold, w = softness.
         var edge: SIMD4<Float> = .zero
@@ -391,16 +370,16 @@ final class ThresholdMacRenderer {
     private let depthPixelFormat: MTLPixelFormat
     private let colorPixelFormat: MTLPixelFormat
     private let vertexDescriptor: MTLVertexDescriptor
-    private let specializedPipelineCache = MacSpecializedPipelineCache()
+    private let specializedPipelineCache = ViewportSpecializedPipelineCache()
     /// Holds the active runtime-compiled custom (`.threshfx`) library + hash.
     /// Read on the render thread, written by the activation handler; guarded.
-    private let customShaderBox = MacCustomShaderBox()
-    private let spatialUpscaler: MacSpatialUpscaler
-    private let temporalUpscaler: MacTemporalUpscaler
+    private let customShaderBox = ViewportCustomShaderBox()
+    private let spatialUpscaler: ViewportSpatialUpscaler
+    private let temporalUpscaler: ViewportTemporalUpscaler
     private let blitPipelineState: MTLRenderPipelineState?
     private let motionPipelineState: MTLRenderPipelineState?
     private let clearColor: MTLClearColor
-    private let inputController: ThresholdMacInputController
+    private let inputController: ViewportInputAccumulator
     private let uiUpdateCoordinator: UIUpdateCoordinator
     private let parameterUpdateCoordinator: ParameterUpdateCoordinator
     private let mesh: MTKMesh
@@ -470,7 +449,7 @@ final class ThresholdMacRenderer {
 
     init?(device: MTLDevice,
                     appModel: AppModel,
-                    inputController: ThresholdMacInputController,
+                    inputController: ViewportInputAccumulator,
           metalLayer: CAMetalLayer,
           colorPixelFormat: MTLPixelFormat,
           depthPixelFormat: MTLPixelFormat,
@@ -501,10 +480,10 @@ final class ThresholdMacRenderer {
         vertexDescriptor = builtVertexDescriptor
         mesh = builtMesh
 
-        spatialUpscaler = MacSpatialUpscaler(device: device,
+        spatialUpscaler = ViewportSpatialUpscaler(device: device,
                                              colorFormat: colorPixelFormat,
                                              depthFormat: depthPixelFormat)
-        temporalUpscaler = MacTemporalUpscaler(device: device,
+        temporalUpscaler = ViewportTemporalUpscaler(device: device,
                                                colorFormat: colorPixelFormat,
                                                depthFormat: depthPixelFormat)
         blitPipelineState = Self.buildBlitPipeline(device: device, colorPixelFormat: colorPixelFormat)
@@ -721,8 +700,8 @@ final class ThresholdMacRenderer {
             // for small or unusually wide windows.
             let drawableShortEdge = max(1, min(drawableWidth, drawableHeight))
             let minimumTemporalScale = max(
-                Float(1.0 / MacTemporalUpscaler.maxScaleFactor),
-                Float(MacTemporalUpscaler.minimumInputShortEdge) / Float(drawableShortEdge)
+                Float(1.0 / ViewportTemporalUpscaler.maxScaleFactor),
+                Float(ViewportTemporalUpscaler.minimumInputShortEdge) / Float(drawableShortEdge)
             )
             let temporalScale = min(1.0, max(effectiveScale, minimumTemporalScale))
             let temporalInputWidth = min(
@@ -917,11 +896,11 @@ final class ThresholdMacRenderer {
             }
             motionEncoder.setRenderPipelineState(motionPipelineState)
             motionEncoder.setFragmentTexture(temporalPass.depth, index: 0)
-            var motionParams = MacMotionParams(currentInvViewProj: motionCurrentInvViewProj,
+            var motionParams = ViewportMotionParams(currentInvViewProj: motionCurrentInvViewProj,
                                                currentViewProjNoJitter: motionCurrentViewProjNoJitter,
                                                previousViewProjNoJitter: motionPreviousViewProjNoJitter)
             motionEncoder.setFragmentBytes(&motionParams,
-                                           length: MemoryLayout<MacMotionParams>.stride,
+                                           length: MemoryLayout<ViewportMotionParams>.stride,
                                            index: 0)
             motionEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             motionEncoder.endEncoding()
@@ -945,7 +924,7 @@ final class ThresholdMacRenderer {
             blitEncoder.setFragmentTexture(temporalPass.output, index: 0)
             blitEncoder.setFragmentBytes(
                 &blitParams,
-                length: MemoryLayout<MacBlitParams>.stride,
+                length: MemoryLayout<ViewportBlitParams>.stride,
                 index: 0
             )
             blitEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
@@ -979,7 +958,7 @@ final class ThresholdMacRenderer {
             blitEncoder.setFragmentTexture(spatialPass.output, index: 0)
             blitEncoder.setFragmentBytes(
                 &blitParams,
-                length: MemoryLayout<MacBlitParams>.stride,
+                length: MemoryLayout<ViewportBlitParams>.stride,
                 index: 0
             )
             blitEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
@@ -1317,13 +1296,13 @@ final class ThresholdMacRenderer {
     @discardableResult
     private func writeUniforms(to buffer: MTLBuffer,
                                appModel: AppModel,
-                               deferEdgeDetection: Bool = false) -> MacBlitParams {
+                               deferEdgeDetection: Bool = false) -> ViewportBlitParams {
         let now = CACurrentMediaTime()
         let deltaTime = max(1.0 / 240.0, min(now - lastFrameTime, 1.0 / 15.0))
         lastFrameTime = now
 
         let settings = appModel.renderSettings
-        applyDesktopInput(appModel: appModel, settings: settings, deltaTime: deltaTime)
+        applyViewportInput(appModel: appModel, settings: settings, deltaTime: deltaTime)
         settings.interpolateToTargets(deltaTime: Float(deltaTime))
         settings.updateLimitFlash(deltaTime: Float(deltaTime))
         settings.updateColorSchemeTransition(deltaTime: Float(deltaTime),
@@ -1370,7 +1349,7 @@ final class ThresholdMacRenderer {
         let edgeRadius = edgeEnabled
             ? Float(max(1, min(3, uniforms.colorScheme.edgeDetectionWindowRadius)))
             : 0.0
-        let blitParams = MacBlitParams(edge: SIMD4<Float>(
+        let blitParams = ViewportBlitParams(edge: SIMD4<Float>(
             edgeRadius,
             uniforms.colorScheme.edgeDetectionStrength,
             uniforms.colorScheme.edgeDetectionThreshold,
@@ -1400,13 +1379,13 @@ final class ThresholdMacRenderer {
         }
     }
 
-    private func applyDesktopInput(appModel: AppModel, settings: RenderSettings, deltaTime: TimeInterval) {
+    private func applyViewportInput(appModel: AppModel, settings: RenderSettings, deltaTime: TimeInterval) {
         applyTiltControl(settings: settings, deltaTime: deltaTime)
 
         let input = inputController.consumeFrame()
 
         if input.shouldResetView {
-            resetDesktopView(settings: settings)
+            resetViewport(settings: settings)
         }
 
         if input.sceneStep != 0 {
@@ -1467,24 +1446,24 @@ final class ThresholdMacRenderer {
 
         let moveStep = Float(deltaTime) * Self.keyboardMoveSpeed * translationSensitivity * zoomCompensation
         if input.isShiftPressed {
-            if input.pressedKeys.contains(.forward) {
+            if input.heldKeys.contains(.forward) {
                 positionDelta.y += moveStep
             }
-            if input.pressedKeys.contains(.backward) {
+            if input.heldKeys.contains(.backward) {
                 positionDelta.y -= moveStep
             }
         } else {
-            if input.pressedKeys.contains(.forward) {
+            if input.heldKeys.contains(.forward) {
                 positionDelta.z += moveStep
             }
-            if input.pressedKeys.contains(.backward) {
+            if input.heldKeys.contains(.backward) {
                 positionDelta.z -= moveStep
             }
         }
-        if input.pressedKeys.contains(.left) {
+        if input.heldKeys.contains(.left) {
             positionDelta.x -= moveStep
         }
-        if input.pressedKeys.contains(.right) {
+        if input.heldKeys.contains(.right) {
             positionDelta.x += moveStep
         }
 
@@ -1498,9 +1477,9 @@ final class ThresholdMacRenderer {
 
         // During animation, route orbit/zoom through the same override model as the
         // grab gesture (offset relative to the scene's animated base) so applyKeyframe
-        // doesn't stomp desktop input every frame. Gate on actual input so an idle frame
+        // doesn't stomp viewport input every frame. Gate on actual input so an idle frame
         // leaves the offset untouched and the decay-back to the animation can run —
-        // mirrors the positionDelta gate above. Invariant must match GestureController:772.
+        // mirrors the positionDelta gate above. Invariant must match GestureProcessor.
         if settings.isAnimationPlaying {
             if orbited {
                 settings.manualRotationOffset = targetRotation * settings.animationBaseWorldRotation.inverse
@@ -1593,7 +1572,7 @@ final class ThresholdMacRenderer {
     /// the laptop to spin the fractal; return it level to stop). No-op when the
     /// sensor is unavailable (Apple Silicon / desktops) or the setting is off.
     private func applyTiltControl(settings: RenderSettings, deltaTime: TimeInterval) {
-        let enabled = settings.macTiltControlEnabled
+        let enabled = settings.viewportTiltControlEnabled
         // No-op on macOS (the SMS samples on demand); on iOS this starts/stops
         // CoreMotion so it doesn't run while tilt control is off.
         motionSensor.setActive(enabled)
@@ -1632,7 +1611,7 @@ final class ThresholdMacRenderer {
         inputController.addOrbit(delta: orbit)
     }
 
-    private func resetDesktopView(settings: RenderSettings) {
+    private func resetViewport(settings: RenderSettings) {
         if settings.isAnimationPlaying {
             settings.clearAnimationManualOffsets()
         } else {
@@ -1886,7 +1865,7 @@ final class ThresholdMacRenderer {
         descriptor.vertexFunction = vertexFunction
         descriptor.fragmentFunction = fragmentFunction
         descriptor.rasterSampleCount = 1
-        descriptor.colorAttachments[0].pixelFormat = MacTemporalUpscaler.motionFormat
+        descriptor.colorAttachments[0].pixelFormat = ViewportTemporalUpscaler.motionFormat
         return try? device.makeRenderPipelineState(descriptor: descriptor)
     }
 
@@ -1937,7 +1916,7 @@ final class ThresholdMacRenderer {
 #if os(iOS)
 import UIKit
 
-/// iPad host for the shared `ThresholdMacRenderer`. Wraps an `MTKView` in a
+/// iPad host for the shared `ViewportRenderer`. Wraps an `MTKView` in a
 /// `UIViewRepresentable` and translates touch gestures into the same
 /// orbit / pan / zoom input the macOS trackpad path feeds, so the renderer is
 /// byte-identical across platforms:
@@ -1950,6 +1929,7 @@ import UIKit
 /// handlers — the renderer math is unchanged.
 struct ThresholdiOSRenderView: UIViewRepresentable {
     let appModel: AppModel
+    let onRadialMenuRequest: (CGPoint) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(appModel: appModel)
@@ -1968,6 +1948,11 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         view.framebufferOnly = true
         view.autoResizeDrawable = true
         view.isMultipleTouchEnabled = true
+        view.inputSink = context.coordinator.inputController
+        view.shouldAcceptViewportInput = { [weak appModel] in
+            appModel?.inputOwnershipStore.canConsume(.viewport) ?? false
+        }
+        view.onRadialMenuRequest = onRadialMenuRequest
         view.delegate = context.coordinator
         context.coordinator.attachGestures(to: view)
         context.coordinator.configure(view)
@@ -1976,17 +1961,27 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
 
     func updateUIView(_ uiView: MTKView, context: Context) {
         context.coordinator.appModel = appModel
+        guard let view = uiView as? TouchVisualizingMTKView else { return }
+        view.inputSink = context.coordinator.inputController
+        view.shouldAcceptViewportInput = { [weak appModel] in
+            appModel?.inputOwnershipStore.canConsume(.viewport) ?? false
+        }
+        view.onRadialMenuRequest = onRadialMenuRequest
     }
 
     static func dismantleUIView(_ uiView: MTKView, coordinator: Coordinator) {
         uiView.delegate = nil
+        if let view = uiView as? TouchVisualizingMTKView {
+            view.inputSink = nil
+            view.onRadialMenuRequest = nil
+        }
         coordinator.tearDown()
     }
 
     final class Coordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDelegate {
         var appModel: AppModel
-        private let inputController = ThresholdMacInputController()
-        private var renderer: ThresholdMacRenderer?
+        let inputController = ViewportInputAccumulator()
+        private var renderer: ViewportRenderer?
 
         // Incremental gesture tracking. UIPanGestureRecognizer reports cumulative
         // translation; we feed per-callback deltas (points) to match the macOS
@@ -2011,7 +2006,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             metalLayer.pixelFormat = view.colorPixelFormat
             metalLayer.framebufferOnly = true
             metalLayer.drawableSize = view.drawableSize
-            renderer = ThresholdMacRenderer(device: device,
+            renderer = ViewportRenderer(device: device,
                                             appModel: appModel,
                                             inputController: inputController,
                                             metalLayer: metalLayer,
@@ -2026,6 +2021,13 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             if let renderer {
                 appModel.activateEmbeddedFormulaHandler = renderer.embeddedFormulaActivator(renderSettings: appModel.renderSettings)
                 appModel.forceShaderRecompileHandler = renderer.shaderRecompiler(appModel: appModel)
+            }
+            appModel.viewportCommandHandler = { [weak inputController] command in
+                switch command {
+                case .resetViewport: inputController?.requestReset()
+                case .toggleRadialMenu, .dismissRadialMenu, .openAnimationEditor,
+                     .toggleAnimationPlayback, .selectRoute: break
+                }
             }
         }
 
@@ -2050,9 +2052,15 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             pinchGesture.cancelsTouchesInView = false
             pinch = pinchGesture
 
+            let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+            doubleTap.numberOfTapsRequired = 2
+            doubleTap.cancelsTouchesInView = false
+            doubleTap.delegate = self
+
             view.addGestureRecognizer(orbit)
             view.addGestureRecognizer(pan)
             view.addGestureRecognizer(pinchGesture)
+            view.addGestureRecognizer(doubleTap)
         }
 
         func tearDown() {
@@ -2061,6 +2069,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             Task { @MainActor [appModel] in
                 appModel.activateEmbeddedFormulaHandler = nil
                 appModel.forceShaderRecompileHandler = nil
+                appModel.viewportCommandHandler = nil
                 appModel.rendererStartupWarmupComplete = false
             }
         }
@@ -2077,6 +2086,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             let translation = gesture.translation(in: gesture.view)
             switch gesture.state {
             case .began:
+                guard appModel.inputOwnershipStore.claim(.viewport) else { return }
                 lastOrbitTranslation = .zero
                 inputController.setFocus(true)
             case .changed:
@@ -2088,6 +2098,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                 }
             default:
                 lastOrbitTranslation = .zero
+                appModel.inputOwnershipStore.release(.viewport)
             }
         }
 
@@ -2095,6 +2106,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             let translation = gesture.translation(in: gesture.view)
             switch gesture.state {
             case .began:
+                guard appModel.inputOwnershipStore.claim(.viewport) else { return }
                 lastPanTranslation = .zero
                 inputController.setFocus(true)
             case .changed:
@@ -2106,12 +2118,14 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                 }
             default:
                 lastPanTranslation = .zero
+                appModel.inputOwnershipStore.release(.viewport)
             }
         }
 
         @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
             switch gesture.state {
             case .began:
+                guard appModel.inputOwnershipStore.claim(.viewport) else { return }
                 lastPinchScale = gesture.scale
                 inputController.setFocus(true)
             case .changed:
@@ -2125,7 +2139,19 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                 }
             default:
                 lastPinchScale = 1.0
+                appModel.inputOwnershipStore.release(.viewport)
             }
+        }
+
+        @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+            guard gesture.state == .ended,
+                  appModel.inputOwnershipStore.canConsume(.viewport),
+                  let view = gesture.view as? TouchVisualizingMTKView else { return }
+            view.onRadialMenuRequest?(gesture.location(in: view))
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            appModel.inputOwnershipStore.canConsume(.viewport)
         }
 
         // Allow the two-finger pan and pinch to run together (natural combined

@@ -10,14 +10,14 @@
 //
 //  Layering: the `Module` data type (Parameters/Module.swift) owns identity, route,
 //  params, capability, and scene-apply. This App-tier layer owns the *presentation*
-//  of a module's route — the live `UISettingsCache` / `RenderSettings` bindings and
+//  of a module's route — the live `ControlStateStore` / `RenderSettings` bindings and
 //  the SwiftUI rendering — so the Parameters layer stays free of SwiftUI.
 //
 //  A `ModuleUISection` is one box. A module's route may surface as several boxes
 //  (Space → inversion, projection, warp); each is a `ModuleUISection`. Converting a
 //  hand-written section is: declare its `ModuleUISection` factory + render it.
 //
-//  Closures are `@MainActor` (the live store, UISettingsCache, is MainActor-
+//  Closures are `@MainActor` (the live store, ControlStateStore, is MainActor-
 //  isolated) — mirroring the FloatParameterNode read/write closure pattern.
 //
 
@@ -145,7 +145,7 @@ extension ModuleUISection {
     /// enable toggle and two sliders shown once enabled. Behavior-identical to the
     /// former hand-written `sphereProjectionSection`.
     @MainActor
-    static func sphereProjection(cache: UISettingsCache) -> ModuleUISection {
+    static func sphereProjection(cache: ControlStateStore) -> ModuleUISection {
         let isMandelbox = cache.fractalType == .mandelbox
         return ModuleUISection(
             title: "Sphere Projection",
@@ -204,7 +204,7 @@ extension ModuleUISection {
     /// Pulse box (Effects → Dynamic): two sliders sharing the pulse enable. The
     /// "Pulse Speed" slider shows the enable switch; "Pulse Amount" greys with it.
     @MainActor
-    static func pulse(cache: UISettingsCache) -> ModuleUISection {
+    static func pulse(cache: ControlStateStore) -> ModuleUISection {
         let pulseEnabled = ModuleToggle(
             get: { cache.lighting.pulseEffect.enabled },
             set: { cache.lighting.pulseEffect.enabled = $0 })

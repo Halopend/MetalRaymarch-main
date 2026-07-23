@@ -2,6 +2,32 @@
 import os
 import simd
 
+struct GestureConfigurationSnapshot: Sendable {
+    let version: UInt64
+    let menuToggleEnabled: Bool
+    let menuToggleMode: MenuToggleGestureMode
+    let perFingerTapEnabled: Bool
+    let leftTapActions: [PerFingerTapAction]
+    let rightTapActions: [PerFingerTapAction]
+    let tapActivateThreshold: Float
+    let tapReleaseThreshold: Float
+    let tapHoldDuration: Float
+    let tapCooldown: Float
+
+    static let initial = GestureConfigurationSnapshot(
+        version: 0,
+        menuToggleEnabled: GestureDefaults.menuToggleGestureEnabled,
+        menuToggleMode: GestureDefaults.menuToggleGestureMode,
+        perFingerTapEnabled: GestureDefaults.perFingerTapGestureEnabled,
+        leftTapActions: GestureDefaults.perFingerTapLeftActions.map { $0 == .toggleMenu ? .none : $0 },
+        rightTapActions: GestureDefaults.perFingerTapRightActions.map { $0 == .toggleMenu ? .none : $0 },
+        tapActivateThreshold: GestureDefaults.perFingerTapActivateThreshold,
+        tapReleaseThreshold: GestureDefaults.perFingerTapReleaseThreshold,
+        tapHoldDuration: GestureDefaults.perFingerTapHoldDuration,
+        tapCooldown: GestureDefaults.perFingerTapCooldown
+    )
+}
+
 final class RenderSettings: @unchecked Sendable {
     // Shared depth pipeline settings (raymarch + depth output + MetalFX input)
     static let maxViewDistance: Float = 12.0
@@ -315,11 +341,12 @@ final class RenderSettings: @unchecked Sendable {
     private var _perFingerTapReleaseThreshold: Float = loadFloat("perFingerTapReleaseThreshold", default: GestureDefaults.perFingerTapReleaseThreshold)
     private var _perFingerTapHoldDuration: Float = loadFloat("perFingerTapHoldDuration", default: GestureDefaults.perFingerTapHoldDuration)
     private var _perFingerTapCooldown: Float = loadFloat("perFingerTapCooldown", default: GestureDefaults.perFingerTapCooldown)
+    private var _gestureConfigurationVersion: UInt64 = 1
 
     private var _leftHandedMode: Bool = UserDefaults.standard.bool(forKey: "leftHandedMode")
 
     // macOS-only: orbit the fractal by tilting the laptop (Sudden Motion Sensor).
-    private var _macTiltControlEnabled: Bool = UserDefaults.standard.bool(forKey: "macTiltControlEnabled")
+    private var _viewportTiltControlEnabled: Bool = UserDefaults.standard.bool(forKey: "macTiltControlEnabled")
 
     // === SPRING BLOB NAVIGATION (retained renderer subsystem; currently never activated) ===
     // Spring physics state — driven by translate gesture, ticked in Renderer
@@ -1759,7 +1786,10 @@ final class RenderSettings: @unchecked Sendable {
     var menuToggleGestureEnabled: Bool {
         get { withLock { _menuToggleGestureEnabled } }
         set {
-            withLock { _menuToggleGestureEnabled = newValue }
+            withLock {
+                _menuToggleGestureEnabled = newValue
+                _gestureConfigurationVersion &+= 1
+            }
             persistGesture()
         }
     }
@@ -1768,7 +1798,10 @@ final class RenderSettings: @unchecked Sendable {
     var menuToggleGestureMode: MenuToggleGestureMode {
         get { withLock { _menuToggleGestureMode } }
         set {
-            withLock { _menuToggleGestureMode = newValue }
+            withLock {
+                _menuToggleGestureMode = newValue
+                _gestureConfigurationVersion &+= 1
+            }
             persistGesture()
         }
     }
@@ -1855,7 +1888,10 @@ final class RenderSettings: @unchecked Sendable {
     var perFingerTapGestureEnabled: Bool {
         get { withLock { _perFingerTapGestureEnabled } }
         set {
-            withLock { _perFingerTapGestureEnabled = newValue }
+            withLock {
+                _perFingerTapGestureEnabled = newValue
+                _gestureConfigurationVersion &+= 1
+            }
             persistGesture()
         }
     }
@@ -1863,7 +1899,10 @@ final class RenderSettings: @unchecked Sendable {
     var perFingerTapLeftActions: [PerFingerTapAction] {
         get { withLock { _perFingerTapLeftActions } }
         set {
-            withLock { _perFingerTapLeftActions = newValue }
+            withLock {
+                _perFingerTapLeftActions = newValue.map { $0 == .toggleMenu ? .none : $0 }
+                _gestureConfigurationVersion &+= 1
+            }
             persistGesture()
         }
     }
@@ -1871,7 +1910,10 @@ final class RenderSettings: @unchecked Sendable {
     var perFingerTapRightActions: [PerFingerTapAction] {
         get { withLock { _perFingerTapRightActions } }
         set {
-            withLock { _perFingerTapRightActions = newValue }
+            withLock {
+                _perFingerTapRightActions = newValue.map { $0 == .toggleMenu ? .none : $0 }
+                _gestureConfigurationVersion &+= 1
+            }
             persistGesture()
         }
     }
@@ -1880,7 +1922,10 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _perFingerTapActivateThreshold } }
         set {
             let clamped = max(0.2, min(0.95, newValue))
-            withLock { _perFingerTapActivateThreshold = clamped }
+            withLock {
+                _perFingerTapActivateThreshold = clamped
+                _gestureConfigurationVersion &+= 1
+            }
             persistGesture()
         }
     }
@@ -1889,7 +1934,10 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _perFingerTapReleaseThreshold } }
         set {
             let clamped = max(0.1, min(0.9, newValue))
-            withLock { _perFingerTapReleaseThreshold = clamped }
+            withLock {
+                _perFingerTapReleaseThreshold = clamped
+                _gestureConfigurationVersion &+= 1
+            }
             persistGesture()
         }
     }
@@ -1898,7 +1946,10 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _perFingerTapHoldDuration } }
         set {
             let clamped = max(0.05, min(0.6, newValue))
-            withLock { _perFingerTapHoldDuration = clamped }
+            withLock {
+                _perFingerTapHoldDuration = clamped
+                _gestureConfigurationVersion &+= 1
+            }
             persistGesture()
         }
     }
@@ -1907,8 +1958,32 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _perFingerTapCooldown } }
         set {
             let clamped = max(0.1, min(2.5, newValue))
-            withLock { _perFingerTapCooldown = clamped }
+            withLock {
+                _perFingerTapCooldown = clamped
+                _gestureConfigurationVersion &+= 1
+            }
             persistGesture()
+        }
+    }
+
+    /// Copies gesture configuration only after an authored change. The hand
+    /// processor calls this every frame, but the steady-state path returns nil
+    /// after reading one integer under the settings lock.
+    func gestureConfigurationSnapshot(ifNewerThan version: UInt64) -> GestureConfigurationSnapshot? {
+        withLock {
+            guard _gestureConfigurationVersion != version else { return nil }
+            return GestureConfigurationSnapshot(
+                version: _gestureConfigurationVersion,
+                menuToggleEnabled: _menuToggleGestureEnabled,
+                menuToggleMode: _menuToggleGestureMode,
+                perFingerTapEnabled: _perFingerTapGestureEnabled,
+                leftTapActions: _perFingerTapLeftActions.map { $0 == .toggleMenu ? .none : $0 },
+                rightTapActions: _perFingerTapRightActions.map { $0 == .toggleMenu ? .none : $0 },
+                tapActivateThreshold: _perFingerTapActivateThreshold,
+                tapReleaseThreshold: _perFingerTapReleaseThreshold,
+                tapHoldDuration: _perFingerTapHoldDuration,
+                tapCooldown: _perFingerTapCooldown
+            )
         }
     }
 
@@ -1931,10 +2006,11 @@ final class RenderSettings: @unchecked Sendable {
     /// Device-local: stored as a bare UserDefaults key and deliberately omitted from
     /// the domain save/restore + iCloud sync, since the tilt sensor only exists on
     /// Intel MacBooks and the setting is meaningless to sync to other devices.
-    var macTiltControlEnabled: Bool {
-        get { withLock { _macTiltControlEnabled } }
+    var viewportTiltControlEnabled: Bool {
+        get { withLock { _viewportTiltControlEnabled } }
         set {
-            withLock { _macTiltControlEnabled = newValue }
+            withLock { _viewportTiltControlEnabled = newValue }
+            // Retain the persisted key so existing users do not lose the setting.
             UserDefaults.standard.set(newValue, forKey: "macTiltControlEnabled")
         }
     }
@@ -4301,7 +4377,7 @@ final class RenderSettings: @unchecked Sendable {
     // MARK: - Domain Config Struct Accessors
     // Snapshot current state into focused config structs (get) or apply a
     // config struct back to the underlying fields (set).
-    // These are the foundation for eliminating UISettingsCache, auto-deriving
+    // These are the foundation for eliminating ControlStateStore, auto-deriving
     // preset serialization, and composable SwiftUI views.
     // ═══════════════════════════════════════════════════════════════════════════
 

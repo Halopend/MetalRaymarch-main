@@ -15,4 +15,11 @@ struct AppIntentsTests {
             "App Intents fractal cases drifted from the in-app selectable set"
         )
     }
+
+    @Test("Control-area intents map to unique canonical routes")
+    func controlAreaRoutesAreCanonical() {
+        let routes = ThresholdControlArea.allCases.map(\.route)
+        #expect(Set(routes).count == routes.count)
+        #expect(routes.allSatisfy { !$0.stableID.isEmpty })
+    }
 }

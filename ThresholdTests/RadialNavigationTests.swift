@@ -622,7 +622,7 @@ struct RadialNavigationProjectionTests {
         var second = SpaceWarpOpValue(kind: .twist)
         second.strength = 0.8
         settings.spaceWarpStack = [first, second]
-        let cache = UISettingsCache(renderSettings: settings)
+        let cache = ControlStateStore(renderSettings: settings)
 
         settings.spaceWarpStack = [second, first]
         let changed = cache.updateSpaceWarpOp(id: second.id) { $0.strength = 1.6 }

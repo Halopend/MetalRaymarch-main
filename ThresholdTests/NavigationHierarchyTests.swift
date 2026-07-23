@@ -51,8 +51,8 @@ struct NavigationHierarchyTests {
             "shape.\(ShapeRailSection.bounding.rawValue)"
         ])
         #expect(hierarchy.children(ofWorkspace: .music).map(\.id) == [
-            "music.\(MusicRailSection.playback.rawValue)",
-            "music.\(MusicRailSection.songs.rawValue)"
+            "input.\(MusicRailSection.playback.rawValue)",
+            "input.\(MusicRailSection.songs.rawValue)"
         ])
         #expect(hierarchy.utilityRoots.map(\.id) == [
             "utility.gestures",

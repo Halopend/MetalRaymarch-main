@@ -6,9 +6,6 @@
 //
 
 import SwiftUI
-#if os(macOS)
-import AppKit
-#endif
 
 enum FractalBrowseTab: String, CaseIterable {
     case jumpingOff = "Jumping Off"
@@ -712,8 +709,7 @@ struct FractalGridCell: View {
 /// always shown; a "Custom" section appears below whenever any loaded scene
 /// (bundled or user-saved) carries an embedded distance-estimator formula.
 struct FractalFormulaGrid: View {
-    var cache: UISettingsCache
-    let gestureController: GestureController?
+    var cache: ControlStateStore
     let presetManager: PresetManager?
 
     @State private var exportShareItem: ExportShareItem?
@@ -736,7 +732,7 @@ struct FractalFormulaGrid: View {
                             isSelected: type == cache.fractalType && cache.activeCustomFormulaHash == nil
                         ) {
                             cache.fractalType = type
-                            cache.pushFractalType(type, gestureController: gestureController)
+                            cache.pushFractalType(type)
                         }
                     }
                 }
@@ -754,7 +750,7 @@ struct FractalFormulaGrid: View {
                                 formula: formula,
                                 isSelected: cache.fractalType == .custom && cache.activeCustomFormulaHash == formula.shortHash,
                                 action: {
-                                    cache.pushCustomFormula(formula, gestureController: gestureController)
+                                    cache.pushCustomFormula(formula)
                                 },
                                 onReveal: {
                                     revealFormulaFile(formula)
@@ -784,11 +780,9 @@ struct FractalFormulaGrid: View {
     private func revealFormulaFile(_ formula: EmbeddedFormula) {
         let container = EmbeddedFormulaContainer(formula: formula)
         exportOffMain({ container.exportToFile() }) { url in
-            #if os(macOS)
-            NSWorkspace.shared.activateFileViewerSelecting([url])
-            #else
-            exportShareItem = ExportShareItem(url: url)
-            #endif
+            if !PlatformFilePresentationAdapter.revealIfSupported(url) {
+                exportShareItem = ExportShareItem(url: url)
+            }
         }
     }
 }

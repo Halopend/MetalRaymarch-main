@@ -9,26 +9,23 @@ struct NavigationAvailability {
     let musicSections: [MusicRailSection]
     let includesGestureEditing: Bool
 
-    /// The capabilities of the current app target. Runtime feature flags remain
-    /// explicit inputs while compile-time hardware features are resolved once.
-    static func current(
+    /// Runtime feature flags remain explicit inputs; platform support comes
+    /// from the injected profile rather than target-conditional navigation.
+    static func resolve(
+        profile: PlatformProfile,
         allowsCustomScenes: Bool,
         includesGestureEditing: Bool
     ) -> NavigationAvailability {
         let shapeSections = ShapeRailSection.allCases.filter { section in
             guard section != .performance else { return false }
-            #if os(visionOS)
-            return true
-            #else
-            return section != .hands
-            #endif
+            return section != .hands || profile.supports(.handTracking)
         }
 
         return NavigationAvailability(
             allowsCustomScenes: allowsCustomScenes,
             shapeSections: shapeSections,
-            musicSections: MusicRailSection.availableCases,
-            includesGestureEditing: includesGestureEditing
+            musicSections: MusicRailSection.availableCases(for: profile),
+            includesGestureEditing: includesGestureEditing && profile.supports(.gestureEditing)
         )
     }
 }
@@ -44,24 +41,11 @@ struct NavigationHierarchy {
         case utility
     }
 
-    enum Destination {
-        case workspace(TopDockTab)
-        case explore(ExploreRailSection)
-        case shape(ShapeRailSection)
-        case visualizations(VisualizationsRailSection)
-        case performance(PerformanceRailSection)
-        case music(MusicRailSection)
-        case animationEditor
-        case quickToggles
-        case gestures
-        case settings
-    }
-
     struct Node: Identifiable {
         let id: String
         let title: String
         let systemImage: String
-        let destination: Destination
+        let target: AppNavigationTarget
         let rootPlacement: RootPlacement
         let children: [Node]
 
@@ -85,8 +69,8 @@ struct NavigationHierarchy {
 
     func children(ofWorkspace tab: TopDockTab) -> [Node] {
         workspaceRoots.first(where: { node in
-            guard case .workspace(let candidate) = node.destination else { return false }
-            return candidate == tab
+            guard case .workspace(let candidate) = node.target else { return false }
+            return candidate == WorkspaceRoot(tab)
         })?.children ?? []
     }
 
@@ -116,16 +100,15 @@ struct NavigationHierarchy {
 
     static func application(availability: NavigationAvailability) -> NavigationHierarchy {
         func leaf(
-            id: String,
             title: String,
             systemImage: String,
-            destination: Destination
+            route: AppRoute
         ) -> Node {
             Node(
-                id: id,
+                id: route.stableID,
                 title: title,
                 systemImage: systemImage,
-                destination: destination,
+                target: .route(route),
                 rootPlacement: .workspace,
                 children: []
             )
@@ -136,7 +119,7 @@ struct NavigationHierarchy {
                 id: rootID(for: tab),
                 title: tab.title,
                 systemImage: tab.icon,
-                destination: .workspace(tab),
+                target: .workspace(WorkspaceRoot(tab)),
                 rootPlacement: .workspace,
                 children: children
             )
@@ -146,42 +129,37 @@ struct NavigationHierarchy {
             .filter { $0 != .customScenes || availability.allowsCustomScenes }
             .map { section in
                 leaf(
-                    id: "explore.\(section.rawValue)",
                     title: section.rawValue,
                     systemImage: section.icon,
-                    destination: .explore(section)
+                    route: .explore(section)
                 )
             }
         let shape = availability.shapeSections.map { section in
             leaf(
-                id: "shape.\(section.rawValue)",
                 title: section.rawValue,
                 systemImage: section.icon,
-                destination: .shape(section)
+                route: .shape(section)
             )
         }
         let visualizations = VisualizationsRailSection.visibleCases.map { section in
             leaf(
-                id: "visualizations.\(section.rawValue)",
                 title: section.title,
                 systemImage: section.icon,
-                destination: .visualizations(section)
+                route: .look(section)
             )
         }
         let music = availability.musicSections.map { section in
             leaf(
-                id: "music.\(section.rawValue)",
                 title: section.title,
                 systemImage: section.icon,
-                destination: .music(section)
+                route: .input(section)
             )
         }
         let performance = PerformanceRailSection.allCases.map { section in
             leaf(
-                id: "performance.\(section.rawValue)",
                 title: section.rawValue,
                 systemImage: section.icon,
-                destination: .performance(section)
+                route: .quality(section)
             )
         }
 
@@ -190,23 +168,23 @@ struct NavigationHierarchy {
                 id: "utility.animationEditor",
                 title: "Animation Editor",
                 systemImage: AppIcons.pencilAndListClipboard,
-                destination: .animationEditor,
+                target: .command(.openAnimationEditor),
                 rootPlacement: .utility,
                 children: []
             ),
             Node(
                 id: "utility.quickToggles",
                 title: "Quick Toggles",
-                systemImage: SidebarTab.quickToggles.icon,
-                destination: .quickToggles,
+                systemImage: ControlPanelContent.quickToggles.icon,
+                target: .route(.quickToggles),
                 rootPlacement: .utility,
                 children: []
             ),
             Node(
                 id: "utility.settings",
                 title: "Settings",
-                systemImage: SidebarTab.settings.icon,
-                destination: .settings,
+                systemImage: ControlPanelContent.settings.icon,
+                target: .route(.settings(.display)),
                 rootPlacement: .utility,
                 children: []
             )
@@ -216,8 +194,8 @@ struct NavigationHierarchy {
                 Node(
                     id: "utility.gestures",
                     title: "Gestures",
-                    systemImage: SidebarTab.gestures.icon,
-                    destination: .gestures,
+                    systemImage: ControlPanelContent.gestures.icon,
+                    target: .route(.gestures),
                     rootPlacement: .utility,
                     children: []
                 ),

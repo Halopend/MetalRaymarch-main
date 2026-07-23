@@ -1,47 +1,452 @@
 import Foundation
+import Synchronization
+import simd
 
-/// Shared owner for parameter-operation dispatch across UI, gesture, animation, and audio layers.
-/// Keeps one authoritative layer-stack state for conflict resolution and smoothing continuity.
+enum ParameterOperationSource: String, Codable, Sendable {
+    case gesture
+    case slider
+    case audio
+}
+
+struct ParameterOperationSmoothing: Codable, Sendable {
+    var smoothingTime: Float?
+
+    init(smoothingTime: Float? = nil) {
+        self.smoothingTime = smoothingTime
+    }
+}
+
+struct ParameterOperation: Codable, Sendable {
+    let targetID: String
+    let source: ParameterOperationSource
+    let value: Float
+    let timestamp: TimeInterval
+    let frameIndex: UInt64
+    let smoothing: ParameterOperationSmoothing
+
+    init(targetID: String,
+         source: ParameterOperationSource,
+         value: Float,
+         timestamp: TimeInterval = CFAbsoluteTimeGetCurrent(),
+         frameIndex: UInt64,
+         smoothing: ParameterOperationSmoothing = .init()) {
+        self.targetID = targetID
+        self.source = source
+        self.value = value
+        self.timestamp = timestamp
+        self.frameIndex = frameIndex
+        self.smoothing = smoothing
+    }
+}
+
+struct ParameterTransaction: Sendable {
+    let frameIndex: UInt64
+    let timestamp: TimeInterval
+    let operations: [ParameterOperation]
+
+    init(frameIndex: UInt64,
+         timestamp: TimeInterval = CFAbsoluteTimeGetCurrent(),
+         operations: [ParameterOperation]) {
+        self.frameIndex = frameIndex
+        self.timestamp = timestamp
+        self.operations = operations
+    }
+}
+
+// Not @MainActor: instances are owned per-caller (ControlStateStore, GestureProcessor, Renderer).
+// The cache-based dispatch path is @MainActor since it touches MainActor-isolated node closures.
+// The settings-based path only writes through lock-protected RenderSettings.
+// Mutable layer stacks are synchronized so dispatch remains safe even if an owner
+// starts driving one dispatcher from multiple contexts.
 final class ParameterPipeline: @unchecked Sendable {
-    private let dispatcher: ParameterOperationDispatcher
+    private struct State: Sendable {
+        var coreStacks: [String: ParameterLayerStack] = [:]
+        var formulaStacks: [String: ParameterLayerStack] = [:]
+    }
 
-    init(dispatcher: ParameterOperationDispatcher = ParameterOperationDispatcher()) {
-        self.dispatcher = dispatcher
+    struct SourcePolicy: Sendable {
+        let priority: [ParameterOperationSource: Int]
+
+        static let `default` = SourcePolicy(priority: [
+            .gesture: 10,
+            .slider: 25,
+            .audio: 35
+        ])
+
+        func rank(for source: ParameterOperationSource) -> Int {
+            priority[source] ?? 0
+        }
+    }
+
+    private let _state = Mutex(State())
+
+    /// Live (base, resolved) snapshot per target, refreshed every time an operation
+    /// is applied through the settings path (gesture/animation/audio). The UI reads
+    /// this to render a "derived value" ghost indicator without touching — and racing
+    /// on — the authoritative, mutating layer stacks.
+    struct LiveValue: Sendable {
+        let base: Float
+        let resolved: Float
+        /// True when an additive layer is currently displacing the parameter enough
+        /// to be worth showing as a distinct derived value.
+        var isModulated: Bool { abs(resolved - base) > 1e-4 }
+    }
+    private let _liveValues = Mutex<[String: LiveValue]>([:])
+
+    /// Latest (base, resolved) snapshot for a target, or nil if it has never been
+    /// driven through the settings path.
+    func liveValue(for targetID: String) -> LiveValue? {
+        _liveValues.withLock { $0[targetID] }
+    }
+
+    /// Current value of a core/effect target read straight from RenderSettings, or
+    /// nil if the id isn't a routable core descriptor. Lets the gesture path seed a
+    /// scalar drag for core params (which, unlike formula params, aren't read via
+    /// `settings.formulaParams`).
+    func coreValue(for targetID: String, settings: RenderSettings) -> Float? {
+        ParameterCatalog.settingsBinding(for: targetID).map { $0.read(settings) }
+    }
+
+    private func recordLiveValue(_ targetID: String, base: Float, resolved: Float) {
+        _liveValues.withLock { $0[targetID] = LiveValue(base: base, resolved: resolved) }
+    }
+
+    private let sourcePolicy: SourcePolicy
+    var debugTraceEnabled = false
+
+    init(sourcePolicy: SourcePolicy = .default) {
+        self.sourcePolicy = sourcePolicy
     }
 
     func setDebugTraceEnabled(_ enabled: Bool) {
-        dispatcher.debugTraceEnabled = enabled
+        debugTraceEnabled = enabled
     }
 
     @MainActor
-    func dispatchUI(_ operations: [ParameterOperation], cache: UISettingsCache) {
-        dispatcher.dispatch(operations, cache: cache)
+    func dispatchUI(_ operations: [ParameterOperation], cache: ControlStateStore) {
+        dispatch(operations, cache: cache)
     }
 
     func dispatchGesture(_ operations: [ParameterOperation], settings: RenderSettings) {
-        dispatcher.dispatch(operations, settings: settings)
+        dispatch(operations, settings: settings)
     }
 
     func dispatchAudio(_ operations: [ParameterOperation], settings: RenderSettings) {
-        dispatcher.dispatch(operations, settings: settings)
+        dispatch(operations, settings: settings)
     }
 
-    func clearMusicLayers(settings: RenderSettings) {
-        dispatcher.clearMusicLayers(settings: settings)
-    }
-
-    func clearFormulaStacks() {
-        dispatcher.clearFormulaStacks()
-    }
-
-    /// Latest (base, resolved) snapshot for a target, for UI derived-value display.
-    func liveValue(for targetID: String) -> ParameterOperationDispatcher.LiveValue? {
-        dispatcher.liveValue(for: targetID)
-    }
-
-    /// Current value of a core/effect target read from RenderSettings (for seeding
-    /// a gesture scalar drag on core params). nil for non-core ids.
     func currentValue(for targetID: String, settings: RenderSettings) -> Float? {
-        dispatcher.coreValue(for: targetID, settings: settings)
+        coreValue(for: targetID, settings: settings)
+    }
+
+    @MainActor
+    func dispatch(_ transaction: ParameterTransaction, cache: ControlStateStore) {
+        resolve(transaction).forEach { resolved in
+            apply(resolved, cache: cache)
+        }
+    }
+
+    /// Convenience: wrap a bare operation array into a transaction.
+    @MainActor
+    func dispatch(_ operations: [ParameterOperation], cache: ControlStateStore) {
+        guard let first = operations.first else { return }
+        let txn = ParameterTransaction(frameIndex: first.frameIndex, operations: operations)
+        dispatch(txn, cache: cache)
+    }
+
+    func dispatch(_ transaction: ParameterTransaction, settings: RenderSettings) {
+        resolve(transaction).forEach { resolved in
+            apply(resolved, settings: settings)
+        }
+    }
+
+    /// Convenience: wrap a bare operation array into a transaction.
+    func dispatch(_ operations: [ParameterOperation], settings: RenderSettings) {
+        guard let first = operations.first else { return }
+        let txn = ParameterTransaction(frameIndex: first.frameIndex, operations: operations)
+        dispatch(txn, settings: settings)
+    }
+
+    private func resolve(_ transaction: ParameterTransaction) -> [ParameterOperation] {
+        var winners = Dictionary<String, ParameterOperation>(minimumCapacity: transaction.operations.count)
+        var contenderSources: [String: [ParameterOperationSource]] = [:]
+        for operation in transaction.operations {
+            if debugTraceEnabled {
+                contenderSources[operation.targetID, default: []].append(operation.source)
+            }
+            guard let existing = winners[operation.targetID] else {
+                winners[operation.targetID] = operation
+                continue
+            }
+            let existingRank = sourcePolicy.rank(for: existing.source)
+            let incomingRank = sourcePolicy.rank(for: operation.source)
+            if incomingRank > existingRank
+                || (incomingRank == existingRank && operation.timestamp > existing.timestamp) {
+                winners[operation.targetID] = operation
+            }
+        }
+
+        if debugTraceEnabled {
+            for (targetID, sources) in contenderSources where sources.count > 1 {
+                guard let winner = winners[targetID] else { continue }
+                let contenders = sources
+                    .map { "\($0.rawValue)(p:\(sourcePolicy.rank(for: $0)))" }
+                    .joined(separator: ", ")
+                print("🧮 ParamOp conflict target=\(winner.targetID) [\(contenders)] -> \(winner.source.rawValue)")
+            }
+        }
+
+        var resolved: [ParameterOperation] = []
+        resolved.reserveCapacity(winners.count)
+        resolved.append(contentsOf: winners.values)
+        return resolved
+    }
+
+    @MainActor
+    private func apply(_ operation: ParameterOperation, cache: ControlStateStore) {
+        let timestamp = operation.timestamp
+        let layer = layer(for: operation.source)
+
+        if operation.source == .slider {
+            // Manual edit: ask the music engine to re-zero this target's drift/
+            // decay/phase so audio variation restarts cleanly around the new value.
+            cache.renderSettings?.requestMusicRecenter(targetID: operation.targetID)
+        }
+
+        let formulaBatch = ParameterNodeRegistry.shared.formulaBatch(for: cache.fractalType)
+        if let node = formulaBatch.floatNodes.first(where: { $0.id == operation.targetID }) {
+            node.bootstrapBaseIfNeeded(from: node.readValue(cache), timestamp: timestamp)
+            let incoming = operation.value
+            let resolved = node.applyLayer(layer, value: incoming, smoothingTime: operation.smoothing.smoothingTime, timestamp: timestamp)
+            node.writeValue(cache, resolved)
+            if operation.source == .slider {
+                // A formula slider writes only this per-node stack; re-anchor the
+                // separate settings-path stack the audio layer composes on so the
+                // music center follows the edit instead of a frozen bootstrap.
+                recenterMusicBase(targetID: operation.targetID, to: incoming)
+            }
+            if debugTraceEnabled {
+                print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(resolved)")
+            }
+            return
+        }
+
+        if let boolNode = formulaBatch.boolNodes.first(where: { $0.id == operation.targetID }) {
+            let newValue = operation.value
+            boolNode.writeValue(cache, newValue >= 0.5)
+            if debugTraceEnabled {
+                print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(newValue >= 0.5)")
+            }
+            return
+        }
+
+        applyCore(operation, settings: cache.renderSettings, layer: layer)
+    }
+
+    private func apply(_ operation: ParameterOperation, settings: RenderSettings) {
+        let timestamp = operation.timestamp
+        let layer = layer(for: operation.source)
+
+        if operation.source == .gesture {
+            // Manual gesture edit: the .gesture layer already re-anchors the base
+            // (same stack the audio layer uses); also re-zero the engine's
+            // accumulated drift/decay/phase so variation restarts around it.
+            settings.requestMusicRecenter(targetID: operation.targetID)
+        }
+
+        if let formulaID = ParameterTargetID.parseFormulaID(operation.targetID) {
+            let fractalType = formulaID.fractalType
+            let formulaIndex = formulaID.formulaIndex
+            var params = settings.formulaParams
+            let current = FormulaCatalog.getParam(params, index: formulaIndex)
+            let nodeRange: ClosedRange<Float> = ParameterNodeRegistry.shared
+                .node(for: fractalType, formulaIndex: formulaIndex)?.range ?? -Float.greatestFiniteMagnitude...Float.greatestFiniteMagnitude
+            let outcome = _state.withLock { state -> (resolved: Float, base: Float) in
+                var stack = state.formulaStacks[operation.targetID] ?? ParameterLayerStack(defaultValue: current, range: nodeRange, timestamp: timestamp)
+                stack.setBaseIfNeeded(current, timestamp: timestamp)
+                let incoming = operation.value
+                let strategy = ParameterNodeRegistry.shared
+                    .node(for: fractalType, formulaIndex: formulaIndex)?
+                    .motionStrategy ?? .layerLerp
+                let effectiveSmoothTime = smoothingTime(for: strategy, requested: operation.smoothing.smoothingTime)
+                let resolved = stack.apply(layer: layer, value: incoming, smoothingTime: effectiveSmoothTime, timestamp: timestamp)
+                let anchor = stack.baseRawValue ?? current
+                state.formulaStacks[operation.targetID] = stack
+                return (resolved, anchor)
+            }
+            let resolved = outcome.resolved
+            recordLiveValue(operation.targetID, base: outcome.base, resolved: resolved)
+
+            if settings.isAnimationPlaying {
+                // During playback the per-frame formula rebuild owns `formulaParams`, so a
+                // direct write is stomped. Route gesture/slider edits into the manual
+                // override and music into the audio offset; the rebuild composes
+                // animationBase + manualOffset + audioOffset. The music op carries a pure
+                // delta, recovered as resolved − anchor (the additive `.music` layer).
+                switch operation.source {
+                case .gesture, .slider:
+                    settings.setManualFormulaParamOverride(index: formulaIndex, value: resolved)
+                case .audio:
+                    settings.setAudioFormulaParamOffset(index: formulaIndex, offset: resolved - outcome.base)
+                }
+            } else {
+                FormulaCatalog.setParam(&params, index: formulaIndex, value: resolved)
+                settings.formulaParams = params
+            }
+            if debugTraceEnabled {
+                print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(resolved)")
+            }
+            return
+        }
+
+        applyCore(operation, settings: settings, layer: layer)
+    }
+
+    private func applyCore(_ operation: ParameterOperation, settings: RenderSettings?, layer: ParameterLayer) {
+        guard let settings else { return }
+        // Slice 3: source the off-main read/write + playback-offset closures from the
+        // authored catalog (narrowed `settingsBinding` — never the @MainActor ui pair),
+        // and range/motion from the canonical spec, instead of the deleted local
+        // `coreDescriptors` literal. Behavior-identical to the prior CoreParameterDescriptor.
+        guard let binding = ParameterCatalog.settingsBinding(for: operation.targetID),
+              let spec = ControlCatalog.spec(operation.targetID) else { return }
+
+        let base = binding.read(settings)
+        let outcome = _state.withLock { state -> (resolved: Float, base: Float) in
+            var stack = state.coreStacks[operation.targetID] ?? ParameterLayerStack(defaultValue: base, range: spec.range, timestamp: operation.timestamp)
+            stack.setBaseIfNeeded(base, timestamp: operation.timestamp)
+
+            let incoming = operation.value
+            let effectiveSmoothTime = smoothingTime(for: spec.motionStrategy, requested: operation.smoothing.smoothingTime)
+            let resolved = stack.apply(layer: layer, value: incoming, smoothingTime: effectiveSmoothTime, timestamp: operation.timestamp)
+            let anchor = stack.baseRawValue ?? base
+
+            state.coreStacks[operation.targetID] = stack
+            return (min(spec.range.upperBound, max(spec.range.lowerBound, resolved)), anchor)
+        }
+        let resolved = outcome.resolved
+
+        recordLiveValue(operation.targetID, base: outcome.base, resolved: resolved)
+
+        // During animation playback, applyKeyframe owns this param's backing var every
+        // frame, so an absolute music write is stomped. Deposit the pure music delta
+        // (resolved − anchor) into the playback offset slot the keyframe composer reads.
+        // Only `.music` ops reroute; gestures/sliders keep the absolute write so their
+        // existing playback behavior is unchanged.
+        if layer == .music,
+           settings.isAnimationPlaying,
+           let writeAudioOffset = binding.writeAudioOffset,
+           binding.audioOffsetActiveDuringPlayback?(settings) == true {
+            writeAudioOffset(settings, resolved - outcome.base)
+        } else {
+            binding.write(settings, resolved)
+        }
+
+        if debugTraceEnabled {
+            print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(resolved)")
+        }
+    }
+
+    private func layer(for source: ParameterOperationSource) -> ParameterLayer {
+        switch source {
+        case .gesture: return .gesture
+        case .slider: return .ui
+        case .audio: return .music
+        }
+    }
+
+    private func smoothingTime(for strategy: ParameterMotionStrategy, requested: Float?) -> Float? {
+        switch strategy {
+        case .none, .smoothDamp:
+            return 0
+        case .layerLerp:
+            return requested
+        }
+    }
+
+    /// Re-anchor the music "center of variation" for a formula target to a fresh
+    /// manual value. The audio layer composes additively on the settings-path
+    /// `formulaStacks`, but a formula slider writes a *separate* per-node stack, so
+    /// without this the audio base stays frozen at its first bootstrap and
+    /// overwrites the slider every frame. No-op until the stack exists (i.e. until
+    /// audio has touched the target). Core/effect targets self-recenter via the
+    /// shared `coreStacks` `.ui` write, so they are intentionally excluded here.
+    func recenterMusicBase(targetID: String, to value: Float) {
+        guard ParameterTargetID.parseFormulaID(targetID) != nil else { return }
+        let timestamp = CFAbsoluteTimeGetCurrent()
+        let touched: Bool = _state.withLock { state in
+            guard var stack = state.formulaStacks[targetID] else { return false }
+            stack.recenterBase(to: value, timestamp: timestamp, clearGesture: true)
+            state.formulaStacks[targetID] = stack
+            return true
+        }
+        if touched {
+            // Collapse the live snapshot to the new base so the ghost marker
+            // doesn't flash a stale offset before the next audio frame recomputes.
+            recordLiveValue(targetID, base: value, resolved: value)
+        }
+    }
+
+    /// Zero out the music (audio) layer in every core parameter stack and re-write
+    /// the stack-resolved value to settings. Call when audio reactivity stops so
+    /// stale music offsets don't bleed into subsequent slider / gesture operations.
+    func clearMusicLayers(settings: RenderSettings) {
+        let timestamp = CFAbsoluteTimeGetCurrent()
+        let cleared = _state.withLock { state -> (core: [(String, Float)], formula: [(Int, Float)]) in
+            var coreWrites: [(String, Float)] = []
+            var formulaWrites: [(Int, Float)] = []
+
+            for (id, var stack) in state.coreStacks {
+                let resolved = stack.apply(layer: .music, value: 0, smoothingTime: 0, timestamp: timestamp)
+                state.coreStacks[id] = stack
+                coreWrites.append((id, resolved))
+            }
+
+            for (id, var stack) in state.formulaStacks {
+                let resolved = stack.apply(layer: .music, value: 0, smoothingTime: 0, timestamp: timestamp)
+                state.formulaStacks[id] = stack
+                if let formula = ParameterTargetID.parseFormulaID(id) {
+                    let formulaIndex = formula.formulaIndex
+                    formulaWrites.append((formulaIndex, resolved))
+                }
+            }
+
+            return (coreWrites, formulaWrites)
+        }
+
+        for (id, resolved) in cleared.core {
+            ParameterCatalog.settingsBinding(for: id)?.write(settings, resolved)
+        }
+
+        var params = settings.formulaParams
+        for (formulaIndex, resolved) in cleared.formula {
+            FormulaCatalog.setParam(&params, index: formulaIndex, value: resolved)
+        }
+        settings.formulaParams = params
+
+        // Music is gone: collapse the derived snapshot to base so the UI ghost
+        // indicators fade out and stop displaying a stale offset.
+        for (id, resolved) in cleared.core {
+            recordLiveValue(id, base: resolved, resolved: resolved)
+        }
+        _liveValues.withLock { live in
+            for id in live.keys where ParameterTargetID.parseFormulaID(id) != nil {
+                if let v = live[id] { live[id] = LiveValue(base: v.resolved, resolved: v.resolved) }
+            }
+        }
+    }
+
+    /// Discard all formula parameter layer stacks. Call when the fractal type
+    /// changes so stale entries from the old type's formula params don't interfere
+    /// with the new type.
+    func clearFormulaStacks() {
+        _state.withLock { state in
+            state.formulaStacks.removeAll()
+        }
+        _liveValues.withLock { live in
+            for id in live.keys where ParameterTargetID.parseFormulaID(id) != nil {
+                live.removeValue(forKey: id)
+            }
+        }
     }
 }

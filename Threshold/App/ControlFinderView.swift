@@ -11,68 +11,6 @@ import SwiftUI
 
 // MARK: - Destination model
 
-enum ControlFinderPlatform: String, CaseIterable, Identifiable, Sendable {
-    case macOS
-    case iOS
-    case visionOS
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .macOS: return "macOS"
-        case .iOS: return "iPadOS"
-        case .visionOS: return "visionOS"
-        }
-    }
-
-    static var current: ControlFinderPlatform {
-        #if os(macOS)
-        return .macOS
-        #elseif os(visionOS)
-        return .visionOS
-        #else
-        return .iOS
-        #endif
-    }
-}
-
-struct ControlFinderPlatformAvailability: OptionSet, Sendable {
-    let rawValue: UInt8
-
-    static let macOS = Self(rawValue: 1 << 0)
-    static let iOS = Self(rawValue: 1 << 1)
-    static let visionOS = Self(rawValue: 1 << 2)
-
-    static let all: Self = [.macOS, .iOS, .visionOS]
-    static let iOSAndVisionOS: Self = [.iOS, .visionOS]
-    static let visionOSOnly: Self = [.visionOS]
-
-    func contains(_ platform: ControlFinderPlatform) -> Bool {
-        let flag: Self
-        switch platform {
-        case .macOS: flag = .macOS
-        case .iOS: flag = .iOS
-        case .visionOS: flag = .visionOS
-        }
-        return !intersection(flag).isEmpty
-    }
-
-    var platforms: [ControlFinderPlatform] {
-        ControlFinderPlatform.allCases.filter(contains)
-    }
-
-    var shortLabel: String? {
-        guard self != .all else { return nil }
-        return platforms.map(\.displayName).joined(separator: " · ")
-    }
-
-    var accessibilityDescription: String {
-        if self == .all { return "Available on every platform" }
-        return "Available on \(platforms.map(\.displayName).joined(separator: ", "))"
-    }
-}
-
 enum ControlFinderCategory: String, CaseIterable, Identifiable, Sendable {
     case explore = "Explore"
     case shape = "Shape"
@@ -91,34 +29,8 @@ enum ControlFinderCategory: String, CaseIterable, Identifiable, Sendable {
         case .visualizations: return TopDockTab.visualizations.icon
         case .performance: return TopDockTab.performance.icon
         case .music: return TopDockTab.music.icon
-        case .settings: return SidebarTab.settings.icon
+        case .settings: return ControlPanelContent.settings.icon
         case .workflow: return "arrow.triangle.branch"
-        }
-    }
-}
-
-/// Typed hand-off from the finder to ContentView. Keeping route mutation out of
-/// this file makes the catalog deterministic and straightforward to test.
-enum ControlFinderRouteMetadata {
-    case explore(ExploreRailSection)
-    case shape(ShapeRailSection)
-    case visualizations(VisualizationsRailSection)
-    case performance(PerformanceRailSection)
-    case music(MusicRailSection)
-    case settings(SettingsSubTab)
-    case sidebar(SidebarTab)
-    case animationEditor
-
-    var stableID: String {
-        switch self {
-        case .explore(let section): return "explore.\(section.rawValue)"
-        case .shape(let section): return "shape.\(section.rawValue)"
-        case .visualizations(let section): return "visualizations.\(section.rawValue)"
-        case .performance(let section): return "performance.\(section.rawValue)"
-        case .music(let section): return "music.\(section.rawValue)"
-        case .settings(let section): return "settings.\(section.rawValue)"
-        case .sidebar(let tab): return "sidebar.\(tab.rawValue)"
-        case .animationEditor: return "workflow.animation-editor"
         }
     }
 }
@@ -131,8 +43,8 @@ struct ControlFinderDestination: Identifiable {
     let description: String
     let icon: String
     let searchKeywords: [String]
-    let availability: ControlFinderPlatformAvailability
-    let route: ControlFinderRouteMetadata?
+    let requiredCapabilities: PlatformCapability
+    let target: AppNavigationTarget
 
     var path: String { pathComponents.joined(separator: " › ") }
 
@@ -144,27 +56,38 @@ struct ControlFinderDestination: Identifiable {
         description: String,
         icon: String,
         searchKeywords: [String] = [],
-        availability: ControlFinderPlatformAvailability = .all,
-        route: ControlFinderRouteMetadata? = nil
+        requiredCapabilities: PlatformCapability = [],
+        target: AppNavigationTarget
     ) {
-        self.id = id ?? route?.stableID ?? "\(category.rawValue).\(title)"
+        self.id = id ?? target.stableID
         self.title = title
         self.category = category
         self.pathComponents = pathComponents
         self.description = description
         self.icon = icon
         self.searchKeywords = searchKeywords
-        self.availability = availability
-        self.route = route
+        self.requiredCapabilities = requiredCapabilities
+        self.target = target
     }
 
-    func isAvailable(on platform: ControlFinderPlatform) -> Bool {
-        availability.contains(platform)
+    func isAvailable(on profile: PlatformProfile) -> Bool {
+        profile.supports(requiredCapabilities)
+    }
+
+    var availabilityLabel: String? {
+        let supported = PlatformProfile.all.filter(isAvailable(on:))
+        guard supported.count != PlatformProfile.all.count else { return nil }
+        return supported.map(\.platform.displayName).joined(separator: " · ")
+    }
+
+    var availabilityAccessibilityDescription: String {
+        guard let availabilityLabel else { return "Available on every platform" }
+        return "Available on \(availabilityLabel.replacingOccurrences(of: " · ", with: ", "))"
     }
 
     // MARK: Catalog
 
-    static let catalog: [ControlFinderDestination] = [
+    private static let routeCatalog: [ControlFinderDestination] = [
         // Explore
         destination(
             ExploreRailSection.jumpingOff,
@@ -212,7 +135,7 @@ struct ControlFinderDestination: Identifiable {
             ShapeRailSection.hands,
             description: "Shape the fractal around tracked hands and forearms.",
             keywords: ["hand attraction", "tracking", "palm", "forearm", "pocket", "arkit"],
-            availability: .visionOSOnly
+            requiredCapabilities: .handTracking
         ),
         destination(
             ShapeRailSection.space,
@@ -221,7 +144,7 @@ struct ControlFinderDestination: Identifiable {
         ),
         destination(
             ShapeRailSection.transformations,
-            description: "Learn by mapping Metal equations, or switch to Just Use for the full transformation catalog.",
+            description: "Edit the full transformation catalog directly, or switch to Learn for optional equation lessons.",
             keywords: ["transform", "warp", "sphere projection", "inversion", "twist", "fold stack", "space cut", "icosahedral", "coxeter"]
         ),
         destination(
@@ -304,19 +227,19 @@ struct ControlFinderDestination: Identifiable {
             MusicRailSection.songs,
             description: "Search the connected music library and play a song.",
             keywords: ["track", "library", "apple music", "search", "play"],
-            availability: .iOSAndVisionOS
+            requiredCapabilities: .musicLibraryBrowsing
         ),
         destination(
             MusicRailSection.playlists,
             description: "Browse and play playlists from the connected music service.",
             keywords: ["playlist", "library", "shuffle", "apple music"],
-            availability: .iOSAndVisionOS
+            requiredCapabilities: .musicLibraryBrowsing
         ),
         destination(
             MusicRailSection.albums,
             description: "Browse and play albums from the connected music service.",
             keywords: ["album", "artist", "library", "apple music"],
-            availability: .iOSAndVisionOS
+            requiredCapabilities: .musicLibraryBrowsing
         ),
 
         // Settings
@@ -345,10 +268,10 @@ struct ControlFinderDestination: Identifiable {
             category: .settings,
             pathComponents: ["Settings", "Gestures"],
             description: "Assign menu and per-finger gestures for hands-free control.",
-            icon: SidebarTab.gestures.icon,
+            icon: ControlPanelContent.gestures.icon,
             searchKeywords: ["gesture", "hands", "finger", "tap", "pinch", "menu", "shortcut"],
-            availability: .visionOSOnly,
-            route: .sidebar(.gestures)
+            requiredCapabilities: .gestureEditing,
+            target: .route(.gestures)
         ),
 
         // Workflow shortcuts
@@ -357,9 +280,9 @@ struct ControlFinderDestination: Identifiable {
             category: .workflow,
             pathComponents: ["Workflow", "Quick Toggles"],
             description: "See important feature switches together in one scannable grid.",
-            icon: SidebarTab.quickToggles.icon,
+            icon: ControlPanelContent.quickToggles.icon,
             searchKeywords: ["switch", "enable", "disable", "effects", "space", "audio", "performance"],
-            route: .sidebar(.quickToggles)
+            target: .route(.quickToggles)
         ),
         ControlFinderDestination(
             title: "Animation Editor",
@@ -368,16 +291,62 @@ struct ControlFinderDestination: Identifiable {
             description: "Create scenes, capture keyframes, adjust timing, and preview animation.",
             icon: "pencil.and.list.clipboard",
             searchKeywords: ["scene editor", "animation", "video", "keyframe", "timeline", "capture", "record"],
-            route: .animationEditor
+            target: .command(.openAnimationEditor)
         )
     ]
 
+    /// Individual control metadata is projected from the semantic catalog; the
+    /// authored list above contains destinations/workflows only.
+    static let catalog: [ControlFinderDestination] = routeCatalog +
+        ParameterCatalog.semanticDescriptors.compactMap(controlDestination)
+
+    private static func controlDestination(
+        _ semantic: SemanticControlDescriptor
+    ) -> ControlFinderDestination? {
+        guard case .presented(let route, let section, _, let presentations) = semantic.placement,
+              presentations.contains(.controlFinder) else { return nil }
+
+        let metadata: (name: String, icon: String, target: AppNavigationTarget)
+        switch semantic {
+        case .scalar(let descriptor):
+            metadata = (descriptor.spec.name, descriptor.spec.icon, .route(route))
+        case .toggle(let descriptor):
+            metadata = (descriptor.name, descriptor.icon, .route(route))
+        case .action(let descriptor):
+            metadata = (descriptor.name, descriptor.icon, .command(descriptor.command))
+        }
+
+        return ControlFinderDestination(
+            id: "control.\(semantic.id.rawValue)",
+            title: metadata.name,
+            category: category(for: route),
+            pathComponents: [route.workspaceRoot?.displayName ?? "Workflow", route.title, section],
+            description: "Open the full controls for \(metadata.name).",
+            icon: metadata.icon,
+            searchKeywords: [section, route.title, semantic.id.rawValue],
+            requiredCapabilities: semantic.requiredPlatformCapabilities,
+            target: metadata.target
+        )
+    }
+
+    private static func category(for route: AppRoute) -> ControlFinderCategory {
+        switch route {
+        case .explore: return .explore
+        case .input: return .music
+        case .shape: return .shape
+        case .look: return .visualizations
+        case .quality: return .performance
+        case .settings, .gestures: return .settings
+        case .quickToggles, .animationLibrary: return .workflow
+        }
+    }
+
     static func results(
         matching query: String,
-        on platform: ControlFinderPlatform = .current,
+        on profile: PlatformProfile = .current,
         includeUnavailable: Bool = false
     ) -> [ControlFinderDestination] {
-        let eligible = catalog.filter { includeUnavailable || $0.isAvailable(on: platform) }
+        let eligible = catalog.filter { includeUnavailable || $0.isAvailable(on: profile) }
         let tokens = searchTokens(in: query)
         guard !tokens.isEmpty else { return eligible }
 
@@ -441,7 +410,7 @@ struct ControlFinderDestination: Identifiable {
         _ section: ExploreRailSection,
         description: String,
         keywords: [String],
-        availability: ControlFinderPlatformAvailability = .all
+        requiredCapabilities: PlatformCapability = []
     ) -> ControlFinderDestination {
         ControlFinderDestination(
             title: section.rawValue,
@@ -450,8 +419,8 @@ struct ControlFinderDestination: Identifiable {
             description: description,
             icon: section.icon,
             searchKeywords: keywords,
-            availability: availability,
-            route: .explore(section)
+            requiredCapabilities: requiredCapabilities,
+            target: .route(.explore(section))
         )
     }
 
@@ -459,7 +428,7 @@ struct ControlFinderDestination: Identifiable {
         _ section: ShapeRailSection,
         description: String,
         keywords: [String],
-        availability: ControlFinderPlatformAvailability = .all
+        requiredCapabilities: PlatformCapability = []
     ) -> ControlFinderDestination {
         ControlFinderDestination(
             title: section.rawValue,
@@ -468,8 +437,8 @@ struct ControlFinderDestination: Identifiable {
             description: description,
             icon: section.icon,
             searchKeywords: keywords,
-            availability: availability,
-            route: .shape(section)
+            requiredCapabilities: requiredCapabilities,
+            target: .route(.shape(section))
         )
     }
 
@@ -477,7 +446,7 @@ struct ControlFinderDestination: Identifiable {
         _ section: VisualizationsRailSection,
         description: String,
         keywords: [String],
-        availability: ControlFinderPlatformAvailability = .all
+        requiredCapabilities: PlatformCapability = []
     ) -> ControlFinderDestination {
         ControlFinderDestination(
             title: section.title,
@@ -486,8 +455,8 @@ struct ControlFinderDestination: Identifiable {
             description: description,
             icon: section.icon,
             searchKeywords: keywords,
-            availability: availability,
-            route: .visualizations(section)
+            requiredCapabilities: requiredCapabilities,
+            target: .route(.look(section))
         )
     }
 
@@ -495,7 +464,7 @@ struct ControlFinderDestination: Identifiable {
         _ section: PerformanceRailSection,
         description: String,
         keywords: [String],
-        availability: ControlFinderPlatformAvailability = .all
+        requiredCapabilities: PlatformCapability = []
     ) -> ControlFinderDestination {
         ControlFinderDestination(
             title: section.rawValue,
@@ -504,8 +473,8 @@ struct ControlFinderDestination: Identifiable {
             description: description,
             icon: section.icon,
             searchKeywords: keywords,
-            availability: availability,
-            route: .performance(section)
+            requiredCapabilities: requiredCapabilities,
+            target: .route(.quality(section))
         )
     }
 
@@ -513,7 +482,7 @@ struct ControlFinderDestination: Identifiable {
         _ section: MusicRailSection,
         description: String,
         keywords: [String],
-        availability: ControlFinderPlatformAvailability = .all
+        requiredCapabilities: PlatformCapability = []
     ) -> ControlFinderDestination {
         ControlFinderDestination(
             title: section.title,
@@ -522,8 +491,8 @@ struct ControlFinderDestination: Identifiable {
             description: description,
             icon: section.icon,
             searchKeywords: keywords,
-            availability: availability,
-            route: .music(section)
+            requiredCapabilities: requiredCapabilities,
+            target: .route(.input(section))
         )
     }
 
@@ -531,17 +500,17 @@ struct ControlFinderDestination: Identifiable {
         _ section: SettingsSubTab,
         description: String,
         keywords: [String],
-        availability: ControlFinderPlatformAvailability = .all
+        requiredCapabilities: PlatformCapability = []
     ) -> ControlFinderDestination {
         ControlFinderDestination(
             title: section.rawValue,
             category: .settings,
-            pathComponents: [SidebarTab.settings.rawValue, section.rawValue],
+            pathComponents: ["Settings", section.rawValue],
             description: description,
             icon: section.icon,
             searchKeywords: keywords,
-            availability: availability,
-            route: .settings(section)
+            requiredCapabilities: requiredCapabilities,
+            target: .route(.settings(section))
         )
     }
 }
@@ -549,7 +518,7 @@ struct ControlFinderDestination: Identifiable {
 // MARK: - Search view
 
 struct ControlFinderView: View {
-    let platform: ControlFinderPlatform
+    let profile: PlatformProfile
     let onSelect: (ControlFinderDestination) -> Void
     let onDismiss: () -> Void
 
@@ -563,17 +532,17 @@ struct ControlFinderView: View {
     }
 
     init(
-        platform: ControlFinderPlatform = .current,
+        profile: PlatformProfile = .current,
         onSelect: @escaping (ControlFinderDestination) -> Void,
         onDismiss: @escaping () -> Void
     ) {
-        self.platform = platform
+        self.profile = profile
         self.onSelect = onSelect
         self.onDismiss = onDismiss
     }
 
     private var results: [ControlFinderDestination] {
-        ControlFinderDestination.results(matching: query, on: platform)
+        ControlFinderDestination.results(matching: query, on: profile)
     }
 
     private var resultIDs: [String] { results.map(\.id) }
@@ -770,14 +739,14 @@ struct ControlFinderView: View {
         #endif
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(destination.title), \(destination.path). \(destination.description)")
-        .accessibilityHint("Opens this control. \(destination.availability.accessibilityDescription).")
+        .accessibilityHint("Opens this control. \(destination.availabilityAccessibilityDescription).")
     }
 
     private var footer: some View {
         HStack(spacing: 8) {
             Text("\(results.count) \(results.count == 1 ? "destination" : "destinations")")
             Text("•")
-            Text(platform.displayName)
+            Text(profile.platform.displayName)
             Spacer()
             #if os(macOS)
             Text("↑↓ Navigate   ↵ Open   esc Close")
@@ -909,7 +878,7 @@ private struct ControlFinderDestinationRowLabel: View {
 
     @ViewBuilder
     private var availabilityBadge: some View {
-        if let availability = destination.availability.shortLabel {
+        if let availability = destination.availabilityLabel {
             Text(availability)
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.secondary)

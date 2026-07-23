@@ -3,37 +3,6 @@ import ARKit
 import simd
 
 extension Renderer {
-    /// Hand Attraction: world-space palm position plus the validity of the palm
-    /// joint itself. An anchor can remain tracked while that joint is not; using
-    /// the anchor flag alone would activate a phantom hand at world origin.
-    @available(visionOS 2.0, *)
-    static func palmPosition(from anchor: HandAnchor?) -> (position: SIMD3<Float>, tracked: Bool) {
-        guard let anchor, anchor.isTracked,
-              let joint = anchor.handSkeleton?.joint(.middleFingerMetacarpal), joint.isTracked else {
-            return (.zero, false)
-        }
-        let worldTransform = anchor.originFromAnchorTransform * joint.anchorFromJointTransform
-        return (
-            SIMD3<Float>(worldTransform.columns.3.x, worldTransform.columns.3.y, worldTransform.columns.3.z),
-            true
-        )
-    }
-
-    /// Wrist + elbow world positions for the Hand Attraction forearm capsule.
-    static func forearmSegment(from anchor: HandAnchor?) -> (wrist: SIMD3<Float>, elbow: SIMD3<Float>, tracked: Bool) {
-        guard let anchor, anchor.isTracked, let skeleton = anchor.handSkeleton else {
-            return (.zero, .zero, false)
-        }
-        let wristJoint = skeleton.joint(.forearmWrist)
-        let elbowJoint = skeleton.joint(.forearmArm)
-        guard wristJoint.isTracked, elbowJoint.isTracked else { return (.zero, .zero, false) }
-        func world(_ joint: HandSkeleton.Joint) -> SIMD3<Float> {
-            let t = anchor.originFromAnchorTransform * joint.anchorFromJointTransform
-            return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
-        }
-        return (world(wristJoint), world(elbowJoint), true)
-    }
-
     /// Clear every renderer-side tracking mirror as soon as the provider or
     /// required joints drop. Otherwise the last valid hand remains latched into
     /// the DE while ARKit is paused/stopped.
@@ -100,33 +69,29 @@ extension Renderer {
         let gestureUpdateDelta = Float(time - lastHandTrackingUpdateTime)
         lastHandTrackingUpdateTime = time
 
-        // Process gestures via async dispatch to MainActor
-        // GestureController is @MainActor so updateHands must run there.
-        // UI state updates (leftHandTracked, rightHandTracked) are throttled to ~15Hz
-        // since they trigger @Observable invalidation but are only visual indicators.
         if #available(visionOS 2.0, *) {
             let leftAnchor = anchors.leftHand
             let rightAnchor = anchors.rightHand
+            let extracted = HandPoseSnapshot.extract(
+                leftAnchor: leftAnchor,
+                rightAnchor: rightAnchor,
+                timestamp: time,
+                deltaTime: gestureUpdateDelta
+            )
 
-            // Hand Attraction (visionOS only): cache each palm's world-space
-            // position directly on the Renderer actor, synchronously — GestureController
-            // is @MainActor and updateGameState runs on the render loop, so routing
-            // through it would require an actor hop. These mirror buildHandData's own
-            // extraction and are read back in makeHandAttractionUniforms this same frame.
-            let leftPalm = Self.palmPosition(from: leftAnchor)
-            lastLeftHandPalmPosition = leftPalm.position
-            lastLeftHandTrackedForAttraction = leftPalm.tracked
-            let rightPalm = Self.palmPosition(from: rightAnchor)
-            lastRightHandPalmPosition = rightPalm.position
-            lastRightHandTrackedForAttraction = rightPalm.tracked
-            let leftForearm = Self.forearmSegment(from: leftAnchor)
-            lastLeftForearmWrist = leftForearm.wrist
-            lastLeftForearmElbow = leftForearm.elbow
-            lastLeftForearmTracked = leftForearm.tracked
-            let rightForearm = Self.forearmSegment(from: rightAnchor)
-            lastRightForearmWrist = rightForearm.wrist
-            lastRightForearmElbow = rightForearm.elbow
-            lastRightForearmTracked = rightForearm.tracked
+            // The exact same extracted snapshot feeds attraction and recognition.
+            lastLeftHandPalmPosition = extracted.leftHand.palmPosition
+            lastLeftHandTrackedForAttraction = extracted.leftHand.isTracked
+                && simd_length_squared(extracted.leftHand.palmPosition) > 1e-6
+            lastRightHandPalmPosition = extracted.rightHand.palmPosition
+            lastRightHandTrackedForAttraction = extracted.rightHand.isTracked
+                && simd_length_squared(extracted.rightHand.palmPosition) > 1e-6
+            lastLeftForearmWrist = extracted.leftHand.forearmWrist
+            lastLeftForearmElbow = extracted.leftHand.forearmElbow
+            lastLeftForearmTracked = extracted.leftHand.forearmTracked
+            lastRightForearmWrist = extracted.rightHand.forearmWrist
+            lastRightForearmElbow = extracted.rightHand.forearmElbow
+            lastRightForearmTracked = extracted.rightHand.forearmTracked
 
             // Atomically decide whether to start a new dispatch or just accumulate
             // onto an in-flight one. Returns the delta to use if we're starting;
@@ -143,74 +108,47 @@ extension Renderer {
             }
 
             guard let delta = accumulatedDelta else { return }
+            let snapshot = HandPoseSnapshot(
+                leftHand: extracted.leftHand,
+                rightHand: extracted.rightHand,
+                timestamp: time,
+                deltaTime: delta
+            )
+            let shouldPublishDiagnostics = time - lastHandDiagnosticsPublishTime >= (1.0 / 15.0)
+            if shouldPublishDiagnostics { lastHandDiagnosticsPublishTime = time }
+            let gesturesEnabled = appModel.handTrackingEnabledForRenderer
+            let processor = appModel.gestureProcessor
+            let model = appModel
 
-            let dispatchTask = Task { @MainActor [weak self] in
+            let dispatchTask = Task.detached(priority: .userInitiated) { [weak self] in
                 guard let self else { return }
                 defer {
-                    // Call directly — finishHandTrackingDispatch is nonisolated
-                    // and grabs its own Mutex lock; no need to hop back to the
-                    // Renderer actor (which is stuck in a synchronous render loop).
                     self.finishHandTrackingDispatch()
                     self.clearHandTrackingDispatchTask()
                 }
 
-                // Mark tracking as running (for UI diagnostics)
-                if !self.appModel.handTrackingRunning {
-                    self.appModel.handTrackingRunning = true
-                }
-
-                guard self.appModel.handTrackingEnabled else {
-                    if self.appModel.leftHandTracked {
-                        self.appModel.leftHandTracked = false
+                guard gesturesEnabled else {
+                    guard shouldPublishDiagnostics else { return }
+                    await MainActor.run {
+                        model.handTrackingRunning = true
+                        model.leftHandTracked = false
+                        model.rightHandTracked = false
+                        model.gestureStatus = "Hand tracking disabled in settings"
                     }
-                    if self.appModel.rightHandTracked {
-                        self.appModel.rightHandTracked = false
-                    }
-                    self.appModel.gestureStatus = "Hand tracking disabled in settings"
                     return
                 }
 
-                // Clear stale hover to prevent gesture suppression from getting stuck
-                self.appModel.clearStaleHoverIfNeeded()
-
-                // Only update UI-facing tracking state at ~15Hz to reduce @Observable invalidation
-                // Checking gestureUpdateDelta here: if accumulated time > 66ms, update UI state
-                if delta > 0.066 {
-                    let isLeftTracked = leftAnchor?.isTracked ?? false
-                    let isRightTracked = rightAnchor?.isTracked ?? false
-                    if self.appModel.leftHandTracked != isLeftTracked {
-                        self.appModel.leftHandTracked = isLeftTracked
-                    }
-                    if self.appModel.rightHandTracked != isRightTracked {
-                        self.appModel.rightHandTracked = isRightTracked
-                    }
-
-                    // Update diagnostic status
-                    let suppressed = self.appModel.gestureController?.suppressParameterGestures ?? false
-                    if suppressed {
-                        self.appModel.gestureStatus = "Suppressed (looking at menu window)"
-                    } else if !isLeftTracked && !isRightTracked {
-                        self.appModel.gestureStatus = "No hands detected"
-                    } else {
-                        let activeGesture = self.appModel.renderSettings.activeGestureIndex
-                        if activeGesture > 0 {
-                            let names = ["", "Index → minDist", "Middle → foldLimit", "Ring → sphereRadius", "Pinky → scale"]
-                            self.appModel.gestureStatus = "Active: \(names[min(activeGesture, 4)])"
-                        } else {
-                            var parts: [String] = []
-                            if isLeftTracked { parts.append("L") }
-                            if isRightTracked { parts.append("R") }
-                            self.appModel.gestureStatus = "Ready (\(parts.joined(separator: "+")) tracked)"
-                        }
-                    }
+                let output = await processor.process(snapshot)
+                guard shouldPublishDiagnostics || output.didUseGesture || !output.commands.isEmpty else {
+                    return
                 }
-
-                // Gesture processing always runs for responsive controls
-                self.appModel.gestureController?.updateHands(
-                    leftAnchor: leftAnchor,
-                    rightAnchor: rightAnchor,
-                    deltaTime: delta
-                )
+                await MainActor.run {
+                    model.handTrackingRunning = true
+                    if shouldPublishDiagnostics {
+                        model.clearStaleHoverIfNeeded()
+                    }
+                    model.applyGestureOutput(output, publishDiagnostics: shouldPublishDiagnostics)
+                }
             }
             handTrackingDispatchTask = dispatchTask
         }

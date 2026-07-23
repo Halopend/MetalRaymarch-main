@@ -30,7 +30,7 @@ extension ContentView {
                 FractalGridView(
                     animationManager: appModel.animationManager,
                     presetManager: appModel.presetManager,
-                    tabSelection: $fractalBrowseTab,
+                    tabSelection: fractalBrowseTabBinding,
                     onCreateAnimation: { openAnimationEditor() },
                     onEditScene: openAnimationEditor,
                     onLoadAnimationScene: { _ in
@@ -52,10 +52,7 @@ extension ContentView {
                         case .formula:
                             fractalFormulaContent
                         case .primitives:
-                            PrimitivesSection(
-                                cache: cache,
-                                gestureController: appModel.gestureController
-                            )
+                            PrimitivesSection(cache: cache)
                         case .hands:
                             fractalHandsContent
                         }
@@ -147,7 +144,7 @@ extension ContentView {
             if cache.fractalType == .mandelbox {
                 Divider()
                 EffectSliderRow(icon: "arrow.up.left.and.arrow.down.right", label: "Scale",
-                    value: $cache.fractalScale, range: ControlCatalog.fractalScale.range,
+                    value: cacheBinding(\.fractalScale), range: ControlCatalog.fractalScale.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.targetFractalScale, value: cache.fractalScale) },
                     showToggle: false,
@@ -172,7 +169,7 @@ extension ContentView {
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            FractalFormulaGrid(cache: cache, gestureController: appModel.gestureController, presetManager: appModel.presetManager)
+            FractalFormulaGrid(cache: cache, presetManager: appModel.presetManager)
         }
     }
 
@@ -191,7 +188,7 @@ extension ContentView {
                     Label("Hand Attraction", systemImage: "hand.raised.fingers.spread")
                         .font(.headline)
                     Spacer()
-                    Toggle("", isOn: $cache.handAttraction.enabled)
+                    Toggle("", isOn: cacheBinding(\.handAttraction.enabled))
                         .labelsHidden()
                         .onChange(of: cache.handAttraction.enabled) { _, val in
                             cache.push(\.handAttractionEnabled, value: val)
@@ -203,13 +200,13 @@ extension ContentView {
 
                 if cache.handAttraction.enabled {
                     EffectSliderRow(icon: "circle.dashed", label: "Radius",
-                        value: $cache.handAttraction.radius, range: 0.05...1.0,
+                        value: cacheBinding(\.handAttraction.radius), range: 0.05...1.0,
                         enabled: .constant(true),
                         onChanged: { cache.push(\.handAttractionRadius, value: cache.handAttraction.radius) },
                         showToggle: false)
 
                     EffectSliderRow(icon: "arrow.left.and.right", label: "Repel \u{2190}\u{2192} Attract",
-                        value: $cache.handAttraction.strength, range: -1.0...1.0,
+                        value: cacheBinding(\.handAttraction.strength), range: -1.0...1.0,
                         enabled: .constant(true),
                         onChanged: { cache.push(\.handAttractionStrength, value: cache.handAttraction.strength) },
                         showToggle: false,
@@ -219,21 +216,21 @@ extension ContentView {
                         })
 
                     EffectSliderRow(icon: "circle.fill", label: "Ball Size",
-                        value: $cache.handAttraction.ballScale, range: 0.1...1.0,
+                        value: cacheBinding(\.handAttraction.ballScale), range: 0.1...1.0,
                         enabled: .constant(true),
                         onChanged: { cache.push(\.handAttractionBallScale, value: cache.handAttraction.ballScale) },
                         showToggle: false,
                         valueFormat: { v in String(format: "%.0f%% of radius", v * 100) })
 
                     EffectSliderRow(icon: "aqi.medium", label: "Blend Softness",
-                        value: $cache.handAttraction.softness, range: 0.05...2.0,
+                        value: cacheBinding(\.handAttraction.softness), range: 0.05...2.0,
                         enabled: .constant(true),
                         onChanged: { cache.push(\.handAttractionSoftness, value: cache.handAttraction.softness) },
                         showToggle: false,
                         valueFormat: { v in String(format: "%.2f\u{00D7}", v) })
 
                     EffectSliderRow(icon: "arrow.up.forward", label: "Reach Offset",
-                        value: $cache.handAttraction.projectionDistance, range: 0.0...1.0,
+                        value: cacheBinding(\.handAttraction.projectionDistance), range: 0.0...1.0,
                         enabled: .constant(true),
                         onChanged: { cache.push(\.handAttractionProjectionDistance, value: cache.handAttraction.projectionDistance) },
                         showToggle: false,
@@ -248,7 +245,7 @@ extension ContentView {
                         Label("Forearms", systemImage: "figure.wave")
                             .font(.subheadline)
                         Spacer()
-                        Toggle("", isOn: $cache.handAttraction.forearmEnabled)
+                        Toggle("", isOn: cacheBinding(\.handAttraction.forearmEnabled))
                             .labelsHidden()
                             .onChange(of: cache.handAttraction.forearmEnabled) { _, val in
                                 cache.push(\.handAttractionForearmEnabled, value: val)
@@ -260,7 +257,7 @@ extension ContentView {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if cache.handAttraction.forearmEnabled {
                         EffectSliderRow(icon: "capsule", label: "Forearm Radius",
-                            value: $cache.handAttraction.forearmRadius, range: 0.02...0.3,
+                            value: cacheBinding(\.handAttraction.forearmRadius), range: 0.02...0.3,
                             enabled: .constant(true),
                             onChanged: { cache.push(\.handAttractionForearmRadius, value: cache.handAttraction.forearmRadius) },
                             showToggle: false,
@@ -273,7 +270,7 @@ extension ContentView {
                             Label("Pocket", systemImage: "circle.circle")
                                 .font(.subheadline)
                             Spacer()
-                            Toggle("", isOn: $cache.handAttraction.pocketEnabled)
+                            Toggle("", isOn: cacheBinding(\.handAttraction.pocketEnabled))
                                 .labelsHidden()
                                 .onChange(of: cache.handAttraction.pocketEnabled) { _, val in
                                     cache.push(\.handAttractionPocketEnabled, value: val)
@@ -286,14 +283,14 @@ extension ContentView {
 
                         if cache.handAttraction.pocketEnabled {
                             EffectSliderRow(icon: "circle.circle", label: "Pocket Size",
-                                value: $cache.handAttraction.pocketSize, range: 0.1...1.5,
+                                value: cacheBinding(\.handAttraction.pocketSize), range: 0.1...1.5,
                                 enabled: .constant(true),
                                 onChanged: { cache.push(\.handAttractionPocketSize, value: cache.handAttraction.pocketSize) },
                                 showToggle: false,
                                 valueFormat: { v in String(format: "%.0f%% of ball", v * 100) })
 
                             EffectSliderRow(icon: "aqi.low", label: "Pocket Softness",
-                                value: $cache.handAttraction.pocketSoftness, range: 0.1...1.5,
+                                value: cacheBinding(\.handAttraction.pocketSoftness), range: 0.1...1.5,
                                 enabled: .constant(true),
                                 onChanged: { cache.push(\.handAttractionPocketSoftness, value: cache.handAttraction.pocketSoftness) },
                                 showToggle: false,
@@ -334,7 +331,7 @@ extension ContentView {
                     Label("Safety Bubble", systemImage: AppIcons.shieldLefthalfFilled)
                         .font(.headline)
                     Spacer()
-                    Toggle("", isOn: $cache.safetyBubble.enabled)
+                    Toggle("", isOn: cacheBinding(\.safetyBubble.enabled))
                         .labelsHidden()
                         .onChange(of: cache.safetyBubble.enabled) { _, val in
                             cache.push(\.safetyBubbleEnabled, value: val)
@@ -400,7 +397,7 @@ extension ContentView {
 
                     VStack(alignment: .leading, spacing: 8) {
                         EffectSliderRow(icon: "circle.dashed", label: "Radius",
-                            value: $cache.safetyBubble.radius, range: 0.5...2.5,
+                            value: cacheBinding(\.safetyBubble.radius), range: 0.5...2.5,
                             enabled: .constant(true),
                             onChanged: { cache.push(\.safetyBubbleRadius, value: cache.safetyBubble.radius) },
                             showToggle: false)
@@ -414,7 +411,7 @@ extension ContentView {
                             Label("Shrink in Mixed", systemImage: "arrow.down.right.and.arrow.up.left")
                                 .font(.subheadline.weight(.semibold))
                             Spacer()
-                            Toggle("", isOn: $cache.safetyBubble.mixedAutoShrinkEnabled)
+                            Toggle("", isOn: cacheBinding(\.safetyBubble.mixedAutoShrinkEnabled))
                                 .labelsHidden()
                                 .onChange(of: cache.safetyBubble.mixedAutoShrinkEnabled) { _, val in
                                     cache.push(\.safetyBubbleMixedAutoShrink, value: val)
@@ -426,7 +423,7 @@ extension ContentView {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         if cache.safetyBubble.mixedAutoShrinkEnabled {
                             EffectSliderRow(icon: "circle.dashed", label: "Mixed Radius",
-                                value: $cache.safetyBubble.mixedRadius, range: 0.05...1.0,
+                                value: cacheBinding(\.safetyBubble.mixedRadius), range: 0.05...1.0,
                                 enabled: .constant(true),
                                 onChanged: { cache.push(\.safetyBubbleMixedRadius, value: cache.safetyBubble.mixedRadius) },
                                 showToggle: false,
@@ -451,8 +448,8 @@ extension ContentView {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         EffectSliderRow(icon: "circle.righthalf.filled", label: "Blend",
                             value: Binding<Float>(
-                                get: { 1.0 - UISettingsCache.blendValueToSlider(cache.safetyBubble.strength) },
-                                set: { cache.safetyBubble.strength = UISettingsCache.blendSliderToValue(1.0 - $0) }
+                                get: { 1.0 - ControlStateStore.blendValueToSlider(cache.safetyBubble.strength) },
+                                set: { cache.safetyBubble.strength = ControlStateStore.blendSliderToValue(1.0 - $0) }
                             ), range: 0.0...1.0,
                             enabled: .constant(true),
                             onChanged: { cache.push(\.safetyBubbleBlend, value: cache.safetyBubble.strength) },
@@ -976,9 +973,7 @@ extension ContentView {
 
             VStack(alignment: .leading, spacing: 6) {
                 Button {
-                    cache.promoteBoundingShapeToSeed(
-                        gestureController: appModel.gestureController
-                    )
+                    cache.promoteBoundingShapeToSeed()
                 } label: {
                     Label(
                         "Use \(selectedBoundingPreset.displayName) as Seed",

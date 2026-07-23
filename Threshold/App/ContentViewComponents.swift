@@ -9,11 +9,6 @@
 //
 
 import SwiftUI
-#if os(visionOS) || os(iOS)
-import UIKit
-#elseif os(macOS)
-import AppKit
-#endif
 
 /// A plain Reset button that restores the current fractal to its saved settings.
 /// Lives beside the record control on the opposite end of the bottom bar from
@@ -79,19 +74,7 @@ enum PresetPreviewGenerator {
         )
         .frame(width: 512, height: 320)
 
-        let renderer = ImageRenderer(content: content)
-        renderer.scale = 2
-
-        #if os(visionOS) || os(iOS)
-        return renderer.uiImage?.pngData()
-        #elseif os(macOS)
-        guard let image = renderer.nsImage,
-              let tiffData = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffData) else { return nil }
-        return bitmap.representation(using: .png, properties: [:])
-        #else
-        return nil
-        #endif
+        return PlatformImageEncodingAdapter.pngData(for: content)
     }
 }
 
@@ -600,7 +583,7 @@ struct RenderDiagnosticsView: View {
 /// this view re-renders each frame — the surrounding controls stay static.
 struct PerformanceMetricsView: View {
     @Environment(AppModel.self) private var appModel
-    var cache: UISettingsCache
+    var cache: ControlStateStore
 
     // Force Recompile — embedded in this card (developer/debug).
     @State private var isRecompilingShaders = false

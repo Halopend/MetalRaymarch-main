@@ -185,7 +185,7 @@ extension AppModel {
         // configured "Same Scene Transition Time" instead of snapping.
         renderSettings.commitSceneTransition()
         applyPresetGestureOverridesIfNeeded(for: preset)
-        gestureController?.syncWithSettings()
+        syncGestureProcessor()
         rememberActiveResetPreset(preset)
         if options.contains(.saveToLibrary) {
             _ = presetManager.importPreset(preset)

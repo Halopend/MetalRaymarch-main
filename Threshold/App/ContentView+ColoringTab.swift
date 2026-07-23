@@ -55,7 +55,7 @@ extension ContentView {
             .accessibilityLabel("Edit gradient colors")
             .accessibilityHint("Opens the gradient stop editor")
             .popover(isPresented: $showStopsPopover, arrowEdge: .bottom) {
-                GradientStopsPopover(cache: $cache)
+                GradientStopsPopover(cache: cache)
             }
             // ── Saved Custom Gradients ──
             HStack {
@@ -232,20 +232,20 @@ extension ContentView {
             // Gradient transform controls
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "repeat", label: "Repeat",
-                    value: $cache.color.gradientState.gradient.repeatCount, range: 0.1...5.0,
+                    value: cacheBinding(\.color.gradientState.gradient.repeatCount), range: 0.1...5.0,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.gradientRepeat, value: cache.color.gradientState.gradient.repeatCount) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "arrow.right", label: "Offset",
-                    value: $cache.color.gradientState.gradient.offset, range: 0...1,
+                    value: cacheBinding(\.color.gradientState.gradient.offset), range: 0...1,
                     enabled: .constant(true),
                     onChanged: { cache.commitGradientOffset() },
                     showToggle: false,
                     musicTargetID: ParameterTargetID.Effect.gradientOffset)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "waveform.path", label: "Smoothing",
-                    value: $cache.color.gradientState.gradient.smoothing, range: 0...1,
+                    value: cacheBinding(\.color.gradientState.gradient.smoothing), range: 0...1,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.gradientSmoothing, value: cache.color.gradientState.gradient.smoothing) },
                     showToggle: false)
@@ -258,13 +258,13 @@ extension ContentView {
             // Color blend controls
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "circle.lefthalf.filled", label: "Color Mix",
-                    value: $cache.color.colorMix, range: 0...1.0,
+                    value: cacheBinding(\.color.colorMix), range: 0...1.0,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorMix, value: cache.color.colorMix) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "number", label: "Iterations",
-                    value: $cache.color.colorIterations, range: ControlCatalog.colorIterations.range,
+                    value: cacheBinding(\.color.colorIterations), range: ControlCatalog.colorIterations.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorIterations, value: cache.color.colorIterations) },
                     showToggle: false)
@@ -304,19 +304,19 @@ extension ContentView {
             // Tone controls
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "circle.lefthalf.filled", label: "Contrast",
-                    value: $cache.color.colorSchemeContrast, range: ControlCatalog.colorSchemeContrast.range,
+                    value: cacheBinding(\.color.colorSchemeContrast), range: ControlCatalog.colorSchemeContrast.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorSchemeContrast, value: cache.color.colorSchemeContrast) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "circle.lefthalf.filled", label: "Gamma",
-                    value: $cache.color.colorSchemeGamma, range: ControlCatalog.colorSchemeGamma.range,
+                    value: cacheBinding(\.color.colorSchemeGamma), range: ControlCatalog.colorSchemeGamma.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorSchemeGamma, value: cache.color.colorSchemeGamma) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "waveform.path", label: "Midtone Curve",
-                    value: $cache.color.colorSchemeCurve, range: ControlCatalog.colorSchemeCurve.range,
+                    value: cacheBinding(\.color.colorSchemeCurve), range: ControlCatalog.colorSchemeCurve.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorSchemeCurve, value: cache.color.colorSchemeCurve) },
                     showToggle: false)
@@ -327,26 +327,26 @@ extension ContentView {
             // Color response, shadows & highlights
             VStack(spacing: 4) {
                 EffectSliderRow(icon: ControlCatalog.saturation.icon, label: "Saturation",
-                    value: $cache.color.colorSchemeSaturation, range: ControlCatalog.saturation.range,
+                    value: cacheBinding(\.color.colorSchemeSaturation), range: ControlCatalog.saturation.range,
                     enabled: .constant(true),
                     onChanged: { cache.commitColorSchemeSaturation() },
                     showToggle: false,
                     musicTargetID: ParameterTargetID.Effect.saturation)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "paintpalette.fill", label: "Vibrance",
-                    value: $cache.color.colorSchemeVibrance, range: ControlCatalog.colorSchemeVibrance.range,
+                    value: cacheBinding(\.color.colorSchemeVibrance), range: ControlCatalog.colorSchemeVibrance.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorSchemeVibrance, value: cache.color.colorSchemeVibrance) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "shadow", label: "Shadows",
-                    value: $cache.color.colorSchemeShadows, range: ControlCatalog.colorSchemeShadows.range,
+                    value: cacheBinding(\.color.colorSchemeShadows), range: ControlCatalog.colorSchemeShadows.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorSchemeShadows, value: cache.color.colorSchemeShadows) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "sun.max.fill", label: "Highlights",
-                    value: $cache.color.colorSchemeHighlights, range: ControlCatalog.colorSchemeHighlights.range,
+                    value: cacheBinding(\.color.colorSchemeHighlights), range: ControlCatalog.colorSchemeHighlights.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorSchemeHighlights, value: cache.color.colorSchemeHighlights) },
                     showToggle: false)
@@ -359,33 +359,33 @@ extension ContentView {
             // its useful band-count range starts at two.
             VStack(spacing: 4) {
                 EffectSliderRow(icon: ControlCatalog.lightingSoftness.icon, label: "Lighting Softness",
-                    value: $cache.color.lightingSoftness, range: ControlCatalog.lightingSoftness.range,
+                    value: cacheBinding(\.color.lightingSoftness), range: ControlCatalog.lightingSoftness.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.lightingSoftness, value: cache.color.lightingSoftness) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: ControlCatalog.cellShadingLevels.icon, label: "Cell Shading",
-                    value: $cache.color.cellShadingLevels, range: ControlCatalog.cellShadingLevels.range,
-                    enabled: $cache.color.cellShadingEnabled,
+                    value: cacheBinding(\.color.cellShadingLevels), range: ControlCatalog.cellShadingLevels.range,
+                    enabled: cacheBinding(\.color.cellShadingEnabled),
                     onChanged: {
                         cache.push(\.cellShadingEnabled, value: cache.color.cellShadingEnabled)
                         cache.push(\.cellShadingLevels, value: cache.color.cellShadingLevels)
                     })
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "circle.lefthalf.striped.horizontal", label: "Ambient Occlusion",
-                    value: $cache.color.aoStrength, range: ControlCatalog.aoStrength.range,
+                    value: cacheBinding(\.color.aoStrength), range: ControlCatalog.aoStrength.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.aoStrength, value: cache.color.aoStrength) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "camera.aperture", label: "Filmic Tonemap",
-                    value: $cache.color.tonemapStrength, range: ControlCatalog.tonemapStrength.range,
+                    value: cacheBinding(\.color.tonemapStrength), range: ControlCatalog.tonemapStrength.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.tonemapStrength, value: cache.color.tonemapStrength) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: ControlCatalog.vignetteStrength.icon, label: "Vignette",
-                    value: $cache.color.vignetteStrength, range: ControlCatalog.vignetteStrength.range,
+                    value: cacheBinding(\.color.vignetteStrength), range: ControlCatalog.vignetteStrength.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.vignetteStrength, value: cache.color.vignetteStrength) },
                     showToggle: false,

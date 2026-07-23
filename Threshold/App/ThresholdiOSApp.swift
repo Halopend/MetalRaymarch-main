@@ -15,14 +15,7 @@ struct ThresholdiOSApp: App {
                 }
         }
         .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active {
-                appModel.isAppActive = true
-                appModel.presetManager.refreshBundledPresets()
-            } else if newPhase == .background || newPhase == .inactive {
-                appModel.isAppActive = false
-                appModel.saveLastState()
-                Task { await UsageAnalytics.shared.endSession() }
-            }
+            AppLifecycle.transition(to: newPhase, appModel: appModel)
         }
     }
 }
@@ -31,6 +24,8 @@ private struct ThresholdiOSRootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isShowingControls = true
+    @State private var radialMenu = RadialMenuModel(interactionProfile: .touch)
+    @State private var radialCurvature = 0.72
     private let controlsAnimation = MenuChrome.panelSpring
 
     var body: some View {
@@ -38,7 +33,9 @@ private struct ThresholdiOSRootView: View {
             let widths = inspectorColumnWidths(for: proxy.size)
             let safeAreaInsets = proxy.safeAreaInsets
 
-            ThresholdiOSRenderView(appModel: appModel)
+            ThresholdiOSRenderView(appModel: appModel) { location in
+                toggleRadialMenu(at: location, viewportSize: proxy.size)
+            }
                 .ignoresSafeArea()
                 .background(Color.black)
                 .overlay(alignment: .topTrailing) {
@@ -53,11 +50,104 @@ private struct ThresholdiOSRootView: View {
                         .environment(appModel)
                         .inspectorColumnWidth(min: widths.min, ideal: widths.ideal, max: widths.max)
                 }
+                .overlay {
+                    if radialMenu.isPresented {
+                        RadialMenu(
+                            size: proxy.size,
+                            pointerAnchor: radialMenu.anchor,
+                            curvature: $radialCurvature,
+                            projection: radialProjection,
+                            interactionProfile: radialMenu.interactionProfile,
+                            allowsPresentationSelection: false,
+                            path: Binding(
+                                get: { radialMenu.path },
+                                set: { radialMenu.path = $0 }
+                            ),
+                            sceneAccent: RadialMenuSceneAccent.color(
+                                from: appModel.renderSettings.gradientColorMap
+                            ),
+                            suspendsHoverNavigation: false,
+                            hoveredSlider: Binding(
+                                get: { radialMenu.hoveredSlider },
+                                set: { radialMenu.hoveredSlider = $0 }
+                            ),
+                            onSliderEditingChanged: { editing in
+                                if editing { appModel.beginMenuAdjustment() }
+                                else { appModel.endMenuAdjustment() }
+                            },
+                            onSelectPresentation: { _ in },
+                            onDismiss: dismissRadialMenu
+                        )
+                        .transition(.opacity)
+                        .zIndex(10)
+                    }
+                }
+                .accessibilityAction(named: Text("Open radial controls")) {
+                    toggleRadialMenu(
+                        at: CGPoint(x: proxy.size.width * 0.5, y: proxy.size.height * 0.5),
+                        viewportSize: proxy.size
+                    )
+                }
                 .onSceneLoadAutoHide {
                     // Auto-hide the controls inspector when a scene is selected.
                     // (iPad has no pin concept, so it always collapses.)
                     setControlsVisible(false)
                 }
+                .onDisappear(perform: dismissRadialMenu)
+        }
+    }
+
+    private var radialProjection: RadialNavigationProjection {
+        RadialMenuProjectionFactory.make(appModel: appModel) { target in
+            activateRadialTarget(target)
+        }
+    }
+
+    private func toggleRadialMenu(at location: CGPoint, viewportSize: CGSize) {
+        if radialMenu.isPresented {
+            dismissRadialMenu()
+            return
+        }
+        guard appModel.inputOwnershipStore.claim(.radialMenu) else { return }
+        setControlsVisible(false)
+        appModel.controlStateStore.startSync(with: appModel.renderSettings, appModel: appModel)
+        let anchor = CGPoint(
+            x: min(max(location.x, 24), max(24, viewportSize.width - 24)),
+            y: min(max(location.y, 32), max(32, viewportSize.height - 32))
+        )
+        let initialPath = appModel.navigationStore.currentRoute.workspaceRoot.map {
+            [NavigationHierarchy.rootID(for: $0.legacyTab)]
+        } ?? []
+        withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.82)) {
+            radialMenu.present(at: anchor, initialPath: initialPath)
+        }
+    }
+
+    private func dismissRadialMenu() {
+        guard radialMenu.isPresented else { return }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) {
+            radialMenu.dismiss()
+        }
+        appModel.controlStateStore.stopSync()
+        appModel.inputOwnershipStore.release(.radialMenu)
+    }
+
+    private func activateRadialTarget(_ target: AppNavigationTarget) {
+        let command = appModel.navigationStore.activate(target)
+        switch command {
+        case .openAnimationEditor:
+            dismissRadialMenu()
+            appModel.openAnimationEditorHandler?()
+        case .resetViewport:
+            appModel.viewportCommandHandler?(.resetViewport)
+            dismissRadialMenu()
+        case .dismissRadialMenu, .toggleRadialMenu:
+            dismissRadialMenu()
+        case .toggleAnimationPlayback, .selectRoute:
+            dismissRadialMenu()
+        case nil:
+            dismissRadialMenu()
+            setControlsVisible(true)
         }
     }
 

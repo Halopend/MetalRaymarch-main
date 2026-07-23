@@ -4,7 +4,7 @@ import Foundation
 /// three styles surfaced at first launch (`MenuGestureStarterStyle`) — the
 /// raw values are kept stable (1/3/6) so configs written by builds that had
 /// the wider list still decode the kept modes correctly.
-enum MenuToggleGestureMode: Int32, CaseIterable, Codable {
+enum MenuToggleGestureMode: Int32, CaseIterable, Codable, Sendable {
     case middleAndRingToPalm = 1
     case wristTap = 3
     case middleOrRingToPalm = 6

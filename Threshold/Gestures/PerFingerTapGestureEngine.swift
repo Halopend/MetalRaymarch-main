@@ -7,9 +7,8 @@ import Foundation
 /// tap wins.  The engine supports both left and right hands independently.
 ///
 /// This replaces the monolithic menu-toggle gesture with a configurable layer
-/// where any finger on either hand can be mapped to toggle the menu, control
-/// playback, or perform other discrete actions.
-@MainActor
+/// where any finger on either hand can control playback or perform navigation
+/// actions. Recovery-menu ownership remains exclusive to MenuToggleGestureEngine.
 final class PerFingerTapGestureEngine {
     private static let menuGestureSafetyDelay: Float = 0.75
 
@@ -141,7 +140,10 @@ final class PerFingerTapGestureEngine {
                     action: actions[winningFinger],
                     delay: Self.menuGestureSafetyDelay
                 )
-                return [actions[winningFinger].gestureOperation]
+                let operation = actions[winningFinger].gestureOperation
+                // Recovery-menu ownership belongs exclusively to the dedicated
+                // menu engine, even if an old persisted mapping survived import.
+                return operation == .toggleMenu ? [] : [operation]
             }
         }
 
@@ -214,7 +216,7 @@ enum PerFingerTapAction: Int32, CaseIterable, Codable, Hashable, Sendable {
 }
 
 extension Array where Element == PerFingerTapAction {
-    /// The configurable menu gesture owns menu open/close. Older installs may
+    /// The dedicated recovery engine owns menu open/close. Older installs may
     /// still have `.toggleMenu` persisted in the per-finger shortcut layer; keep
     /// decoding that value for compatibility, but do not let it compete with the
     /// selected menu gesture mode.

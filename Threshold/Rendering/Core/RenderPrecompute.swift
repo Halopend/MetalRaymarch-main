@@ -4,7 +4,7 @@ import simd
 /// Cross-platform CPU precomputation of frame-uniform shader values.
 ///
 /// These pure functions are shared by every rendering backend — the visionOS
-/// `Renderer` and the macOS/iOS `ThresholdMacRenderer`. The
+/// `Renderer` and the macOS/iOS `ViewportRenderer`. The
 /// `Precomputed*` result types come from the shared `ShaderTypes.h` bridging
 /// header, so this file compiles unchanged on all targets and is the single
 /// source of truth for the math. Computing these once per frame on the CPU

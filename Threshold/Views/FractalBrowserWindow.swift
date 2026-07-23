@@ -516,15 +516,14 @@ struct FractalBrowserWindow: View {
 
     private func loadType(_ type: FractalModelType) {
         appModel.renderSettings.fractalType = type
-        appModel.gestureController?.applyFractalDefaults()
-        appModel.gestureController?.syncWithSettings()
+        appModel.applyFractalDefaults()
         selectedTypeID = "native-\(type.rawValue)"
         NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
     }
 
     private func loadVariant(type: FractalModelType, variant: FractalVariant) {
         appModel.renderSettings.fractalType = type
-        appModel.gestureController?.applyFractalDefaults()
+        appModel.applyFractalDefaults()
 
         let fp = FormulaCatalog.shared.buildParams(for: type, overrides: variant.formulaOverrides)
         appModel.renderSettings.formulaParams = fp
@@ -534,7 +533,7 @@ struct FractalBrowserWindow: View {
             appModel.renderSettings.fractalScale = targetScale
         }
 
-        appModel.gestureController?.syncWithSettings()
+        appModel.syncGestureProcessor()
         selectedTypeID = "native-\(type.rawValue)"
         NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
     }

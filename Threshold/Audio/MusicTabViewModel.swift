@@ -107,7 +107,7 @@ final class MusicTabViewModel {
 
     // MARK: - Preset Persistence
 
-    func saveMusicPreset(using cache: UISettingsCache) {
+    func saveMusicPreset(using cache: ControlStateStore) {
         let trimmed = musicPresetName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let preset = MusicReactivePreset(
@@ -126,7 +126,7 @@ final class MusicTabViewModel {
         musicPresetName = ""
     }
 
-    func loadMusicPreset(_ preset: MusicReactivePreset, into cache: UISettingsCache) {
+    func loadMusicPreset(_ preset: MusicReactivePreset, into cache: ControlStateStore) {
         cache.audioReactive.fractalAudioAmount = preset.audioAmount
         cache.audioReactive.fractalBeatPunch = preset.beatPunch
         cache.audioReactive.fractalAudioDamping = preset.audioDamping

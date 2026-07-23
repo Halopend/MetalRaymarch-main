@@ -43,6 +43,33 @@ struct ParameterCatalogTests {
         }
     }
 
+    @Test("Every static scalar has complete metadata and explicit placement")
+    func completeScalarMetadataAndPlacement() {
+        #expect(Set(ParameterCatalog.allDescriptors.map(\.controlID)) == Set(ControlCatalog.everySpec.map(\.controlID)))
+        for descriptor in ParameterCatalog.allDescriptors {
+            #expect(!descriptor.id.isEmpty)
+            #expect(!descriptor.spec.name.isEmpty)
+            #expect(!descriptor.spec.icon.isEmpty)
+            #expect(descriptor.spec.range.contains(descriptor.spec.defaultValue))
+            switch descriptor.placement {
+            case .internalOnly:
+                break
+            case .presented(let route, let section, _, let presentations):
+                #expect(!route.stableID.isEmpty)
+                #expect(!section.isEmpty)
+                #expect(!presentations.isEmpty)
+                #expect(presentations.contains(.fullControls))
+            }
+        }
+    }
+
+    @Test("Semantic control IDs are globally unique")
+    func semanticIDsAreUnique() {
+        let ids = ParameterCatalog.semanticDescriptors.map(\.id)
+        #expect(Set(ids).count == ids.count)
+        #expect(ParameterCatalog.semanticByID.count == ids.count)
+    }
+
     @Test("settingsBinding(for:) resolves for every routed id and is nil for unknown ids")
     func settingsBindingResolves() {
         for descriptor in ParameterCatalog.routedDescriptors {

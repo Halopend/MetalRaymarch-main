@@ -6,7 +6,7 @@ import Synchronization
 import simd
 
 /// macOS-only MetalFX *temporal* upscaler — the Stage B sibling of
-/// `MacSpatialUpscaler`. Where the spatial scaler resolves a single frame, the
+/// `ViewportSpatialUpscaler`. Where the spatial scaler resolves a single frame, the
 /// temporal scaler accumulates sub-pixel-jittered history using a depth buffer
 /// and per-pixel motion vectors, giving markedly better stability/detail at low
 /// render scales.
@@ -43,7 +43,7 @@ import simd
 /// AUDIT — @unchecked Sendable: the Mutex guards everything the build queue
 /// touches; the exposed `MTLTexture` vars are written in `prepare` and read
 /// by the render thread within the same frame.
-final class MacTemporalUpscaler: @unchecked Sendable {
+final class ViewportTemporalUpscaler: @unchecked Sendable {
     typealias Size = MetalFXSize
 
     static let minimumInputShortEdge = MetalFXTextureSupport.minimumInputShortEdge

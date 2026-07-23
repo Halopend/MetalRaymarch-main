@@ -49,8 +49,8 @@ class AnyParameterNodeBase: @unchecked Sendable, Identifiable {
 /// read/write closures are MainActor-isolated and only invoked from the UI path.
 class FloatParameterNode: AnyParameterNodeBase, @unchecked Sendable {
     let range: ClosedRange<Float>
-    let readValue: @MainActor (UISettingsCache) -> Float
-    let writeValue: @MainActor (UISettingsCache, Float) -> Void
+    let readValue: @MainActor (ControlStateStore) -> Float
+    let writeValue: @MainActor (ControlStateStore, Float) -> Void
     private let _layerStack: Mutex<ParameterLayerStack>
 
     init(id: String,
@@ -61,8 +61,8 @@ class FloatParameterNode: AnyParameterNodeBase, @unchecked Sendable {
          range: ClosedRange<Float>,
          isGestureMappable: Bool,
          motionStrategy: ParameterMotionStrategy = .layerLerp,
-         readValue: @MainActor @escaping (UISettingsCache) -> Float,
-         writeValue: @MainActor @escaping (UISettingsCache, Float) -> Void) {
+         readValue: @MainActor @escaping (ControlStateStore) -> Float,
+         writeValue: @MainActor @escaping (ControlStateStore, Float) -> Void) {
         self.range = range
         self.readValue = readValue
         self.writeValue = writeValue
@@ -107,8 +107,8 @@ extension FloatParameterNode {
     convenience init(spec: ControlSpec,
                      group: ParameterGroup?,
                      isGestureMappable: Bool,
-                     readValue: @MainActor @escaping (UISettingsCache) -> Float,
-                     writeValue: @MainActor @escaping (UISettingsCache, Float) -> Void) {
+                     readValue: @MainActor @escaping (ControlStateStore) -> Float,
+                     writeValue: @MainActor @escaping (ControlStateStore, Float) -> Void) {
         self.init(id: spec.id,
                   name: spec.name,
                   group: group,
@@ -135,8 +135,8 @@ extension FloatParameterNode {
 
 /// @unchecked Sendable justification: stores immutable metadata plus MainActor-only closures.
 final class BoolParameterNode: AnyParameterNodeBase, @unchecked Sendable {
-    let readValue: @MainActor (UISettingsCache) -> Bool
-    let writeValue: @MainActor (UISettingsCache, Bool) -> Void
+    let readValue: @MainActor (ControlStateStore) -> Bool
+    let writeValue: @MainActor (ControlStateStore, Bool) -> Void
 
     init(id: String,
          name: String,
@@ -145,8 +145,8 @@ final class BoolParameterNode: AnyParameterNodeBase, @unchecked Sendable {
          defaultValue: Bool,
          isGestureMappable: Bool,
          motionStrategy: ParameterMotionStrategy = .none,
-         readValue: @MainActor @escaping (UISettingsCache) -> Bool,
-         writeValue: @MainActor @escaping (UISettingsCache, Bool) -> Void) {
+         readValue: @MainActor @escaping (ControlStateStore) -> Bool,
+         writeValue: @MainActor @escaping (ControlStateStore, Bool) -> Void) {
         self.readValue = readValue
         self.writeValue = writeValue
         super.init(id: id,
@@ -371,7 +371,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
     }
 
     /// One-time build of engine-level parameter nodes for core geometry and effects.
-    /// IDs and ranges mirror the descriptors in ParameterOperationDispatcher.
+    /// IDs and ranges mirror the descriptors in ParameterPipeline.
     /// NOTE: minDistance / foldingLimit / sphereRadius are now catalog-driven formula
     /// params (built per-type in buildFormulaBatch) rather than hard-coded core nodes.
     private static func buildCoreAndEffectNodes() -> (core: [String: FloatParameterNode], effect: [String: FloatParameterNode]) {
@@ -651,7 +651,8 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             motionStrategy: Self.formulaMotionStrategy(for: type, index: index))
         return ParameterDescriptor(
             spec: spec,
-            route: nil,
+            placement: .internalOnly,
+            requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true),
             music: nil,

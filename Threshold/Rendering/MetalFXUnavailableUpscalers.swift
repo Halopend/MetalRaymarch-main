@@ -6,7 +6,7 @@ import simd
 /// MetalFX. Keeping the same surface as the device implementations lets the
 /// shared renderer compile and automatically take its existing direct-render
 /// path whenever `prepare` returns `false`.
-final class MacSpatialUpscaler {
+final class ViewportSpatialUpscaler {
     typealias Size = MetalFXSize
 
     static let minimumInputShortEdge = MetalFXTextureSupport.minimumInputShortEdge
@@ -26,7 +26,7 @@ final class MacSpatialUpscaler {
     func encode(commandBuffer: MTLCommandBuffer) {}
 }
 
-final class MacTemporalUpscaler: @unchecked Sendable {
+final class ViewportTemporalUpscaler: @unchecked Sendable {
     typealias Size = MetalFXSize
 
     static let minimumInputShortEdge = MetalFXTextureSupport.minimumInputShortEdge

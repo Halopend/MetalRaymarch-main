@@ -1,6 +1,48 @@
 import Foundation
 import SwiftUI
 
+enum RadialInteractionProfile: Sendable {
+    case pointer
+    case touch
+
+    var supportsHoverNavigation: Bool { self == .pointer }
+    var minimumTargetSize: CGFloat { self == .touch ? 44 : 28 }
+    var itemSpacing: CGFloat { self == .touch ? 48 : 32 }
+}
+
+/// Shared transient state for every 2-D radial host. Platform adapters provide
+/// only the interaction profile and activation location.
+@MainActor
+@Observable
+final class RadialMenuModel {
+    let interactionProfile: RadialInteractionProfile
+    private(set) var isPresented = false
+    var anchor: CGPoint = .zero
+    var path: [String] = []
+    var hoveredSlider: RadialActiveSlider?
+
+    init(interactionProfile: RadialInteractionProfile) {
+        self.interactionProfile = interactionProfile
+    }
+
+    func present(at point: CGPoint, initialPath: [String] = []) {
+        anchor = point
+        path = initialPath
+        hoveredSlider = nil
+        isPresented = true
+    }
+
+    func dismiss() {
+        isPresented = false
+        path = []
+        hoveredSlider = nil
+    }
+
+    func toggle(at point: CGPoint, initialPath: [String] = []) {
+        isPresented ? dismiss() : present(at: point, initialPath: initialPath)
+    }
+}
+
 /// A radial-presentation node. The platform-neutral route and label hierarchy
 /// lives in `NavigationHierarchy`; this type decorates those routes with live
 /// quick inputs and full-controls fallback actions.

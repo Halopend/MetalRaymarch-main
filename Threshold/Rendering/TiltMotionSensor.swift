@@ -9,7 +9,7 @@ struct MotionTilt {
     var pitch: Float
 }
 
-/// Common interface for the platform tilt sensors so `ThresholdMacRenderer`'s
+/// Common interface for the platform tilt sensors so `ViewportRenderer`'s
 /// `applyTiltControl` stays platform-agnostic. macOS reads the built-in
 /// accelerometer (Intel only); iOS reads CoreMotion gravity.
 protocol TiltMotionSensor: AnyObject {

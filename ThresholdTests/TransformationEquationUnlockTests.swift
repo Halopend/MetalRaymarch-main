@@ -20,6 +20,11 @@ struct TransformationEquationUnlockTests {
                 == Set(kindIDs)
         )
         #expect(lessons.allSatisfy { !$0.mathematicalNotation.isEmpty })
+        #expect(lessons.allSatisfy { $0.mathematicalNotation.contains("=") })
+        #expect(lessons.allSatisfy {
+            !$0.mathematicalNotation.hasPrefix("Apply ")
+                && !$0.mathematicalNotation.contains("repeatedly reflect")
+        })
         #expect(spokenMath.allSatisfy { !$0.isEmpty })
         #expect(Set(spokenMath).count == lessons.count)
         #expect(lessons.allSatisfy {
@@ -51,7 +56,7 @@ struct TransformationEquationUnlockTests {
                 lesson.mathematicalNotation,
                 lesson.spokenMathematicalNotation,
                 lesson.hint,
-            ] + TransformationEquationCatalog.cheatSheet(for: lesson).flatMap {
+            ] + TransformationEquationCatalog.metalVocabulary(for: lesson).flatMap {
                 [$0.notation, $0.meaning]
             }
             let normalizedLockedCopy = normalizedProductWords(lockedCopy.joined(separator: " "))
@@ -244,10 +249,10 @@ struct TransformationEquationUnlockTests {
         }
     }
 
-    @Test("Each lesson receives a compact relevant cheat sheet")
-    func contextualCheatSheets() {
+    @Test("Each lesson receives compact relevant Metal vocabulary")
+    func contextualMetalVocabulary() {
         for lesson in TransformationEquationCatalog.lessons {
-            let entries = TransformationEquationCatalog.cheatSheet(for: lesson)
+            let entries = TransformationEquationCatalog.metalVocabulary(for: lesson)
             #expect((2...8).contains(entries.count))
             #expect(entries.first?.notation == "p = expression;")
             #expect(Set(entries.map(\.notation)).count == entries.count)
@@ -261,15 +266,15 @@ struct TransformationEquationUnlockTests {
         let coxeter = TransformationEquationCatalog.lessons.first { $0.kind == .coxeter }!
         let mandelbox = TransformationEquationCatalog.lessons.first { $0.kind == .mandelboxStep }!
 
-        #expect(TransformationEquationCatalog.cheatSheet(for: mirror).map(\.notation).contains("abs(x) / fabs(x)"))
-        #expect(TransformationEquationCatalog.cheatSheet(for: ripple).map(\.notation).contains("sin / cos / sincos"))
-        #expect(TransformationEquationCatalog.cheatSheet(for: kaleidoscope).map(\.notation).contains("atan2(y, x)"))
-        #expect(TransformationEquationCatalog.cheatSheet(for: kaleidoscope).map(\.notation).contains("fmod(x, period)"))
-        #expect(TransformationEquationCatalog.cheatSheet(for: scaleRepeat).map(\.notation).contains("log / exp"))
-        #expect(TransformationEquationCatalog.cheatSheet(for: coxeter).map(\.notation).contains("op.p1/p2 · op.axisX/Y"))
-        #expect(!TransformationEquationCatalog.cheatSheet(for: coxeter).map(\.notation).contains("op.axisX/Y/Z"))
-        #expect(TransformationEquationCatalog.cheatSheet(for: mandelbox).map(\.notation).contains("p0"))
-        #expect(TransformationEquationCatalog.cheatSheet(for: mandelbox).map(\.notation).contains("fma(a, b, c)"))
+        #expect(TransformationEquationCatalog.metalVocabulary(for: mirror).map(\.notation).contains("abs(x) / fabs(x)"))
+        #expect(TransformationEquationCatalog.metalVocabulary(for: ripple).map(\.notation).contains("sin / cos / sincos"))
+        #expect(TransformationEquationCatalog.metalVocabulary(for: kaleidoscope).map(\.notation).contains("atan2(y, x)"))
+        #expect(TransformationEquationCatalog.metalVocabulary(for: kaleidoscope).map(\.notation).contains("fmod(x, period)"))
+        #expect(TransformationEquationCatalog.metalVocabulary(for: scaleRepeat).map(\.notation).contains("log / exp"))
+        #expect(TransformationEquationCatalog.metalVocabulary(for: coxeter).map(\.notation).contains("op.p1/p2 · op.axisX/Y"))
+        #expect(!TransformationEquationCatalog.metalVocabulary(for: coxeter).map(\.notation).contains("op.axisX/Y/Z"))
+        #expect(TransformationEquationCatalog.metalVocabulary(for: mandelbox).map(\.notation).contains("p0"))
+        #expect(TransformationEquationCatalog.metalVocabulary(for: mandelbox).map(\.notation).contains("fma(a, b, c)"))
     }
 
     @Test("Unlock progress round-trips stable semantic lesson IDs")
@@ -489,7 +494,7 @@ struct TransformationEquationUnlockTests {
         #expect(TransformationEducationPath.unmappedLessonCount(mappedIDs: finalLevelComplete) == 5)
     }
 
-    @Test("Just Use opens the catalog without granting Education progress")
+    @Test("Edit opens the catalog without granting Learn progress")
     func experienceModeAccess() {
         let encoded = TransformationUnlockProgress.unlock(.mirror, in: "")
         let mappedLessons = TransformationUnlockProgress.decode(encoded)
@@ -498,7 +503,7 @@ struct TransformationEquationUnlockTests {
         #expect(TransformationExperienceMode.defaultsKey == "Transformations.experienceMode.v1")
         #expect(TransformationExperienceMode.decode("education") == .education)
         #expect(TransformationExperienceMode.decode("justUse") == .justUse)
-        #expect(TransformationExperienceMode.decode("unexpected") == .education)
+        #expect(TransformationExperienceMode.decode("unexpected") == .justUse)
 
         #expect(TransformationAccessPolicy.addMenuLessons(
             mode: .education,
@@ -669,23 +674,38 @@ struct TransformationEquationUnlockTests {
 
     @Test("Assistance cannot reveal an unmapped answer before its focused hint")
     func assistanceProgression() {
-        let initial = TransformationAssistanceStage.vocabulary
+        let initial = TransformationAssistanceStage.theory
 
         #expect(TransformationAssistancePolicy.advance(
             from: initial,
             event: .revealAnswer,
             isMapped: false,
             isFocused: true
-        ) == .vocabulary)
+        ) == .theory)
         #expect(TransformationAssistancePolicy.advance(
             from: initial,
             event: .requestHint,
             isMapped: false,
             isFocused: false
-        ) == .vocabulary)
+        ) == .theory)
+
+        #expect(TransformationAssistancePolicy.advance(
+            from: initial,
+            event: .requestHint,
+            isMapped: false,
+            isFocused: true
+        ) == .theory)
+
+        let vocabulary = TransformationAssistancePolicy.advance(
+            from: initial,
+            event: .showVocabulary,
+            isMapped: false,
+            isFocused: true
+        )
+        #expect(vocabulary == .vocabulary)
 
         let hinted = TransformationAssistancePolicy.advance(
-            from: initial,
+            from: vocabulary,
             event: .requestHint,
             isMapped: false,
             isFocused: true

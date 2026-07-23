@@ -2,17 +2,20 @@
 //  HandTrackingTypes.swift
 //  Threshold
 //
-//  Lightweight hand tracking data types extracted from GestureController.
+//  Lightweight hand tracking data consumed by GestureProcessor.
 //  Part of the gesture engine decomposition (Phase 6).
 //
 
 import Foundation
 import simd
+#if os(visionOS)
+import ARKit
+#endif
 
 // MARK: - Hand Tracking Data
 
 /// Lightweight hand tracking data extracted from ARKit
-struct HandData {
+struct HandData: Sendable {
     var isTracked: Bool = false
     var thumbTip: SIMD3<Float> = .zero
     var indexTip: SIMD3<Float> = .zero
@@ -184,6 +187,82 @@ struct HandData {
     
     static var zero: HandData { HandData() }
 }
+
+struct HandPoseSnapshot: Sendable {
+    let leftHand: HandData
+    let rightHand: HandData
+    let timestamp: TimeInterval
+    let deltaTime: Float
+}
+
+#if os(visionOS)
+@available(visionOS 2.0, *)
+extension HandPoseSnapshot {
+    /// Extract every joint required by attraction and gesture engines exactly
+    /// once on the Renderer actor. No ARKit anchor crosses the processing seam.
+    static func extract(
+        leftAnchor: HandAnchor?,
+        rightAnchor: HandAnchor?,
+        timestamp: TimeInterval,
+        deltaTime: Float
+    ) -> HandPoseSnapshot {
+        HandPoseSnapshot(
+            leftHand: handData(from: leftAnchor),
+            rightHand: handData(from: rightAnchor),
+            timestamp: timestamp,
+            deltaTime: deltaTime
+        )
+    }
+
+    private static func handData(from anchor: HandAnchor?) -> HandData {
+        guard let anchor, anchor.isTracked, let skeleton = anchor.handSkeleton else { return .zero }
+        let origin = anchor.originFromAnchorTransform
+
+        func position(_ name: HandSkeleton.JointName) -> SIMD3<Float> {
+            let joint = skeleton.joint(name)
+            guard joint.isTracked else { return .zero }
+            let world = origin * joint.anchorFromJointTransform
+            return SIMD3<Float>(world.columns.3.x, world.columns.3.y, world.columns.3.z)
+        }
+
+        var hand = HandData()
+        hand.isTracked = true
+        hand.thumbTip = position(.thumbTip)
+        hand.indexTip = position(.indexFingerTip)
+        hand.middleTip = position(.middleFingerTip)
+        hand.ringTip = position(.ringFingerTip)
+        hand.pinkyTip = position(.littleFingerTip)
+        hand.palmPosition = position(.middleFingerMetacarpal)
+        hand.wristPosition = position(.wrist)
+        hand.forearmWrist = position(.forearmWrist)
+        hand.forearmElbow = position(.forearmArm)
+        hand.forearmTracked = simd_length_squared(hand.forearmWrist) > 1e-6
+            && simd_length_squared(hand.forearmElbow) > 1e-6
+
+        let indexMeta = position(.indexFingerMetacarpal)
+        let middleMeta = position(.middleFingerMetacarpal)
+        let ringMeta = position(.ringFingerMetacarpal)
+        let pinkyMeta = position(.littleFingerMetacarpal)
+        hand.palmCenter = (indexMeta + middleMeta + ringMeta + pinkyMeta) * 0.25
+
+        let rawNormal = simd_cross(pinkyMeta - indexMeta, middleMeta - hand.wristPosition)
+        let normalLength = simd_length(rawNormal)
+        hand.palmNormal = normalLength > 1e-6 ? rawNormal / normalLength : .zero
+
+        func pinch(_ finger: SIMD3<Float>, maximumDistance: Float) -> Float {
+            guard simd_length_squared(hand.thumbTip) > 1e-6,
+                  simd_length_squared(finger) > 1e-6 else { return 0 }
+            let normalized = 1 - (simd_length(hand.thumbTip - finger) - 0.02)
+                / (maximumDistance - 0.02)
+            return simd_clamp(normalized, 0, 1)
+        }
+        hand.indexPinch = pinch(hand.indexTip, maximumDistance: 0.05)
+        hand.middlePinch = pinch(hand.middleTip, maximumDistance: 0.05)
+        hand.ringPinch = pinch(hand.ringTip, maximumDistance: 0.04)
+        return hand
+    }
+}
+#endif
 
 // MARK: - Two-Hand Gesture State
 

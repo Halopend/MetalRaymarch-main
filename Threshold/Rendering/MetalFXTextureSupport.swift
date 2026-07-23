@@ -8,7 +8,7 @@ struct MetalFXSize: Equatable {
 }
 
 /// Shared texture allocation for the Mac/iOS MetalFX scalers
-/// (`MacSpatialUpscaler` / `MacTemporalUpscaler`). Keeping this in one place
+/// (`ViewportSpatialUpscaler` / `ViewportTemporalUpscaler`). Keeping this in one place
 /// means the platform storage-mode rules (e.g. `.memoryless` depth on iOS tile
 /// GPUs) live in a single source of truth.
 enum MetalFXTextureSupport {

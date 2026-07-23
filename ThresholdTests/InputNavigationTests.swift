@@ -10,11 +10,9 @@ struct InputNavigationTests {
             .playback, .reactive, .songs, .playlists, .albums
         ])
 
-        #if os(macOS)
-        #expect(MusicRailSection.availableCases == [.playback, .reactive])
-        #else
-        #expect(MusicRailSection.availableCases == MusicRailSection.visibleCases)
-        #endif
+        #expect(MusicRailSection.availableCases(for: .macOS) == [.playback, .reactive])
+        #expect(MusicRailSection.availableCases(for: .iPadOS) == MusicRailSection.visibleCases)
+        #expect(MusicRailSection.availableCases(for: .visionOS) == MusicRailSection.visibleCases)
 
         #expect(!MusicRailSection.visibleCases.contains(.mappings))
         #expect(!MusicRailSection.visibleCases.contains(.presets))
@@ -41,26 +39,10 @@ struct InputNavigationTests {
         #expect(MusicPanelTab(rawValue: "Presets")?.canonical == .reactive)
     }
 
-    @Test("Legacy reactive pins canonicalize and deduplicate in stable order")
-    func legacyPinsCanonicalizeAndDeduplicate() {
-        #expect(PinnedRailControl.visualizationsReactive.canonical == .musicReactive)
-        #expect(PinnedRailControl.musicMappings.canonical == .musicReactive)
-        #expect(PinnedRailControl.musicPresets.canonical == .musicReactive)
-
-        let canonical = PinnedRailControl.canonicalized([
-            .musicMappings,
-            .exploreJumpingOff,
-            .musicReactive,
-            .musicPresets,
-            .visualizationsReactive,
-            .musicPlayback,
-            .exploreJumpingOff,
-        ])
-
-        #expect(canonical == [
-            .musicReactive,
-            .exploreJumpingOff,
-            .musicPlayback,
-        ])
+    @Test("Semantic route IDs canonicalize old Input pages")
+    func semanticRouteIDsCanonicalize() {
+        #expect(AppRoute.input(.mappings).stableID == AppRoute.input(.reactive).stableID)
+        #expect(AppRoute.input(.presets).stableID == AppRoute.input(.reactive).stableID)
+        #expect(AppRoute.look(.reactive).stableID != AppRoute.input(.reactive).stableID)
     }
 }

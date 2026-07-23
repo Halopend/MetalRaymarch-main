@@ -1,5 +1,56 @@
-import AppIntents
+@preconcurrency import AppIntents
 import SwiftUI
+
+enum ThresholdControlArea: String, AppEnum {
+    case explore
+    case input
+    case shape
+    case look
+    case quality
+    case quickToggles
+    case settings
+
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Threshold Control Area"
+    static let caseDisplayRepresentations: [ThresholdControlArea: DisplayRepresentation] = [
+        .explore: "Explore",
+        .input: "Input",
+        .shape: "Shape",
+        .look: "Look",
+        .quality: "Quality",
+        .quickToggles: "Quick Toggles",
+        .settings: "Settings",
+    ]
+
+    var route: AppRoute {
+        switch self {
+        case .explore: return .explore(.jumpingOff)
+        case .input: return .input(.playback)
+        case .shape: return .shape(.parameters)
+        case .look: return .look(.color)
+        case .quality: return .quality(.overview)
+        case .quickToggles: return .quickToggles
+        case .settings: return .settings(.display)
+        }
+    }
+}
+
+struct OpenThresholdControlsIntent: AppIntent {
+    static let title: LocalizedStringResource = "Open Threshold controls"
+    static let description: LocalizedStringResource = "Open a control area in Threshold"
+    static let openAppWhenRun = true
+
+    @Parameter(title: "Area")
+    var area: ThresholdControlArea
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        guard let appModel = AppModel.shared else {
+            return .result(dialog: "Threshold app not available")
+        }
+        appModel.navigationStore.activate(.command(.selectRoute(area.route)))
+        return .result(dialog: "Opened \(area.route.title)")
+    }
+}
 
 // MARK: - Play Animation
 struct PlayAnimationIntent: AppIntent {
@@ -352,10 +403,6 @@ struct SwitchFractalTypeIntent: AppIntent {
     @Parameter(title: "Fractal")
     var fractal: FractalTypeAppEnum
 
-    static var parameterSummary: some ParameterSummary {
-        Summary("Switch to \(\.$fractal)")
-    }
-
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         guard let appModel = AppModel.shared else {
@@ -377,10 +424,6 @@ struct SetAudioSensitivityIntent: AppIntent {
                controlStyle: .field,
                inclusiveRange: (0, 100))
     var percent: Int
-
-    static var parameterSummary: some ParameterSummary {
-        Summary("Set audio sensitivity to \(\.$percent)%")
-    }
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
@@ -438,10 +481,6 @@ struct SetSpokenAudioSensitivityIntent: AppIntent {
 
     @Parameter(title: "Percent", default: .sixty)
     var level: AudioSensitivityLevelAppEnum
-
-    static var parameterSummary: some ParameterSummary {
-        Summary("Set audio sensitivity to \(\.$level)")
-    }
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {

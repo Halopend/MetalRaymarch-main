@@ -1,5 +1,5 @@
 //
-//  UISettingsCache.swift
+//  ControlStateStore.swift
 //  Threshold
 //
 //  Local state that syncs with RenderSettings periodically to avoid lock contention.
@@ -9,7 +9,7 @@
 import SwiftUI
 
 // MARK: - Gradient Library
-// Isolated @Observable so gradient mutations don't invalidate UISettingsCache observers
+// Isolated @Observable so gradient mutations don't invalidate ControlStateStore observers
 @MainActor
 @Observable
 final class GradientLibrary {
@@ -32,7 +32,7 @@ final class GradientLibrary {
 // Local state that syncs with RenderSettings periodically to avoid lock contention
 @MainActor
 @Observable
-final class UISettingsCache {
+final class ControlStateStore {
     private var parameterPipeline: ParameterPipeline?
     // ═══════════════════════════════════════════════════════════════════════════
     // MARK: - Domain Config Struct Backing Stores
@@ -63,10 +63,13 @@ final class UISettingsCache {
     var targetFoldingLimit: Float = 1.0
     var targetSphereRadius: Float = 0.5
     var formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()
-    /// Observable mirror of the composable Transform stack. Quick Controls use
-    /// this instead of reading RenderSettings directly so slider writes repaint
-    /// immediately even though RenderSettings itself is not observable.
-    var spaceWarpStack: [SpaceWarpOpValue] = []
+    /// Main-actor mirror of the composable Transform stack. The values themselves
+    /// are deliberately ignored by Observation: a slider sample must not invalidate
+    /// the complete Transformations screen (lesson guide, every card, and every
+    /// disclosure). Structural edits bump `spaceWarpStructureRevision`; live slider
+    /// bindings read this mirror directly and keep their own native interaction state.
+    @ObservationIgnored private(set) var spaceWarpStack: [SpaceWarpOpValue] = []
+    private(set) var spaceWarpStructureRevision = 0
 
     // === SAVED CUSTOM GRADIENTS (isolated in GradientLibrary to avoid observation cross-talk) ===
     let gradientLibrary = GradientLibrary()
@@ -116,6 +119,7 @@ final class UISettingsCache {
     
     private weak var _appModel: AppModel?
     private var syncTimer: Timer?
+    private var syncReferenceCount = 0
     private weak var settings: RenderSettings?
     var renderSettings: RenderSettings? { settings }
 
@@ -131,6 +135,8 @@ final class UISettingsCache {
         self._appModel = appModel
         self.parameterPipeline = appModel.parameterPipeline
         loadFromSettings()
+        syncReferenceCount += 1
+        guard syncTimer == nil else { return }
         syncTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.syncLiveStats()
@@ -139,6 +145,8 @@ final class UISettingsCache {
     }
     
     func stopSync() {
+        syncReferenceCount = max(0, syncReferenceCount - 1)
+        guard syncReferenceCount == 0 else { return }
         syncTimer?.invalidate()
         syncTimer = nil
     }
@@ -214,7 +222,16 @@ final class UISettingsCache {
         let newSphere = settings.targetSphereRadius
         if targetSphereRadius != newSphere { targetSphereRadius = newSphere }
         let newSpaceWarpStack = settings.spaceWarpStack
-        if spaceWarpStack != newSpaceWarpStack { spaceWarpStack = newSpaceWarpStack }
+        if spaceWarpStack != newSpaceWarpStack {
+            let structureChanged = !Self.hasSameSpaceWarpStructure(
+                spaceWarpStack,
+                newSpaceWarpStack
+            )
+            spaceWarpStack = newSpaceWarpStack
+            if structureChanged {
+                spaceWarpStructureRevision &+= 1
+            }
+        }
 
     }
     
@@ -229,7 +246,7 @@ final class UISettingsCache {
     /// Latest (base, resolved) snapshot for a modulated parameter, used by sliders
     /// to draw a live "derived value" ghost indicator. nil if the parameter has
     /// never been driven through the pipeline.
-    func liveDerivedValue(for targetID: String) -> ParameterOperationDispatcher.LiveValue? {
+    func liveDerivedValue(for targetID: String) -> ParameterPipeline.LiveValue? {
         parameterPipeline?.liveValue(for: targetID)
     }
 
@@ -247,13 +264,41 @@ final class UISettingsCache {
         _ mutate: (inout SpaceWarpOpValue) -> Void
     ) -> Bool {
         guard let settings else { return false }
-        var updated = settings.spaceWarpStack
+        var updated = spaceWarpStack
         guard let index = updated.firstIndex(where: { $0.id == id }) else { return false }
+        let previous = updated[index]
         mutate(&updated[index])
+        guard updated[index] != previous else { return true }
         settings.spaceWarpStack = updated
         spaceWarpStack = updated
         settings.requestMusicRecenter(targetID: ParameterTargetID.SpaceWarp.opStrength(slot: index))
         return true
+    }
+
+    /// Commits an add/remove/reorder/grouping edit and invalidates only consumers
+    /// whose presentation depends on stack structure. Parameter-only mutations use
+    /// `updateSpaceWarpOp` and intentionally avoid the revision bump.
+    func replaceSpaceWarpStack(_ updated: [SpaceWarpOpValue]) {
+        guard let settings else { return }
+        let structureChanged = !Self.hasSameSpaceWarpStructure(spaceWarpStack, updated)
+        settings.spaceWarpStack = updated
+        spaceWarpStack = updated
+        if structureChanged {
+            spaceWarpStructureRevision &+= 1
+        }
+    }
+
+    private static func hasSameSpaceWarpStructure(
+        _ lhs: [SpaceWarpOpValue],
+        _ rhs: [SpaceWarpOpValue]
+    ) -> Bool {
+        lhs.count == rhs.count && zip(lhs, rhs).allSatisfy { left, right in
+            left.id == right.id
+                && left.type == right.type
+                && left.groupID == right.groupID
+                && left.groupIterations == right.groupIterations
+                && left.groupMode == right.groupMode
+        }
     }
 
     
@@ -286,7 +331,7 @@ final class UISettingsCache {
     }
 
     @MainActor
-    func pushFractalType(_ type: FractalModelType, gestureController: GestureController?) {
+    func pushFractalType(_ type: FractalModelType) {
         if let appModel = _appModel {
             appModel.switchFractalType(type)
             activeCustomFormulaHash = nil
@@ -302,7 +347,9 @@ final class UISettingsCache {
         if oldType != type {
             // Clear stale formula parameter layer stacks from the old type
             parameterPipeline?.clearFormulaStacks()
-            gestureController?.applyFractalDefaults()
+            if let settings {
+                FractalDefaultsStore.applyFractalDefaults(for: type, to: settings)
+            }
             loadFromSettings()
             // Reset now targets the freshly-selected type's defaults (not the
             // previously-loaded scene's type). Snapshot after defaults applied.
@@ -316,7 +363,7 @@ final class UISettingsCache {
     /// `pushFractalType`'s built-in behavior, but keyed by formula hash since
     /// `.custom` is a single shared enum case.
     @MainActor
-    func pushCustomFormula(_ formula: EmbeddedFormula, gestureController: GestureController?) {
+    func pushCustomFormula(_ formula: EmbeddedFormula) {
         guard let appModel = _appModel else { return }
         Task { @MainActor in
             let result = await appModel.installEmbeddedFormulaIfNeededAndWait(formula)
@@ -324,7 +371,7 @@ final class UISettingsCache {
             settings?.fractalType = .custom
             activeCustomFormulaHash = formula.shortHash
             parameterPipeline?.clearFormulaStacks()
-            gestureController?.applyFractalDefaults()
+            appModel.applyFractalDefaults()
             loadFromSettings()
             appModel.rememberActiveResetPresetFromCurrent()
         }
@@ -334,7 +381,6 @@ final class UISettingsCache {
     /// retaining its EmbeddedFormula payload for scene attribution/portability.
     @MainActor
     func pushConstructionPrimitive(_ primitive: FractalPrimitiveKind,
-                                   gestureController: GestureController?,
                                    primarySize: Float? = nil,
                                    disablesBoundingShape: Bool = false) {
         var authoredParams = primitive.bundledFormulaParams
@@ -360,7 +406,7 @@ final class UISettingsCache {
             // selected primitive params so defaults cannot replace it with Sphere.
             appModel.switchFractalType(.constructionPrimitive)
             parameterPipeline?.clearFormulaStacks()
-            gestureController?.applyFractalDefaults()
+            appModel.applyFractalDefaults()
             settings?.formulaParams = authoredParams
             let result = await appModel.installEmbeddedFormulaIfNeededAndWait(primitive.formula)
             guard result == .ready else { return }
@@ -375,12 +421,11 @@ final class UISettingsCache {
     /// geometry at the same model-space size. The clip turns off after promotion
     /// so its fade band cannot erase the newly-created surface; Transform stays.
     @MainActor
-    func promoteBoundingShapeToSeed(gestureController: GestureController?) {
+    func promoteBoundingShapeToSeed() {
         let preset = SafetyBubbleShapePreset(storedValue: quality.boundingShapeType)
         guard let primitive = preset.seedPrimitiveKind else { return }
         pushConstructionPrimitive(
             primitive,
-            gestureController: gestureController,
             primarySize: quality.boundingShapeRadius,
             disablesBoundingShape: true
         )
@@ -627,7 +672,7 @@ final class UISettingsCache {
     }
 }
 
-extension UISettingsCache {
+extension ControlStateStore {
     static func blendValueToSlider(_ value: Float) -> Float {
         sqrt(value.clamped(to: 0.0...1.0))
     }

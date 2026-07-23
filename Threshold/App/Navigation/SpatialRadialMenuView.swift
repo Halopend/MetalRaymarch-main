@@ -9,7 +9,8 @@
   final class SpatialRadialMenuModel {
     private(set) var navigation = SpatialRadialNavigationState()
     private(set) var hierarchy = NavigationHierarchy.application(
-      availability: .current(
+      availability: .resolve(
+        profile: .current,
         allowsCustomScenes: AppModel.allowCustomScenes,
         includesGestureEditing: true
       )
@@ -60,7 +61,8 @@
 
     func configureHierarchy() {
       hierarchy = NavigationHierarchy.application(
-        availability: .current(
+        availability: .resolve(
+          profile: .current,
           allowsCustomScenes: AppModel.allowCustomScenes,
           includesGestureEditing: true
         )
@@ -233,61 +235,11 @@
     @State private var rotationGestureStart: Float?
     @State private var quickControlRevision = 0
 
-    private enum SpatialQuickControl: String, CaseIterable, Identifiable {
-      case boundingShape
-      case surroundings
-      case shadows
-      case smartAdvance
-      case audioReactive
-
-      var id: String { rawValue }
-
-      var title: String {
-        switch self {
-        case .boundingShape: return "Bounding Shape"
-        case .surroundings: return "Surroundings"
-        case .shadows: return "Self-Shadows"
-        case .smartAdvance: return "Smart Advance"
-        case .audioReactive: return "Audio Reactive"
-        }
-      }
-
-      var icon: String {
-        switch self {
-        case .boundingShape: return "circle.dashed"
-        case .surroundings: return "square.3.layers.3d"
-        case .shadows: return "moon"
-        case .smartAdvance: return "bolt"
-        case .audioReactive: return "waveform"
-        }
-      }
-
-      func isEnabled(in settings: RenderSettings) -> Bool {
-        switch self {
-        case .boundingShape: return settings.boundingSphereSkipEnabled
-        case .surroundings: return settings.envScrunchEnabled
-        case .shadows: return settings.shadowsEnabled
-        case .smartAdvance: return settings.smartAdvanceEnabled
-        case .audioReactive: return settings.fractalAudioReactiveEnabled
-        }
-      }
-
-      func toggle(in settings: RenderSettings) {
-        switch self {
-        case .boundingShape:
-          settings.boundingSphereSkipEnabled.toggle()
-        case .surroundings:
-          settings.envScrunchEnabled.toggle()
-          if settings.envScrunchEnabled && settings.envScrunchContain == 0 {
-            settings.envScrunchContain = 2
-          }
-        case .shadows:
-          settings.shadowsEnabled.toggle()
-        case .smartAdvance:
-          settings.smartAdvanceEnabled.toggle()
-        case .audioReactive:
-          settings.fractalAudioReactiveEnabled.toggle()
-        }
+    private var spatialQuickControls: [ToggleDescriptor] {
+      ParameterCatalog.toggleDescriptors.filter { descriptor in
+        appModel.platformProfile.supports(descriptor.requiredPlatformCapabilities)
+          && descriptor.placement.presentations.contains(.spatialRadial)
+          && descriptor.isAvailable(appModel.controlStateStore)
       }
     }
 
@@ -336,8 +288,8 @@
           }
         }
         if model.isShowingQuickControls {
-          ForEach(SpatialQuickControl.allCases) { control in
-            Attachment(id: AttachmentID.quickControl(control.id)) {
+          ForEach(spatialQuickControls) { control in
+            Attachment(id: AttachmentID.quickControl(control.controlID.rawValue)) {
               quickControlButton(control)
             }
           }
@@ -503,25 +455,22 @@
       .accessibilityLabel("\(node.title), \(actionLabel.lowercased())")
     }
 
-    private func quickControlButton(_ control: SpatialQuickControl) -> some View {
+    private func quickControlButton(_ control: ToggleDescriptor) -> some View {
       _ = quickControlRevision
-      let isEnabled = control.isEnabled(in: appModel.renderSettings)
+      let access = appModel.controlAccessService
+      let isEnabled = access.readToggle(control.controlID) ?? false
       return Button {
-        control.toggle(in: appModel.renderSettings)
+        access.writeToggle(!isEnabled, to: control.controlID)
         quickControlRevision &+= 1
         model.reportQuickControlChange(
-          title: control.title,
-          isEnabled: control.isEnabled(in: appModel.renderSettings)
-        )
-        NotificationCenter.default.post(
-          name: AppModel.fractalSettingsDidChangeNotification,
-          object: nil
+          title: control.name,
+          isEnabled: access.readToggle(control.controlID) ?? false
         )
       } label: {
         VStack(spacing: 5) {
           Image(systemName: control.icon)
             .font(.title3.weight(.semibold))
-          Text(control.title)
+          Text(control.name)
             .font(.caption.weight(.semibold))
             .lineLimit(1)
           Text(isEnabled ? "On" : "Off")
@@ -541,7 +490,7 @@
       }
       .buttonStyle(.plain)
       .hoverEffect(.highlight)
-      .accessibilityLabel("\(control.title), \(isEnabled ? "on" : "off")")
+      .accessibilityLabel("\(control.name), \(isEnabled ? "on" : "off")")
       .accessibilityValue(isEnabled ? "On" : "Off")
       .accessibilityHint("Toggles the setting directly in the immersive scene")
     }
@@ -595,7 +544,7 @@
 
     private func synchronizeEntities(_ attachments: RealityViewAttachments) {
       let nodes = model.visibleNodes
-      let quickControls = model.isShowingQuickControls ? SpatialQuickControl.allCases : []
+      let quickControls = model.isShowingQuickControls ? spatialQuickControls : []
       let gestureShortcuts =
         model.isShowingGestureMap
         ? model.gestureMap?.shortcuts ?? []
@@ -633,7 +582,7 @@
       }
 
       for (control, placement) in zip(quickControls, placements) {
-        let name = AttachmentID.quickControl(control.id)
+        let name = AttachmentID.quickControl(control.controlID.rawValue)
         liveNames.insert(name)
         guard let entity = attachments.entity(for: name) else { continue }
         entity.name = name

@@ -30,19 +30,11 @@ struct ThresholdMacApp: App {
         .defaultSize(width: 1780, height: 920)
         .windowResizability(.contentMinSize)
         .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active {
-                appModel.isAppActive = true
-                appModel.presetManager.refreshBundledPresets()
-            } else if newPhase == .background || newPhase == .inactive {
-                // In benchmark mode keep the render loop alive while unfocused so
-                // an unattended profiler run captures a continuous workload.
-                if !BenchmarkMode.isActive { appModel.isAppActive = false }
-                appModel.saveLastState()
-                Task { @MainActor in
-                    await appModel.audioHub.stopTransientSources()
-                    await UsageAnalytics.shared.endSession()
-                }
-            }
+            AppLifecycle.transition(
+                to: newPhase,
+                appModel: appModel,
+                keepActiveInBackground: BenchmarkMode.isActive
+            )
         }
         // Breakout controls window — the same control panel that slides over
         // the render view, hosted in its own window so it can live on another
@@ -111,12 +103,12 @@ private struct ThresholdMacRootView: View {
     @State private var radialAnchor = CGPoint(x: 1400, y: 320)
     /// Selected node id per ring depth — the launcher's transient browsing
     /// state. Hover auto-select rewrites it; committed selection stays in the
-    /// @AppStorage keys until a fallback leaf activates.
+    /// AppModel-owned navigation store until a fallback leaf activates.
     @State private var radialPath: [String] = []
     /// Live parameter mirror backing the launcher's hierarchy sliders. Synced
     /// only while the launcher is visible (each live cache costs a 0.5s
     /// main-thread timer), following the ContentView start/stopSync pattern.
-    @State private var radialCache = UISettingsCache()
+    private var radialCache: ControlStateStore { appModel.controlStateStore }
     @State private var hoveredRadialSlider: RadialActiveSlider?
     @State private var activeMenuTrackingCount = 0
     @State private var pendingAutoHide: DispatchWorkItem?
@@ -128,27 +120,19 @@ private struct ThresholdMacRootView: View {
     @AppStorage("MacTabLauncher.navigationModeMigrated.v1") private var didMigrateNavigationMode = false
     @AppStorage("MacTabLauncher.style") private var launcherStyle: NavigationPresentationStyle = .radial
     @AppStorage("MacTabLauncher.curvature") private var launcherCurvature: Double = 0.82
-    @AppStorage("ContentView.topDockTab") private var radialTopDockTab: TopDockTab = .explore
-    @AppStorage("ContentView.exploreRailSection") private var radialExploreSection: ExploreRailSection = .jumpingOff
-    @AppStorage("ContentView.shapeRailSection") private var radialShapeSection: ShapeRailSection = .parameters
-    @AppStorage("ContentView.visualizationsRailSection") private var radialVisualizationsSection: VisualizationsRailSection = .color
-    @AppStorage("ContentView.musicRailSection") private var radialMusicSection: MusicRailSection = .playback
-    @AppStorage("ContentView.performanceRailSection.v3") private var radialPerformanceSection: PerformanceRailSection = .overview
-    @AppStorage("ContentView.selectedTab") private var radialSelectedTab: SidebarTab = .fractal
-    @AppStorage("FractalGridView.innerTab") private var radialBrowseTab: FractalBrowseTab = .jumpingOff
-    @AppStorage("ContentView.fractalSubTab") private var radialFractalSubTab: FractalSubTab = .shape
-    @AppStorage("ContentView.shapeInnerTab") private var radialShapeInnerTab: ShapeInnerTab = .parameters
-    @AppStorage("ContentView.coloringSubTab") private var radialColoringSubTab: ColoringSubTab = .gradient
-    @AppStorage("ContentView.effectsSubTab") private var radialEffectsSubTab: EffectsSubTab = .dynamic
-    @AppStorage("MusicTabContent.innerTab") private var radialMusicPanelTab: MusicPanelTab = .music
-    @AppStorage("ContentView.settingsSubTab") private var radialSettingsSubTab: SettingsSubTab = .display
     @AppStorage("allowCustomScenes") private var allowCustomScenes = false
-    @AppStorage(TransformationExperienceMode.defaultsKey)
-    private var radialTransformationModeRaw = TransformationExperienceMode.education.rawValue
-    @AppStorage(TransformationUnlockProgress.defaultsKey)
-    private var radialMappedLessonIDsRaw = ""
-    @AppStorage(TransformationUnlockProgress.legacyDefaultsKey)
-    private var radialLegacyMappedTransformationIDsRaw = ""
+
+    private var radialActiveWorkspaceRoute: AppRoute {
+        if appModel.navigationStore.currentRoute.workspaceRoot != nil {
+            return appModel.navigationStore.currentRoute
+        }
+        return appModel.navigationStore.state.returnRoute ?? .explore(.jumpingOff)
+    }
+
+    private var radialTopDockTab: TopDockTab {
+        get { (radialActiveWorkspaceRoute.workspaceRoot ?? .explore).legacyTab }
+        nonmutating set { appModel.navigationStore.selectRoot(WorkspaceRoot(newValue)) }
+    }
 
     private let contentMinimumSize = CGSize(width: 980, height: 576)
     private let minimumWindowSize = CGSize(width: 1440, height: 640)
@@ -205,6 +189,8 @@ private struct ThresholdMacRootView: View {
                         pointerAnchor: radialAnchor,
                         curvature: $launcherCurvature,
                         projection: radialProjection,
+                        interactionProfile: .pointer,
+                        allowsPresentationSelection: true,
                         path: $radialPath,
                         sceneAccent: RadialMenuSceneAccent.color(from: appModel.renderSettings.gradientColorMap),
                         suspendsHoverNavigation: isShiftPressed,
@@ -272,9 +258,6 @@ private struct ThresholdMacRootView: View {
                     onTwoFingerSwipeUp: {
                         hideRadialTabs(animated: true)
                     },
-                    onDoubleClick: {
-                        hideRadialTabs(animated: true)
-                    },
                     isPointerOverSlider: { locationInWindow in
                         // Geometric check: hover-exit events can be dropped, so a
                         // stale hovered id must not hijack scrolls window-wide.
@@ -325,7 +308,7 @@ private struct ThresholdMacRootView: View {
         .frame(minWidth: minimumWindowSize.width, minHeight: minimumWindowSize.height)
         .sheet(isPresented: $isControlFinderPresented) {
             ControlFinderView(
-                platform: .macOS,
+                profile: appModel.platformProfile,
                 onSelect: navigateFromControlFinder,
                 onDismiss: { isControlFinderPresented = false }
             )
@@ -496,102 +479,17 @@ private struct ThresholdMacRootView: View {
     }
 
     private func navigateFromControlFinder(_ destination: ControlFinderDestination) {
-        guard let route = destination.route else { return }
-
         hideRadialTabs(animated: false)
         withAnimation(motionSensitivePanelAnimation) {
             isControlsPinnedOpen = true
-
-            switch route {
-            case .explore(let section):
-                radialTopDockTab = .explore
-                radialExploreSection = section
-                radialSelectedTab = .fractal
-                radialFractalSubTab = .browse
-                radialBrowseTab = section.browseTab
-
-            case .shape(let section):
-                radialTopDockTab = .shape
-                radialShapeSection = section
-                radialSelectedTab = .fractal
-                switch section {
-                case .parameters:
-                    radialFractalSubTab = .shape
-                    radialShapeInnerTab = .parameters
-                case .formula:
-                    radialFractalSubTab = .shape
-                    radialShapeInnerTab = .formula
-                case .primitives:
-                    radialFractalSubTab = .shape
-                    radialShapeInnerTab = .primitives
-                case .hands:
-                    radialFractalSubTab = .shape
-                    radialShapeInnerTab = .hands
-                case .space:
-                    radialFractalSubTab = .space
-                case .transformations:
-                    radialFractalSubTab = .transform
-                case .bounding:
-                    radialFractalSubTab = .bounding
-                case .performance:
-                    radialTopDockTab = .performance
-                    radialPerformanceSection = .tuning
-                    radialFractalSubTab = .render
-                }
-
-            case .visualizations(let section):
-                radialTopDockTab = .visualizations
-                radialVisualizationsSection = section
-                switch section {
-                case .color:
-                    radialSelectedTab = .coloring
-                    radialColoringSubTab = .gradient
-                case .mapping:
-                    radialSelectedTab = .coloring
-                    radialColoringSubTab = .mapping
-                case .grading:
-                    radialSelectedTab = .coloring
-                    radialColoringSubTab = .grading
-                case .motion:
-                    radialSelectedTab = .effects
-                    radialEffectsSubTab = .dynamic
-                case .atmosphere:
-                    radialSelectedTab = .effects
-                    radialEffectsSubTab = .static
-                case .transition:
-                    radialSelectedTab = .transition
-                case .reactive:
-                    radialTopDockTab = .music
-                    radialMusicSection = .reactive
-                    radialSelectedTab = .music
-                    radialMusicPanelTab = .reactive
-                }
-
-            case .performance(let section):
-                radialTopDockTab = .performance
-                radialPerformanceSection = section
-                radialSelectedTab = .fractal
-                radialFractalSubTab = .render
-
-            case .music(let section):
-                let section = section.canonical
-                radialTopDockTab = .music
-                radialMusicSection = section
-                radialSelectedTab = .music
-                radialMusicPanelTab = section.musicPanelTab
-
-            case .settings(let section):
-                radialSelectedTab = .settings
-                radialSettingsSubTab = section
-
-            case .sidebar(let tab):
-                radialSelectedTab = tab
-
-            case .animationEditor:
+            switch appModel.navigationStore.activate(destination.target) {
+            case .openAnimationEditor:
                 if appModel.animationManager?.currentScene == nil {
                     appModel.animationManager?.currentScene = appModel.animationManager?.scenes.first
                 }
                 openWindow(id: AppModel.animationEditorWindowID)
+            case nil, .toggleRadialMenu, .dismissRadialMenu, .resetViewport,
+                 .toggleAnimationPlayback, .selectRoute: break
             }
         }
     }
@@ -693,12 +591,14 @@ private struct ThresholdMacRootView: View {
     /// to call once per session, so both reveal paths route through here while
     /// the launcher is still hidden.
     private func beginRadialSession() {
+        guard appModel.inputOwnershipStore.claim(.radialMenu) else { return }
         radialPath = [Self.rootNodeID(for: radialTopDockTab)]
         hoveredRadialSlider = nil
         radialCache.startSync(with: appModel.renderSettings, appModel: appModel)
     }
 
     private func endRadialSession() {
+        appModel.inputOwnershipStore.release(.radialMenu)
         radialCache.stopSync()
         hoveredRadialSlider = nil
     }
@@ -715,547 +615,36 @@ private struct ThresholdMacRootView: View {
         NavigationHierarchy.rootID(for: tab)
     }
 
-    private var sharedNavigationHierarchy: NavigationHierarchy {
-        NavigationHierarchy.application(availability: .current(
-            allowsCustomScenes: allowCustomScenes,
-            includesGestureEditing: false
-        ))
-    }
-
     private var radialProjection: RadialNavigationProjection {
-        RadialNavigationProjection(
-            roots: sharedNavigationHierarchy.roots.compactMap(radialNode(for:))
+        RadialMenuProjectionFactory.make(
+            appModel: appModel,
+            allowsCustomScenes: allowCustomScenes,
+            onActivate: activateRadialTarget
         )
     }
 
-    private func radialNode(for definition: NavigationHierarchy.Node) -> RadialNavigationNode? {
-        switch definition.destination {
-        case .workspace:
-            return RadialNavigationNode(
-                id: definition.id,
-                title: definition.title,
-                systemImage: definition.systemImage,
-                isSelected: radialPath.first == definition.id,
-                children: definition.children.compactMap(radialNode(for:))
-            )
-
-        case .explore(let section):
-            return RadialNavigationNode(
-                id: definition.id,
-                title: definition.title,
-                systemImage: definition.systemImage,
-                isSelected: radialTopDockTab == .explore
-                    && radialExploreSection == section
-                    && radialSelectedTab == .fractal,
-                fallbackAction: { activateExploreFromLauncher(section) }
-            )
-
-        case .shape(let section):
-            let inputs = shapeSliderNodes(for: section)
-            return radialSectionNode(
-                definition,
-                isSelected: radialTopDockTab == .shape
-                    && radialShapeSection == section
-                    && radialSelectedTab == .fractal,
-                inputs: inputs,
-                fallback: { activateShapeFromLauncher(section) }
-            )
-
-        case .visualizations(let section):
-            let inputs = visualizationsSliderNodes(for: section)
-            return radialSectionNode(
-                definition,
-                isSelected: radialTopDockTab == .visualizations
-                    && radialVisualizationsSection == section,
-                inputs: inputs,
-                fallback: { activateVisualizationsFromLauncher(section) }
-            )
-
-        case .music(let section):
-            return RadialNavigationNode(
-                id: definition.id,
-                title: definition.title,
-                systemImage: definition.systemImage,
-                isSelected: radialTopDockTab == .music
-                    && radialMusicSection.canonical == section
-                    && radialSelectedTab == .music,
-                fallbackAction: { activateMusicFromLauncher(section) }
-            )
-
-        case .performance(let section):
-            return RadialNavigationNode(
-                id: definition.id,
-                title: definition.title,
-                systemImage: definition.systemImage,
-                isSelected: radialTopDockTab == .performance
-                    && radialPerformanceSection == section,
-                fallbackAction: { activatePerformanceFromLauncher(section) }
-            )
-
-        case .animationEditor:
-            return RadialNavigationNode(
-                id: definition.id,
-                title: definition.title,
-                systemImage: definition.systemImage,
-                fallbackAction: {
-                    hideRadialTabs(animated: true)
-                    if appModel.animationManager?.currentScene == nil {
-                        appModel.animationManager?.currentScene = appModel.animationManager?.scenes.first
-                    }
-                    openWindow(id: AppModel.animationEditorWindowID)
-                }
-            )
-
-        case .quickToggles:
-            return RadialNavigationNode(
-                id: definition.id,
-                title: definition.title,
-                systemImage: definition.systemImage,
-                isSelected: radialSelectedTab == .quickToggles,
-                fallbackAction: {
-                    radialSelectedTab = .quickToggles
-                    showControlsAfterLauncherSelection()
-                }
-            )
-
-        case .settings:
-            return RadialNavigationNode(
-                id: definition.id,
-                title: definition.title,
-                systemImage: definition.systemImage,
-                isSelected: radialSelectedTab == .settings,
-                fallbackAction: {
-                    radialSelectedTab = .settings
-                    showControlsAfterLauncherSelection()
-                }
-            )
-
-        case .gestures:
-            // Gesture editing is not supported by ContentView on macOS.
-            return nil
-        }
-    }
-
-    private func radialSectionNode(
-        _ definition: NavigationHierarchy.Node,
-        isSelected: Bool,
-        inputs: [RadialNavigationNode],
-        fallback: @escaping () -> Void
-    ) -> RadialNavigationNode {
-        RadialNavigationNode(
-            id: definition.id,
-            title: definition.title,
-            systemImage: definition.systemImage,
-            isSelected: isSelected,
-            children: inputs,
-            fallbackAction: inputs.isEmpty ? fallback : nil,
-            compactChildrenLimit: inputs.isEmpty ? nil : Self.maxSlidersPerRing,
-            overflowFallback: inputs.isEmpty ? nil : RadialOverflowFallback(
-                RadialNavigationNode(
-                    id: "\(definition.id).more",
-                    title: "More \(definition.title)",
-                    systemImage: "ellipsis.circle",
-                    fallbackAction: fallback
-                )
-            )
-        )
-    }
-
-    // MARK: Quick-input leaves
-
-    /// Terminal slider rings mirror where each control lives in the panel, so
-    /// the radial route and the full controls window never disagree about a
-    /// control's home. Sections without in-place controls stay pure fallback
-    /// leaves. The hierarchy stays complete; compact projections enforce the
-    /// fan budget through each section node's explicit overflow fallback.
-    private static let maxSlidersPerRing = 8
-
-    private func shapeSliderNodes(for section: ShapeRailSection) -> [RadialNavigationNode] {
-        switch section {
-        case .parameters:
-            // Per-fractal formula params, exactly like FormulaParamsEditor —
-            // plus the Mandelbox-only Scale row fractalShapeContent appends.
-            let formulaNodes = ParameterNodeRegistry.shared
-                .formulaBatch(for: radialCache.fractalType)
-                .floatNodes
-            var inputs = formulaNodes.map(formulaSliderNode(for:))
-            if radialCache.fractalType == .mandelbox,
-               let scale = catalogSliderNode(ParameterTargetID.Core.fractalScale) {
-                inputs.append(scale)
+    private func activateRadialTarget(_ target: AppNavigationTarget) {
+        let command = appModel.navigationStore.activate(target)
+        switch command {
+        case .openAnimationEditor:
+            if appModel.animationManager?.currentScene == nil {
+                appModel.animationManager?.currentScene = appModel.animationManager?.scenes.first
             }
-            return inputs
-        case .space:
-            // A disabled feature's slider would scrub a value the renderer
-            // ignores; the section then behaves as a pure fallback leaf.
-            guard radialCache.safetyBubble.enabled else { return [] }
-            return [catalogSliderNode(ParameterTargetID.Effect.safetyBubbleRadius)].compactMap { $0 }
-        case .primitives:
-            return primitiveQuickControlNodes()
-        case .transformations:
-            return transformationQuickControlNodes()
-        case .formula, .hands, .bounding, .performance:
-            return []
+            hideRadialTabs(animated: true)
+            openWindow(id: AppModel.animationEditorWindowID)
+        case .resetViewport:
+            appModel.viewportCommandHandler?(.resetViewport)
+            hideRadialTabs(animated: true)
+        case .toggleAnimationPlayback:
+            appModel.toggleAnimationPlayback()
+        case .toggleRadialMenu, .dismissRadialMenu:
+            hideRadialTabs(animated: true)
+        case .selectRoute(let route):
+            appModel.navigationStore.select(route)
+            showControlsAfterLauncherSelection()
+        case nil:
+            showControlsAfterLauncherSelection()
         }
-    }
-
-    /// The radial surface keeps the analytic-solid picker one gesture away;
-    /// compact overflow and shape-specific dimensions live in the full panel.
-    private func primitiveQuickControlNodes() -> [RadialNavigationNode] {
-        let selected: FractalPrimitiveKind? = {
-            guard radialCache.fractalType == .constructionPrimitive else { return nil }
-            // rawSelector: scene files carry slot 0 unclamped, and this runs on
-            // every radial-menu mount — a plain Int(Float) here traps on a
-            // corrupt/hand-edited file before the user navigates anywhere.
-            return FractalPrimitiveKind(
-                rawSelector: FormulaCatalog.getParam(radialCache.formulaParams, index: 0)
-            )
-        }()
-
-        return FractalPrimitiveKind.analyticCases.map { primitive in
-            RadialNavigationNode(
-                id: "shape.primitives.\(primitive.id)",
-                title: primitive.name,
-                systemImage: primitive.icon,
-                isSelected: selected == primitive,
-                fallbackAction: {
-                    radialCache.pushConstructionPrimitive(
-                        primitive,
-                        gestureController: appModel.gestureController
-                    )
-                }
-            )
-        }
-    }
-
-    /// Active space systems and composable stack instances exposed through
-    /// the shared hierarchy's Transform destination. Structural
-    /// editing (equation mapping/add/delete/reorder) remains in the full Transform panel;
-    /// this surface is intentionally optimized for live tuning.
-    private func transformationQuickControlNodes() -> [RadialNavigationNode] {
-        var nodes: [RadialNavigationNode] = []
-
-        if radialCache.display.sphericalInversionMode != .off {
-            let cache = radialCache
-            let spec = ControlCatalog.sphericalInversionRadius
-            nodes.append(RadialNavigationNode(
-                id: "transform.system.sphericalInversion",
-                title: "Spherical Inversion",
-                systemImage: AppIcons.circleDashedInsetFilled,
-                children: [
-                    RadialNavigationNode(
-                        id: "slider.\(spec.id)",
-                        title: spec.name,
-                        systemImage: spec.icon,
-                        slider: RadialSliderBinding(
-                            range: spec.range,
-                            read: { cache.display.sphericalInversionRadius },
-                            write: {
-                                cache.display.sphericalInversionRadius = spec.clamp($0)
-                                cache.commitSphericalInversion()
-                            },
-                            format: Self.sliderValueFormat(for: spec.range)
-                        )
-                    )
-                ]
-            ))
-        }
-
-        if radialCache.display.sphereProjectionEnabled {
-            let projectionControls = [
-                catalogSliderNode(ParameterTargetID.Space.sphereProjectionBlend),
-                catalogSliderNode(ParameterTargetID.Space.sphereProjectionRadius)
-            ].compactMap { $0 }
-            if !projectionControls.isEmpty {
-                nodes.append(RadialNavigationNode(
-                    id: "transform.system.sphereProjection",
-                    title: "Sphere Projection",
-                    systemImage: AppIcons.globeAsiaAustralia,
-                    children: projectionControls
-                ))
-            }
-        }
-
-        let cache = radialCache
-        let stack = cache.spaceWarpStack
-        let mode = TransformationExperienceMode.decode(radialTransformationModeRaw)
-        let mappedIDs = TransformationUnlockProgress.runtimeKindIDs(
-            from: TransformationUnlockProgress.decode(
-                radialMappedLessonIDsRaw,
-                legacyEncoded: radialLegacyMappedTransformationIDsRaw
-            )
-        )
-        let hasCurrentAccess: (SpaceWarpOpValue) -> Bool = { liveOp in
-            let defaults = UserDefaults.standard
-            let liveMode = TransformationExperienceMode.decode(
-                defaults.string(forKey: TransformationExperienceMode.defaultsKey) ?? ""
-            )
-            let liveMappedIDs = TransformationUnlockProgress.runtimeKindIDs(
-                from: TransformationUnlockProgress.decode(
-                    defaults.string(forKey: TransformationUnlockProgress.defaultsKey) ?? "",
-                    legacyEncoded: defaults.string(
-                        forKey: TransformationUnlockProgress.legacyDefaultsKey
-                    ) ?? ""
-                )
-            )
-            return TransformationAccessPolicy.canInteract(
-                withRawKindID: liveOp.type,
-                mode: liveMode,
-                mappedIDs: liveMappedIDs
-            )
-        }
-        let opNodes: [RadialNavigationNode] = stack.enumerated().compactMap { position, op in
-            guard TransformationAccessPolicy.canInteract(
-                withRawKindID: op.type,
-                mode: mode,
-                mappedIDs: mappedIDs
-            ) else { return nil }
-            return RadialTransformNodeFactory.branch(
-                for: op,
-                position: position,
-                read: { id in
-                    guard let liveOp = cache.renderSettings?.spaceWarpStack.first(where: { $0.id == id }),
-                          hasCurrentAccess(liveOp) else { return nil }
-                    return liveOp
-                },
-                update: { id, mutate in
-                    guard let liveOp = cache.renderSettings?.spaceWarpStack.first(where: { $0.id == id }),
-                          hasCurrentAccess(liveOp) else { return }
-                    cache.updateSpaceWarpOp(id: id, mutate)
-                }
-            )
-        }
-
-        return nodes + opNodes
-    }
-
-    private func visualizationsSliderNodes(for section: VisualizationsRailSection) -> [RadialNavigationNode] {
-        switch section {
-        case .mapping:
-            return [
-                catalogSliderNode(ParameterTargetID.Core.colorMix),
-                catalogSliderNode(ParameterTargetID.Effect.gradientOffset)
-            ].compactMap { $0 }
-        case .grading:
-            return gradingSliderNodes()
-        case .atmosphere:
-            return [
-                catalogSliderNode(ParameterTargetID.Effect.glow),
-                catalogSliderNode(ParameterTargetID.Effect.bloom),
-                catalogSliderNode(ParameterTargetID.Effect.fog)
-            ].compactMap { $0 }
-        case .motion:
-            return [catalogSliderNode(ParameterTargetID.Effect.hueSpeed)].compactMap { $0 }
-        case .color, .transition, .reactive:
-            return []
-        }
-    }
-
-    /// Slider leaf for a catalog-routed control. descriptor.ui.write is the
-    /// canonical UI write path: it updates the observable cache mirror AND
-    /// commits/pushes into RenderSettings (routing through the parameter layer
-    /// stack where the control is music/gesture-layered). Values are clamped
-    /// here because some core writes deliberately do not clamp.
-    private func catalogSliderNode(_ targetID: String) -> RadialNavigationNode? {
-        guard let descriptor = ParameterCatalog.byID[targetID],
-              descriptor.capability.isAvailable(radialCache.fractalType) else { return nil }
-        let cache = radialCache
-        let spec = descriptor.spec
-        return RadialNavigationNode(
-            id: "slider.\(spec.id)",
-            title: spec.name,
-            systemImage: spec.icon,
-            slider: RadialSliderBinding(
-                range: spec.range,
-                read: { descriptor.ui.read(cache) },
-                write: { descriptor.ui.write(cache, spec.clamp($0)) },
-                format: Self.sliderValueFormat(for: spec.range)
-            )
-        )
-    }
-
-    /// Slider leaf for a per-fractal formula param. Reads through the live
-    /// node; writes dispatch a .slider ParameterOperation so the layer stack
-    /// recenters music/gesture modulation around the new base (writing
-    /// cache.formulaParams directly would fight the automation layers).
-    private func formulaSliderNode(for node: FloatParameterNode) -> RadialNavigationNode {
-        let cache = radialCache
-        return RadialNavigationNode(
-            id: "slider.\(node.id)",
-            title: node.name,
-            systemImage: node.icon,
-            slider: RadialSliderBinding(
-                range: node.range,
-                read: { node.readValue(cache) },
-                write: { value in
-                    // smoothingTime 0: the pill re-reads the mirror between
-                    // scroll ticks, so default smoothing would eat most of each
-                    // delta (read-modify-write against a lagging value).
-                    cache.dispatchParameterOperation(ParameterOperation(
-                        targetID: node.id,
-                        source: .slider,
-                        value: value,
-                        frameIndex: UInt64(Date().timeIntervalSince1970 * 1000),
-                        smoothing: ParameterOperationSmoothing(smoothingTime: 0)
-                    ))
-                },
-                format: Self.sliderValueFormat(for: node.range)
-            )
-        )
-    }
-
-    /// Post-processing is grouped into one extra navigation level so related
-    /// controls stay together and no radial ring exceeds the readability cap.
-    /// Long-tail ranges come from ControlCatalog; the groups are also the first
-    /// step toward a declarative post-effect catalog rather than another flat
-    /// list of unrelated sliders.
-    private func gradingSliderNodes() -> [RadialNavigationNode] {
-        let cache = radialCache
-        func node(
-            _ spec: ControlSpec,
-            title: String,
-            read: @escaping () -> Float,
-            write: @escaping (Float) -> Void,
-            isEnabled: @escaping () -> Bool = { true },
-            format: ((Float) -> String)? = nil
-        ) -> RadialNavigationNode {
-            let valueFormat = format ?? Self.sliderValueFormat(for: spec.range)
-            return RadialNavigationNode(
-                id: "slider.\(spec.id)",
-                title: title,
-                systemImage: spec.icon,
-                slider: RadialSliderBinding(
-                    range: spec.range,
-                    read: read,
-                    write: { write(spec.clamp($0)) },
-                    isEnabled: isEnabled,
-                    format: valueFormat
-                )
-            )
-        }
-
-        let colorGrade = [
-            node(ControlCatalog.saturation, title: "Saturation",
-                 read: { cache.color.colorSchemeSaturation },
-                 write: { cache.color.colorSchemeSaturation = $0; cache.commitColorSchemeSaturation() }),
-            node(ControlCatalog.colorSchemeContrast, title: "Contrast",
-                 read: { cache.color.colorSchemeContrast },
-                 write: { cache.color.colorSchemeContrast = $0; cache.push(\.colorSchemeContrast, value: $0) }),
-            node(ControlCatalog.colorSchemeGamma, title: "Gamma",
-                 read: { cache.color.colorSchemeGamma },
-                 write: { cache.color.colorSchemeGamma = $0; cache.push(\.colorSchemeGamma, value: $0) }),
-            node(ControlCatalog.colorSchemeVibrance, title: "Vibrance",
-                 read: { cache.color.colorSchemeVibrance },
-                 write: { cache.color.colorSchemeVibrance = $0; cache.push(\.colorSchemeVibrance, value: $0) }),
-            node(ControlCatalog.colorSchemeCurve, title: "Midtone Curve",
-                 read: { cache.color.colorSchemeCurve },
-                 write: { cache.color.colorSchemeCurve = $0; cache.push(\.colorSchemeCurve, value: $0) }),
-            node(ControlCatalog.colorSchemeShadows, title: "Shadows",
-                 read: { cache.color.colorSchemeShadows },
-                 write: { cache.color.colorSchemeShadows = $0; cache.push(\.colorSchemeShadows, value: $0) }),
-            node(ControlCatalog.colorSchemeHighlights, title: "Highlights",
-                 read: { cache.color.colorSchemeHighlights },
-                 write: { cache.color.colorSchemeHighlights = $0; cache.push(\.colorSchemeHighlights, value: $0) })
-        ]
-
-        // Cell shading has a discrete useful range of 2...8, but radial sliders
-        // need an off position. Map 0 -> off and 1...7 -> 2...8 bands while the
-        // canonical stored band count remains governed by its ControlSpec.
-        let cellShading = RadialNavigationNode(
-            id: "slider.post.cellShading",
-            title: "Cell Shading",
-            systemImage: ControlCatalog.cellShadingLevels.icon,
-            slider: RadialSliderBinding(
-                range: 0...(ControlCatalog.cellShadingLevels.range.upperBound - 1),
-                read: {
-                    cache.color.cellShadingEnabled
-                        ? max(1, cache.color.cellShadingLevels - 1)
-                        : 0
-                },
-                write: { rawValue in
-                    if rawValue <= EdgeDetectionEffect.activationEpsilon {
-                        cache.color.cellShadingEnabled = false
-                    } else {
-                        cache.color.cellShadingEnabled = true
-                        cache.color.cellShadingLevels = ControlCatalog.cellShadingLevels.clamp((rawValue + 1).rounded())
-                    }
-                    cache.push(\.cellShadingEnabled, value: cache.color.cellShadingEnabled)
-                    cache.push(\.cellShadingLevels, value: cache.color.cellShadingLevels)
-                },
-                format: { $0 <= EdgeDetectionEffect.activationEpsilon ? "Off" : "\(Int(($0 + 1).rounded()))" }
-            )
-        )
-
-        let lightingFinish = [
-            node(ControlCatalog.lightingSoftness, title: "Lighting Softness",
-                 read: { cache.color.lightingSoftness },
-                 write: { cache.color.lightingSoftness = $0; cache.push(\.lightingSoftness, value: $0) }),
-            cellShading,
-            node(ControlCatalog.aoStrength, title: "Ambient Occlusion",
-                 read: { cache.color.aoStrength },
-                 write: { cache.color.aoStrength = $0; cache.push(\.aoStrength, value: $0) }),
-            node(ControlCatalog.tonemapStrength, title: "Filmic Tonemap",
-                 read: { cache.color.tonemapStrength },
-                 write: { cache.color.tonemapStrength = $0; cache.push(\.tonemapStrength, value: $0) }),
-            node(ControlCatalog.vignetteStrength, title: "Vignette",
-                 read: { cache.color.vignetteStrength },
-                 write: { cache.color.vignetteStrength = $0; cache.push(\.vignetteStrength, value: $0) },
-                 format: { $0 <= EdgeDetectionEffect.activationEpsilon ? "Off" : String(format: "%.2f", $0) })
-        ]
-
-        let edgeIsActive = { cache.lighting.edgeDetectionEffect.isActive }
-        let edgeDetection = [
-            node(ControlCatalog.edgeStrength, title: "Strength",
-                 read: { cache.lighting.edgeDetectionEffect.strength },
-                 write: { value in
-                     cache.lighting.edgeDetectionEffect.setStrength(value)
-                     cache.commitEdgeDetectionEffect()
-                 },
-                 format: { $0 <= EdgeDetectionEffect.activationEpsilon ? "Off" : String(format: "%.2f", $0) }),
-            node(ControlCatalog.edgeThreshold, title: "Threshold",
-                 read: { cache.lighting.edgeDetectionEffect.threshold },
-                 write: { cache.lighting.edgeDetectionEffect.threshold = $0; cache.commitEdgeDetectionEffect() },
-                 isEnabled: edgeIsActive),
-            node(ControlCatalog.edgeSoftness, title: "Softness",
-                 read: { cache.lighting.edgeDetectionEffect.softness },
-                 write: { cache.lighting.edgeDetectionEffect.softness = $0; cache.commitEdgeDetectionEffect() },
-                 isEnabled: edgeIsActive),
-            node(ControlCatalog.edgeWindowRadius, title: "Window Size",
-                 read: { Float(cache.lighting.edgeDetectionEffect.windowRadius) },
-                 write: {
-                     cache.lighting.edgeDetectionEffect.windowRadius = Int($0.rounded())
-                     cache.commitEdgeDetectionEffect()
-                 },
-                 isEnabled: edgeIsActive,
-                 format: { String(Int($0.rounded())) })
-        ]
-
-        return [
-            RadialNavigationNode(
-                id: "post.colorGrade",
-                title: "Color Grade",
-                systemImage: "paintpalette.fill",
-                children: colorGrade
-            ),
-            RadialNavigationNode(
-                id: "post.lightingFinish",
-                title: "Lighting Finish",
-                systemImage: "camera.filters",
-                children: lightingFinish
-            ),
-            RadialNavigationNode(
-                id: "post.edgeDetection",
-                title: "Edge Detection",
-                systemImage: "circle.lefthalf.filled",
-                children: edgeDetection
-            )
-        ]
-    }
-
-    private static func sliderValueFormat(for range: ClosedRange<Float>) -> (Float) -> String {
-        let span = range.upperBound - range.lowerBound
-        return span >= 8
-            ? { String(format: "%.1f", $0) }
-            : { String(format: "%.2f", $0) }
     }
 
     /// Trackpad scroll over a hovered slider pill, normalized so physical
@@ -1268,91 +657,6 @@ private struct ThresholdMacRootView: View {
         let span = slider.range.upperBound - slider.range.lowerBound
         let value = (slider.read() + Float(upwardDelta / 240) * span).clamped(to: slider.range)
         slider.writeIfEnabled(value)
-    }
-
-    private func activateExploreFromLauncher(_ section: ExploreRailSection) {
-        radialTopDockTab = .explore
-        radialExploreSection = section
-        radialBrowseTab = section.browseTab
-        radialFractalSubTab = .browse
-        radialSelectedTab = .fractal
-        showControlsAfterLauncherSelection()
-    }
-
-    private func activateShapeFromLauncher(_ section: ShapeRailSection) {
-        radialTopDockTab = .shape
-        radialShapeSection = section
-        switch section {
-        case .parameters:
-            radialShapeInnerTab = .parameters
-            radialFractalSubTab = .shape
-        case .formula:
-            radialShapeInnerTab = .formula
-            radialFractalSubTab = .shape
-        case .primitives:
-            radialShapeInnerTab = .primitives
-            radialFractalSubTab = .shape
-        case .hands:
-            radialShapeInnerTab = .hands
-            radialFractalSubTab = .shape
-        case .space:
-            radialFractalSubTab = .space
-        case .transformations:
-            radialFractalSubTab = .transform
-        case .bounding:
-            radialFractalSubTab = .bounding
-        case .performance:
-            radialFractalSubTab = .render
-        }
-        radialSelectedTab = .fractal
-        showControlsAfterLauncherSelection()
-    }
-
-    private func activateVisualizationsFromLauncher(_ section: VisualizationsRailSection) {
-        radialTopDockTab = .visualizations
-        radialVisualizationsSection = section
-        switch section {
-        case .color:
-            radialColoringSubTab = .gradient
-            radialSelectedTab = .coloring
-        case .mapping:
-            radialColoringSubTab = .mapping
-            radialSelectedTab = .coloring
-        case .grading:
-            radialColoringSubTab = .grading
-            radialSelectedTab = .coloring
-        case .motion:
-            radialEffectsSubTab = .dynamic
-            radialSelectedTab = .effects
-        case .atmosphere:
-            radialEffectsSubTab = .static
-            radialSelectedTab = .effects
-        case .transition:
-            radialSelectedTab = .transition
-        case .reactive:
-            radialTopDockTab = .music
-            radialMusicSection = .reactive
-            radialMusicPanelTab = .reactive
-            radialSelectedTab = .music
-        }
-        showControlsAfterLauncherSelection()
-    }
-
-    private func activateMusicFromLauncher(_ section: MusicRailSection) {
-        let section = section.canonical
-        radialTopDockTab = .music
-        radialMusicSection = section
-        radialMusicPanelTab = section.musicPanelTab
-        radialSelectedTab = .music
-        showControlsAfterLauncherSelection()
-    }
-
-    private func activatePerformanceFromLauncher(_ section: PerformanceRailSection) {
-        radialTopDockTab = .performance
-        radialPerformanceSection = section
-        radialFractalSubTab = .render
-        radialSelectedTab = .fractal
-        showControlsAfterLauncherSelection()
     }
 
     private func showControlsAfterLauncherSelection() {

@@ -10,7 +10,7 @@ struct SpatialRadialNavigationTests {
       availability: NavigationAvailability(
         allowsCustomScenes: true,
         shapeSections: ShapeRailSection.allCases.filter { $0 != .performance },
-        musicSections: MusicRailSection.availableCases,
+        musicSections: MusicRailSection.availableCases(for: .current),
         includesGestureEditing: true
       ))
   }

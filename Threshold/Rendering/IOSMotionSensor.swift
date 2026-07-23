@@ -4,7 +4,7 @@ import simd
 
 /// Reads the iPad's built-in motion sensors via CoreMotion and exposes a
 /// calibrated tilt, mirroring the `MacMotionSensor` interface so the shared
-/// `ThresholdMacRenderer.applyTiltControl` is platform-agnostic.
+/// `ViewportRenderer.applyTiltControl` is platform-agnostic.
 ///
 /// We use `CMDeviceMotion.gravity` — a gravity-direction unit vector (in g)
 /// expressed in the device frame. The calibrated tilt is the per-axis delta

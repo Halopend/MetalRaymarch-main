@@ -7,20 +7,18 @@
 
 import SwiftUI
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// MARK: - Sidebar Tab Enum
-// ═══════════════════════════════════════════════════════════════════════════════
-
-enum SidebarTab: String, CaseIterable {
-    case fractal = "Fractal"
-    case animate = "Video"
-    case coloring = "Coloring"
-    case effects = "Effects"
-    case music = "Music"
-    case transition = "Transition"
-    case quickToggles = "Quick Toggles"
-    case gestures = "Gestures"
-    case settings = "Settings"
+/// View-only grouping for legacy full-panel composition. This is neither
+/// persisted nor routable; AppRoute remains the sole navigation state.
+enum ControlPanelContent {
+    case fractal
+    case animate
+    case coloring
+    case effects
+    case music
+    case transition
+    case quickToggles
+    case gestures
+    case settings
 
     var icon: String {
         switch self {
@@ -37,7 +35,7 @@ enum SidebarTab: String, CaseIterable {
     }
 }
 
-enum TopDockTab: String, CaseIterable {
+enum TopDockTab: String, CaseIterable, Codable, Hashable, Sendable {
     case explore = "Explore"
     case shape = "Shape"
     case visualizations = "Visualizations"
@@ -69,7 +67,7 @@ enum TopDockTab: String, CaseIterable {
     }
 }
 
-enum ExploreRailSection: String, CaseIterable {
+enum ExploreRailSection: String, CaseIterable, Codable, Hashable, Sendable {
     case jumpingOff = "Jumping Off"
     case musicReactive = "Music Reactive"
     case animated = "Animated"
@@ -97,7 +95,7 @@ enum ExploreRailSection: String, CaseIterable {
     }
 }
 
-enum ShapeRailSection: String, CaseIterable {
+enum ShapeRailSection: String, CaseIterable, Codable, Hashable, Sendable {
     case parameters = "Parameters"
     case formula = "Formula"
     case primitives = "Primitives"
@@ -121,7 +119,7 @@ enum ShapeRailSection: String, CaseIterable {
     }
 }
 
-enum PerformanceRailSection: String, CaseIterable {
+enum PerformanceRailSection: String, CaseIterable, Codable, Hashable, Sendable {
     // Overview first: the read-only live dashboard is the default landing section
     // for the Performance tab (the rail renders allCases in this order, so the
     // default-selected section also sits at the top). Tuning holds every knob —
@@ -137,7 +135,7 @@ enum PerformanceRailSection: String, CaseIterable {
     }
 }
 
-enum VisualizationsRailSection: String, CaseIterable {
+enum VisualizationsRailSection: String, CaseIterable, Codable, Hashable, Sendable {
     case color = "Color"
     case mapping = "Mapping"
     case grading = "Grading"
@@ -186,7 +184,7 @@ enum VisualizationsRailSection: String, CaseIterable {
     }
 }
 
-enum MusicRailSection: String, CaseIterable {
+enum MusicRailSection: String, CaseIterable, Codable, Hashable, Sendable {
     case playback = "Playback"
     case reactive = "Reactive"
     // Legacy persisted routes. Mappings and presets now live on the combined
@@ -227,12 +225,8 @@ enum MusicRailSection: String, CaseIterable {
         [.playback, .reactive, .songs, .playlists, .albums]
     }
 
-    static var availableCases: [MusicRailSection] {
-        #if os(macOS)
-        return [.playback, .reactive]
-        #else
-        return visibleCases
-        #endif
+    static func availableCases(for profile: PlatformProfile) -> [MusicRailSection] {
+        profile.supports(.musicLibraryBrowsing) ? visibleCases : [.playback, .reactive]
     }
 
     /// Resolves old split-page routes to their single current destination.
@@ -257,135 +251,42 @@ enum MusicRailSection: String, CaseIterable {
     }
 }
 
-enum PinnedRailControl: String, CaseIterable {
-    case exploreJumpingOff
-    case exploreMusicReactive
-    case exploreAnimated
-    case exploreMixed
-    case exploreCustomScenes
-    case shapeParameters
-    case shapeFormula
-    case shapePrimitives
-    case shapeHands
-    case shapeSpace
-    case shapeTransformations
-    case shapeBounding
-    case shapePerformance
-    case visualizationsColor
-    case visualizationsMapping
-    case visualizationsGrading
-    case visualizationsMotion
-    case visualizationsAtmosphere
-    case visualizationsTransition
-    case visualizationsReactive
-    case musicPlayback
-    case musicReactive
-    case musicMappings
-    case musicPresets
-    case musicSongs
-    case musicPlaylists
-    case musicAlbums
-
-    /// Old Look/Mappings/Presets pins all point at the combined Input page.
-    /// Keeping the cases decodes existing storage; canonicalization prevents
-    /// three Quick Access buttons from representing the same destination.
-    var canonical: PinnedRailControl {
-        switch self {
-        case .visualizationsReactive, .musicMappings, .musicPresets:
-            return .musicReactive
-        default:
-            return self
-        }
-    }
-
-    static func canonicalized(_ controls: [PinnedRailControl]) -> [PinnedRailControl] {
-        var seen = Set<PinnedRailControl>()
-        return controls.compactMap { control in
-            let canonical = control.canonical
-            return seen.insert(canonical).inserted ? canonical : nil
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .exploreJumpingOff: return ExploreRailSection.jumpingOff.rawValue
-        case .exploreMusicReactive: return ExploreRailSection.musicReactive.rawValue
-        case .exploreAnimated: return ExploreRailSection.animated.rawValue
-        case .exploreMixed: return ExploreRailSection.mixed.rawValue
-        case .exploreCustomScenes: return ExploreRailSection.customScenes.rawValue
-        case .shapeParameters: return ShapeRailSection.parameters.rawValue
-        case .shapeFormula: return ShapeRailSection.formula.rawValue
-        case .shapePrimitives: return ShapeRailSection.primitives.rawValue
-        case .shapeHands: return ShapeRailSection.hands.rawValue
-        case .shapeSpace: return ShapeRailSection.space.rawValue
-        case .shapeTransformations: return ShapeRailSection.transformations.rawValue
-        case .shapeBounding: return ShapeRailSection.bounding.rawValue
-        case .shapePerformance: return ShapeRailSection.performance.rawValue
-        case .visualizationsColor: return VisualizationsRailSection.color.title
-        case .visualizationsMapping: return VisualizationsRailSection.mapping.title
-        case .visualizationsGrading: return VisualizationsRailSection.grading.title
-        case .visualizationsMotion: return VisualizationsRailSection.motion.title
-        case .visualizationsAtmosphere: return VisualizationsRailSection.atmosphere.title
-        case .visualizationsTransition: return VisualizationsRailSection.transition.title
-        case .visualizationsReactive: return VisualizationsRailSection.reactive.title
-        case .musicPlayback: return MusicRailSection.playback.title
-        case .musicReactive: return MusicRailSection.reactive.title
-        case .musicMappings: return MusicRailSection.mappings.title
-        case .musicPresets: return MusicRailSection.presets.title
-        case .musicSongs: return MusicRailSection.songs.title
-        case .musicPlaylists: return MusicRailSection.playlists.title
-        case .musicAlbums: return MusicRailSection.albums.title
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .exploreJumpingOff: return ExploreRailSection.jumpingOff.icon
-        case .exploreMusicReactive: return ExploreRailSection.musicReactive.icon
-        case .exploreAnimated: return ExploreRailSection.animated.icon
-        case .exploreMixed: return ExploreRailSection.mixed.icon
-        case .exploreCustomScenes: return ExploreRailSection.customScenes.icon
-        case .shapeParameters: return ShapeRailSection.parameters.icon
-        case .shapeFormula: return ShapeRailSection.formula.icon
-        case .shapePrimitives: return ShapeRailSection.primitives.icon
-        case .shapeHands: return ShapeRailSection.hands.icon
-        case .shapeSpace: return ShapeRailSection.space.icon
-        case .shapeTransformations: return ShapeRailSection.transformations.icon
-        case .shapeBounding: return ShapeRailSection.bounding.icon
-        case .shapePerformance: return ShapeRailSection.performance.icon
-        case .visualizationsColor: return VisualizationsRailSection.color.icon
-        case .visualizationsMapping: return VisualizationsRailSection.mapping.icon
-        case .visualizationsGrading: return VisualizationsRailSection.grading.icon
-        case .visualizationsMotion: return VisualizationsRailSection.motion.icon
-        case .visualizationsAtmosphere: return VisualizationsRailSection.atmosphere.icon
-        case .visualizationsTransition: return VisualizationsRailSection.transition.icon
-        case .visualizationsReactive: return VisualizationsRailSection.reactive.icon
-        case .musicPlayback: return MusicRailSection.playback.icon
-        case .musicReactive: return MusicRailSection.reactive.icon
-        case .musicMappings: return MusicRailSection.mappings.icon
-        case .musicPresets: return MusicRailSection.presets.icon
-        case .musicSongs: return MusicRailSection.songs.icon
-        case .musicPlaylists: return MusicRailSection.playlists.icon
-        case .musicAlbums: return MusicRailSection.albums.icon
-        }
-    }
-}
-
 enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shape", space = "Space", transform = "Transform", bounding = "Bounding", render = "Render" }
 enum ShapeInnerTab: String, CaseIterable { case parameters = "Parameters", formula = "Formula", primitives = "Primitives", hands = "Hands" }
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
 enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic Color", `static` = "Atmosphere" }
 
-/// Where a Quick Toggles tile's full controls live. Long-pressing a tile
-/// navigates to the matching tab/sub-tab via `ContentView.openQuickToggleHome(_:)`.
-enum QuickToggleHome {
-    case effectsAtmosphere      // Glow, Bloom, Fog
-    case effectsDynamic         // Hue Rotation, Pulse, Gradient Cycle, Linear Rail, Polar Rotation, Julia Drift, Beat Flash
-    case shapeSpace             // Spherical Inversion, Safety Bubble, Detail
-    case shapeTransformations   // Sphere Projection, Spherical Inversion, warp stack
-    case shapeBounding          // Containment: Bounding Shape, Scrunch to Surroundings, Bound to Space
-    case shapePerformance       // Smart Advance, Coherent Packet, Self-Shadows, Bounding Sphere Skip
-    case audioReactive          // Audio Reactive + bass/mid/treble/beat
+extension ShapeInnerTab {
+    var routeSection: ShapeRailSection {
+        switch self {
+        case .parameters: return .parameters
+        case .formula: return .formula
+        case .primitives: return .primitives
+        case .hands: return .hands
+        }
+    }
+}
+
+extension ColoringSubTab {
+    var routeSection: VisualizationsRailSection {
+        switch self {
+        case .gradient: return .color
+        case .mapping: return .mapping
+        case .grading: return .grading
+        }
+    }
+}
+
+extension MusicPanelTab {
+    var routeSection: MusicRailSection {
+        switch canonical {
+        case .music: return .playback
+        case .songs: return .songs
+        case .playlists: return .playlists
+        case .albums: return .albums
+        case .reactive, .mappings, .presets, .visualizations: return .reactive
+        }
+    }
 }
 
 /// How a scene is contained in the room — the headline framing over the two
@@ -441,7 +342,7 @@ enum MixedContainment: String, CaseIterable, Identifiable {
 }
 /// Inner tabs of the Settings panel. Drives the segmented picker in
 /// `ContentView.settingsTabContent` and the corresponding switch dispatch.
-enum SettingsSubTab: String, CaseIterable, Identifiable {
+enum SettingsSubTab: String, CaseIterable, Identifiable, Codable, Hashable, Sendable {
     case display   = "Display"
     case gestures  = "Gestures"
     case sharing   = "Sharing"

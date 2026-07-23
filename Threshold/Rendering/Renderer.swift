@@ -263,9 +263,10 @@ actor Renderer {
     var hasLoggedProgressivePortal: Bool = false
 
     var lastHandTrackingUpdateTime: TimeInterval = 0  // Throttle hand UI updates
+    var lastHandDiagnosticsPublishTime: TimeInterval = 0
     // Hand Attraction: last-known palm positions, written synchronously in
     // updateHandTracking (Renderer actor) and read back the same frame in
-    // updateGameState — no actor hop needed since GestureController's mirror
+    // updateGameState — no actor hop needed since GestureProcessor's state
     // of this data is @MainActor-isolated and would require one.
     var lastLeftHandPalmPosition: SIMD3<Float> = .zero
     var lastLeftHandTrackedForAttraction: Bool = false
@@ -280,7 +281,7 @@ actor Renderer {
     var lastRightForearmElbow: SIMD3<Float> = .zero
     var lastRightForearmTracked: Bool = false
     // Hand-tracking dispatch coordination between the render loop (Renderer actor)
-    // and the per-frame @MainActor Task that processes gestures. A single Mutex
+    // and the serial off-main GestureProcessor. A single Mutex
     // replaces the previous pair of `nonisolated(unsafe)` flags: the render loop
     // is synchronous, but `finishHandTrackingDispatch()` runs off-actor from a
     // Task continuation, so we need real synchronization on the state they share

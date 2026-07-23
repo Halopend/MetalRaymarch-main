@@ -180,6 +180,11 @@ final class TouchVisualizationOverlay: UIView {
 /// while leaving gesture recognition untouched.
 final class TouchVisualizingMTKView: MTKView {
     private let touchOverlay = TouchVisualizationOverlay(frame: .zero)
+    weak var inputSink: (any ViewportInputSink)?
+    var shouldAcceptViewportInput: () -> Bool = { true }
+    var onRadialMenuRequest: ((CGPoint) -> Void)?
+
+    override var canBecomeFirstResponder: Bool { true }
 
     override init(frame frameRect: CGRect, device: MTLDevice?) {
         super.init(frame: frameRect, device: device)
@@ -195,6 +200,7 @@ final class TouchVisualizingMTKView: MTKView {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        becomeFirstResponder()
         touchOverlay.touchesBegan(touches)
         super.touchesBegan(touches, with: event)
     }
@@ -212,6 +218,63 @@ final class TouchVisualizingMTKView: MTKView {
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         touchOverlay.touchesEnded(touches)
         super.touchesCancelled(touches, with: event)
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let unhandled = Set(presses.filter { !handle($0, isPressed: true) })
+        if !unhandled.isEmpty { super.pressesBegan(unhandled, with: event) }
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let unhandled = Set(presses.filter { !handle($0, isPressed: false) })
+        if !unhandled.isEmpty { super.pressesEnded(unhandled, with: event) }
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        inputSink?.setFocus(false)
+        super.pressesCancelled(presses, with: event)
+    }
+
+    @discardableResult
+    override func resignFirstResponder() -> Bool {
+        inputSink?.setFocus(false)
+        return super.resignFirstResponder()
+    }
+
+    private func handle(_ press: UIPress, isPressed: Bool) -> Bool {
+        guard let key = press.key else { return false }
+
+        if isPressed,
+           key.modifierFlags.contains(.command),
+           key.charactersIgnoringModifiers == "." {
+            onRadialMenuRequest?(CGPoint(x: bounds.midX, y: bounds.midY))
+            return true
+        }
+
+        guard shouldAcceptViewportInput() else { return false }
+        switch key.keyCode {
+        case .keyboardW:
+            inputSink?.setMovementKey(.forward, isPressed: isPressed)
+        case .keyboardS:
+            inputSink?.setMovementKey(.backward, isPressed: isPressed)
+        case .keyboardA:
+            inputSink?.setMovementKey(.left, isPressed: isPressed)
+        case .keyboardD:
+            inputSink?.setMovementKey(.right, isPressed: isPressed)
+        case .keyboardLeftShift, .keyboardRightShift:
+            inputSink?.setShiftPressed(isPressed)
+        case .keyboardLeftArrow:
+            if isPressed { inputSink?.requestSceneStep(-1) }
+        case .keyboardRightArrow:
+            if isPressed { inputSink?.requestSceneStep(1) }
+        case .keyboardSpacebar:
+            if isPressed { inputSink?.requestPlaybackToggle() }
+        case .keyboardR:
+            if isPressed { inputSink?.requestReset() }
+        default:
+            return false
+        }
+        return true
     }
 }
 #endif

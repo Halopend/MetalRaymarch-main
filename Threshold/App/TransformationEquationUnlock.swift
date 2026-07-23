@@ -75,7 +75,7 @@ struct TransformationEquationLesson: Identifiable, Equatable {
 /// One small piece of Metal vocabulary relevant to the equation being assembled.
 /// These are teaching notes only; submitted source still goes through the strict,
 /// non-executing token matcher below.
-struct TransformationEquationCheatSheetEntry: Identifiable, Equatable {
+struct TransformationMetalVocabularyEntry: Identifiable, Equatable {
     let notation: String
     let meaning: String
 
@@ -90,7 +90,7 @@ enum TransformationEquationCatalog {
     static let lessons: [TransformationEquationLesson] = [
         lesson(
             .twist,
-            math: "T(p) = R_axis(1.5 s · ⟨p, axis⟩) p",
+            math: "Tₛ(p) = Rₐ̂(1.5s⟨p,â⟩)p",
             spokenMath: "Point p is rotated around the axis by an angle equal to one point five times s times the dot product of p and the axis.",
             metal: """
             if (op.strength > 0.0f) {
@@ -105,7 +105,7 @@ enum TransformationEquationCatalog {
         ),
         lesson(
             .bend,
-            math: "B(p) = p⊥ + axis(a cos θ) + normalize(p⊥)(a sin θ), θ = 1.5 s |p⊥|",
+            math: "a = ⟨p,â⟩,  p⊥ = p − aâ\nBₛ(p) = p⊥ + a cos(θ)â + a sin(θ)p̂⊥,  θ = 1.5s‖p⊥‖",
             spokenMath: "Output is the perpendicular part of p, plus the axis multiplied by scalar a and cosine of theta, plus the normalized perpendicular direction multiplied by scalar a and sine of theta. Theta equals one point five times s times the length of the perpendicular part.",
             metal: """
             if (op.strength > 0.0f) {
@@ -123,14 +123,14 @@ enum TransformationEquationCatalog {
         ),
         lesson(
             .mirror,
-            math: "M(p) = (1 - s)p + s|p|",
+            math: "Mₛ(p) = (1 − s)p + s|p|",
             spokenMath: "Output equals one minus s, times p, plus s times the component-wise absolute value of p.",
             metal: "p = mix(p, abs(p), clamp(op.strength, 0.0f, 1.0f));",
             hint: "`op.strength` blends from the original point to `abs(p)`, which reflects negative coordinates into the positive octant."
         ),
         lesson(
             .boxFold,
-            math: "B_L(p) = 2 clamp(p, -L, L) - p; optional hall mode repeats that reflection every 4L",
+            math: "Fₗ,ₛ(p) = (1 − s)p + s(2 clamp(p,−L,L) − p)\nHₗ(p) = L − |mod(p + L,4L) − 2L|",
             spokenMath: "Output equals two times p clamped between negative L and L, minus p. The optional repeating form reflects every four L.",
             metal: """
             float t = clamp(op.strength, 0.0f, 1.0f);
@@ -150,7 +150,7 @@ enum TransformationEquationCatalog {
         ),
         lesson(
             .sphereFold,
-            math: "S(p) = p(maxR²/minR²) inside minR; p(maxR²/|p|²) inside maxR; p outside",
+            math: "k(r²) = maxR²/minR²  if r² < minR²;  maxR²/r²  if r² < maxR²;  1 otherwise\nSₛ(p) = (1 − s)p + s·k(‖p‖²)p",
             spokenMath: "Inside the minimum radius, multiply p by maximum radius squared over minimum radius squared. Inside the maximum radius, multiply p by maximum radius squared over the squared length of p. Outside, leave p unchanged.",
             metal: """
             float t = clamp(op.strength, 0.0f, 1.0f);
@@ -169,7 +169,7 @@ enum TransformationEquationCatalog {
         ),
         lesson(
             .inversion,
-            math: "I_R(p) = p · clamp(R²/|p|², 0.05, 20)",
+            math: "Iᵣ(p) = p · clamp(R²/‖p‖², 0.05, 20)",
             spokenMath: "Multiply p by radius squared divided by the squared length of p, clamped between zero point zero five and twenty.",
             metal: """
             float t = clamp(op.strength, 0.0f, 1.0f);
@@ -181,7 +181,7 @@ enum TransformationEquationCatalog {
         ),
         lesson(
             .kaleidoscope,
-            math: "φ ↦ mod(|φ| + α, 2α) - α, with α = π / segments",
+            math: "α = π/N,  φ′ = mod(|φ| + α,2α) − α",
             spokenMath: "Map angle phi to the absolute value of phi plus alpha, modulo two alpha, then subtract alpha. Alpha equals pi divided by the segment count.",
             metal: """
             float t = clamp(op.strength, 0.0f, 1.0f);
@@ -197,7 +197,7 @@ enum TransformationEquationCatalog {
         ),
         lesson(
             .ripple,
-            math: "R(p) = p + axis · s sin(f ⟨p, axis⟩)",
+            math: "Rₛ(p) = p + â·s sin(f⟨p,â⟩)",
             spokenMath: "Output equals p plus the axis multiplied by s and the sine of f times the dot product of p and the axis.",
             metal: """
             if (op.strength > 0.0f) {
@@ -210,7 +210,7 @@ enum TransformationEquationCatalog {
         ),
         lesson(
             .circle,
-            math: "Apply a piecewise radial scale to |p.xz|² while leaving y unchanged",
+            math: "q = (pₓ,p_z),  q′ = k(‖q‖²)q\nCₛ(p) = (1 − s)p + s(q′ₓ,p_y,q′ᵧ)",
             spokenMath: "Apply the radial scale using the squared length of p's x-z components, while leaving the y component unchanged.",
             metal: """
             float t = clamp(op.strength, 0.0f, 1.0f);
@@ -230,7 +230,7 @@ enum TransformationEquationCatalog {
         ),
         lesson(
             .shells,
-            math: "r' = |r - d round(r/d)|; p ↦ p(r'/r)",
+            math: "r′ = |r − d·round(r/d)|,  r = ‖p‖\nSₛ(p) = (1 − s)p + s(r′/r)p",
             spokenMath: "New radius equals the absolute value of radius minus spacing times the rounded value of radius over spacing. Then multiply p by new radius over radius.",
             metal: """
             float t = clamp(op.strength, 0.0f, 1.0f);
@@ -245,7 +245,7 @@ enum TransformationEquationCatalog {
         ),
         lesson(
             .scaleRepeat,
-            math: "p ↦ p · exp(-⌊log_s |p|⌋ log s)",
+            math: "Oₛ(p) = p·exp(−⌊logₛ‖p‖⌋·log s)",
             spokenMath: "Multiply p by e raised to the power of: negative floor of the base-s logarithm of the length of p, multiplied by the natural logarithm of s. That entire product is in the exponent.",
             metal: """
             float t = clamp(op.strength, 0.0f, 1.0f);
@@ -261,7 +261,7 @@ enum TransformationEquationCatalog {
         ),
         lesson(
             .coxeter,
-            math: "[p,q]: repeatedly reflect a point behind any of three ordered mirror planes",
+            math: "rₙ(x) = x − 2 min(0,⟨x,n⟩)n\nCₚ,ᵩ(x) = (rₙ₂ ∘ rₙ₁ ∘ rₙ₀)ᵏ(x),  k ≤ 16",
             spokenMath: "Repeatedly reflect the point whenever it lies behind any of three mirror planes determined by the two orders p and q.",
             metal: """
             float t = clamp(op.strength, 0.0f, 1.0f);
@@ -298,7 +298,7 @@ enum TransformationEquationCatalog {
         ),
         lesson(
             .planeFold,
-            math: "if ⟨p,n⟩ < d, p ↦ p - 2(⟨p,n⟩-d)n · s",
+            math: "Fₙ,ᵈ,ₛ(p) = p − 2s·min(0,⟨p,n⟩ − d)n",
             spokenMath: "If the dot product of p and normal n is less than distance d, subtract two times that signed difference, times n, times s.",
             metal: """
             float intensity = clamp(op.strength, 0.0f, 1.0f);
@@ -315,7 +315,7 @@ enum TransformationEquationCatalog {
         ),
         lesson(
             .mengerFold,
-            math: "p ↦ sortDescending(|p|)",
+            math: "Mₛ(p) = (1 − s)p + s·sort↓(|p|)",
             spokenMath: "Replace p with its component-wise absolute value, then sort the three coordinates from greatest to least.",
             metal: """
             float t = clamp(op.strength, 0.0f, 1.0f);
@@ -335,7 +335,7 @@ enum TransformationEquationCatalog {
         ),
         lesson(
             .tiling,
-            math: "p ↦ p - size · round(p/size)",
+            math: "Tₗ(p) = p − L·round(p/L)",
             spokenMath: "Output equals p minus cell size times the component-wise rounded value of p divided by cell size.",
             metal: """
             float t = clamp(op.strength, 0.0f, 1.0f);
@@ -347,7 +347,7 @@ enum TransformationEquationCatalog {
         ),
         lesson(
             .scale,
-            math: "p ↦ s p",
+            math: "Sₛ(p) = sp",
             spokenMath: "Output equals s multiplied by p.",
             metal: "p = p * op.strength;",
             hint: "Here `op.strength` is the signed uniform factor itself, not a 0…1 blend. The renderer applies its distance correction separately.",
@@ -355,7 +355,7 @@ enum TransformationEquationCatalog {
         ),
         lesson(
             .offsetFold,
-            math: "p ↦ (1-s)p + s|p+c|",
+            math: "Fₛ,c(p) = (1 − s)p + s|p + c|",
             spokenMath: "Output equals one minus s, times p, plus s times the component-wise absolute value of the complete sum p plus offset c.",
             metal: """
             float t = clamp(op.strength, 0.0f, 1.0f);
@@ -383,7 +383,7 @@ enum TransformationEquationCatalog {
         ),
         lesson(
             .icosahedralCut,
-            math: "{5,3}: repeatedly reflect a point into the fixed fundamental chamber",
+            math: "rₙ(x) = x − 2 min(0,⟨x,n⟩)n\nI₅,₃(x) = (rₙ₂ ∘ rₙ₁ ∘ rₙ₀)ᵏ(x),  k ≤ 20",
             spokenMath: "Repeatedly reflect the point into the fundamental chamber defined by the fixed orders five and three.",
             metal: """
             float t = clamp(op.strength, 0.0f, 1.0f);
@@ -422,13 +422,13 @@ enum TransformationEquationCatalog {
 
     /// Builds a compact toolbox from the actual Metal used by a lesson, so the
     /// learner sees useful notation before typing without receiving the answer.
-    static func cheatSheet(for lesson: TransformationEquationLesson) -> [TransformationEquationCheatSheetEntry] {
+    static func metalVocabulary(for lesson: TransformationEquationLesson) -> [TransformationMetalVocabularyEntry] {
         let source = lesson.metalNotation
-        var mathEntries: [TransformationEquationCheatSheetEntry] = [
+        var mathEntries: [TransformationMetalVocabularyEntry] = [
             .init(notation: "p = expression;",
                   meaning: "Assign the transformed float3 point back to p."),
         ]
-        var fieldEntries: [TransformationEquationCheatSheetEntry] = []
+        var fieldEntries: [TransformationMetalVocabularyEntry] = []
 
         func addMath(_ notation: String, _ meaning: String, when condition: Bool) {
             guard condition, !mathEntries.contains(where: { $0.notation == notation }) else { return }
@@ -657,13 +657,13 @@ enum TransformationExperienceMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var displayName: String {
         switch self {
-        case .education: return "Education"
-        case .justUse: return "Just Use"
+        case .education: return "Learn"
+        case .justUse: return "Edit"
         }
     }
 
     static func decode(_ storedValue: String) -> TransformationExperienceMode {
-        TransformationExperienceMode(rawValue: storedValue) ?? .education
+        TransformationExperienceMode(rawValue: storedValue) ?? .justUse
     }
 }
 
@@ -911,6 +911,7 @@ enum TransformationAccessPolicy {
 }
 
 enum TransformationAssistanceStage: Int, Comparable {
+    case theory
     case vocabulary
     case hint
     case fullAnswer
@@ -922,6 +923,7 @@ enum TransformationAssistanceStage: Int, Comparable {
 }
 
 enum TransformationAssistanceEvent {
+    case showVocabulary
     case requestHint
     case revealAnswer
 }
@@ -932,10 +934,13 @@ enum TransformationAssistancePolicy {
     static func advance(from stage: TransformationAssistanceStage,
                         event: TransformationAssistanceEvent,
                         isMapped: Bool,
-                        isFocused: Bool) -> TransformationAssistanceStage {
+        isFocused: Bool) -> TransformationAssistanceStage {
         switch event {
-        case .requestHint:
+        case .showVocabulary:
             guard isFocused else { return stage }
+            return max(stage, .vocabulary)
+        case .requestHint:
+            guard isFocused, stage >= .vocabulary else { return stage }
             return max(stage, .hint)
         case .revealAnswer:
             guard isMapped || (isFocused && stage >= .hint) else { return stage }

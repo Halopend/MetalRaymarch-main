@@ -1,5 +1,5 @@
 //
-//  UISettingsCacheTests.swift
+//  ControlStateStoreTests.swift
 //  ThresholdTests
 //
 //  Guards UI-to-renderer writes and the platform-specific live-stat refresh
@@ -12,7 +12,7 @@ import simd
 
 @MainActor
 @Suite("UI settings cache synchronization")
-struct UISettingsCacheTests {
+struct ControlStateStoreTests {
 
     @Test("platform visibility updates both cache and RenderSettings")
     func platformVisibilityPushesToRenderSettings() {
@@ -20,7 +20,7 @@ struct UISettingsCacheTests {
         settings.withPersistenceSuppressed {
             settings.platformEnabled = true
             settings.platformRadius = 1.4
-            let cache = UISettingsCache(renderSettings: settings)
+            let cache = ControlStateStore(renderSettings: settings)
 
             cache.setPlatformEnabled(false)
 
@@ -38,7 +38,7 @@ struct UISettingsCacheTests {
             settings.platformEnabled = false
             settings.boundingShapeType = SafetyBubbleShapePreset.dodecahedron.storedValue
 
-            let cache = UISettingsCache(renderSettings: settings)
+            let cache = ControlStateStore(renderSettings: settings)
 
             #expect(cache.display.platformEnabled == false)
             #expect(cache.quality.boundingShapeType == SafetyBubbleShapePreset.dodecahedron.storedValue)
@@ -54,7 +54,7 @@ struct UISettingsCacheTests {
         settings.withPersistenceSuppressed {
             settings.boundingSphereSkipEnabled = false
             settings.boundingShapeType = SafetyBubbleShapePreset.dodecahedron.storedValue
-            let cache = UISettingsCache(renderSettings: settings)
+            let cache = ControlStateStore(renderSettings: settings)
 
             cache.setBoundingShapeEnabled(true)
 
@@ -71,7 +71,7 @@ struct UISettingsCacheTests {
             settings.boundingSphereSkipEnabled = true
             settings.boundToSpaceEnabled = false
             settings.envScrunchEnabled = true
-            let cache = UISettingsCache(renderSettings: settings)
+            let cache = ControlStateStore(renderSettings: settings)
 
             #expect(cache.mixedContainment == .custom)
             cache.applyMixedContainment(.space)
@@ -94,9 +94,9 @@ struct UISettingsCacheTests {
             settings.boundingShapeRadius = 2.75
             settings.boundingShapeType = SafetyBubbleShapePreset.icosahedron.storedValue
             settings.spaceWarpStack = [SpaceWarpOpValue(kind: .icosahedralCut)]
-            let cache = UISettingsCache(renderSettings: settings)
+            let cache = ControlStateStore(renderSettings: settings)
 
-            cache.promoteBoundingShapeToSeed(gestureController: nil)
+            cache.promoteBoundingShapeToSeed()
 
             #expect(settings.fractalType == .constructionPrimitive)
             #expect(FractalPrimitiveKind(
@@ -117,7 +117,7 @@ struct UISettingsCacheTests {
             settings.fractalScale = 4.25
             settings.position = SIMD3<Float>(1, 2, 3)
             settings.detailScale = 0.125
-            let cache = UISettingsCache(renderSettings: settings)
+            let cache = ControlStateStore(renderSettings: settings)
 
             cache.refreshLiveStats(
                 isAppActive: true,
@@ -151,6 +151,30 @@ struct UISettingsCacheTests {
             )
             #expect(cache.liveFractalIterations == 21)
             #expect(cache.liveFPS == 90)
+        }
+    }
+
+    @Test("Transform slider writes stay value-only while structural edits invalidate projections")
+    func transformMirrorSeparatesValuesFromStructure() {
+        let settings = RenderSettings()
+        settings.withPersistenceSuppressed {
+            let operation = SpaceWarpOpValue(kind: .twist)
+            settings.spaceWarpStack = [operation]
+            let cache = ControlStateStore(renderSettings: settings)
+            let initialRevision = cache.spaceWarpStructureRevision
+
+            #expect(cache.updateSpaceWarpOp(id: operation.id) { $0.strength = 0.25 })
+            #expect(cache.spaceWarpStack.first?.strength == 0.25)
+            #expect(settings.spaceWarpStack.first?.strength == 0.25)
+            #expect(cache.spaceWarpStructureRevision == initialRevision)
+
+            var expanded = cache.spaceWarpStack
+            expanded.append(SpaceWarpOpValue(kind: .mirror))
+            cache.replaceSpaceWarpStack(expanded)
+
+            #expect(cache.spaceWarpStack.map(\.kind) == [.twist, .mirror])
+            #expect(settings.spaceWarpStack.map(\.kind) == [.twist, .mirror])
+            #expect(cache.spaceWarpStructureRevision == initialRevision + 1)
         }
     }
 }

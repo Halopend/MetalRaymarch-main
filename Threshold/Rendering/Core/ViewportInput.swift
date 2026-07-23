@@ -6,54 +6,66 @@ import AppKit
 import MetalKit
 #endif
 
-/// Movement keys for the desktop/iPad fly-through camera (WASD + shift to rise/fall).
-enum ThresholdMacMovementKey: Hashable, Sendable {
-    case forward
-    case backward
-    case left
-    case right
+/// Compact held-key state shared by macOS and iPadOS viewport adapters.
+struct ViewportMovementKeys: OptionSet, Hashable, Sendable {
+    let rawValue: UInt8
+
+    static let forward  = Self(rawValue: 1 << 0)
+    static let backward = Self(rawValue: 1 << 1)
+    static let left     = Self(rawValue: 1 << 2)
+    static let right    = Self(rawValue: 1 << 3)
 }
 
-/// One frame's worth of accumulated viewport input, drained by the renderer.
-struct ThresholdMacInputFrame: Sendable {
-    var pressedKeys: Set<ThresholdMacMovementKey> = []
+/// Compact edge-triggered actions. They are cleared after every renderer drain.
+struct ViewportInputActions: OptionSet, Hashable, Sendable {
+    let rawValue: UInt8
+
+    static let togglePlayback = Self(rawValue: 1 << 0)
+    static let resetView      = Self(rawValue: 1 << 1)
+}
+
+/// One frame's accumulated viewport input. Draining copies only value types and
+/// performs no heap allocation; held state survives while deltas/actions clear.
+struct ViewportInputFrame: Sendable {
+    var heldKeys: ViewportMovementKeys = []
     var isShiftPressed: Bool = false
     var orbitDelta: SIMD2<Float> = .zero
     var panDelta: SIMD2<Float> = .zero
     var zoomDelta: Float = 0
-    var shouldTogglePlayback = false
-    var shouldResetView = false
+    var actions: ViewportInputActions = []
     // Net scene-switch steps requested this frame (left/right arrow keys).
     // Positive = advance, negative = go back.
     var sceneStep = 0
+
+    var shouldTogglePlayback: Bool { actions.contains(.togglePlayback) }
+    var shouldResetView: Bool { actions.contains(.resetView) }
 }
 
-#if os(macOS)
-protocol ThresholdMacViewportInputDelegate: AnyObject {
-    func viewportDidChangeFocus(_ isFocused: Bool)
-    func viewportDidOrbit(delta: SIMD2<Float>)
-    func viewportDidPan(delta: SIMD2<Float>)
-    func viewportDidZoom(delta: Float)
-    func viewportDidChangeKey(_ key: ThresholdMacMovementKey, isPressed: Bool)
-    func viewportDidChangeShift(_ isPressed: Bool)
-    func viewportDidTogglePlayback()
-    func viewportDidRequestReset()
-    func viewportDidRequestSceneStep(_ step: Int)
+/// The single native-adapter boundary for mouse, trackpad, touch, and hardware
+/// keyboard events. Platform views translate events; this sink owns semantics.
+protocol ViewportInputSink: AnyObject {
+    func setFocus(_ isFocused: Bool)
+    func addOrbit(delta: SIMD2<Float>)
+    func addPan(delta: SIMD2<Float>)
+    func addZoom(delta: Float)
+    func setMovementKey(_ key: ViewportMovementKeys, isPressed: Bool)
+    func setShiftPressed(_ isPressed: Bool)
+    func requestPlaybackToggle()
+    func requestReset()
+    func requestSceneStep(_ step: Int)
 }
-#endif
 
 /// Thread-safe accumulator that collects viewport input events (from AppKit/UIKit
 /// on the main thread) and hands the renderer a snapshot once per frame. State is
 /// guarded by a `Mutex` so the render thread's `consumeFrame()` is race-free.
-final class ThresholdMacInputController: Sendable {
+final class ViewportInputAccumulator: ViewportInputSink, Sendable {
     private struct State {
-        var pressedKeys: Set<ThresholdMacMovementKey> = []
+        var heldKeys: ViewportMovementKeys = []
         var isShiftPressed: Bool = false
         var orbitDelta: SIMD2<Float> = .zero
         var panDelta: SIMD2<Float> = .zero
         var zoomDelta: Float = 0
-        var shouldTogglePlayback = false
-        var shouldResetView = false
+        var actions: ViewportInputActions = []
         var sceneStep = 0
     }
 
@@ -62,23 +74,22 @@ final class ThresholdMacInputController: Sendable {
     func setFocus(_ isFocused: Bool) {
         guard !isFocused else { return }
         state.withLock { current in
-            current.pressedKeys.removeAll()
+            current.heldKeys = []
             current.isShiftPressed = false
             current.orbitDelta = .zero
             current.panDelta = .zero
             current.zoomDelta = 0
-            current.shouldTogglePlayback = false
-            current.shouldResetView = false
+            current.actions = []
             current.sceneStep = 0
         }
     }
 
-    func setMovementKey(_ key: ThresholdMacMovementKey, isPressed: Bool) {
+    func setMovementKey(_ key: ViewportMovementKeys, isPressed: Bool) {
         state.withLock { current in
             if isPressed {
-                current.pressedKeys.insert(key)
+                current.heldKeys.insert(key)
             } else {
-                current.pressedKeys.remove(key)
+                current.heldKeys.remove(key)
             }
         }
     }
@@ -108,14 +119,14 @@ final class ThresholdMacInputController: Sendable {
     }
 
     func requestPlaybackToggle() {
-        state.withLock { current in
-            current.shouldTogglePlayback = true
+        _ = state.withLock { current in
+            current.actions.insert(.togglePlayback)
         }
     }
 
     func requestReset() {
-        state.withLock { current in
-            current.shouldResetView = true
+        _ = state.withLock { current in
+            current.actions.insert(.resetView)
         }
     }
 
@@ -125,23 +136,21 @@ final class ThresholdMacInputController: Sendable {
         }
     }
 
-    func consumeFrame() -> ThresholdMacInputFrame {
+    func consumeFrame() -> ViewportInputFrame {
         state.withLock { current in
-            let frame = ThresholdMacInputFrame(
-                pressedKeys: current.pressedKeys,
+            let frame = ViewportInputFrame(
+                heldKeys: current.heldKeys,
                 isShiftPressed: current.isShiftPressed,
                 orbitDelta: current.orbitDelta,
                 panDelta: current.panDelta,
                 zoomDelta: current.zoomDelta,
-                shouldTogglePlayback: current.shouldTogglePlayback,
-                shouldResetView: current.shouldResetView,
+                actions: current.actions,
                 sceneStep: current.sceneStep
             )
             current.orbitDelta = .zero
             current.panDelta = .zero
             current.zoomDelta = 0
-            current.shouldTogglePlayback = false
-            current.shouldResetView = false
+            current.actions = []
             current.sceneStep = 0
             return frame
         }
@@ -161,7 +170,8 @@ final class ThresholdMacInteractiveView: MTKView {
         case pan
     }
 
-    weak var inputDelegate: (any ThresholdMacViewportInputDelegate)?
+    weak var inputSink: (any ViewportInputSink)?
+    var shouldAcceptViewportInput: () -> Bool = { true }
     private var dragMode: DragMode?
     private var primaryMouseDownLocation: CGPoint?
     private var primaryDragDistance: CGFloat = 0
@@ -233,11 +243,12 @@ final class ThresholdMacInteractiveView: MTKView {
     override func resignFirstResponder() -> Bool {
         let resigned = super.resignFirstResponder()
         dragMode = nil
-        inputDelegate?.viewportDidChangeFocus(false)
+        inputSink?.setFocus(false)
         return resigned
     }
 
     override func mouseDown(with event: NSEvent) {
+        guard shouldAcceptViewportInput() else { return }
         primaryMouseDownLocation = event.locationInWindow
         primaryDragDistance = 0
         beginInteraction(mode: event.modifierFlags.contains(.option) ? .pan : .orbit)
@@ -254,7 +265,8 @@ final class ThresholdMacInteractiveView: MTKView {
             primaryMouseDownLocation = nil
             primaryDragDistance = 0
         }
-        guard primaryMouseDownLocation != nil,
+        guard event.clickCount >= 2,
+              primaryMouseDownLocation != nil,
               primaryDragDistance <= clickMovementTolerance else { return }
         NotificationCenter.default.post(
             name: Self.didClickViewportNotification,
@@ -264,6 +276,7 @@ final class ThresholdMacInteractiveView: MTKView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        guard shouldAcceptViewportInput() else { return }
         beginInteraction(mode: .pan)
     }
 
@@ -276,6 +289,7 @@ final class ThresholdMacInteractiveView: MTKView {
     }
 
     override func otherMouseDown(with event: NSEvent) {
+        guard shouldAcceptViewportInput() else { return }
         beginInteraction(mode: .pan)
     }
 
@@ -288,16 +302,18 @@ final class ThresholdMacInteractiveView: MTKView {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        guard shouldAcceptViewportInput() else { return }
         _ = window?.makeFirstResponder(self)
-        inputDelegate?.viewportDidChangeFocus(true)
+        inputSink?.setFocus(true)
         let multiplier: Float = event.hasPreciseScrollingDeltas ? 1.0 : 6.0
-        inputDelegate?.viewportDidZoom(delta: Float(event.scrollingDeltaY) * multiplier)
+        inputSink?.addZoom(delta: Float(event.scrollingDeltaY) * multiplier)
     }
 
     override func magnify(with event: NSEvent) {
+        guard shouldAcceptViewportInput() else { return }
         _ = window?.makeFirstResponder(self)
-        inputDelegate?.viewportDidChangeFocus(true)
-        inputDelegate?.viewportDidZoom(delta: -Float(event.magnification) * 18.0)
+        inputSink?.setFocus(true)
+        inputSink?.addZoom(delta: -Float(event.magnification) * 18.0)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -315,17 +331,20 @@ final class ThresholdMacInteractiveView: MTKView {
     }
 
     override func flagsChanged(with event: NSEvent) {
-        inputDelegate?.viewportDidChangeShift(event.modifierFlags.contains(.shift))
+        if shouldAcceptViewportInput() {
+            inputSink?.setShiftPressed(event.modifierFlags.contains(.shift))
+        }
         super.flagsChanged(with: event)
     }
 
     private func beginInteraction(mode: DragMode) {
         _ = window?.makeFirstResponder(self)
-        inputDelegate?.viewportDidChangeFocus(true)
+        inputSink?.setFocus(true)
         dragMode = mode
     }
 
     private func handleDrag(_ event: NSEvent, fallbackMode: DragMode) {
+        guard shouldAcceptViewportInput() else { return }
         let delta = SIMD2<Float>(Float(event.deltaX), Float(event.deltaY))
         guard simd_length_squared(delta) > 0 else { return }
 
@@ -338,13 +357,14 @@ final class ThresholdMacInteractiveView: MTKView {
 
         switch activeMode {
         case .orbit:
-            inputDelegate?.viewportDidOrbit(delta: delta)
+            inputSink?.addOrbit(delta: delta)
         case .pan:
-            inputDelegate?.viewportDidPan(delta: delta)
+            inputSink?.addPan(delta: delta)
         }
     }
 
     private func handleKey(_ event: NSEvent, isPressed: Bool) -> Bool {
+        guard shouldAcceptViewportInput() else { return false }
         // Left/right arrows switch jumping-off scenes. Handled via virtual key
         // codes (123 = left, 124 = right) since arrow keys carry function-key
         // unicode rather than plain characters. Fire once per press (not on
@@ -352,12 +372,12 @@ final class ThresholdMacInteractiveView: MTKView {
         switch event.keyCode {
         case 123:
             if isPressed && !event.isARepeat {
-                inputDelegate?.viewportDidRequestSceneStep(-1)
+                inputSink?.requestSceneStep(-1)
             }
             return true
         case 124:
             if isPressed && !event.isARepeat {
-                inputDelegate?.viewportDidRequestSceneStep(1)
+                inputSink?.requestSceneStep(1)
             }
             return true
         default:
@@ -372,25 +392,25 @@ final class ThresholdMacInteractiveView: MTKView {
         for character in characters {
             switch character {
             case "w":
-                inputDelegate?.viewportDidChangeKey(.forward, isPressed: isPressed)
+                inputSink?.setMovementKey(.forward, isPressed: isPressed)
                 handled = true
             case "s":
-                inputDelegate?.viewportDidChangeKey(.backward, isPressed: isPressed)
+                inputSink?.setMovementKey(.backward, isPressed: isPressed)
                 handled = true
             case "a":
-                inputDelegate?.viewportDidChangeKey(.left, isPressed: isPressed)
+                inputSink?.setMovementKey(.left, isPressed: isPressed)
                 handled = true
             case "d":
-                inputDelegate?.viewportDidChangeKey(.right, isPressed: isPressed)
+                inputSink?.setMovementKey(.right, isPressed: isPressed)
                 handled = true
             case " ":
                 if isPressed && !event.isARepeat {
-                    inputDelegate?.viewportDidTogglePlayback()
+                    inputSink?.requestPlaybackToggle()
                 }
                 handled = true
             case "r":
                 if isPressed && !event.isARepeat {
-                    inputDelegate?.viewportDidRequestReset()
+                    inputSink?.requestReset()
                 }
                 handled = true
             default:

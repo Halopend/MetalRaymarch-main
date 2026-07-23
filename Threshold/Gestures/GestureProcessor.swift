@@ -1,5 +1,5 @@
 //
-//  GestureController.swift
+//  GestureProcessor.swift
 //  Threshold
 //
 //  Two-hand gesture controls for fractal parameters
@@ -14,12 +14,9 @@
 //
 
 import Foundation
-#if os(visionOS)
-import ARKit
-#endif
 import simd
 
-// MARK: - Gesture Controller
+// MARK: - Gesture Processor
 
 /// Processes hand tracking data and maps gestures to render parameters
 /// 
@@ -27,16 +24,18 @@ import simd
 /// - Both hands must pinch with the SAME finger to activate a gesture
 /// - Parameter scales RELATIVELY: if hands move 2× apart, parameter doubles
 /// - Smoothing prevents jitter and provides natural feel
-@MainActor
-final class GestureController {
+actor GestureProcessor {
     let parameterPipeline: ParameterPipeline
     private var operationFrameCounter: UInt64 = 0
     private let menuToggleEngine = MenuToggleGestureEngine()
     private let perFingerTapEngine = PerFingerTapGestureEngine()
-    private let twoHandScalarEngine = TwoHandScalarGestureEngine()
-    private let twoPointGrabEngine = TwoPointGrabEngine()
-    private let singleHandDragEngine = SingleHandDragEngine()
+    private var twoHandScalarState = TwoHandScalarEngineState()
+    private var twoPointGrabState = TwoPointGrabGestureState()
+    private var singleHandDragState = SingleHandDragEngineState()
     private var armSliderState = ArmSliderGestureState()
+    private var configuration = GestureConfigurationSnapshot.initial
+    private var didUseGesture = false
+    private var lastPublishedUsageTime: TimeInterval = -.infinity
 
     // ==========================================================================
     // PER-FRACTAL PARAMETER RANGES  (cached from FractalTypeDescriptor)
@@ -64,16 +63,10 @@ final class GestureController {
         cachedRanges
     }
 
-    @discardableResult
-    func saveCurrentAsFractalDefaults() -> Bool {
-        guard let settings = renderSettings else { return false }
-        return FractalDefaultsStore.saveCurrentAsFractalDefaults(from: settings)
-    }
-    
     /// When true, parameter-changing gestures are suppressed so pinching and dragging
     /// menu controls does not also manipulate the scene. Menu toggle remains active
     /// so the gesture can still close or recover the menu window.
-    var suppressParameterGestures: Bool = false
+    private var suppressParameterGestures = false
     
     // Hand tracking state
     private var leftHand: HandData = .zero
@@ -99,28 +92,21 @@ final class GestureController {
     }
 
     private var twoHandStateByDigit: [Int: TwoHandGestureState] {
-        get { twoHandScalarEngine.state.perDigit }
-        set { twoHandScalarEngine.state.perDigit = newValue }
+        get { twoHandScalarState.perDigit }
+        set { twoHandScalarState.perDigit = newValue }
     }
 
     private var grabState: TwoPointGrabGestureState {
-        get { twoPointGrabEngine.state }
-        set { twoPointGrabEngine.state = newValue }
+        get { twoPointGrabState }
+        set { twoPointGrabState = newValue }
     }
 
     private var singleHandState: SingleHandDragEngineState {
-        get { singleHandDragEngine.state }
-        set { singleHandDragEngine.state = newValue }
+        get { singleHandDragState }
+        set { singleHandDragState = newValue }
     }
 
     
-    // Gesture callbacks
-    var onMenuToggle: (() -> Void)?
-    var onAnimationPlayerToggle: (() -> Void)?
-    var onOpenShapeMenu: (() -> Void)?
-    var onOpenRenderMenu: (() -> Void)?
-    var onOpenQuickToggles: (() -> Void)?
-
     // Reference to render settings
     private weak var renderSettings: RenderSettings?
     
@@ -129,54 +115,59 @@ final class GestureController {
         self.renderSettings = renderSettings
         self.parameterPipeline = parameterPipeline
         
-        // Initialize drag engine state from current settings
-        singleHandDragEngine.reset(accumulatedPosition: renderSettings.position)
+        singleHandDragState.accumulatedPosition = renderSettings.position
     }
     
     func setDebugTraceEnabled(_ enabled: Bool) {
         parameterPipeline.setDebugTraceEnabled(enabled)
     }
 
+    func setParameterGesturesSuppressed(_ suppressed: Bool) {
+        suppressParameterGestures = suppressed
+    }
+
     /// Sync internal state with current render settings.
     /// Call this after loading a preset to prevent jumps when gestures resume.
     func syncWithSettings() {
         guard let settings = renderSettings else { return }
-        singleHandDragEngine.state.accumulatedPosition = settings.effectiveTargetPosition
+        singleHandDragState.accumulatedPosition = settings.effectiveTargetPosition
         refreshCachedDescriptorValues()
         
         // Reset all gesture states to avoid stale data
-        twoHandScalarEngine.reset()
-        twoPointGrabEngine.reset()
-        singleHandDragEngine.reset(accumulatedPosition: settings.effectiveTargetPosition)
+        twoHandScalarState = TwoHandScalarEngineState()
+        twoPointGrabState = TwoPointGrabGestureState()
+        singleHandDragState = SingleHandDragEngineState(
+            perSlot: [:],
+            accumulatedPosition: settings.effectiveTargetPosition
+        )
         menuToggleEngine.reset()
         perFingerTapEngine.reset()
         armSliderState.left = ArmSliderHandState()
         armSliderState.right = ArmSliderHandState()
     }
     
-    /// Apply default parameter values for the current fractal type.
-    /// Call this when switching fractal types to get good starting values.
-    func applyFractalDefaults() {
-        guard let settings = renderSettings else { return }
-        FractalDefaultsStore.applyFractalDefaults(for: settings.fractalType, to: settings)
-        
-        // Reset gesture states
-        syncWithSettings()
-    }
-    
     // MARK: - Hand Tracking Updates
     
-    /// Update hand data from ARKit hand anchors.
-    /// Called every frame via async dispatch. Sets TARGET values on RenderSettings.
-    /// The Renderer's interpolateToTargets() handles smooth animation at 90Hz.
-    /// - Parameter deltaTime: Time since last hand tracking update (not used for smoothing anymore)
-#if os(visionOS)
-    @available(visionOS 2.0, *)
-    func updateHands(leftAnchor: HandAnchor?, rightAnchor: HandAnchor?, deltaTime: Float = 1.0/90.0) {
+    /// Processes one Sendable pose snapshot on this actor's serial executor.
+    func process(_ snapshot: HandPoseSnapshot) -> GestureOutput {
         operationFrameCounter &+= 1
         refreshCachedDescriptorValues()
-        leftHand = buildHandData(from: leftAnchor)
-        rightHand = buildHandData(from: rightAnchor)
+        leftHand = snapshot.leftHand
+        rightHand = snapshot.rightHand
+        let deltaTime = snapshot.deltaTime
+
+        if let settings = renderSettings,
+           let updated = settings.gestureConfigurationSnapshot(ifNewerThan: configuration.version) {
+            configuration = updated
+            perFingerTapEngine.isEnabled = updated.perFingerTapEnabled
+            perFingerTapEngine.leftHandActions = updated.leftTapActions
+            perFingerTapEngine.rightHandActions = updated.rightTapActions
+            perFingerTapEngine.activateThreshold = updated.tapActivateThreshold
+            perFingerTapEngine.releaseThreshold = updated.tapReleaseThreshold
+            perFingerTapEngine.holdDuration = updated.tapHoldDuration
+            perFingerTapEngine.cooldown = updated.tapCooldown
+        }
+        didUseGesture = false
 
         // Track left hand stability: count continuous frames of tracking.
         // Resets when the left hand disappears from tracking.
@@ -191,8 +182,8 @@ final class GestureController {
         leftHandWasTracked = leftHand.isTracked
         
         // Update cooldown timers in engine states
-        if twoPointGrabEngine.state.endCooldown > 0 {
-            twoPointGrabEngine.state.endCooldown = max(0, twoPointGrabEngine.state.endCooldown - deltaTime)
+        if twoPointGrabState.endCooldown > 0 {
+            twoPointGrabState.endCooldown = max(0, twoPointGrabState.endCooldown - deltaTime)
         }
         
         // Process all gesture mappings (sets targets on RenderSettings)
@@ -201,135 +192,45 @@ final class GestureController {
         // Process special gestures
         let context = GestureContext(leftHand: leftHand, rightHand: rightHand, deltaTime: deltaTime)
 
-        // Sync per-finger tap engine config from settings each frame
-        if let settings = renderSettings {
-            perFingerTapEngine.isEnabled = settings.perFingerTapGestureEnabled
-            perFingerTapEngine.leftHandActions = settings.perFingerTapLeftActions
-            perFingerTapEngine.rightHandActions = settings.perFingerTapRightActions
-            perFingerTapEngine.activateThreshold = settings.perFingerTapActivateThreshold
-            perFingerTapEngine.releaseThreshold = settings.perFingerTapReleaseThreshold
-            perFingerTapEngine.holdDuration = settings.perFingerTapHoldDuration
-            perFingerTapEngine.cooldown = settings.perFingerTapCooldown
-        }
-
-        // Run per-finger tap engine (handles both menu and animation-player toggles)
+        var commands: [AppCommand] = []
+        // Run per-finger tap engine. It cannot emit the recovery-menu command.
         let tapOps = perFingerTapEngine.process(context: context)
-        var didToggleMenu = false
         for op in tapOps {
             switch op {
-            case .toggleMenu:
-                didToggleMenu = true
-                onMenuToggle?()
+            case .toggleMenu: break
             case .toggleAnimationPlayer:
-                onAnimationPlayerToggle?()
+                commands.append(.toggleAnimationPlayback)
             case .openShapeMenu:
-                onOpenShapeMenu?()
+                commands.append(.selectRoute(.shape(.parameters)))
             case .openRenderMenu:
-                onOpenRenderMenu?()
+                commands.append(.selectRoute(.quality(.tuning)))
             case .openQuickToggles:
-                onOpenQuickToggles?()
+                commands.append(.selectRoute(.quickToggles))
             default:
                 break
             }
         }
 
-        // Menu-toggle engine (supplements per-finger tap)
-        if !didToggleMenu, let settings = renderSettings {
-            let ops = menuToggleEngine.process(context: context, settings: settings)
-            if ops.contains(where: { if case .toggleMenu = $0 { return true } else { return false } }) {
-                onMenuToggle?()
-            }
+        // The recovery engine always runs, including during parameter suppression.
+        let menuOps = menuToggleEngine.process(context: context, configuration: configuration)
+        if menuOps.contains(.toggleMenu) {
+            commands.append(.toggleRadialMenu)
         }
 
         processArmSliderGesture(deltaTime: deltaTime)
+        let publishUsage = didUseGesture && snapshot.timestamp - lastPublishedUsageTime >= 1
+        if publishUsage { lastPublishedUsageTime = snapshot.timestamp }
+        return GestureOutput(
+            commands: commands,
+            diagnostics: GestureDiagnostics(
+                leftTracked: leftHand.isTracked,
+                rightTracked: rightHand.isTracked,
+                activeGestureIndex: renderSettings?.activeGestureIndex ?? 0,
+                parametersSuppressed: suppressParameterGestures
+            ),
+            didUseGesture: publishUsage
+        )
     }
-#endif
-
-#if os(visionOS)
-    @available(visionOS 2.0, *)
-    private func buildHandData(from anchor: HandAnchor?) -> HandData {
-        guard let anchor = anchor, anchor.isTracked else {
-            return .zero
-        }
-        
-        var data = HandData()
-        data.isTracked = true
-        
-        let skeleton = anchor.handSkeleton
-        let transform = anchor.originFromAnchorTransform
-        
-        // Helper to get world position of a joint
-        func jointPosition(_ jointName: HandSkeleton.JointName) -> SIMD3<Float> {
-            guard let joint = skeleton?.joint(jointName), joint.isTracked else {
-                return .zero
-            }
-            let localTransform = joint.anchorFromJointTransform
-            let worldTransform = transform * localTransform
-            return SIMD3<Float>(worldTransform.columns.3.x, worldTransform.columns.3.y, worldTransform.columns.3.z)
-        }
-        
-        // Extract finger positions
-        data.thumbTip = jointPosition(.thumbTip)
-        data.indexTip = jointPosition(.indexFingerTip)
-        data.middleTip = jointPosition(.middleFingerTip)
-        data.ringTip = jointPosition(.ringFingerTip)
-        data.pinkyTip = jointPosition(.littleFingerTip)
-        
-        // Palm position (use wrist or middle metacarpal)
-        data.palmPosition = jointPosition(.middleFingerMetacarpal)
-
-        // Wrist position
-        data.wristPosition = jointPosition(.wrist)
-
-        // Forearm segment (elbow → wrist) for the arm-slider music gesture.
-        data.forearmWrist = jointPosition(.forearmWrist)
-        data.forearmElbow = jointPosition(.forearmArm)
-        data.forearmTracked = simd_length_squared(data.forearmWrist) > 1e-6
-            && simd_length_squared(data.forearmElbow) > 1e-6
-
-        // Palm center (average of metacarpals for more accurate palm detection)
-        // OPTIMIZATION: Use SIMD addition with single multiply instead of 4 multiplies
-        let indexMeta = jointPosition(.indexFingerMetacarpal)
-        let middleMeta = jointPosition(.middleFingerMetacarpal)
-        let ringMeta = jointPosition(.ringFingerMetacarpal)
-        let pinkyMeta = jointPosition(.littleFingerMetacarpal)
-        data.palmCenter = (indexMeta + middleMeta + ringMeta + pinkyMeta) * 0.25
-
-        // Palm normal: cross product of two vectors spanning the palm surface.
-        // Uses index metacarpal → pinky metacarpal and wrist → middle metacarpal to define the plane.
-        let palmEdge1 = pinkyMeta - indexMeta
-        let palmEdge2 = middleMeta - data.wristPosition
-        let rawNormal = simd_cross(palmEdge1, palmEdge2)
-        let normalLen = simd_length(rawNormal)
-        data.palmNormal = normalLen > 1e-6 ? rawNormal / normalLen : .zero
-        
-        // Calculate pinch values based on distance between thumb and each finger.
-        // Modeled as two fingertip "spheres": pinchMinDist is where they fully
-        // touch (strength 1.0) and maxDist is where they are far enough apart to
-        // read as no pinch (strength 0.0). The range was previously 8cm (6cm ring),
-        // which let a pinch trigger while fingertips were still ~4cm apart. Tightened
-        // so a pinch only registers near actual fingertip contact.
-        let pinchMinDist: Float = 0.02   // 2cm = full pinch (same for all)
-        let pinchMaxDist: Float = 0.05   // 5cm = released (index/middle reach)
-        let ringMaxDist: Float = 0.04    // ring has shorter reach to the thumb
-
-        func calculatePinch(fingerTip: SIMD3<Float>, maxDist: Float) -> Float {
-            // Guard against untracked joints (both at zero would give false positive)
-            if simd_length_squared(data.thumbTip) < 1e-6 || simd_length_squared(fingerTip) < 1e-6 {
-                return 0  // Can't determine pinch if joints aren't tracked
-            }
-            let distance = simd_length(data.thumbTip - fingerTip)
-            let normalized = 1.0 - ((distance - pinchMinDist) / (maxDist - pinchMinDist))
-            return simd_clamp(normalized, 0, 1)
-        }
-        
-        data.indexPinch = calculatePinch(fingerTip: data.indexTip, maxDist: pinchMaxDist)
-        data.middlePinch = calculatePinch(fingerTip: data.middleTip, maxDist: pinchMaxDist)
-        data.ringPinch = calculatePinch(fingerTip: data.ringTip, maxDist: ringMaxDist)
-        
-        return data
-    }
-        #endif
     
     // MARK: - Arm Slider (fingertip slides along the forearm → music strength)
 
@@ -364,7 +265,7 @@ final class GestureController {
         } else if leftWas {
             settings.persistAudioReactiveNow()
             armSliderState.left.hasValue = false
-            UsageAnalytics.shared.trackHandGestureUsed()
+            didUseGesture = true
         }
 
         // Right forearm ← left index fingertip → music dampening (0…max).
@@ -377,7 +278,7 @@ final class GestureController {
         } else if rightWas {
             settings.persistAudioReactiveNow()
             armSliderState.right.hasValue = false
-            UsageAnalytics.shared.trackHandGestureUsed()
+            didUseGesture = true
         }
     }
 
@@ -480,7 +381,7 @@ final class GestureController {
                         smoothing: ParameterOperationSmoothing(smoothingTime: GestureDefaults.gestureSmoothing)
                     )
                     self.parameterPipeline.dispatchGesture([op], settings: settings)
-                    UsageAnalytics.shared.trackHandGestureUsed()
+                    self.didUseGesture = true
                 }
                 twoHandStateByDigit[digit] = digitState
                 if digitState.isActive { activeDigit = digit }
@@ -565,9 +466,9 @@ final class GestureController {
     ]
 
     private typealias ShapeInfo = (
-        target: (RenderSettings) -> Float,
-        range: (GestureParamRanges) -> ClosedRange<Float>,
-        writeOffset: (RenderSettings, Float) -> Void
+        target: @Sendable (RenderSettings) -> Float,
+        range: @Sendable (GestureParamRanges) -> ClosedRange<Float>,
+        writeOffset: @Sendable (RenderSettings, Float) -> Void
     )
 
     private static let shapeActionInfo: [FingerGestureAction: ShapeInfo] = [
@@ -623,7 +524,7 @@ final class GestureController {
                 smoothing: ParameterOperationSmoothing(smoothingTime: GestureDefaults.gestureSmoothing)
             )
             parameterPipeline.dispatchGesture([op], settings: settings)
-            UsageAnalytics.shared.trackHandGestureUsed()
+            didUseGesture = true
         }
         twoHandStateByDigit[digit] = digitState
         if digitState.isActive { activeDigit = digit }
@@ -656,7 +557,7 @@ final class GestureController {
                 frameIndex: operationFrameCounter
             )
             parameterPipeline.dispatchGesture([op], settings: settings)
-            UsageAnalytics.shared.trackHandGestureUsed()
+            didUseGesture = true
         }
         twoHandStateByDigit[digit] = digitState
         if digitState.isActive { activeDigit = digit }
@@ -741,7 +642,7 @@ final class GestureController {
             // ── Apply to render settings ─────────────────────────────────
             // Direct application (intentional dispatcher bypass):
             // Position (SIMD3), rotation (quaternion), and grab-scale bypass
-            // ParameterOperationDispatcher because quaternions need slerp,
+            // ParameterPipeline because quaternions need slerp,
             // and grab requires 1:1 tracking, not scalar lerp.
             if settings.isAnimationPlaying {
                 settings.manualOffsetPosition = result.position - settings.animationBasePosition
@@ -764,7 +665,7 @@ final class GestureController {
                 singleHandState.accumulatedPosition = result.position
             }
             
-            UsageAnalytics.shared.trackHandGestureUsed()
+            didUseGesture = true
         }
         
         // === GESTURE END ===
@@ -1012,7 +913,7 @@ final class GestureController {
             // Position XYZ pinch-drag
             if active && !state.isActive {
                 state.isActive = true
-                singleHandDragEngine.state.accumulatedPosition = settings.effectiveTargetPosition
+                singleHandDragState.accumulatedPosition = settings.effectiveTargetPosition
                 state.prevPos = hand.pinchPosition(digit: digit)
                 state.prevPalm = hand.palmPosition
             }
@@ -1091,7 +992,7 @@ final class GestureController {
                         ParameterOperation(targetID: triplet.zNodeID, source: .gesture, value: state.startValues.z, frameIndex: operationFrameCounter, smoothing: tripletSmoothing),
                     ]
                     parameterPipeline.dispatchGesture(ops, settings: settings)
-                    UsageAnalytics.shared.trackHandGestureUsed()
+                    self.didUseGesture = true
                 }
                 state.prevPos = currentPos
                 activeDigit = digit
@@ -1144,7 +1045,7 @@ final class GestureController {
                     smoothing: ParameterOperationSmoothing(smoothingTime: GestureDefaults.gestureSmoothing)
                 )
                 parameterPipeline.dispatchGesture([op], settings: settings)
-                UsageAnalytics.shared.trackHandGestureUsed()
+                didUseGesture = true
                 state.prevPos = currentPos
                 activeDigit = digit
             }

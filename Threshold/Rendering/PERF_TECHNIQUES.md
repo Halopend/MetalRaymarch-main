@@ -119,7 +119,7 @@ Critically, the verification pass reveals that **the most-advertised "exotic" op
 
 **FC_DEBUG_HIERARCHICAL compile-out** — `Shaders.metal:2258-2287` — debug tint + packet overlay DCE'd when baked false. — Removes per-pixel debug branching in release. — **STATUS: 🟡 conditional** — `debug=false` baked on specialized compute pipelines; the generic empty-constants fallback keeps it a runtime branch (still false).
 
-**Mac/iOS Mutex-backed `fragmentShaderMono` cache** — `MacSpecializedPipelineCache.swift:18-51`; `RaymarchRenderView.swift:617-709` — synchronous per-frame read; async build bakes FC 0,6,7,9,12; generic pipeline used until ready. — Brings loop-unroll + DE-devirtualization to Mac/iOS without a render-thread stall. — **STATUS: ✅ active.**
+**Mac/iOS Mutex-backed `fragmentShaderMono` cache** — `ViewportSpecializedPipelineCache.swift:18-51`; `RaymarchRenderView.swift:617-709` — synchronous per-frame read; async build bakes FC 0,6,7,9,12; generic pipeline used until ready. — Brings loop-unroll + DE-devirtualization to Mac/iOS without a render-thread stall. — **STATUS: ✅ active.**
 
 **Shared-quality fallback pipelines (FC_FRACTAL_TYPE omitted)** — `RendererPipelineCache.swift:60-61,603-629`; `Renderer.swift:381-430` — prebuilds iterations/raysteps/quality-keyed pipelines (Map unrolls, DE dispatch stays runtime) to cover the first frame after a fractal-type change. — Partially-specialized coverage avoids both a sync compile and the fully-generic pipeline. — **STATUS: ✅ active.**
 
@@ -139,11 +139,11 @@ Critically, the verification pass reveals that **the most-advertised "exotic" op
 
 **Sub-native render + MetalFX spatial upscale (visionOS stereo)** — `MetalFXManager.swift:196-216`; `RendererRenderSupport.swift:785-786` — fragment renders to reduced `type2DArray`, per-eye `MTLFXSpatialScaler` reconstructs to drawable via cached views. — Raymarch cost ~scale²; the primary GPU saving when engaged. — **STATUS: 🟡 conditional** — gated on `resolutionScale < 0.999` (default 1.0). Wired and functional; not the default.
 
-**MetalFX temporal upscaling preferred over spatial (Mac/iOS)** — `MacTemporalUpscaler.swift:163-192`; `RaymarchRenderView.swift:393-411` — motion-vector pass + `MTLFXTemporalScaler` accumulates Halton-jittered history using depth + per-pixel motion; spatial is fallback. — Better stability/detail than spatial at the same low scale → push render resolution lower. — **STATUS: 🟡 conditional** — `resolutionScale < 0.985` (default 1.0), Mac/iOS only.
+**MetalFX temporal upscaling preferred over spatial (Mac/iOS)** — `ViewportTemporalUpscaler.swift:163-192`; `RaymarchRenderView.swift:393-411` — motion-vector pass + `MTLFXTemporalScaler` accumulates Halton-jittered history using depth + per-pixel motion; spatial is fallback. — Better stability/detail than spatial at the same low scale → push render resolution lower. — **STATUS: 🟡 conditional** — `resolutionScale < 0.985` (default 1.0), Mac/iOS only.
 
 **Closed-loop GPU-time dynamic resolution (retired on Mac/iOS)** — `AdaptiveResolutionController.swift` remains as an experimental implementation, but the MetalFX Definition control now maps directly to its displayed render scale. The hidden governor could push a displayed 75% setting down near its floor, obscuring both image quality and the performance effect of slider changes. visionOS retains its separate, explicitly labelled compositor auto-adjust option. — **STATUS: ⚪ inactive**.
 
-**Temporal input clamped to output/3** — `MacTemporalUpscaler.swift:22-24,73-80` — floors temporal input at `ceil(output/3)` so the lowest slider settings stay on the temporal (not spatial) path. — Keeps aggressive downscales on the higher-quality path. — **STATUS: 🟡 conditional** (temporal path only).
+**Temporal input clamped to output/3** — `ViewportTemporalUpscaler.swift:22-24,73-80` — floors temporal input at `ceil(output/3)` so the lowest slider settings stay on the temporal (not spatial) path. — Keeps aggressive downscales on the higher-quality path. — **STATUS: 🟡 conditional** (temporal path only).
 
 **RCAS sharpening fused into the resolve pass + adaptive strength** — `Shaders.metal:2938-2984,3027-3032`; `RendererRenderSupport.swift:671-679` — 5-tap noise-adaptive sharpen inline in the MetalFX resolve; host ramps `rcasStrength = clamp((1-scale)/0.67)*0.95`; shader early-outs to a single nearest tap when 0. — Recovers upscale detail in an existing pass; skips the 5-tap when nothing to sharpen. — **STATUS: 🟡 conditional** — runs only on the MetalFX resolve path (`resolutionScale<0.999`); near native it is skipped (MetalFX off anyway).
 
@@ -153,7 +153,7 @@ Critically, the verification pass reveals that **the most-advertised "exotic" op
 
 **Per-eye scaler + texture-view caching** — `MetalFXManager.swift:88-89,207-208,286-309` — views/scalers built once, reassigned (not reallocated) each frame. — Per-frame encode cost → pointer assignment. — **STATUS: 🟡 conditional** (MetalFX engaged only).
 
-**MetalFX texture/scaler reuse across frames** — `MacTemporalUpscaler.swift:85-98`; `MacSpatialUpscaler.swift:61-67` — `prepare()` early-returns when sizes match; only size changes rebuild. — Avoids allocation churn on the steady-state upscale path. — **STATUS: 🟡 conditional** (upscale path only).
+**MetalFX texture/scaler reuse across frames** — `ViewportTemporalUpscaler.swift:85-98`; `ViewportSpatialUpscaler.swift:61-67` — `prepare()` early-returns when sizes match; only size changes rebuild. — Avoids allocation churn on the steady-state upscale path. — **STATUS: 🟡 conditional** (upscale path only).
 
 **Largest-drawable selection (visionOS 26)** — `RendererRenderSupport.swift:299-352` — picks the largest-area candidate from `queryDrawables()` so the app's `resolutionScale`+MetalFX is the single quality lever (no compositor double-downscale). — Avoids stacking two quality reductions. — **STATUS: ✅ active** on visionOS 26+ (call is on the hot path; benefit only when >1 candidate returned).
 
@@ -195,7 +195,7 @@ Critically, the verification pass reveals that **the most-advertised "exotic" op
 
 **Halton (2,3) sub-pixel jitter** — `RaymarchRenderView.swift:414-428`; `Shaders.metal:1722-1723,2736-2779` — sub-pixel offset advanced per frame, baked into projection (Mac) or added to `fragCoord` (visionOS) for temporal accumulation. — Distinct sub-pixel coverage drives detail reconstruction above render resolution. — **STATUS: 🟡 conditional** — the add executes every frame but `jitterOffset` is .zero unless TAA (visionOS, scale<0.999) or the Mac temporal scaler is active. **Compute path `jitterOffset` is hardcoded zero (latent there).** `fragmentShaderMono` add is latent-dead on Mac (Mac jitters via the projection matrix).
 
-**TAA history ping-pong + warm-start validity gating; reset on engage/cut/param change** — `VisionOSTAAManager.swift:29-41,117-118`; `MacTemporalUpscaler.swift:49-51,172-175` — two histories alternate read/write; `needsReset`/`forceReset` discard accumulation after discontinuities (reset assigned before textures per newer SDK semantics). — Prevents reads of uninitialized/stale history (flashing/ghosting). — **STATUS: 🟡 conditional** (temporal/TAA paths).
+**TAA history ping-pong + warm-start validity gating; reset on engage/cut/param change** — `VisionOSTAAManager.swift:29-41,117-118`; `ViewportTemporalUpscaler.swift:49-51,172-175` — two histories alternate read/write; `needsReset`/`forceReset` discard accumulation after discontinuities (reset assigned before textures per newer SDK semantics). — Prevents reads of uninitialized/stale history (flashing/ghosting). — **STATUS: 🟡 conditional** (temporal/TAA paths).
 
 **Direct-render fallback invalidates warm-start** — `RendererRenderSupport.swift:135-140`; `RendererCoreTypes.swift:117-131` — `WarmStartGate.invalidate()` on any non-depth-writing path (direct render, Buddhabrot, compute, MetalFX failure); MetalFX path records depth + advances history. — Keeps warm-start correct across path switches. — **STATUS: ✅ active** — this guard runs every frame on the default direct-render path (even though the warm-start *benefit* it protects is conditional).
 
@@ -233,7 +233,7 @@ Critically, the verification pass reveals that **the most-advertised "exotic" op
 
 **Aspect-correction folded into resolve UV** — `Shaders.metal:3020-3022,3053-3055` — in-shader `uv.x` rescale about 0.5, guarded by `!=1.0`. — Handles foveated physical-texture squish without a dedicated rescale pass. — **STATUS: 🟡 conditional** (MetalFX resolve, aspect-mismatched textures).
 
-**Non-sRGB writable-twin temporal output** — `MacTemporalUpscaler.swift:29-33,62-68` — compute-written output in `bgra8Unorm` (sRGB can't be compute-written), blit handles the linear round-trip. — Keeps output 8-bit; avoids a conversion pass. — **STATUS: 🟡 conditional** (Mac temporal path).
+**Non-sRGB writable-twin temporal output** — `ViewportTemporalUpscaler.swift:29-33,62-68` — compute-written output in `bgra8Unorm` (sRGB can't be compute-written), blit handles the linear round-trip. — Keeps output 8-bit; avoids a conversion pass. — **STATUS: 🟡 conditional** (Mac temporal path).
 
 **Residency-set registration to skip per-frame validation** — `RendererRenderSupport.swift:895-904` — adds (re)created MetalFX textures to an `MTLResidencySet` only on `resolutionChanged`. — Compositor skips per-frame residency validation. — **STATUS: 🟡 conditional** (visionOS 2.0+, MetalFX texture (re)alloc).
 

@@ -3,7 +3,7 @@
 //  Threshold
 //
 //  Pre-computed inverse mapping from hand gesture space to fractal world transform.
-//  Extracted from GestureController as part of Phase 6 decomposition.
+//  Extracted for GestureProcessor as part of Phase 6 decomposition.
 //
 
 import Foundation

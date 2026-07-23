@@ -10,7 +10,6 @@ struct MacRadialInputMonitor: NSViewRepresentable {
     let isRadialVisible: Bool
     let onMouseMoved: (CGPoint) -> Void
     let onTwoFingerSwipeUp: () -> Void
-    let onDoubleClick: () -> Void
     let isPointerOverSlider: (CGPoint) -> Bool
     let isPointerOverWindowDragHandle: (CGPoint) -> Bool
     let onSliderScroll: (CGFloat) -> Void
@@ -21,7 +20,6 @@ struct MacRadialInputMonitor: NSViewRepresentable {
             isRadialVisible: isRadialVisible,
             onMouseMoved: onMouseMoved,
             onTwoFingerSwipeUp: onTwoFingerSwipeUp,
-            onDoubleClick: onDoubleClick,
             isPointerOverSlider: isPointerOverSlider,
             isPointerOverWindowDragHandle: isPointerOverWindowDragHandle,
             onSliderScroll: onSliderScroll
@@ -41,7 +39,6 @@ struct MacRadialInputMonitor: NSViewRepresentable {
         context.coordinator.isRadialVisible = isRadialVisible
         context.coordinator.onMouseMoved = onMouseMoved
         context.coordinator.onTwoFingerSwipeUp = onTwoFingerSwipeUp
-        context.coordinator.onDoubleClick = onDoubleClick
         context.coordinator.isPointerOverSlider = isPointerOverSlider
         context.coordinator.isPointerOverWindowDragHandle = isPointerOverWindowDragHandle
         context.coordinator.onSliderScroll = onSliderScroll
@@ -57,7 +54,6 @@ struct MacRadialInputMonitor: NSViewRepresentable {
         var isRadialVisible: Bool
         var onMouseMoved: (CGPoint) -> Void
         var onTwoFingerSwipeUp: () -> Void
-        var onDoubleClick: () -> Void
         var isPointerOverSlider: (CGPoint) -> Bool
         var isPointerOverWindowDragHandle: (CGPoint) -> Bool
         var onSliderScroll: (CGFloat) -> Void
@@ -72,7 +68,6 @@ struct MacRadialInputMonitor: NSViewRepresentable {
             isRadialVisible: Bool,
             onMouseMoved: @escaping (CGPoint) -> Void,
             onTwoFingerSwipeUp: @escaping () -> Void,
-            onDoubleClick: @escaping () -> Void,
             isPointerOverSlider: @escaping (CGPoint) -> Bool,
             isPointerOverWindowDragHandle: @escaping (CGPoint) -> Bool,
             onSliderScroll: @escaping (CGFloat) -> Void
@@ -81,7 +76,6 @@ struct MacRadialInputMonitor: NSViewRepresentable {
             self.isRadialVisible = isRadialVisible
             self.onMouseMoved = onMouseMoved
             self.onTwoFingerSwipeUp = onTwoFingerSwipeUp
-            self.onDoubleClick = onDoubleClick
             self.isPointerOverSlider = isPointerOverSlider
             self.isPointerOverWindowDragHandle = isPointerOverWindowDragHandle
             self.onSliderScroll = onSliderScroll
@@ -98,14 +92,6 @@ struct MacRadialInputMonitor: NSViewRepresentable {
                 if event.type == .flagsChanged {
                     isPressed.wrappedValue = event.modifierFlags.contains(.shift)
                 } else if event.type == .leftMouseDown {
-                    if isRadialVisible, event.clickCount >= 2 {
-                        if isPointerOverSlider(event.locationInWindow)
-                            || isPointerOverWindowDragHandle(event.locationInWindow) {
-                            return event
-                        }
-                        onDoubleClick()
-                        return nil
-                    }
                     onMouseMoved(event.locationInWindow)
                 } else if event.type == .scrollWheel {
                     guard isRadialVisible else {

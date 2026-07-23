@@ -12,7 +12,7 @@
 //  Why offscreen: the MTKView render loop is display-link driven, which the
 //  window server throttles to near-zero for a window that isn't the composited
 //  foreground — so an unattended run produces almost no frames. Rendering
-//  offscreen with `ThresholdMacRenderer.renderBenchmarkFrame` decouples the
+//  offscreen with `ViewportRenderer.renderBenchmarkFrame` decouples the
 //  benchmark from compositing while staying faithful to the shipping shader.
 //
 //  Two entry modes:
@@ -458,8 +458,8 @@ enum MacBenchmarkHarness {
         let layer = CAMetalLayer()
         layer.device = device
         layer.pixelFormat = .bgra8Unorm_srgb
-        let inputController = ThresholdMacInputController()
-        guard let renderer = ThresholdMacRenderer(
+        let inputController = ViewportInputAccumulator()
+        guard let renderer = ViewportRenderer(
             device: device,
             appModel: appModel,
             inputController: inputController,
@@ -514,7 +514,7 @@ enum MacBenchmarkHarness {
     }
 
     private static func runPlan(path: String, appModel: AppModel,
-                                renderer: ThresholdMacRenderer, settings: RenderSettings) async {
+                                renderer: ViewportRenderer, settings: RenderSettings) async {
         let plan: BenchPlan
         do {
             plan = try JSONDecoder().decode(BenchPlan.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
@@ -583,7 +583,7 @@ enum MacBenchmarkHarness {
     /// (valid only when the same scene is already loaded — every config axis a
     /// job can carry is re-applied below regardless).
     private static func measure(job: ResolvedJob, preset: FractalPreset, reload: Bool,
-                                appModel: AppModel, renderer: ThresholdMacRenderer,
+                                appModel: AppModel, renderer: ViewportRenderer,
                                 settings: RenderSettings, pngDir: String?) async -> BenchJobResult? {
         log("job '\(job.name)': scene '\(job.scene)' \(job.width)x\(job.height) "
             + "frames=\(job.frames) warmup=\(job.warmup)\(reload ? "" : " (scene cached)")")
@@ -609,7 +609,7 @@ enum MacBenchmarkHarness {
 
         // Ablation mode is read by the renderer per frame; racy-by-design gate
         // (main-actor write, render-thread read) like the other benchmark toggles.
-        ThresholdMacRenderer.benchAblateMode = job.ablate ?? ThresholdMacRenderer.benchAblateModeEnvDefault
+        ViewportRenderer.benchAblateMode = job.ablate ?? ViewportRenderer.benchAblateModeEnvDefault
 
         // Provenance guard: log the quality values actually in effect so a
         // measurement made with the wrong iteration/step budget is visible in the
@@ -709,7 +709,7 @@ enum MacBenchmarkHarness {
     // MARK: - Env (legacy) mode — behavior kept identical for perf-gate.sh
 
     private static func runEnvMode(appModel: AppModel,
-                                   renderer: ThresholdMacRenderer, settings: RenderSettings) async {
+                                   renderer: ViewportRenderer, settings: RenderSettings) async {
         let cfg = configFromEnv()
         log("start scenes=\(cfg.scenes.isEmpty ? "<all>" : cfg.scenes.joined(separator: ",")) "
             + "frames=\(cfg.frames) warmup=\(cfg.warmup) size=\(cfg.width)x\(cfg.height)")

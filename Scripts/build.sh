@@ -15,7 +15,7 @@
 #   Scripts/build.sh test      # TRUSTWORTHY unit run: clean + serial (a green here is real)
 #   Scripts/build.sh testfast  # fast incremental tests — ⚠️ can run STALE, don't trust a pass
 #   Scripts/build.sh embeds    # generate an inspection copy under .build/Generated
-#   Scripts/build.sh all       # embeds + mac + vision + test
+#   Scripts/build.sh all       # embeds + mac + iPadOS + vision + test
 #
 # Override the toolchain explicitly:  DEVELOPER_DIR=/path/to/Xcode.app/Contents/Developer Scripts/build.sh mac
 
@@ -67,7 +67,8 @@ fi
 echo "Using DEVELOPER_DIR=$DEVELOPER_DIR"
 echo "Using macOS SDK $SDK_VERSION"
 
-COMMON_FLAGS=(-project "$PROJECT" -configuration Debug CODE_SIGNING_ALLOWED=NO THRESHOLD_GIT_SHA="$GIT_SHA" THRESHOLD_GIT_DIRTY="$GIT_DIRTY")
+DERIVED_DATA_PATH="${THRESHOLD_DERIVED_DATA_PATH:-$REPO_ROOT/.build/DerivedData}"
+COMMON_FLAGS=(-project "$PROJECT" -configuration Debug -derivedDataPath "$DERIVED_DATA_PATH" CODE_SIGNING_ALLOWED=NO THRESHOLD_GIT_SHA="$GIT_SHA" THRESHOLD_GIT_DIRTY="$GIT_DIRTY")
 
 # Why `test` is clean + serial (learned the hard way 2026-06-29):
 #  • clean — the incremental builder has been observed to link ThresholdTests
@@ -81,16 +82,22 @@ COMMON_FLAGS=(-project "$PROJECT" -configuration Debug CODE_SIGNING_ALLOWED=NO T
 #    phantom 0.000s "failures". Serial = one host = deterministic.
 # Use `testfast` (incremental) only for tight iteration; re-confirm with `test`.
 TEST_FLAGS=(-parallel-testing-enabled NO)
-RESULT_FLAGS=()
-if [[ -n "${THRESHOLD_RESULT_BUNDLE_PATH:-}" ]]; then
-    RESULT_FLAGS=(-resultBundlePath "$THRESHOLD_RESULT_BUNDLE_PATH")
-fi
 
 build_mac()      { xcodebuild build "${COMMON_FLAGS[@]}" -scheme ThresholdMac  -destination 'platform=macOS'; }
 build_vision()   { xcodebuild build "${COMMON_FLAGS[@]}" -scheme Threshold     -destination 'generic/platform=visionOS'; }
 build_ios()      { xcodebuild build "${COMMON_FLAGS[@]}" -scheme ThresholdiOS  -destination 'generic/platform=iOS'; }
-run_tests()      { xcodebuild clean test "${COMMON_FLAGS[@]}" "${TEST_FLAGS[@]}" "${RESULT_FLAGS[@]}" -scheme ThresholdMac -destination 'platform=macOS'; }
-run_tests_fast() { xcodebuild test       "${COMMON_FLAGS[@]}" "${TEST_FLAGS[@]}" "${RESULT_FLAGS[@]}" -scheme ThresholdMac -destination 'platform=macOS'; }
+run_xcode_tests() {
+    if [[ -n "${THRESHOLD_RESULT_BUNDLE_PATH:-}" ]]; then
+        xcodebuild "$@" "${COMMON_FLAGS[@]}" "${TEST_FLAGS[@]}" \
+            -resultBundlePath "$THRESHOLD_RESULT_BUNDLE_PATH" \
+            -scheme ThresholdMac -destination 'platform=macOS'
+    else
+        xcodebuild "$@" "${COMMON_FLAGS[@]}" "${TEST_FLAGS[@]}" \
+            -scheme ThresholdMac -destination 'platform=macOS'
+    fi
+}
+run_tests()      { run_xcode_tests clean test; }
+run_tests_fast() { run_xcode_tests test; }
 regen_embeds()   { "$REPO_ROOT/Scripts/generate_metal_embeds.sh"; }
 
 case "${1:-mac}" in
@@ -100,6 +107,6 @@ case "${1:-mac}" in
     test)     run_tests ;;
     testfast) run_tests_fast ;;
     embeds)   regen_embeds ;;
-    all)      regen_embeds && build_mac && build_vision && run_tests ;;
+    all)      regen_embeds && build_mac && build_ios && build_vision && run_tests ;;
     *) echo "Unknown command: $1 (expected: mac | vision | ios | test | testfast | embeds | all)" >&2; exit 2 ;;
 esac

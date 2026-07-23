@@ -1,6 +1,5 @@
 import Foundation
 
-@MainActor
 final class MenuToggleGestureEngine {
     private static let activationDebounceFrames = 2
 
@@ -13,19 +12,19 @@ final class MenuToggleGestureEngine {
         state = MenuToggleGestureState()
     }
 
-    func process(context: GestureContext, settings: RenderSettings) -> [GestureOperation] {
+    func process(context: GestureContext, configuration: GestureConfigurationSnapshot) -> [GestureOperation] {
         if state.cooldown > 0 {
             state.cooldown = max(0, state.cooldown - context.deltaTime)
         }
 
-        guard settings.menuToggleGestureEnabled else {
+        guard configuration.menuToggleEnabled else {
             state.isActive = false
             state.holdTimer = 0
             state.consecutiveFramesAboveActivate = 0
             return []
         }
 
-        let mode = settings.menuToggleGestureMode
+        let mode = configuration.menuToggleMode
 
         // Wrist tap requires both hands; other modes require right hand only
         if mode.requiresBothHands {

@@ -775,8 +775,8 @@ struct SceneEditorView: View {
                             settingsSliderRow(
                                 label: "Blend",
                                 value: Binding(
-                                    get: { UISettingsCache.blendValueToSlider(scene.safetyBubbleBlend ?? 0.5) },
-                                    set: { scene.safetyBubbleBlend = UISettingsCache.blendSliderToValue($0) }
+                                    get: { ControlStateStore.blendValueToSlider(scene.safetyBubbleBlend ?? 0.5) },
+                                    set: { scene.safetyBubbleBlend = ControlStateStore.blendSliderToValue($0) }
                                 ),
                                 range: 0.0...1.0,
                                 step: 0.05,

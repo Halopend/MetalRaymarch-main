@@ -10,8 +10,7 @@
 import SwiftUI
 
 struct PrimitivesSection: View {
-    let cache: UISettingsCache
-    let gestureController: GestureController?
+    let cache: ControlStateStore
 
     private var selectedPrimitive: FractalPrimitiveKind? {
         guard cache.fractalType == .constructionPrimitive else { return nil }
@@ -88,7 +87,7 @@ struct PrimitivesSection: View {
         let isSelected = selectedPrimitive == primitive
 
         return Button {
-            cache.pushConstructionPrimitive(primitive, gestureController: gestureController)
+            cache.pushConstructionPrimitive(primitive)
         } label: {
             HStack(alignment: .top, spacing: 9) {
                 Image(systemName: primitive.icon)
@@ -143,7 +142,7 @@ struct PrimitivesSection: View {
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 Button {
-                    cache.pushConstructionPrimitive(primitive, gestureController: gestureController)
+                    cache.pushConstructionPrimitive(primitive)
                 } label: {
                     Label("Reset", systemImage: AppIcons.arrowCounterclockwise)
                         .font(.caption)

@@ -17,33 +17,30 @@
 import SwiftUI
 import Foundation
 import simd
-#if os(macOS)
-import AppKit
-#elseif os(iOS) || os(visionOS)
-import UIKit
-#endif
 
 struct TransformationsSection: View {
     private enum EquationAccessibilityTarget: Hashable {
+        case vocabulary(TransformationLessonID)
         case hint(TransformationLessonID)
         case answer(TransformationLessonID)
         case result(TransformationLessonID)
     }
 
     let renderSettings: RenderSettings
-    /// Live UI store. `UISettingsCache` is `@Observable`, so reading its sphere-system
+    /// Live UI store. `ControlStateStore` is `@Observable`, so reading its sphere-system
     /// flags in `body` auto-subscribes this view — the system cards below track the
     /// same state the Space tab / quick toggles drive (DisplayConfig, scene-persisted).
-    let cache: UISettingsCache
+    let cache: ControlStateStore
 
-    // RenderSettings is not Observable; bump to force a re-read of the op LIST after
-    // structural edits (add / delete / reorder / enable). Slider drags mutate in
-    // place and don't need it (mirrors TwistShapingSection). No edit recompiles a
-    // shader — the runtime loop reads the per-frame-repacked uniforms (count + ops).
+    // Local redraw token for presentation-only changes such as enable switches and
+    // discrete steppers. Stack structure has its own revision in ControlStateStore;
+    // continuous slider writes deliberately invalidate neither one.
     @State private var refresh: Int = 0
     @State private var isCreatingGroup = false
     @State private var groupSelection: Set<UUID> = []
     @State private var expandedGroups: Set<UUID> = []
+    @State private var expandedOperationIDs: Set<UUID> = []
+    @State private var expandedTechnicalDetailIDs: Set<UUID> = []
     @SceneStorage("Transformations.educationEquationDraft.v1")
     private var legacyEquationDraft = ""
     @SceneStorage("Transformations.focusedEquationRawID.v1")
@@ -56,20 +53,25 @@ struct TransformationsSection: View {
     @State private var pendingNextEquationID: TransformationLessonID?
     @State private var mappingResultMessage = ""
     @State private var equationError: String?
-    @State private var isEquationGuideExpanded = true
+    @State private var isEquationGuideExpanded = false
     @State private var expandedEducationLevelIDs: Set<Int> = []
     @State private var didInitializeEducationExpansion = false
     @State private var assistanceStages: [TransformationLessonID: TransformationAssistanceStage] = [:]
     @FocusState private var isEquationEditorFocused: Bool
     @AccessibilityFocusState private var equationAccessibilityTarget: EquationAccessibilityTarget?
     @AppStorage(TransformationExperienceMode.defaultsKey)
-    private var experienceModeRaw = TransformationExperienceMode.education.rawValue
+    private var experienceModeRaw = TransformationExperienceMode.justUse.rawValue
     @AppStorage(TransformationUnlockProgress.defaultsKey)
     private var mappedLessonIDsRaw = ""
     @AppStorage(TransformationUnlockProgress.legacyDefaultsKey)
     private var legacyMappedTransformationIDsRaw = ""
 
-    private var ops: [SpaceWarpOpValue] { renderSettings.spaceWarpStack }
+    private var ops: [SpaceWarpOpValue] {
+        // Observe structure only. Slider samples mutate the ignored value mirror and
+        // must not rebuild this entire education/editor hierarchy.
+        _ = cache.spaceWarpStructureRevision
+        return cache.spaceWarpStack
+    }
     private var hasStackCapacity: Bool { ops.count < Int(kMaxSpaceWarpOps) }
     private var experienceMode: TransformationExperienceMode {
         TransformationExperienceMode.decode(experienceModeRaw)
@@ -223,8 +225,8 @@ struct TransformationsSection: View {
             experienceModePicker
 
             Text(experienceMode == .education
-                 ? "Map equations to complete lessons and open deeper levels. Mapped transforms stack top → bottom; global space systems remain separate."
-                 : "Direct controls, no equations. Education progress is unchanged.")
+                 ? "Optional equation lessons. Your mapped transforms and editing stack remain separate."
+                 : "Direct editing. Transformations run from top to bottom; open a card only when you want to tune it.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -273,10 +275,9 @@ struct TransformationsSection: View {
                                insideGroup: false)
                     }
                 }
-                // Structural edits need fresh row identities because RenderSettings is
-                // lock-backed rather than Observable. Keep that invalidation confined to
-                // the stack: rebuilding the whole section would discard the equation
-                // editor's keyboard cursor and VoiceOver focus after a successful map.
+                // Keep explicit row re-identification confined to the stack. Rebuilding
+                // the whole section would discard the equation editor's keyboard cursor
+                // and VoiceOver focus after a successful map.
                 .id(refresh)
             }
         }
@@ -290,6 +291,9 @@ struct TransformationsSection: View {
                 mode: experienceMode,
                 mappedIDs: mappedTransformationIDs
             )
+            if ops.count == 1, let onlyOperation = ops.first {
+                expandedOperationIDs.insert(onlyOperation.id)
+            }
             guard !didInitializeEducationExpansion else { return }
             expandedEducationLevelIDs = [focusedEducationLevel.id]
             didInitializeEducationExpansion = true
@@ -326,11 +330,11 @@ struct TransformationsSection: View {
             switch mode {
             case .education:
                 postAccessibilityAnnouncement(
-                    "Education mode. \(progress) \(progress == 1 ? "lesson" : "lessons") mapped."
+                    "Learn mode. \(progress) \(progress == 1 ? "lesson" : "lessons") mapped."
                 )
             case .justUse:
                 postAccessibilityAnnouncement(
-                    "Just Use mode. The full catalog is available and \(progress) Education \(progress == 1 ? "mapping is" : "mappings are") preserved."
+                    "Edit mode. The full catalog is available and \(progress) Learn \(progress == 1 ? "mapping is" : "mappings are") preserved."
                 )
             }
         }
@@ -354,16 +358,8 @@ struct TransformationsSection: View {
     }
 
     private var transformationsTitle: some View {
-        HStack(spacing: 8) {
-            Label("Transformations", systemImage: "circle.hexagongrid")
-                .font(.headline)
-            Text("BETA")
-                .font(.caption2.weight(.heavy))
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(Capsule().fill(.orange.opacity(0.22)))
-                .foregroundStyle(.orange)
-                .accessibilityLabel("Beta feature")
-        }
+        Label("Transformations", systemImage: "circle.hexagongrid")
+            .font(.headline)
     }
 
     private var transformationsHeaderActions: some View {
@@ -375,7 +371,7 @@ struct TransformationsSection: View {
 
     private var experienceModePicker: some View {
         Picker("Transformation experience", selection: experienceModeBinding) {
-            ForEach(TransformationExperienceMode.allCases) { mode in
+            ForEach([TransformationExperienceMode.justUse, .education]) { mode in
                 Text(mode.displayName).tag(mode)
             }
         }
@@ -383,7 +379,7 @@ struct TransformationsSection: View {
         .labelsHidden()
         .accessibilityLabel("Transformation experience mode")
         .accessibilityValue(experienceMode.displayName)
-        .accessibilityHint("Education maps equations. Just Use opens the full catalog without completing lessons.")
+        .accessibilityHint("Edit opens the full catalog. Learn maps equations without changing your editing progress.")
     }
 
     private var justUseSummary: some View {
@@ -393,7 +389,7 @@ struct TransformationsSection: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Full Catalog")
                     .font(.caption.weight(.semibold))
-                Text("Choose any built-in transformation from Add. Return to Education whenever you want to map equations and reach deeper lessons.")
+                Text("Add a transformation, then open only the card you want to tune. Switch to Learn whenever you want the optional equation lessons.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -410,7 +406,7 @@ struct TransformationsSection: View {
 
     private var educationProgressSummary: String {
         let count = mappedLessons.count
-        return "Education: Level \(currentEducationLevel.numeral) open · \(count) \(count == 1 ? "lesson" : "lessons") mapped."
+        return "Learn: Level \(currentEducationLevel.numeral) open · \(count) \(count == 1 ? "lesson" : "lessons") mapped."
     }
 
     private var emptyStackMessage: String {
@@ -507,7 +503,7 @@ struct TransformationsSection: View {
         VStack(alignment: .leading, spacing: 9) {
             educationWorkbenchHeader
 
-            Text("Translate the current map into Metal notation. A match completes its lesson, adds the first instance, and moves you toward the next level.")
+            Text("Study the named transformation as mathematics first, then translate the same point map into Metal. A correct translation completes the lesson and adds its first instance.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -517,11 +513,11 @@ struct TransformationsSection: View {
                 .foregroundStyle(.tertiary)
 
             if let focusedEquationLesson {
-                equationCheatSheet(focusedEquationLesson)
+                transformationLessonCard(focusedEquationLesson)
             }
 
             VStack(alignment: .trailing, spacing: 7) {
-                TextField("p = …;", text: equationInputBinding, axis: .vertical)
+                TextField("Write the Metal translation, leaving the result in p…", text: equationInputBinding, axis: .vertical)
                     .font(.system(.caption, design: .monospaced))
                     .lineLimit(4...16)
                     .textFieldStyle(.roundedBorder)
@@ -531,10 +527,10 @@ struct TransformationsSection: View {
                     .autocorrectionDisabled()
                     .focused($isEquationEditorFocused)
                     .accessibilityLabel("Metal equation")
-                    .accessibilityHint("Enter the complete Metal point transformation for the current map.")
+                    .accessibilityHint("Enter the complete Metal translation for the named transformation lesson.")
 
                 Button(action: mapEquation) {
-                    Label("Map", systemImage: "arrow.turn.down.right")
+                    Label("Check Translation", systemImage: "checkmark.circle")
                         .font(.caption.weight(.semibold))
                 }
                 .buttonStyle(.borderedProminent)
@@ -564,13 +560,15 @@ struct TransformationsSection: View {
 
             DisclosureGroup(isExpanded: $isEquationGuideExpanded) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Each point-map receives mutable `float3 p`, original `float3 p0`, and a GPU-ready `SpaceWarpOp op`. Leave the result in `p`; each clue explains the fields it uses. Distance correction stays in the proven renderer.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if isEquationGuideExpanded {
+                        Text("Each point-map receives mutable `float3 p`, original `float3 p0`, and a GPU-ready `SpaceWarpOp op`. Leave the result in `p`; each clue explains the fields it uses. Distance correction stays in the proven renderer.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                    ForEach(TransformationEducationPath.levels) { level in
-                        educationLevelSection(level)
+                        ForEach(TransformationEducationPath.levels) { level in
+                            educationLevelSection(level)
+                        }
                     }
                 }
                 .padding(.top, 7)
@@ -601,7 +599,7 @@ struct TransformationsSection: View {
     }
 
     private var educationWorkbenchTitle: some View {
-        Label("Map an Equation", systemImage: "function")
+        Label("Theory → Metal", systemImage: "function")
             .font(.subheadline.weight(.semibold))
     }
 
@@ -859,7 +857,7 @@ struct TransformationsSection: View {
     }
 
     private func assistanceStage(for lesson: TransformationEquationLesson) -> TransformationAssistanceStage {
-        assistanceStages[lesson.id] ?? .vocabulary
+        assistanceStages[lesson.id] ?? .theory
     }
 
     private func advanceAssistance(for lesson: TransformationEquationLesson,
@@ -877,34 +875,28 @@ struct TransformationsSection: View {
             assistanceStages[lesson.id] = next
         }
         switch next {
-        case .hint:
-            let subject = isMapped ? lesson.kind.displayName : "the current map"
-            moveAccessibilityFocus(to: .hint(lesson.id))
-            postAccessibilityAnnouncement("Hint for \(subject). \(lesson.hint)")
-        case .fullAnswer:
-            let subject = isMapped ? lesson.kind.displayName : "the current map"
-            moveAccessibilityFocus(to: .answer(lesson.id))
-            postAccessibilityAnnouncement("Full Metal answer revealed for \(subject).")
         case .vocabulary:
+            moveAccessibilityFocus(to: .vocabulary(lesson.id))
+            postAccessibilityAnnouncement(
+                "Metal vocabulary revealed for \(lesson.kind.displayName)."
+            )
+        case .hint:
+            moveAccessibilityFocus(to: .hint(lesson.id))
+            postAccessibilityAnnouncement(
+                "Implementation hint for \(lesson.kind.displayName). \(lesson.hint)"
+            )
+        case .fullAnswer:
+            moveAccessibilityFocus(to: .answer(lesson.id))
+            postAccessibilityAnnouncement(
+                "Full Metal answer revealed for \(lesson.kind.displayName)."
+            )
+        case .theory:
             break
         }
     }
 
     private func postAccessibilityAnnouncement(_ message: String, urgent: Bool = false) {
-        #if os(macOS)
-        NSAccessibility.post(
-            element: NSApplication.shared,
-            notification: .announcementRequested,
-            userInfo: [
-                .announcement: message,
-                .priority: (urgent
-                    ? NSAccessibilityPriorityLevel.high
-                    : NSAccessibilityPriorityLevel.medium).rawValue,
-            ]
-        )
-        #elseif os(iOS) || os(visionOS)
-        UIAccessibility.post(notification: .announcement, argument: message)
-        #endif
+        PlatformAccessibilityAdapter.announce(message, urgent: urgent)
     }
 
     private func educationAdvancementMessage(for level: TransformationEducationLevel,
@@ -916,7 +908,7 @@ struct TransformationsSection: View {
                 mappedIDs: mappedLessonIDs
             )
             if remainingLessons == 0 {
-                return "Education path complete. Every built-in transformation has been mapped."
+                return "Learning path complete. Every built-in transformation has been mapped."
             }
             if mappedCount == level.kinds.count {
                 return "Final level complete · \(remainingLessons) earlier \(remainingLessons == 1 ? "lesson remains" : "lessons remain")."
@@ -945,39 +937,80 @@ struct TransformationsSection: View {
     }
 
     @ViewBuilder
-    private func equationCheatSheet(_ lesson: TransformationEquationLesson) -> some View {
+    private func transformationLessonCard(_ lesson: TransformationEquationLesson) -> some View {
         let isMapped = mappedLessonIDs.contains(lesson.id)
         let stage = assistanceStage(for: lesson)
 
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 6) {
-                Label("Math Cheat Sheet", systemImage: "list.bullet.rectangle")
-                    .font(.caption.weight(.semibold))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(lesson.kind.displayName, systemImage: lesson.kind.icon)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.indigo)
                 Spacer()
-                Text(isMapped ? lesson.kind.displayName.uppercased() : "CURRENT MAP")
+                Text(isMapped ? "COMPLETED" : "CURRENT LESSON")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(isMapped ? Color.mint : Color.secondary)
             }
 
-            Text(lesson.mathematicalNotation)
-                .font(.system(.caption2, design: .monospaced))
-                .textSelection(.enabled)
+            Text(lesson.kind.tagline)
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-                .accessibilityLabel(lesson.spokenMathematicalNotation)
 
-            ForEach(TransformationEquationCatalog.cheatSheet(for: lesson)) { entry in
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(entry.notation)
-                        .font(.system(.caption2, design: .monospaced).weight(.semibold))
-                        .foregroundStyle(.indigo)
-                        .textSelection(.enabled)
-                    Text(entry.meaning)
+            VStack(alignment: .leading, spacing: 7) {
+                Text("MATHEMATICAL MODEL")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+                TransformationMathEquationView(
+                    notation: lesson.mathematicalNotation,
+                    spokenNotation: lesson.spokenMathematicalNotation
+                )
+                Text("Read it as: \(lesson.spokenMathematicalNotation)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(9)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.indigo.opacity(0.08)))
+            .accessibilityElement(children: .combine)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("YOUR TRANSLATION TASK")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+                Text("Express this exact point transformation in Metal using the supplied `p` and `op`, then leave the transformed point back in `p`.")
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if stage >= .vocabulary {
+                Divider()
+                VStack(alignment: .leading, spacing: 7) {
+                    Label("Metal Vocabulary", systemImage: "curlybraces")
+                        .font(.caption.weight(.semibold))
+                    Text("These are the language pieces used by this lesson—not their final order or complete implementation.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    ForEach(TransformationEquationCatalog.metalVocabulary(for: lesson)) { entry in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(entry.notation)
+                                .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                                .foregroundStyle(.indigo)
+                                .textSelection(.enabled)
+                            Text(entry.meaning)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("\(entry.notation). \(entry.meaning)")
+                    }
                 }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(entry.notation). \(entry.meaning)")
+                .accessibilityFocused(
+                    $equationAccessibilityTarget,
+                    equals: .vocabulary(lesson.id)
+                )
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             ViewThatFits(in: .horizontal) {
@@ -990,10 +1023,14 @@ struct TransformationsSection: View {
             }
 
             if stage >= .hint {
-                Label(lesson.hint, systemImage: "lightbulb")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Label("Implementation Hint", systemImage: "lightbulb")
+                        .font(.caption.weight(.semibold))
+                    Text(lesson.hint)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                     .accessibilityFocused(
                         $equationAccessibilityTarget,
                         equals: .hint(lesson.id)
@@ -1017,7 +1054,7 @@ struct TransformationsSection: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            Text("Choose a different map in the guide below.")
+            Text("Choose a different named lesson in the guide below.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -1032,8 +1069,11 @@ struct TransformationsSection: View {
                                     isMapped: Bool,
                                     stage: TransformationAssistanceStage) -> some View {
         if stage < .hint {
-            Button("Get a hint") {
-                advanceAssistance(for: lesson, event: .requestHint)
+            Button(stage < .vocabulary ? "Show Metal vocabulary" : "Get implementation hint") {
+                let event: TransformationAssistanceEvent = stage < .vocabulary
+                    ? .showVocabulary
+                    : .requestHint
+                advanceAssistance(for: lesson, event: event)
             }
             .font(.caption.weight(.semibold))
             .buttonStyle(.bordered)
@@ -1066,8 +1106,7 @@ struct TransformationsSection: View {
 
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
-                Label(isMapped ? lesson.kind.displayName : "Unknown transformation",
-                      systemImage: isMapped ? lesson.kind.icon : "questionmark.diamond")
+                Label(lesson.kind.displayName, systemImage: lesson.kind.icon)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(isMapped ? Color.mint : Color.primary)
                 Spacer()
@@ -1085,12 +1124,12 @@ struct TransformationsSection: View {
                 .accessibilityLabel(lesson.spokenMathematicalNotation)
 
             if isFocused {
-                Label("Current map", systemImage: "checkmark.circle.fill")
+                Label("Current lesson", systemImage: "checkmark.circle.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.indigo)
                     .accessibilityAddTraits(.isSelected)
             } else {
-                Button("Assemble this map") {
+                Button("Study this lesson") {
                     withAnimation(.easeInOut(duration: 0.15)) {
                         focusEquation(lesson.id)
                         mappedKind = nil
@@ -1100,8 +1139,9 @@ struct TransformationsSection: View {
                         equationAccessibilityTarget = nil
                     }
                     isEquationEditorFocused = true
-                    let subject = isMapped ? lesson.kind.displayName : "This equation"
-                    postAccessibilityAnnouncement("\(subject) is now the current map.")
+                    postAccessibilityAnnouncement(
+                        "\(lesson.kind.displayName) is now the current lesson."
+                    )
                 }
                 .font(.caption.weight(.semibold))
                 .buttonStyle(.bordered)
@@ -1112,9 +1152,9 @@ struct TransformationsSection: View {
 
             Text(isFocused
                  ? (isMapped
-                    ? "Use the cheat sheet above to review its hint or Metal answer."
-                    : "Use the cheat sheet above to request hints and assemble the answer.")
-                 : "Select this map to load its relevant cheat sheet.")
+                    ? "Use the lesson above to review its theory or Metal answer."
+                    : "Use the lesson above to translate its mathematical model into Metal.")
+                 : "Select this named transformation to study its mathematical model.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1292,7 +1332,6 @@ struct TransformationsSection: View {
     @ViewBuilder
     private func opCard(_ op: SpaceWarpOpValue, index: Int, isFirst: Bool, isLast: Bool,
                         insideGroup: Bool) -> some View {
-        let kind = op.kind
         VStack(alignment: .leading, spacing: 6) {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
@@ -1313,60 +1352,24 @@ struct TransformationsSection: View {
             .font(.caption)
 
             if isOpRevealed(op) {
-                Group {
-                    if kind == .coxeter {
-                        coxeterEditor(op)
-                    } else {
-                    // Master amount.
-                    EffectSliderRow(
-                        icon: kind.icon, label: kind.amountLabel,
-                        value: Binding(get: { liveOp(op.id)?.strength ?? op.strength },
-                                       set: { v in update(op.id) { $0.strength = v } }),
-                        range: kind.strengthRange,
-                        enabled: .constant(true), onChanged: {}, showToggle: false,
-                        valueFormat: { String(format: "%.2f", $0) })
-
-                    // Per-operator scalars.
-                    ForEach(kind.params) { spec in
-                        EffectSliderRow(
-                            icon: spec.icon, label: spec.label,
-                            value: Binding(
-                                get: { let o = liveOp(op.id) ?? op; return spec.slot == 1 ? o.p1 : o.p2 },
-                                set: { v in update(op.id) { if spec.slot == 1 { $0.p1 = v } else { $0.p2 = v } } }),
-                            range: spec.range,
-                            enabled: .constant(true), onChanged: {}, showToggle: false,
-                            valueFormat: { String(format: "%.2f", $0) })
-                    }
-
-                    // Per-transform boolean option, stored in op.p2 as a live uniform.
-                    if let toggle = kind.toggle {
-                        HStack(spacing: 8) {
-                            Label(toggle.label, systemImage: toggle.icon)
-                                .font(.caption)
-                            Spacer()
-                            Toggle("", isOn: Binding(
-                                get: { (liveOp(op.id) ?? op).p2 > 0.5 },
-                                set: { v in update(op.id) { $0.p2 = v ? 1 : 0 }; refresh &+= 1 }))
-                                .labelsHidden()
-                                .toggleStyle(.switch)
-                                .controlSize(.mini)
-                                .accessibilityLabel("\(kind.displayName), \(toggle.label)")
+                if insideGroup {
+                    operationEditor(op)
+                } else {
+                    DisclosureGroup(isExpanded: operationExpandedBinding(op.id)) {
+                        // DisclosureGroup may evaluate its content builder while
+                        // closed. Keep slider rows and technical source genuinely lazy.
+                        if expandedOperationIDs.contains(op.id) {
+                            operationEditor(op)
+                                .padding(.top, 6)
                         }
-                    }
-
-                    if kind.usesAxis {
-                        axisRow(op, "\(kind.axisLabel) X", "arrow.left.and.right", \.x)
-                        axisRow(op, "\(kind.axisLabel) Y", "arrow.up.and.down", \.y)
-                        axisRow(op, "\(kind.axisLabel) Z", "arrow.up.left.and.arrow.down.right", \.z)
-                    }
+                    } label: {
+                        Label("Edit parameters", systemImage: "slider.horizontal.3")
+                            .font(.caption.weight(.semibold))
+                            .transformationActionHitTarget()
                     }
                 }
-                .opacity(op.isEnabled ? 1.0 : 0.4)
-                .disabled(!op.isEnabled)
-
-                underTheHood(kind)
             } else {
-                Label("Used in this scene · map its equation to reveal its controls and add another",
+                Label("Complete the \(op.kind.displayName) lesson to edit its controls and add another",
                       systemImage: "lock")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -1380,6 +1383,82 @@ struct TransformationsSection: View {
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(
             groupSelection.contains(op.id) && !insideGroup
                 ? Color.indigo.opacity(0.65) : Color.clear, lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private func operationEditor(_ op: SpaceWarpOpValue) -> some View {
+        let kind = op.kind
+        let enabled = liveOp(op.id)?.isEnabled ?? op.isEnabled
+        Group {
+            if kind == .coxeter {
+                coxeterEditor(op)
+            } else {
+                EffectSliderRow(
+                    icon: kind.icon, label: kind.amountLabel,
+                    value: Binding(get: { liveOp(op.id)?.strength ?? op.strength },
+                                   set: { v in update(op.id) { $0.strength = v } }),
+                    range: kind.strengthRange,
+                    enabled: .constant(true), onChanged: {}, showToggle: false,
+                    valueFormat: { String(format: "%.2f", $0) })
+
+                ForEach(kind.params) { spec in
+                    EffectSliderRow(
+                        icon: spec.icon, label: spec.label,
+                        value: Binding(
+                            get: {
+                                let live = liveOp(op.id) ?? op
+                                return spec.slot == 1 ? live.p1 : live.p2
+                            },
+                            set: { value in
+                                update(op.id) {
+                                    if spec.slot == 1 { $0.p1 = value }
+                                    else { $0.p2 = value }
+                                }
+                            }),
+                        range: spec.range,
+                        enabled: .constant(true), onChanged: {}, showToggle: false,
+                        valueFormat: { String(format: "%.2f", $0) })
+                }
+
+                if let toggle = kind.toggle {
+                    HStack(spacing: 8) {
+                        Label(toggle.label, systemImage: toggle.icon)
+                            .font(.caption)
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { (liveOp(op.id) ?? op).p2 > 0.5 },
+                            set: { value in
+                                update(op.id) { $0.p2 = value ? 1 : 0 }
+                                refresh &+= 1
+                            }))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                            .accessibilityLabel("\(kind.displayName), \(toggle.label)")
+                    }
+                }
+
+                if kind.usesAxis {
+                    axisRow(op, "\(kind.axisLabel) X", "arrow.left.and.right", \.x)
+                    axisRow(op, "\(kind.axisLabel) Y", "arrow.up.and.down", \.y)
+                    axisRow(op, "\(kind.axisLabel) Z", "arrow.up.left.and.arrow.down.right", \.z)
+                }
+            }
+        }
+        .opacity(enabled ? 1.0 : 0.4)
+        .disabled(!enabled)
+
+        underTheHood(op)
+    }
+
+    private func operationExpandedBinding(_ id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { expandedOperationIDs.contains(id) },
+            set: { isExpanded in
+                if isExpanded { expandedOperationIDs.insert(id) }
+                else { expandedOperationIDs.remove(id) }
+            }
+        )
     }
 
     @ViewBuilder
@@ -1427,10 +1506,9 @@ struct TransformationsSection: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 16)
             VStack(alignment: .leading, spacing: 1) {
-                Label(revealed ? kind.displayName : "Unknown transformation",
-                      systemImage: revealed ? kind.icon : "questionmark.diamond")
+                Label(kind.displayName, systemImage: kind.icon)
                     .font(.subheadline.weight(.medium))
-                Text(revealed ? kind.tagline : "Map its equation to reveal this scene operation")
+                Text(revealed ? kind.tagline : "Complete its Learn lesson to edit this scene operation")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -1515,7 +1593,7 @@ struct TransformationsSection: View {
     }
 
     private func stackOpSubject(_ op: SpaceWarpOpValue, index: Int) -> String {
-        isOpRevealed(op) ? op.kind.displayName : "unknown transformation \(index + 1)"
+        "\(op.kind.displayName) transformation \(index + 1)"
     }
 
     /// An explicit super-group in the editor. Its children remain ordinary
@@ -1555,9 +1633,7 @@ struct TransformationsSection: View {
         let allChildrenRevealed = children.allSatisfy(isOpRevealed)
         let title = mode == .mandelboxRecurrence && isMandelboxSequence && allChildrenRevealed
             ? "Mandelbox Recurrence" : "Transformation Group"
-        let sequence = children.map { child in
-            isOpRevealed(child) ? child.kind.displayName : "Unknown transformation"
-        }.joined(separator: "  →  ")
+        let sequence = children.map(\.kind.displayName).joined(separator: "  →  ")
         let transformWork = range.count * passes
         return VStack(alignment: .leading, spacing: 8) {
             ViewThatFits(in: .horizontal) {
@@ -1606,12 +1682,12 @@ struct TransformationsSection: View {
                         .font(.caption.weight(.semibold))
                     Stepper(value: Binding(
                         get: {
-                            renderSettings.spaceWarpStack.first(where: { $0.groupID == groupID })?
+                            cache.spaceWarpStack.first(where: { $0.groupID == groupID })?
                                 .effectiveGroupIterations ?? fallbackIterations
                         },
                         set: { updateGroupIterations(groupID, iterations: $0) }),
                         in: 1...Int(kMaxSpaceWarpGroupIterations)) {
-                        Text("\(renderSettings.spaceWarpStack.first(where: { $0.groupID == groupID })?.effectiveGroupIterations ?? fallbackIterations)")
+                        Text("\(cache.spaceWarpStack.first(where: { $0.groupID == groupID })?.effectiveGroupIterations ?? fallbackIterations)")
                             .font(.caption.monospacedDigit().weight(.semibold))
                     }
                     .fixedSize()
@@ -1776,34 +1852,47 @@ struct TransformationsSection: View {
     /// Self-documenting panel: what this transform does, the math, and the EXACT
     /// Metal function it runs on the GPU (pulled live from the embedded shader).
     @ViewBuilder
-    private func underTheHood(_ kind: SpaceWarpKind) -> some View {
+    private func underTheHood(_ op: SpaceWarpOpValue) -> some View {
+        let kind = op.kind
         let d = kind.descriptor
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(d.blurb)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(kind.formula)
-                    .font(.caption2.monospaced())
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let src = WarpSource.metalFunction(named: d.gpuApplyFn) {
-                    codeBlock(src)
+        DisclosureGroup(isExpanded: technicalDetailExpandedBinding(op.id)) {
+            if expandedTechnicalDetailIDs.contains(op.id) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(d.blurb)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(kind.formula)
+                        .font(.caption2.monospaced())
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let src = WarpSource.metalFunction(named: d.gpuApplyFn) {
+                        codeBlock(src)
+                    }
+                    if let de = d.gpuDEScaleFn, let src = WarpSource.metalFunction(named: de) {
+                        Text("Distance-estimator correction")
+                            .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                        codeBlock(src)
+                    }
                 }
-                if let de = d.gpuDEScaleFn, let src = WarpSource.metalFunction(named: de) {
-                    Text("Distance-estimator correction")
-                        .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                    codeBlock(src)
-                }
+                .padding(.top, 6)
             }
-            .padding(.top, 6)
         } label: {
             Label("Under the hood — ƒ \(d.gpuApplyFn)", systemImage: "function")
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.tint)
                 .transformationActionHitTarget()
         }
+    }
+
+    private func technicalDetailExpandedBinding(_ id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { expandedTechnicalDetailIDs.contains(id) },
+            set: { isExpanded in
+                if isExpanded { expandedTechnicalDetailIDs.insert(id) }
+                else { expandedTechnicalDetailIDs.remove(id) }
+            }
+        )
     }
 
     private func codeBlock(_ source: String) -> some View {
@@ -2024,35 +2113,43 @@ struct TransformationsSection: View {
 
     private func add(_ kind: SpaceWarpKind,
                      mappedIDs: Set<Int32>? = nil) {
-        var arr = renderSettings.spaceWarpStack
+        var arr = cache.spaceWarpStack
         let effectiveMappedIDs = mappedIDs ?? mappedTransformationIDs
         guard TransformationAccessPolicy.canAdd(
             kind,
             mode: experienceMode,
             mappedIDs: effectiveMappedIDs
         ), arr.count < Int(kMaxSpaceWarpOps) else { return }
-        arr.append(SpaceWarpOpValue(kind: kind))
-        renderSettings.spaceWarpStack = arr
+        let operation = SpaceWarpOpValue(kind: kind)
+        arr.append(operation)
+        cache.replaceSpaceWarpStack(arr)
+        expandedOperationIDs = [operation.id]
         refresh &+= 1
     }
 
     private func delete(_ id: UUID) {
-        var arr = renderSettings.spaceWarpStack
+        var arr = cache.spaceWarpStack
         arr.removeAll { $0.id == id }
-        renderSettings.spaceWarpStack = arr
+        cache.replaceSpaceWarpStack(arr)
         groupSelection.remove(id)
+        expandedOperationIDs.remove(id)
+        expandedTechnicalDetailIDs.remove(id)
         refresh &+= 1
     }
 
     private func deleteGroup(_ groupID: UUID) {
-        var arr = renderSettings.spaceWarpStack
+        var arr = cache.spaceWarpStack
+        let removedIDs = Set(arr.lazy.filter { $0.groupID == groupID }.map(\.id))
         arr.removeAll { $0.groupID == groupID }
-        renderSettings.spaceWarpStack = arr
+        cache.replaceSpaceWarpStack(arr)
+        expandedOperationIDs.subtract(removedIDs)
+        expandedTechnicalDetailIDs.subtract(removedIDs)
+        expandedGroups.remove(groupID)
         refresh &+= 1
     }
 
     private func move(_ id: UUID, by delta: Int) {
-        var arr = renderSettings.spaceWarpStack
+        var arr = cache.spaceWarpStack
         guard let i = arr.firstIndex(where: { $0.id == id }) else { return }
         let current = unitRange(containing: i, in: arr)
         guard current.allSatisfy({ isOpRevealed(arr[$0]) }) else { return }
@@ -2073,7 +2170,7 @@ struct TransformationsSection: View {
                 + Array(arr[current])
                 + Array(arr[next.upperBound...])
         }
-        renderSettings.spaceWarpStack = arr
+        cache.replaceSpaceWarpStack(arr)
         refresh &+= 1
     }
 
@@ -2087,7 +2184,7 @@ struct TransformationsSection: View {
     }
 
     private func moveWithinGroup(_ id: UUID, by delta: Int) {
-        var arr = renderSettings.spaceWarpStack
+        var arr = cache.spaceWarpStack
         guard let index = arr.firstIndex(where: { $0.id == id }),
               let groupID = arr[index].groupID,
               isOpRevealed(arr[index]) else { return }
@@ -2096,13 +2193,13 @@ struct TransformationsSection: View {
               arr[destination].groupID == groupID,
               isOpRevealed(arr[destination]) else { return }
         arr.swapAt(index, destination)
-        renderSettings.spaceWarpStack = arr
+        cache.replaceSpaceWarpStack(arr)
         refresh &+= 1
     }
 
     private func canMoveTransform(_ id: UUID, by delta: Int,
                                   insideGroup: Bool) -> Bool {
-        let arr = renderSettings.spaceWarpStack
+        let arr = cache.spaceWarpStack
         guard let index = arr.firstIndex(where: { $0.id == id }),
               isOpRevealed(arr[index]) else { return false }
 
@@ -2167,21 +2264,21 @@ struct TransformationsSection: View {
 
     private func createSelectedGroup() {
         guard canCreateSelectedGroup else { return }
-        var arr = renderSettings.spaceWarpStack
+        var arr = cache.spaceWarpStack
         let groupID = UUID()
         for index in selectedGroupIndices {
             arr[index].groupID = groupID
             arr[index].groupIterations = 1
             arr[index].groupMode = .repeatOutput
         }
-        renderSettings.spaceWarpStack = arr
+        cache.replaceSpaceWarpStack(arr)
         groupSelection.removeAll()
         isCreatingGroup = false
         refresh &+= 1
     }
 
     private func ungroup(_ groupID: UUID) {
-        var arr = renderSettings.spaceWarpStack
+        var arr = cache.spaceWarpStack
         let members = arr.filter { $0.groupID == groupID }
         guard !members.isEmpty,
               members.allSatisfy(isOpRevealed) else { return }
@@ -2190,12 +2287,12 @@ struct TransformationsSection: View {
             arr[index].groupIterations = nil
             arr[index].groupMode = nil
         }
-        renderSettings.spaceWarpStack = arr
+        cache.replaceSpaceWarpStack(arr)
         refresh &+= 1
     }
 
     private func updateGroupIterations(_ groupID: UUID, iterations: Int) {
-        var arr = renderSettings.spaceWarpStack
+        var arr = cache.spaceWarpStack
         let members = arr.filter { $0.groupID == groupID }
         guard !members.isEmpty,
               members.allSatisfy(isOpRevealed) else { return }
@@ -2203,7 +2300,7 @@ struct TransformationsSection: View {
         for index in arr.indices where arr[index].groupID == groupID {
             arr[index].groupIterations = clamped
         }
-        renderSettings.spaceWarpStack = arr
+        cache.replaceSpaceWarpStack(arr)
         refresh &+= 1
     }
 
@@ -2222,11 +2319,9 @@ struct TransformationsSection: View {
     /// Read-modify-write one op by id (slider drags). No `refresh` bump so the
     /// drag stays smooth — the binding reads the stored value back directly.
     private func update(_ id: UUID, _ mutate: (inout SpaceWarpOpValue) -> Void) {
-        var arr = renderSettings.spaceWarpStack
-        guard let i = arr.firstIndex(where: { $0.id == id }),
-              isOpRevealed(arr[i]) else { return }
-        mutate(&arr[i])
-        renderSettings.spaceWarpStack = arr
+        guard let op = cache.spaceWarpStack.first(where: { $0.id == id }),
+              isOpRevealed(op) else { return }
+        cache.updateSpaceWarpOp(id: id, mutate)
     }
 
     /// LIVE lookup of an op by id. Every slider/stepper binding's `get` MUST read
@@ -2235,7 +2330,7 @@ struct TransformationsSection: View {
     /// never re-snapshots the closure). A captured `strength` default of 1.0 in a
     /// 0…2 range is exactly mid-track, which read as a thumb "stuck in the centre".
     private func liveOp(_ id: UUID) -> SpaceWarpOpValue? {
-        renderSettings.spaceWarpStack.first { $0.id == id }
+        cache.spaceWarpStack.first { $0.id == id }
     }
 
     /// Enabled music mappings driving any field of this stack slot — drives the ♪
@@ -2245,6 +2340,30 @@ struct TransformationsSection: View {
         renderSettings.musicReactiveMappings.filter {
             $0.isEnabled && $0.target.spaceWarpSlot == index
         }
+    }
+}
+
+/// Native mathematical typography shared by macOS, iPadOS, and visionOS. The
+/// lesson catalog is authored with Unicode math symbols, so this provides the
+/// visual role people expect from rendered LaTeX without a WebView, JavaScript,
+/// network dependency, or a platform-specific math renderer.
+private struct TransformationMathEquationView: View {
+    let notation: String
+    let spokenNotation: String
+    @ScaledMetric(relativeTo: .title3) private var equationSize: CGFloat = 22
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Text(notation)
+                .font(.system(size: equationSize, weight: .medium, design: .serif))
+                .kerning(0.2)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.vertical, 3)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenNotation)
     }
 }
 

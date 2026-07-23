@@ -63,7 +63,7 @@ extension EnvironmentValues {
 /// root so any EffectSliderRow can draw a derived-value ghost indicator just by
 /// passing its `musicTargetID`.
 struct DerivedValueProvider: Sendable {
-    var resolve: @Sendable @MainActor (String) -> ParameterOperationDispatcher.LiveValue? = { _ in nil }
+    var resolve: @Sendable @MainActor (String) -> ParameterPipeline.LiveValue? = { _ in nil }
     var musicActive: Bool = false
 }
 

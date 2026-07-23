@@ -7,7 +7,7 @@
 //
 //  Background: the same logical control (e.g. "Fractal Scale") historically had
 //  its range/default/name/icon redefined independently in ParameterNodeRegistry,
-//  ParameterOperationDispatcher.coreDescriptors, MusicReactiveTarget, and inline
+//  ParameterPipeline.coreDescriptors, MusicReactiveTarget, and inline
 //  in the SwiftUI sliders. Those copies drifted — the Fractal Scale *manual*
 //  slider read -3...5 while every automation layer (node, dispatcher, music)
 //  used -5...8, so a value reachable by gesture/music could not be dialed in by
@@ -23,6 +23,13 @@
 //
 
 import Foundation
+
+struct ControlID: RawRepresentable, Codable, Hashable, Sendable, CustomStringConvertible {
+    let rawValue: String
+    init(rawValue: String) { self.rawValue = rawValue }
+    init(_ rawValue: String) { self.rawValue = rawValue }
+    var description: String { rawValue }
+}
 
 /// Immutable, Sendable description of one tunable control — the single source of
 /// truth for its range, default, label, icon, and motion strategy.
@@ -42,6 +49,8 @@ struct ControlSpec: Sendable, Equatable {
     let defaultValue: Float
     /// How layered changes to this control are smoothed.
     let motionStrategy: ParameterMotionStrategy
+
+    var controlID: ControlID { ControlID(id) }
 
     init(id: String,
          name: String,

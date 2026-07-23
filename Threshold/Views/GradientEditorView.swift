@@ -13,7 +13,7 @@ import SwiftUI
 
 /// Popover shown when the gradient bar is tapped, allowing editing of individual color stops.
 struct GradientStopsPopover: View {
-    @Binding var cache: UISettingsCache
+    let cache: ControlStateStore
     
     @State private var gradientName: String = ""
     @State private var showSavedConfirmation = false

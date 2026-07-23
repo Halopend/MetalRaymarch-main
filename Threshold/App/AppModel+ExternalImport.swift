@@ -264,7 +264,7 @@ extension AppModel {
                     resetEnvironment: true,
                     scope: .session
                 )
-                gestureController?.syncWithSettings()
+                syncGestureProcessor()
                 NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
             }
             if externalPreviewCapturedScene {

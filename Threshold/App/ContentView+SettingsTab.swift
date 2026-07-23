@@ -31,7 +31,7 @@ extension ContentView {
             // "Show Welcome Again" affordance on the trailing edge so users
             // can replay the onboarding from settings.
             HStack(spacing: 12) {
-                Picker("Settings section", selection: $settingsSubTab) {
+                Picker("Settings section", selection: settingsSubTabBinding) {
                     ForEach(SettingsSubTab.visibleCases) { tab in
                         Label(tab.rawValue, systemImage: tab.icon).tag(tab)
                     }
@@ -86,264 +86,78 @@ extension ContentView {
     /// control surfaces use, so flipping one here is identical to toggling it on
     /// its home tab — this is just one place to find them all.
     var quickTogglesTabContent: some View {
-        ScrollView(.vertical, showsIndicators: true) {
+        let sections = quickToggleSections
+        return ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 18) {
-                HStack {
-                    Label("Quick Toggles", systemImage: SidebarTab.quickToggles.icon)
-                        .font(.headline)
-                    Spacer()
-                }
-                Text("Tap a tile to flip a feature on or off. Lit tiles are on. Each tile drives the same switch as its home tab.")
+                Label("Quick Toggles", systemImage: ControlPanelContent.quickToggles.icon)
+                    .font(.headline)
+                Text("Tap a tile to flip a feature on or off. Lit tiles are on. Each tile is resolved from the same semantic control catalog as radial and spatial controls.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                // Formula section auto-populates from the active fractal type's
-                // capabilities — empty for fractals with no formula-specific knobs.
-                quickToggleFormulaSection
-
-                quickToggleSection("Lighting & Color", icon: "lightbulb", rows: quickToggleLightingRows)
-                quickToggleSection("Space", icon: "globe.asia.australia", rows: quickToggleSpaceRows)
-                quickToggleSection("Audio", icon: "waveform", rows: quickToggleAudioRows,
-                                   footnote: "Bands are quick mutes — turning one back on restores full sensitivity. Available while Audio Reactive is on.")
-                quickToggleSection("Performance", icon: AppIcons.boltFill, rows: quickTogglePerformanceRows)
+                ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
+                    quickToggleSection(section.name, descriptors: section.descriptors)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
     }
 
-    // ── Row models, grouped by section ──────────────────────────────────────
-
-    /// Fractal-type-specific toggles. Built dynamically from
-    /// `cache.fractalType.supports(_:)` so the section reflects the active
-    /// formula (e.g. Julia Drift only on Mandelbulb Julia).
-    private var quickToggleFormulaRows: [QuickToggleRow] {
-        var rows: [QuickToggleRow] = []
-        if cache.fractalType.supports(.polarRotation) {
-            rows.append(QuickToggleRow("Polar Rotation", AppIcons.arrowTriangleheadCounterclockwiseRotate90,
-                home: .effectsDynamic,
-                get: { cache.lighting.polarRotationEffect.enabled },
-                set: { v in
-                    cache.lighting.polarRotationEffect.enabled = v
-                    cache.push(\.polarRotationEffect, value: cache.lighting.polarRotationEffect)
-                }))
-        }
-        if cache.fractalType.supports(.juliaDrift) {
-            rows.append(QuickToggleRow("Julia Drift", "wind",
-                home: .effectsDynamic,
-                get: { cache.lighting.juliaDriftEffect.enabled },
-                set: { cache.lighting.juliaDriftEffect.enabled = $0; cache.commitJuliaDriftEffect() }))
-        }
-        return rows
-    }
-
-    private var quickToggleLightingRows: [QuickToggleRow] {
-        [
-            QuickToggleRow("Glow", "sun.max", home: .effectsAtmosphere,
-                get: { cache.lighting.glowEffect.enabled },
-                set: { cache.lighting.glowEffect.enabled = $0; cache.commitGlowEffect() }),
-            QuickToggleRow("Bloom", "sparkles", home: .effectsAtmosphere,
-                get: { cache.lighting.bloomEffect.enabled },
-                set: { cache.lighting.bloomEffect.enabled = $0; cache.commitBloomEffect() }),
-            QuickToggleRow("Fog", "cloud.fog", home: .effectsAtmosphere,
-                get: { cache.lighting.fogEffect.enabled },
-                set: { cache.lighting.fogEffect.enabled = $0; cache.commitFogEffect() }),
-            QuickToggleRow("Hue Rotation", "paintpalette", home: .effectsDynamic,
-                get: { cache.lighting.hueRotationEffect.enabled },
-                set: { cache.lighting.hueRotationEffect.enabled = $0; cache.commitHueRotationEffect() }),
-            QuickToggleRow("Pulse", "waveform.path.ecg", home: .effectsDynamic,
-                get: { cache.lighting.pulseEffect.enabled },
-                set: { cache.lighting.pulseEffect.enabled = $0; cache.commitPulseEffect() }),
-            QuickToggleRow("Gradient Cycle", "circle.hexagongrid", home: .effectsDynamic,
-                get: { cache.lighting.gradientCycleEffect.enabled },
-                set: { cache.lighting.gradientCycleEffect.enabled = $0; cache.commitGradientCycleEffect() }),
-            QuickToggleRow("Linear Rail", "slider.horizontal.below.rectangle", home: .effectsDynamic,
-                get: { cache.lighting.linearRailEffect.enabled },
-                set: { cache.lighting.linearRailEffect.enabled = $0; cache.commitLinearRailEffect() }),
-        ]
-    }
-
-    private var quickToggleSpaceRows: [QuickToggleRow] {
-        var rows = [
-            // Sphere Projection now lives in the Transformations section (Shape →
-            // Transform) alongside the warp stack, so long-press jumps there.
-            QuickToggleRow("Sphere Projection", "globe.asia.australia",
-                home: .shapeTransformations,
-                available: { cache.fractalType.supports(.sphereProjection) },
-                get: { cache.display.sphereProjectionEnabled },
-                set: { cache.display.sphereProjectionEnabled = $0; cache.commitSphereProjection() }),
-            QuickToggleRow("Bound to Space", "house", home: .shapeBounding,
-                get: { cache.quality.boundToSpaceEnabled },
-                set: { cache.setBoundToSpaceEnabled($0) }),
-            QuickToggleRow("Shape", "circle.dashed", home: .shapeBounding,
-                get: { cache.quality.boundingSphereSkipEnabled },
-                set: { cache.setBoundingShapeEnabled($0) }),
-        ]
-        #if os(visionOS)
-        rows.append(
-            QuickToggleRow("Surroundings Containment", "square.3.layers.3d",
-                home: .shapeBounding,
-                // Independent toggle — does NOT turn the Bounding shape off.
-                get: { cache.quality.envScrunchEnabled },
-                set: { cache.setScrunchEnabled($0) })
-        )
-        #endif
-        return rows
-    }
-
-    /// Individual audio components: the master reactive switch, beat-driven
-    /// flash, and per-band quick mutes (bass/mid/treble/beat). Bands map an
-    /// on/off tile to full (1.0) / muted (0.0) sensitivity.
-    private var quickToggleAudioRows: [QuickToggleRow] {
-        let masterOn: @MainActor () -> Bool = { cache.audioReactive.fractalAudioReactiveEnabled }
-        func band(_ label: String, _ icon: String,
-                  get: @escaping @MainActor () -> Float,
-                  set: @escaping @MainActor (Float) -> Void) -> QuickToggleRow {
-            // No `home`: bands are quick on/off mutes with no dedicated slider to
-            // jump to (per-band sensitivity is only set via reactivity presets),
-            // so they don't get a "go to controls" affordance.
-            QuickToggleRow(label, icon, available: masterOn,
-                get: { get() > 0 },
-                set: { set($0 ? 1.0 : 0.0) })
-        }
-        return [
-            QuickToggleRow("Audio Reactive", "waveform", home: .audioReactive,
-                get: masterOn,
-                set: { v in
-                    cache.audioReactive.fractalAudioReactiveEnabled = v
-                    cache.push(\.fractalAudioReactiveEnabled, value: v)
-                }),
-            QuickToggleRow("Beat Flash", "bolt", home: .effectsDynamic,
-                get: { cache.lighting.beatFlashEffect.enabled },
-                set: { cache.lighting.beatFlashEffect.enabled = $0; cache.commitBeatFlashEffect() }),
-            band("Bass", "speaker.wave.1",
-                get: { cache.audioReactive.bassSensitivity },
-                set: { cache.audioReactive.bassSensitivity = $0; cache.push(\.bassSensitivity, value: $0) }),
-            band("Mid", "speaker.wave.2",
-                get: { cache.audioReactive.midSensitivity },
-                set: { cache.audioReactive.midSensitivity = $0; cache.push(\.midSensitivity, value: $0) }),
-            band("Treble", "speaker.wave.3",
-                get: { cache.audioReactive.trebleSensitivity },
-                set: { cache.audioReactive.trebleSensitivity = $0; cache.push(\.trebleSensitivity, value: $0) }),
-            band("Beat", "metronome",
-                get: { cache.audioReactive.beatSensitivity },
-                set: { cache.audioReactive.beatSensitivity = $0; cache.push(\.beatSensitivity, value: $0) }),
-        ]
-    }
-
-    private var quickTogglePerformanceRows: [QuickToggleRow] {
-        [
-            QuickToggleRow("Smart Advance", "bolt", home: .shapePerformance,
-                get: { appModel.renderSettings.smartAdvanceEnabled },
-                set: { appModel.renderSettings.smartAdvanceEnabled = $0 }),
-            QuickToggleRow("Coherent Packet", "square.grid.3x3", home: .shapePerformance,
-                get: { appModel.renderSettings.coherentPacketEnabled },
-                set: { appModel.renderSettings.coherentPacketEnabled = $0 }),
-            QuickToggleRow("Self-Shadows", "moon", home: .shapePerformance,
-                get: { cache.quality.shadowsEnabled },
-                set: { cache.quality.shadowsEnabled = $0; cache.push(\.shadowsEnabled, value: $0) }),
-            // Bounding Shape moved to the Space section (it's a containment
-            // control, not a raw perf knob) — see `quickToggleSpaceRows`.
-            QuickToggleRow("Zoom Fog Comp", "cloud.fog",
-                get: { cache.quality.zoomFogCompensationEnabled },
-                set: { cache.quality.zoomFogCompensationEnabled = $0; cache.push(\.zoomFogCompensationEnabled, value: $0) }),
-        ]
-    }
-
-    /// Formula section — its own view because it may be empty (some fractal
-    /// types expose no formula-specific toggles) and shows a hint instead.
-    private var quickToggleFormulaSection: some View {
-        let rows = quickToggleFormulaRows
-        return VStack(alignment: .leading, spacing: 10) {
-            Label("Formula — \(cache.fractalType.displayName)", systemImage: "function")
-                .font(.headline)
-            if rows.isEmpty {
-                Text("This fractal type has no formula-specific toggles. Switch to Mandelbulb, a Julia, or Quaternion type to reveal polar rotation and Julia drift.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                quickToggleGrid(rows)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// One row of the quick-toggles page. `available` gates whether the toggle
-    /// is interactive for the current fractal (disabled + dimmed when not).
-    /// `home` is where the control's full slider lives — long-pressing the tile
-    /// jumps there.
-    struct QuickToggleRow: Identifiable {
-        var id: String { label }
-        let label: String
-        let icon: String
-        let home: QuickToggleHome?
-        let available: @MainActor () -> Bool
-        let get: @MainActor () -> Bool
-        let set: @MainActor (Bool) -> Void
-
-        init(_ label: String, _ icon: String,
-             home: QuickToggleHome? = nil,
-             available: @escaping @MainActor () -> Bool = { true },
-             get: @escaping @MainActor () -> Bool,
-             set: @escaping @MainActor (Bool) -> Void) {
-            self.label = label; self.icon = icon; self.home = home
-            self.available = available; self.get = get; self.set = set
+    private var quickToggleDescriptors: [ToggleDescriptor] {
+        ParameterCatalog.toggleDescriptors.filter { descriptor in
+            appModel.platformProfile.supports(descriptor.requiredPlatformCapabilities)
+                && descriptor.placement.presentations.contains(.quickToggles)
         }
     }
 
-    /// A titled section: header + a responsive grid of toggle tiles.
-    private func quickToggleSection(_ title: String, icon: String,
-                                    rows: [QuickToggleRow],
-                                    footnote: String? = nil) -> some View {
+    private var quickToggleSections: [(name: String, descriptors: [ToggleDescriptor])] {
+        var order: [String] = []
+        var groups: [String: [ToggleDescriptor]] = [:]
+        groups.reserveCapacity(quickToggleDescriptors.count)
+        for descriptor in quickToggleDescriptors {
+            guard case .presented(_, let section, _, _) = descriptor.placement else { continue }
+            if groups[section] == nil { order.append(section) }
+            groups[section, default: []].append(descriptor)
+        }
+        return order.compactMap { name in
+            guard let descriptors = groups[name] else { return nil }
+            return (name, descriptors)
+        }
+    }
+
+    private func quickToggleSection(
+        _ title: String,
+        descriptors: [ToggleDescriptor]
+    ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: icon).font(.headline)
-            if let footnote {
-                Text(footnote)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            Text(title).font(.headline)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 10)], spacing: 10) {
+                ForEach(descriptors) { descriptor in quickToggleTile(descriptor) }
             }
-            quickToggleGrid(rows)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Responsive grid of toggle tiles — fills the available width, wrapping
-    /// into as many columns as fit.
-    private func quickToggleGrid(_ rows: [QuickToggleRow]) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 10)], spacing: 10) {
-            ForEach(rows) { quickToggleTile($0) }
-        }
-    }
-
-    /// Rainbow fill used to mark a tile as ON. Diagonal so adjacent tiles read
-    /// as a continuous spectrum block of "live" features.
     private var quickToggleOnFill: LinearGradient {
         LinearGradient(
             colors: [.red, .orange, .yellow, .green, .blue, .purple],
-            startPoint: .topLeading, endPoint: .bottomTrailing)
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 
-    /// A single tile: the whole rectangle is both the button and the toggle.
-    /// Tap flips it (rainbow = on, grey = off); long-press jumps to where the
-    /// control's full slider lives (`row.home`). Dimmed + non-interactive when
-    /// the feature isn't available for the current fractal / audio state.
-    ///
-    /// Uses a tap + long-press gesture pair: a completed long press navigates,
-    /// a quick tap toggles. For assistive tech the toggle is exposed as the
-    /// default accessibility action and the navigation as a named action, since
-    /// raw gestures aren't surfaced to VoiceOver/keyboard.
-    private func quickToggleTile(_ row: QuickToggleRow) -> some View {
-        let available = row.available()
-        let on = row.get()
+    private func quickToggleTile(_ descriptor: ToggleDescriptor) -> some View {
+        let access = appModel.controlAccessService
+        let available = descriptor.isAvailable(cache)
+        let on = access.readToggle(descriptor.controlID) ?? false
+        let home = descriptor.placement.route
         let tile = VStack(spacing: 6) {
-            Image(systemName: row.icon)
+            Image(systemName: descriptor.icon)
                 .font(.title3)
                 .symbolRenderingMode(.hierarchical)
-            Text(row.label)
+            Text(descriptor.name)
                 .font(.caption)
                 .fontWeight(.medium)
                 .multilineTextAlignment(.center)
@@ -355,17 +169,14 @@ extension ContentView {
         .foregroundStyle(on ? Color.white : Color.secondary)
         .background {
             RoundedRectangle(cornerRadius: 14)
-                .fill(on ? AnyShapeStyle(quickToggleOnFill)
-                         : AnyShapeStyle(Color.gray.opacity(0.16)))
+                .fill(on ? AnyShapeStyle(quickToggleOnFill) : AnyShapeStyle(Color.gray.opacity(0.16)))
         }
         .overlay {
             RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(on ? Color.white.opacity(0.35) : Color.white.opacity(0.08),
-                              lineWidth: 1)
+                .strokeBorder(on ? Color.white.opacity(0.35) : Color.white.opacity(0.08), lineWidth: 1)
         }
         .overlay(alignment: .topTrailing) {
-            // Subtle hint that the tile has a "go to controls" affordance.
-            if row.home != nil {
+            if home != nil {
                 Image(systemName: "arrow.up.forward")
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(on ? Color.white.opacity(0.7) : Color.secondary.opacity(0.5))
@@ -376,30 +187,23 @@ extension ContentView {
         .contentShape(RoundedRectangle(cornerRadius: 14))
         .opacity(available ? 1 : 0.3)
         .animation(.easeInOut(duration: 0.18), value: on)
-        // Long-press first so a completed hold navigates instead of toggling;
-        // a quick tap falls through to the toggle.
         .onLongPressGesture(minimumDuration: 0.4) {
-            if let home = row.home { openQuickToggleHome(home) }
+            if let home { openQuickToggleRoute(home) }
         }
         .onTapGesture {
-            row.set(!row.get())
+            access.writeToggle(!on, to: descriptor.controlID)
         }
         .disabled(!available)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(row.label)
+        .accessibilityLabel(descriptor.name)
         .accessibilityValue(on ? "On" : "Off")
         .accessibilityAddTraits(.isButton)
-        // VoiceOver/keyboard activation → toggle; raw gestures aren't surfaced to
-        // assistive tech, so back the tap with an explicit default action.
-        .accessibilityAction { row.set(!row.get()) }
-        .help(row.home != nil ? "\(row.label) — long-press to open its controls" : row.label)
+        .accessibilityAction { access.writeToggle(!on, to: descriptor.controlID) }
+        .help(home != nil ? "\(descriptor.name) — long-press to open its controls" : descriptor.name)
 
-        // Expose the long-press navigation as a discrete VoiceOver/keyboard action
-        // (only when there's somewhere to go), since long-press isn't reachable by
-        // assistive tech.
-        if let home = row.home {
+        if let home {
             return AnyView(tile.accessibilityAction(named: Text("Open controls")) {
-                openQuickToggleHome(home)
+                openQuickToggleRoute(home)
             })
         }
         return AnyView(tile)

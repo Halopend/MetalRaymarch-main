@@ -112,6 +112,12 @@ enum RadialMenuSceneAccent {
 /// extra bend so nested controls read as a deeper ring in the hierarchy.
 struct RadialMenuGeometry {
     let curvature: CGFloat
+    let interactionProfile: RadialInteractionProfile
+
+    init(curvature: CGFloat, interactionProfile: RadialInteractionProfile = .pointer) {
+        self.curvature = curvature
+        self.interactionProfile = interactionProfile
+    }
 
     /// Capsules are taller than the raw arc spacing near its ends. Keep enough
     /// center-to-center room for the resting size plus hover/focus expansion
@@ -119,6 +125,7 @@ struct RadialMenuGeometry {
     /// so they can remain denser — hover-to-navigate makes every point of
     /// pointer travel count.
     private func minimumItemSpacing(depth: Int, sliderRing: Bool) -> CGFloat {
+        if interactionProfile == .touch { return interactionProfile.itemSpacing }
         if depth == 0 { return 38 }
         return sliderRing ? 40 : 32
     }
@@ -157,7 +164,9 @@ struct RadialMenuGeometry {
         guard count > 0 else { return [] }
         // This is a hard center-to-center floor, not a curvature-scaled ideal:
         // shrinking it at low curvature made neighboring capsules overlap.
-        let linearSpacing: CGFloat = sliderRing ? 40 : 32
+        let linearSpacing: CGFloat = interactionProfile == .touch
+            ? interactionProfile.itemSpacing
+            : (sliderRing ? 40 : 32)
         let curvatureScale = min(max(curvature, 0.35), 1.35)
         let minimumAngularStep = 2 * asin(min(linearSpacing / (2 * max(radius, 1)), 0.82))
         // Curvature may open the arc farther, but can never compress it below
@@ -492,6 +501,8 @@ struct RadialMenu: View {
     let pointerAnchor: CGPoint
     @Binding var curvature: Double
     let projection: RadialNavigationProjection
+    let interactionProfile: RadialInteractionProfile
+    let allowsPresentationSelection: Bool
     @Binding var path: [String]
     let sceneAccent: Color
     /// True while the user shift-peeks at the fractal: the menu stays mounted
@@ -577,6 +588,10 @@ struct RadialMenu: View {
         let focusOrder = keyboardFocusOrder(rings: rings)
 
         ZStack {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2, perform: onDismiss)
+
             radialGuide(rings: rings)
                 .allowsHitTesting(false)
 
@@ -584,7 +599,9 @@ struct RadialMenu: View {
                 ringView(ring)
             }
 
-            layoutPicker(primaryPositions: rings.first?.positions ?? [])
+            if allowsPresentationSelection {
+                layoutPicker(primaryPositions: rings.first?.positions ?? [])
+            }
 
             anchorMark
         }
@@ -706,7 +723,10 @@ struct RadialMenu: View {
         sliderRing: Bool,
         priorLayouts: [RingLayout]
     ) -> (positions: [CGPoint], baseAngle: CGFloat) {
-        let geometry = RadialMenuGeometry(curvature: CGFloat(curvature))
+        let geometry = RadialMenuGeometry(
+            curvature: CGFloat(curvature),
+            interactionProfile: interactionProfile
+        )
         let offsets: [CGFloat] = [0, 0.10, -0.10, 0.20, -0.20, 0.32, -0.32]
         let halfWidth: CGFloat = sliderRing ? radialSliderWidth * 0.5 : 52
         let halfHeight: CGFloat = sliderRing ? 17 : 16
@@ -786,9 +806,9 @@ struct RadialMenu: View {
                     // adapters, extending past the pill's hover scale.
                     let hitFrame = CGRect(
                         x: position.x - width * 0.5 - 8,
-                        y: position.y - 15 - 8,
+                        y: position.y - interactionProfile.minimumTargetSize * 0.5 - 8,
                         width: width + 16,
-                        height: 30 + 16
+                        height: interactionProfile.minimumTargetSize + 16
                     )
                     RadialSliderPill(
                         node: node,
@@ -796,6 +816,7 @@ struct RadialMenu: View {
                         fixedWidth: width,
                         isFocused: focusedItemID == node.id,
                         sceneAccent: sceneAccent,
+                        interactionProfile: interactionProfile,
                         onHoverChanged: { hovering in
                             updateHoveredRing(ring.depth, hovering: hovering)
                             // Slider pills never arm the dwell, but their
@@ -822,6 +843,7 @@ struct RadialMenu: View {
                         isFocused: focusedItemID == node.id,
                         retreatDirection: position.x < anchor.x ? -1 : 1,
                         sceneAccent: sceneAccent,
+                        interactionProfile: interactionProfile,
                         onActivate: {
                             // Click (or keyboard activation) on a pure branch
                             // navigates immediately — hover-only switching
@@ -871,6 +893,7 @@ struct RadialMenu: View {
     /// Leaves never re-navigate on hover — only their own click acts — so a
     /// deeper ring stays open while the pointer visits a sibling leaf.
     private func handleNodeHover(_ node: RadialNavigationNode, depth: Int, hovering: Bool) {
+        guard interactionProfile.supportsHoverNavigation else { return }
         guard hovering else {
             // Only the owning pill's exit cancels: SwiftUI does not order
             // hover exit/enter between pills, so a trailing exit from the
@@ -936,7 +959,10 @@ struct RadialMenu: View {
         // The primary ring is exempt from the width clamp: shifting it would
         // divorce the fan from the anchor mark, guide arc, and picker. Only
         // deep branches near a side edge need rescuing.
-        return RadialMenuGeometry(curvature: CGFloat(curvature)).positions(
+        return RadialMenuGeometry(
+            curvature: CGFloat(curvature),
+            interactionProfile: interactionProfile
+        ).positions(
             count: count,
             depth: depth,
             anchor: layoutAnchor,
@@ -1333,6 +1359,7 @@ private struct RadialMenuButton: View {
     let isFocused: Bool
     let retreatDirection: CGFloat
     let sceneAccent: Color
+    let interactionProfile: RadialInteractionProfile
     let onActivate: () -> Void
     let onHoverChanged: (Bool) -> Void
 
@@ -1386,7 +1413,7 @@ private struct RadialMenuButton: View {
                 }
             }
             .padding(.horizontal, depth == 0 ? 11 : 8)
-            .frame(height: depth == 0 ? 36 : 28)
+            .frame(height: max(interactionProfile.minimumTargetSize, depth == 0 ? 36 : 28))
             .frame(
                 minWidth: fixedWidth ?? (depth == 0 ? 116 : 84),
                 idealWidth: fixedWidth ?? (depth == 0 ? 128 : 92),
@@ -1432,6 +1459,7 @@ private struct RadialMenuButton: View {
         .animation(.easeOut(duration: 0.12), value: isHovering)
         .animation(.easeOut(duration: 0.12), value: isFocused)
         .onHover { hovering in
+            guard interactionProfile.supportsHoverNavigation else { return }
             isHovering = hovering
             onHoverChanged(hovering)
             hoverSequence &+= 1
@@ -1549,6 +1577,7 @@ private struct RadialSliderPill: View {
     let fixedWidth: CGFloat
     let isFocused: Bool
     let sceneAccent: Color
+    let interactionProfile: RadialInteractionProfile
     let onHoverChanged: (Bool) -> Void
     let onEditingChanged: (Bool) -> Void
 
@@ -1613,7 +1642,7 @@ private struct RadialSliderPill: View {
     ) -> some View {
         content
         .padding(.horizontal, 10)
-        .frame(width: fixedWidth, height: 30, alignment: .leading)
+        .frame(width: fixedWidth, height: max(30, interactionProfile.minimumTargetSize), alignment: .leading)
         .background(
             gaugeBackground(normalized: normalized)
                 .clipShape(Capsule())

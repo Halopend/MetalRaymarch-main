@@ -20,7 +20,7 @@ struct ParameterNodeGroup: Identifiable {
 }
 
 struct FormulaParamsEditor: View {
-    @Bindable var cache: UISettingsCache
+    @Bindable var cache: ControlStateStore
     @State private var cachedGroups: [ParameterNodeGroup] = []
 
     private var descriptor: FormulaDescriptor? {
@@ -128,7 +128,7 @@ struct FormulaParamsEditor: View {
 
 private struct ParameterNodeRow: View {
     private var operationFrameIndex: UInt64 { UInt64(Date().timeIntervalSince1970 * 1000) }
-    @Bindable var cache: UISettingsCache
+    @Bindable var cache: ControlStateStore
     let node: AnyParameterNodeBase
 
     /// When true, shows the sensitivity slider instead of the parameter slider.
@@ -421,7 +421,7 @@ private struct ParameterNodeRow: View {
 
 /// Segmented control for quickly selecting common Mandelbulb integer power values.
 private struct PowerQuickPicker: View {
-    @Bindable var cache: UISettingsCache
+    @Bindable var cache: ControlStateStore
     let node: AnyParameterNodeBase
 
     private static let presets: [(label: String, value: Float)] = [
@@ -483,7 +483,7 @@ private struct PowerQuickPicker: View {
 // MARK: - Multi-Axis Gesture Assignment
 
 private struct TripletRow: View {
-    @Bindable var cache: UISettingsCache
+    @Bindable var cache: ControlStateStore
     let triplet: GestureBindableTriplet
 
     private var binding: GestureActionBinding { .parameterTriplet(triplet) }

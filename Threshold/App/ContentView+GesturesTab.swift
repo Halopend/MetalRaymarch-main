@@ -61,7 +61,7 @@ extension ContentView {
             Label("Core Behavior", systemImage: AppIcons.sliderHorizontal3)
                 .font(.subheadline.weight(.semibold))
 
-            Toggle("Relative Gestures", isOn: $cache.gesture.useRelativeGestures)
+            Toggle("Relative Gestures", isOn: cacheBinding(\.gesture.useRelativeGestures))
                 .onChange(of: cache.gesture.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
                 .toggleStyle(.switch)
                 .font(.subheadline)
@@ -71,8 +71,8 @@ extension ContentView {
 
             #if os(macOS)
             Toggle("Tilt to Orbit (Motion Sensor)", isOn: Binding(
-                get: { appModel.renderSettings.macTiltControlEnabled },
-                set: { appModel.renderSettings.macTiltControlEnabled = $0 }
+                get: { appModel.renderSettings.viewportTiltControlEnabled },
+                set: { appModel.renderSettings.viewportTiltControlEnabled = $0 }
             ))
             .toggleStyle(.switch)
             .font(.subheadline)
@@ -87,7 +87,7 @@ extension ContentView {
 
     private var gestureMenuToggleSection: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Toggle("Menu Toggle Gesture", isOn: $cache.gesture.menuToggleGestureEnabled)
+            Toggle("Menu Toggle Gesture", isOn: cacheBinding(\.gesture.menuToggleGestureEnabled))
                 .onChange(of: cache.gesture.menuToggleGestureEnabled) { _, v in
                     cache.push(\.menuToggleGestureEnabled, value: v)
                 }
@@ -97,7 +97,7 @@ extension ContentView {
                     Label("Gesture", systemImage: cache.gesture.menuToggleGestureMode.icon)
                         .font(.subheadline)
                     Spacer()
-                    Picker("", selection: $cache.gesture.menuToggleGestureMode) {
+                    Picker("", selection: cacheBinding(\.gesture.menuToggleGestureMode)) {
                         ForEach(MenuToggleGestureMode.allCases, id: \.self) { mode in
                             Text(mode.displayName).tag(mode)
                         }
@@ -116,7 +116,7 @@ extension ContentView {
 
     private var gesturePerFingerTapSection: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Toggle("Per-Finger Tap", isOn: $cache.gesture.perFingerTapGestureEnabled)
+            Toggle("Per-Finger Tap", isOn: cacheBinding(\.gesture.perFingerTapGestureEnabled))
                 .onChange(of: cache.gesture.perFingerTapGestureEnabled) { _, v in
                     cache.push(\.perFingerTapGestureEnabled, value: v)
                 }

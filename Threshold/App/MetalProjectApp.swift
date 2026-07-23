@@ -264,25 +264,13 @@ struct MetalProjectTestApp: App {
                 }
             }
         }
-        .onChange(of: scenePhase) { oldPhase, newPhase in
-            // Handle app becoming active from background/terminated state
+        .onChange(of: scenePhase) { _, newPhase in
+            AppLifecycle.transition(to: newPhase, appModel: appModel)
             if newPhase == .active {
-                Task { @MainActor in
-                    appModel.isAppActive = true
-                    appModel.presetManager.refreshBundledPresets()
-                    appModel.ensureWindowContentVisible()
-                }
-            } else if newPhase == .background || newPhase == .inactive {
-                // PGO: persist profile counters before the system can SIGKILL
-                // us. No-op when not instrumented.
-                if newPhase == .background { PGOProfile.flush() }
-                Task { @MainActor in
-                    appModel.isAppActive = false
-                    // Save current state when going to background
-                    appModel.saveLastState()
-                    // Upload analytics before going to background
-                    await UsageAnalytics.shared.endSession()
-                }
+                appModel.ensureWindowContentVisible()
+            } else if newPhase == .background {
+                // No-op outside instrumented PGO builds.
+                PGOProfile.flush()
             }
         }
     }
