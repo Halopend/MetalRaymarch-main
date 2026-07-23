@@ -15,6 +15,52 @@ private enum LegacySidebarSelection: String {
     case settings = "Settings"
 }
 
+private enum LegacyTopDockTab: String {
+    case explore = "Explore"
+    case shape = "Shape"
+    case visualizations = "Visualizations"
+    case music = "Music"
+    case performance = "Performance"
+}
+
+private enum LegacyFractalSubTab: String {
+    case browse = "Browse"
+    case shape = "Shape"
+    case space = "Space"
+    case transform = "Transform"
+    case bounding = "Bounding"
+    case render = "Render"
+}
+
+private enum LegacyShapeInnerTab: String {
+    case parameters = "Parameters"
+    case formula = "Formula"
+    case primitives = "Primitives"
+    case hands = "Hands"
+}
+
+private enum LegacyColoringSubTab: String {
+    case gradient = "Gradient"
+    case mapping = "Mapping"
+    case grading = "Grading"
+}
+
+private enum LegacyEffectsSubTab: String {
+    case dynamic = "Dynamic Color"
+    case `static` = "Atmosphere"
+}
+
+private enum LegacyMusicPanelTab: String {
+    case music = "Music"
+    case reactive = "Reactive"
+    case mappings = "Mappings"
+    case presets = "Presets"
+    case songs = "Songs"
+    case playlists = "Playlists"
+    case albums = "Albums"
+    case visualizations = "Visualizations"
+}
+
 enum WorkspaceRoot: String, CaseIterable, Codable, Hashable, Sendable {
     case explore
     case input
@@ -22,27 +68,25 @@ enum WorkspaceRoot: String, CaseIterable, Codable, Hashable, Sendable {
     case look
     case quality
 
-    init(_ legacyTab: TopDockTab) {
-        switch legacyTab {
-        case .explore: self = .explore
-        case .music: self = .input
-        case .shape: self = .shape
-        case .visualizations: self = .look
-        case .performance: self = .quality
-        }
-    }
-
-    var legacyTab: TopDockTab {
+    var displayName: String {
         switch self {
-        case .explore: return .explore
-        case .input: return .music
-        case .shape: return .shape
-        case .look: return .visualizations
-        case .quality: return .performance
+        case .explore: return "Explore"
+        case .input: return "Input"
+        case .shape: return "Shape"
+        case .look: return "Look"
+        case .quality: return "Quality"
         }
     }
 
-    var displayName: String { legacyTab.title }
+    var systemImage: String {
+        switch self {
+        case .explore: return "sparkles.rectangle.stack"
+        case .input: return "waveform"
+        case .shape: return "cube.transparent"
+        case .look: return "paintbrush.pointed.fill"
+        case .quality: return "speedometer"
+        }
+    }
 
     var defaultRoute: AppRoute {
         switch self {
@@ -115,8 +159,8 @@ enum AppRoute: Codable, Hashable, Sendable {
         case .shape(let section): return section.icon
         case .look(let section): return section.icon
         case .quality(let section): return section.icon
-        case .quickToggles: return ControlPanelContent.quickToggles.icon
-        case .gestures: return ControlPanelContent.gestures.icon
+        case .quickToggles: return "switch.2"
+        case .gestures: return "hand.draw"
         case .settings(let section): return section.icon
         case .animationLibrary: return AppIcons.pencilAndListClipboard
         }
@@ -416,13 +460,13 @@ final class NavigationStore {
             guard let tab = value("ContentView.selectedTab", as: LegacySidebarSelection.self) else { return nil }
             switch tab {
             case .fractal:
-                let sub = value("ContentView.fractalSubTab", as: FractalSubTab.self) ?? .shape
+                let sub = value("ContentView.fractalSubTab", as: LegacyFractalSubTab.self) ?? .shape
                 switch sub {
                 case .browse:
                     let browse = value("FractalGridView.innerTab", as: FractalBrowseTab.self) ?? .jumpingOff
                     return .explore(ExploreRailSection.allCases.first { $0.browseTab == browse } ?? .jumpingOff)
                 case .shape:
-                    switch value("ContentView.shapeInnerTab", as: ShapeInnerTab.self) ?? .parameters {
+                    switch value("ContentView.shapeInnerTab", as: LegacyShapeInnerTab.self) ?? .parameters {
                     case .parameters: return .shape(.parameters)
                     case .formula: return .shape(.formula)
                     case .primitives: return .shape(.primitives)
@@ -435,17 +479,17 @@ final class NavigationStore {
                 }
             case .animate: return .animationLibrary
             case .coloring:
-                switch value("ContentView.coloringSubTab", as: ColoringSubTab.self) ?? .gradient {
+                switch value("ContentView.coloringSubTab", as: LegacyColoringSubTab.self) ?? .gradient {
                 case .gradient: return .look(.color)
                 case .mapping: return .look(.mapping)
                 case .grading: return .look(.grading)
                 }
             case .effects:
-                return value("ContentView.effectsSubTab", as: EffectsSubTab.self) == .static
+                return value("ContentView.effectsSubTab", as: LegacyEffectsSubTab.self) == .static
                     ? .look(.atmosphere) : .look(.motion)
             case .music:
-                let panel = value("MusicTabContent.innerTab", as: MusicPanelTab.self) ?? .music
-                switch panel.canonical {
+                let panel = value("MusicTabContent.innerTab", as: LegacyMusicPanelTab.self) ?? .music
+                switch panel {
                 case .music: return .input(.playback)
                 case .songs: return .input(.songs)
                 case .playlists: return .input(.playlists)
@@ -461,7 +505,7 @@ final class NavigationStore {
         }()
 
         let fallbackRoute: AppRoute = {
-            let tab = value("ContentView.topDockTab", as: TopDockTab.self) ?? .explore
+            let tab = value("ContentView.topDockTab", as: LegacyTopDockTab.self) ?? .explore
             switch tab {
             case .explore: return .explore(explore)
             case .shape: return .shape(shape)

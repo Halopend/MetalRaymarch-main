@@ -53,10 +53,10 @@ struct NavigationStoreTests {
     func preciseLegacyRouteWins() {
         let (defaults, name) = isolatedDefaults()
         defer { defaults.removePersistentDomain(forName: name) }
-        defaults.set(TopDockTab.performance.rawValue, forKey: "ContentView.topDockTab")
+        defaults.set("Performance", forKey: "ContentView.topDockTab")
         defaults.set("Fractal", forKey: "ContentView.selectedTab")
-        defaults.set(FractalSubTab.shape.rawValue, forKey: "ContentView.fractalSubTab")
-        defaults.set(ShapeInnerTab.formula.rawValue, forKey: "ContentView.shapeInnerTab")
+        defaults.set("Shape", forKey: "ContentView.fractalSubTab")
+        defaults.set("Formula", forKey: "ContentView.shapeInnerTab")
 
         let store = NavigationStore(profile: .visionOS, defaults: defaults, allowsCustomScenes: true)
         #expect(store.currentRoute == .shape(.formula))
@@ -66,27 +66,27 @@ struct NavigationStoreTests {
     }
 
     @Test("Every removed legacy route has a canonical destination", arguments: [
-        (TopDockTab.visualizations, VisualizationsRailSection.reactive.rawValue, AppRoute.input(.reactive)),
-        (TopDockTab.music, MusicRailSection.mappings.rawValue, AppRoute.input(.reactive)),
-        (TopDockTab.music, MusicRailSection.presets.rawValue, AppRoute.input(.reactive)),
-        (TopDockTab.shape, ShapeRailSection.performance.rawValue, AppRoute.quality(.tuning))
+        ("Visualizations", VisualizationsRailSection.reactive.rawValue, AppRoute.input(.reactive)),
+        ("Music", MusicRailSection.mappings.rawValue, AppRoute.input(.reactive)),
+        ("Music", MusicRailSection.presets.rawValue, AppRoute.input(.reactive)),
+        ("Shape", ShapeRailSection.performance.rawValue, AppRoute.quality(.tuning))
     ])
     func removedLegacyRoutes(
-        tab: TopDockTab,
+        tab: String,
         legacySection: String,
         expected: AppRoute
     ) {
         let (defaults, name) = isolatedDefaults()
         defer { defaults.removePersistentDomain(forName: name) }
-        defaults.set(tab.rawValue, forKey: "ContentView.topDockTab")
+        defaults.set(tab, forKey: "ContentView.topDockTab")
         switch tab {
-        case .visualizations:
+        case "Visualizations":
             defaults.set(legacySection, forKey: "ContentView.visualizationsRailSection")
-        case .music:
+        case "Music":
             defaults.set(legacySection, forKey: "ContentView.musicRailSection")
-        case .shape:
+        case "Shape":
             defaults.set(legacySection, forKey: "ContentView.shapeRailSection")
-        case .explore, .performance:
+        default:
             break
         }
 

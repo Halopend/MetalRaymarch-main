@@ -116,7 +116,7 @@ private struct ThresholdiOSRootView: View {
             y: min(max(location.y, 32), max(32, viewportSize.height - 32))
         )
         let initialPath = appModel.navigationStore.currentRoute.workspaceRoot.map {
-            [NavigationHierarchy.rootID(for: $0.legacyTab)]
+            [NavigationHierarchy.rootID(for: $0)]
         } ?? []
         withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.82)) {
             radialMenu.present(at: anchor, initialPath: initialPath)

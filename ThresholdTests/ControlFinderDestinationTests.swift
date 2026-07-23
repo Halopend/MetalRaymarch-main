@@ -7,7 +7,7 @@ struct ControlFinderDestinationTests {
     func staleLookSectionFallsBackToColor() {
         #expect(VisualizationsRailSection.reactive.lookWorkspaceDestination == .color)
         #expect(VisualizationsRailSection.mapping.lookWorkspaceDestination == .mapping)
-        #expect(VisualizationsRailSection.visibleCases.allSatisfy {
+        #expect(VisualizationsRailSection.allCases.allSatisfy {
             $0.lookWorkspaceDestination == $0
         })
     }
@@ -48,10 +48,10 @@ struct ControlFinderDestinationTests {
         }
 
         #expect(explore == Set(ExploreRailSection.allCases.map(\.rawValue)))
-        #expect(shape == Set(ShapeRailSection.allCases.filter { $0 != .performance }.map(\.rawValue)))
-        #expect(visualizations == Set(VisualizationsRailSection.visibleCases.map(\.rawValue)))
+        #expect(shape == Set(ShapeRailSection.allCases.map(\.rawValue)))
+        #expect(visualizations == Set(VisualizationsRailSection.allCases.map(\.rawValue)))
         #expect(performance == Set(PerformanceRailSection.allCases.map(\.rawValue)))
-        #expect(music == Set(MusicRailSection.visibleCases.map(\.rawValue)))
+        #expect(music == Set(MusicRailSection.allCases.map(\.rawValue)))
         #expect(settings == Set(SettingsSubTab.visibleCases.map(\.rawValue)))
         #expect(utilities == ["gestures", "quickToggles"])
         #expect(hasAnimationEditor)

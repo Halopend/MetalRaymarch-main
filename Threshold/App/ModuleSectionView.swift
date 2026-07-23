@@ -211,14 +211,16 @@ extension ModuleUISection {
         return ModuleUISection(
             controls: [
                 ModuleSliderControl(
-                    label: "Pulse Speed", icon: "waveform.path.ecg", range: 0...2,
+                    label: "Pulse Speed", icon: "waveform.path.ecg",
+                    range: ControlCatalog.pulseSpeed.range,
                     get: { cache.lighting.pulseEffect.speed },
                     set: { cache.lighting.pulseEffect.speed = $0 },
                     commit: { cache.commitPulseEffect() },
                     isEnabled: { cache.lighting.pulseEffect.enabled },
                     toggle: pulseEnabled),
                 ModuleSliderControl(
-                    label: "Pulse Amount", icon: "waveform.path", range: 0...1,
+                    label: "Pulse Amount", icon: "waveform.path",
+                    range: ControlCatalog.pulseAmount.range,
                     get: { cache.lighting.pulseEffect.amount },
                     set: { cache.lighting.pulseEffect.amount = $0 },
                     commit: { cache.commitPulseEffect() },

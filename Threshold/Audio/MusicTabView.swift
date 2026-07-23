@@ -12,27 +12,6 @@ import SwiftUI
 
 // MARK: - Music Tab Content
 
-enum MusicPanelTab: String, CaseIterable {
-    case music = "Music"
-    case reactive = "Reactive"
-    // Legacy split-page values retained for AppStorage decoding.
-    case mappings = "Mappings"
-    case presets = "Presets"
-    case songs = "Songs"
-    case playlists = "Playlists"
-    case albums = "Albums"
-    case visualizations = "Visualizations"
-
-    var canonical: MusicPanelTab {
-        switch self {
-        case .mappings, .presets, .visualizations:
-            return .reactive
-        case .music, .reactive, .songs, .playlists, .albums:
-            return self
-        }
-    }
-}
-
 struct MusicTabContent: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.scenePhase) private var scenePhase
@@ -44,8 +23,8 @@ struct MusicTabContent: View {
     private let renderSettings: RenderSettings
 
     @State private var viewModel: MusicTabViewModel
-    var tabSelection: Binding<MusicPanelTab>? = nil
-    @AppStorage("MusicTabContent.innerTab") private var storedTabSelection: MusicPanelTab = .music
+    var tabSelection: Binding<MusicRailSection>? = nil
+    @State private var localTabSelection: MusicRailSection = .playback
     @AppStorage(TransformationExperienceMode.defaultsKey)
     private var transformationExperienceModeRaw = TransformationExperienceMode.justUse.rawValue
     @AppStorage(TransformationUnlockProgress.defaultsKey)
@@ -68,24 +47,24 @@ struct MusicTabContent: View {
         )
     }
 
-    private var effectiveTabSelection: Binding<MusicPanelTab> {
+    private var effectiveTabSelection: Binding<MusicRailSection> {
         Binding(
-            get: { normalizedMusicPanelTab(tabSelection?.wrappedValue ?? storedTabSelection) },
+            get: { normalizedMusicSection(tabSelection?.wrappedValue ?? localTabSelection) },
             set: { newValue in
-                let normalized = normalizedMusicPanelTab(newValue)
-                storedTabSelection = normalized
+                let normalized = normalizedMusicSection(newValue)
+                localTabSelection = normalized
                 tabSelection?.wrappedValue = normalized
             }
         )
     }
 
-    private func normalizedMusicPanelTab(_ tab: MusicPanelTab) -> MusicPanelTab {
+    private func normalizedMusicSection(_ tab: MusicRailSection) -> MusicRailSection {
         let canonical = tab.canonical
         #if os(macOS)
         switch canonical {
         case .songs, .playlists, .albums:
-            return .music
-        case .music, .reactive, .mappings, .presets, .visualizations:
+            return .playback
+        case .playback, .reactive, .mappings, .presets:
             return canonical
         }
         #else
@@ -111,7 +90,7 @@ struct MusicTabContent: View {
         musicService: MusicService,
         audioHub: AudioHub,
         renderSettings: RenderSettings,
-        tabSelection: Binding<MusicPanelTab>? = nil
+        tabSelection: Binding<MusicRailSection>? = nil
     ) {
         self.cache = cache
         self.musicService = musicService
@@ -125,7 +104,7 @@ struct MusicTabContent: View {
         VStack(spacing: 10) {
             Group {
                 switch effectiveTabSelection.wrappedValue {
-                case .music:
+                case .playback:
                     #if os(macOS)
                     macAudioVisualizerDashboard
                     #else
@@ -162,7 +141,7 @@ struct MusicTabContent: View {
                 case .albums:
                     libraryAlbumsSection
 
-                case .reactive, .mappings, .presets, .visualizations:
+                case .reactive, .mappings, .presets:
                     inputReactivePage
                 }
             }
@@ -722,7 +701,7 @@ struct MusicTabContent: View {
     }
 
     #if !os(macOS)
-    private func musicQuickActionButton(title: String, systemImage: String, tab: MusicPanelTab) -> some View {
+    private func musicQuickActionButton(title: String, systemImage: String, tab: MusicRailSection) -> some View {
         Button {
             effectiveTabSelection.wrappedValue = tab
         } label: {

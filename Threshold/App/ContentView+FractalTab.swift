@@ -25,8 +25,8 @@ extension ContentView {
     
     var fractalTabContent: some View {
         VStack(spacing: 0) {
-            switch fractalSubTab {
-            case .browse:
+            switch currentRoute {
+            case .explore:
                 FractalGridView(
                     animationManager: appModel.animationManager,
                     presetManager: appModel.presetManager,
@@ -43,51 +43,55 @@ extension ContentView {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            case .shape:
+            case .shape(.parameters), .shape(.formula), .shape(.primitives), .shape(.hands):
                 ScrollView(.vertical, showsIndicators: true) {
                     Group {
-                        switch shapeInnerTab {
-                        case .parameters:
+                        switch currentRoute {
+                        case .shape(.parameters):
                             fractalShapeContent
-                        case .formula:
+                        case .shape(.formula):
                             fractalFormulaContent
-                        case .primitives:
+                        case .shape(.primitives):
                             PrimitivesSection(cache: cache)
-                        case .hands:
+                        case .shape(.hands):
                             fractalHandsContent
+                        default:
+                            EmptyView()
                         }
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
                 }
 
-            case .space:
+            case .shape(.space):
                 ScrollView(.vertical, showsIndicators: true) {
                     fractalSpaceContent
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                 }
 
-            case .transform:
+            case .shape(.transformations):
                 ScrollView(.vertical, showsIndicators: true) {
                     fractalTransformContent
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                 }
 
-            case .bounding:
+            case .shape(.bounding):
                 ScrollView(.vertical, showsIndicators: true) {
                     fractalBoundingContent
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                 }
 
-            case .render:
+            case .quality, .shape(.performance):
                 ScrollView(.vertical, showsIndicators: true) {
                     performanceTabContent
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                 }
+            default:
+                EmptyView()
             }
         }
     }
@@ -200,13 +204,15 @@ extension ContentView {
 
                 if cache.handAttraction.enabled {
                     EffectSliderRow(icon: "circle.dashed", label: "Radius",
-                        value: cacheBinding(\.handAttraction.radius), range: 0.05...1.0,
+                        value: cacheBinding(\.handAttraction.radius),
+                        range: ControlCatalog.handAttractionRadius.range,
                         enabled: .constant(true),
                         onChanged: { cache.push(\.handAttractionRadius, value: cache.handAttraction.radius) },
                         showToggle: false)
 
                     EffectSliderRow(icon: "arrow.left.and.right", label: "Repel \u{2190}\u{2192} Attract",
-                        value: cacheBinding(\.handAttraction.strength), range: -1.0...1.0,
+                        value: cacheBinding(\.handAttraction.strength),
+                        range: ControlCatalog.handAttractionStrength.range,
                         enabled: .constant(true),
                         onChanged: { cache.push(\.handAttractionStrength, value: cache.handAttraction.strength) },
                         showToggle: false,
@@ -216,21 +222,24 @@ extension ContentView {
                         })
 
                     EffectSliderRow(icon: "circle.fill", label: "Ball Size",
-                        value: cacheBinding(\.handAttraction.ballScale), range: 0.1...1.0,
+                        value: cacheBinding(\.handAttraction.ballScale),
+                        range: ControlCatalog.handAttractionBallScale.range,
                         enabled: .constant(true),
                         onChanged: { cache.push(\.handAttractionBallScale, value: cache.handAttraction.ballScale) },
                         showToggle: false,
                         valueFormat: { v in String(format: "%.0f%% of radius", v * 100) })
 
                     EffectSliderRow(icon: "aqi.medium", label: "Blend Softness",
-                        value: cacheBinding(\.handAttraction.softness), range: 0.05...2.0,
+                        value: cacheBinding(\.handAttraction.softness),
+                        range: ControlCatalog.handAttractionSoftness.range,
                         enabled: .constant(true),
                         onChanged: { cache.push(\.handAttractionSoftness, value: cache.handAttraction.softness) },
                         showToggle: false,
                         valueFormat: { v in String(format: "%.2f\u{00D7}", v) })
 
                     EffectSliderRow(icon: "arrow.up.forward", label: "Reach Offset",
-                        value: cacheBinding(\.handAttraction.projectionDistance), range: 0.0...1.0,
+                        value: cacheBinding(\.handAttraction.projectionDistance),
+                        range: ControlCatalog.handAttractionProjectionDistance.range,
                         enabled: .constant(true),
                         onChanged: { cache.push(\.handAttractionProjectionDistance, value: cache.handAttraction.projectionDistance) },
                         showToggle: false,
@@ -257,7 +266,8 @@ extension ContentView {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if cache.handAttraction.forearmEnabled {
                         EffectSliderRow(icon: "capsule", label: "Forearm Radius",
-                            value: cacheBinding(\.handAttraction.forearmRadius), range: 0.02...0.3,
+                            value: cacheBinding(\.handAttraction.forearmRadius),
+                            range: ControlCatalog.handAttractionForearmRadius.range,
                             enabled: .constant(true),
                             onChanged: { cache.push(\.handAttractionForearmRadius, value: cache.handAttraction.forearmRadius) },
                             showToggle: false,
@@ -283,14 +293,16 @@ extension ContentView {
 
                         if cache.handAttraction.pocketEnabled {
                             EffectSliderRow(icon: "circle.circle", label: "Pocket Size",
-                                value: cacheBinding(\.handAttraction.pocketSize), range: 0.1...1.5,
+                                value: cacheBinding(\.handAttraction.pocketSize),
+                                range: ControlCatalog.handAttractionPocketSize.range,
                                 enabled: .constant(true),
                                 onChanged: { cache.push(\.handAttractionPocketSize, value: cache.handAttraction.pocketSize) },
                                 showToggle: false,
                                 valueFormat: { v in String(format: "%.0f%% of ball", v * 100) })
 
                             EffectSliderRow(icon: "aqi.low", label: "Pocket Softness",
-                                value: cacheBinding(\.handAttraction.pocketSoftness), range: 0.1...1.5,
+                                value: cacheBinding(\.handAttraction.pocketSoftness),
+                                range: ControlCatalog.handAttractionPocketSoftness.range,
                                 enabled: .constant(true),
                                 onChanged: { cache.push(\.handAttractionPocketSoftness, value: cache.handAttraction.pocketSoftness) },
                                 showToggle: false,
@@ -397,7 +409,8 @@ extension ContentView {
 
                     VStack(alignment: .leading, spacing: 8) {
                         EffectSliderRow(icon: "circle.dashed", label: "Radius",
-                            value: cacheBinding(\.safetyBubble.radius), range: 0.5...2.5,
+                            value: cacheBinding(\.safetyBubble.radius),
+                            range: ControlCatalog.safetyBubbleRadius.range,
                             enabled: .constant(true),
                             onChanged: { cache.push(\.safetyBubbleRadius, value: cache.safetyBubble.radius) },
                             showToggle: false)
@@ -423,7 +436,8 @@ extension ContentView {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         if cache.safetyBubble.mixedAutoShrinkEnabled {
                             EffectSliderRow(icon: "circle.dashed", label: "Mixed Radius",
-                                value: cacheBinding(\.safetyBubble.mixedRadius), range: 0.05...1.0,
+                                value: cacheBinding(\.safetyBubble.mixedRadius),
+                                range: ControlCatalog.safetyBubbleMixedRadius.range,
                                 enabled: .constant(true),
                                 onChanged: { cache.push(\.safetyBubbleMixedRadius, value: cache.safetyBubble.mixedRadius) },
                                 showToggle: false,
@@ -450,7 +464,7 @@ extension ContentView {
                             value: Binding<Float>(
                                 get: { 1.0 - ControlStateStore.blendValueToSlider(cache.safetyBubble.strength) },
                                 set: { cache.safetyBubble.strength = ControlStateStore.blendSliderToValue(1.0 - $0) }
-                            ), range: 0.0...1.0,
+                            ), range: ControlCatalog.safetyBubbleBlend.range,
                             enabled: .constant(true),
                             onChanged: { cache.push(\.safetyBubbleBlend, value: cache.safetyBubble.strength) },
                             showToggle: false)
@@ -497,7 +511,7 @@ extension ContentView {
                         value: Binding(
                             get: { cache.display.platformRadius },
                             set: { cache.display.platformRadius = $0 }
-                        ), range: 0.5...2.5,
+                        ), range: ControlCatalog.platformRadius.range,
                         enabled: .constant(true),
                         onChanged: { cache.commitPlatformRadius() },
                         showToggle: false)
@@ -664,7 +678,7 @@ extension ContentView {
                         get: { cache.quality.overRelaxationMax },
                         set: { cache.quality.overRelaxationMax = $0; cache.push(\.overRelaxationMax, value: $0) }
                     ),
-                    range: 1.0...1.6,
+                    range: ControlCatalog.overRelaxationMax.range,
                     display: String(format: "%.2f×", cache.quality.overRelaxationMax),
                     tint: .cyan,
                     helpText: "How big a step the march takes in open space (Keinert enhanced sphere tracing). Higher = faster; lower = sharper on thin features. 1.0 = plain conservative tracing."
@@ -676,7 +690,7 @@ extension ContentView {
                         get: { cache.quality.coneMarchStrength },
                         set: { cache.quality.coneMarchStrength = $0; cache.push(\.coneMarchStrength, value: $0) }
                     ),
-                    range: 0...1,
+                    range: ControlCatalog.coneMarchStrength.range,
                     display: cache.quality.coneMarchStrength < 0.01 ? "Off" : "\(Int((cache.quality.coneMarchStrength * 100).rounded()))%",
                     tint: .cyan,
                     helpText: "Stops each ray within its on-screen pixel footprint, so distant geometry needs far fewer steps. Higher = faster, but inflates distant silhouettes."
@@ -688,7 +702,7 @@ extension ContentView {
                         get: { cache.quality.distanceLODStrength },
                         set: { cache.quality.distanceLODStrength = $0; cache.push(\.distanceLODStrength, value: $0) }
                     ),
-                    range: 0...1,
+                    range: ControlCatalog.distanceLODStrength.range,
                     display: cache.quality.distanceLODStrength < 0.01 ? "Off" : "\(Int((cache.quality.distanceLODStrength * 100).rounded()))%",
                     tint: .cyan,
                     helpText: "Faraway geometry uses fewer fractal iterations, where the lost detail is already sub-pixel. Speeds up deep scenes without inflating silhouettes the way cone marching does."
@@ -700,7 +714,7 @@ extension ContentView {
                         get: { cache.quality.foveationStrength },
                         set: { cache.quality.foveationStrength = $0; cache.push(\.foveationStrength, value: $0) }
                     ),
-                    range: 0...1,
+                    range: ControlCatalog.foveationStrength.range,
                     display: cache.quality.foveationStrength < 0.01 ? "Off" : "\(Int((cache.quality.foveationStrength * 100).rounded()))%",
                     tint: .cyan,
                     helpText: "Peripheral tiles march fewer steps, ramping from the center outward. Adaptive Compute renderer mode only."
@@ -854,28 +868,32 @@ extension ContentView {
                 #endif
 
                 accelSliderCompact("Fallback Width",
-                            value: cache.quality.boundSpaceWidth, range: 1...20,
+                            value: cache.quality.boundSpaceWidth,
+                            range: ControlCatalog.boundSpaceWidth.range,
                             display: String(format: "%.1f m", cache.quality.boundSpaceWidth),
                             help: "Fallback width used until a complete room scan is available.") { value in
                     cache.quality.boundSpaceWidth = value
                     cache.push(\.boundSpaceWidth, value: value)
                 }
                 accelSliderCompact("Fallback Depth",
-                            value: cache.quality.boundSpaceDepth, range: 1...20,
+                            value: cache.quality.boundSpaceDepth,
+                            range: ControlCatalog.boundSpaceDepth.range,
                             display: String(format: "%.1f m", cache.quality.boundSpaceDepth),
                             help: "Fallback depth used until a complete room scan is available.") { value in
                     cache.quality.boundSpaceDepth = value
                     cache.push(\.boundSpaceDepth, value: value)
                 }
                 accelSliderCompact("Fallback Height",
-                            value: cache.quality.boundSpaceHeight, range: 1...10,
+                            value: cache.quality.boundSpaceHeight,
+                            range: ControlCatalog.boundSpaceHeight.range,
                             display: String(format: "%.1f m", cache.quality.boundSpaceHeight),
                             help: "Fallback height used until a complete room scan is available.") { value in
                     cache.quality.boundSpaceHeight = value
                     cache.push(\.boundSpaceHeight, value: value)
                 }
                 accelSliderCompact("Space Ambient",
-                            value: cache.quality.boundAmbientStrength, range: 0...1,
+                            value: cache.quality.boundAmbientStrength,
+                            range: ControlCatalog.boundAmbientStrength.range,
                             display: String(format: "%.0f%%", cache.quality.boundAmbientStrength * 100),
                             help: "Contact shadow contributed by the room boundary. 0% disables it.") { value in
                     cache.quality.boundAmbientStrength = value
@@ -963,7 +981,8 @@ extension ContentView {
             .opacity(cache.quality.boundingSphereSkipEnabled ? 1 : 0.45)
 
             accelSliderCompact("Shape Size",
-                        value: cache.quality.boundingShapeRadius, range: 0.05...30,
+                        value: cache.quality.boundingShapeRadius,
+                        range: ControlCatalog.boundingShapeRadius.range,
                         display: String(format: "%.1f", cache.quality.boundingShapeRadius),
                         help: "Radius/half-size of the selected boundary in model units. Only active while Shape is on.") { v in
                 cache.quality.boundingShapeRadius = v; cache.push(\.boundingShapeRadius, value: v)
@@ -1019,7 +1038,8 @@ extension ContentView {
 
             if cache.quality.boundingShapeFogMode == BoundingFogMode.innerShadow.rawValue {
                 accelSliderCompact("Shadow Depth",
-                            value: cache.quality.boundingShapeShadowDepth, range: 0.02...0.95,
+                            value: cache.quality.boundingShapeShadowDepth,
+                            range: ControlCatalog.boundingShapeShadowDepth.range,
                             display: "\(Int((cache.quality.boundingShapeShadowDepth * 100).rounded()))%",
                             help: "How far the darkening reaches in from the bounding shape's edge, as a fraction of its radius.") { v in
                     cache.quality.boundingShapeShadowDepth = v; cache.push(\.boundingShapeShadowDepth, value: v)
@@ -1070,13 +1090,15 @@ extension ContentView {
         .pickerStyle(.segmented)
             .help("Scrunch: the fractal bulges around nearby real surfaces. Shell: the fractal only renders within Reach of walls and objects, coating the room instead of filling open space.")
             accelSliderCompact("Strength",
-                        value: cache.quality.envScrunchStrength, range: 0...1,
+                        value: cache.quality.envScrunchStrength,
+                        range: ControlCatalog.surroundingsStrength.range,
                         display: "\(Int((cache.quality.envScrunchStrength * 100).rounded()))%",
                         help: "How strongly the fractal deforms toward the scrunched shape. Low values bump gently; 100% fully conforms within the reach band.") { v in
                 cache.quality.envScrunchStrength = v; cache.push(\.envScrunchStrength, value: v)
             }
             accelSliderCompact("Reach",
-                        value: cache.quality.envScrunchReach, range: 0.2...2,
+                        value: cache.quality.envScrunchReach,
+                        range: ControlCatalog.surroundingsReach.range,
                         display: String(format: "%.1f m", cache.quality.envScrunchReach),
                         help: "Scrunch: how far from a real surface the pull engages. Shell: the thickness of the rendered layer around walls and objects.") { v in
                 cache.quality.envScrunchReach = v; cache.push(\.envScrunchReach, value: v)
@@ -1095,7 +1117,8 @@ extension ContentView {
             .help("Keeps the fractal stuck to your scanned room. The room scan is an unsigned distance field, so on its own the scrunch mirrors an outside shell / doubling beyond real walls — Contain clips the fractal to the scanned room box to cut that. Hard: a crisp boundary. Blend: a soft feathered edge (width below). Works with Strength 0 too, for pure auto-containment.")
             if cache.quality.envScrunchContain == 2 {
                 accelSliderCompact("Blend Width",
-                            value: cache.quality.envScrunchContainFeather, range: 0...0.5,
+                            value: cache.quality.envScrunchContainFeather,
+                            range: ControlCatalog.surroundingsBlendWidth.range,
                             display: String(format: "%.2f m", cache.quality.envScrunchContainFeather),
                             help: "How gradually the fractal fades out as it crosses the scanned room boundary.") { v in
                     cache.quality.envScrunchContainFeather = v; cache.push(\.envScrunchContainFeather, value: v)
@@ -1260,7 +1283,7 @@ extension ContentView {
                                         appModel.animationManager?.markIterationBudgetUserOverridden()
                                     }
                                 ),
-                                range: 4...32,
+                                range: ControlCatalog.iterations.range,
                                 step: 1,
                                 display: "\(cache.quality.baseFractalIterations)",
                                 tint: .cyan,
@@ -1284,7 +1307,7 @@ extension ContentView {
                                     appModel.animationManager?.markIterationBudgetUserOverridden()
                                 }
                             ),
-                            range: 32...200,
+                            range: ControlCatalog.maxRaySteps.range,
                             step: 8,
                             display: "\(cache.quality.baseMaxRaySteps)",
                             tint: .cyan,

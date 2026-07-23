@@ -17,9 +17,10 @@ extension ContentView {
         VStack(spacing: 0) {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 12) {
-                    switch effectsSubTab {
-                    case .static:  effectsStaticContent
-                    case .dynamic: effectsDynamicContent
+                    switch currentRoute {
+                    case .look(.atmosphere): effectsStaticContent
+                    case .look(.motion): effectsDynamicContent
+                    default: EmptyView()
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
@@ -75,7 +76,7 @@ extension ContentView {
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "arrow.trianglehead.2.clockwise.rotate.90", label: "Gradient Cycle",
                     value: Binding(get: { cache.lighting.gradientCycleEffect.speed }, set: { cache.lighting.gradientCycleEffect.speed = $0 }),
-                    range: 0...1,
+                    range: ControlCatalog.gradientCycleSpeed.range,
                     enabled: Binding(get: { cache.lighting.gradientCycleEffect.enabled }, set: { cache.lighting.gradientCycleEffect.enabled = $0 }),
                     onChanged: { cache.commitGradientCycleEffect() })
                 if cache.lighting.gradientCycleEffect.enabled {
@@ -108,14 +109,14 @@ extension ContentView {
                     onChanged: { cache.commitHueRotationEffect() })
                 EffectSliderRow(icon: "circle.lefthalf.filled", label: "Hue Intensity",
                     value: Binding(get: { cache.lighting.hueRotationEffect.intensity }, set: { cache.lighting.hueRotationEffect.intensity = $0 }),
-                    range: 0...1,
+                    range: ControlCatalog.hueRotationIntensity.range,
                     enabled: Binding(get: { cache.lighting.hueRotationEffect.enabled }, set: { cache.lighting.hueRotationEffect.enabled = $0 }),
                     onChanged: { cache.commitHueRotationEffect() },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "cloud.fog.fill", label: "Fog Hue Cycle",
                     value: Binding(get: { cache.lighting.fogEffect.hueRotateSpeed }, set: { cache.lighting.fogEffect.hueRotateSpeed = $0 }),
-                    range: 0...0.5,
+                    range: ControlCatalog.fogHueRotationSpeed.range,
                     enabled: Binding(get: { cache.lighting.fogEffect.hueRotateEnabled }, set: { cache.lighting.fogEffect.hueRotateEnabled = $0 }),
                     onChanged: { cache.commitFogEffect() })
                 if cache.lighting.fogEffect.hueRotateEnabled {
@@ -157,7 +158,7 @@ extension ContentView {
                     if cache.lighting.polarRotationEffect.enabled {
                         EffectSliderRow(icon: "gauge.with.dots.needle.50percent", label: "Speed",
                             value: Binding(get: { cache.lighting.polarRotationEffect.speed }, set: { cache.lighting.polarRotationEffect.speed = $0 }),
-                            range: 0...1,
+                            range: ControlCatalog.polarRotationSpeed.range,
                             enabled: .constant(true),
                             onChanged: { cache.push(\.polarRotationEffect, value: cache.lighting.polarRotationEffect) },
                             showToggle: false)
@@ -184,7 +185,7 @@ extension ContentView {
             }
             EffectSliderRow(icon: "tortoise.fill", label: "Color Shift",
                 value: Binding(get: { cache.lighting.lightVariationRate }, set: { cache.lighting.lightVariationRate = $0 }),
-                range: 0...1,
+                range: ControlCatalog.lightVariationRate.range,
                 enabled: .constant(true),
                 onChanged: { cache.commitLightVariationRate() },
                 showToggle: false)
@@ -303,32 +304,32 @@ extension ContentView {
             }
             EffectSliderRow(icon: "point.3.connected.trianglepath.dotted", label: "Rail Speed",
                 value: Binding(get: { cache.lighting.linearRailEffect.speed }, set: { cache.lighting.linearRailEffect.speed = $0 }),
-                range: 0...1,
+                range: ControlCatalog.linearRailSpeed.range,
                 enabled: Binding(get: { cache.lighting.linearRailEffect.enabled }, set: { cache.lighting.linearRailEffect.enabled = $0 }),
                 onChanged: { cache.commitLinearRailEffect() })
             if cache.lighting.linearRailEffect.enabled {
                 EffectSliderRow(icon: "arrow.up.left.and.arrow.down.right", label: "Rail Reach",
                     value: Binding(get: { cache.lighting.linearRailEffect.amplitude }, set: { cache.lighting.linearRailEffect.amplitude = $0 }),
-                    range: 0...3,
+                    range: ControlCatalog.linearRailAmplitude.range,
                     enabled: .constant(true),
                     onChanged: { cache.commitLinearRailEffect() },
                     showToggle: false)
                 EffectSliderRow(icon: "waveform", label: "Harmonic",
                     value: Binding(get: { cache.lighting.linearRailEffect.multiplier }, set: { cache.lighting.linearRailEffect.multiplier = $0 }),
-                    range: 1...8,
+                    range: ControlCatalog.linearRailMultiplier.range,
                     enabled: .constant(true),
                     onChanged: { cache.commitLinearRailEffect() },
                     showToggle: false)
                 EffectSliderRow(icon: "circle.dotted", label: "Orbit",
                     value: Binding(get: { cache.lighting.linearRailEffect.orbitAmount }, set: { cache.lighting.linearRailEffect.orbitAmount = $0 }),
-                    range: 0...1,
+                    range: ControlCatalog.linearRailOrbitAmount.range,
                     enabled: .constant(true),
                     onChanged: { cache.commitLinearRailEffect() },
                     showToggle: false)
                 if cache.lighting.linearRailEffect.orbitAmount > 0.0001 {
                     EffectSliderRow(icon: "arrow.triangle.2.circlepath", label: "Orbit Speed",
                         value: Binding(get: { cache.lighting.linearRailEffect.orbitSpeed }, set: { cache.lighting.linearRailEffect.orbitSpeed = $0 }),
-                        range: 0...1,
+                        range: ControlCatalog.linearRailOrbitSpeed.range,
                         enabled: .constant(true),
                         onChanged: { cache.commitLinearRailEffect() },
                         showToggle: false)

@@ -89,7 +89,7 @@ extension ContentView {
         let sections = quickToggleSections
         return ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 18) {
-                Label("Quick Toggles", systemImage: ControlPanelContent.quickToggles.icon)
+                Label("Quick Toggles", systemImage: "switch.2")
                     .font(.headline)
                 Text("Tap a tile to flip a feature on or off. Lit tiles are on. Each tile is resolved from the same semantic control catalog as radial and spatial controls.")
                     .font(.caption2)
@@ -105,25 +105,22 @@ extension ContentView {
         }
     }
 
-    private var quickToggleDescriptors: [ToggleDescriptor] {
-        ParameterCatalog.toggleDescriptors.filter { descriptor in
-            appModel.platformProfile.supports(descriptor.requiredPlatformCapabilities)
-                && descriptor.placement.presentations.contains(.quickToggles)
-        }
-    }
-
     private var quickToggleSections: [(name: String, descriptors: [ToggleDescriptor])] {
-        var order: [String] = []
-        var groups: [String: [ToggleDescriptor]] = [:]
-        groups.reserveCapacity(quickToggleDescriptors.count)
-        for descriptor in quickToggleDescriptors {
-            guard case .presented(_, let section, _, _) = descriptor.placement else { continue }
-            if groups[section] == nil { order.append(section) }
-            groups[section, default: []].append(descriptor)
-        }
-        return order.compactMap { name in
-            guard let descriptors = groups[name] else { return nil }
-            return (name, descriptors)
+        let key = ControlCatalogProjectionKey(
+            profile: appModel.platformProfile,
+            route: nil,
+            presentation: .quickToggles,
+            fractalType: cache.fractalType,
+            catalogRevision: 1,
+            transformRevision: cache.spaceWarpStructureRevision,
+            featureFlags: 0
+        )
+        return appModel.controlProjectionCache.sections(for: key).compactMap { section in
+            let descriptors = section.controlIDs.compactMap { id -> ToggleDescriptor? in
+                guard case .toggle(let descriptor) = ParameterCatalog.semanticByID[id] else { return nil }
+                return descriptor
+            }
+            return descriptors.isEmpty ? nil : (section.name, descriptors)
         }
     }
 
@@ -333,7 +330,7 @@ extension ContentView {
                     value: Binding(
                         get: { cache.display.platformRadius },
                         set: { cache.display.platformRadius = $0 }
-                    ), range: 0.5...2.5,
+                    ), range: ControlCatalog.platformRadius.range,
                     enabled: .constant(true),
                     onChanged: { cache.commitPlatformRadius() },
                     showToggle: false)
@@ -474,7 +471,7 @@ extension ContentView {
                             cache.push(\.deIterationMismatch, value: $0)
                         }
                     ),
-                    range: -8...8,
+                    range: ControlCatalog.deIterationMismatch.range,
                     display: String(format: "%+.2f", cache.display.deIterationMismatch),
                     tint: .orange
                 )
@@ -964,7 +961,7 @@ extension ContentView {
                         get: { appModel.renderSettings.foveationStrength },
                         set: { appModel.renderSettings.foveationStrength = $0 }
                     ),
-                    range: 0...1,
+                    range: ControlCatalog.foveationStrength.range,
                     display: appModel.renderSettings.foveationStrength < 0.01 ? "Off" : "\(Int((appModel.renderSettings.foveationStrength * 100).rounded()))%",
                     tint: themeColor
                 )

@@ -7,66 +7,6 @@
 
 import SwiftUI
 
-/// View-only grouping for legacy full-panel composition. This is neither
-/// persisted nor routable; AppRoute remains the sole navigation state.
-enum ControlPanelContent {
-    case fractal
-    case animate
-    case coloring
-    case effects
-    case music
-    case transition
-    case quickToggles
-    case gestures
-    case settings
-
-    var icon: String {
-        switch self {
-        case .fractal:  return "cube.fill"
-        case .animate:  return "film.stack"
-        case .coloring: return "paintpalette.fill"
-        case .effects:  return "wand.and.stars"
-        case .music:    return "music.note"
-        case .transition: return "timer"
-        case .quickToggles: return "switch.2"
-        case .gestures: return "hand.draw"
-        case .settings: return "gearshape.fill"
-        }
-    }
-}
-
-enum TopDockTab: String, CaseIterable, Codable, Hashable, Sendable {
-    case explore = "Explore"
-    case shape = "Shape"
-    case visualizations = "Visualizations"
-    case music = "Music"
-    case performance = "Performance"
-
-    /// User-facing workspace order. Raw values intentionally remain unchanged so
-    /// existing AppStorage navigation state survives the information-architecture
-    /// update.
-    static var allCases: [TopDockTab] { [.explore, .music, .shape, .visualizations, .performance] }
-
-    var title: String {
-        switch self {
-        case .music: return "Input"
-        case .visualizations: return "Look"
-        case .performance: return "Quality"
-        default: return rawValue
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .explore: return "sparkles.rectangle.stack"
-        case .shape: return "cube.transparent"
-        case .visualizations: return "paintbrush.pointed.fill"
-        case .music: return "waveform"
-        case .performance: return "speedometer"
-        }
-    }
-}
-
 enum ExploreRailSection: String, CaseIterable, Codable, Hashable, Sendable {
     case jumpingOff = "Jumping Off"
     case musicReactive = "Music Reactive"
@@ -103,7 +43,14 @@ enum ShapeRailSection: String, CaseIterable, Codable, Hashable, Sendable {
     case space = "Space"
     case transformations = "Transform"
     case bounding = "Bounding"
+    /// Legacy decode-only value. Current presentation enumeration is authored
+    /// below and never exposes it; NavigationStore redirects it to Quality.
     case performance = "Performance"
+
+    static let allCases: [ShapeRailSection] = [
+        .parameters, .formula, .primitives, .hands, .space,
+        .transformations, .bounding,
+    ]
 
     var icon: String {
         switch self {
@@ -142,20 +89,19 @@ enum VisualizationsRailSection: String, CaseIterable, Codable, Hashable, Sendabl
     case motion = "Cycling"
     case atmosphere = "Atmosphere"
     case transition = "Transition"
+    /// Legacy decode-only value. NavigationStore redirects it to Input.
     case reactive = "Reactive"
 
-    /// Audio reactivity now lives in Input. Keep the legacy case decodable so
-    /// saved routes can be redirected without losing user state.
-    static var visibleCases: [VisualizationsRailSection] {
-        [.color, .mapping, .atmosphere, .grading, .motion, .transition]
-    }
+    static let allCases: [VisualizationsRailSection] = [
+        .color, .mapping, .atmosphere, .grading, .motion, .transition,
+    ]
 
     /// A safe destination when opening the top-level Look workspace. Older
     /// installs can still have the removed `reactive` section in AppStorage;
     /// that legacy route belongs to Input now and must not make the Look button
     /// appear to open Music.
     var lookWorkspaceDestination: VisualizationsRailSection {
-        Self.visibleCases.contains(self) ? self : .color
+        Self.allCases.contains(self) ? self : .color
     }
 
     var title: String {
@@ -195,6 +141,10 @@ enum MusicRailSection: String, CaseIterable, Codable, Hashable, Sendable {
     case playlists = "Playlists"
     case albums = "Albums"
 
+    static let allCases: [MusicRailSection] = [
+        .playback, .reactive, .songs, .playlists, .albums,
+    ]
+
     var title: String {
         switch self {
         case .playback:
@@ -219,14 +169,8 @@ enum MusicRailSection: String, CaseIterable, Codable, Hashable, Sendable {
         }
     }
 
-    /// User-facing Input destinations. The legacy mapping/preset cases remain
-    /// in `allCases` solely so older saved navigation state can be decoded.
-    static var visibleCases: [MusicRailSection] {
-        [.playback, .reactive, .songs, .playlists, .albums]
-    }
-
     static func availableCases(for profile: PlatformProfile) -> [MusicRailSection] {
-        profile.supports(.musicLibraryBrowsing) ? visibleCases : [.playback, .reactive]
+        profile.supports(.musicLibraryBrowsing) ? allCases : [.playback, .reactive]
     }
 
     /// Resolves old split-page routes to their single current destination.
@@ -239,54 +183,6 @@ enum MusicRailSection: String, CaseIterable, Codable, Hashable, Sendable {
         }
     }
 
-    var musicPanelTab: MusicPanelTab {
-        switch self {
-        case .playback:  return .music
-        case .reactive:  return .reactive
-        case .mappings, .presets: return .reactive
-        case .songs:     return .songs
-        case .playlists: return .playlists
-        case .albums:    return .albums
-        }
-    }
-}
-
-enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shape", space = "Space", transform = "Transform", bounding = "Bounding", render = "Render" }
-enum ShapeInnerTab: String, CaseIterable { case parameters = "Parameters", formula = "Formula", primitives = "Primitives", hands = "Hands" }
-enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
-enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic Color", `static` = "Atmosphere" }
-
-extension ShapeInnerTab {
-    var routeSection: ShapeRailSection {
-        switch self {
-        case .parameters: return .parameters
-        case .formula: return .formula
-        case .primitives: return .primitives
-        case .hands: return .hands
-        }
-    }
-}
-
-extension ColoringSubTab {
-    var routeSection: VisualizationsRailSection {
-        switch self {
-        case .gradient: return .color
-        case .mapping: return .mapping
-        case .grading: return .grading
-        }
-    }
-}
-
-extension MusicPanelTab {
-    var routeSection: MusicRailSection {
-        switch canonical {
-        case .music: return .playback
-        case .songs: return .songs
-        case .playlists: return .playlists
-        case .albums: return .albums
-        case .reactive, .mappings, .presets, .visualizations: return .reactive
-        }
-    }
 }
 
 /// How a scene is contained in the room — the headline framing over the two

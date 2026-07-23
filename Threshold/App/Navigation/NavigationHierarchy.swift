@@ -16,9 +16,8 @@ struct NavigationAvailability {
         allowsCustomScenes: Bool,
         includesGestureEditing: Bool
     ) -> NavigationAvailability {
-        let shapeSections = ShapeRailSection.allCases.filter { section in
-            guard section != .performance else { return false }
-            return section != .hands || profile.supports(.handTracking)
+        let shapeSections = ShapeRailSection.allCases.filter {
+            $0 != .hands || profile.supports(.handTracking)
         }
 
         return NavigationAvailability(
@@ -67,10 +66,10 @@ struct NavigationHierarchy {
         roots.filter { $0.rootPlacement == .utility }
     }
 
-    func children(ofWorkspace tab: TopDockTab) -> [Node] {
+    func children(ofWorkspace root: WorkspaceRoot) -> [Node] {
         workspaceRoots.first(where: { node in
             guard case .workspace(let candidate) = node.target else { return false }
-            return candidate == WorkspaceRoot(tab)
+            return candidate == root
         })?.children ?? []
     }
 
@@ -114,12 +113,12 @@ struct NavigationHierarchy {
             )
         }
 
-        func workspace(_ tab: TopDockTab, children: [Node]) -> Node {
+        func workspace(_ root: WorkspaceRoot, children: [Node]) -> Node {
             Node(
-                id: rootID(for: tab),
-                title: tab.title,
-                systemImage: tab.icon,
-                target: .workspace(WorkspaceRoot(tab)),
+                id: rootID(for: root),
+                title: root.displayName,
+                systemImage: root.systemImage,
+                target: .workspace(root),
                 rootPlacement: .workspace,
                 children: children
             )
@@ -141,7 +140,7 @@ struct NavigationHierarchy {
                 route: .shape(section)
             )
         }
-        let visualizations = VisualizationsRailSection.visibleCases.map { section in
+        let visualizations = VisualizationsRailSection.allCases.map { section in
             leaf(
                 title: section.title,
                 systemImage: section.icon,
@@ -175,7 +174,7 @@ struct NavigationHierarchy {
             Node(
                 id: "utility.quickToggles",
                 title: "Quick Toggles",
-                systemImage: ControlPanelContent.quickToggles.icon,
+                systemImage: "switch.2",
                 target: .route(.quickToggles),
                 rootPlacement: .utility,
                 children: []
@@ -183,7 +182,7 @@ struct NavigationHierarchy {
             Node(
                 id: "utility.settings",
                 title: "Settings",
-                systemImage: ControlPanelContent.settings.icon,
+                systemImage: "gearshape.fill",
                 target: .route(.settings(.display)),
                 rootPlacement: .utility,
                 children: []
@@ -194,7 +193,7 @@ struct NavigationHierarchy {
                 Node(
                     id: "utility.gestures",
                     title: "Gestures",
-                    systemImage: ControlPanelContent.gestures.icon,
+                    systemImage: "hand.draw",
                     target: .route(.gestures),
                     rootPlacement: .utility,
                     children: []
@@ -205,15 +204,15 @@ struct NavigationHierarchy {
 
         return NavigationHierarchy(roots: [
             workspace(.explore, children: explore),
-            workspace(.music, children: music),
+            workspace(.input, children: music),
             workspace(.shape, children: shape),
-            workspace(.visualizations, children: visualizations),
-            workspace(.performance, children: performance)
+            workspace(.look, children: visualizations),
+            workspace(.quality, children: performance)
         ] + utilities)
     }
 
-    static func rootID(for tab: TopDockTab) -> String {
-        "root.\(tab.rawValue)"
+    static func rootID(for root: WorkspaceRoot) -> String {
+        "root.\(root.rawValue)"
     }
 }
 

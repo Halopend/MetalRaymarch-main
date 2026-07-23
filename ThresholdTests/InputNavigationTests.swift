@@ -6,16 +6,16 @@ struct InputNavigationTests {
 
     @Test("Visible Input sections omit legacy split reactivity routes")
     func visibleSections() {
-        #expect(MusicRailSection.visibleCases == [
+        #expect(MusicRailSection.allCases == [
             .playback, .reactive, .songs, .playlists, .albums
         ])
 
         #expect(MusicRailSection.availableCases(for: .macOS) == [.playback, .reactive])
-        #expect(MusicRailSection.availableCases(for: .iPadOS) == MusicRailSection.visibleCases)
-        #expect(MusicRailSection.availableCases(for: .visionOS) == MusicRailSection.visibleCases)
+        #expect(MusicRailSection.availableCases(for: .iPadOS) == MusicRailSection.allCases)
+        #expect(MusicRailSection.availableCases(for: .visionOS) == MusicRailSection.allCases)
 
-        #expect(!MusicRailSection.visibleCases.contains(.mappings))
-        #expect(!MusicRailSection.visibleCases.contains(.presets))
+        #expect(!MusicRailSection.allCases.contains(.mappings))
+        #expect(!MusicRailSection.allCases.contains(.presets))
     }
 
     @Test("Legacy Input routes canonicalize to the combined Reactivity page")
@@ -25,18 +25,10 @@ struct InputNavigationTests {
         #expect(MusicRailSection(rawValue: "Mappings")?.canonical == .reactive)
         #expect(MusicRailSection(rawValue: "Presets")?.canonical == .reactive)
 
-        for section in MusicRailSection.visibleCases {
+        for section in MusicRailSection.allCases {
             #expect(section.canonical == section)
         }
 
-        #expect(MusicRailSection.mappings.musicPanelTab == .reactive)
-        #expect(MusicRailSection.presets.musicPanelTab == .reactive)
-
-        #expect(MusicPanelTab.mappings.canonical == .reactive)
-        #expect(MusicPanelTab.presets.canonical == .reactive)
-        #expect(MusicPanelTab.visualizations.canonical == .reactive)
-        #expect(MusicPanelTab(rawValue: "Mappings")?.canonical == .reactive)
-        #expect(MusicPanelTab(rawValue: "Presets")?.canonical == .reactive)
     }
 
     @Test("Semantic route IDs canonicalize old Input pages")

@@ -14,9 +14,9 @@ import SwiftUI
 enum ControlFinderCategory: String, CaseIterable, Identifiable, Sendable {
     case explore = "Explore"
     case shape = "Shape"
-    case visualizations = "Look"
-    case performance = "Quality"
-    case music = "Input"
+    case look = "Look"
+    case quality = "Quality"
+    case input = "Input"
     case settings = "Settings"
     case workflow = "Workflow"
 
@@ -24,12 +24,12 @@ enum ControlFinderCategory: String, CaseIterable, Identifiable, Sendable {
 
     var icon: String {
         switch self {
-        case .explore: return TopDockTab.explore.icon
-        case .shape: return TopDockTab.shape.icon
-        case .visualizations: return TopDockTab.visualizations.icon
-        case .performance: return TopDockTab.performance.icon
-        case .music: return TopDockTab.music.icon
-        case .settings: return ControlPanelContent.settings.icon
+        case .explore: return WorkspaceRoot.explore.systemImage
+        case .shape: return WorkspaceRoot.shape.systemImage
+        case .look: return WorkspaceRoot.look.systemImage
+        case .quality: return WorkspaceRoot.quality.systemImage
+        case .input: return WorkspaceRoot.input.systemImage
+        case .settings: return "gearshape.fill"
         case .workflow: return "arrow.triangle.branch"
         }
     }
@@ -268,7 +268,7 @@ struct ControlFinderDestination: Identifiable {
             category: .settings,
             pathComponents: ["Settings", "Gestures"],
             description: "Assign menu and per-finger gestures for hands-free control.",
-            icon: ControlPanelContent.gestures.icon,
+            icon: "hand.draw",
             searchKeywords: ["gesture", "hands", "finger", "tap", "pinch", "menu", "shortcut"],
             requiredCapabilities: .gestureEditing,
             target: .route(.gestures)
@@ -280,7 +280,7 @@ struct ControlFinderDestination: Identifiable {
             category: .workflow,
             pathComponents: ["Workflow", "Quick Toggles"],
             description: "See important feature switches together in one scannable grid.",
-            icon: ControlPanelContent.quickToggles.icon,
+            icon: "switch.2",
             searchKeywords: ["switch", "enable", "disable", "effects", "space", "audio", "performance"],
             target: .route(.quickToggles)
         ),
@@ -332,10 +332,10 @@ struct ControlFinderDestination: Identifiable {
     private static func category(for route: AppRoute) -> ControlFinderCategory {
         switch route {
         case .explore: return .explore
-        case .input: return .music
+        case .input: return .input
         case .shape: return .shape
-        case .look: return .visualizations
-        case .quality: return .performance
+        case .look: return .look
+        case .quality: return .quality
         case .settings, .gestures: return .settings
         case .quickToggles, .animationLibrary: return .workflow
         }
@@ -415,7 +415,7 @@ struct ControlFinderDestination: Identifiable {
         ControlFinderDestination(
             title: section.rawValue,
             category: .explore,
-            pathComponents: [TopDockTab.explore.rawValue, section.rawValue],
+            pathComponents: [WorkspaceRoot.explore.displayName, section.rawValue],
             description: description,
             icon: section.icon,
             searchKeywords: keywords,
@@ -433,7 +433,7 @@ struct ControlFinderDestination: Identifiable {
         ControlFinderDestination(
             title: section.rawValue,
             category: .shape,
-            pathComponents: [TopDockTab.shape.rawValue, section.rawValue],
+            pathComponents: [WorkspaceRoot.shape.displayName, section.rawValue],
             description: description,
             icon: section.icon,
             searchKeywords: keywords,
@@ -450,8 +450,8 @@ struct ControlFinderDestination: Identifiable {
     ) -> ControlFinderDestination {
         ControlFinderDestination(
             title: section.title,
-            category: .visualizations,
-            pathComponents: [TopDockTab.visualizations.title, section.title],
+            category: .look,
+            pathComponents: [WorkspaceRoot.look.displayName, section.title],
             description: description,
             icon: section.icon,
             searchKeywords: keywords,
@@ -468,8 +468,8 @@ struct ControlFinderDestination: Identifiable {
     ) -> ControlFinderDestination {
         ControlFinderDestination(
             title: section.rawValue,
-            category: .performance,
-            pathComponents: [TopDockTab.performance.title, section.rawValue],
+            category: .quality,
+            pathComponents: [WorkspaceRoot.quality.displayName, section.rawValue],
             description: description,
             icon: section.icon,
             searchKeywords: keywords,
@@ -486,8 +486,8 @@ struct ControlFinderDestination: Identifiable {
     ) -> ControlFinderDestination {
         ControlFinderDestination(
             title: section.title,
-            category: .music,
-            pathComponents: [TopDockTab.music.title, section.title],
+            category: .input,
+            pathComponents: [WorkspaceRoot.input.displayName, section.title],
             description: description,
             icon: section.icon,
             searchKeywords: keywords,

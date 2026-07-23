@@ -23,10 +23,10 @@ struct NavigationHierarchyTests {
 
         #expect(hierarchy.workspaceRoots.map(\.id) == [
             NavigationHierarchy.rootID(for: .explore),
-            NavigationHierarchy.rootID(for: .music),
+            NavigationHierarchy.rootID(for: .input),
             NavigationHierarchy.rootID(for: .shape),
-            NavigationHierarchy.rootID(for: .visualizations),
-            NavigationHierarchy.rootID(for: .performance)
+            NavigationHierarchy.rootID(for: .look),
+            NavigationHierarchy.rootID(for: .quality)
         ])
         #expect(hierarchy.workspaceRoots.map(\.title) == [
             "Explore", "Input", "Shape", "Look", "Quality"
@@ -50,7 +50,7 @@ struct NavigationHierarchyTests {
             "shape.\(ShapeRailSection.hands.rawValue)",
             "shape.\(ShapeRailSection.bounding.rawValue)"
         ])
-        #expect(hierarchy.children(ofWorkspace: .music).map(\.id) == [
+        #expect(hierarchy.children(ofWorkspace: .input).map(\.id) == [
             "input.\(MusicRailSection.playback.rawValue)",
             "input.\(MusicRailSection.songs.rawValue)"
         ])

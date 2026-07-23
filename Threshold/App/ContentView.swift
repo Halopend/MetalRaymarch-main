@@ -92,49 +92,13 @@ struct ContentView: View {
         return appModel.navigationStore.state.returnRoute ?? .explore(.jumpingOff)
     }
 
-    private var topDockTab: TopDockTab {
-        get { (activeWorkspaceRoute.workspaceRoot ?? .explore).legacyTab }
-        nonmutating set { appModel.navigationStore.selectRoot(WorkspaceRoot(newValue)) }
+    var currentRoute: AppRoute {
+        appModel.navigationStore.currentRoute
     }
 
-    private var exploreRailSection: ExploreRailSection {
-        get {
-            guard case .explore(let section) = appModel.navigationStore.lastRoute(for: .explore) else {
-                return .jumpingOff
-            }
-            return section
-        }
-        nonmutating set { appModel.navigationStore.select(.explore(newValue)) }
-    }
-
-    private var shapeRailSection: ShapeRailSection {
-        get {
-            guard case .shape(let section) = appModel.navigationStore.lastRoute(for: .shape) else {
-                return .parameters
-            }
-            return section
-        }
-        nonmutating set { appModel.navigationStore.select(.shape(newValue)) }
-    }
-
-    private var visualizationsRailSection: VisualizationsRailSection {
-        get {
-            guard case .look(let section) = appModel.navigationStore.lastRoute(for: .look) else {
-                return .color
-            }
-            return section
-        }
-        nonmutating set { appModel.navigationStore.select(.look(newValue)) }
-    }
-
-    private var musicRailSection: MusicRailSection {
-        get {
-            guard case .input(let section) = appModel.navigationStore.lastRoute(for: .input) else {
-                return .playback
-            }
-            return section.canonical
-        }
-        nonmutating set { appModel.navigationStore.select(.input(newValue)) }
+    private var activeWorkspaceRoot: WorkspaceRoot {
+        get { activeWorkspaceRoute.workspaceRoot ?? .explore }
+        nonmutating set { appModel.navigationStore.selectRoot(newValue) }
     }
 
     var performanceRailSection: PerformanceRailSection {
@@ -147,108 +111,17 @@ struct ContentView: View {
         nonmutating set { appModel.navigationStore.select(.quality(newValue)) }
     }
 
-    var selectedTab: ControlPanelContent {
-        get {
-            switch appModel.navigationStore.currentRoute {
-            case .explore, .shape, .quality: return .fractal
-            case .input: return .music
-            case .look(let section):
-                switch section {
-                case .color, .mapping, .grading: return .coloring
-                case .motion, .atmosphere: return .effects
-                case .transition: return .transition
-                case .reactive: return .music
-                }
-            case .quickToggles: return .quickToggles
-            case .gestures: return .gestures
-            case .settings: return .settings
-            case .animationLibrary: return .animate
-            }
-        }
-        nonmutating set {
-            switch newValue {
-            case .fractal: appModel.navigationStore.select(activeWorkspaceRoute)
-            case .animate: appModel.navigationStore.select(.animationLibrary)
-            case .coloring: appModel.navigationStore.select(.look(coloringSubTab.routeSection))
-            case .effects: appModel.navigationStore.select(.look(effectsSubTab == .dynamic ? .motion : .atmosphere))
-            case .music: appModel.navigationStore.select(.input(musicPanelTab.routeSection))
-            case .transition: appModel.navigationStore.select(.look(.transition))
-            case .quickToggles: appModel.navigationStore.select(.quickToggles)
-            case .gestures: appModel.navigationStore.select(.gestures)
-            case .settings: appModel.navigationStore.select(.settings(settingsSubTab))
-            }
-        }
-    }
-
     var fractalBrowseTab: FractalBrowseTab {
-        get { exploreRailSection.browseTab }
+        get {
+            guard case .explore(let section) = appModel.navigationStore.lastRoute(for: .explore) else {
+                return .jumpingOff
+            }
+            return section.browseTab
+        }
         nonmutating set {
             let section = ExploreRailSection.allCases.first { $0.browseTab == newValue } ?? .jumpingOff
             appModel.navigationStore.select(.explore(section))
         }
-    }
-
-    var fractalSubTab: FractalSubTab {
-        get {
-            switch activeWorkspaceRoute {
-            case .explore: return .browse
-            case .shape(let section):
-                switch section {
-                case .parameters, .formula, .primitives, .hands: return .shape
-                case .space: return .space
-                case .transformations: return .transform
-                case .bounding: return .bounding
-                case .performance: return .render
-                }
-            case .quality: return .render
-            default: return .shape
-            }
-        }
-        nonmutating set {
-            switch newValue {
-            case .browse: appModel.navigationStore.select(appModel.navigationStore.lastRoute(for: .explore))
-            case .shape: appModel.navigationStore.select(.shape(shapeInnerTab.routeSection))
-            case .space: appModel.navigationStore.select(.shape(.space))
-            case .transform: appModel.navigationStore.select(.shape(.transformations))
-            case .bounding: appModel.navigationStore.select(.shape(.bounding))
-            case .render: appModel.navigationStore.select(.quality(performanceRailSection))
-            }
-        }
-    }
-
-    var shapeInnerTab: ShapeInnerTab {
-        get {
-            switch shapeRailSection {
-            case .formula: return .formula
-            case .primitives: return .primitives
-            case .hands: return .hands
-            default: return .parameters
-            }
-        }
-        nonmutating set { appModel.navigationStore.select(.shape(newValue.routeSection)) }
-    }
-
-    var coloringSubTab: ColoringSubTab {
-        get {
-            switch visualizationsRailSection {
-            case .mapping: return .mapping
-            case .grading: return .grading
-            default: return .gradient
-            }
-        }
-        nonmutating set { appModel.navigationStore.select(.look(newValue.routeSection)) }
-    }
-
-    var effectsSubTab: EffectsSubTab {
-        get { visualizationsRailSection == .atmosphere ? .static : .dynamic }
-        nonmutating set {
-            appModel.navigationStore.select(.look(newValue == .dynamic ? .motion : .atmosphere))
-        }
-    }
-
-    private var musicPanelTab: MusicPanelTab {
-        get { musicRailSection.musicPanelTab }
-        nonmutating set { appModel.navigationStore.select(.input(newValue.routeSection)) }
     }
 
     var settingsSubTab: SettingsSubTab {
@@ -263,8 +136,16 @@ struct ContentView: View {
         Binding(get: { fractalBrowseTab }, set: { fractalBrowseTab = $0 })
     }
 
-    private var musicPanelTabBinding: Binding<MusicPanelTab> {
-        Binding(get: { musicPanelTab }, set: { musicPanelTab = $0 })
+    private var musicSectionBinding: Binding<MusicRailSection> {
+        Binding(
+            get: {
+                guard case .input(let section) = appModel.navigationStore.lastRoute(for: .input) else {
+                    return .playback
+                }
+                return section.canonical
+            },
+            set: { appModel.navigationStore.select(.input($0)) }
+        )
     }
 
     var settingsSubTabBinding: Binding<SettingsSubTab> {
@@ -280,41 +161,29 @@ struct ContentView: View {
     }()
 
     private var sectionRailWidth: CGFloat {
-    #if os(visionOS)
-        228
-    #elseif os(iOS)
-        208
-    #else
-        170
-    #endif
+        switch appModel.platformProfile.platform {
+        case .visionOS: return 228
+        case .iPadOS: return 208
+        case .macOS: return 170
+        }
     }
 
     private var immersiveLayoutMinimumWidth: CGFloat? {
-    #if os(visionOS)
-        1240
-    #elseif os(iOS)
-        nil
-    #else
-        showsOuterNavigation ? 980 : 720
-    #endif
+        switch appModel.platformProfile.platform {
+        case .visionOS: return 1240
+        case .iPadOS: return nil
+        case .macOS: return showsOuterNavigation ? 980 : 720
+        }
     }
 
     private var immersiveLayoutMinimumHeight: CGFloat? {
-    #if os(iOS)
         // iPad windows can be shorter than the desktop workspace in Stage
         // Manager, Split View, and while the software keyboard is visible.
-        nil
-    #else
-        576
-    #endif
+        appModel.platformProfile.platform == .iPadOS ? nil : 576
     }
 
     private var usesCompactWorkspaceLayout: Bool {
-    #if os(iOS)
-        horizontalSizeClass == .compact
-    #else
-        false
-    #endif
+        appModel.platformProfile.platform == .iPadOS && horizontalSizeClass == .compact
     }
 
     /// Shared definition consumed by the regular top-dock/rail grid, compact
@@ -328,7 +197,7 @@ struct ContentView: View {
     }
 
     private var activeWorkspaceNavigationNodes: [NavigationHierarchy.Node] {
-        navigationHierarchy.children(ofWorkspace: topDockTab)
+        navigationHierarchy.children(ofWorkspace: activeWorkspaceRoot)
     }
 
     private var activeMusicPermutationCount: Int {
@@ -359,7 +228,7 @@ struct ContentView: View {
     }
 
     private var isPrimaryWorkspaceSelection: Bool {
-        selectedTab != .gestures && selectedTab != .settings && selectedTab != .quickToggles
+        appModel.navigationStore.currentRoute.workspaceRoot != nil
     }
 
     var hasShapeMusicMapping: Bool {
@@ -487,7 +356,8 @@ struct ContentView: View {
                 }
             }
             appModel.isShapeMenuActiveHandler = {
-                selectedTab == .fractal && fractalSubTab == .shape
+                guard case .shape(let section) = appModel.navigationStore.currentRoute else { return false }
+                return [.parameters, .formula, .primitives, .hands].contains(section)
             }
             appModel.openRenderMenuHandler = {
                 withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) {
@@ -495,15 +365,15 @@ struct ContentView: View {
                 }
             }
             appModel.isRenderMenuActiveHandler = {
-                selectedTab == .fractal && fractalSubTab == .render
+                appModel.navigationStore.currentRoute.workspaceRoot == .quality
             }
             appModel.openQuickTogglesHandler = {
                 withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) {
-                    selectedTab = .quickToggles
+                    appModel.navigationStore.select(.quickToggles)
                 }
             }
             appModel.isQuickTogglesActiveHandler = {
-                selectedTab == .quickToggles
+                appModel.navigationStore.currentRoute == .quickToggles
             }
             appModel.openSavePresetMenuHandler = {
                 showSaveDestinationSheet = true
@@ -533,18 +403,18 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: AppModel.fractalSettingsDidChangeNotification)) { _ in
             cache.loadFromSettings()
         }
-        .onChange(of: selectedTab) { _, _ in
+        .onChange(of: appModel.navigationStore.currentRoute) { _, _ in
             normalizeDesktopSelectionIfNeeded()
         }
         .onChange(of: appModel.immersiveSpaceState) { _, _ in
             // When the renderer is not ready, snap back to Explore so the user
             // never gets stuck on a tab that requires active rendering.
-            if shouldGateRendererNavigation, !isRendererNavigationReady, topDockTab != .explore {
+            if shouldGateRendererNavigation, !isRendererNavigationReady, activeWorkspaceRoot != .explore {
                 withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) { activateTopDock(.explore) }
             }
         }
         .onChange(of: appModel.rendererStartupWarmupComplete) { _, isReady in
-            if shouldGateRendererNavigation, !isReady, topDockTab != .explore {
+            if shouldGateRendererNavigation, !isReady, activeWorkspaceRoot != .explore {
                 withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) { activateTopDock(.explore) }
             }
         }
@@ -771,7 +641,7 @@ struct ContentView: View {
                 activateExploreSection(.jumpingOff)
             }
         case .animation:
-            selectedTab = .animate
+            appModel.navigationStore.select(.animationLibrary)
         }
     }
     
@@ -966,7 +836,6 @@ struct ContentView: View {
         return HStack(spacing: 10) {
             ForEach(navigationHierarchy.workspaceRoots) { node in
                 if case .workspace(let root) = node.target {
-                    let tab = root.legacyTab
                     Button {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             activateNavigationNode(node)
@@ -976,7 +845,7 @@ struct ContentView: View {
                             ZStack(alignment: .topTrailing) {
                                 Image(systemName: node.systemImage)
                                     .font(.system(size: IconSize.medium, weight: .semibold))
-                                topDockBadge(for: tab)
+                                topDockBadge(for: root)
                             }
                             Text(node.title)
                                 .font(.subheadline.weight(.semibold))
@@ -985,16 +854,16 @@ struct ContentView: View {
                         .padding(.vertical, 10)
                         .background(
                             Capsule()
-                                .fill(topDockTab == tab && isPrimaryWorkspaceSelection ? Color.blue.opacity(0.18) : Color.clear)
+                                .fill(activeWorkspaceRoot == root && isPrimaryWorkspaceSelection ? Color.blue.opacity(0.18) : Color.clear)
                         )
                         .overlay(
                             Capsule()
-                                .strokeBorder(topDockTab == tab && isPrimaryWorkspaceSelection ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.14), lineWidth: 1)
+                                .strokeBorder(activeWorkspaceRoot == root && isPrimaryWorkspaceSelection ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.14), lineWidth: 1)
                         )
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(topDockTab == tab && isPrimaryWorkspaceSelection ? .primary : .secondary)
-                    .accessibilityAddTraits(topDockTab == tab && isPrimaryWorkspaceSelection ? .isSelected : [])
+                    .foregroundStyle(activeWorkspaceRoot == root && isPrimaryWorkspaceSelection ? .primary : .secondary)
+                    .accessibilityAddTraits(activeWorkspaceRoot == root && isPrimaryWorkspaceSelection ? .isSelected : [])
                 }
             }
 
@@ -1149,11 +1018,11 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func topDockBadge(for tab: TopDockTab) -> some View {
-        switch tab {
-        case .visualizations where activeDynamicEffectCount > 0:
+    private func topDockBadge(for root: WorkspaceRoot) -> some View {
+        switch root {
+        case .look where activeDynamicEffectCount > 0:
             countBadge(activeDynamicEffectCount, color: .pink)
-        case .music where activeMusicPermutationCount > 0:
+        case .input where activeMusicPermutationCount > 0:
             countBadge(activeMusicPermutationCount, color: .green)
         case .shape where isSphericalInversionActive:
             dotBadge(color: .indigo)
@@ -1271,23 +1140,20 @@ struct ContentView: View {
             .accessibilityHidden(true)
     }
 
-            private var shouldGateRendererNavigation: Bool {
-        #if os(iOS)
-            false
-        #else
-            true
-        #endif
-            }
+    private var shouldGateRendererNavigation: Bool {
+        appModel.platformProfile.platform != .iPadOS
+    }
 
-            private var isRendererNavigationReady: Bool {
-        #if os(iOS)
-            true
-        #elseif os(macOS)
-        appModel.rendererStartupWarmupComplete
-    #else
-        appModel.immersiveSpaceState == .open && appModel.rendererStartupWarmupComplete
-    #endif
+    private var isRendererNavigationReady: Bool {
+        switch appModel.platformProfile.platform {
+        case .iPadOS:
+            return true
+        case .macOS:
+            return appModel.rendererStartupWarmupComplete
+        case .visionOS:
+            return appModel.immersiveSpaceState == .open && appModel.rendererStartupWarmupComplete
         }
+    }
 
     func dismissMenuWindowIfNeeded() {
 #if os(visionOS)
@@ -1308,7 +1174,7 @@ struct ContentView: View {
     private func isNavigationNodeSelected(_ node: NavigationHierarchy.Node) -> Bool {
         switch node.target {
         case .workspace(let root):
-            return isPrimaryWorkspaceSelection && topDockTab == root.legacyTab
+            return isPrimaryWorkspaceSelection && activeWorkspaceRoot == root
         case .route(let route):
             return appModel.navigationStore.currentRoute == appModel.navigationStore.canonical(route)
         case .command:
@@ -1330,12 +1196,12 @@ struct ContentView: View {
         return appModel.navigationStore.canonical(route)
     }
 
-    private func activateTopDock(_ tab: TopDockTab) {
-        guard tab == .explore || isRendererNavigationReady else {
+    private func activateTopDock(_ root: WorkspaceRoot) {
+        guard root == .explore || isRendererNavigationReady else {
             appModel.navigationStore.select(.explore(.jumpingOff))
             return
         }
-        appModel.navigationStore.selectRoot(WorkspaceRoot(tab))
+        appModel.navigationStore.selectRoot(root)
     }
 
     private func activateExploreSection(_ section: ExploreRailSection) {
@@ -1392,10 +1258,9 @@ struct ContentView: View {
         }
     }
 
-    /// Navigate from a Quick Toggles tile (long-press) to where that control's
-    /// full slider/controls live. Setting the sidebar tab + sub-tab is enough;
-    /// the dock chrome re-syncs via the `onChange` hooks. Lives here (not in the
-    /// settings extension) so it can reach the file-private `musicPanelTab`.
+    /// Navigate from a Quick Toggles tile to the catalog-authored full-controls
+    /// destination through the same canonical route reducer as every other
+    /// presentation.
     func openQuickToggleRoute(_ route: AppRoute) {
         appModel.navigationStore.select(route)
     }
@@ -1407,18 +1272,22 @@ struct ContentView: View {
             if appModel.runtimeViewMode == .buddhabrot {
                 BuddhabrotControlsView()
             } else {
-                switch selectedTab {
-                case .fractal:  fractalTabContent
-                case .animate:  animateTabContent
-                case .coloring: coloringTabContent
-                case .effects:  effectsTabContent
-                case .music:
+                switch appModel.navigationStore.currentRoute {
+                case .explore, .shape, .quality:
+                    fractalTabContent
+                case .animationLibrary:
+                    animateTabContent
+                case .look(.color), .look(.mapping), .look(.grading):
+                    coloringTabContent
+                case .look(.motion), .look(.atmosphere):
+                    effectsTabContent
+                case .input, .look(.reactive):
                     MusicTabContent(cache: cache,
                                     musicService: appModel.musicService,
                                     audioHub: appModel.audioHub,
                                     renderSettings: appModel.renderSettings,
-                                    tabSelection: musicPanelTabBinding)
-                case .transition:
+                                    tabSelection: musicSectionBinding)
+                case .look(.transition):
                     if let animationManager = appModel.animationManager {
                         TransitionTabContent(animationManager: animationManager)
                     } else {
@@ -1430,8 +1299,10 @@ struct ContentView: View {
                     } else {
                         settingsTabContent
                     }
-                case .quickToggles: quickTogglesTabContent
-                case .settings: settingsTabContent
+                case .quickToggles:
+                    quickTogglesTabContent
+                case .settings:
+                    settingsTabContent
                 }
             }
         }
@@ -1439,16 +1310,14 @@ struct ContentView: View {
     }
 
     private func normalizeDesktopSelectionIfNeeded() {
-        if !supportsGestureEditing, selectedTab == .gestures {
-            selectedTab = .fractal
+        if !supportsGestureEditing, appModel.navigationStore.currentRoute == .gestures {
+            appModel.navigationStore.select(.shape(.parameters))
         }
 
-        #if !os(visionOS)
-        if selectedTab == .fractal, fractalSubTab == .shape, shapeInnerTab == .hands {
-            shapeInnerTab = .parameters
-            shapeRailSection = .parameters
+        if !appModel.platformProfile.supports(.handTracking),
+           appModel.navigationStore.currentRoute == .shape(.hands) {
+            appModel.navigationStore.select(.shape(.parameters))
         }
-        #endif
     }
     
     // MARK: - Bottom Bar

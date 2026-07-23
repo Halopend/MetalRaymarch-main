@@ -164,7 +164,7 @@
         return true
       case .openRenderMenu:
         navigation.focus(
-          nodeID: NavigationHierarchy.rootID(for: .performance),
+          nodeID: NavigationHierarchy.rootID(for: .quality),
           in: hierarchy
         )
         return true
@@ -236,10 +236,22 @@
     @State private var quickControlRevision = 0
 
     private var spatialQuickControls: [ToggleDescriptor] {
-      ParameterCatalog.toggleDescriptors.filter { descriptor in
-        appModel.platformProfile.supports(descriptor.requiredPlatformCapabilities)
-          && descriptor.placement.presentations.contains(.spatialRadial)
-          && descriptor.isAvailable(appModel.controlStateStore)
+      let store = appModel.controlStateStore
+      let key = ControlCatalogProjectionKey(
+        profile: appModel.platformProfile,
+        route: nil,
+        presentation: .spatialRadial,
+        fractalType: store.fractalType,
+        catalogRevision: 1,
+        transformRevision: store.spaceWarpStructureRevision,
+        featureFlags: 0
+      )
+      return appModel.controlProjectionCache.sections(for: key).flatMap { section in
+        section.controlIDs.compactMap { id -> ToggleDescriptor? in
+          guard case .toggle(let descriptor) = ParameterCatalog.semanticByID[id],
+                descriptor.isAvailable(store) else { return nil }
+          return descriptor
+        }
       }
     }
 

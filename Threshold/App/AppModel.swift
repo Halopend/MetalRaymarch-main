@@ -819,7 +819,7 @@ class AppModel {
 
     func openRenderMenuFromGesture() {
         if immersiveSpaceState == .open, let presentSpatialMenuHandler {
-            presentSpatialMenuHandler(NavigationHierarchy.rootID(for: .performance))
+            presentSpatialMenuHandler(NavigationHierarchy.rootID(for: .quality))
             return
         }
         toggleFractalMenuFromGesture(

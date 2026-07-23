@@ -9,7 +9,7 @@ struct SpatialRadialNavigationTests {
     NavigationHierarchy.application(
       availability: NavigationAvailability(
         allowsCustomScenes: true,
-        shapeSections: ShapeRailSection.allCases.filter { $0 != .performance },
+        shapeSections: ShapeRailSection.allCases,
         musicSections: MusicRailSection.availableCases(for: .current),
         includesGestureEditing: true
       ))
@@ -36,7 +36,7 @@ struct SpatialRadialNavigationTests {
     let tree = hierarchy()
     var state = SpatialRadialNavigationState()
 
-    let performanceID = NavigationHierarchy.rootID(for: .performance)
+    let performanceID = NavigationHierarchy.rootID(for: .quality)
     state.focus(nodeID: performanceID, in: tree)
     #expect(state.path == [performanceID])
     #expect(state.highlightedNodeID == nil)

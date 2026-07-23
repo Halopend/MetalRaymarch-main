@@ -17,10 +17,11 @@ extension ContentView {
         VStack(spacing: 0) {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 12) {
-                    switch coloringSubTab {
-                    case .gradient: coloringGradientContent
-                    case .mapping:  coloringMappingContent
-                    case .grading:  coloringGradingContent
+                    switch currentRoute {
+                    case .look(.color): coloringGradientContent
+                    case .look(.mapping): coloringMappingContent
+                    case .look(.grading): coloringGradingContent
+                    default: EmptyView()
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
@@ -232,20 +233,23 @@ extension ContentView {
             // Gradient transform controls
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "repeat", label: "Repeat",
-                    value: cacheBinding(\.color.gradientState.gradient.repeatCount), range: 0.1...5.0,
+                    value: cacheBinding(\.color.gradientState.gradient.repeatCount),
+                    range: ControlCatalog.gradientRepeat.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.gradientRepeat, value: cache.color.gradientState.gradient.repeatCount) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "arrow.right", label: "Offset",
-                    value: cacheBinding(\.color.gradientState.gradient.offset), range: 0...1,
+                    value: cacheBinding(\.color.gradientState.gradient.offset),
+                    range: ControlCatalog.gradientOffset.range,
                     enabled: .constant(true),
                     onChanged: { cache.commitGradientOffset() },
                     showToggle: false,
                     musicTargetID: ParameterTargetID.Effect.gradientOffset)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "waveform.path", label: "Smoothing",
-                    value: cacheBinding(\.color.gradientState.gradient.smoothing), range: 0...1,
+                    value: cacheBinding(\.color.gradientState.gradient.smoothing),
+                    range: ControlCatalog.gradientSmoothing.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.gradientSmoothing, value: cache.color.gradientState.gradient.smoothing) },
                     showToggle: false)
@@ -258,7 +262,8 @@ extension ContentView {
             // Color blend controls
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "circle.lefthalf.filled", label: "Color Mix",
-                    value: cacheBinding(\.color.colorMix), range: 0...1.0,
+                    value: cacheBinding(\.color.colorMix),
+                    range: ControlCatalog.colorMix.range,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorMix, value: cache.color.colorMix) },
                     showToggle: false)

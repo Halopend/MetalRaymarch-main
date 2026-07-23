@@ -98,18 +98,12 @@ private struct ThresholdMacRootView: View {
     @State private var isHoverVisible = false
     @State private var isPaneHovering = false
     @State private var isEdgeRevealHovering = false
-    @State private var isRadialVisible = false
+    @State private var radialMenu = RadialMenuModel(interactionProfile: .pointer)
     @State private var isShiftPressed = false
-    @State private var radialAnchor = CGPoint(x: 1400, y: 320)
-    /// Selected node id per ring depth — the launcher's transient browsing
-    /// state. Hover auto-select rewrites it; committed selection stays in the
-    /// AppModel-owned navigation store until a fallback leaf activates.
-    @State private var radialPath: [String] = []
     /// Live parameter mirror backing the launcher's hierarchy sliders. Synced
     /// only while the launcher is visible (each live cache costs a 0.5s
     /// main-thread timer), following the ContentView start/stopSync pattern.
     private var radialCache: ControlStateStore { appModel.controlStateStore }
-    @State private var hoveredRadialSlider: RadialActiveSlider?
     @State private var activeMenuTrackingCount = 0
     @State private var pendingAutoHide: DispatchWorkItem?
     @State private var pendingRadialReveal: DispatchWorkItem?
@@ -129,9 +123,8 @@ private struct ThresholdMacRootView: View {
         return appModel.navigationStore.state.returnRoute ?? .explore(.jumpingOff)
     }
 
-    private var radialTopDockTab: TopDockTab {
-        get { (radialActiveWorkspaceRoute.workspaceRoot ?? .explore).legacyTab }
-        nonmutating set { appModel.navigationStore.selectRoot(WorkspaceRoot(newValue)) }
+    private var radialWorkspaceRoot: WorkspaceRoot {
+        radialActiveWorkspaceRoute.workspaceRoot ?? .explore
     }
 
     private let contentMinimumSize = CGSize(width: 980, height: 576)
@@ -161,7 +154,7 @@ private struct ThresholdMacRootView: View {
         // While the launcher is up the slide-over panel stays put: quick-input
         // drags mark menu interaction active, which must not summon the panel
         // over the rings mid-adjustment. An explicit pin still wins.
-        if isRadialVisible { return isControlsPinnedOpen }
+        if radialMenu.isPresented { return isControlsPinnedOpen }
         return isControlsPinnedOpen || isHoverVisible || appModel.isMenuInteractionActive || activeMenuTrackingCount > 0
     }
 
@@ -183,18 +176,24 @@ private struct ThresholdMacRootView: View {
                     .background(Color.black)
                     .ignoresSafeArea()
 
-                if launcherStyle == .radial && isRadialVisible && !appModel.isControlsWindowOpen {
+                if launcherStyle == .radial && radialMenu.isPresented && !appModel.isControlsWindowOpen {
                     RadialMenu(
                         size: proxy.size,
-                        pointerAnchor: radialAnchor,
+                        pointerAnchor: radialMenu.anchor,
                         curvature: $launcherCurvature,
                         projection: radialProjection,
-                        interactionProfile: .pointer,
+                        interactionProfile: radialMenu.interactionProfile,
                         allowsPresentationSelection: true,
-                        path: $radialPath,
+                        path: Binding(
+                            get: { radialMenu.path },
+                            set: { radialMenu.path = $0 }
+                        ),
                         sceneAccent: RadialMenuSceneAccent.color(from: appModel.renderSettings.gradientColorMap),
                         suspendsHoverNavigation: isShiftPressed,
-                        hoveredSlider: $hoveredRadialSlider,
+                        hoveredSlider: Binding(
+                            get: { radialMenu.hoveredSlider },
+                            set: { radialMenu.hoveredSlider = $0 }
+                        ),
                         onSliderEditingChanged: { editing in
                             if editing {
                                 appModel.beginMenuAdjustment()
@@ -251,7 +250,7 @@ private struct ThresholdMacRootView: View {
 
                 MacRadialInputMonitor(
                     isPressed: $isShiftPressed,
-                    isRadialVisible: isRadialVisible,
+                    isRadialVisible: radialMenu.isPresented,
                     onMouseMoved: { location in
                         handleWindowMouseMoved(location, windowSize: proxy.size)
                     },
@@ -262,7 +261,7 @@ private struct ThresholdMacRootView: View {
                         // Geometric check: hover-exit events can be dropped, so a
                         // stale hovered id must not hijack scrolls window-wide.
                         // Shift-peek makes the faded pills inert.
-                        guard !isShiftPressed, let hovered = hoveredRadialSlider else { return false }
+                        guard !isShiftPressed, let hovered = radialMenu.hoveredSlider else { return false }
                         let point = CGPoint(
                             x: locationInWindow.x,
                             y: proxy.size.height - locationInWindow.y
@@ -270,14 +269,14 @@ private struct ThresholdMacRootView: View {
                         return hovered.frame.contains(point)
                     },
                     isPointerOverWindowDragHandle: { locationInWindow in
-                        guard isRadialVisible, !isShiftPressed else { return false }
+                        guard radialMenu.isPresented, !isShiftPressed else { return false }
                         let point = CGPoint(
                             x: locationInWindow.x,
                             y: proxy.size.height - locationInWindow.y
                         )
                         return RadialMenu.windowDragHandleFrame(
                             size: proxy.size,
-                            pointerAnchor: radialAnchor
+                            pointerAnchor: radialMenu.anchor
                         ).contains(point)
                     },
                     onSliderScroll: { upwardDelta in
@@ -356,7 +355,7 @@ private struct ThresholdMacRootView: View {
         .onReceive(NotificationCenter.default.publisher(for: AppModel.fractalSettingsDidChangeNotification)) { _ in
             // Scene/preset loads replace RenderSettings values wholesale; the
             // launcher's slider mirrors must resnapshot or they scrub stale bases.
-            if isRadialVisible { radialCache.loadFromSettings() }
+            if radialMenu.isPresented { radialCache.loadFromSettings() }
         }
         .onDisappear {
             appModel.openControlFinderHandler = nil
@@ -431,7 +430,7 @@ private struct ThresholdMacRootView: View {
             case .separateWindow:
                 return "Open Controls"
             case .radial:
-                return isRadialVisible ? "Hide Menu" : "Menu"
+                return radialMenu.isPresented ? "Hide Menu" : "Menu"
             case .controlPanel:
                 return shouldShowControls ? "Hide Controls" : "Controls"
             }
@@ -444,11 +443,11 @@ private struct ThresholdMacRootView: View {
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 12)
                 .frame(minHeight: 44)
-                .foregroundStyle(isRadialVisible ? Color.accentColor : Color.primary)
+                .foregroundStyle(radialMenu.isPresented ? Color.accentColor : Color.primary)
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .help(isRadialVisible ? "Hide radial menu (⌘.)" : "Open \(launcherStyle.displayName.lowercased()) (⌘.)")
+        .help(radialMenu.isPresented ? "Hide radial menu (⌘.)" : "Open \(launcherStyle.displayName.lowercased()) (⌘.)")
         .keyboardShortcut(".", modifiers: .command)
         .background(.ultraThinMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
@@ -507,7 +506,7 @@ private struct ThresholdMacRootView: View {
         let isInsideRevealEdge = location.x >= windowSize.width - edgeRevealWidth
             && location.x <= windowSize.width + 2
 
-        if isRadialVisible {
+        if radialMenu.isPresented {
             // Keep the launcher fixed after it opens. If the anchor follows the
             // pointer, every button moves away while the user approaches it and
             // the eventual click falls through to the viewport instead.
@@ -528,7 +527,7 @@ private struct ThresholdMacRootView: View {
         }
 
         isEdgeRevealHovering = true
-        radialAnchor = clampedLauncherAnchor(
+        radialMenu.anchor = clampedLauncherAnchor(
             CGPoint(x: location.x, y: windowSize.height - location.y),
             windowSize: windowSize
         )
@@ -541,13 +540,13 @@ private struct ThresholdMacRootView: View {
     /// and made edge reveal feel intermittent.
     private func scheduleNavigationReveal() {
         guard launcherStyle != .separateWindow,
-              !isRadialVisible,
+              !radialMenu.isPresented,
               pendingRadialReveal == nil,
               !shouldShowControls else { return }
 
         let workItem = DispatchWorkItem {
             pendingRadialReveal = nil
-            guard !isRadialVisible,
+            guard !radialMenu.isPresented,
                   isEdgeRevealHovering,
                   !shouldShowControls else { return }
 
@@ -558,12 +557,13 @@ private struct ThresholdMacRootView: View {
 
             guard launcherStyle == .radial else { return }
 
-            beginRadialSession()
+            guard beginRadialSession() else { return }
+            let path = [Self.rootNodeID(for: radialWorkspaceRoot)]
             if reduceMotion {
-                isRadialVisible = true
+                radialMenu.present(at: radialMenu.anchor, initialPath: path)
             } else {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                    isRadialVisible = true
+                    radialMenu.present(at: radialMenu.anchor, initialPath: path)
                 }
             }
         }
@@ -574,15 +574,15 @@ private struct ThresholdMacRootView: View {
     private func hideRadialTabs(animated: Bool) {
         pendingRadialReveal?.cancel()
         pendingRadialReveal = nil
-        guard isRadialVisible else { return }
+        guard radialMenu.isPresented else { return }
 
         endRadialSession()
         if animated && !reduceMotion {
             withAnimation(.easeOut(duration: 0.14)) {
-                isRadialVisible = false
+                radialMenu.dismiss()
             }
         } else {
-            isRadialVisible = false
+            radialMenu.dismiss()
         }
     }
 
@@ -590,17 +590,15 @@ private struct ThresholdMacRootView: View {
     /// the committed dock tab, and a live slider cache. startSync is only safe
     /// to call once per session, so both reveal paths route through here while
     /// the launcher is still hidden.
-    private func beginRadialSession() {
-        guard appModel.inputOwnershipStore.claim(.radialMenu) else { return }
-        radialPath = [Self.rootNodeID(for: radialTopDockTab)]
-        hoveredRadialSlider = nil
+    private func beginRadialSession() -> Bool {
+        guard appModel.inputOwnershipStore.claim(.radialMenu) else { return false }
         radialCache.startSync(with: appModel.renderSettings, appModel: appModel)
+        return true
     }
 
     private func endRadialSession() {
         appModel.inputOwnershipStore.release(.radialMenu)
         radialCache.stopSync()
-        hoveredRadialSlider = nil
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -611,8 +609,8 @@ private struct ThresholdMacRootView: View {
     // fallback actions; the radial model and renderer are shared with iPadOS.
     // ═══════════════════════════════════════════════════════════════════════
 
-    static func rootNodeID(for tab: TopDockTab) -> String {
-        NavigationHierarchy.rootID(for: tab)
+    static func rootNodeID(for root: WorkspaceRoot) -> String {
+        NavigationHierarchy.rootID(for: root)
     }
 
     private var radialProjection: RadialNavigationProjection {
@@ -651,7 +649,7 @@ private struct ThresholdMacRootView: View {
     /// finger-up increases the value. 240pt of travel sweeps the full range —
     /// finer than the arc drag, for dialing in exact values.
     private func applyRadialSliderScroll(_ upwardDelta: CGFloat) {
-        guard let hovered = hoveredRadialSlider,
+        guard let hovered = radialMenu.hoveredSlider,
               let slider = radialProjection.node(withID: hovered.id)?.slider,
               slider.isEnabled() else { return }
         let span = slider.range.upperBound - slider.range.lowerBound
@@ -680,7 +678,7 @@ private struct ThresholdMacRootView: View {
 
         case .radial:
             guard !appModel.isControlsWindowOpen else { return }
-            if isRadialVisible {
+            if radialMenu.isPresented {
                 hideRadialTabs(animated: true)
                 return
             }
@@ -709,7 +707,7 @@ private struct ThresholdMacRootView: View {
             }
 
         case .radial:
-            if isRadialVisible {
+            if radialMenu.isPresented {
                 hideRadialTabs(animated: true)
                 return
             }
@@ -764,21 +762,23 @@ private struct ThresholdMacRootView: View {
         pendingRadialReveal = nil
         isControlsPinnedOpen = false
         setHoverVisible(false, animated: false)
-        radialAnchor = clampedLauncherAnchor(anchor, windowSize: windowSize)
+        let clampedAnchor = clampedLauncherAnchor(anchor, windowSize: windowSize)
 
         // Re-anchoring while visible resets the browse path to the committed
         // tab but must not restart the already-running cache sync.
-        guard !isRadialVisible else {
-            radialPath = [Self.rootNodeID(for: radialTopDockTab)]
+        guard !radialMenu.isPresented else {
+            radialMenu.anchor = clampedAnchor
+            radialMenu.path = [Self.rootNodeID(for: radialWorkspaceRoot)]
             return
         }
 
-        beginRadialSession()
+        guard beginRadialSession() else { return }
+        let path = [Self.rootNodeID(for: radialWorkspaceRoot)]
         if reduceMotion {
-            isRadialVisible = true
+            radialMenu.present(at: clampedAnchor, initialPath: path)
         } else {
             withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                isRadialVisible = true
+                radialMenu.present(at: clampedAnchor, initialPath: path)
             }
         }
     }
@@ -825,7 +825,7 @@ private struct ThresholdMacRootView: View {
             // While the launcher is up the hover latch has no visual effect
             // (shouldShowControls ignores it), so latching would only leave
             // stale state that flashes the panel open after dismissal.
-            if !isRadialVisible { setHoverVisible(true, animated: animated) }
+            if !radialMenu.isPresented { setHoverVisible(true, animated: animated) }
             return
         }
 
