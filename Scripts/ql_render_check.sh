@@ -29,6 +29,28 @@ fi
 export DEVELOPER_DIR
 echo "==> DEVELOPER_DIR=$DEVELOPER_DIR"
 
+MACOS_SDK="$(xcrun -sdk macosx --show-sdk-path)"
+METAL_BIN=""
+METALLIB_BIN=""
+
+# Current Xcode releases install the Metal compiler as a separately downloaded
+# toolchain. `xcodebuild` discovers it automatically, but a bare `xcrun metal`
+# may still resolve the non-functional placeholder in XcodeDefault.xctoolchain.
+METAL_TOOLCHAIN_MOUNTS="${HOME}/Library/Developer/DVTDownloads/MetalToolchain/mounts"
+for toolchain in "$METAL_TOOLCHAIN_MOUNTS"/*/Metal.xctoolchain; do
+  if [[ -x "$toolchain/usr/bin/metal" && -x "$toolchain/usr/bin/metallib" ]]; then
+    METAL_BIN="$toolchain/usr/bin/metal"
+    METALLIB_BIN="$toolchain/usr/bin/metallib"
+    break
+  fi
+done
+
+if [[ -z "$METAL_BIN" ]]; then
+  METAL_BIN="$(xcrun -sdk macosx --find metal)"
+  METALLIB_BIN="$(xcrun -sdk macosx --find metallib)"
+fi
+echo "==> METAL_TOOLCHAIN=$(dirname "$(dirname "$(dirname "$METAL_BIN")")")"
+
 WIRE="$REPO/ThresholdQuickLook/wire_quicklook.rb"
 BUILD="$(mktemp -d)"
 trap 'rm -rf "$BUILD"' EXIT
@@ -38,8 +60,8 @@ echo "==> generating target-local embedded Metal source"
 
 echo "==> building metallib from Shaders.metal"
 ( cd "$REPO/Threshold" \
-  && xcrun -sdk macosx metal -c Rendering/Shaders.metal -o "$BUILD/shaders.air" \
-  && xcrun -sdk macosx metallib "$BUILD/shaders.air" -o "$BUILD/shaders.metallib" )
+  && "$METAL_BIN" -c Rendering/Shaders.metal -isysroot "$MACOS_SDK" -o "$BUILD/shaders.air" \
+  && "$METALLIB_BIN" "$BUILD/shaders.air" -o "$BUILD/shaders.metallib" )
 
 echo "==> deriving source closure from wire_quicklook.rb (SHARED_SOURCES only)"
 # Scope to the SHARED_SOURCES array — the render closure. Deliberately EXCLUDE
