@@ -180,6 +180,7 @@ final class TouchVisualizationOverlay: UIView {
 /// while leaving gesture recognition untouched.
 final class TouchVisualizingMTKView: MTKView {
     private let touchOverlay = TouchVisualizationOverlay(frame: .zero)
+    private var heldKeyboardUsages: Set<Int> = []
     weak var inputSink: (any ViewportInputSink)?
     var shouldAcceptViewportInput: () -> Bool = { true }
     var onRadialMenuRequest: ((CGPoint) -> Void)?
@@ -231,50 +232,47 @@ final class TouchVisualizingMTKView: MTKView {
     }
 
     override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        heldKeyboardUsages.removeAll(keepingCapacity: true)
         inputSink?.setFocus(false)
         super.pressesCancelled(presses, with: event)
     }
 
     @discardableResult
     override func resignFirstResponder() -> Bool {
+        heldKeyboardUsages.removeAll(keepingCapacity: true)
         inputSink?.setFocus(false)
         return super.resignFirstResponder()
     }
 
     private func handle(_ press: UIPress, isPressed: Bool) -> Bool {
         guard let key = press.key else { return false }
+        let usage = Int(key.keyCode.rawValue)
+        let wasHeld = heldKeyboardUsages.contains(usage)
+        if !isPressed {
+            heldKeyboardUsages.remove(usage)
+        }
 
         if isPressed,
+           !wasHeld,
            key.modifierFlags.contains(.command),
            key.charactersIgnoringModifiers == "." {
+            heldKeyboardUsages.insert(usage)
             onRadialMenuRequest?(CGPoint(x: bounds.midX, y: bounds.midY))
             return true
         }
 
         guard shouldAcceptViewportInput() else { return false }
-        switch key.keyCode {
-        case .keyboardW:
-            inputSink?.setMovementKey(.forward, isPressed: isPressed)
-        case .keyboardS:
-            inputSink?.setMovementKey(.backward, isPressed: isPressed)
-        case .keyboardA:
-            inputSink?.setMovementKey(.left, isPressed: isPressed)
-        case .keyboardD:
-            inputSink?.setMovementKey(.right, isPressed: isPressed)
-        case .keyboardLeftShift, .keyboardRightShift:
-            inputSink?.setShiftPressed(isPressed)
-        case .keyboardLeftArrow:
-            if isPressed { inputSink?.requestSceneStep(-1) }
-        case .keyboardRightArrow:
-            if isPressed { inputSink?.requestSceneStep(1) }
-        case .keyboardSpacebar:
-            if isPressed { inputSink?.requestPlaybackToggle() }
-        case .keyboardR:
-            if isPressed { inputSink?.requestReset() }
-        default:
-            return false
+        guard let semanticKey = ViewportKeyboardMap.iPadOS(
+            hidUsage: usage
+        ) else { return false }
+        if isPressed {
+            heldKeyboardUsages.insert(usage)
         }
-        return true
+        return inputSink?.applyKeyboard(
+            semanticKey,
+            isPressed: isPressed,
+            isRepeat: isPressed && wasHeld
+        ) ?? true
     }
 }
 #endif

@@ -1916,6 +1916,47 @@ final class ViewportRenderer {
 #if os(iOS)
 import UIKit
 
+/// UIKit's tap recognizer does not expose a configurable movement threshold.
+/// This adapter applies the same semantic policy used by the Mac pointer path
+/// and fails before a dragged touch can become a radial-menu activation.
+private final class LowMovementTapGestureRecognizer: UITapGestureRecognizer {
+    private let maximumMovementSquared: CGFloat
+    private var initialLocation: CGPoint?
+
+    init(
+        maximumMovement: CGFloat,
+        target: Any?,
+        action: Selector?
+    ) {
+        maximumMovementSquared = maximumMovement * maximumMovement
+        super.init(target: target, action: action)
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        if initialLocation == nil, let touch = touches.first {
+            initialLocation = touch.location(in: view)
+        }
+        super.touchesBegan(touches, with: event)
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        if let initialLocation, let touch = touches.first {
+            let location = touch.location(in: view)
+            let dx = location.x - initialLocation.x
+            let dy = location.y - initialLocation.y
+            if dx * dx + dy * dy > maximumMovementSquared {
+                state = .failed
+            }
+        }
+        super.touchesMoved(touches, with: event)
+    }
+
+    override func reset() {
+        initialLocation = nil
+        super.reset()
+    }
+}
+
 /// iPad host for the shared `ViewportRenderer`. Wraps an `MTKView` in a
 /// `UIViewRepresentable` and translates touch gestures into the same
 /// orbit / pan / zoom input the macOS trackpad path feeds, so the renderer is
@@ -2052,7 +2093,11 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             pinchGesture.cancelsTouchesInView = false
             pinch = pinchGesture
 
-            let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+            let doubleTap = LowMovementTapGestureRecognizer(
+                maximumMovement: RadialActivationPolicy.maximumMovement(for: .touch),
+                target: self,
+                action: #selector(handleDoubleTap(_:))
+            )
             doubleTap.numberOfTapsRequired = 2
             doubleTap.cancelsTouchesInView = false
             doubleTap.delegate = self

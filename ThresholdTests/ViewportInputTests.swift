@@ -75,5 +75,40 @@ struct ViewportInputTests {
         #expect(frame.zoomDelta == Float(eventCount))
         #expect(frame.sceneStep == eventCount)
     }
+
+    @Test("Mac and iPad hardware-key mappings have semantic parity")
+    func keyboardMappingParity() {
+        let mac: [ViewportKeyboardKey?] = [
+            ViewportKeyboardMap.macOS(keyCode: 0, characters: "w"),
+            ViewportKeyboardMap.macOS(keyCode: 0, characters: "s"),
+            ViewportKeyboardMap.macOS(keyCode: 0, characters: "a"),
+            ViewportKeyboardMap.macOS(keyCode: 0, characters: "d"),
+            ViewportKeyboardMap.macOS(keyCode: 123, characters: nil),
+            ViewportKeyboardMap.macOS(keyCode: 124, characters: nil),
+            ViewportKeyboardMap.macOS(keyCode: 0, characters: " "),
+            ViewportKeyboardMap.macOS(keyCode: 0, characters: "r"),
+        ]
+        let iPad: [ViewportKeyboardKey?] = [26, 22, 4, 7, 80, 79, 44, 21]
+            .map(ViewportKeyboardMap.iPadOS(hidUsage:))
+        #expect(mac == iPad)
+        #expect(ViewportKeyboardMap.iPadOS(hidUsage: 225) == .shift)
+        #expect(ViewportKeyboardMap.iPadOS(hidUsage: 229) == .shift)
+    }
+
+    @Test("Held keys repeat safely while transient keys remain edge-triggered")
+    func keyboardDispatchSemantics() {
+        let input = ViewportInputAccumulator()
+        input.applyKeyboard(.forward, isPressed: true, isRepeat: false)
+        input.applyKeyboard(.forward, isPressed: true, isRepeat: true)
+        input.applyKeyboard(.togglePlayback, isPressed: true, isRepeat: false)
+        input.applyKeyboard(.togglePlayback, isPressed: true, isRepeat: true)
+        input.applyKeyboard(.nextScene, isPressed: true, isRepeat: false)
+        input.applyKeyboard(.nextScene, isPressed: true, isRepeat: true)
+
+        let frame = input.consumeFrame()
+        #expect(frame.heldKeys == [.forward])
+        #expect(frame.actions == [.togglePlayback])
+        #expect(frame.sceneStep == 1)
+    }
 }
 #endif

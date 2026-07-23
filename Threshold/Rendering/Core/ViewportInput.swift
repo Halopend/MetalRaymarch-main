@@ -41,6 +41,61 @@ struct ViewportInputFrame: Sendable {
     var shouldResetView: Bool { actions.contains(.resetView) }
 }
 
+/// Platform-neutral keyboard vocabulary. Native adapters translate one key and
+/// then share the dispatch semantics below, keeping Mac and iPad edge/held
+/// behavior in lockstep.
+enum ViewportKeyboardKey: Hashable, Sendable {
+    case forward
+    case backward
+    case left
+    case right
+    case shift
+    case previousScene
+    case nextScene
+    case togglePlayback
+    case resetView
+}
+
+enum ViewportKeyboardMap {
+    /// AppKit virtual-key codes are used only for arrows; printable controls
+    /// come from `charactersIgnoringModifiers` so alternate hardware layouts
+    /// preserve their typed WASD/R/Space meaning.
+    static func macOS(keyCode: UInt16, characters: String?) -> ViewportKeyboardKey? {
+        switch keyCode {
+        case 123: return .previousScene
+        case 124: return .nextScene
+        default: break
+        }
+        switch characters?.lowercased().first {
+        case "w": return .forward
+        case "s": return .backward
+        case "a": return .left
+        case "d": return .right
+        case " ": return .togglePlayback
+        case "r": return .resetView
+        default: return nil
+        }
+    }
+
+    /// USB HID usages used by UIKit's `UIKeyboardHIDUsage`. Keeping the pure
+    /// mapping here makes iPad hardware-keyboard parity testable on the Mac CI
+    /// host without importing UIKit into shared tests.
+    static func iPadOS(hidUsage: Int) -> ViewportKeyboardKey? {
+        switch hidUsage {
+        case 4: return .left                  // keyboardA
+        case 7: return .right                 // keyboardD
+        case 21: return .resetView            // keyboardR
+        case 22: return .backward             // keyboardS
+        case 26: return .forward              // keyboardW
+        case 44: return .togglePlayback       // keyboardSpacebar
+        case 79: return .nextScene            // keyboardRightArrow
+        case 80: return .previousScene        // keyboardLeftArrow
+        case 225, 229: return .shift          // left/right Shift
+        default: return nil
+        }
+    }
+}
+
 /// The single native-adapter boundary for mouse, trackpad, touch, and hardware
 /// keyboard events. Platform views translate events; this sink owns semantics.
 protocol ViewportInputSink: AnyObject {
@@ -53,6 +108,37 @@ protocol ViewportInputSink: AnyObject {
     func requestPlaybackToggle()
     func requestReset()
     func requestSceneStep(_ step: Int)
+}
+
+extension ViewportInputSink {
+    @discardableResult
+    func applyKeyboard(
+        _ key: ViewportKeyboardKey,
+        isPressed: Bool,
+        isRepeat: Bool
+    ) -> Bool {
+        switch key {
+        case .forward:
+            setMovementKey(.forward, isPressed: isPressed)
+        case .backward:
+            setMovementKey(.backward, isPressed: isPressed)
+        case .left:
+            setMovementKey(.left, isPressed: isPressed)
+        case .right:
+            setMovementKey(.right, isPressed: isPressed)
+        case .shift:
+            setShiftPressed(isPressed)
+        case .previousScene:
+            if isPressed && !isRepeat { requestSceneStep(-1) }
+        case .nextScene:
+            if isPressed && !isRepeat { requestSceneStep(1) }
+        case .togglePlayback:
+            if isPressed && !isRepeat { requestPlaybackToggle() }
+        case .resetView:
+            if isPressed && !isRepeat { requestReset() }
+        }
+        return true
+    }
 }
 
 /// Thread-safe accumulator that collects viewport input events (from AppKit/UIKit
@@ -175,7 +261,6 @@ final class ThresholdMacInteractiveView: MTKView {
     private var dragMode: DragMode?
     private var primaryMouseDownLocation: CGPoint?
     private var primaryDragDistance: CGFloat = 0
-    private let clickMovementTolerance: CGFloat = 4
 
     // When the window is dragged fully off-screen (or hidden/minimized) on a
     // single-display setup, AppKit clears `.visible` from the window's
@@ -265,9 +350,12 @@ final class ThresholdMacInteractiveView: MTKView {
             primaryMouseDownLocation = nil
             primaryDragDistance = 0
         }
-        guard event.clickCount >= 2,
-              primaryMouseDownLocation != nil,
-              primaryDragDistance <= clickMovementTolerance else { return }
+        guard primaryMouseDownLocation != nil,
+              RadialActivationPolicy.shouldToggle(
+                activationCount: event.clickCount,
+                movement: primaryDragDistance,
+                profile: .pointer
+              ) else { return }
         NotificationCenter.default.post(
             name: Self.didClickViewportNotification,
             object: window,
@@ -365,60 +453,15 @@ final class ThresholdMacInteractiveView: MTKView {
 
     private func handleKey(_ event: NSEvent, isPressed: Bool) -> Bool {
         guard shouldAcceptViewportInput() else { return false }
-        // Left/right arrows switch jumping-off scenes. Handled via virtual key
-        // codes (123 = left, 124 = right) since arrow keys carry function-key
-        // unicode rather than plain characters. Fire once per press (not on
-        // auto-repeat) and consume both down and up to suppress the system beep.
-        switch event.keyCode {
-        case 123:
-            if isPressed && !event.isARepeat {
-                inputSink?.requestSceneStep(-1)
-            }
-            return true
-        case 124:
-            if isPressed && !event.isARepeat {
-                inputSink?.requestSceneStep(1)
-            }
-            return true
-        default:
-            break
-        }
-
-        guard let characters = event.charactersIgnoringModifiers?.lowercased(), !characters.isEmpty else {
-            return false
-        }
-
-        var handled = false
-        for character in characters {
-            switch character {
-            case "w":
-                inputSink?.setMovementKey(.forward, isPressed: isPressed)
-                handled = true
-            case "s":
-                inputSink?.setMovementKey(.backward, isPressed: isPressed)
-                handled = true
-            case "a":
-                inputSink?.setMovementKey(.left, isPressed: isPressed)
-                handled = true
-            case "d":
-                inputSink?.setMovementKey(.right, isPressed: isPressed)
-                handled = true
-            case " ":
-                if isPressed && !event.isARepeat {
-                    inputSink?.requestPlaybackToggle()
-                }
-                handled = true
-            case "r":
-                if isPressed && !event.isARepeat {
-                    inputSink?.requestReset()
-                }
-                handled = true
-            default:
-                break
-            }
-        }
-
-        return handled
+        guard let key = ViewportKeyboardMap.macOS(
+            keyCode: event.keyCode,
+            characters: event.charactersIgnoringModifiers
+        ) else { return false }
+        return inputSink?.applyKeyboard(
+            key,
+            isPressed: isPressed,
+            isRepeat: event.isARepeat
+        ) ?? true
     }
 }
 #endif

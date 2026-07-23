@@ -10,6 +10,20 @@ enum RadialInteractionProfile: Sendable {
     var itemSpacing: CGFloat { self == .touch ? 48 : 32 }
 }
 
+enum RadialActivationPolicy {
+    static func maximumMovement(for profile: RadialInteractionProfile) -> CGFloat {
+        profile == .touch ? 12 : 4
+    }
+
+    static func shouldToggle(
+        activationCount: Int,
+        movement: CGFloat,
+        profile: RadialInteractionProfile
+    ) -> Bool {
+        activationCount >= 2 && movement <= maximumMovement(for: profile)
+    }
+}
+
 /// Shared transient state for every 2-D radial host. Platform adapters provide
 /// only the interaction profile and activation location.
 @MainActor
