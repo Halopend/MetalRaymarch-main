@@ -95,7 +95,7 @@ final class StorageLocation {
         return docs.appendingPathComponent("Threshold", isDirectory: true)
     }
 
-    #if DEBUG
+    #if DEBUG || THRESHOLD_TESTING
     /// Test-only override for the active store root. When set, `activeRoot` returns
     /// it regardless of mode so tests can exercise the real folder-mirroring against
     /// a temp directory instead of the app sandbox. Never compiled into Release.
@@ -106,7 +106,7 @@ final class StorageLocation {
     /// its container has not resolved yet — callers should fall back or wait for
     /// `rootResolvedNotification`.
     var activeRoot: URL? {
-        #if DEBUG
+        #if DEBUG || THRESHOLD_TESTING
         if let testRootOverride { return testRootOverride }
         #endif
         switch mode {
