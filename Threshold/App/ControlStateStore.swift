@@ -264,7 +264,10 @@ final class ControlStateStore {
         _ mutate: (inout SpaceWarpOpValue) -> Void
     ) -> Bool {
         guard let settings else { return false }
-        var updated = spaceWarpStack
+        // Resolve against the authoritative live stack. A renderer-side scene
+        // load or reorder can land between low-rate cache reconciliations; using
+        // the mirror here would replay its stale ordering along with the edit.
+        var updated = settings.spaceWarpStack
         guard let index = updated.firstIndex(where: { $0.id == id }) else { return false }
         let previous = updated[index]
         mutate(&updated[index])

@@ -74,14 +74,16 @@ struct HandAttractionConfig: Codable, Equatable, Sendable {
     // MARK: - Validation
 
     mutating func clamp() {
-        radius = radius.clamped(to: 0.05...1.0)
-        strength = strength.clamped(to: -1.0...1.0)
-        ballScale = ballScale.clamped(to: 0.1...1.0)
-        softness = softness.clamped(to: 0.05...2.0)
-        pocketSize = pocketSize.clamped(to: 0.1...1.5)
-        pocketSoftness = pocketSoftness.clamped(to: 0.1...1.5)
-        projectionDistance = projectionDistance.clamped(to: 0.0...1.0)
-        forearmRadius = forearmRadius.clamped(to: 0.02...0.3)
+        radius = radius.clamped(to: ControlCatalog.handAttractionRadius)
+        strength = strength.clamped(to: ControlCatalog.handAttractionStrength)
+        ballScale = ballScale.clamped(to: ControlCatalog.handAttractionBallScale)
+        softness = softness.clamped(to: ControlCatalog.handAttractionSoftness)
+        pocketSize = pocketSize.clamped(to: ControlCatalog.handAttractionPocketSize)
+        pocketSoftness = pocketSoftness.clamped(to: ControlCatalog.handAttractionPocketSoftness)
+        projectionDistance = projectionDistance.clamped(
+            to: ControlCatalog.handAttractionProjectionDistance
+        )
+        forearmRadius = forearmRadius.clamped(to: ControlCatalog.handAttractionForearmRadius)
     }
 }
 

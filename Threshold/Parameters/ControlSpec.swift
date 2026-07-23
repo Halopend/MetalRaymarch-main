@@ -70,6 +70,12 @@ struct ControlSpec: Sendable, Equatable {
     func clamp(_ v: Float) -> Float {
         min(range.upperBound, max(range.lowerBound, v))
     }
+
+    /// Integer projection for controls whose UI metadata is Float-backed but
+    /// whose renderer budget is stored as Int.
+    var integerRange: ClosedRange<Int> {
+        Int(range.lowerBound) ... Int(range.upperBound)
+    }
 }
 
 /// The registry of canonical engine-level controls (core geometry + post-process
@@ -106,7 +112,7 @@ enum ControlCatalog {
         name: "Iterations",
         icon: "number",
         range: 2.0...24.0,
-        defaultValue: 12.0)
+        defaultValue: 9.0)
 
     // MARK: Post-process effects
 
@@ -247,6 +253,178 @@ enum ControlCatalog {
         range: 0.33...1.0,
         defaultValue: 0.5)
 
+    /// Gradient mapping controls are scene-authored, static scalars. Repeat
+    /// previously exposed only half of the renderer setter's supported range.
+    static let gradientRepeat = ControlSpec(
+        id: "color.gradientRepeat",
+        name: "Gradient Repeat",
+        icon: "repeat",
+        range: 0.1...10.0,
+        defaultValue: 1.0)
+
+    static let gradientSmoothing = ControlSpec(
+        id: "color.gradientSmoothing",
+        name: "Gradient Smoothing",
+        icon: "waveform.path",
+        range: 0.0...1.0,
+        defaultValue: 1.0)
+
+    // visionOS hand-field controls. They remain static descriptors so the
+    // capability matrix—not target-conditional presentation code—decides
+    // whether they exist on a surface.
+    static let handAttractionRadius = ControlSpec(
+        id: "hands.attractionRadius", name: "Hand Radius", icon: "circle.dashed",
+        range: 0.05...1.0, defaultValue: 0.36)
+
+    static let handAttractionStrength = ControlSpec(
+        id: "hands.attractionStrength", name: "Repel / Attract", icon: "arrow.left.and.right",
+        range: -1.0...1.0, defaultValue: 0.39)
+
+    static let handAttractionBallScale = ControlSpec(
+        id: "hands.ballScale", name: "Hand Ball Size", icon: "circle.fill",
+        range: 0.1...1.0, defaultValue: 0.5)
+
+    static let handAttractionSoftness = ControlSpec(
+        id: "hands.softness", name: "Hand Blend Softness", icon: "aqi.medium",
+        range: 0.05...2.0, defaultValue: 0.73)
+
+    static let handAttractionProjectionDistance = ControlSpec(
+        id: "hands.projectionDistance", name: "Hand Reach Offset", icon: "arrow.up.forward",
+        range: 0.0...1.0, defaultValue: 0.08)
+
+    static let handAttractionForearmRadius = ControlSpec(
+        id: "hands.forearmRadius", name: "Forearm Radius", icon: "capsule",
+        range: 0.02...0.3, defaultValue: 0.06)
+
+    static let handAttractionPocketSize = ControlSpec(
+        id: "hands.pocketSize", name: "Hand Pocket Size", icon: "circle.circle",
+        range: 0.1...1.5, defaultValue: 0.77)
+
+    static let handAttractionPocketSoftness = ControlSpec(
+        id: "hands.pocketSoftness", name: "Hand Pocket Softness", icon: "aqi.low",
+        range: 0.1...1.5, defaultValue: 0.18)
+
+    // Static lighting-animation controls.
+    static let gradientCycleSpeed = ControlSpec(
+        id: "lighting.gradientCycleSpeed", name: "Gradient Cycle Speed", icon: "circle.hexagongrid",
+        range: 0.0...1.0, defaultValue: 0.1)
+
+    static let hueRotationIntensity = ControlSpec(
+        id: "lighting.hueRotationIntensity", name: "Hue Intensity", icon: "circle.lefthalf.filled",
+        range: 0.0...1.0, defaultValue: 0.5)
+
+    static let fogHueRotationSpeed = ControlSpec(
+        id: "lighting.fogHueRotationSpeed", name: "Fog Hue Cycle", icon: "cloud.fog.fill",
+        range: 0.0...0.5, defaultValue: 0.1)
+
+    static let polarRotationSpeed = ControlSpec(
+        id: "lighting.polarRotationSpeed", name: "Polar Rotation Speed", icon: "rotate.3d",
+        range: 0.0...1.0, defaultValue: 0.15)
+
+    static let lightVariationRate = ControlSpec(
+        id: "lighting.variationRate", name: "Color Shift Speed", icon: "tortoise.fill",
+        range: 0.0...1.0, defaultValue: 0.5)
+
+    static let pulseSpeed = ControlSpec(
+        id: "lighting.pulseSpeed", name: "Pulse Speed", icon: "waveform.path.ecg",
+        range: 0.0...2.0, defaultValue: 0.5)
+
+    static let pulseAmount = ControlSpec(
+        id: "lighting.pulseAmount", name: "Pulse Amount", icon: "waveform.path",
+        range: 0.0...1.0, defaultValue: 0.3)
+
+    static let linearRailSpeed = ControlSpec(
+        id: "lighting.linearRailSpeed", name: "Rail Speed", icon: "point.3.connected.trianglepath.dotted",
+        range: 0.0...1.0, defaultValue: 0.12)
+
+    static let linearRailAmplitude = ControlSpec(
+        id: "lighting.linearRailAmplitude", name: "Rail Reach", icon: "arrow.up.left.and.arrow.down.right",
+        range: 0.0...3.0, defaultValue: 0.7)
+
+    static let linearRailMultiplier = ControlSpec(
+        id: "lighting.linearRailMultiplier", name: "Rail Harmonic", icon: "waveform",
+        range: 1.0...8.0, defaultValue: 1.0)
+
+    static let linearRailOrbitAmount = ControlSpec(
+        id: "lighting.linearRailOrbitAmount", name: "Rail Orbit", icon: "circle.dotted",
+        range: 0.0...1.0, defaultValue: 0.0)
+
+    static let linearRailOrbitSpeed = ControlSpec(
+        id: "lighting.linearRailOrbitSpeed", name: "Rail Orbit Speed", icon: "arrow.triangle.2.circlepath",
+        range: 0.0...1.0, defaultValue: 0.18)
+
+    static let maxRaySteps = ControlSpec(
+        id: "quality.maxRaySteps", name: "Max Ray Steps", icon: "arrow.forward.to.line",
+        range: 16.0...200.0, defaultValue: 64.0)
+
+    static let overRelaxationMax = ControlSpec(
+        id: "quality.overRelaxationMax", name: "Over-Relaxation", icon: "forward.frame",
+        range: 1.0...1.6, defaultValue: 1.4)
+
+    static let coneMarchStrength = ControlSpec(
+        id: "quality.coneMarchStrength", name: "Cone Marching", icon: "triangle",
+        range: 0.0...1.0, defaultValue: 0.0)
+
+    static let distanceLODStrength = ControlSpec(
+        id: "quality.distanceLODStrength", name: "Distance Falloff", icon: "mountain.2",
+        range: 0.0...1.0, defaultValue: 0.0)
+
+    static let foveationStrength = ControlSpec(
+        id: "quality.foveationStrength", name: "Foveation", icon: "eye",
+        range: 0.0...1.0, defaultValue: 0.0)
+
+    static let boundSpaceWidth = ControlSpec(
+        id: "space.boundWidth", name: "Fallback Width", icon: "arrow.left.and.right",
+        range: 1.0...20.0, defaultValue: 4.0)
+
+    static let boundSpaceDepth = ControlSpec(
+        id: "space.boundDepth", name: "Fallback Depth", icon: "arrow.up.left.and.arrow.down.right",
+        range: 1.0...20.0, defaultValue: 4.0)
+
+    static let boundSpaceHeight = ControlSpec(
+        id: "space.boundHeight", name: "Fallback Height", icon: "arrow.up.and.down",
+        range: 1.0...10.0, defaultValue: 2.5)
+
+    static let boundAmbientStrength = ControlSpec(
+        id: "space.boundAmbientStrength", name: "Space Ambient", icon: "circle.lefthalf.filled",
+        range: 0.0...1.0, defaultValue: 0.5)
+
+    static let boundingShapeRadius = ControlSpec(
+        id: "space.boundingShapeRadius", name: "Shape Size", icon: "circle.dashed",
+        range: 0.05...30.0, defaultValue: 6.0)
+
+    static let boundingShapeShadowDepth = ControlSpec(
+        id: "space.boundingShapeShadowDepth", name: "Shadow Depth", icon: "moon",
+        range: 0.02...0.95, defaultValue: 0.35)
+
+    static let surroundingsStrength = ControlSpec(
+        id: "space.surroundingsStrength", name: "Surroundings Strength", icon: "square.3.layers.3d",
+        range: 0.0...1.0, defaultValue: 0.8)
+
+    static let surroundingsReach = ControlSpec(
+        id: "space.surroundingsReach", name: "Surroundings Reach", icon: "dot.scope",
+        range: 0.2...2.0, defaultValue: 0.75)
+
+    static let surroundingsBlendWidth = ControlSpec(
+        id: "space.surroundingsBlendWidth", name: "Surroundings Blend Width", icon: "aqi.medium",
+        range: 0.0...0.5, defaultValue: 0.1)
+
+    static let safetyBubbleMixedRadius = ControlSpec(
+        id: "space.safetyBubbleMixedRadius", name: "Mixed Safety Radius", icon: "circle.dashed",
+        range: 0.05...1.0, defaultValue: 0.3)
+
+    static let safetyBubbleBlend = ControlSpec(
+        id: "space.safetyBubbleBlend", name: "Safety Blend Strength", icon: "circle.righthalf.filled",
+        range: 0.0...1.0, defaultValue: SafetyBubbleConfig.defaultStrength)
+
+    static let platformRadius = ControlSpec(
+        id: "display.platformRadius", name: "Platform Radius", icon: "circle.dotted",
+        range: 0.5...2.5, defaultValue: 1.888)
+
+    static let deIterationMismatch = ControlSpec(
+        id: "display.deIterationMismatch", name: "Sphere Projection Mismatch", icon: "function",
+        range: -8.0...8.0, defaultValue: 0.0)
+
     // Color-grading controls — not drift bugs (setter / ColorConfig.clamp / slider
     // already agreed), folded onto specs so their range lives in ONE place and the
     // three consumers can't diverge in future.
@@ -350,6 +528,23 @@ enum ControlCatalog {
     /// the spec system exists to prevent.
     static let longTailSpecs: [ControlSpec] = [
         sphericalInversionRadius, colorIterations, resolutionScale,
+        gradientRepeat, gradientSmoothing,
+        handAttractionRadius, handAttractionStrength,
+        handAttractionBallScale, handAttractionSoftness,
+        handAttractionProjectionDistance, handAttractionForearmRadius,
+        handAttractionPocketSize, handAttractionPocketSoftness,
+        gradientCycleSpeed, hueRotationIntensity, fogHueRotationSpeed,
+        polarRotationSpeed, lightVariationRate, pulseSpeed, pulseAmount,
+        linearRailSpeed, linearRailAmplitude, linearRailMultiplier,
+        linearRailOrbitAmount, linearRailOrbitSpeed,
+        maxRaySteps,
+        overRelaxationMax, coneMarchStrength, distanceLODStrength,
+        foveationStrength, boundSpaceWidth, boundSpaceDepth,
+        boundSpaceHeight, boundAmbientStrength, boundingShapeRadius,
+        boundingShapeShadowDepth, surroundingsStrength,
+        surroundingsReach, surroundingsBlendWidth,
+        safetyBubbleMixedRadius, safetyBubbleBlend,
+        platformRadius, deIterationMismatch,
         colorSchemeContrast, colorSchemeVibrance, colorSchemeCurve,
         colorSchemeShadows, colorSchemeHighlights,
         colorSchemeGamma, lightingSoftness, cellShadingLevels,

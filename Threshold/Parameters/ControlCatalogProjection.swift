@@ -2,7 +2,9 @@ import Foundation
 
 struct ControlCatalogProjectionKey: Hashable, Sendable {
     let profile: PlatformProfile
-    let route: AppRoute
+    /// A concrete route for full/radial projections. `nil` projects a
+    /// presentation-wide surface such as Quick Toggles across all home routes.
+    let route: AppRoute?
     let presentation: ControlPresentation
     let fractalType: FractalModelType
     let catalogRevision: Int
@@ -29,7 +31,7 @@ final class ControlCatalogProjectionCache {
                 guard descriptor.isAvailable(for: key.fractalType),
                       key.profile.supports(descriptor.requiredPlatformCapabilities),
                       case .presented(let route, let section, let order, let presentations) = descriptor.placement,
-                      route == key.route,
+                      key.route == nil || route == key.route,
                       presentations.contains(key.presentation) else { return nil }
                 return (descriptor, section, order)
             }

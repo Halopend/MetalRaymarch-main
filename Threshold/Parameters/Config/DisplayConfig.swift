@@ -23,8 +23,8 @@ struct DisplayConfig: Codable, Equatable, Sendable {
     /// computes the Mandelbox DE's absScalePow term as if for `iterations + δ`
     /// while the fold loop runs the real count — the deterministic form of the
     /// old compute-cache pipeline-mismatch artifact. 0 = off (correct DE).
-    var deIterationMismatch: Float = 0.0
-    var platformRadius: Float = 1.888
+    var deIterationMismatch: Float = ControlCatalog.deIterationMismatch.defaultValue
+    var platformRadius: Float = ControlCatalog.platformRadius.defaultValue
     /// When `false`, the renderer skips building the glass-floor field in
     /// the immersive space. The radius value is preserved so toggling back
     /// on restores the previous size. Defaults to `true` for parity with
@@ -51,10 +51,14 @@ struct DisplayConfig: Codable, Equatable, Sendable {
         sphereProjectionEnabled = try container.decodeIfPresent(Bool.self, forKey: .sphereProjectionEnabled) ?? false
         sphereProjectionBlend = try container.decodeIfPresent(Float.self, forKey: .sphereProjectionBlend) ?? 1.0
         sphereProjectionRadius = try container.decodeIfPresent(Float.self, forKey: .sphereProjectionRadius) ?? 1.0
-        deIterationMismatch = (try container.decodeIfPresent(Float.self, forKey: .deIterationMismatch) ?? 0.0).clamped(to: -8.0...8.0)
+        deIterationMismatch = (try container.decodeIfPresent(Float.self, forKey: .deIterationMismatch)
+            ?? ControlCatalog.deIterationMismatch.defaultValue)
+            .clamped(to: ControlCatalog.deIterationMismatch)
         // Clamp on decode so previously-saved larger radii (old max was 3.0) snap into
         // the new 0.5…2.5 m range and stay consistent with the slider bounds.
-        platformRadius = (try container.decodeIfPresent(Float.self, forKey: .platformRadius) ?? 1.888).clamped(to: 0.5...2.5)
+        platformRadius = (try container.decodeIfPresent(Float.self, forKey: .platformRadius)
+            ?? ControlCatalog.platformRadius.defaultValue)
+            .clamped(to: ControlCatalog.platformRadius)
         platformEnabled = try container.decodeIfPresent(Bool.self, forKey: .platformEnabled) ?? true
     }
 }

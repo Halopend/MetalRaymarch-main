@@ -293,28 +293,40 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // MARK: - Validation
 
     mutating func clamp() {
-        boundingShapeRadius = boundingShapeRadius.clamped(to: 0.05...30.0)
+        boundingShapeRadius = boundingShapeRadius.clamped(to: ControlCatalog.boundingShapeRadius)
         boundingShapeFogMode = boundingShapeFogMode.clamped(to: 0...2)
-        boundingShapeShadowDepth = boundingShapeShadowDepth.clamped(to: 0.02...0.95)
+        boundingShapeShadowDepth = boundingShapeShadowDepth.clamped(
+            to: ControlCatalog.boundingShapeShadowDepth
+        )
         boundingShapeType = boundingShapeType.clamped(to: 0.0...SafetyBubbleShapePreset.maxStoredValue)
         boundToSpaceMode = boundToSpaceMode.clamped(to: 0...2)
-        boundSpaceWidth = boundSpaceWidth.clamped(to: 1.0...20.0)
-        boundSpaceDepth = boundSpaceDepth.clamped(to: 1.0...20.0)
-        boundSpaceHeight = boundSpaceHeight.clamped(to: 1.0...10.0)
-        boundAmbientStrength = boundAmbientStrength.clamped(to: 0.0...1.0)
+        boundSpaceWidth = boundSpaceWidth.clamped(to: ControlCatalog.boundSpaceWidth)
+        boundSpaceDepth = boundSpaceDepth.clamped(to: ControlCatalog.boundSpaceDepth)
+        boundSpaceHeight = boundSpaceHeight.clamped(to: ControlCatalog.boundSpaceHeight)
+        boundAmbientStrength = boundAmbientStrength.clamped(
+            to: ControlCatalog.boundAmbientStrength
+        )
         envScrunchMode = envScrunchMode.clamped(to: 0...1)
-        envScrunchStrength = envScrunchStrength.clamped(to: 0.0...1.0)
-        envScrunchReach = envScrunchReach.clamped(to: 0.2...2.0)
+        envScrunchStrength = envScrunchStrength.clamped(to: ControlCatalog.surroundingsStrength)
+        envScrunchReach = envScrunchReach.clamped(to: ControlCatalog.surroundingsReach)
         envScrunchContain = envScrunchContain.clamped(to: 0...2)
-        envScrunchContainFeather = envScrunchContainFeather.clamped(to: 0.0...0.5)
-        baseFractalIterations = baseFractalIterations.clamped(to: 2...24)
-        baseMaxRaySteps = baseMaxRaySteps.clamped(to: 16...200)
+        envScrunchContainFeather = envScrunchContainFeather.clamped(
+            to: ControlCatalog.surroundingsBlendWidth
+        )
+        baseFractalIterations = baseFractalIterations.clamped(
+            to: ControlCatalog.iterations.integerRange
+        )
+        baseMaxRaySteps = baseMaxRaySteps.clamped(
+            to: ControlCatalog.maxRaySteps.integerRange
+        )
         resolutionScale = resolutionScale.clamped(to: ControlCatalog.resolutionScale)
         renderQuality = Self.clampedVisionRenderQuality(renderQuality)
-        foveationStrength = foveationStrength.clamped(to: 0.0...1.0)
-        coneMarchStrength = coneMarchStrength.clamped(to: 0.0...1.0)
-        overRelaxationMax = overRelaxationMax.clamped(to: 1.0...1.6)
-        distanceLODStrength = distanceLODStrength.clamped(to: 0.0...1.0)
+        foveationStrength = foveationStrength.clamped(to: ControlCatalog.foveationStrength)
+        coneMarchStrength = coneMarchStrength.clamped(to: ControlCatalog.coneMarchStrength)
+        overRelaxationMax = overRelaxationMax.clamped(to: ControlCatalog.overRelaxationMax)
+        distanceLODStrength = distanceLODStrength.clamped(
+            to: ControlCatalog.distanceLODStrength
+        )
     }
 
     // MARK: - Codable

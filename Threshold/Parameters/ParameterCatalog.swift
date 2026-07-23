@@ -261,11 +261,12 @@ enum ParameterCatalog {
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
             music: MusicFacet(category: .geometry, defaultSource: .mid, defaultResponseCurve: .sinusoidal, hasFlashingRisk: false),
             ui: UIBinding(
-                read: { Float($0.liveFractalIterations) },
+                read: { Float($0.quality.baseFractalIterations) },
                 write: { cache, v in
                     let rounded = max(2, min(24, Int(round(v))))
+                    cache.quality.baseFractalIterations = rounded
                     cache.liveFractalIterations = rounded
-                    cache.push(\.fractalIterations, value: rounded)
+                    cache.push(\.baseFractalIterations, value: rounded)
                 },
                 persists: true),
             settings: SettingsBinding(
@@ -513,6 +514,9 @@ enum ParameterCatalog {
         route: AppRoute,
         section: String,
         order: Int,
+        requiredPlatformCapabilities: PlatformCapability = [],
+        presentations: ControlPresentation? = nil,
+        capability: ParameterCapability = .universal,
         uiRead: @escaping @MainActor @Sendable (ControlStateStore) -> Float,
         uiWrite: @escaping @MainActor @Sendable (ControlStateStore, Float) -> Void,
         settingsRead: @escaping @Sendable (RenderSettings) -> Float,
@@ -524,10 +528,10 @@ enum ParameterCatalog {
                 route: route,
                 section: section,
                 order: order,
-                presentations: standardPresentations
+                presentations: presentations ?? standardPresentations
             ),
-            requiredPlatformCapabilities: [],
-            capability: .universal,
+            requiredPlatformCapabilities: requiredPlatformCapabilities,
+            capability: capability,
             gesture: nil,
             music: nil,
             ui: UIBinding(read: uiRead, write: uiWrite, persists: true),
@@ -568,6 +572,459 @@ enum ParameterCatalog {
             uiWrite: { cache, value in cache.quality.resolutionScale = value; cache.push(\.resolutionScale, value: value) },
             settingsRead: { $0.resolutionScale },
             settingsWrite: { $0.resolutionScale = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.gradientRepeat,
+            route: .look(.mapping), section: "Gradient Mapping", order: 1,
+            uiRead: { $0.color.gradientState.gradient.repeatCount },
+            uiWrite: { cache, value in
+                cache.color.gradientState.gradient.repeatCount = value
+                cache.push(\.gradientRepeat, value: value)
+            },
+            settingsRead: { $0.gradientRepeat },
+            settingsWrite: { $0.gradientRepeat = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.gradientSmoothing,
+            route: .look(.mapping), section: "Gradient Mapping", order: 2,
+            uiRead: { $0.color.gradientState.gradient.smoothing },
+            uiWrite: { cache, value in
+                cache.color.gradientState.gradient.smoothing = value
+                cache.push(\.gradientSmoothing, value: value)
+            },
+            settingsRead: { $0.gradientSmoothing },
+            settingsWrite: { $0.gradientSmoothing = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.handAttractionRadius,
+            route: .shape(.hands), section: "Hand Attraction", order: 0,
+            requiredPlatformCapabilities: [.handTracking],
+            uiRead: { $0.handAttraction.radius },
+            uiWrite: { cache, value in
+                cache.handAttraction.radius = value
+                cache.push(\.handAttractionRadius, value: value)
+            },
+            settingsRead: { $0.handAttractionRadius },
+            settingsWrite: { $0.handAttractionRadius = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.handAttractionStrength,
+            route: .shape(.hands), section: "Hand Attraction", order: 1,
+            requiredPlatformCapabilities: [.handTracking],
+            uiRead: { $0.handAttraction.strength },
+            uiWrite: { cache, value in
+                cache.handAttraction.strength = value
+                cache.push(\.handAttractionStrength, value: value)
+            },
+            settingsRead: { $0.handAttractionStrength },
+            settingsWrite: { $0.handAttractionStrength = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.handAttractionBallScale,
+            route: .shape(.hands), section: "Hand Attraction", order: 2,
+            requiredPlatformCapabilities: [.handTracking],
+            uiRead: { $0.handAttraction.ballScale },
+            uiWrite: { cache, value in
+                cache.handAttraction.ballScale = value
+                cache.push(\.handAttractionBallScale, value: value)
+            },
+            settingsRead: { $0.handAttractionBallScale },
+            settingsWrite: { $0.handAttractionBallScale = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.handAttractionSoftness,
+            route: .shape(.hands), section: "Hand Attraction", order: 3,
+            requiredPlatformCapabilities: [.handTracking],
+            uiRead: { $0.handAttraction.softness },
+            uiWrite: { cache, value in
+                cache.handAttraction.softness = value
+                cache.push(\.handAttractionSoftness, value: value)
+            },
+            settingsRead: { $0.handAttractionSoftness },
+            settingsWrite: { $0.handAttractionSoftness = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.handAttractionProjectionDistance,
+            route: .shape(.hands), section: "Hand Attraction", order: 4,
+            requiredPlatformCapabilities: [.handTracking],
+            uiRead: { $0.handAttraction.projectionDistance },
+            uiWrite: { cache, value in
+                cache.handAttraction.projectionDistance = value
+                cache.push(\.handAttractionProjectionDistance, value: value)
+            },
+            settingsRead: { $0.handAttractionProjectionDistance },
+            settingsWrite: { $0.handAttractionProjectionDistance = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.handAttractionForearmRadius,
+            route: .shape(.hands), section: "Hand Attraction", order: 5,
+            requiredPlatformCapabilities: [.handTracking],
+            uiRead: { $0.handAttraction.forearmRadius },
+            uiWrite: { cache, value in
+                cache.handAttraction.forearmRadius = value
+                cache.push(\.handAttractionForearmRadius, value: value)
+            },
+            settingsRead: { $0.handAttractionForearmRadius },
+            settingsWrite: { $0.handAttractionForearmRadius = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.handAttractionPocketSize,
+            route: .shape(.hands), section: "Hand Pocket", order: 0,
+            requiredPlatformCapabilities: [.handTracking],
+            uiRead: { $0.handAttraction.pocketSize },
+            uiWrite: { cache, value in
+                cache.handAttraction.pocketSize = value
+                cache.push(\.handAttractionPocketSize, value: value)
+            },
+            settingsRead: { $0.handAttractionPocketSize },
+            settingsWrite: { $0.handAttractionPocketSize = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.handAttractionPocketSoftness,
+            route: .shape(.hands), section: "Hand Pocket", order: 1,
+            requiredPlatformCapabilities: [.handTracking],
+            uiRead: { $0.handAttraction.pocketSoftness },
+            uiWrite: { cache, value in
+                cache.handAttraction.pocketSoftness = value
+                cache.push(\.handAttractionPocketSoftness, value: value)
+            },
+            settingsRead: { $0.handAttractionPocketSoftness },
+            settingsWrite: { $0.handAttractionPocketSoftness = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.gradientCycleSpeed,
+            route: .look(.motion), section: "Lighting & Color", order: 0,
+            uiRead: { $0.lighting.gradientCycleEffect.speed },
+            uiWrite: { cache, value in
+                cache.lighting.gradientCycleEffect.speed = value
+                cache.commitGradientCycleEffect()
+            },
+            settingsRead: { $0.gradientCycleEffect.speed },
+            settingsWrite: { settings, value in
+                var effect = settings.gradientCycleEffect
+                effect.speed = value
+                settings.gradientCycleEffect = effect
+            }
+        ),
+        staticDescriptor(
+            ControlCatalog.hueRotationIntensity,
+            route: .look(.motion), section: "Lighting & Color", order: 1,
+            uiRead: { $0.lighting.hueRotationEffect.intensity },
+            uiWrite: { cache, value in
+                cache.lighting.hueRotationEffect.intensity = value
+                cache.commitHueRotationEffect()
+            },
+            settingsRead: { $0.hueRotationEffect.intensity },
+            settingsWrite: { settings, value in
+                var effect = settings.hueRotationEffect
+                effect.intensity = value
+                settings.hueRotationEffect = effect
+            }
+        ),
+        staticDescriptor(
+            ControlCatalog.fogHueRotationSpeed,
+            route: .look(.atmosphere), section: "Atmosphere", order: 3,
+            uiRead: { $0.lighting.fogEffect.hueRotateSpeed },
+            uiWrite: { cache, value in
+                cache.lighting.fogEffect.hueRotateSpeed = value
+                cache.commitFogEffect()
+            },
+            settingsRead: { $0.fogEffect.hueRotateSpeed },
+            settingsWrite: { settings, value in
+                var effect = settings.fogEffect
+                effect.hueRotateSpeed = value
+                settings.fogEffect = effect
+            }
+        ),
+        staticDescriptor(
+            ControlCatalog.polarRotationSpeed,
+            route: .look(.motion), section: "Formula", order: 2,
+            capability: .requires { $0.supports(.polarRotation) },
+            uiRead: { $0.lighting.polarRotationEffect.speed },
+            uiWrite: { cache, value in
+                cache.lighting.polarRotationEffect.speed = value
+                cache.push(\.polarRotationEffect, value: cache.lighting.polarRotationEffect)
+            },
+            settingsRead: { $0.polarRotationEffect.speed },
+            settingsWrite: { settings, value in
+                var effect = settings.polarRotationEffect
+                effect.speed = value
+                settings.polarRotationEffect = effect
+            }
+        ),
+        staticDescriptor(
+            ControlCatalog.lightVariationRate,
+            route: .look(.motion), section: "Lighting & Color", order: 2,
+            uiRead: { $0.lighting.lightVariationRate },
+            uiWrite: { cache, value in
+                cache.lighting.lightVariationRate = value
+                cache.commitLightVariationRate()
+            },
+            settingsRead: { $0.lightVariationRate },
+            settingsWrite: { $0.lightVariationRate = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.pulseSpeed,
+            route: .look(.motion), section: "Pulse", order: 0,
+            uiRead: { $0.lighting.pulseEffect.speed },
+            uiWrite: { cache, value in
+                cache.lighting.pulseEffect.speed = value
+                cache.commitPulseEffect()
+            },
+            settingsRead: { $0.pulseEffect.speed },
+            settingsWrite: { settings, value in
+                var effect = settings.pulseEffect
+                effect.speed = value
+                settings.pulseEffect = effect
+            }
+        ),
+        staticDescriptor(
+            ControlCatalog.pulseAmount,
+            route: .look(.motion), section: "Pulse", order: 1,
+            uiRead: { $0.lighting.pulseEffect.amount },
+            uiWrite: { cache, value in
+                cache.lighting.pulseEffect.amount = value
+                cache.commitPulseEffect()
+            },
+            settingsRead: { $0.pulseEffect.amount },
+            settingsWrite: { settings, value in
+                var effect = settings.pulseEffect
+                effect.amount = value
+                settings.pulseEffect = effect
+            }
+        ),
+        staticDescriptor(
+            ControlCatalog.linearRailSpeed,
+            route: .look(.motion), section: "Linear Rail", order: 0,
+            uiRead: { $0.lighting.linearRailEffect.speed },
+            uiWrite: { cache, value in
+                cache.lighting.linearRailEffect.speed = value
+                cache.commitLinearRailEffect()
+            },
+            settingsRead: { $0.linearRailEffect.speed },
+            settingsWrite: { settings, value in
+                var effect = settings.linearRailEffect
+                effect.speed = value
+                settings.linearRailEffect = effect
+            }
+        ),
+        staticDescriptor(
+            ControlCatalog.linearRailAmplitude,
+            route: .look(.motion), section: "Linear Rail", order: 1,
+            uiRead: { $0.lighting.linearRailEffect.amplitude },
+            uiWrite: { cache, value in
+                cache.lighting.linearRailEffect.amplitude = value
+                cache.commitLinearRailEffect()
+            },
+            settingsRead: { $0.linearRailEffect.amplitude },
+            settingsWrite: { settings, value in
+                var effect = settings.linearRailEffect
+                effect.amplitude = value
+                settings.linearRailEffect = effect
+            }
+        ),
+        staticDescriptor(
+            ControlCatalog.linearRailMultiplier,
+            route: .look(.motion), section: "Linear Rail", order: 2,
+            uiRead: { $0.lighting.linearRailEffect.multiplier },
+            uiWrite: { cache, value in
+                cache.lighting.linearRailEffect.multiplier = value
+                cache.commitLinearRailEffect()
+            },
+            settingsRead: { $0.linearRailEffect.multiplier },
+            settingsWrite: { settings, value in
+                var effect = settings.linearRailEffect
+                effect.multiplier = value
+                settings.linearRailEffect = effect
+            }
+        ),
+        staticDescriptor(
+            ControlCatalog.linearRailOrbitAmount,
+            route: .look(.motion), section: "Linear Rail", order: 3,
+            uiRead: { $0.lighting.linearRailEffect.orbitAmount },
+            uiWrite: { cache, value in
+                cache.lighting.linearRailEffect.orbitAmount = value
+                cache.commitLinearRailEffect()
+            },
+            settingsRead: { $0.linearRailEffect.orbitAmount },
+            settingsWrite: { settings, value in
+                var effect = settings.linearRailEffect
+                effect.orbitAmount = value
+                settings.linearRailEffect = effect
+            }
+        ),
+        staticDescriptor(
+            ControlCatalog.linearRailOrbitSpeed,
+            route: .look(.motion), section: "Linear Rail", order: 4,
+            uiRead: { $0.lighting.linearRailEffect.orbitSpeed },
+            uiWrite: { cache, value in
+                cache.lighting.linearRailEffect.orbitSpeed = value
+                cache.commitLinearRailEffect()
+            },
+            settingsRead: { $0.linearRailEffect.orbitSpeed },
+            settingsWrite: { settings, value in
+                var effect = settings.linearRailEffect
+                effect.orbitSpeed = value
+                settings.linearRailEffect = effect
+            }
+        ),
+        staticDescriptor(
+            ControlCatalog.maxRaySteps,
+            route: .quality(.tuning), section: "Render Budget", order: 1,
+            uiRead: { Float($0.quality.baseMaxRaySteps) },
+            uiWrite: { cache, value in
+                let rounded = Int(value.rounded())
+                cache.quality.baseMaxRaySteps = rounded
+                cache.push(\.baseMaxRaySteps, value: rounded)
+            },
+            settingsRead: { Float($0.baseMaxRaySteps) },
+            settingsWrite: { $0.baseMaxRaySteps = Int($1.rounded()) }
+        ),
+        staticDescriptor(
+            ControlCatalog.overRelaxationMax,
+            route: .quality(.tuning), section: "Acceleration", order: 0,
+            uiRead: { $0.quality.overRelaxationMax },
+            uiWrite: { cache, value in
+                cache.quality.overRelaxationMax = value
+                cache.push(\.overRelaxationMax, value: value)
+            },
+            settingsRead: { $0.overRelaxationMax },
+            settingsWrite: { $0.overRelaxationMax = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.coneMarchStrength,
+            route: .quality(.tuning), section: "Acceleration", order: 1,
+            uiRead: { $0.quality.coneMarchStrength },
+            uiWrite: { cache, value in
+                cache.quality.coneMarchStrength = value
+                cache.push(\.coneMarchStrength, value: value)
+            },
+            settingsRead: { $0.coneMarchStrength },
+            settingsWrite: { $0.coneMarchStrength = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.distanceLODStrength,
+            route: .quality(.tuning), section: "Acceleration", order: 2,
+            uiRead: { $0.quality.distanceLODStrength },
+            uiWrite: { cache, value in
+                cache.quality.distanceLODStrength = value
+                cache.push(\.distanceLODStrength, value: value)
+            },
+            settingsRead: { $0.distanceLODStrength },
+            settingsWrite: { $0.distanceLODStrength = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.foveationStrength,
+            route: .quality(.tuning), section: "Acceleration", order: 3,
+            uiRead: { $0.quality.foveationStrength },
+            uiWrite: { cache, value in
+                cache.quality.foveationStrength = value
+                cache.push(\.foveationStrength, value: value)
+            },
+            settingsRead: { $0.foveationStrength },
+            settingsWrite: { $0.foveationStrength = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.boundSpaceWidth,
+            route: .shape(.bounding), section: "Bound to Space", order: 0,
+            uiRead: { $0.quality.boundSpaceWidth },
+            uiWrite: { cache, value in
+                cache.quality.boundSpaceWidth = value
+                cache.push(\.boundSpaceWidth, value: value)
+            },
+            settingsRead: { $0.boundSpaceWidth },
+            settingsWrite: { $0.boundSpaceWidth = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.boundSpaceDepth,
+            route: .shape(.bounding), section: "Bound to Space", order: 1,
+            uiRead: { $0.quality.boundSpaceDepth },
+            uiWrite: { cache, value in
+                cache.quality.boundSpaceDepth = value
+                cache.push(\.boundSpaceDepth, value: value)
+            },
+            settingsRead: { $0.boundSpaceDepth },
+            settingsWrite: { $0.boundSpaceDepth = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.boundSpaceHeight,
+            route: .shape(.bounding), section: "Bound to Space", order: 2,
+            uiRead: { $0.quality.boundSpaceHeight },
+            uiWrite: { cache, value in
+                cache.quality.boundSpaceHeight = value
+                cache.push(\.boundSpaceHeight, value: value)
+            },
+            settingsRead: { $0.boundSpaceHeight },
+            settingsWrite: { $0.boundSpaceHeight = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.boundAmbientStrength,
+            route: .shape(.bounding), section: "Bound to Space", order: 3,
+            uiRead: { $0.quality.boundAmbientStrength },
+            uiWrite: { cache, value in
+                cache.quality.boundAmbientStrength = value
+                cache.push(\.boundAmbientStrength, value: value)
+            },
+            settingsRead: { $0.boundAmbientStrength },
+            settingsWrite: { $0.boundAmbientStrength = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.boundingShapeRadius,
+            route: .shape(.bounding), section: "Shape", order: 0,
+            uiRead: { $0.quality.boundingShapeRadius },
+            uiWrite: { cache, value in
+                cache.quality.boundingShapeRadius = value
+                cache.push(\.boundingShapeRadius, value: value)
+            },
+            settingsRead: { $0.boundingShapeRadius },
+            settingsWrite: { $0.boundingShapeRadius = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.boundingShapeShadowDepth,
+            route: .shape(.bounding), section: "Shape", order: 1,
+            uiRead: { $0.quality.boundingShapeShadowDepth },
+            uiWrite: { cache, value in
+                cache.quality.boundingShapeShadowDepth = value
+                cache.push(\.boundingShapeShadowDepth, value: value)
+            },
+            settingsRead: { $0.boundingShapeShadowDepth },
+            settingsWrite: { $0.boundingShapeShadowDepth = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.surroundingsStrength,
+            route: .shape(.bounding), section: "Surroundings", order: 0,
+            requiredPlatformCapabilities: [.spatialMenu],
+            uiRead: { $0.quality.envScrunchStrength },
+            uiWrite: { cache, value in
+                cache.quality.envScrunchStrength = value
+                cache.push(\.envScrunchStrength, value: value)
+            },
+            settingsRead: { $0.envScrunchStrength },
+            settingsWrite: { $0.envScrunchStrength = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.surroundingsReach,
+            route: .shape(.bounding), section: "Surroundings", order: 1,
+            requiredPlatformCapabilities: [.spatialMenu],
+            uiRead: { $0.quality.envScrunchReach },
+            uiWrite: { cache, value in
+                cache.quality.envScrunchReach = value
+                cache.push(\.envScrunchReach, value: value)
+            },
+            settingsRead: { $0.envScrunchReach },
+            settingsWrite: { $0.envScrunchReach = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.surroundingsBlendWidth,
+            route: .shape(.bounding), section: "Surroundings", order: 2,
+            requiredPlatformCapabilities: [.spatialMenu],
+            uiRead: { $0.quality.envScrunchContainFeather },
+            uiWrite: { cache, value in
+                cache.quality.envScrunchContainFeather = value
+                cache.push(\.envScrunchContainFeather, value: value)
+            },
+            settingsRead: { $0.envScrunchContainFeather },
+            settingsWrite: { $0.envScrunchContainFeather = $1 }
         ),
         staticDescriptor(
             ControlCatalog.colorSchemeContrast,
@@ -659,6 +1116,52 @@ enum ParameterCatalog {
             uiRead: { $0.color.colorSchemeTransitionDuration },
             uiWrite: { cache, value in cache.color.colorSchemeTransitionDuration = value; cache.push(\.colorSchemeTransitionDuration, value: value) },
             settingsRead: { $0.colorSchemeTransitionDuration }, settingsWrite: { $0.colorSchemeTransitionDuration = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.safetyBubbleMixedRadius,
+            route: .shape(.space), section: "Safety", order: 1,
+            requiredPlatformCapabilities: [.spatialMenu],
+            uiRead: { $0.safetyBubble.mixedRadius },
+            uiWrite: { cache, value in
+                cache.safetyBubble.mixedRadius = value
+                cache.push(\.safetyBubbleMixedRadius, value: value)
+            },
+            settingsRead: { $0.safetyBubbleMixedRadius },
+            settingsWrite: { $0.safetyBubbleMixedRadius = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.safetyBubbleBlend,
+            route: .shape(.space), section: "Safety", order: 2,
+            uiRead: { $0.safetyBubble.strength },
+            uiWrite: { cache, value in
+                cache.safetyBubble.strength = value
+                cache.push(\.safetyBubbleBlend, value: value)
+            },
+            settingsRead: { $0.safetyBubbleBlend },
+            settingsWrite: { $0.safetyBubbleBlend = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.platformRadius,
+            route: .settings(.display), section: "Platform", order: 0,
+            requiredPlatformCapabilities: [.spatialMenu],
+            uiRead: { $0.display.platformRadius },
+            uiWrite: { cache, value in
+                cache.display.platformRadius = value
+                cache.commitPlatformRadius()
+            },
+            settingsRead: { $0.platformRadius },
+            settingsWrite: { $0.platformRadius = $1 }
+        ),
+        staticDescriptor(
+            ControlCatalog.deIterationMismatch,
+            route: .settings(.advanced), section: "Compatibility", order: 0,
+            uiRead: { $0.display.deIterationMismatch },
+            uiWrite: { cache, value in
+                cache.display.deIterationMismatch = value
+                cache.push(\.deIterationMismatch, value: value)
+            },
+            settingsRead: { $0.deIterationMismatch },
+            settingsWrite: { $0.deIterationMismatch = $1 }
         ),
         staticDescriptor(
             ControlCatalog.edgeStrength,

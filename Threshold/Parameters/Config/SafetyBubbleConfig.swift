@@ -129,13 +129,13 @@ struct SafetyBubbleConfig: Codable, Equatable, Sendable {
     var shape: Float = 0.0         // 0...1 = legacy sphere/cube morph, 2...6 = discrete presets
     var fadeEnabled: Bool = true
     var fadeWidth: Float = 0.1     // 0.0 - 1.0
-    var strength: Float = SafetyBubbleConfig.defaultStrength     // 0.0 - 1.0
+    var strength: Float = ControlCatalog.safetyBubbleBlend.defaultValue
     /// Mixed immersion: cap the bubble at `mixedRadius` while Mixed is active.
     /// In Mixed you're "outside" the fractal looking at it in your room, so a
     /// large comfort bubble mostly just hollows out the object. Live override —
     /// the saved radius is untouched and returns when leaving Mixed.
     var mixedAutoShrinkEnabled: Bool = true
-    var mixedRadius: Float = 0.3   // 0.05 - 1.0 meters
+    var mixedRadius: Float = ControlCatalog.safetyBubbleMixedRadius.defaultValue
 
     // MARK: - Codable (tolerant decode so adding fields never resets the
     // user's saved bubble config — it carries a comfort-default migration)
@@ -154,9 +154,11 @@ struct SafetyBubbleConfig: Codable, Equatable, Sendable {
         shape = try c.decodeIfPresent(Float.self, forKey: .shape) ?? 0.0
         fadeEnabled = try c.decodeIfPresent(Bool.self, forKey: .fadeEnabled) ?? true
         fadeWidth = try c.decodeIfPresent(Float.self, forKey: .fadeWidth) ?? 0.1
-        strength = try c.decodeIfPresent(Float.self, forKey: .strength) ?? SafetyBubbleConfig.defaultStrength
+        strength = try c.decodeIfPresent(Float.self, forKey: .strength)
+            ?? ControlCatalog.safetyBubbleBlend.defaultValue
         mixedAutoShrinkEnabled = try c.decodeIfPresent(Bool.self, forKey: .mixedAutoShrinkEnabled) ?? true
-        mixedRadius = try c.decodeIfPresent(Float.self, forKey: .mixedRadius) ?? 0.3
+        mixedRadius = try c.decodeIfPresent(Float.self, forKey: .mixedRadius)
+            ?? ControlCatalog.safetyBubbleMixedRadius.defaultValue
     }
 
     // MARK: - Validation
@@ -174,7 +176,7 @@ struct SafetyBubbleConfig: Codable, Equatable, Sendable {
         radius = ControlCatalog.safetyBubbleRadius.clamp(radius)
         shape = shape.clamped(to: 0.0...SafetyBubbleShapePreset.maxStoredValue)
         fadeWidth = fadeWidth.clamped(to: 0.0...1.0)
-        strength = strength.clamped(to: 0.0...1.0)
-        mixedRadius = mixedRadius.clamped(to: 0.05...1.0)
+        strength = strength.clamped(to: ControlCatalog.safetyBubbleBlend)
+        mixedRadius = mixedRadius.clamped(to: ControlCatalog.safetyBubbleMixedRadius)
     }
 }

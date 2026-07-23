@@ -48,6 +48,43 @@ struct LightingConfig: Codable, Equatable, Sendable {
         beatFlashEffect = try container.decodeIfPresent(BeatFlashEffect.self, forKey: .beatFlashEffect) ?? BeatFlashEffect()
         polarRotationEffect = try container.decodeIfPresent(PolarRotationEffect.self, forKey: .polarRotationEffect) ?? PolarRotationEffect()
         juliaDriftEffect = try container.decodeIfPresent(JuliaDriftEffect.self, forKey: .juliaDriftEffect) ?? JuliaDriftEffect()
+        clamp()
+    }
+
+    mutating func clamp() {
+        lightVariationRate = lightVariationRate.clamped(to: ControlCatalog.lightVariationRate)
+        hueRotationEffect.speed = hueRotationEffect.speed.clamped(to: ControlCatalog.hueSpeed)
+        hueRotationEffect.intensity = hueRotationEffect.intensity.clamped(
+            to: ControlCatalog.hueRotationIntensity
+        )
+        pulseEffect.speed = pulseEffect.speed.clamped(to: ControlCatalog.pulseSpeed)
+        pulseEffect.amount = pulseEffect.amount.clamped(to: ControlCatalog.pulseAmount)
+        glowEffect.intensity = glowEffect.intensity.clamped(to: ControlCatalog.glow)
+        bloomEffect.strength = bloomEffect.strength.clamped(to: ControlCatalog.bloom)
+        fogEffect.intensity = fogEffect.intensity.clamped(to: ControlCatalog.fog)
+        fogEffect.hueRotateSpeed = fogEffect.hueRotateSpeed.clamped(
+            to: ControlCatalog.fogHueRotationSpeed
+        )
+        gradientCycleEffect.speed = gradientCycleEffect.speed.clamped(
+            to: ControlCatalog.gradientCycleSpeed
+        )
+        polarRotationEffect.speed = polarRotationEffect.speed.clamped(
+            to: ControlCatalog.polarRotationSpeed
+        )
+        linearRailEffect.speed = linearRailEffect.speed.clamped(to: ControlCatalog.linearRailSpeed)
+        linearRailEffect.amplitude = linearRailEffect.amplitude.clamped(
+            to: ControlCatalog.linearRailAmplitude
+        )
+        linearRailEffect.multiplier = linearRailEffect.multiplier.clamped(
+            to: ControlCatalog.linearRailMultiplier
+        )
+        linearRailEffect.orbitAmount = linearRailEffect.orbitAmount.clamped(
+            to: ControlCatalog.linearRailOrbitAmount
+        )
+        linearRailEffect.orbitSpeed = linearRailEffect.orbitSpeed.clamped(
+            to: ControlCatalog.linearRailOrbitSpeed
+        )
+        edgeDetectionEffect.normalize()
     }
 
 }

@@ -21,6 +21,25 @@ struct ControlCatalogConvergenceTests {
         }
     }
 
+    @Test("Every static scalar resolves through the shared presentation edge")
+    func everyStaticScalarResolves() {
+        let settings = RenderSettings()
+        let store = ControlStateStore(renderSettings: settings)
+        let access = ControlAccessService(store: store)
+
+        for descriptor in ParameterCatalog.allDescriptors {
+            access.write(descriptor.spec.defaultValue, to: descriptor.controlID)
+            let value = access.read(descriptor.controlID)
+            #expect(value != nil, "Missing live resolver for \(descriptor.id)")
+            if let value {
+                #expect(
+                    abs(value - descriptor.spec.defaultValue) < 0.0001,
+                    "\(descriptor.id) wrote \(descriptor.spec.defaultValue) but read \(value)"
+                )
+            }
+        }
+    }
+
     @Test("Projection cache keys exclude live slider values")
     func projectionDoesNotRebuildForLiveValues() {
         let settings = RenderSettings()
@@ -67,6 +86,35 @@ struct ControlCatalogConvergenceTests {
             ControlID("toggle.quality.selfShadows"),
             ControlID("toggle.quality.smartAdvance"),
             ControlID("toggle.input.audioReactive"),
+        ])
+    }
+
+    @Test("Hand controls are filtered solely by the injected capability profile")
+    func handControlCapabilityFiltering() {
+        let cache = ControlCatalogProjectionCache()
+        func ids(for profile: PlatformProfile) -> Set<ControlID> {
+            Set(cache.sections(for: ControlCatalogProjectionKey(
+                profile: profile,
+                route: .shape(.hands),
+                presentation: .fullControls,
+                fractalType: .mandelbox,
+                catalogRevision: 1,
+                transformRevision: 0,
+                featureFlags: 0
+            )).flatMap(\.controlIDs))
+        }
+
+        #expect(ids(for: .macOS).isEmpty)
+        #expect(ids(for: .iPadOS).isEmpty)
+        #expect(ids(for: .visionOS) == [
+            ControlCatalog.handAttractionRadius.controlID,
+            ControlCatalog.handAttractionStrength.controlID,
+            ControlCatalog.handAttractionBallScale.controlID,
+            ControlCatalog.handAttractionSoftness.controlID,
+            ControlCatalog.handAttractionProjectionDistance.controlID,
+            ControlCatalog.handAttractionForearmRadius.controlID,
+            ControlCatalog.handAttractionPocketSize.controlID,
+            ControlCatalog.handAttractionPocketSoftness.controlID,
         ])
     }
 }

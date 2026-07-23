@@ -169,7 +169,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _sphereProjectionEnabled: Bool = false
     private var _sphereProjectionBlend: Float = 1.0
     private var _sphereProjectionRadius: Float = 1.0
-    private var _deIterationMismatch: Float = 0.0    // Legacy DE mismatch δ (Accidental Sphere Projection recreation); 0 = off
+    private var _deIterationMismatch: Float = ControlCatalog.deIterationMismatch.defaultValue
     // Custom space warp (built-in "Twist" by default; a loaded .threshfx warp can
     // override the GPU function). Strength 0 = off (dead-code-eliminated).
     private var _spaceWarpStrength: Float = 0.0
@@ -206,7 +206,7 @@ final class RenderSettings: @unchecked Sendable {
     // runtime warp loop. (See SpaceWarpStackModel.swift for why codegen was removed.)
     private var _warpStackCodegenSource: String? = nil
     private var _warpStackCodegenSignature: String = "s0"
-    private var _platformRadius: Float = 1.888
+    private var _platformRadius: Float = ControlCatalog.platformRadius.defaultValue
     private var _platformEnabled: Bool = true
     private var _audioLevel: Float = 0.0            // Current audio level (0-1) for reactive lighting
     private var _bassLevel: Float = 0.0             // Bass frequency energy (0-1)
@@ -361,9 +361,9 @@ final class RenderSettings: @unchecked Sendable {
     private var _safetyBubbleShape: Float = 0.0     // 0...1 = sphere/cube morph (no rotation); 2...6 select discrete platonic solids
     private var _safetyBubbleFadeEnabled: Bool = true
     private var _safetyBubbleFadeWidth: Float = 0.1
-    private var _safetyBubbleStrength: Float = SafetyBubbleConfig.defaultStrength
+    private var _safetyBubbleStrength: Float = ControlCatalog.safetyBubbleBlend.defaultValue
     private var _safetyBubbleMixedAutoShrink: Bool = true
-    private var _safetyBubbleMixedRadius: Float = 0.3
+    private var _safetyBubbleMixedRadius: Float = ControlCatalog.safetyBubbleMixedRadius.defaultValue
 
     // Hand Attraction: a per-hand interaction sphere (visionOS only) that pulls
     // the fractal surface toward each tracked palm — the inverse of the safety
@@ -614,7 +614,11 @@ final class RenderSettings: @unchecked Sendable {
     /// Current effective fractal iterations
     var fractalIterations: Int {
         get { withLock { _fractalIterations } }
-        set { withLock { _fractalIterations = newValue } }
+        set {
+            withLock {
+                _fractalIterations = newValue.clamped(to: ControlCatalog.iterations.integerRange)
+            }
+        }
     }
     
     /// Current effective ray steps
@@ -628,8 +632,9 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _baseFractalIterations } }
         set {
             withLock {
-                _baseFractalIterations = newValue
-                _fractalIterations = newValue  // Also update current
+                let clamped = newValue.clamped(to: ControlCatalog.iterations.integerRange)
+                _baseFractalIterations = clamped
+                _fractalIterations = clamped  // Also update current
             }
             persistQuality()
         }
@@ -640,8 +645,9 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _baseMaxRaySteps } }
         set {
             withLock {
-                _baseMaxRaySteps = newValue
-                _maxRaySteps = newValue  // Also update current
+                let clamped = newValue.clamped(to: ControlCatalog.maxRaySteps.integerRange)
+                _baseMaxRaySteps = clamped
+                _maxRaySteps = clamped  // Also update current
             }
             persistQuality()
         }
@@ -712,7 +718,9 @@ final class RenderSettings: @unchecked Sendable {
     var deIterationMismatch: Float {
         get { withLock { _deIterationMismatch } }
         set {
-            withLock { _deIterationMismatch = newValue.clamped(to: -8.0...8.0) }
+            withLock {
+                _deIterationMismatch = newValue.clamped(to: ControlCatalog.deIterationMismatch)
+            }
             persistDisplay()
         }
     }
@@ -853,7 +861,7 @@ final class RenderSettings: @unchecked Sendable {
     var platformRadius: Float {
         get { withLock { _platformRadius } }
         set {
-            withLock { _platformRadius = max(0.5, min(2.5, newValue)) }
+            withLock { _platformRadius = newValue.clamped(to: ControlCatalog.platformRadius) }
             persistDisplay()
         }
     }
@@ -1415,7 +1423,7 @@ final class RenderSettings: @unchecked Sendable {
     var foveationStrength: Float {
         get { withLock { _foveationStrength } }
         set {
-            let clamped = max(0.0, min(1.0, newValue))
+            let clamped = newValue.clamped(to: ControlCatalog.foveationStrength)
             withLock { _foveationStrength = clamped }
             persistQuality()
         }
@@ -1456,7 +1464,9 @@ final class RenderSettings: @unchecked Sendable {
     var coneMarchStrength: Float {
         get { withLock { _coneMarchStrength } }
         set {
-            withLock { _coneMarchStrength = max(0.0, min(1.0, newValue)) }
+            withLock {
+                _coneMarchStrength = newValue.clamped(to: ControlCatalog.coneMarchStrength)
+            }
             persistQuality()
         }
     }
@@ -1526,7 +1536,9 @@ final class RenderSettings: @unchecked Sendable {
     var overRelaxationMax: Float {
         get { withLock { _overRelaxationMax } }
         set {
-            withLock { _overRelaxationMax = max(1.0, min(1.6, newValue)) }
+            withLock {
+                _overRelaxationMax = newValue.clamped(to: ControlCatalog.overRelaxationMax)
+            }
             persistQuality()
         }
     }
@@ -1536,7 +1548,9 @@ final class RenderSettings: @unchecked Sendable {
     var distanceLODStrength: Float {
         get { withLock { _distanceLODStrength } }
         set {
-            withLock { _distanceLODStrength = max(0.0, min(1.0, newValue)) }
+            withLock {
+                _distanceLODStrength = newValue.clamped(to: ControlCatalog.distanceLODStrength)
+            }
             persistQuality()
         }
     }
@@ -1567,7 +1581,9 @@ final class RenderSettings: @unchecked Sendable {
     var boundingShapeRadius: Float {
         get { withLock { _boundingShapeRadius } }
         set {
-            withLock { _boundingShapeRadius = max(0.05, min(30.0, newValue)) }
+            withLock {
+                _boundingShapeRadius = newValue.clamped(to: ControlCatalog.boundingShapeRadius)
+            }
             persistQuality()
         }
     }
@@ -1588,7 +1604,11 @@ final class RenderSettings: @unchecked Sendable {
     var boundingShapeShadowDepth: Float {
         get { withLock { _boundingShapeShadowDepth } }
         set {
-            withLock { _boundingShapeShadowDepth = max(0.02, min(0.95, newValue)) }
+            withLock {
+                _boundingShapeShadowDepth = newValue.clamped(
+                    to: ControlCatalog.boundingShapeShadowDepth
+                )
+            }
             persistQuality()
         }
     }
@@ -1628,7 +1648,7 @@ final class RenderSettings: @unchecked Sendable {
     var boundSpaceWidth: Float {
         get { withLock { _boundSpaceWidth } }
         set {
-            withLock { _boundSpaceWidth = max(1.0, min(20.0, newValue)) }
+            withLock { _boundSpaceWidth = newValue.clamped(to: ControlCatalog.boundSpaceWidth) }
             persistQuality()
         }
     }
@@ -1637,7 +1657,7 @@ final class RenderSettings: @unchecked Sendable {
     var boundSpaceDepth: Float {
         get { withLock { _boundSpaceDepth } }
         set {
-            withLock { _boundSpaceDepth = max(1.0, min(20.0, newValue)) }
+            withLock { _boundSpaceDepth = newValue.clamped(to: ControlCatalog.boundSpaceDepth) }
             persistQuality()
         }
     }
@@ -1646,7 +1666,7 @@ final class RenderSettings: @unchecked Sendable {
     var boundSpaceHeight: Float {
         get { withLock { _boundSpaceHeight } }
         set {
-            withLock { _boundSpaceHeight = max(1.0, min(10.0, newValue)) }
+            withLock { _boundSpaceHeight = newValue.clamped(to: ControlCatalog.boundSpaceHeight) }
             persistQuality()
         }
     }
@@ -1656,7 +1676,9 @@ final class RenderSettings: @unchecked Sendable {
     var boundAmbientStrength: Float {
         get { withLock { _boundAmbientStrength } }
         set {
-            withLock { _boundAmbientStrength = max(0.0, min(1.0, newValue)) }
+            withLock {
+                _boundAmbientStrength = newValue.clamped(to: ControlCatalog.boundAmbientStrength)
+            }
             persistQuality()
         }
     }
@@ -1688,7 +1710,9 @@ final class RenderSettings: @unchecked Sendable {
     var envScrunchStrength: Float {
         get { withLock { _envScrunchStrength } }
         set {
-            withLock { _envScrunchStrength = max(0.0, min(1.0, newValue)) }
+            withLock {
+                _envScrunchStrength = newValue.clamped(to: ControlCatalog.surroundingsStrength)
+            }
             persistQuality()
         }
     }
@@ -1697,7 +1721,9 @@ final class RenderSettings: @unchecked Sendable {
     var envScrunchReach: Float {
         get { withLock { _envScrunchReach } }
         set {
-            withLock { _envScrunchReach = max(0.2, min(2.0, newValue)) }
+            withLock {
+                _envScrunchReach = newValue.clamped(to: ControlCatalog.surroundingsReach)
+            }
             persistQuality()
         }
     }
@@ -1718,7 +1744,11 @@ final class RenderSettings: @unchecked Sendable {
     var envScrunchContainFeather: Float {
         get { withLock { _envScrunchContainFeather } }
         set {
-            withLock { _envScrunchContainFeather = max(0.0, min(0.5, newValue)) }
+            withLock {
+                _envScrunchContainFeather = newValue.clamped(
+                    to: ControlCatalog.surroundingsBlendWidth
+                )
+            }
             persistQuality()
         }
     }
@@ -2105,7 +2135,11 @@ final class RenderSettings: @unchecked Sendable {
     var safetyBubbleMixedRadius: Float {
         get { withLock { _safetyBubbleMixedRadius } }
         set {
-            withLock { _safetyBubbleMixedRadius = max(0.05, min(1.0, newValue)) }
+            withLock {
+                _safetyBubbleMixedRadius = newValue.clamped(
+                    to: ControlCatalog.safetyBubbleMixedRadius
+                )
+            }
             persistSafetyBubble()
         }
     }
@@ -2126,7 +2160,9 @@ final class RenderSettings: @unchecked Sendable {
     var safetyBubbleBlend: Float {
         get { withLock { _safetyBubbleStrength } }
         set {
-            withLock { _safetyBubbleStrength = max(0.0, min(1.0, newValue)) }
+            withLock {
+                _safetyBubbleStrength = newValue.clamped(to: ControlCatalog.safetyBubbleBlend)
+            }
             persistSafetyBubble()
         }
     }
@@ -2150,7 +2186,9 @@ final class RenderSettings: @unchecked Sendable {
     var handAttractionRadius: Float {
         get { withLock { _handAttractionRadius } }
         set {
-            withLock { _handAttractionRadius = max(0.05, min(1.0, newValue)) }
+            withLock {
+                _handAttractionRadius = ControlCatalog.handAttractionRadius.clamp(newValue)
+            }
             persistHandAttraction()
         }
     }
@@ -2159,7 +2197,9 @@ final class RenderSettings: @unchecked Sendable {
     var handAttractionStrength: Float {
         get { withLock { _handAttractionStrength } }
         set {
-            withLock { _handAttractionStrength = max(-1.0, min(1.0, newValue)) }
+            withLock {
+                _handAttractionStrength = ControlCatalog.handAttractionStrength.clamp(newValue)
+            }
             persistHandAttraction()
         }
     }
@@ -2177,7 +2217,9 @@ final class RenderSettings: @unchecked Sendable {
     var handAttractionBallScale: Float {
         get { withLock { _handAttractionBallScale } }
         set {
-            withLock { _handAttractionBallScale = max(0.1, min(1.0, newValue)) }
+            withLock {
+                _handAttractionBallScale = ControlCatalog.handAttractionBallScale.clamp(newValue)
+            }
             persistHandAttraction()
         }
     }
@@ -2186,7 +2228,9 @@ final class RenderSettings: @unchecked Sendable {
     var handAttractionSoftness: Float {
         get { withLock { _handAttractionSoftness } }
         set {
-            withLock { _handAttractionSoftness = max(0.05, min(2.0, newValue)) }
+            withLock {
+                _handAttractionSoftness = ControlCatalog.handAttractionSoftness.clamp(newValue)
+            }
             persistHandAttraction()
         }
     }
@@ -2195,7 +2239,9 @@ final class RenderSettings: @unchecked Sendable {
     var handAttractionPocketSize: Float {
         get { withLock { _handAttractionPocketSize } }
         set {
-            withLock { _handAttractionPocketSize = max(0.1, min(1.5, newValue)) }
+            withLock {
+                _handAttractionPocketSize = ControlCatalog.handAttractionPocketSize.clamp(newValue)
+            }
             persistHandAttraction()
         }
     }
@@ -2204,7 +2250,10 @@ final class RenderSettings: @unchecked Sendable {
     var handAttractionPocketSoftness: Float {
         get { withLock { _handAttractionPocketSoftness } }
         set {
-            withLock { _handAttractionPocketSoftness = max(0.1, min(1.5, newValue)) }
+            withLock {
+                _handAttractionPocketSoftness =
+                    ControlCatalog.handAttractionPocketSoftness.clamp(newValue)
+            }
             persistHandAttraction()
         }
     }
@@ -2214,7 +2263,10 @@ final class RenderSettings: @unchecked Sendable {
     var handAttractionProjectionDistance: Float {
         get { withLock { _handAttractionProjectionDistance } }
         set {
-            withLock { _handAttractionProjectionDistance = max(0.0, min(1.0, newValue)) }
+            withLock {
+                _handAttractionProjectionDistance =
+                    ControlCatalog.handAttractionProjectionDistance.clamp(newValue)
+            }
             persistHandAttraction()
         }
     }
@@ -2232,7 +2284,10 @@ final class RenderSettings: @unchecked Sendable {
     var handAttractionForearmRadius: Float {
         get { withLock { _handAttractionForearmRadius } }
         set {
-            withLock { _handAttractionForearmRadius = max(0.02, min(0.3, newValue)) }
+            withLock {
+                _handAttractionForearmRadius =
+                    ControlCatalog.handAttractionForearmRadius.clamp(newValue)
+            }
             persistHandAttraction()
         }
     }
@@ -2430,7 +2485,10 @@ final class RenderSettings: @unchecked Sendable {
     var gradientRepeat: Float {
         get { withLock { _gradientState.gradient.repeatCount } }
         set {
-            withLock { _gradientState.gradient.repeatCount = max(0.1, min(10.0, newValue)) }
+            withLock {
+                _gradientState.gradient.repeatCount =
+                    ControlCatalog.gradientRepeat.clamp(newValue)
+            }
             persistColor()
         }
     }
@@ -2448,7 +2506,10 @@ final class RenderSettings: @unchecked Sendable {
     var gradientSmoothing: Float {
         get { withLock { _gradientState.gradient.smoothing } }
         set {
-            withLock { _gradientState.gradient.smoothing = max(0.0, min(1.0, newValue)) }
+            withLock {
+                _gradientState.gradient.smoothing =
+                    ControlCatalog.gradientSmoothing.clamp(newValue)
+            }
             persistColor()
         }
     }
@@ -2519,7 +2580,9 @@ final class RenderSettings: @unchecked Sendable {
     var lightVariationRate: Float {
         get { withLock { _lightVariationRate } }
         set {
-            withLock { _lightVariationRate = max(0.0, min(1.0, newValue)) }
+            withLock {
+                _lightVariationRate = ControlCatalog.lightVariationRate.clamp(newValue)
+            }
             persistLighting()
         }
     }
@@ -4584,22 +4647,22 @@ final class RenderSettings: @unchecked Sendable {
             }
         }
         set {
-            var normalizedEdge = newValue.edgeDetectionEffect
-            normalizedEdge.normalize()
+            var normalized = newValue
+            normalized.clamp()
             withLock {
-                _lightingPreset = newValue.lightingPreset
-                _lightVariationRate = newValue.lightVariationRate
-                _hueRotationEffect = newValue.hueRotationEffect
-                _pulseEffect = newValue.pulseEffect
-                _glowEffect = newValue.glowEffect
-                _bloomEffect = newValue.bloomEffect
-                _edgeDetectionEffect = normalizedEdge
-                _fogEffect = newValue.fogEffect
-                _gradientCycleEffect = newValue.gradientCycleEffect
-                _linearRailEffect = newValue.linearRailEffect
-                _beatFlashEffect = newValue.beatFlashEffect
-                _polarRotationEffect = newValue.polarRotationEffect
-                _juliaDriftEffect = newValue.juliaDriftEffect
+                _lightingPreset = normalized.lightingPreset
+                _lightVariationRate = normalized.lightVariationRate
+                _hueRotationEffect = normalized.hueRotationEffect
+                _pulseEffect = normalized.pulseEffect
+                _glowEffect = normalized.glowEffect
+                _bloomEffect = normalized.bloomEffect
+                _edgeDetectionEffect = normalized.edgeDetectionEffect
+                _fogEffect = normalized.fogEffect
+                _gradientCycleEffect = normalized.gradientCycleEffect
+                _linearRailEffect = normalized.linearRailEffect
+                _beatFlashEffect = normalized.beatFlashEffect
+                _polarRotationEffect = normalized.polarRotationEffect
+                _juliaDriftEffect = normalized.juliaDriftEffect
             }
         }
     }
@@ -4775,8 +4838,12 @@ final class RenderSettings: @unchecked Sendable {
                 _sphereProjectionEnabled = newValue.sphereProjectionEnabled
                 _sphereProjectionBlend = max(0.0, min(1.0, newValue.sphereProjectionBlend))
                 _sphereProjectionRadius = max(0.2, min(12.0, newValue.sphereProjectionRadius))
-                _deIterationMismatch = newValue.deIterationMismatch.clamped(to: -8.0...8.0)
-                _platformRadius = max(0.5, min(2.5, newValue.platformRadius))
+                _deIterationMismatch = newValue.deIterationMismatch.clamped(
+                    to: ControlCatalog.deIterationMismatch
+                )
+                _platformRadius = newValue.platformRadius.clamped(
+                    to: ControlCatalog.platformRadius
+                )
                 _platformEnabled = newValue.platformEnabled
             }
         }

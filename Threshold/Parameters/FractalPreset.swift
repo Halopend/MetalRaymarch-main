@@ -142,8 +142,8 @@ struct SceneDisplayState: Codable, Equatable {
     var sphereProjectionEnabled: Bool = false
     var sphereProjectionBlend: Float = 1.0
     var sphereProjectionRadius: Float = 1.0
-    var deIterationMismatch: Float = 0.0
-    var platformRadius: Float = 1.888
+    var deIterationMismatch: Float = ControlCatalog.deIterationMismatch.defaultValue
+    var platformRadius: Float = ControlCatalog.platformRadius.defaultValue
     var platformEnabled: Bool = true
 
     init() {}
@@ -176,8 +176,10 @@ struct SceneDisplayState: Codable, Equatable {
         sphereProjectionEnabled = try c.decodeIfPresent(Bool.self, forKey: .sphereProjectionEnabled) ?? false
         sphereProjectionBlend = try c.decodeIfPresent(Float.self, forKey: .sphereProjectionBlend) ?? 1.0
         sphereProjectionRadius = try c.decodeIfPresent(Float.self, forKey: .sphereProjectionRadius) ?? 1.0
-        deIterationMismatch = try c.decodeIfPresent(Float.self, forKey: .deIterationMismatch) ?? 0.0
-        platformRadius = try c.decodeIfPresent(Float.self, forKey: .platformRadius) ?? 1.888
+        deIterationMismatch = try c.decodeIfPresent(Float.self, forKey: .deIterationMismatch)
+            ?? ControlCatalog.deIterationMismatch.defaultValue
+        platformRadius = try c.decodeIfPresent(Float.self, forKey: .platformRadius)
+            ?? ControlCatalog.platformRadius.defaultValue
         platformEnabled = try c.decodeIfPresent(Bool.self, forKey: .platformEnabled) ?? true
     }
 }
@@ -1454,7 +1456,8 @@ struct FractalPreset: Codable, Identifiable {
         settings.sphereProjectionRadius = sphereProjectionRadius ?? 1.0
         // Same authoritative-reset rule: a scene without the mismatch field
         // means a correct DE, so clear any δ the previous scene left live.
-        settings.deIterationMismatch = deIterationMismatch ?? 0.0
+        settings.deIterationMismatch = deIterationMismatch
+            ?? ControlCatalog.deIterationMismatch.defaultValue
 
         // Composable domain-transform stack (Transformations section). A scene fully
         // defines its transforms, so apply AUTHORITATIVELY: nil/absent (an empty stack
@@ -1465,7 +1468,7 @@ struct FractalPreset: Codable, Identifiable {
         // Glass-floor platform — AUTHORITATIVE: absent means the defaults
         // (platform on at 1.888), never the previous scene's platform.
         settings.platformEnabled = platformEnabled ?? true
-        settings.platformRadius = platformRadius ?? 1.888
+        settings.platformRadius = platformRadius ?? ControlCatalog.platformRadius.defaultValue
 
         // Bounding Shape (sphere) — a scene's explicit setting wins; otherwise
         // bounding follows the Mixed-immersion rule: scenes marked Mixed are
