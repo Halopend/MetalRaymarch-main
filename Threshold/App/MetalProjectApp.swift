@@ -79,7 +79,7 @@ struct MetalProjectTestApp: App {
                 .environment(appModel)
                 .environment(spatialRadialMenu)
                 .background(ImmersiveSpaceAutoOpener().environment(appModel))
-                .onAppear { [appModel, spatialRadialMenu, openWindow, dismissWindow] in
+                .onAppear { [appModel, openWindow, dismissWindow] in
                     // PGO: if this is an instrumented "Generate Optimization
                     // Profile" build, start periodic counter flushing so the
                     // profile survives the SIGKILL teardown typical of
@@ -102,32 +102,11 @@ struct MetalProjectTestApp: App {
                     appModel.dismissMenuWindowHandler = { [dismissWindow] in
                         dismissWindow(id: appModel.menuWindowID)
                     }
-                    spatialRadialMenu.installWindowHandlers(
-                        reveal: { [weak appModel] in
-                            appModel?.revealMenuWindowForSpatialNavigation()
-                        },
-                        dismiss: { [weak appModel] in
-                            appModel?.setSpatialMenuVisible(false)
-                        }
-                    )
-                    appModel.presentSpatialMenuHandler = { [weak appModel, weak spatialRadialMenu] nodeID in
-                        guard let appModel, let spatialRadialMenu else { return }
-                        let gestureMap = SpatialGestureMapSnapshot.capture(
-                            isEnabled: appModel.renderSettings.perFingerTapGestureEnabled,
-                            menuGestureIsEnabled: appModel.renderSettings.menuToggleGestureEnabled,
-                            menuGestureMode: appModel.renderSettings.menuToggleGestureMode,
-                            leftActions: appModel.renderSettings.perFingerTapLeftActions,
-                            rightActions: appModel.renderSettings.perFingerTapRightActions
-                        )
-                        spatialRadialMenu.prepare(
-                            focusing: nodeID,
-                            gestureMap: gestureMap
-                        )
-                        appModel.setSpatialMenuVisible(true)
-                    }
-                    appModel.dismissSpatialMenuHandler = { [weak appModel] in
-                        appModel?.setSpatialMenuVisible(false)
-                    }
+                    // CompositorLayer must remain the direct ImmersiveSpace
+                    // content. Without a spatial presentation handler, gesture
+                    // commands intentionally use AppModel's existing plain
+                    // menu-window routes instead of an unsupported RealityView
+                    // sibling or a separate volumetric window.
 
                     if !hasCompletedIntroOnboarding {
                         openWindow(id: AppModel.onboardingWindowID)
@@ -189,17 +168,8 @@ struct MetalProjectTestApp: App {
         .windowResizability(.contentMinSize)
 
         ImmersiveSpace(id: appModel.immersiveSpaceID) {
-            ZStack {
-                CompositorLayer(configuration: ContentStageConfiguration()) { @MainActor layerRenderer in
-                    Renderer.startRenderLoop(layerRenderer, appModel: appModel)
-                }
-                ._viewRepresentation
-
-                // Keep the controls in the immersive coordinate space so the
-                // RealityKit above-hand anchor can follow the dominant hand.
-                SpatialRadialMenuView()
-                    .environment(appModel)
-                    .environment(spatialRadialMenu)
+            CompositorLayer(configuration: ContentStageConfiguration()) { @MainActor layerRenderer in
+                Renderer.startRenderLoop(layerRenderer, appModel: appModel)
             }
         }
         // The selection follows the user's Immersive / Mixed preference.
