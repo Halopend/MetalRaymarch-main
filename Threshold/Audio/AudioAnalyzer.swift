@@ -390,10 +390,15 @@ class AudioAnalyzer {
         // The requested tap size is a hint only — the engine may deliver more
         // or fewer frames. The core's internal accumulator makes analysis
         // independent of whatever size actually arrives.
+        //
+        // @Sendable is load-bearing: without it the closure inherits this
+        // method's MainActor isolation and the injected runtime executor check
+        // kills the process the moment AVFAudio invokes the tap on its
+        // realtime-messenger queue.
         let core = self.core
         input.installTap(onBus: 0,
                          bufferSize: AVAudioFrameCount(AudioAnalysisCore.windowSize),
-                         format: format) { buffer, _ in
+                         format: format) { @Sendable buffer, _ in
             core.ingest(buffer)
         }
 

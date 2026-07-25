@@ -2926,7 +2926,18 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
         // An underestimated h is still a valid unbounding-sphere radius, so the
         // relaxed/smart step logic below stays overshoot-safe unchanged.
         float h;
-        float cachedBound = (dcGrid != nullptr) ? distCacheSample(p, *distCache, dcGrid) : 0.0f;
+        float cachedBound = 0.0f;
+        if (dcGrid != nullptr && type == FractalTypeMandelbox) {
+            // The atlas stores the CANONICAL, unwarped Mandelbox. Apply the
+            // current domain-transform stack to the query point after the fact,
+            // exactly as MapUnified does, and divide by its conservative
+            // Jacobian stretch. Translation/rotation/model scale already live
+            // outside model-space marching and likewise never enter the atlas.
+            SpaceTransform atlasTransform = applySpaceTransforms(p, type, params);
+            cachedBound = distCacheSample(
+                atlasTransform.point, *distCache, dcGrid
+            ) / max(atlasTransform.deScale, 1e-6f);
+        }
         if (dcGrid != nullptr && cachedBound > distCache->nearBandModel) {
             h = cachedBound;
         } else {
@@ -5143,8 +5154,9 @@ fragment float2 macMotionFragment(MacBlitVertexOut in [[stage_in]],
 // === FRACTAL DISTANCE CACHE BAKE ===
 // Bakes the fractal DE into the conservative distance grid (see
 // DistanceCacheParams in ShaderTypes.h). One thread per voxel: evaluate the
-// SAME MapUnified the march uses (full iteration count, space-warp stack and
-// sphere projection included) at the voxel center and store
+// SAME canonical Mandelbox Map the march uses (full iteration count and native
+// per-fold sphere projection included, domain-transform stack excluded) at the
+// voxel center and store
 //     max(DE − kDistCacheLipschitzSlack·halfDiagonal, 0)
 // — a lower bound on the DE anywhere inside the voxel while the local
 // Lipschitz constant stays ≤ the slack. Camera-dependent DE terms (safety
@@ -5154,8 +5166,10 @@ fragment float2 macMotionFragment(MacBlitVertexOut in [[stage_in]],
 // render pass, only on DE-parameter change — the cache is never stale.
 kernel void distanceCacheBake(device half* outGrid [[buffer(0)]],
                               constant Uniforms& uniforms [[buffer(BufferIndexUniforms)]],
-                              uint3 tid [[thread_position_in_grid]])
+                              constant uint& zOffset [[buffer(30)]],
+                              uint3 localTid [[thread_position_in_grid]])
 {
+    uint3 tid = uint3(localTid.xy, localTid.z + zOffset);
     if (any(tid >= uint3(DIST_CACHE_DIM))) return;
     constant DistanceCacheParams& dc = uniforms.distCache;
     float3 cell = 1.0f / dc.invCellModel;
@@ -5173,9 +5187,9 @@ kernel void distanceCacheBake(device half* outGrid [[buffer(0)]],
         /*envScrunch (excluded)*/ nullptr,
         /*handField (excluded)*/ nullptr);
 
-    float d = MapUnified(p, params, uniforms.foldingLimit,
-                         max(int(uniforms.fractalIterations), 2),
-                         uniforms.fractalType, uniforms.formulaParams);
+    float d = Map(p, params, uniforms.foldingLimit,
+                  max(int(uniforms.fractalIterations), 2),
+                  /*world fields excluded*/ false);
     float halfDiag = 0.5f * length(cell);
     float bound = max(d - kDistCacheLipschitzSlack * halfDiag, 0.0f);
     // Clamp well under half-float max; the march only needs "big" out here.
@@ -5213,9 +5227,9 @@ kernel void distanceCacheValidate(device const half* grid [[buffer(0)]],
     for (uint i = 0; i < 8; i++) {
         float3 f = float3(float(i & 1u), float((i >> 1) & 1u), float((i >> 2) & 1u));
         float3 p = dc.originModel + (float3(tid) + mix(float3(0.05f), float3(0.95f), f)) * cell;
-        float d = MapUnified(p, params, uniforms.foldingLimit,
-                             max(int(uniforms.fractalIterations), 2),
-                             uniforms.fractalType, uniforms.formulaParams);
+        float d = Map(p, params, uniforms.foldingLimit,
+                      max(int(uniforms.fractalIterations), 2),
+                      /*world fields excluded*/ false);
         if (bound > d + 1e-4f) {
             atomic_fetch_add_explicit(&out[0], 1u, memory_order_relaxed);
             atomic_fetch_max_explicit(&out[1], as_type<uint>(bound - d), memory_order_relaxed);

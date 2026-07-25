@@ -339,15 +339,15 @@ final class ViewportRenderer {
     }()
     nonisolated(unsafe) static var benchAblateMode: UInt32 = benchAblateModeEnvDefault
 
-    /// Fractal distance cache (conservative distance-field grid) prototype,
+    /// Fractal distance seed cache (conservative distance-field grids),
     /// opt-in via THRESHOLD_DIST_CACHE=1 so the benchmark harness can A/B it.
     private static let distCacheRequested =
         ProcessInfo.processInfo.environment["THRESHOLD_DIST_CACHE"] == "1"
     private var distCache: FractalDistanceCache?
     private var distCacheInitAttempted = false
-    /// Bake key for the frame being encoded; nil = cache ineligible this frame
-    /// (no bake dispatch, no residency, shader sees enabled == 0).
-    private var distCachePendingKey: Int?
+    /// Exact seed selected for the frame. Partial seeds request one bounded bake
+    /// slab and remain shader-disabled; complete seeds expose `renderBuffer`.
+    private var distCacheFrameState: FractalDistanceCache.FrameState?
 
     private static let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
     private static let maxBuffersInFlight = 2
@@ -573,10 +573,11 @@ final class ViewportRenderer {
         guard let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
         // Fractal distance cache: bake in the measured command buffer so the
         // harness sees the cache's true amortized cost (rebake only on change).
-        if let distCache, let key = distCachePendingKey {
-            distCache.encodeBakeIfNeeded(commandBuffer: commandBuffer,
-                                         uniformBuffer: uniformBuffer,
-                                         key: key)
+        if let distCache, let frame = distCacheFrameState {
+            distCache.encodeBakeSliceIfNeeded(
+                commandBuffer: commandBuffer,
+                uniformBuffer: uniformBuffer,
+                frame: frame)
         }
         let pipeline = resolveActivePipeline(appModel: appModel)
         let descriptor = makeOffscreenRenderPassDescriptor(color: color, depth: depth)
@@ -841,10 +842,11 @@ final class ViewportRenderer {
 
         // Fractal distance cache: (re)bake before the render pass when a
         // DE-shaping parameter changed. Same command buffer ⇒ never stale.
-        if let distCache, let key = distCachePendingKey {
-            distCache.encodeBakeIfNeeded(commandBuffer: commandBuffer,
-                                         uniformBuffer: uniformBuffer,
-                                         key: key)
+        if let distCache, let frame = distCacheFrameState {
+            distCache.encodeBakeSliceIfNeeded(
+                commandBuffer: commandBuffer,
+                uniformBuffer: uniformBuffer,
+                frame: frame)
         }
 
         // Step profiling: zero this slot's counters before the GPU accumulates
@@ -1031,8 +1033,8 @@ final class ViewportRenderer {
         encoder.setFragmentBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
         // Fractal distance cache grid is also bindless (GPU address in the
         // uniforms) — declare residency whenever it's enabled this frame.
-        if let distCache, distCachePendingKey != nil {
-            encoder.useResource(distCache.buffer, usage: .read, stages: .fragment)
+        if let buffer = distCacheFrameState?.renderBuffer {
+            encoder.useResource(buffer, usage: .read, stages: .fragment)
         }
         // fragmentShaderMono declares benchCounters at this index; bind every
         // frame so the argument is satisfied even when profiling is off.
@@ -1600,15 +1602,17 @@ final class ViewportRenderer {
         // The bake itself is encoded in draw() (same command buffer, before the
         // render pass) so the grid the fragment march reads is never stale.
         var distCacheParams = DistanceCacheParams()
-        distCachePendingKey = nil
+        distCacheFrameState = nil
         if Self.distCacheRequested, FractalDistanceCache.isEligible(settings: settings) {
             if distCache == nil, !distCacheInitAttempted {
                 distCacheInitAttempted = true
                 distCache = FractalDistanceCache(device: device)
             }
             if let cache = distCache {
-                distCachePendingKey = FractalDistanceCache.bakeKey(settings: settings)
-                distCacheParams = cache.makeParams(enabled: true)
+                let key = FractalDistanceCache.bakeKey(settings: settings)
+                let frame = cache.prepareFrame(key: key)
+                distCacheFrameState = frame
+                distCacheParams = frame.params
             }
         }
 
