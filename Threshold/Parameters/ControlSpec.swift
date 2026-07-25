@@ -450,7 +450,11 @@ enum ControlCatalog {
 
     static let colorSchemeHighlights = ControlSpec(
         id: "color.highlights", name: "Highlights", icon: "sun.max.fill",
-        range: -0.5...1.0, defaultValue: 0.02)
+        // Exposure-style multiplier (shader applies 1 + value). The old cap of
+        // 1.0 (2×) matched the hard-clipped SDR pipeline; with the extended
+        // grading range + EDR display mapping, up to 4× (+2 stops) is usable —
+        // highlights ride the soft shoulder instead of clipping.
+        range: -0.5...3.0, defaultValue: 0.02)
 
     // More color/lighting controls whose range was open-coded in BOTH the
     // RenderSettings setter AND ColorConfig.clamp() (and the UI slider) — folded

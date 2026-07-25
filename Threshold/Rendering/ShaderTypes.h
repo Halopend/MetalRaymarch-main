@@ -199,7 +199,14 @@ typedef struct
     // Beat Flash Effect - music-driven edge glow
     int beatFlashEnabled;             // 0 = off, 1 = on
     float beatFlashIntensity;         // Flash strength (0-1), multiplied by beat level
-    
+
+    // Display peak this frame in SDR-white units (display state, not artistic:
+    // the renderer stamps it per frame from the screen's EDR headroom). 1 = SDR
+    // display or SDR-pinned target (benchmark captures); >1 = grading may send
+    // highlight energy above SDR white up to this value. The shader clamps to
+    // >= 1, so a zero-initialized struct behaves as SDR.
+    float edrHeadroom;
+
     // Note: fog is handled entirely by PrecomputedFog — no per-pixel fog fields here.
     // fogEnabled/fogIntensity live in RenderSettings for CPU precomputation only.
 } ColorSchemeParams;

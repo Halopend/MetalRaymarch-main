@@ -22,7 +22,7 @@ struct ColorConfig: Codable, Equatable, Sendable {
     var colorSchemeVibrance: Float = 0.8   // 0.0 - 1.0
     var colorSchemeCurve: Float = 0.0      // -1.0 - 1.0
     var colorSchemeShadows: Float = -0.018 // -0.05 - 0.05
-    var colorSchemeHighlights: Float = 0.02 // -0.5 - 1.0
+    var colorSchemeHighlights: Float = 0.02 // range: ControlCatalog.colorSchemeHighlights
     var lightingSoftness: Float = 0.35     // 0.0 - 1.0
     var cellShadingEnabled: Bool = false
     var cellShadingLevels: Float = 4.0     // 2.0 - 8.0

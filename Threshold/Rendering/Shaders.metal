@@ -336,19 +336,35 @@ FORCE_INLINE float finalizeGlow(float glow) {
     return saturate(glow * kGlowAccumScale);
 }
 
-// Clamp color before post-processing
+// Clamp color before post-processing. The ceiling is the grading pipeline's
+// HDR working range: wide enough that sun specular, glow, and bloom keep real
+// highlight energy for the EDR display mapping in PostEffectsWithScheme, while
+// still containing inf/NaN blowups well inside half-float range.
 FORCE_INLINE half3 clampColor(half3 col) {
-    return clamp(col, half3(0.0h), half3(2.0h));
+    return clamp(col, half3(0.0h), half3(8.0h));
 }
 
 // Narkowicz ACES filmic tonemap fit. Compresses HDR-range values (bloom/glow
-// can exceed 1.0 before this point) into displayable range with a filmic
-// shoulder, applied BEFORE the user-tunable gamma/display-curve step in
+// can exceed 1.0 before this point) into SDR range with a filmic shoulder,
+// applied BEFORE the user-tunable gamma/display-curve step in
 // PostEffectsWithScheme — gamma remains a separate artistic control, this is
-// purely the HDR-compression stage.
+// purely the HDR-compression stage. Input is deliberately UNCLAMPED so energy
+// above 1.0 rides the shoulder instead of being pre-flattened.
 FORCE_INLINE half3 acesFilm(half3 x) {
     const half a = 2.51h, b = 0.03h, c = 2.43h, d = 0.59h, e = 0.14h;
     return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
+}
+
+// Soft-clip into [0, peak]: identity below the knee (0.8·peak), then a rational
+// shoulder that approaches `peak` asymptotically. C1-continuous at the knee, so
+// in-range colors are untouched and out-of-range energy compresses instead of
+// banding at a hard clip. Used by the EDR display mapping (peak = the screen's
+// current headroom in SDR-white units).
+FORCE_INLINE half3 softClipToPeak(half3 x, half peak) {
+    half knee = 0.8h * peak;
+    half range = peak - knee;
+    half3 over = max(x - knee, half3(0.0h));
+    return min(x, half3(knee)) + range * over / (range + over);
 }
 
 FORCE_INLINE half quantizeCelLight(half value, ColorSchemeParams scheme) {
@@ -3217,21 +3233,38 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, Preco
         rgb = mix(rgb, flashColor, edgeGlow * 0.8h);
     }
     
-    // Clamp before gamma to avoid NaN from negative values (matches the
-    // original pre-tonemap behavior so tonemapStrength == 0 is unchanged).
-    rgb = saturate(rgb);
+    // === DISPLAY MAPPING (SDR body + EDR highlight energy) ===
+    // Grading above ran in unbounded working range; only negatives are removed
+    // here (NaN guard for powr). The old pipeline hard-clipped (`saturate`)
+    // BEFORE the tonemap, which destroyed every glow/bloom/specular value above
+    // 1.0 — the filmic shoulder never saw real HDR input.
+    rgb = max(rgb, half3(0.0h));
+    half peak = max(half(scheme.edrHeadroom), 1.0h);
 
-    // Filmic tonemap (ACES fit), optional and blended by colorScheme.tonemapStrength
-    // (default 0 = off, byte-identical to the prior plain-clamp behavior).
-    // Compresses HDR-range glow/bloom values with a filmic shoulder instead of
-    // a hard clip when dialed in.
+    // SDR body in [0,1] — pixel-identical to the historical pipeline on SDR
+    // displays (presets were authored against it): hard clip, optional ACES
+    // blend. The one deliberate change: acesFilm now receives the UNCLAMPED
+    // scene value, so tonemapStrength compresses real HDR range instead of
+    // reshaping already-clipped pixels.
+    half3 sdrClipped = min(rgb, half3(1.0h));
+    half3 sdrBody = sdrClipped;
     if (scheme.tonemapStrength > 0.001f) {
-        rgb = mix(rgb, acesFilm(rgb), half(scheme.tonemapStrength));
+        sdrBody = mix(sdrBody, acesFilm(rgb), half(scheme.tonemapStrength));
     }
 
-    // Gamma from scheme (user-tunable artistic display curve, applied after
-    // tonemap so it does not fight the filmic shoulder).
-    return powr(max(rgb, half3(kPowEpsilonHalf)), half3(scheme.gamma));
+    // Gamma from scheme (user-tunable artistic display curve) applies to the
+    // SDR body exactly as before, keeping the artistic curve
+    // display-independent.
+    half3 graded = powr(max(sdrBody, half3(kPowEpsilonHalf)), half3(scheme.gamma));
+
+    // EDR: energy above SDR white, soft-clipped into the display's headroom,
+    // rides on top of the gamma-graded body. Continuous (zero at rgb == 1),
+    // monotonic, and bounded so the result never exceeds `peak`. The max()
+    // guards small headrooms, where the soft knee starts below SDR white.
+    if (peak > 1.001h) {
+        graded += max(softClipToPeak(rgb, peak) - sdrClipped, half3(0.0h));
+    }
+    return graded;
 }
 
 struct FloorCircleHit {

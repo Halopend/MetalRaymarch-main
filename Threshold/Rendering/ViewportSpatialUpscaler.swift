@@ -98,8 +98,16 @@ final class ViewportSpatialUpscaler {
         descriptor.colorTextureFormat = colorFormat
         descriptor.outputTextureFormat = colorFormat
         // sRGB formats require perceptual processing (same constraint the
-        // visionOS `MetalFXManager` documents).
-        descriptor.colorProcessingMode = .perceptual
+        // visionOS `MetalFXManager` documents). Float formats carry LINEAR
+        // extended-range (EDR) data — `.hdr` makes the scaler apply its own
+        // reversible tonemap internally instead of misreading >1 energy as
+        // perceptual values.
+        switch colorFormat {
+        case .rgba16Float, .bgra10_xr, .bgra10_xr_srgb, .rg11b10Float:
+            descriptor.colorProcessingMode = .hdr
+        default:
+            descriptor.colorProcessingMode = .perceptual
+        }
 
         guard let made = descriptor.makeSpatialScaler(device: device) else {
             print("❌ Mac MetalFX makeSpatialScaler failed: input=\(inputSize.width)x\(inputSize.height) output=\(outputSize.width)x\(outputSize.height)")

@@ -3083,7 +3083,10 @@ final class RenderSettings: @unchecked Sendable {
             edgeDetectionSoftness: _edgeDetectionEffect.softness,
             edgeDetectionWindowRadius: Int32(max(1, min(3, _edgeDetectionEffect.windowRadius))),
             beatFlashEnabled: _beatFlashEffect.enabled ? 1 : 0,
-            beatFlashIntensity: _beatFlashEffect.intensity * animationActivity
+            beatFlashIntensity: _beatFlashEffect.intensity * animationActivity,
+            // Display state, not artistic: 1 = SDR. The interactive renderer
+            // stamps the real per-frame EDR headroom before upload.
+            edrHeadroom: 1.0
         )
     }
     

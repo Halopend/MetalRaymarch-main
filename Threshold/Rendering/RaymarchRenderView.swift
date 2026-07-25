@@ -121,7 +121,12 @@ struct ThresholdMacRenderView: NSViewRepresentable {
     func makeNSView(context: Context) -> MTKView {
         let device = MTLCreateSystemDefaultDevice()
         let view = ThresholdMacInteractiveView(frame: .zero, device: device)
-        view.colorPixelFormat = .bgra8Unorm_srgb
+        // Extended-range surface: float pixels + extended linear sRGB keep the
+        // shader's working space (linear, sRGB primaries) but remove the [0,1]
+        // encode clamp, so graded highlights above SDR white reach the display's
+        // EDR headroom. SDR displays simply show values clamped at headroom 1.
+        view.colorPixelFormat = .rgba16Float
+        view.colorspace = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)
         view.depthStencilPixelFormat = .depth32Float
         view.clearColor = MTLClearColor(red: 0.005, green: 0.006, blue: 0.008, alpha: 1.0)
         view.clearDepth = 1.0
@@ -172,6 +177,9 @@ struct ThresholdMacRenderView: NSViewRepresentable {
             metalLayer.pixelFormat = view.colorPixelFormat
             metalLayer.framebufferOnly = true
             metalLayer.drawableSize = view.drawableSize
+            // Ask the compositor for EDR; actual headroom is read per frame in
+            // draw(in:) and fed to the shader's display mapping.
+            metalLayer.wantsExtendedDynamicRangeContent = true
             renderer = ViewportRenderer(device: device,
                                             appModel: appModel,
                                             inputController: inputAccumulator,
@@ -213,6 +221,12 @@ struct ThresholdMacRenderView: NSViewRepresentable {
         }
 
         func draw(in view: MTKView) {
+            // EDR headroom is a live display property (it ramps with screen
+            // brightness and ambient conditions) — sample it every frame so the
+            // shader's display mapping tracks what the compositor can show.
+            renderer?.displayEDRHeadroom = Float(
+                (view.window?.screen ?? NSScreen.main)?
+                    .maximumExtendedDynamicRangeColorComponentValue ?? 1.0)
             renderer?.draw(appModel: appModel)
         }
 
@@ -369,6 +383,13 @@ final class ViewportRenderer {
     private let depthState: MTLDepthStencilState
     private let depthPixelFormat: MTLPixelFormat
     private let colorPixelFormat: MTLPixelFormat
+
+    /// Display EDR headroom in SDR-white units, stamped by the view delegate
+    /// each frame (NSScreen/UIScreen current value; 1 = SDR). Forwarded to the
+    /// shader's display mapping only when this renderer targets a float
+    /// extended-range surface — SDR (8-bit) and benchmark renderers stay
+    /// pinned at 1 so captures remain display-independent.
+    var displayEDRHeadroom: Float = 1.0
     private let vertexDescriptor: MTLVertexDescriptor
     private let specializedPipelineCache = ViewportSpecializedPipelineCache()
     private let specializedPipelineBuilder: ViewportSpecializedPipelineBuilder
@@ -1721,6 +1742,13 @@ final class ViewportRenderer {
         // Scanned-environment containment is a visionOS renderer feature.
         let envScrunch = EnvScrunchParams()
 
+        // Stamp the per-frame display headroom into the color scheme (display
+        // state, not artistic — see ColorSchemeParams.edrHeadroom). Non-float
+        // targets (benchmark harness renderers) stay pinned at SDR.
+        var colorScheme = benchStableColorScheme(settings.colorSchemeParams)
+        colorScheme.edrHeadroom =
+            colorPixelFormat == .rgba16Float ? max(displayEDRHeadroom, 1.0) : 1.0
+
         // Shared assembler (TECH_DEBT.md #2): the ~76-field list + the derived math
         // (bubble scaling, epsilon/LOD, spring, animated color/glow) live once in
         // makeUniforms; only the Mac-specific inputs are named here.
@@ -1751,7 +1779,7 @@ final class ViewportRenderer {
             precomputedLighting: precomputedLighting,
             precomputedAudio: precomputedAudio,
             precomputedFog: precomputedFog,
-            colorScheme: benchStableColorScheme(settings.colorSchemeParams),
+            colorScheme: colorScheme,
             floorPlane: SIMD4<Float>(0, 1, 0, 0),
             floorCenterRadius: SIMD4<Float>(0, 0, 0, 0),
             renderResolution: [1, 1],
@@ -1955,7 +1983,12 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
     func makeUIView(context: Context) -> MTKView {
         let device = MTLCreateSystemDefaultDevice()
         let view = TouchVisualizingMTKView(frame: .zero, device: device)
-        view.colorPixelFormat = .bgra8Unorm_srgb
+        // Extended-range surface — same rationale as the macOS view: float
+        // pixels + extended linear sRGB let graded highlights above SDR white
+        // reach the display's EDR headroom (XDR iPhone/iPad panels). The
+        // colorspace is set on the CAMetalLayer in configure() —
+        // MTKView.colorspace is macOS-only.
+        view.colorPixelFormat = .rgba16Float
         view.depthStencilPixelFormat = .depth32Float
         view.clearColor = MTLClearColor(red: 0.005, green: 0.006, blue: 0.008, alpha: 1.0)
         view.clearDepth = 1.0
@@ -2023,6 +2056,11 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             metalLayer.pixelFormat = view.colorPixelFormat
             metalLayer.framebufferOnly = true
             metalLayer.drawableSize = view.drawableSize
+            // Extended linear sRGB (MTKView.colorspace is macOS-only) + ask the
+            // compositor for EDR; actual headroom is read per frame in
+            // draw(in:) and fed to the shader's display mapping.
+            metalLayer.colorspace = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)
+            metalLayer.wantsExtendedDynamicRangeContent = true
             renderer = ViewportRenderer(device: device,
                                             appModel: appModel,
                                             inputController: inputController,
@@ -2100,6 +2138,10 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         }
 
         func draw(in view: MTKView) {
+            // EDR headroom is a live display property (it ramps with screen
+            // brightness) — sample it every frame so the shader's display
+            // mapping tracks what the panel can currently show.
+            renderer?.displayEDRHeadroom = Float(view.window?.screen.currentEDRHeadroom ?? 1.0)
             renderer?.draw(appModel: appModel)
         }
 
