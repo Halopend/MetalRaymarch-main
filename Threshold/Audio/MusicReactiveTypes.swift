@@ -97,6 +97,24 @@ enum MusicReactiveSource: String, CaseIterable, Codable, Sendable {
     /// Deprecated wideband RMS; redundant with Energy. Hidden from the picker
     /// (see `pickerCases`) but kept so older saved mappings still decode.
     case overall
+    /// Finger pinch inputs (visionOS hand tracking).
+    case leftIndexPinch
+    case leftMiddlePinch
+    case leftRingPinch
+    /// Finger pinch inputs (visionOS hand tracking).
+    case rightIndexPinch
+    case rightMiddlePinch
+    case rightRingPinch
+
+    var isFingerInput: Bool {
+        switch self {
+        case .leftIndexPinch, .leftMiddlePinch, .leftRingPinch,
+             .rightIndexPinch, .rightMiddlePinch, .rightRingPinch:
+            true
+        case .composite, .bass, .mid, .treble, .beat, .overall:
+            false
+        }
+    }
 
     var displayName: String {
         switch self {
@@ -106,13 +124,30 @@ enum MusicReactiveSource: String, CaseIterable, Codable, Sendable {
         case .treble: return "Treble"
         case .beat: return "Drop"
         case .overall: return "Energy"   // legacy alias; behaves like wideband but reads as Energy
+        case .leftIndexPinch: return "L Index"
+        case .leftMiddlePinch: return "L Middle"
+        case .leftRingPinch: return "L Ring"
+        case .rightIndexPinch: return "R Index"
+        case .rightMiddlePinch: return "R Middle"
+        case .rightRingPinch: return "R Ring"
         }
     }
 
     /// Sources offered in the UI picker. Excludes the deprecated `overall`
     /// (redundant with Energy) so the control stays a clean, intuitive set.
+    /// Finger-pinch sources are visionOS-only: on macOS/iPadOS there is no
+    /// hand tracking and their values are hardwired to zero, so offering them
+    /// would let a mapping's input offset hold a permanent parameter
+    /// deviation with no audio playing. The enum cases themselves stay
+    /// unconditional so scenes shared from visionOS still decode.
     static var pickerCases: [MusicReactiveSource] {
+        #if os(visionOS)
+        [.composite, .bass, .mid, .treble, .beat,
+         .leftIndexPinch, .leftMiddlePinch, .leftRingPinch,
+         .rightIndexPinch, .rightMiddlePinch, .rightRingPinch]
+        #else
         [.composite, .bass, .mid, .treble, .beat]
+        #endif
     }
 }
 
@@ -451,6 +486,11 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
     var smoothingWindow: Float
     /// Hybrid-only blend: 0 = mostly drift, 1 = more fast vibration.
     var hybridCombo: Float
+    /// Per-input gain used before response-curve application. 1.0 keeps the
+    /// source's native scale.
+    var inputScale: Float
+    /// Per-input bias (additive offset) used before response-curve application.
+    var inputOffset: Float
     /// Which field of a transform-stack op this mapping drives (only meaningful when
     /// `target` is a `spaceWarpN` slot). Defaults to `.strength` — the sole field
     /// bindable before this existed — so pre-existing scenes decode unchanged.
@@ -465,6 +505,8 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
          lfo: LFOSettings = .default,
          smoothingWindow: Float = 0.0,
          hybridCombo: Float = 0.35,
+         inputScale: Float = 1.0,
+         inputOffset: Float = 0.0,
          spaceWarpField: SpaceWarpField = .strength) {
         self.id = id
         self.target = target
@@ -475,6 +517,8 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         self.lfo = lfo
         self.smoothingWindow = smoothingWindow
         self.hybridCombo = hybridCombo
+        self.inputScale = inputScale
+        self.inputOffset = inputOffset
         self.spaceWarpField = spaceWarpField
         sanitizeInPlace()
     }
@@ -483,6 +527,8 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         amount = amount.clamped(to: -3.0...3.0)
         smoothingWindow = smoothingWindow.clamped(to: 0.0...2.0)
         hybridCombo = hybridCombo.clamped(to: 0.0...1.0)
+        inputScale = inputScale.clamped(to: 0.0...3.0)
+        inputOffset = inputOffset.clamped(to: -1.0...1.0)
         lfo.sanitizeInPlace()
     }
 
@@ -496,7 +542,7 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
     // responseSpeed/mode) in older saved data are simply ignored.
     enum CodingKeys: String, CodingKey {
         case id, target, source, amount, isEnabled
-        case responseCurve, lfo, smoothingWindow, hybridCombo, spaceWarpField
+        case responseCurve, lfo, smoothingWindow, hybridCombo, inputScale, inputOffset, spaceWarpField
     }
 
     init(from decoder: Decoder) throws {
@@ -511,6 +557,8 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         self.lfo = try c.decodeIfPresent(LFOSettings.self, forKey: .lfo) ?? .default
         self.smoothingWindow = try c.decodeIfPresent(Float.self, forKey: .smoothingWindow) ?? 0.0
         self.hybridCombo = try c.decodeIfPresent(Float.self, forKey: .hybridCombo) ?? 0.35
+        self.inputScale = try c.decodeIfPresent(Float.self, forKey: .inputScale) ?? 1.0
+        self.inputOffset = try c.decodeIfPresent(Float.self, forKey: .inputOffset) ?? 0.0
         self.spaceWarpField = try c.decodeIfPresent(SpaceWarpField.self, forKey: .spaceWarpField) ?? .strength
         sanitizeInPlace()
     }

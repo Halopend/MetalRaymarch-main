@@ -383,22 +383,12 @@ final class ControlStateStore {
     /// Select a trusted analytic primitive from the bundled Metal library while
     /// retaining its EmbeddedFormula payload for scene attribution/portability.
     @MainActor
-    func pushConstructionPrimitive(_ primitive: FractalPrimitiveKind,
-                                   primarySize: Float? = nil,
-                                   disablesBoundingShape: Bool = false) {
-        var authoredParams = primitive.bundledFormulaParams
-        if let primarySize {
-            FormulaCatalog.setParam(
-                &authoredParams,
-                index: 1,
-                value: min(max(primarySize, 0.05), 30.0)
-            )
-        }
+    func pushConstructionPrimitive(_ primitive: FractalPrimitiveKind) {
+        let authoredParams = primitive.bundledFormulaParams
 
         guard let appModel = _appModel else {
             settings?.fractalType = .constructionPrimitive
             settings?.formulaParams = authoredParams
-            if disablesBoundingShape { setBoundingShapeEnabled(false) }
             loadFromSettings()
             return
         }
@@ -413,27 +403,12 @@ final class ControlStateStore {
             settings?.formulaParams = authoredParams
             let result = await appModel.installEmbeddedFormulaIfNeededAndWait(primitive.formula)
             guard result == .ready else { return }
-            if disablesBoundingShape { setBoundingShapeEnabled(false) }
             activeCustomFormulaHash = primitive.formula.shortHash
             loadFromSettings()
             appModel.rememberActiveResetPresetFromCurrent()
         }
     }
 
-    /// Convert the current Bounding silhouette into editable construction seed
-    /// geometry at the same model-space size. The clip turns off after promotion
-    /// so its fade band cannot erase the newly-created surface; Transform stays.
-    @MainActor
-    func promoteBoundingShapeToSeed() {
-        let preset = SafetyBubbleShapePreset(storedValue: quality.boundingShapeType)
-        guard let primitive = preset.seedPrimitiveKind else { return }
-        pushConstructionPrimitive(
-            primitive,
-            primarySize: quality.boundingShapeRadius,
-            disablesBoundingShape: true
-        )
-    }
-    
     func pushGradientMap(_ map: GradientColorMap) {
         settings?.gradientColorMap = map
     }

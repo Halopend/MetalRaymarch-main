@@ -70,8 +70,8 @@ FORCE_INLINE float DE_ConstructionPyramid_Dist(float3 p, float height,
 }
 
 // These three plane-based distances deliberately match safetyBubbleDistance()
-// so a Bounding shape promoted to a construction seed keeps the same silhouette
-// and radius convention.
+// so a construction primitive and the same-shaped Bounding clip share one
+// silhouette and radius convention.
 FORCE_INLINE float DE_ConstructionTetrahedron_Dist(float3 p, float radius) {
     constexpr float invSqrt3 = 0.5773502691896258f;
     float faceOffset = radius * invSqrt3;

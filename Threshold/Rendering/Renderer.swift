@@ -1189,6 +1189,10 @@ actor Renderer {
         )
         
         if isAudioMode {
+            let hasEnabledFingerInputMapping = settings.musicReactiveMappings.contains {
+                $0.isEnabled && $0.source.isFingerInput
+            }
+
             // Sensitivity multipliers from user settings
             let bassSens = settings.bassSensitivity
             let midSens = settings.midSensitivity
@@ -1196,24 +1200,42 @@ actor Renderer {
             let beatSens = settings.beatSensitivity
             let features = audioSnapshot.mixed
 
-            // AudioHub always produces finite normalized values. Still clamp at
-            // the GPU boundary so a future source implementation cannot poison
-            // uniforms even if it bypasses the hub's normalizer.
-            settings.bassLevel = min(1.0, max(0, features.bass * bassSens))
-            settings.midLevel = min(1.0, max(0, features.mid * midSens))
-            settings.trebleLevel = min(1.0, max(0, features.treble * trebleSens))
-            settings.beatIntensity = min(1.0, max(0, features.onset * beatSens))
-            settings.audioLevel = min(1.0, max(0, features.overall))
+            let useFingerInput = hasEnabledFingerInputMapping
+            let processMusicReactive = settings.fractalAudioReactiveEnabled
+                && (audioSnapshot.isActive || useFingerInput)
+
+            // An inactive snapshot is `.empty` with all-zero features (the
+            // mixer never pairs isActive == false with live values), so the
+            // scaled levels are already zero without an explicit gate.
+            settings.bassLevel = min(1.0, max(0.0, features.bass * bassSens))
+            settings.midLevel = min(1.0, max(0.0, features.mid * midSens))
+            settings.trebleLevel = min(1.0, max(0.0, features.treble * trebleSens))
+            settings.beatIntensity = min(1.0, max(0.0, features.onset * beatSens))
+            settings.audioLevel = min(1.0, max(0.0, features.overall))
+
+            let sanitizePinch: (Float) -> Float = {
+                min(1.0, max(0.0, $0))
+            }
+            let leftHandPinch = latestSpatialHandPose?.leftHand
+            let rightHandPinch = latestSpatialHandPose?.rightHand
 
             // Music drives fractal geometry AND effects (Fractal Forge-inspired).
             // The aggregation above produced the per-band levels; the shared engine
             // applies damping, response curves, the LFO overlay, and dispatch.
-            if settings.fractalAudioReactiveEnabled && audioSnapshot.isActive {
-                let bandLevels = BandLevels(bass: settings.bassLevel,
-                                            mid: settings.midLevel,
-                                            treble: settings.trebleLevel,
-                                            beat: settings.beatIntensity,
-                                            overall: settings.audioLevel)
+            if processMusicReactive {
+                let bandLevels = BandLevels(
+                    bass: bassLevel,
+                    mid: midLevel,
+                    treble: trebleLevel,
+                    beat: beatLevel,
+                    overall: overallLevel,
+                    leftIndexPinch: sanitizePinch(leftHandPinch?.indexPinch ?? 0),
+                    leftMiddlePinch: sanitizePinch(leftHandPinch?.middlePinch ?? 0),
+                    leftRingPinch: sanitizePinch(leftHandPinch?.ringPinch ?? 0),
+                    rightIndexPinch: sanitizePinch(rightHandPinch?.indexPinch ?? 0),
+                    rightMiddlePinch: sanitizePinch(rightHandPinch?.middlePinch ?? 0),
+                    rightRingPinch: sanitizePinch(rightHandPinch?.ringPinch ?? 0)
+                )
                 musicReactiveEngine.process(bandLevels: bandLevels,
                                             settings: settings,
                                             deltaTime: cachedDeltaTime,

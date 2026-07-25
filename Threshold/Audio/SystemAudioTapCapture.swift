@@ -27,6 +27,11 @@
 //  first time capture starts. There is no Info.plist usage-description key for
 //  it.
 //
+//  Delivery: the sink converts each CMSampleBuffer to an owned AVAudioPCMBuffer
+//  and hands it synchronously to `AudioAnalyzer.ingestExternalBuffer`, whose
+//  analysis core accumulates windows internally — no intermediate accumulator,
+//  no MainActor hop on the audio path.
+//
 
 #if os(macOS)
 
@@ -36,6 +41,7 @@ import CoreGraphics
 import ScreenCaptureKit
 import AppKit
 import Observation
+import Synchronization
 import os
 
 @MainActor
@@ -60,8 +66,17 @@ final class SystemAudioTapCapture {
 
     // MARK: - Capture configuration
 
-    /// Internal analysis sample rate. SCStream resamples to this for us.
+    /// Requested analysis sample rate. SCStream resamples to this for us; the
+    /// analyzer additionally follows the per-buffer delivered rate, so a
+    /// stream that ignores the request cannot shift the frequency bands.
     private static let captureSampleRate: Double = 48_000
+
+    /// Distinguishes "the system permission dialog was just shown" from a real
+    /// user decline: `CGRequestScreenCaptureAccess` returns false in both
+    /// cases, but only a repeated attempt after a shown prompt is a denial.
+    /// Tracked per launch, not persisted: a persisted flag survives a TCC
+    /// reset and would misreport the fresh system prompt as a denial.
+    private var hasRequestedPermissionThisLaunch = false
 
     // MARK: - ScreenCaptureKit state
 
@@ -75,6 +90,7 @@ final class SystemAudioTapCapture {
     private enum ScreenRecordingPermissionState {
         case granted
         case grantedNeedsRelaunch
+        case promptPending
         case denied
     }
 
@@ -131,6 +147,13 @@ final class SystemAudioTapCapture {
         errorMessage = permissionErrorMessage(needsRelaunch: true)
     }
 
+    /// The system permission dialog was just raised for the first time. Not a
+    /// denial: keep the source startable and tell the user what to do next.
+    private func applyPromptPendingState() {
+        permissionDenied = false
+        errorMessage = "macOS is asking for Screen & System Audio Recording permission. Grant it in the system dialog, then start capture again. If no dialog appeared, enable Threshold in System Settings → Privacy & Security → Screen & System Audio Recording."
+    }
+
     // MARK: - Capture lifecycle
 
     /// Start capturing the selected source. The first capture in the app's
@@ -152,6 +175,9 @@ final class SystemAudioTapCapture {
         case .grantedNeedsRelaunch:
             applyPermissionGrantedNeedsRelaunchState()
             return false
+        case .promptPending:
+            applyPromptPendingState()
+            return false
         case .denied:
             applyPermissionDeniedState()
             return false
@@ -170,14 +196,18 @@ final class SystemAudioTapCapture {
         }
 
         do {
+            // Activate the analysis core before the stream starts: buffers can
+            // arrive on the delivery queue the moment `startCapture()` returns,
+            // and an inactive core silently drops them.
+            analyzer.beginExternalCapture(sampleRate: Self.captureSampleRate)
             try await beginCapture(with: content)
             isCapturing = true
             errorMessage = nil
-            analyzer.beginExternalCapture(sampleRate: Self.captureSampleRate)
             logger.info("System audio capture started")
             return true
         } catch {
             await teardownStream()
+            analyzer.endExternalCapture()
             isCapturing = false
             errorMessage = captureErrorMessage(error)
             logger.error("System audio capture failed to start: \(error.localizedDescription, privacy: .public)")
@@ -231,14 +261,14 @@ final class SystemAudioTapCapture {
         config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
         config.queueDepth = 3
 
+        // Capture only the DSP core, not the analyzer: if replayd holds the
+        // sink past teardown, it must not keep the analyzer → hub → UI graph
+        // alive with it. Same pattern as the microphone tap.
+        let core = analyzer.core
         let sink = StreamSink(
-            sampleRate: Self.captureSampleRate,
             logger: logger,
-            ingestHandler: { [weak self] buffer in
-                let payload = SendableTapBuffer(buffer: buffer)
-                Task { @MainActor in
-                    self?.analyzer.ingestExternalBuffer(payload.buffer)
-                }
+            ingestHandler: { buffer in
+                core.ingest(buffer)
             },
             stopHandler: { [weak self] error in
                 Task { @MainActor in
@@ -257,6 +287,12 @@ final class SystemAudioTapCapture {
 
     private func teardownStream() async {
         if let stream {
+            // Detach the outputs before stopping: a stream whose stopCapture
+            // throws must not keep delivering into (and retaining) the sink.
+            if let sink {
+                try? stream.removeStreamOutput(sink, type: .audio)
+                try? stream.removeStreamOutput(sink, type: .screen)
+            }
             try? await stream.stopCapture()
         }
         stream = nil
@@ -283,11 +319,17 @@ final class SystemAudioTapCapture {
             return .granted
         }
 
+        let hadRequestedThisLaunch = hasRequestedPermissionThisLaunch
+        hasRequestedPermissionThisLaunch = true
+
         if CGRequestScreenCaptureAccess() {
             return hasScreenRecordingPermission ? .granted : .grantedNeedsRelaunch
         }
 
-        return .denied
+        // The request returns false both when the user just saw the dialog for
+        // the first time and when access is actually denied. Only treat it as
+        // a denial once a prompt has already been shown this launch.
+        return hadRequestedThisLaunch ? .denied : .promptPending
     }
 
     private func permissionErrorMessage(needsRelaunch: Bool) -> String {
@@ -320,21 +362,25 @@ final class SystemAudioTapCapture {
 // MARK: - Stream sink
 //
 // Lives outside the MainActor: ScreenCaptureKit delivers sample buffers on the
-// dispatch queues we register, not the main thread. The sink keeps the callback
-// minimal — convert the CMSampleBuffer to PCM, hand it to the accumulator, and
-// return — so no heavy analysis happens on the capture thread.
+// dispatch queues we register, not the main thread. The sink converts each
+// CMSampleBuffer to an owned PCM buffer and hands it synchronously to the
+// analysis core — the core does its own windowing, so no accumulation happens
+// here.
 
 private final class StreamSink: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
 
-    private let accumulator: TapStreamAccumulator
+    private let ingestHandler: @Sendable (AVAudioPCMBuffer) -> Void
     private let stopHandler: @Sendable (Error?) -> Void
     private let logger: Logger
+    // Atomic (not plain vars) so the @unchecked Sendable annotation holds by
+    // construction rather than by SCK's one-serial-queue delivery detail.
+    private let hasLoggedConversionFailure = Atomic<Bool>(false)
+    private let hasLoggedUnsupportedFormat = Atomic<Bool>(false)
 
-    init(sampleRate: Double,
-         logger: Logger,
+    init(logger: Logger,
          ingestHandler: @escaping @Sendable (AVAudioPCMBuffer) -> Void,
          stopHandler: @escaping @Sendable (Error?) -> Void) {
-        self.accumulator = TapStreamAccumulator(sampleRate: sampleRate, handler: ingestHandler)
+        self.ingestHandler = ingestHandler
         self.stopHandler = stopHandler
         self.logger = logger
     }
@@ -342,18 +388,26 @@ private final class StreamSink: NSObject, SCStreamOutput, SCStreamDelegate, @unc
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio, CMSampleBufferDataIsReady(sampleBuffer) else { return }
         guard let pcm = Self.makePCMBuffer(from: sampleBuffer) else {
-            logger.error("System audio sample buffer could not be converted to PCM")
+            if !hasLoggedConversionFailure.exchange(true, ordering: .relaxed) {
+                logger.error("System audio sample buffer could not be converted to PCM; dropping audio (further reports suppressed)")
+            }
             return
         }
-        accumulator.ingest(pcmBuffer: pcm)
+        guard pcm.format.commonFormat == .pcmFormatFloat32 else {
+            if !hasLoggedUnsupportedFormat.exchange(true, ordering: .relaxed) {
+                logger.error("System audio stream delivered a non-Float32 format; dropping audio (further reports suppressed)")
+            }
+            return
+        }
+        ingestHandler(pcm)
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         stopHandler(error)
     }
 
-    /// Convert an SCStream audio `CMSampleBuffer` into an `AVAudioPCMBuffer`
-    /// matching its native (Float32) stream format.
+    /// Convert an SCStream audio `CMSampleBuffer` into an owned
+    /// `AVAudioPCMBuffer` matching its native (Float32) stream format.
     private static func makePCMBuffer(from sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {
         guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
               let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else { return nil }
@@ -374,132 +428,6 @@ private final class StreamSink: NSObject, SCStreamOutput, SCStreamDelegate, @unc
         guard status == noErr else { return nil }
         return pcm
     }
-}
-
-// MARK: - IO accumulator
-//
-// Mixes incoming audio to mono and accumulates fixed 2048-frame windows
-// (matching AudioAnalyzer.fftSize) before handing owned buffers off for FFT
-// analysis on the MainActor.
-
-private final class TapStreamAccumulator: @unchecked Sendable {
-
-    /// Must match `AudioAnalyzer.fftSize` so band magnitudes are computed.
-    private static let analyzerFrameCount: AVAudioFrameCount = 2048
-
-    private let handler: @Sendable (AVAudioPCMBuffer) -> Void
-    private let monoFormat: AVAudioFormat?
-
-    private var accumBuffer: AVAudioPCMBuffer?
-    private var accumFilled: AVAudioFrameCount = 0
-
-    init(sampleRate: Double, handler: @escaping @Sendable (AVAudioPCMBuffer) -> Void) {
-        self.handler = handler
-        self.monoFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: sampleRate,
-            channels: 1,
-            interleaved: false
-        )
-        if let monoFormat {
-            accumBuffer = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: Self.analyzerFrameCount)
-        }
-    }
-
-    func ingest(pcmBuffer: AVAudioPCMBuffer) {
-        guard pcmBuffer.frameLength > 0,
-              let accum = accumBuffer,
-              let dstPtr = accum.floatChannelData?[0] else { return }
-
-        let inFrames = Int(pcmBuffer.frameLength)
-        let target = Self.analyzerFrameCount
-        let stride = pcmBuffer.format.isInterleaved ? Int(pcmBuffer.format.channelCount) : 1
-
-        switch pcmBuffer.format.commonFormat {
-        case .pcmFormatFloat32:
-            guard let srcPtr = pcmBuffer.floatChannelData?[0] else { return }
-            appendFrames(
-                frameCount: inFrames,
-                target: target,
-                destination: dstPtr,
-                sourceStride: stride
-            ) { frameIndex in
-                srcPtr[frameIndex * stride]
-            }
-
-        case .pcmFormatInt16:
-            guard let srcPtr = pcmBuffer.int16ChannelData?[0] else { return }
-            let scale = 1.0 / Float(Int16.max)
-            appendFrames(
-                frameCount: inFrames,
-                target: target,
-                destination: dstPtr,
-                sourceStride: stride
-            ) { frameIndex in
-                Float(srcPtr[frameIndex * stride]) * scale
-            }
-
-        case .pcmFormatInt32:
-            guard let srcPtr = pcmBuffer.int32ChannelData?[0] else { return }
-            let scale = 1.0 / Float(Int32.max)
-            appendFrames(
-                frameCount: inFrames,
-                target: target,
-                destination: dstPtr,
-                sourceStride: stride
-            ) { frameIndex in
-                Float(srcPtr[frameIndex * stride]) * scale
-            }
-
-        default:
-            return
-        }
-    }
-
-    private func appendFrames(
-        frameCount: Int,
-        target: AVAudioFrameCount,
-        destination dstPtr: UnsafeMutablePointer<Float>,
-        sourceStride _: Int,
-        sampleAt: (Int) -> Float
-    ) {
-        var consumed = 0
-        while consumed < frameCount {
-            let remainingIn = frameCount - consumed
-            let remainingOut = Int(target - accumFilled)
-            let copy = min(remainingIn, remainingOut)
-            let dstStart = Int(accumFilled)
-
-            for i in 0..<copy {
-                // Clamp non-finite samples (NaN/Inf from a malformed SCK buffer
-                // after wake or power restoration) to silence before accumulation.
-                let sample = sampleAt(consumed + i)
-                dstPtr[dstStart + i] = sample.isFinite ? sample : 0.0
-            }
-
-            accumFilled += AVAudioFrameCount(copy)
-            consumed += copy
-            if accumFilled >= target {
-                flush()
-            }
-        }
-    }
-
-    private func flush() {
-        guard let accum = accumBuffer else { return }
-        accum.frameLength = Self.analyzerFrameCount
-        handler(accum)
-        // Allocate a fresh window so the consumer can retain the handed-off
-        // buffer across the MainActor hop.
-        if let monoFormat {
-            accumBuffer = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: Self.analyzerFrameCount)
-        }
-        accumFilled = 0
-    }
-}
-
-private struct SendableTapBuffer: @unchecked Sendable {
-    let buffer: AVAudioPCMBuffer
 }
 
 #endif

@@ -112,6 +112,7 @@ final class AudioHub {
 
         selectedSourceID = sourceID
         refreshFeatureSnapshot()
+        ensureCaptureRefreshTimer()
         return true
     }
 
@@ -131,12 +132,18 @@ final class AudioHub {
         refreshFeatureSnapshot()
     }
 
-    /// Called by the coalesced main-actor update loop. Apple Music's existing
-    /// timing source advances here, and every active source is then collapsed
-    /// into an immutable snapshot for the render thread.
+    /// Called by the coalesced main-actor update loop (and by the fallback
+    /// timer while capture runs with rendering paused). Capture sources apply
+    /// their display-cadence envelope smoothing, Apple Music's timing source
+    /// advances, and every active source is then collapsed into an immutable
+    /// snapshot for the render thread.
     func updateFrame() {
+        let now = ProcessInfo.processInfo.systemUptime
+        for source in captureSources {
+            source.advanceFrame(at: now)
+        }
         appleMusic.advanceFrame()
-        refreshFeatureSnapshot()
+        refreshFeatureSnapshot(now: now)
     }
 
     func setMixPolicy(_ policy: AudioMixPolicy) {
@@ -180,6 +187,43 @@ final class AudioHub {
         return false
         #endif
     }
+
+    // MARK: - Fallback refresh
+
+    /// The render loop drives `updateFrame()` while it runs, but the snapshot,
+    /// envelopes, and staleness gating must stay live even when rendering is
+    /// paused or the visuals aren't in an audio mode — otherwise meters freeze
+    /// at stale values. A low-rate timer covers that gap while any capture
+    /// source is active, and retires itself once none is.
+    private func ensureCaptureRefreshTimer() {
+        guard captureRefreshTimer == nil else { return }
+        // Not `scheduledTimer`: that installs in `.default` mode only, so the
+        // timer would freeze during menu/popover/slider event-tracking loops —
+        // exactly when the user is watching the meters. `.common` covers both.
+        let timer = Timer(timeInterval: 1.0 / 20.0, repeats: true) { [weak self] timer in
+            // The hub is gone: the timer must not keep firing no-ops on the
+            // main run loop for the rest of the process lifetime. Handled
+            // outside the isolated region so the non-Sendable `timer` is
+            // never sent across it.
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            MainActor.assumeIsolated {
+                guard self.captureSources.contains(where: { $0.isActive }) else {
+                    self.captureRefreshTimer?.invalidate()
+                    self.captureRefreshTimer = nil
+                    self.refreshFeatureSnapshot()
+                    return
+                }
+                self.updateFrame()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        captureRefreshTimer = timer
+    }
+
+    @ObservationIgnored private var captureRefreshTimer: Timer?
 
     // MARK: - Snapshot policy
 

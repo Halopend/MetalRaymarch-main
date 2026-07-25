@@ -158,9 +158,9 @@ struct ControlFinderDestination: Identifiable {
             }(),
             keywords: {
                 #if os(visionOS)
-                ["containment", "bound", "sphere", "cube", "platonic", "seed", "scrunch", "shell", "environment", "room"]
+                ["containment", "bound", "sphere", "cube", "platonic", "scrunch", "shell", "environment", "room"]
                 #else
-                ["containment", "bound", "space", "sphere", "cube", "platonic", "seed", "room"]
+                ["containment", "bound", "space", "sphere", "cube", "platonic", "room"]
                 #endif
             }()
         ),

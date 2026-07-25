@@ -12,6 +12,12 @@ struct BandLevels {
     var treble: Float = 0
     var beat: Float = 0
     var overall: Float = 0
+    var leftIndexPinch: Float = 0
+    var leftMiddlePinch: Float = 0
+    var leftRingPinch: Float = 0
+    var rightIndexPinch: Float = 0
+    var rightMiddlePinch: Float = 0
+    var rightRingPinch: Float = 0
 }
 
 /// Shared, platform-neutral engine that turns aggregated audio band levels into
@@ -38,6 +44,8 @@ final class MusicReactiveEngine {
         let allowedSpan: Float
         let absAmount: Float
         let sign: Float
+        let inputScale: Float
+        let inputOffset: Float
         let formulaParamSlot: Int?
         let spaceWarpSlot: Int?
         let spaceWarpField: SpaceWarpField
@@ -184,17 +192,25 @@ final class MusicReactiveEngine {
         var spaceWarpOffsets: [SpaceWarpFieldKey: Float] = [:]
         for mapping in activeResolvedMappings {
             // ── 1. Select audio source level (0-1) ──
-            let sourceValue: Float
+            let rawSourceValue: Float
             switch mapping.source {
-            case .composite: sourceValue = drive
-            case .bass: sourceValue = bass
-            case .mid: sourceValue = mid
-            case .treble: sourceValue = treble
-            case .beat: sourceValue = beat
-            case .overall: sourceValue = overall
+            case .composite: rawSourceValue = drive
+            case .bass: rawSourceValue = bass
+            case .mid: rawSourceValue = mid
+            case .treble: rawSourceValue = treble
+            case .beat: rawSourceValue = beat
+            case .overall: rawSourceValue = overall
+            case .leftIndexPinch: rawSourceValue = bandLevels.leftIndexPinch
+            case .leftMiddlePinch: rawSourceValue = bandLevels.leftMiddlePinch
+            case .leftRingPinch: rawSourceValue = bandLevels.leftRingPinch
+            case .rightIndexPinch: rawSourceValue = bandLevels.rightIndexPinch
+            case .rightMiddlePinch: rawSourceValue = bandLevels.rightMiddlePinch
+            case .rightRingPinch: rawSourceValue = bandLevels.rightRingPinch
             }
 
             // ── 2. Scale audio intensity ──
+            let sourceValue = min(1.0, max(0.0, rawSourceValue * mapping.inputScale + mapping.inputOffset))
+
             // ── 3. Compute max deviation (fraction of allowed range) ──
             let maxDeviation = mapping.allowedSpan * 0.15 * mapping.absAmount * globalAmount
 
@@ -388,6 +404,8 @@ final class MusicReactiveEngine {
                     allowedSpan: allowed.upperBound - allowed.lowerBound,
                     absAmount: abs(mapping.amount),
                     sign: mapping.amount >= 0 ? 1.0 : -1.0,
+                    inputScale: mapping.inputScale,
+                    inputOffset: mapping.inputOffset,
                     formulaParamSlot: mapping.target.formulaParamSlot,
                     spaceWarpSlot: mapping.target.spaceWarpSlot,
                     spaceWarpField: mapping.spaceWarpField,

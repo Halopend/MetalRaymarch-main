@@ -38,6 +38,7 @@ four groups:
 | `NextTrackIntent`           | "Next track"          | awaits the connected provider's next action |
 | `PreviousTrackIntent`       | "Previous track"      | awaits the connected provider's previous action |
 | `NowPlayingIntent`          | "What's playing"      | reads `musicService.nowPlaying` (query-only, does not open the app) |
+| `ViewFromAboveIntent`        | "View from above"      | reorients the scene for a top-down viewpoint |
 
 ### Parameterized intents
 | Intent | Title | Parameter |
@@ -72,7 +73,8 @@ Shortcuts app and Spotlight; the provider list is just the curated zero-config
 7. **Play/Pause Music** — `ToggleMusicPlaybackIntent`
 8. **Next Track** — `NextTrackIntent`
 9. **Previous Track** — `PreviousTrackIntent`
-10. **Now Playing** — `NowPlayingIntent`
+10. **View From Above** — `ViewFromAboveIntent`
+    Siri phrase: `View [app] from above`
 
 If you add a shortcut here, drop or reorder one — the list is at the cap. Lead with
 the highest-value voice commands (parameterized ones especially).

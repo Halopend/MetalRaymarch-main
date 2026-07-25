@@ -785,7 +785,6 @@ extension ContentView {
         let selectedBoundingPreset = SafetyBubbleShapePreset(
             storedValue: cache.quality.boundingShapeType
         )
-        let canPromoteBoundingShape = selectedBoundingPreset.seedPrimitiveKind != nil
 
         return VStack(alignment: .leading, spacing: 10) {
             #if os(visionOS)
@@ -989,29 +988,6 @@ extension ContentView {
             }
             .disabled(!cache.quality.boundingSphereSkipEnabled)
             .opacity(cache.quality.boundingSphereSkipEnabled ? 1 : 0.45)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Button {
-                    cache.promoteBoundingShapeToSeed()
-                } label: {
-                    Label(
-                        "Use \(selectedBoundingPreset.displayName) as Seed",
-                        systemImage: "arrow.down.to.line"
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(
-                    !cache.quality.boundingSphereSkipEnabled || !canPromoteBoundingShape
-                )
-
-                Text(canPromoteBoundingShape
-                     ? "Copies this shape and size into Primitives as editable base geometry, preserves Transform, then turns the clipping bound off."
-                     : "Negative Cube is a legacy clipping-only shape and cannot become solid seed geometry.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Fade Effect").font(.caption)

@@ -4,6 +4,16 @@ import Testing
 
 @Suite("Audio hub feature policy")
 struct AudioHubTests {
+    @Test("Finger-pinch sources are not offered on platforms without hand tracking")
+    func fingerSourcesAbsentFromPickerWithoutHandTracking() {
+        // The test host is macOS: pinch levels are hardwired zero here, so a
+        // finger mapping could never produce input — offering one would let
+        // its input offset hold a permanent parameter deviation. The enum
+        // cases themselves must still exist for scene decode compatibility.
+        #expect(MusicReactiveSource.pickerCases.allSatisfy { !$0.isFingerInput })
+        #expect(MusicReactiveSource.allCases.contains(.leftIndexPinch))
+    }
+
     @Test("An empty source selection produces an inactive zero snapshot")
     func emptySelectionProducesZeroSnapshot() {
         let now = 42.0

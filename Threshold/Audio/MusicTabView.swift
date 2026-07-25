@@ -233,10 +233,17 @@ struct MusicTabContent: View {
 
                 Spacer(minLength: 0)
 
-                Label(isLive ? "Live" : "Ready",
-                      systemImage: isLive ? AppIcons.waveformCircleFill : AppIcons.circleDashed)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(isLive ? .green : .secondary)
+                // Freshness-aware status: a capture source can claim to be live
+                // while its route has stalled (device unplugged, stream dead).
+                // The snapshot goes inactive within 0.35 s of samples stopping,
+                // so "Live but inactive snapshot" means no signal is arriving.
+                TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                    let hasFreshSignal = audioHub.latestSnapshot().isActive
+                    Label(isLive ? (hasFreshSignal ? "Live" : "No Signal") : "Ready",
+                          systemImage: isLive ? AppIcons.waveformCircleFill : AppIcons.circleDashed)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(isLive ? (hasFreshSignal ? AnyShapeStyle(.green) : AnyShapeStyle(.orange)) : AnyShapeStyle(.secondary))
+                }
             }
 
             HStack(spacing: 8) {
@@ -1378,6 +1385,20 @@ struct MusicTabContent: View {
                                         set: { newValue in updateMapping(index) { $0.amount = newValue; $0.sanitizeInPlace() } }
                                     ), range: 0...3)
 
+                                    sliderRow(label: "Input Scale", value: Binding(
+                                        get: { mappingAt(index)?.inputScale ?? 1.0 },
+                                        set: { newValue in
+                                            updateMapping(index) { $0.inputScale = newValue; $0.sanitizeInPlace() }
+                                        }
+                                    ), range: 0...3)
+
+                                    sliderRow(label: "Input Offset", value: Binding(
+                                        get: { mappingAt(index)?.inputOffset ?? 0.0 },
+                                        set: { newValue in
+                                            updateMapping(index) { $0.inputOffset = newValue; $0.sanitizeInPlace() }
+                                        }
+                                    ), range: -1...1)
+
                                     sliderRow(label: "Smooth", value: Binding(
                                         get: { mappingAt(index)?.smoothingWindow ?? 0.0 },
                                         set: { newValue in updateMapping(index) { $0.smoothingWindow = newValue; $0.sanitizeInPlace() } }
@@ -1517,16 +1538,30 @@ struct MusicTabContent: View {
         // smooth at 20 Hz, and a full-rate redraw of these meters while the window is
         // open spends GPU/CPU that the immersive raymarch needs on this device.
         TimelineView(.periodic(from: .now, by: 1.0 / 20.0)) { _ in
-            let rs = renderSettings
+            // Read the hub snapshot directly rather than renderSettings: the
+            // snapshot stays live (hub fallback timer) even when rendering is
+            // paused or the visuals aren't in an audio-reactive mode. Apply
+            // the same sensitivity scaling the renderer applies, so the
+            // meters show the signal that actually drives the visuals.
+            let mixed = audioHub.latestSnapshot().mixed
+            let reactive = cache.audioReactive
             VStack(alignment: .leading, spacing: 8) {
                 Text("Audio Levels")
                     .font(.caption2.bold())
                     .foregroundStyle(.secondary)
                 HStack(spacing: 10) {
-                    meterBar(label: "Bass",   level: rs.bassLevel,      color: .red)
-                    meterBar(label: "Mid",    level: rs.midLevel,       color: .green)
-                    meterBar(label: "Treble", level: rs.trebleLevel,    color: .blue)
-                    meterBar(label: "Drop",   level: rs.beatIntensity,  color: .purple)
+                    meterBar(label: "Bass",
+                             level: min(1, max(0, mixed.bass * reactive.bassSensitivity)),
+                             color: .red)
+                    meterBar(label: "Mid",
+                             level: min(1, max(0, mixed.mid * reactive.midSensitivity)),
+                             color: .green)
+                    meterBar(label: "Treble",
+                             level: min(1, max(0, mixed.treble * reactive.trebleSensitivity)),
+                             color: .blue)
+                    meterBar(label: "Drop",
+                             level: min(1, max(0, mixed.onset * reactive.beatSensitivity)),
+                             color: .purple)
                 }
             }
             .padding(12)

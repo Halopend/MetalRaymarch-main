@@ -1,5 +1,6 @@
 @preconcurrency import AppIntents
 import SwiftUI
+import simd
 
 enum ThresholdControlArea: String, AppEnum {
     case explore
@@ -493,6 +494,31 @@ struct SetSpokenAudioSensitivityIntent: AppIntent {
     }
 }
 
+// MARK: - View From Above
+struct ViewFromAboveIntent: AppIntent {
+    static let title: LocalizedStringResource = "View from above"
+    static let description: LocalizedStringResource = "Reorient the fractal for a top-down view"
+    static let openAppWhenRun = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard let appModel = AppModel.shared else {
+            return .result(dialog: "Threshold app not available")
+        }
+
+        let topDownPosition = appModel.renderSettings.position
+        let pitchRotation = simd_quatf(angle: -.pi / 2, axis: SIMD3<Float>(1, 0, 0))
+        let topDownRotation = pitchRotation.normalized
+
+        appModel.renderSettings.position = topDownPosition
+        appModel.renderSettings.targetPosition = topDownPosition
+        appModel.renderSettings.worldRotation = topDownRotation
+        appModel.renderSettings.targetWorldRotation = topDownRotation
+
+        return .result(dialog: "Showing Threshold from above")
+    }
+}
+
 // MARK: - AppShortcutsProvider
 struct ThresholdAppShortcutsProvider: AppShortcutsProvider {
     // NOTE: AppShortcutsProvider registers a MAXIMUM of 10 App Shortcuts —
@@ -576,11 +602,11 @@ struct ThresholdAppShortcutsProvider: AppShortcutsProvider {
         )
 
         AppShortcut(
-            intent: NowPlayingIntent(),
-            phrases: ["What's playing in \(.applicationName)",
-                      "What song is \(.applicationName) playing"],
-            shortTitle: "Now Playing",
-            systemImageName: "music.note"
+            intent: ViewFromAboveIntent(),
+            phrases: ["View \(.applicationName) from above",
+                      "Show \(.applicationName) from above"],
+            shortTitle: "Top Down",
+            systemImageName: "arrow.up.to.line"
         )
     }
 }

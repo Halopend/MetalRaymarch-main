@@ -86,28 +86,6 @@ struct ControlStateStoreTests {
         }
     }
 
-    @Test("A Bounding silhouette promotes to a same-sized primitive seed")
-    func boundingShapePromotesToSeed() {
-        let settings = RenderSettings()
-        settings.withPersistenceSuppressed {
-            settings.boundingSphereSkipEnabled = true
-            settings.boundingShapeRadius = 2.75
-            settings.boundingShapeType = SafetyBubbleShapePreset.icosahedron.storedValue
-            settings.spaceWarpStack = [SpaceWarpOpValue(kind: .icosahedralCut)]
-            let cache = ControlStateStore(renderSettings: settings)
-
-            cache.promoteBoundingShapeToSeed()
-
-            #expect(settings.fractalType == .constructionPrimitive)
-            #expect(FractalPrimitiveKind(
-                selector: Int(FormulaCatalog.getParam(settings.formulaParams, index: 0).rounded())
-            ) == .icosahedron)
-            #expect(abs(FormulaCatalog.getParam(settings.formulaParams, index: 1) - 2.75) < 1e-5)
-            #expect(!settings.boundingSphereSkipEnabled)
-            #expect(settings.spaceWarpStack.map(\.kind) == [.icosahedralCut])
-        }
-    }
-
     @Test("live stats refresh according to the renderer lifecycle on each platform")
     func liveStatsUsePlatformLifecycle() {
         let settings = RenderSettings()

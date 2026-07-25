@@ -67,21 +67,6 @@ enum SafetyBubbleShapePreset: Int, CaseIterable, Identifiable, Sendable {
         Float(rawValue)
     }
 
-    /// Matching analytic primitive for promoting a Bounding shape into the
-    /// construction stack's seed geometry. Negative Cube remains a legacy
-    /// safety-bubble-only SDF and is intentionally not offered by Bounding.
-    var seedPrimitiveKind: FractalPrimitiveKind? {
-        switch self {
-        case .sphere: return .sphere
-        case .cube: return .box
-        case .tetrahedral: return .tetrahedron
-        case .octahedron: return .octahedron
-        case .icosahedron: return .icosahedron
-        case .dodecahedron: return .dodecahedron
-        case .negativeCube: return nil
-        }
-    }
-
     init(storedValue: Float) {
         if storedValue > 1.0 {
             self = SafetyBubbleShapePreset(rawValue: Int(storedValue.rounded())) ?? .tetrahedral

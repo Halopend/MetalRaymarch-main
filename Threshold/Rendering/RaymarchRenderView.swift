@@ -1498,7 +1498,14 @@ final class ViewportRenderer {
                                                isAudioMode: Bool,
                                                snapshot: AudioFeatureSnapshot,
                                                deltaTime: Float) {
-        guard isAudioMode, snapshot.isActive, settings.fractalAudioReactiveEnabled else {
+        // No finger-input bypass here: this render path has no hand tracking
+        // (pinch levels would be hardwired zero), and letting a finger mapping
+        // keep the engine alive would hold a permanent input-offset deviation
+        // with no audio playing. visionOS's Renderer keeps its bypass — the
+        // pinches are real inputs there.
+        guard isAudioMode,
+              settings.fractalAudioReactiveEnabled,
+              snapshot.isActive else {
             musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
             return
         }
@@ -1519,7 +1526,13 @@ final class ViewportRenderer {
             return
         }
 
-        let bandLevels = BandLevels(bass: bass, mid: mid, treble: treble, beat: beat, overall: overall)
+        let bandLevels = BandLevels(
+            bass: bass,
+            mid: mid,
+            treble: treble,
+            beat: beat,
+            overall: overall
+        )
         musicReactiveEngine.process(bandLevels: bandLevels,
                                     settings: settings,
                                     deltaTime: deltaTime,

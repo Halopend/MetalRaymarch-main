@@ -26,6 +26,9 @@ protocol AudioCaptureSource: AnyObject {
     func refreshAvailability() async
     func startCapture() async -> Bool
     func stopCapture() async
+    /// Advance display-cadence smoothing toward the analysis core's latest
+    /// targets. Called once per `AudioHub.updateFrame()` tick.
+    func advanceFrame(at timestamp: TimeInterval)
     func featureContribution(at timestamp: TimeInterval) -> AudioSourceContribution?
 }
 
@@ -82,6 +85,10 @@ final class MicrophoneCaptureSource: AudioCaptureSource {
 
     func stopCapture() async {
         analyzer.stopCapture()
+    }
+
+    func advanceFrame(at timestamp: TimeInterval) {
+        analyzer.tickEnvelopes(at: timestamp)
     }
 
     func openSettings() {
@@ -177,6 +184,10 @@ final class SystemOutputCaptureSource: AudioCaptureSource {
 
     func stopCapture() async {
         await capture.stop()
+    }
+
+    func advanceFrame(at timestamp: TimeInterval) {
+        analyzer.tickEnvelopes(at: timestamp)
     }
 
     func featureContribution(at _: TimeInterval) -> AudioSourceContribution? {
