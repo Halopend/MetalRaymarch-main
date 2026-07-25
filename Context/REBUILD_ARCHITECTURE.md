@@ -853,12 +853,15 @@ remains available so a locked black box never traps the learner inside a scene.
 Unknown future raw transform IDs also fail closed instead of inheriting a current
 built-in's fallback identity or unlock state.
 
-The learner's draft and current lesson are scene-scoped, while mapped IDs and the
-mode choice are app-scoped. Mapping merges the latest persisted ID snapshot before
-writing, so two open windows do not discard each other's progress. The same access
-policy guards Add-menu presentation, stack mutations, music-mapping authoring, and
-the render-settings audio-offset boundary: Just Use can manipulate any built-in;
-Education can manipulate only mapped transforms. Help is a monotonic
+The learner's draft and current lesson are scene-scoped, while mapped IDs, checked
+translation history, and the mode choice are app-scoped. Each lesson keeps its
+recent accepted and rejected submissions with the mapper feedback so a completed
+answer remains reviewable after its draft clears. Mapping and check history merge
+the latest persisted snapshot before writing, so two open windows do not discard
+each other's progress. The same access policy guards Add-menu presentation, stack
+mutations, music-mapping authoring, and the render-settings audio-offset boundary:
+Just Use can manipulate any built-in; Education can manipulate only mapped
+transforms. Help is a monotonic
 vocabulary → hint → full-answer state, with mapped lessons allowed to review their
 source directly. Automatic focus always opens the focused lesson's level. Authored
 spoken math, accessibility announcements, adaptive headers, and full-size touch

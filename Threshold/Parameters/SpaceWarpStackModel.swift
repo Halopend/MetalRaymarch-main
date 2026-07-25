@@ -43,6 +43,7 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable, Sendable {
     case offsetFold = 16   // p ↦ |p + c| — mirror fold about an off-origin centre
     case mandelboxStep = 17 // one exact box-fold → sphere-fold → scale → +original-p recurrence
     case icosahedralCut = 18 // fixed {5,3} reflection chamber — named icosahedral space cut
+    case compressionShells = 19 // alternating signed radial regions at proportional scales
 
     var id: Int32 { rawValue }
 
@@ -59,6 +60,7 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable, Sendable {
     var strengthRange: ClosedRange<Float> { descriptor.strengthRange }
     var params: [WarpParamSpec] { descriptor.params }
     var toggle: WarpToggleSpec? { descriptor.toggle }
+    var sourceAngle: WarpAngleSpec? { descriptor.sourceAngle }
     var tagline: String { descriptor.tagline }
     var family: WarpFamily { descriptor.family }
 
@@ -69,7 +71,11 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable, Sendable {
         var fields: [SpaceWarpField] = [.strength]
         if params.contains(where: { $0.slot == 1 }) { fields.append(.param1) }
         if params.contains(where: { $0.slot == 2 }) { fields.append(.param2) }
-        if usesAxis { fields += [.axisX, .axisY, .axisZ] }
+        if usesAxis {
+            fields += [.axisX, .axisY, .axisZ]
+        } else if sourceAngle != nil {
+            fields.append(.axisZ)
+        }
         return fields
     }
 
@@ -82,7 +88,7 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable, Sendable {
         case .param2:   return params.first(where: { $0.slot == 2 })?.label ?? "Param 2"
         case .axisX:    return "\(axisLabel) X"
         case .axisY:    return "\(axisLabel) Y"
-        case .axisZ:    return "\(axisLabel) Z"
+        case .axisZ:    return sourceAngle?.label ?? "\(axisLabel) Z"
         }
     }
 
@@ -92,7 +98,10 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable, Sendable {
         case .strength: return strengthRange
         case .param1:   return params.first(where: { $0.slot == 1 })?.range ?? 0...1
         case .param2:   return params.first(where: { $0.slot == 2 })?.range ?? 0...1
-        case .axisX, .axisY, .axisZ: return -1...1   // matches the axis sliders
+        case .axisZ:
+            return sourceAngle?.range ?? -1...1
+        case .axisX, .axisY:
+            return -1...1   // matches the axis sliders
         }
     }
 
@@ -111,7 +120,7 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable, Sendable {
         case .circle:       return "sphere fold confined to the XZ plane (inner/outer radius)"
         case .shells:       return "r = |p|;  p ↦ p · (|r − d·round(r/d)| / r)   — fold radius to nearest shell"
         case .scaleRepeat:  return "p ↦ p · s^(−⌊log_s|p|⌋)   — map |p| into the base octave [1, s) (log-radial Droste)"
-        case .coxeter:      return "reflect p into the {p,q} fundamental domain across 3 mirror normals (n₀,n₁,n₂)"
+        case .coxeter:      return "rotate by −α; reflect into the {p,q} fundamental domain; rotate back by α; blend by strength"
         case .planeFold:    return "if p·n < d:  p −= 2 (p·n − d) · n · strength   — reflect when behind the plane"
         case .mengerFold:   return "p ↦ abs(p), then sort so |x|≥|y|≥|z|   — fold + permute into one octant (Menger prep)"
         case .tiling:       return "p ↦ p − size · round(p / size)   — wrap into an infinite lattice of size-wide cells"
@@ -119,6 +128,8 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable, Sendable {
         case .offsetFold:   return "p ↦ mix(p, |p + c|, strength)   — mirror fold about an off-origin centre c"
         case .mandelboxStep:return "z ↦ scale · sphereFold(boxFold(z)) + p₀   — one Mandelbox recurrence step"
         case .icosahedralCut:return "reflect p into the fixed {5,3} icosahedral chamber across 3 mirror normals"
+        case .compressionShells:
+            return "cᵢ = R·{1−1/√2, φ⁻², φ⁻¹, 1};  bᵢ = 1−smoothstep(½,1,|r−cᵢ|/(wcᵢ));  r′ = r + (s/3)Σ(−1)ⁱwcᵢbᵢ"
         }
     }
 }
@@ -167,6 +178,16 @@ struct WarpToggleSpec {
     let icon: String
 }
 
+/// Optional one-angle orientation control stored in the op's otherwise-unused
+/// `axis.z` field. Coxeter uses it to rotate the complete mirror arrangement
+/// around the vertical axis without changing the persisted or GPU struct layout.
+struct WarpAngleSpec {
+    let label: String
+    let icon: String
+    let range: ClosedRange<Float>
+    let defaultValue: Float
+}
+
 /// Coarse family grouping for the add-menu, so related transforms cluster together
 /// and the look-alikes are visibly distinguished (the radial trio Sphere Fold /
 /// Sphere Inversion / Tube Fold sit side by side under one heading, etc.).
@@ -194,6 +215,7 @@ struct WarpDescriptor {
     let strengthRange: ClosedRange<Float>
     let params: [WarpParamSpec]
     let toggle: WarpToggleSpec?  // optional boolean option (stored in op.p2)
+    let sourceAngle: WarpAngleSpec? // optional vertical orientation (stored in op.axis.z)
     let gpuApplyFn: String       // Metal function name (must exist in Shaders.metal)
     let gpuDEScaleFn: String?    // Metal DE-divisor fn, or nil → contributes 1.0
     let blurb: String            // longer, contrastive description (shown under the hood)
@@ -202,12 +224,14 @@ struct WarpDescriptor {
          amountLabel: String = "Amount",
          usesAxis: Bool = false, axisLabel: String = "Axis", defaultAxis: SIMD3<Float> = SIMD3<Float>(0, 1, 0),
          defaultStrength: Float = 1.0, strengthRange: ClosedRange<Float> = 0.0...2.0,
-         params: [WarpParamSpec] = [], toggle: WarpToggleSpec? = nil, gpuApplyFn: String, gpuDEScaleFn: String? = nil, blurb: String) {
+         params: [WarpParamSpec] = [], toggle: WarpToggleSpec? = nil,
+         sourceAngle: WarpAngleSpec? = nil,
+         gpuApplyFn: String, gpuDEScaleFn: String? = nil, blurb: String) {
         self.kind = kind; self.displayName = displayName; self.icon = icon
         self.family = family; self.tagline = tagline
         self.amountLabel = amountLabel; self.usesAxis = usesAxis; self.axisLabel = axisLabel; self.defaultAxis = defaultAxis
         self.defaultStrength = defaultStrength; self.strengthRange = strengthRange
-        self.params = params; self.toggle = toggle
+        self.params = params; self.toggle = toggle; self.sourceAngle = sourceAngle
         self.gpuApplyFn = gpuApplyFn; self.gpuDEScaleFn = gpuDEScaleFn
         self.blurb = blurb
     }
@@ -246,8 +270,12 @@ enum WarpCatalog {
                        defaultStrength: 1.0, strengthRange: 0.0...1.0,
                        params: [WarpParamSpec(slot: 1, label: "p", icon: "hexagon", range: 2.0...8.0, defaultValue: 5.0),
                                 WarpParamSpec(slot: 2, label: "q", icon: "hexagon", range: 2.0...8.0, defaultValue: 3.0)],
+                       sourceAngle: WarpAngleSpec(
+                           label: "Source Angle", icon: "rotate.3d",
+                           range: -Float.pi...Float.pi, defaultValue: 0
+                       ),
                        gpuApplyFn: "warpCoxeter",   // isometric (reflections) → no DE divisor
-                       blurb: "Folds space into a {p,q} reflection group — full 3-D polyhedral mirror symmetry. {5,3}=icosahedral, {4,3}=octahedral, {3,3}=tetrahedral; 1/p+1/q<1/2 goes hyperbolic. Contrast: Kaleidoscope is flat N-fold; this is the polyhedral generalization."),
+                       blurb: "Folds space into a {p,q} reflection group — full 3-D polyhedral mirror symmetry. {5,3}=icosahedral, {4,3}=octahedral, {3,3}=tetrahedral; 1/p+1/q<1/2 goes hyperbolic. Source Angle rotates the complete mirror arrangement around the vertical axis, while Mirror blends between untouched and fully folded space. Contrast: Kaleidoscope is flat N-fold; this is the polyhedral generalization."),
         WarpDescriptor(.icosahedralCut, "Icosahedral Space Cut", icon: "hexagon.fill",
                        family: .spaceCutting, tagline: "Cut space into a fixed {5,3} chamber",
                        amountLabel: "Cut",
@@ -296,6 +324,17 @@ enum WarpCatalog {
                        params: [WarpParamSpec(slot: 1, label: "Spacing", icon: "circle.dotted", range: 0.1...4.0, defaultValue: 1.0)],
                        gpuApplyFn: "warpShells",
                        blurb: "Folds the radius into evenly-spaced concentric shells, repeating the fractal outward like onion layers at a FIXED spacing. Contrast: Scale Repeat spaces its copies so they GROW; these shells are equal thickness."),
+        WarpDescriptor(.compressionShells, "Compression Shells", icon: "circle.hexagongrid",
+                       family: .spherical, tagline: "Alternate positive and negative scale regions",
+                       amountLabel: "Compression",
+                       defaultStrength: 0.7, strengthRange: 0.0...1.5,
+                       params: [
+                           WarpParamSpec(slot: 1, label: "Outer Radius", icon: "circle", range: 0.1...4.0, defaultValue: 1.0),
+                           WarpParamSpec(slot: 2, label: "Region Width", icon: "arrow.left.and.right", range: 0.02...0.12, defaultValue: 0.08),
+                       ],
+                       gpuApplyFn: "warpCompressionShells",
+                       gpuDEScaleFn: "warpCompressionShellsDEScale",
+                       blurb: "Places four flat-core radial regions at proportional radii: the outer size, two nested golden/Fibonacci scales (φ⁻¹ and φ⁻²), and 1−1/√2 ≈ 0.292893. Their signs alternate positive/negative, so one shell compresses while the next releases. Space between the regions is untouched; this is not a continuous ripple."),
         // ── Self-Similar Repeats ────────────────────────────────────────────
         WarpDescriptor(.scaleRepeat, "Scale Repeat", icon: "infinity",
                        family: .selfSimilar, tagline: "Self-similar copies at growing scale",
@@ -388,7 +427,8 @@ enum WarpCatalog {
     /// Params and axes are randomized within each op's valid ranges.
     static let randomPalette: [SpaceWarpKind] = [
             .mirror, .boxFold, .sphereFold, .inversion, .kaleidoscope, .mengerFold,
-            .tiling, .scaleRepeat, .shells, .coxeter, .twist, .offsetFold, .circle,
+            .tiling, .scaleRepeat, .shells, .compressionShells, .coxeter, .twist,
+            .offsetFold, .circle,
         ]
 
     /// Eligibility is mandatory so a future pack UI cannot accidentally construct
@@ -594,6 +634,9 @@ struct SpaceWarpOpValue: Codable, Identifiable, Hashable {
         self.p1 = d.params.first(where: { $0.slot == 1 })?.defaultValue ?? 0
         self.p2 = d.params.first(where: { $0.slot == 2 })?.defaultValue ?? 0
         self.axis = d.defaultAxis
+        if let sourceAngle = d.sourceAngle {
+            self.axis.z = sourceAngle.defaultValue
+        }
         self.isEnabled = true
         self.groupID = nil
         self.groupIterations = nil
@@ -689,6 +732,7 @@ extension Array where Element == SpaceWarpOpValue {
 /// The GPU functions then just read the precomputed scalars (see `SpaceWarpOp` in
 /// ShaderTypes.h). Field meanings become precomputed/type-specific:
 ///   • axisX/Y/Z = normalized axis (twist/bend/ripple)
+///   • Coxeter axisZ = user-authored vertical source angle (radians)
 ///   • p1 = boxFold L · sphereFold/circle minR² · inversion R² · kaleido seg(π/N)
 ///          · ripple freq · shells spacing · scaleRepeat log(scale)
 ///   • p2 = sphereFold/circle maxR²
@@ -729,6 +773,9 @@ private func precomputedGPUOp(from v: SpaceWarpOpValue) -> SpaceWarpOp {
         p1 = minR * minR; p2 = maxR * maxR
     case .shells:
         p1 = max(v.p1, 0.1)                                      // spacing d
+    case .compressionShells:
+        p1 = max(v.p1, 0.1)                                      // outer radius R
+        p2 = min(max(v.p2, 0.02), 0.12)                          // relative half-width w
     case .scaleRepeat:
         p1 = logf(max(v.p1, 1.1))                                // log(scale), float-precision (matches GPU log)
     case .coxeter, .icosahedralCut:
@@ -736,6 +783,7 @@ private func precomputedGPUOp(from v: SpaceWarpOpValue) -> SpaceWarpOp {
         //   n0 = (1, 0, 0)                            [implicit in the shader]
         //   n1 = (−cos π/p, sin π/p, 0)               → p1, p2
         //   n2 = (0, −cos(π/q)/sin(π/p), √(1−a²))      → axisX, axisY
+        //   source angle around Y                       → axisZ (Coxeter only)
         // Their Gram inner products encode the dihedral orders (n0·n1→p, n1·n2→q,
         // n0·n2 = 0). Real n2.z needs 1/p+1/q ≥ 1/2 (finite/Euclidean); the hyperbolic
         // case clamps to 0 and still folds gracefully (just no convergence).
@@ -746,8 +794,10 @@ private func precomputedGPUOp(from v: SpaceWarpOpValue) -> SpaceWarpOp {
         let cq = cosf(Float.pi / qq)
         let a = -cq / sp
         let b = (1 - a * a > 0) ? sqrtf(1 - a * a) : 0
+        let sourceAngle = v.kind == .coxeter ? v.axis.z : 0
         return SpaceWarpOp(type: v.type, strength: v.strength,
-                           p1: -cp, p2: sp, axisX: a, axisY: b, axisZ: 0, groupControl: 0)
+                           p1: -cp, p2: sp, axisX: a, axisY: b,
+                           axisZ: sourceAngle, groupControl: 0)
     }
     return SpaceWarpOp(type: v.type, strength: v.strength, p1: p1, p2: p2,
                        axisX: n.x, axisY: n.y, axisZ: n.z, groupControl: 0)

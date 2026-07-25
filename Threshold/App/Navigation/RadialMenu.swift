@@ -493,6 +493,33 @@ enum RadialHoverDwellPolicy {
     }
 }
 
+/// Pure path transitions shared by pointer activation and keyboard/chrome
+/// retreat. Keeping these transitions independent of focus is important:
+/// focus may sit on an ancestor pill while deeper rings are still visible, so
+/// deriving "back" from the focused node can accidentally skip multiple rings.
+enum RadialNavigationPathPolicy {
+    /// Pointer activation toggles an already-expanded branch closed. Activating
+    /// any other branch replaces the selection at that depth and drops its stale
+    /// descendants.
+    static func activatingBranch(
+        nodeID: String,
+        depth: Int,
+        in path: [String]
+    ) -> [String] {
+        if path.indices.contains(depth), path[depth] == nodeID {
+            return Array(path.prefix(depth))
+        }
+        return Array(path.prefix(depth)) + [nodeID]
+    }
+
+    /// Back always removes exactly one visible ring, regardless of which pill
+    /// currently owns keyboard focus. Nil means the root ring is already active.
+    static func retreating(from path: [String]) -> [String]? {
+        guard !path.isEmpty else { return nil }
+        return Array(path.dropLast())
+    }
+}
+
 /// Screen-position anchored radial presentation of the shared application
 /// navigation hierarchy. Platform hosts decide how the anchor is invoked and
 /// how fallback destinations reveal the standard controls.
@@ -531,6 +558,7 @@ struct RadialMenu: View {
 
     /// Focus identifiers for launcher chrome live outside the hierarchy.
     private enum ChromeFocusID {
+        static let back = "launcher.chrome.back"
         static let windowLayout = "launcher.chrome.layout.window"
         static let radialLayout = "launcher.chrome.layout.radial"
         static let panelLayout = "launcher.chrome.layout.panel"
@@ -841,15 +869,18 @@ struct RadialMenu: View {
                         depth: ring.depth,
                         fixedWidth: nil,
                         isFocused: focusedItemID == node.id,
+                        isExpanded: isSelectedPathNode,
                         retreatDirection: position.x < anchor.x ? -1 : 1,
                         sceneAccent: sceneAccent,
                         interactionProfile: interactionProfile,
                         onActivate: {
                             // Click (or keyboard activation) on a pure branch
                             // navigates immediately — hover-only switching
-                            // would strand click-first and keyboard users.
+                            // would strand click-first users. Clicking the
+                            // currently expanded parent collapses exactly that
+                            // level, giving pointer users a local Back action.
                             if node.isBranch {
-                                commitHoverSelection(node, depth: ring.depth)
+                                activateBranch(node, depth: ring.depth)
                             } else {
                                 node.fallbackAction?()
                             }
@@ -939,6 +970,22 @@ struct RadialMenu: View {
     private func commitHoverSelection(_ node: RadialNavigationNode, depth: Int) {
         disarmPendingHover()
         let newPath = Array(path.prefix(depth)) + [node.id]
+        setNavigationPath(newPath)
+    }
+
+    private func activateBranch(_ node: RadialNavigationNode, depth: Int) {
+        disarmPendingHover()
+        let newPath = RadialNavigationPathPolicy.activatingBranch(
+            nodeID: node.id,
+            depth: depth,
+            in: path
+        )
+        focusedItemID = node.id
+        setNavigationPath(newPath)
+    }
+
+    private func setNavigationPath(_ newPath: [String]) {
+        guard path != newPath else { return }
         if reduceMotion {
             path = newPath
         } else {
@@ -979,6 +1026,31 @@ struct RadialMenu: View {
 
     private func layoutPicker(primaryPositions: [CGPoint]) -> some View {
         HStack(spacing: 3) {
+            if !path.isEmpty {
+                let isKeyboardFocused = focusedItemID == ChromeFocusID.back
+                Button {
+                    retreatOneLevel()
+                } label: {
+                    Image(systemName: "chevron.backward")
+                        .font(.system(size: 10, weight: .bold))
+                        .frame(width: 24, height: 22)
+                        .foregroundStyle(isKeyboardFocused ? Color.white : Color.white.opacity(0.78))
+                        .background(
+                            isKeyboardFocused ? sceneAccent.opacity(0.34) : Color.clear,
+                            in: Capsule()
+                        )
+                }
+                .buttonStyle(.plain)
+                .focused($focusedItemID, equals: ChromeFocusID.back)
+                .help("Back one radial menu level")
+                .accessibilityLabel("Back")
+
+                Rectangle()
+                    .fill(Color.white.opacity(0.12))
+                    .frame(width: 1, height: 14)
+                    .padding(.horizontal, 1)
+            }
+
             ForEach(NavigationPresentationStyle.allCases, id: \.self) { style in
                 let focusID = layoutFocusID(for: style)
                 let isKeyboardFocused = focusedItemID == focusID
@@ -1201,7 +1273,7 @@ struct RadialMenu: View {
     }
 
     private var chromeFocusIDs: [String] {
-        [
+        (path.isEmpty ? [] : [ChromeFocusID.back]) + [
             ChromeFocusID.windowLayout,
             ChromeFocusID.radialLayout,
             ChromeFocusID.panelLayout,
@@ -1269,6 +1341,9 @@ struct RadialMenu: View {
         guard let focusedItemID else { return .ignored }
 
         switch focusedItemID {
+        case ChromeFocusID.back:
+            retreatOneLevel()
+            return .handled
         case ChromeFocusID.windowLayout:
             onSelectPresentation(.separateWindow)
             return .handled
@@ -1321,32 +1396,20 @@ struct RadialMenu: View {
     }
 
     private func retreatOrDismiss() {
-        if let focusedItemID,
-           let target = projection.flattenedKeyboardTargets()
-            .first(where: { $0.id == focusedItemID }),
-           let parentID = target.ancestorPath.last {
-            setNavigationPath(Array(target.ancestorPath.dropLast()))
-            self.focusedItemID = parentID
+        if RadialNavigationPathPolicy.retreating(from: path) != nil {
+            retreatOneLevel()
             return
         }
 
-        if let parentID = path.last {
-            setNavigationPath(Array(path.dropLast()))
-            focusedItemID = parentID
-        } else {
-            onDismiss()
-        }
+        onDismiss()
     }
 
-    private func setNavigationPath(_ newPath: [String]) {
-        guard path != newPath else { return }
-        if reduceMotion {
-            path = newPath
-        } else {
-            withAnimation(.easeOut(duration: 0.14)) {
-                path = newPath
-            }
-        }
+    private func retreatOneLevel() {
+        guard let newPath = RadialNavigationPathPolicy.retreating(from: path),
+              let collapsedParentID = path.last else { return }
+        disarmPendingHover()
+        setNavigationPath(newPath)
+        focusedItemID = collapsedParentID
     }
 }
 
@@ -1357,6 +1420,7 @@ private struct RadialMenuButton: View {
     let depth: Int
     let fixedWidth: CGFloat?
     let isFocused: Bool
+    let isExpanded: Bool
     let retreatDirection: CGFloat
     let sceneAccent: Color
     let interactionProfile: RadialInteractionProfile
@@ -1368,8 +1432,10 @@ private struct RadialMenuButton: View {
     @State private var hoverSequence = 0
     @State private var shimmerProgress: CGFloat = -1
 
-    private var isEmphasized: Bool { item.isSelected || isHovering || isFocused }
-    private var shouldWiggle: Bool { !reduceMotion && !item.isSelected && !isHovering && !isFocused }
+    private var isEmphasized: Bool { item.isSelected || isExpanded || isHovering || isFocused }
+    private var shouldWiggle: Bool {
+        !reduceMotion && !item.isSelected && !isExpanded && !isHovering && !isFocused
+    }
 
     /// Different rests keep the symbols from moving as a synchronized block.
     /// The animation itself is handled by the system symbol compositor, so it
@@ -1407,7 +1473,7 @@ private struct RadialMenuButton: View {
 
                 // Branch pills advertise that hovering opens a deeper ring.
                 if item.isBranch {
-                    Image(systemName: "chevron.compact.right")
+                    Image(systemName: isExpanded ? "chevron.compact.left" : "chevron.compact.right")
                         .font(.system(size: depth == 0 ? 10 : 8, weight: .semibold))
                         .foregroundStyle(Color.white.opacity(0.38))
                 }
@@ -1495,10 +1561,14 @@ private struct RadialMenuButton: View {
             }
         }
         .help(item.isBranch
-            ? "\(item.title): press Right Arrow to reveal its controls"
+            ? isExpanded
+                ? "\(item.title): click to go back one level"
+                : "\(item.title): press Right Arrow to reveal its controls"
             : item.title)
         .accessibilityHint(item.isBranch
-            ? "Press Right Arrow or Return to reveal child controls."
+            ? isExpanded
+                ? "Activate to collapse this level."
+                : "Press Right Arrow or Return to reveal child controls."
             : item.fallbackAction != nil
                 ? "Press Return to open the full controls for this section."
                 : "Use the available quick control.")

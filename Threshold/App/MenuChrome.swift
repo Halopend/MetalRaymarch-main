@@ -21,9 +21,20 @@ enum MenuChrome {
 
 private struct AutoHideOnSceneLoad: ViewModifier {
     @Environment(AppModel.self) private var appModel
-    let action: () -> Void
+    let action: @MainActor () -> Void
+
     func body(content: Content) -> some View {
-        content.onChange(of: appModel.menuAutoHideRequestID) { _, _ in action() }
+        content.onChange(of: appModel.menuAutoHideRequestID) { _, _ in
+            // SwiftUI can deliver this observer while AppKit is running the
+            // current Core Animation pre-commit actions. Opening an explicit
+            // panel animation from that callback creates a nested NSCGS
+            // transaction ("transaction during CA commit"). Yield once so the
+            // current commit finishes before platform chrome is removed.
+            Task { @MainActor in
+                await Task.yield()
+                action()
+            }
+        }
     }
 }
 
@@ -31,7 +42,7 @@ extension View {
     /// Run `action` whenever a scene load asks the menu to auto-hide
     /// (`appModel.menuAutoHideRequestID` bumps). Each platform supplies its own
     /// hide behavior; the observer wiring is shared here.
-    func onSceneLoadAutoHide(perform action: @escaping () -> Void) -> some View {
+    func onSceneLoadAutoHide(perform action: @escaping @MainActor () -> Void) -> some View {
         modifier(AutoHideOnSceneLoad(action: action))
     }
 }

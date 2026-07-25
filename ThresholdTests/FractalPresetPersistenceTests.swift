@@ -509,6 +509,8 @@ struct FractalPresetPersistenceTests {
         #expect(SpaceWarpKind.scaleRepeat.descriptor.gpuApplyFn == "warpScaleRepeat")
         #expect(SpaceWarpKind.scaleRepeat.descriptor.gpuDEScaleFn == "warpScaleRepeatDEScale")
         #expect(SpaceWarpKind.shells.descriptor.gpuDEScaleFn == nil)  // isometric fold → deScale 1
+        #expect(SpaceWarpKind.compressionShells.descriptor.gpuApplyFn == "warpCompressionShells")
+        #expect(SpaceWarpKind.compressionShells.descriptor.gpuDEScaleFn == "warpCompressionShellsDEScale")
         #expect(SpaceWarpKind.mandelboxStep.descriptor.gpuApplyFn == "warpMandelboxStep")
     }
 
@@ -673,6 +675,11 @@ struct FractalPresetPersistenceTests {
         // scaleRepeat: p1 = log(max(scale, 1.1)) — the win (per-step GPU log removed).
         var sr = SpaceWarpOpValue(kind: .scaleRepeat); sr.p1 = 2.0
         #expect(abs(packed(sr).p1 - logf(2.0)) < 1e-5)
+        // compressionShells clamps its outer radius and relative region width.
+        var cs = SpaceWarpOpValue(kind: .compressionShells); cs.p1 = 0.01; cs.p2 = 0.5
+        let pcs = packed(cs)
+        #expect(abs(pcs.p1 - 0.1) < 1e-5)
+        #expect(abs(pcs.p2 - 0.12) < 1e-5)
         // kaleidoscope: p1 = π / max(round(segments), 2).
         var kal = SpaceWarpOpValue(kind: .kaleidoscope); kal.p1 = 6
         #expect(abs(packed(kal).p1 - Float.pi / 6) < 1e-5)
@@ -690,23 +697,27 @@ struct FractalPresetPersistenceTests {
         #expect(abs(pa.axisX) < 1e-5 && abs(pa.axisY - 1.0) < 1e-5 && abs(pa.axisZ) < 1e-5)
         // Coxeter {4,3} (octahedral): mirror normals packed as n1=(p1,p2), n2=(axisX,axisY).
         // π/4 → cos=sin=1/√2;  n2.y = −cos(π/3)/sin(π/4) = −0.5/(1/√2) = −1/√2;  n2.z = √(1−½) = 1/√2.
-        var cox = SpaceWarpOpValue(kind: .coxeter); cox.p1 = 4; cox.p2 = 3
+        var cox = SpaceWarpOpValue(kind: .coxeter)
+        cox.p1 = 4; cox.p2 = 3; cox.axis.z = .pi / 4
         let pc = packed(cox)
         let invSqrt2 = 1 / sqrtf(2)
         #expect(abs(pc.p1 - (-invSqrt2)) < 1e-4)      // n1.x = −cos π/4
         #expect(abs(pc.p2 - invSqrt2) < 1e-4)         // n1.y =  sin π/4
         #expect(abs(pc.axisX - (-invSqrt2)) < 1e-4)   // n2.y
         #expect(abs(pc.axisY - invSqrt2) < 1e-4)      // n2.z
+        #expect(abs(pc.axisZ - .pi / 4) < 1e-5)       // vertical source angle
         #expect(SpaceWarpKind.coxeter.descriptor.gpuDEScaleFn == nil)   // reflections are isometric
         // The named cut is always the finite {5,3} icosahedral chamber. Ignore
         // stale scalar slots so saved scenes cannot silently change its geometry.
-        var ico = SpaceWarpOpValue(kind: .icosahedralCut); ico.p1 = 4; ico.p2 = 4
+        var ico = SpaceWarpOpValue(kind: .icosahedralCut)
+        ico.p1 = 4; ico.p2 = 4; ico.axis.z = .pi / 3
         let pi = packed(ico)
         var cox53 = SpaceWarpOpValue(kind: .coxeter); cox53.p1 = 5; cox53.p2 = 3
         let p53 = packed(cox53)
         #expect(pi.type == SpaceWarpKind.icosahedralCut.rawValue)
         #expect(abs(pi.p1 - p53.p1) < 1e-5 && abs(pi.p2 - p53.p2) < 1e-5)
         #expect(abs(pi.axisX - p53.axisX) < 1e-5 && abs(pi.axisY - p53.axisY) < 1e-5)
+        #expect(abs(pi.axisZ) < 1e-5) // fixed cut does not inherit Coxeter orientation
         #expect(SpaceWarpKind.icosahedralCut.family == .spaceCutting)
         #expect(SpaceWarpKind.icosahedralCut.descriptor.gpuApplyFn == "warpCoxeter")
         // Box Fold "Hall of Mirrors" option rides op.p2 untouched through precompute.
@@ -1087,6 +1098,9 @@ struct SpaceWarpMusicFieldTests {
         #expect(SpaceWarpKind.mirror.musicFields == [.strength])                       // no params, no axis
         #expect(SpaceWarpKind.sphereFold.musicFields == [.strength, .param1, .param2]) // two slots, no axis
         #expect(SpaceWarpKind.ripple.musicFields == [.strength, .param1, .axisX, .axisY, .axisZ]) // slot1 + axis
+        #expect(SpaceWarpKind.coxeter.musicFields == [.strength, .param1, .param2, .axisZ])
+        #expect(SpaceWarpKind.coxeter.musicFieldLabel(.axisZ) == "Source Angle")
+        #expect(SpaceWarpKind.coxeter.range(for: .axisZ) == (-Float.pi...Float.pi))
     }
 }
 

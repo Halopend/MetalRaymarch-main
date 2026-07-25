@@ -35,15 +35,20 @@ final class PerFingerTapGestureEngine {
 
     private var leftState = PerHandTapState()
     private var rightState = PerHandTapState()
+    /// Hand that emitted this frame's first spatial-navigation shortcut.
+    /// Playback-only taps deliberately leave this nil.
+    private(set) var lastMenuActivationHand: GestureHandMode?
 
     func reset() {
         leftState = PerHandTapState()
         rightState = PerHandTapState()
+        lastMenuActivationHand = nil
     }
 
     // MARK: - Processing
 
     func process(context: GestureContext) -> [GestureOperation] {
+        lastMenuActivationHand = nil
         guard isEnabled else { return [] }
 
         var ops: [GestureOperation] = []
@@ -51,27 +56,42 @@ final class PerFingerTapGestureEngine {
         // Process each hand independently
         if context.leftHand.isTracked {
             leftState.deltaTime = context.deltaTime
-            ops.append(contentsOf: processHand(
+            let leftOperations = processHand(
                 hand: context.leftHand,
                 actions: leftHandActions,
                 state: &leftState
-            ))
+            )
+            recordMenuActivationHand(.left, operations: leftOperations)
+            ops.append(contentsOf: leftOperations)
         } else {
             leftState.resetTrackingState()
         }
 
         if context.rightHand.isTracked {
             rightState.deltaTime = context.deltaTime
-            ops.append(contentsOf: processHand(
+            let rightOperations = processHand(
                 hand: context.rightHand,
                 actions: rightHandActions,
                 state: &rightState
-            ))
+            )
+            recordMenuActivationHand(.right, operations: rightOperations)
+            ops.append(contentsOf: rightOperations)
         } else {
             rightState.resetTrackingState()
         }
 
         return ops
+    }
+
+    private func recordMenuActivationHand(
+        _ hand: GestureHandMode,
+        operations: [GestureOperation]
+    ) {
+        guard lastMenuActivationHand == nil,
+              operations.contains(where: \.presentsSpatialMenu) else {
+            return
+        }
+        lastMenuActivationHand = hand
     }
 
     // MARK: - Per-Hand Logic
@@ -167,6 +187,17 @@ final class PerFingerTapGestureEngine {
             return hand.pinkyFingerTouchingPalm()
         default:
             return 0
+        }
+    }
+}
+
+private extension GestureOperation {
+    var presentsSpatialMenu: Bool {
+        switch self {
+        case .openShapeMenu, .openRenderMenu, .openQuickToggles:
+            return true
+        case .toggleMenu, .toggleAnimationPlayer, .trackGestureUsage:
+            return false
         }
     }
 }

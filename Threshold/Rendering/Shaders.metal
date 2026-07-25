@@ -795,6 +795,38 @@ FORCE_INLINE float3 warpShells(float3 p, SpaceWarpOp op) {      // 9 — concent
     float rNew = fabs(r - d * round(r / d));
     return mix(p, p * (rNew / r), t);
 }
+// Compact positive/negative radial regions at proportional sizes:
+//   1 − 1/√2, φ⁻², φ⁻¹, and 1.
+// Each region has a flat core with a smooth finite shoulder; unlike a sine
+// ripple, space between shells is exactly untouched. Region half-width scales
+// with its center, preserving the same shape across sizes. At the CPU-clamped
+// width ≤ 0.12 the regions do not overlap. smoothstep across the outer half has
+// maximum normalized slope 3, so the 1/3 displacement scale bounds radial and
+// tangential stretch by 1 + strength.
+FORCE_INLINE float3 warpCompressionShells(float3 p, SpaceWarpOp op) { // 19
+    float strength = op.strength; if (strength <= 0.0f) return p;
+    float r = length(p);
+    if (r < 1e-5f) return p;
+
+    constexpr float4 scales = float4(
+        0.29289321881f,  // 1 − 1/√2
+        0.38196601125f,  // φ⁻²
+        0.61803398875f,  // φ⁻¹ — consecutive Fibonacci ratios converge here
+        1.0f
+    );
+    constexpr float4 signs = float4(1.0f, -1.0f, 1.0f, -1.0f);
+    float4 centers = op.p1 * scales;
+    float4 halfWidths = op.p2 * centers;
+    float4 x = abs(float4(r) - centers) / halfWidths;
+    float4 regions = float4(1.0f) - smoothstep(float4(0.5f), float4(1.0f), x);
+    float displacement = strength * dot(signs, halfWidths * regions) / 3.0f;
+    float rNew = max(r + displacement, 1e-5f);
+    return p * (rNew / r);
+}
+FORCE_INLINE float warpCompressionShellsDEScale(float3 p, SpaceWarpOp op) {
+    (void)p;
+    return op.strength > 0.0f ? 1.0f + op.strength : 1.0f;
+}
 FORCE_INLINE float3 warpScaleRepeat(float3 p, SpaceWarpOp op) { // 10 — log-radial Droste (growing scales)
     float t = clamp(op.strength, 0.0f, 1.0f);
     float logS = op.p1;   // precomputed log(max(scale, 1.1))
@@ -818,19 +850,38 @@ FORCE_INLINE float warpScaleRepeatDEScale(float3 p, SpaceWarpOp op) {
 FORCE_INLINE float3 warpCoxeter(float3 p, SpaceWarpOp op) {    // 11 — [p,q] mirror group fold
     float t = clamp(op.strength, 0.0f, 1.0f);
     if (t <= 0.0f) return p;
-    // Mirror normals precomputed on the CPU (cSpaceWarpStack): n0 fixed, n1/n2 packed.
+    // Mirror normals precomputed on the CPU (cSpaceWarpStack): n0 fixed, n1/n2
+    // packed. axisZ remains available as the user-authored vertical orientation.
     const float3 n0 = float3(1.0f, 0.0f, 0.0f);
     float3 n1 = float3(op.p1, op.p2, 0.0f);     // (−cos π/p, sin π/p, 0)
     float3 n2 = float3(0.0f, op.axisX, op.axisY);  // (0, −cos(π/q)/sin(π/p), √…)
+
+    // Move the sample into the mirror arrangement's local orientation. Keep the
+    // zero-angle path free of trigonometry for legacy Coxeter scenes and the fixed
+    // Icosahedral Space Cut, whose packed angle is always zero.
+    float sourceAngle = op.axisZ;
+    float c = 1.0f;
+    float s = 0.0f;
+    float3 localP = p;
+    if (fabs(sourceAngle) > 1e-6f) {
+        s = sincos(sourceAngle, c);
+        localP = float3(c * p.x - s * p.z, p.y, s * p.x + c * p.z);
+    }
+
     // Fold into the fundamental Weyl chamber: reflect across any mirror the point is
     // behind, repeat to convergence. Reflections are isometries → deScale stays 1.
-    float3 q = p;
+    float3 q = localP;
     for (int i = 0; i < 16; ++i) {
         bool folded = false;
         float d0 = dot(q, n0); if (d0 < 0.0f) { q -= 2.0f * d0 * n0; folded = true; }
         float d1 = dot(q, n1); if (d1 < 0.0f) { q -= 2.0f * d1 * n1; folded = true; }
         float d2 = dot(q, n2); if (d2 < 0.0f) { q -= 2.0f * d2 * n2; folded = true; }
         if (!folded) break;   // inside the fundamental domain
+    }
+
+    // Return the folded point to world orientation before applying the amount blend.
+    if (fabs(sourceAngle) > 1e-6f) {
+        q = float3(c * q.x + s * q.z, q.y, -s * q.x + c * q.z);
     }
     return mix(p, q, t);
 }
@@ -949,6 +1000,7 @@ FORCE_INLINE float3 applyWarpOp(float3 p, float3 stackOrigin, SpaceWarpOp op) {
         case 16: return warpOffsetFold(p, op);
         case 17: return warpMandelboxStep(p, stackOrigin, op);
         case 18: return warpCoxeter(p, op);
+        case 19: return warpCompressionShells(p, op);
     }
 }
 // Conservative DE divisor for one op (only radial / scaling warps stretch distance).
@@ -959,6 +1011,7 @@ FORCE_INLINE float warpOpDEScale(float3 p, SpaceWarpOp op) {
         case 8:  return warpCircleDEScale(p, op);
         case 10: return warpScaleRepeatDEScale(p, op);
         case 15: return warpScaleDEScale(p, op);
+        case 19: return warpCompressionShellsDEScale(p, op);
         default: return 1.0f;
     }
 }
@@ -5168,4 +5221,105 @@ kernel void distanceCacheValidate(device const half* grid [[buffer(0)]],
             atomic_fetch_max_explicit(&out[1], as_type<uint>(bound - d), memory_order_relaxed);
         }
     }
+}
+
+// === PLANTED SPATIAL RADIAL MENU ===
+// Instanced world-space cards are composited after the fractal resolve. The
+// renderer supplies raw world→clip matrices, so menu placement is independent
+// of the fractal model transform and remains fixed at its activation pose.
+struct SpatialRadialGPUInstance {
+    float4 centerAndKind;
+    float4 rightAndHalfWidth;
+    float4 upAndHalfHeight;
+    float4 fillColor;
+    float4 strokeColor;
+    float4 labelUVRect;
+};
+
+struct SpatialRadialViewUniforms {
+    float4x4 viewProjection[2];
+};
+
+struct SpatialRadialVertexOut {
+    float4 position [[position]];
+    float2 localPosition;
+    float2 labelUV;
+    float4 fillColor;
+    float4 strokeColor;
+    float kind;
+};
+
+vertex SpatialRadialVertexOut spatialRadialVertex(
+    uint vertexID [[vertex_id]],
+    uint instanceID [[instance_id]],
+    ushort ampID [[amplification_id]],
+    constant SpatialRadialViewUniforms& views [[buffer(0)]],
+    device const SpatialRadialGPUInstance* instances [[buffer(1)]])
+{
+    constexpr float2 corners[6] = {
+        float2(-1.0f, -1.0f), float2( 1.0f, -1.0f), float2(-1.0f,  1.0f),
+        float2(-1.0f,  1.0f), float2( 1.0f, -1.0f), float2( 1.0f,  1.0f)
+    };
+
+    SpatialRadialGPUInstance instance = instances[instanceID];
+    float2 corner = corners[vertexID];
+    float3 worldPosition = instance.centerAndKind.xyz
+        + instance.rightAndHalfWidth.xyz * (corner.x * instance.rightAndHalfWidth.w)
+        + instance.upAndHalfHeight.xyz * (corner.y * instance.upAndHalfHeight.w);
+
+    SpatialRadialVertexOut out;
+    out.position = views.viewProjection[min(ushort(1), ampID)] * float4(worldPosition, 1.0f);
+    out.localPosition = corner;
+    float2 unitUV = float2(corner.x * 0.5f + 0.5f, 0.5f - corner.y * 0.5f);
+    out.labelUV = mix(instance.labelUVRect.xy, instance.labelUVRect.zw, unitUV);
+    out.fillColor = instance.fillColor;
+    out.strokeColor = instance.strokeColor;
+    out.kind = instance.centerAndKind.w;
+    return out;
+}
+
+fragment float4 spatialRadialFragment(
+    SpatialRadialVertexOut in [[stage_in]],
+    texture2d<float> labelAtlas [[texture(0)]])
+{
+    constexpr sampler labelSampler(filter::linear, address::clamp_to_edge);
+    float2 p = in.localPosition;
+    float coverage = 0.0f;
+    float border = 0.0f;
+    float label = 0.0f;
+
+    if (in.kind < 0.5f) {
+        // Rounded navigation card.
+        constexpr float radius = 0.18f;
+        float2 q = abs(p) - float2(0.82f, 0.68f);
+        float distance = length(max(q, 0.0f)) + min(max(q.x, q.y), 0.0f) - radius;
+        float width = max(fwidth(distance), 0.012f);
+        coverage = 1.0f - smoothstep(-width, width, distance);
+        border = (1.0f - smoothstep(0.0f, width * 2.5f, abs(distance))) * coverage;
+        label = labelAtlas.sample(labelSampler, in.labelUV).a * coverage;
+    } else if (in.kind < 1.5f) {
+        // Radial depth guide.
+        float distance = abs(length(p) - 0.94f);
+        float width = max(fwidth(distance), 0.012f);
+        coverage = 1.0f - smoothstep(0.018f, 0.018f + width * 2.0f, distance);
+    } else {
+        // Hub and direct-hand cursor.
+        float distance = length(p) - 0.88f;
+        float width = max(fwidth(distance), 0.012f);
+        coverage = 1.0f - smoothstep(-width, width, distance);
+        border = (1.0f - smoothstep(0.0f, width * 2.5f, abs(distance))) * coverage;
+    }
+
+    float alpha = max(
+        in.fillColor.a * coverage,
+        max(in.strokeColor.a * border, label)
+    );
+    if (alpha < 0.004f) {
+        discard_fragment();
+    }
+
+    float3 color = in.fillColor.rgb;
+    color = mix(color, in.strokeColor.rgb, saturate(border * in.strokeColor.a));
+    color = mix(color, float3(1.0f), saturate(label));
+    return float4(color, alpha);
 }

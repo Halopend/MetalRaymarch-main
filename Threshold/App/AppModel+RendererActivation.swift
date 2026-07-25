@@ -47,12 +47,20 @@ extension AppModel {
     }
 
     private func clearRendererHandlers() {
+        // Invalidate completions from presentation tasks owned by the renderer
+        // whose handlers are about to be removed.
+        spatialMenuPresentationGeneration &+= 1
         captureScreenshotHandler = nil
         preparePipelineHandler = nil
         preparePipelineForValuesHandler = nil
         triggerProfilerHandler = nil
         forceShaderRecompileHandler = nil
         activateEmbeddedFormulaHandler = nil
+        presentSpatialMenuHandler = nil
+        dismissSpatialMenuHandler = nil
+        if isSpatialMenuVisible {
+            setSpatialMenuVisible(false)
+        }
         rendererStartupWarmupComplete = false
     }
 }

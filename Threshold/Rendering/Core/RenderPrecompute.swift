@@ -53,7 +53,7 @@ enum RenderPrecompute {
     static func coneMarchScale(strength: Float,
                                projection: matrix_float4x4,
                                viewportHeight: Float) -> Float {
-        let s = strength.clamped(to: 0.0...1.0)
+        let s = strength.clamped(to: 0.0...QualityConfig.maximumConeMarchStrength)
         guard s > 0, viewportHeight > 1 else { return 0 }
         let cotHalfFovY = abs(projection.columns.1.y)   // = 1 / tan(fovY/2)
         guard cotHalfFovY > 1e-5 else { return 0 }

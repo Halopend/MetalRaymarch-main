@@ -371,6 +371,7 @@ final class ViewportRenderer {
     private let colorPixelFormat: MTLPixelFormat
     private let vertexDescriptor: MTLVertexDescriptor
     private let specializedPipelineCache = ViewportSpecializedPipelineCache()
+    private let specializedPipelineBuilder: ViewportSpecializedPipelineBuilder
     /// Holds the active runtime-compiled custom (`.threshfx`) library + hash.
     /// Read on the render thread, written by the activation handler; guarded.
     private let customShaderBox = ViewportCustomShaderBox()
@@ -478,6 +479,13 @@ final class ViewportRenderer {
         }
         pipelineState = builtPipeline
         vertexDescriptor = builtVertexDescriptor
+        specializedPipelineBuilder = ViewportSpecializedPipelineBuilder(
+            device: device,
+            colorPixelFormat: colorPixelFormat,
+            depthPixelFormat: depthPixelFormat,
+            vertexDescriptor: builtVertexDescriptor,
+            cache: specializedPipelineCache
+        )
         mesh = builtMesh
 
         spatialUpscaler = ViewportSpatialUpscaler(device: device,
@@ -862,9 +870,20 @@ final class ViewportRenderer {
         // representative of display pacing, so leave these diagnostics empty
         // there instead of substituting command-buffer completion timestamps.
         let framePacingTracker = self.framePacingTracker
+        let submittedSceneGeneration = appModel.renderSettings.sceneLoadGeneration
         drawable.addPresentedHandler { drawable in
-            framePacingTracker.withLock { tracker in
-                _ = tracker.recordPresentation(at: drawable.presentedTime)
+            let event = framePacingTracker.withLock { tracker in
+                tracker.recordPresentation(at: drawable.presentedTime)
+            }
+            // Xcode's main-thread hang detector cannot see pauses caused by a
+            // blocked render/compiler thread. Emit presentation truth instead:
+            // this measures the gap between frames the user actually saw.
+            if event.didRecordHitch, event.lastFrameGapMs >= 100 {
+                print(
+                    "⚠️ Presented-frame pause: " +
+                    "\(Int(event.lastFrameGapMs.rounded()))ms, " +
+                    "sceneGeneration=\(submittedSceneGeneration)"
+                )
             }
         }
         #endif
@@ -1143,81 +1162,21 @@ final class ViewportRenderer {
                                           hasEnvScrunch: Bool,
                                           hasHandField: Bool,
                                           customLibrary: MTLLibrary?) {
-        let cache = specializedPipelineCache
-        // When a custom `.threshfx` is active, build against its runtime-compiled
-        // library (a drop-in for default.metallib whose FractalFormulas.h has the
-        // `case FractalTypeCustom` arm). Built-ins resolve identically against it.
-        // `customLibrary` is snapshotted together with the key's hash in
-        // resolveActivePipeline, so the pipeline and its `CX{hash}_` key agree.
-        guard let library = customLibrary ?? MetalLibraryCache.bundledDefaultLibrary(device: device),
-              let vertexFunction = library.makeFunction(name: "screenshotVertexShader") else {
-            cache.failBuild(key)
-            return
-        }
-
-        // Metal function-constant indices (mirrors the visionOS
-        // `FunctionConstantIndex`, which is unavailable on macOS because it
-        // lives in a CompositorServices-only file): 0=fractalIterations,
-        // 2=safetyBubble, 3=hasSpaceWarp, 6=maxRaySteps, 7=fractalType,
-        // 9=colorIterations, 11=shadows, 12=mandelbulbPower,
-        // 17=sphereProjection.
-        let constants = MTLFunctionConstantValues()
-        var fi = iterations
-        constants.setConstantValue(&fi, type: .int, index: 0)
-        var rs = raySteps
-        constants.setConstantValue(&rs, type: .int, index: 6)
-        var ft = fractalType
-        constants.setConstantValue(&ft, type: .int, index: 7)
-        var ci = colorIterations
-        constants.setConstantValue(&ci, type: .int, index: 9)
-        if var p = power {
-            constants.setConstantValue(&p, type: .int, index: 12)
-        }
-        // These values are paired with `_B` / `_SH` in the cache key. Disabled
-        // variants compile out the safety-bubble distance work in every primary
-        // DE call and the complete shadow march, respectively.
-        var bubble = safetyBubbleEnabled
-        constants.setConstantValue(&bubble, type: .bool, index: 2)
-        var shadows = shadowsEnabled
-        constants.setConstantValue(&shadows, type: .bool, index: 11)
-        var sphereProjection = sphereProjectionEnabled
-        constants.setConstantValue(&sphereProjection, type: .bool, index: 17)
-        // FC_HAS_SPACEWARP (index 3): bake the space-warp seam in/out. Baked false only
-        // for scenes provably without any transform, letting the whole warp path DCE.
-        var sw = hasSpaceWarp
-        constants.setConstantValue(&sw, type: .bool, index: 3)
-        // FC_HAS_ENVSCRUNCH (index 16) / FC_HAS_HANDFIELD (index 18): bake the two
-        // DE-tail features in/out. Both default ON when unset (generic fallback),
-        // so the transient pre-build frames still render correctly.
-        var es = hasEnvScrunch
-        constants.setConstantValue(&es, type: .bool, index: 16)
-        var hf = hasHandField
-        constants.setConstantValue(&hf, type: .bool, index: 18)
-
-        let fragmentFunction: MTLFunction
-        do {
-            fragmentFunction = try library.makeFunction(name: "fragmentShaderMono", constantValues: constants)
-        } catch {
-            cache.failBuild(key)
-            return
-        }
-
-        let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.label = "ThresholdMac Specialized [\(key)]"
-        descriptor.vertexFunction = vertexFunction
-        descriptor.fragmentFunction = fragmentFunction
-        descriptor.vertexDescriptor = vertexDescriptor
-        descriptor.rasterSampleCount = 1
-        descriptor.colorAttachments[0].pixelFormat = colorPixelFormat
-        descriptor.depthAttachmentPixelFormat = depthPixelFormat
-
-        device.makeRenderPipelineState(descriptor: descriptor) { pipeline, _ in
-            if let pipeline {
-                cache.store(pipeline, for: key)
-            } else {
-                cache.failBuild(key)
-            }
-        }
+        specializedPipelineBuilder.request(.init(
+            key: key,
+            iterations: iterations,
+            raySteps: raySteps,
+            fractalType: fractalType,
+            colorIterations: colorIterations,
+            power: power,
+            safetyBubbleEnabled: safetyBubbleEnabled,
+            shadowsEnabled: shadowsEnabled,
+            sphereProjectionEnabled: sphereProjectionEnabled,
+            hasSpaceWarp: hasSpaceWarp,
+            hasEnvScrunch: hasEnvScrunch,
+            hasHandField: hasHandField,
+            customLibrary: customLibrary
+        ))
     }
 
     /// A `@Sendable` activation closure for `AppModel.activateEmbeddedFormulaHandler`,

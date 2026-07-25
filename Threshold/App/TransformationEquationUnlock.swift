@@ -45,6 +45,7 @@ struct TransformationLessonID: RawRepresentable, Hashable, Codable, Comparable {
         case .offsetFold: slug = "offset-fold"
         case .mandelboxStep: slug = "mandelbox-step"
         case .icosahedralCut: slug = "icosahedral-cut"
+        case .compressionShells: slug = "compression-shells"
         }
         return TransformationLessonID(rawValue: "core.\(slug)")
     }
@@ -242,6 +243,28 @@ enum TransformationEquationCatalog {
             }
             """,
             hint: "`op.p1` is the CPU-clamped shell spacing and `op.strength` blends the radial sawtooth. The guard keeps the origin unchanged."
+        ),
+        lesson(
+            .compressionShells,
+            math: "c/R ∈ {1−1/√2, φ⁻², φ⁻¹, 1}\nbᵢ(r) = 1−smoothstep(1/2,1,|r−cᵢ|/(wcᵢ))\nr′ = r + (s/3)Σ(−1)ⁱwcᵢbᵢ(r)",
+            spokenMath: "Place four finite shell regions at proportional radii: one minus one over square root two, two inverse golden scales, and the outer radius. Alternate their radial offsets between positive and negative.",
+            metal: """
+            if (op.strength > 0.0f) {
+                float r = length(p);
+                if (r >= 1e-5f) {
+                    float4 scales = float4(0.29289321881f, 0.38196601125f, 0.61803398875f, 1.0f);
+                    float4 signs = float4(1.0f, -1.0f, 1.0f, -1.0f);
+                    float4 centers = op.p1 * scales;
+                    float4 halfWidths = op.p2 * centers;
+                    float4 x = abs(float4(r) - centers) / halfWidths;
+                    float4 regions = float4(1.0f) - smoothstep(float4(0.5f), float4(1.0f), x);
+                    float displacement = op.strength * dot(signs, halfWidths * regions) / 3.0f;
+                    float rNew = max(r + displacement, 1e-5f);
+                    p = p * (rNew / r);
+                }
+            }
+            """,
+            hint: "`op.p1` is the outer radius and `op.p2` is each region's relative half-width. The four compact regions alternate signs and leave all intervening space unchanged."
         ),
         lesson(
             .scaleRepeat,
@@ -714,7 +737,8 @@ enum TransformationEducationPath {
             numeral: "III",
             title: "Curved & Repeating Space",
             subtitle: "Work with radii, angles, shells, and logarithmic repetition.",
-            kinds: [.sphereFold, .inversion, .shells, .kaleidoscope, .circle, .scaleRepeat],
+            kinds: [.sphereFold, .inversion, .shells, .compressionShells,
+                    .kaleidoscope, .circle, .scaleRepeat],
             requiredToAdvance: 4
         ),
         .init(
@@ -1366,5 +1390,133 @@ enum TransformationEquationDraftStore {
         guard let data = try? encoder.encode(rawDrafts),
               let encoded = String(data: data, encoding: .utf8) else { return "{}" }
         return encoded
+    }
+}
+
+/// A durable record of text the learner explicitly checked. Drafts remain
+/// scene-local, while these results follow app-level learning progress so a
+/// completed answer is still available after the workbench clears it.
+struct TransformationEquationCheckRecord: Codable, Equatable, Identifiable {
+    let id: UUID
+    let lessonID: TransformationLessonID
+    let submittedText: String
+    let wasAccepted: Bool
+    let feedback: String
+    let checkedAt: Date
+}
+
+enum TransformationEquationCheckHistoryStore {
+    static let defaultsKey = "Transformations.educationCheckHistory.v1"
+    static let maximumChecksPerLesson = 10
+    static let maximumStoredChecks = 60
+
+    static func checks(for lessonID: TransformationLessonID,
+                       in encoded: String) -> [TransformationEquationCheckRecord] {
+        decode(encoded).filter { $0.lessonID == lessonID }
+    }
+
+    static func record(_ submittedText: String,
+                       assessment: TransformationEquationAttempt,
+                       for lessonID: TransformationLessonID,
+                       merging encodedValues: [String],
+                       id: UUID = UUID(),
+                       checkedAt: Date = Date()) -> String {
+        guard lessonID.isSafeForLocalStorage else {
+            return encode(mergedChecks(encodedValues))
+        }
+        let boundedText = boundedUTF8(
+            submittedText,
+            maximumBytes: TransformationEquationCatalog.maximumInputLength
+        )
+        guard !boundedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return encode(mergedChecks(encodedValues))
+        }
+
+        var checks = mergedChecks(encodedValues)
+        checks.removeAll { $0.id == id }
+        checks.append(TransformationEquationCheckRecord(
+            id: id,
+            lessonID: lessonID,
+            submittedText: boundedText,
+            wasAccepted: assessment == .matched,
+            feedback: assessment.guidance,
+            checkedAt: checkedAt
+        ))
+        return encode(pruned(checks))
+    }
+
+    static func decode(_ encoded: String) -> [TransformationEquationCheckRecord] {
+        guard let data = encoded.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(
+                [TransformationEquationCheckRecord].self,
+                from: data
+              ) else {
+            return []
+        }
+        return pruned(decoded.filter { check in
+            check.lessonID.isSafeForLocalStorage
+                && !check.submittedText.isEmpty
+                && check.submittedText.utf8.count
+                    <= TransformationEquationCatalog.maximumInputLength
+                && check.feedback.utf8.count <= 1_024
+                && check.checkedAt.timeIntervalSinceReferenceDate.isFinite
+        })
+    }
+
+    private static func mergedChecks(
+        _ encodedValues: [String]
+    ) -> [TransformationEquationCheckRecord] {
+        var checksByID: [UUID: TransformationEquationCheckRecord] = [:]
+        for encoded in encodedValues {
+            for check in decode(encoded) {
+                checksByID[check.id] = check
+            }
+        }
+        return Array(checksByID.values)
+    }
+
+    private static func pruned(
+        _ checks: [TransformationEquationCheckRecord]
+    ) -> [TransformationEquationCheckRecord] {
+        let newestFirst = checks.sorted {
+            if $0.checkedAt != $1.checkedAt {
+                return $0.checkedAt > $1.checkedAt
+            }
+            return $0.id.uuidString > $1.id.uuidString
+        }
+        var countByLesson: [TransformationLessonID: Int] = [:]
+        var kept: [TransformationEquationCheckRecord] = []
+        for check in newestFirst {
+            let lessonCount = countByLesson[check.lessonID, default: 0]
+            guard lessonCount < maximumChecksPerLesson,
+                  kept.count < maximumStoredChecks else { continue }
+            kept.append(check)
+            countByLesson[check.lessonID] = lessonCount + 1
+        }
+        return kept
+    }
+
+    private static func encode(
+        _ checks: [TransformationEquationCheckRecord]
+    ) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(pruned(checks)),
+              let encoded = String(data: data, encoding: .utf8) else { return "[]" }
+        return encoded
+    }
+
+    private static func boundedUTF8(_ value: String,
+                                    maximumBytes: Int) -> String {
+        guard value.utf8.count > maximumBytes else { return value }
+        var byteCount = 0
+        var endIndex = value.startIndex
+        for character in value {
+            let characterByteCount = String(character).utf8.count
+            guard byteCount + characterByteCount <= maximumBytes else { break }
+            byteCount += characterByteCount
+            endIndex = value.index(after: endIndex)
+        }
+        return String(value[..<endIndex])
     }
 }

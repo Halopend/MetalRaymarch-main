@@ -3,7 +3,7 @@ import Foundation
 /// Runtime capabilities that filter the shared application navigation without
 /// changing its structure. Platform hosts provide capabilities; presentations
 /// never redefine labels, routes, or ordering.
-struct NavigationAvailability {
+struct NavigationAvailability: Sendable {
     let allowsCustomScenes: Bool
     let shapeSections: [ShapeRailSection]
     let musicSections: [MusicRailSection]
@@ -34,13 +34,13 @@ struct NavigationAvailability {
 /// It owns destinations and parent/child relationships only. Grid, radial,
 /// keyboard, touch, pointer, and spatial-input presentations all consume this
 /// same tree and decide independently how to render or traverse it.
-struct NavigationHierarchy {
-    enum RootPlacement {
+struct NavigationHierarchy: Sendable {
+    enum RootPlacement: Sendable {
         case workspace
         case utility
     }
 
-    struct Node: Identifiable {
+    struct Node: Identifiable, Sendable {
         let id: String
         let title: String
         let systemImage: String
@@ -51,7 +51,7 @@ struct NavigationHierarchy {
         var isBranch: Bool { !children.isEmpty }
     }
 
-    struct KeyboardTarget: Equatable {
+    struct KeyboardTarget: Equatable, Sendable {
         let id: String
         let ancestorPath: [String]
     }

@@ -17,6 +17,57 @@ import Foundation
 @Suite("QualityConfig — raymarch accelerator persistence")
 struct QualityConfigCodableTests {
 
+    @Test("default resolution is 50 percent")
+    func resolutionDefaults() {
+        #expect(QualityConfig().resolutionScale == 0.5)
+        #expect(SceneQualityTarget.standard.macResolutionScale == 0.5)
+
+        #if os(macOS)
+        #expect(RenderSettings().resolutionScale == 0.5)
+        #endif
+    }
+
+    @Test("cone marching defaults to 84 percent")
+    func coneMarchingDefaults() throws {
+        #expect(QualityConfig().coneMarchStrength == 0.84)
+        #expect(ControlCatalog.coneMarchStrength.defaultValue == 0.84)
+
+        let legacy = try JSONDecoder().decode(QualityConfig.self, from: Data("{}".utf8))
+        #expect(legacy.coneMarchStrength == 0.84)
+    }
+
+    @Test("cone marching supports the extended 200 percent range")
+    func coneMarchingExtendedRange() {
+        #expect(ControlCatalog.coneMarchStrength.range == 0.0...2.0)
+
+        var config = QualityConfig()
+        config.coneMarchStrength = 1.5
+        config.clamp()
+        #expect(config.coneMarchStrength == 1.5)
+
+        config.coneMarchStrength = 3.0
+        config.clamp()
+        #expect(config.coneMarchStrength == 2.0)
+
+        let projection = RenderPrecompute.makePerspectiveProjection(
+            fovyRadians: .pi / 2,
+            aspect: 1,
+            nearZ: 0.1,
+            farZ: 500
+        )
+        let formerMaximum = RenderPrecompute.coneMarchScale(
+            strength: 1,
+            projection: projection,
+            viewportHeight: 1_000
+        )
+        let extendedMaximum = RenderPrecompute.coneMarchScale(
+            strength: 2,
+            projection: projection,
+            viewportHeight: 1_000
+        )
+        #expect(abs(extendedMaximum - formerMaximum * 2) < 1e-8)
+    }
+
     @Test("render quality rejects non-finite values")
     func renderQualitySanitization() {
         #expect(QualityConfig.clampedVisionRenderQuality(.nan) == QualityConfig.visionDefaultRenderQuality)

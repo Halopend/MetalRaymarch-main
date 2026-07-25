@@ -31,6 +31,8 @@ extension Renderer {
     func updateHandTracking(atTime time: TimeInterval) {
         guard let ht = handTracking else {
             clearHandAttractionTrackingState()
+            clearSpatialRadialTrackingState(atTime: time)
+            updateSpatialRadialHandInteraction(with: nil)
             // Log once if handTracking provider is nil (should never happen after init)
             if !hasLoggedHandTrackingNil {
                 hasLoggedHandTrackingNil = true
@@ -42,6 +44,8 @@ extension Renderer {
         // Only process if hand tracking is running
         guard ht.state == .running else {
             clearHandAttractionTrackingState()
+            clearSpatialRadialTrackingState(atTime: time)
+            updateSpatialRadialHandInteraction(with: nil)
             // Throttled log for non-running state (once per 5 seconds)
             if time - lastHandTrackingStateLogTime > 5.0 {
                 lastHandTrackingStateLogTime = time
@@ -78,6 +82,9 @@ extension Renderer {
                 timestamp: time,
                 deltaTime: gestureUpdateDelta
             )
+            spatialHandTrackingIsRunning = true
+            latestSpatialHandPose = extracted
+            updateSpatialRadialHandInteraction(with: extracted)
 
             // The exact same extracted snapshot feeds attraction and recognition.
             lastLeftHandPalmPosition = extracted.leftHand.palmPosition
@@ -141,6 +148,21 @@ extension Renderer {
                 }
 
                 let output = await processor.process(snapshot)
+                let requestsSpatialMenu = output.commands.contains { command in
+                    switch command {
+                    case .toggleRadialMenu, .selectRoute:
+                        return true
+                    case .openAnimationEditor, .dismissRadialMenu,
+                         .resetViewport, .toggleAnimationPlayback:
+                        return false
+                    }
+                }
+                if requestsSpatialMenu {
+                    await self.captureSpatialRadialActivationPose(
+                        snapshot,
+                        hand: output.menuActivationHand
+                    )
+                }
                 if !output.parameterOperations.isEmpty {
                     parameterPipeline.dispatchGesture(
                         output.parameterOperations,

@@ -144,6 +144,41 @@ struct RadialNavigationProjectionTests {
         #expect(projection.reconciledPath(["root", "section.1"]) == ["root", "section.1"])
     }
 
+    @Test("Activating an expanded branch collapses exactly that level")
+    func expandedBranchActivationRetreatsOneLevel() {
+        #expect(RadialNavigationPathPolicy.activatingBranch(
+            nodeID: "shape.parameters",
+            depth: 1,
+            in: ["root.shape", "shape.parameters", "parameters.formula"]
+        ) == ["root.shape"])
+
+        // The pre-opened workspace root is the first Mac radial level. It must
+        // be collapsible by clicking its selected pill instead of being a no-op.
+        #expect(RadialNavigationPathPolicy.activatingBranch(
+            nodeID: "root.shape",
+            depth: 0,
+            in: ["root.shape"]
+        ).isEmpty)
+    }
+
+    @Test("Activating a sibling replaces only that depth and stale descendants")
+    func siblingBranchActivationReplacesTail() {
+        #expect(RadialNavigationPathPolicy.activatingBranch(
+            nodeID: "shape.transformations",
+            depth: 1,
+            in: ["root.shape", "shape.parameters", "parameters.formula"]
+        ) == ["root.shape", "shape.transformations"])
+    }
+
+    @Test("Back removes one visible radial ring independent of focus")
+    func radialBackAlwaysRetreatsOneLevel() {
+        #expect(RadialNavigationPathPolicy.retreating(
+            from: ["root.shape", "shape.parameters", "parameters.formula"]
+        ) == ["root.shape", "shape.parameters"])
+        #expect(RadialNavigationPathPolicy.retreating(from: ["root.shape"]) == [])
+        #expect(RadialNavigationPathPolicy.retreating(from: []) == nil)
+    }
+
     @Test("Compact overflow is an explicit full-controls fallback")
     func compactOverflowFallback() {
         var clicked = false
@@ -407,18 +442,21 @@ struct RadialNavigationProjectionTests {
             let state = TransformStackState([op])
             let branch = transformBranch(op, state: state)
             let expectedCount = 1
-                + (kind == .coxeter ? 0 : 1)
+                + 1
                 + kind.params.count
                 + (kind.toggle == nil ? 0 : 1)
+                + (kind.sourceAngle == nil ? 0 : 1)
                 + (kind.usesAxis ? 3 : 0)
 
             #expect(branch.children.count == expectedCount)
             #expect(branch.title == "1 · \(kind.displayName)")
             #expect(branch.children.first?.title == "Enabled")
 
-            if kind != .coxeter {
-                let strength = branch.children.first(where: { $0.title == kind.amountLabel })
-                #expect(strength?.slider?.range == kind.strengthRange)
+            let strength = branch.children.first(where: { $0.title == kind.amountLabel })
+            #expect(strength?.slider?.range == kind.strengthRange)
+            if let sourceAngle = kind.sourceAngle {
+                let angle = branch.children.first(where: { $0.title == sourceAngle.label })
+                #expect(angle?.slider?.range == sourceAngle.range)
             }
             for spec in kind.params {
                 let parameter = branch.children.first(where: { $0.title == spec.label })
@@ -503,11 +541,18 @@ struct RadialNavigationProjectionTests {
         let state = TransformStackState([coxeter, kaleidoscope])
 
         let coxeterBranch = transformBranch(coxeter, position: 0, state: state)
+        let mirror = coxeterBranch.children.first(where: { $0.title == "Mirror" })!.slider!
         let p = coxeterBranch.children.first(where: { $0.title == "p" })!.slider!
+        let sourceAngle = coxeterBranch.children.first(where: { $0.title == "Source Angle" })!.slider!
+        mirror.writeIfEnabled(0.4)
+        #expect(state.read(coxeter.id)?.strength == 0.4)
         p.step(by: 1)
         #expect(state.read(coxeter.id)?.p1 == 6)
         p.writeIfEnabled(99)
         #expect(state.read(coxeter.id)?.p1 == 8)
+        sourceAngle.writeIfEnabled(.pi / 2)
+        #expect(abs((state.read(coxeter.id)?.axis.z ?? 0) - .pi / 2) < 1e-5)
+        #expect(sourceAngle.format(.pi / 2) == "90°")
 
         let kaleidoscopeBranch = transformBranch(kaleidoscope, position: 1, state: state)
         let segments = kaleidoscopeBranch.children.first(where: { $0.title == "Segments" })!.slider!

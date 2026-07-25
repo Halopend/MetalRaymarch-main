@@ -321,6 +321,13 @@ class AppModel {
     let errorReporter = ErrorReporter()
 
     var pendingExternalImport: ExternalFileImportRequest?
+    /// Non-nil while an externally opened Threshold file is being read and
+    /// decoded. External scenes can be large enough that synchronous parsing
+    /// looks like an application hang, so ContentView presents a progress
+    /// overlay while AppModel performs that work off the main actor.
+    var externalImportLoadingFileName: String?
+    @ObservationIgnored var externalImportDecodeTask: Task<Void, Never>?
+    @ObservationIgnored var externalImportDecodeGeneration: UInt64 = 0
     @ObservationIgnored var externalPreviewRestorePreset: FractalPreset?
     @ObservationIgnored var externalPreviewRestoreScene: AnimationScene?
     @ObservationIgnored var externalPreviewRestoreEmbeddedFormula: EmbeddedFormula?
@@ -331,12 +338,16 @@ class AppModel {
     // Animation/Scene playback manager
     var animationManager: AnimationManager?
     
-    // Menu window visibility (toggled by gesture).
-    // The window is physically dismissed when closed; visionOS currently preserves
-    // its placement when reopened, which keeps the user's chosen location intact.
+    // Menu window visibility acknowledged by the window scene lifecycle.
+    // Gesture requests do not mutate this optimistically because openWindow and
+    // dismissWindow provide no success result.
     var isMenuWindowVisible: Bool = true
     var isSpatialMenuVisible: Bool = false
     var isMenuInteractionActive: Bool = false
+    /// Monotonic token shared by the MainActor presentation edge and Renderer.
+    /// It makes rapid open/close/open requests last-writer-wins even though the
+    /// renderer calls cross an actor boundary.
+    @ObservationIgnored var spatialMenuPresentationGeneration: UInt64 = 0
     @ObservationIgnored private(set) var activeResetPreset: FractalPreset?
 
     @ObservationIgnored private let menuWindowRetoggleGuardInterval: CFTimeInterval = 0.45
@@ -921,6 +932,16 @@ class AppModel {
         refreshMenuInteractionState()
     }
 
+    /// Window-scene lifecycle acknowledgement. An `openWindow` request has no
+    /// success result, so visibility only becomes true when SwiftUI confirms
+    /// that the scene's content actually appeared.
+    func markMenuWindowPresented() {
+        isMenuWindowVisible = true
+        lastMenuWindowOpenedAt = CACurrentMediaTime()
+        refreshMenuInteractionState()
+    }
+
+    /// Window-scene lifecycle acknowledgement for a completed dismissal.
     func markMenuWindowDismissed() {
         isMenuWindowVisible = false
         isMenuHovering = false
@@ -943,6 +964,48 @@ class AppModel {
         }
         isSpatialMenuVisible = visible
         refreshMenuInteractionState()
+    }
+
+    func beginSpatialMenuPresentationRequest() -> UInt64 {
+        spatialMenuPresentationGeneration &+= 1
+        return spatialMenuPresentationGeneration
+    }
+
+    func isCurrentSpatialMenuPresentationRequest(_ generation: UInt64) -> Bool {
+        spatialMenuPresentationGeneration == generation
+    }
+
+    /// Resolves a terminal spatial-menu selection through the same canonical
+    /// hierarchy and NavigationStore activation seam as the Mac radial menu.
+    /// Renderer passes the target from its exact immutable hierarchy snapshot,
+    /// so a runtime availability change cannot strand menu input ownership.
+    @MainActor
+    func activateSpatialNavigationTarget(_ target: AppNavigationTarget) {
+        // Release hand-input ownership before any fallible route work.
+        setSpatialMenuVisible(false)
+        dismissSpatialMenuHandler?()
+
+        switch navigationStore.activate(target) {
+        case .openAnimationEditor:
+            if animationManager?.currentScene == nil {
+                animationManager?.currentScene = animationManager?.scenes.first
+            }
+            if let openAnimationEditorHandler {
+                openAnimationEditorHandler()
+            } else {
+                // A missing native window seam must never strand the selection.
+                revealMenuWindowForSpatialNavigation()
+            }
+        case .toggleAnimationPlayback:
+            toggleAnimationPlayback()
+        case .toggleRadialMenu, .dismissRadialMenu, .resetViewport,
+             .selectRoute:
+            revealMenuWindowForSpatialNavigation()
+        case nil:
+            // Route targets are reduced by NavigationStore and displayed in the
+            // conventional controls window.
+            revealMenuWindowForSpatialNavigation()
+        }
     }
 
     /// Spatial leaves call this before routing to a dense destination. If the
@@ -1159,8 +1222,10 @@ class AppModel {
     }
 
     private func showMenuWindow(reason: String) {
-        isMenuWindowVisible = true
-        lastMenuWindowOpenedAt = CACurrentMediaTime()
+        // `openWindow` is a fire-and-forget request. Keep the lifecycle-backed
+        // visibility false until the window scene's onAppear confirms presentation;
+        // if the system declines or delays the request, the next gesture can
+        // retry instead of taking the stale "close" branch.
         openMenuWindowHandler?()
         refreshMenuInteractionState()
     }
@@ -1175,7 +1240,6 @@ class AppModel {
             return
         }
 
-        isMenuWindowVisible = false
         isMenuHovering = false
         menuAdjustmentDepth = 0
         // Truly dismiss the window so it actually closes — no lingering, invisible
@@ -1188,7 +1252,11 @@ class AppModel {
         // Trade-off the prior opacity-hide avoided: dismiss tears down the heavy
         // ContentView and the reopen rebuilds it on the main thread, which can briefly
         // hitch the @MainActor hand-gesture task. If that reopen hitch is noticeable in
-        // use, revert to the opacity-hide (drop this call, keep isMenuWindowVisible).
+        // use, revert to the opacity-hide (drop this call).
+        //
+        // Visibility remains true until the window scene's onDisappear callback
+        // confirms teardown. If dismissal is declined, the next gesture retries
+        // the close request instead of assuming the window vanished.
         dismissMenuWindowHandler?()
         refreshMenuInteractionState()
     }
@@ -1273,6 +1341,7 @@ class AppModel {
     }
 
     deinit {
+        externalImportDecodeTask?.cancel()
         storageWatcherObservers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 

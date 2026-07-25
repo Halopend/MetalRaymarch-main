@@ -49,6 +49,8 @@ final class AnimationManager {
     private struct SceneScanRequest: @unchecked Sendable {
         let root: URL
         let cachedFiles: [URL: CachedSceneFile]
+        let allowsPlaceholderProbe: Bool
+        let failedPlaceholderProbeURLs: Set<URL>
     }
 
     private struct SceneScanResult: @unchecked Sendable {
@@ -58,12 +60,15 @@ final class AnimationManager {
         let decodedCount: Int
         let reusedCount: Int
         let pendingDownloadCount: Int
+        let retryablePlaceholderCount: Int
+        let failedPlaceholderProbeURLs: Set<URL>
         let cancelled: Bool
     }
 
     @ObservationIgnored private var sceneFileCache: [URL: CachedSceneFile] = [:]
     @ObservationIgnored private var userSceneReloadTask: Task<Void, Never>?
     @ObservationIgnored private var userSceneReloadGeneration: UInt64 = 0
+    @ObservationIgnored private var failedPlaceholderProbeURLs: Set<URL> = []
     @ObservationIgnored private var pendingRootWrites: [UUID: AnimationScene] = [:]
     private static let sceneReloadDebounce: Duration = .milliseconds(350)
 
@@ -90,6 +95,7 @@ final class AnimationManager {
         let resourceKeys: Set<URLResourceKey> = [
             .contentModificationDateKey,
             .fileSizeKey,
+            .fileAllocatedSizeKey,
             .isUbiquitousItemKey,
             .ubiquitousItemDownloadingStatusKey
         ]
@@ -100,7 +106,10 @@ final class AnimationManager {
         ) else {
             return SceneScanResult(
                 scenes: [], cachedFiles: [:], fileCount: 0, decodedCount: 0,
-                reusedCount: 0, pendingDownloadCount: 0, cancelled: false
+                reusedCount: 0, pendingDownloadCount: 0,
+                retryablePlaceholderCount: 0,
+                failedPlaceholderProbeURLs: request.failedPlaceholderProbeURLs,
+                cancelled: false
             )
         }
 
@@ -111,6 +120,9 @@ final class AnimationManager {
         var decodedCount = 0
         var reusedCount = 0
         var pendingDownloadCount = 0
+        var retryablePlaceholderCount = 0
+        var didProbePlaceholder = false
+        var failedPlaceholderProbeURLs = request.failedPlaceholderProbeURLs
         let sceneURLs = files
             .filter { exts.contains($0.pathExtension) }
             .sorted { $0.path < $1.path }
@@ -120,7 +132,10 @@ final class AnimationManager {
                 return SceneScanResult(
                     scenes: [], cachedFiles: request.cachedFiles, fileCount: sceneURLs.count,
                     decodedCount: decodedCount, reusedCount: reusedCount,
-                    pendingDownloadCount: pendingDownloadCount, cancelled: true
+                    pendingDownloadCount: pendingDownloadCount,
+                    retryablePlaceholderCount: retryablePlaceholderCount,
+                    failedPlaceholderProbeURLs: failedPlaceholderProbeURLs,
+                    cancelled: true
                 )
             }
 
@@ -132,21 +147,6 @@ final class AnimationManager {
             )
             let cached = request.cachedFiles[url]
 
-            // Request an iCloud download and return immediately. Reading here
-            // would synchronously block until File Provider hydrated the file.
-            // NSMetadataQuery sends another coalesced update when it is ready.
-            if values?.isUbiquitousItem == true,
-               values?.ubiquitousItemDownloadingStatus != .current {
-                try? FileManager.default.startDownloadingUbiquitousItem(at: url)
-                pendingDownloadCount += 1
-                if let cached {
-                    newCache[url] = cached
-                    byID[cached.scene.id] = cached.scene
-                    reusedCount += 1
-                }
-                continue
-            }
-
             if let cached, cached.signature == signature {
                 newCache[url] = cached
                 byID[cached.scene.id] = cached.scene
@@ -154,9 +154,58 @@ final class AnimationManager {
                 continue
             }
 
+            let downloadStatus = values?.ubiquitousItemDownloadingStatus
+            let requiresHydration = StorePlaceholderReadPolicy.requiresHydration(
+                isUbiquitous: values?.isUbiquitousItem == true,
+                downloadStatus: downloadStatus
+            )
+            var isPlaceholderProbe = false
+
+            // Unknown File Provider status is common on macOS. Probe at most one
+            // small scene per detached pass; large recordings are only read after
+            // File Provider reports them downloaded or gives them local allocation.
+            if requiresHydration {
+                try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+                pendingDownloadCount += 1
+
+                let canProbe = request.allowsPlaceholderProbe &&
+                    !didProbePlaceholder &&
+                    !failedPlaceholderProbeURLs.contains(url) &&
+                    StorePlaceholderReadPolicy.canProbeUnknownStatus(
+                        downloadStatus: downloadStatus,
+                        fileSize: values?.fileSize,
+                        allocatedSize: values?.fileAllocatedSize,
+                        maximumSize: 1 * 1_024 * 1_024
+                    )
+                if canProbe {
+                    didProbePlaceholder = true
+                    isPlaceholderProbe = true
+                } else {
+                    if let cached {
+                        newCache[url] = cached
+                        byID[cached.scene.id] = cached.scene
+                        reusedCount += 1
+                    }
+                    if downloadStatus == nil,
+                       !failedPlaceholderProbeURLs.contains(url),
+                       StorePlaceholderReadPolicy.canProbeUnknownStatus(
+                           downloadStatus: downloadStatus,
+                           fileSize: values?.fileSize,
+                           allocatedSize: values?.fileAllocatedSize,
+                           maximumSize: 1 * 1_024 * 1_024
+                       ) {
+                        retryablePlaceholderCount += 1
+                    }
+                    continue
+                }
+            }
+
             guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
                   let scene = try? decoder.decode(AnimationScene.self, from: data),
                   !DefaultScenes.isDefault(scene.id) else {
+                if isPlaceholderProbe {
+                    failedPlaceholderProbeURLs.insert(url)
+                }
                 // Keep the last known-good value if a coordinated external write
                 // was observed between directory enumeration and the read.
                 if let cached {
@@ -187,6 +236,8 @@ final class AnimationManager {
             decodedCount: decodedCount,
             reusedCount: reusedCount,
             pendingDownloadCount: pendingDownloadCount,
+            retryablePlaceholderCount: retryablePlaceholderCount,
+            failedPlaceholderProbeURLs: failedPlaceholderProbeURLs,
             cancelled: false
         )
     }
@@ -278,7 +329,10 @@ final class AnimationManager {
         guard let request = makeSceneScanRequest() else {
             applySceneScanResult(.init(
                 scenes: [], cachedFiles: [:], fileCount: 0, decodedCount: 0,
-                reusedCount: 0, pendingDownloadCount: 0, cancelled: false
+                reusedCount: 0, pendingDownloadCount: 0,
+                retryablePlaceholderCount: 0,
+                failedPlaceholderProbeURLs: [],
+                cancelled: false
             ), reason: "immediate")
             return
         }
@@ -287,7 +341,14 @@ final class AnimationManager {
         applySceneScanResult(result, reason: "immediate")
     }
 
-    private func scheduleUserSceneReload(reason: String, immediate: Bool = false) {
+    private func scheduleUserSceneReload(
+        reason: String,
+        immediate: Bool = false,
+        allowsPlaceholderProbe: Bool = false
+    ) {
+        if !allowsPlaceholderProbe {
+            failedPlaceholderProbeURLs = []
+        }
         userSceneReloadGeneration &+= 1
         let generation = userSceneReloadGeneration
         userSceneReloadTask?.cancel()
@@ -301,7 +362,9 @@ final class AnimationManager {
                 }
             }
             guard !Task.isCancelled, let self,
-                  let request = self.makeSceneScanRequest() else { return }
+                  let request = self.makeSceneScanRequest(
+                    allowsPlaceholderProbe: allowsPlaceholderProbe
+                  ) else { return }
             let result = await self.performSceneScan(request)
             guard !Task.isCancelled, !result.cancelled,
                   generation == self.userSceneReloadGeneration else { return }
@@ -309,9 +372,16 @@ final class AnimationManager {
         }
     }
 
-    private func makeSceneScanRequest() -> SceneScanRequest? {
+    private func makeSceneScanRequest(
+        allowsPlaceholderProbe: Bool = false
+    ) -> SceneScanRequest? {
         guard let root = storeRoot else { return nil }
-        return SceneScanRequest(root: root, cachedFiles: sceneFileCache)
+        return SceneScanRequest(
+            root: root,
+            cachedFiles: sceneFileCache,
+            allowsPlaceholderProbe: allowsPlaceholderProbe,
+            failedPlaceholderProbeURLs: failedPlaceholderProbeURLs
+        )
     }
 
     private func performSceneScan(_ request: SceneScanRequest) async -> SceneScanResult {
@@ -327,14 +397,22 @@ final class AnimationManager {
 
     private func applySceneScanResult(_ result: SceneScanResult, reason: String) {
         sceneFileCache = result.cachedFiles
+        failedPlaceholderProbeURLs = result.failedPlaceholderProbeURLs
         if userScenes != result.scenes {
             withSceneRebuildBatch { userScenes = result.scenes }
         }
         print(
             "📂 Scene scan [\(reason)]: files=\(result.fileCount), " +
             "decoded=\(result.decodedCount), reused=\(result.reusedCount), " +
-            "pending=\(result.pendingDownloadCount)"
+            "pending=\(result.pendingDownloadCount), " +
+            "retryable=\(result.retryablePlaceholderCount)"
         )
+        if result.retryablePlaceholderCount > 0 {
+            scheduleUserSceneReload(
+                reason: "placeholder-probe",
+                allowsPlaceholderProbe: true
+            )
+        }
     }
 
     /// One-time migration of the legacy single-blob animation_scenes.json into the

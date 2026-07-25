@@ -231,10 +231,10 @@ final class RenderSettings: @unchecked Sendable {
     // Mac renders into a full native Retina drawable; at 1.0 the MetalFX upscale
     // path is bypassed entirely (`resolutionScale < 0.985` gate in the renderer),
     // so the raymarch pays for every backing-store pixel and the GPU is pixel-bound.
-    // Default to a 0.75 input scale (~56% of the pixels) and let MetalFX reconstruct
+    // Default to a 0.50 input scale (25% of the pixels) and let MetalFX reconstruct
     // to native. This value is the exact manual target; automatic resolution remains
     // a separate, explicitly labelled visionOS compositor option.
-    private var _resolutionScale: Float = 0.75      // Mac: MetalFX upscale on by default
+    private var _resolutionScale: Float = 0.50      // Mac: MetalFX upscale on by default
     #elseif os(visionOS)
     private var _resolutionScale: Float = 1.0       // Vision Pro: unused; compositor Render Quality is the resolution control
     #else
@@ -252,7 +252,9 @@ final class RenderSettings: @unchecked Sendable {
     private var _foveationStrength: Float = loadFloat("foveationStrength", default: 0.0)  // Peripheral step reduction on the 8x8 compute path (0 = off)
     private var _smartAdvanceEnabled: Bool = loadBool("smartAdvanceEnabled", default: false)  // Experimental grazing-aware lead-ahead sphere tracing
     private var _adaptiveRenderQualityEnabled: Bool = loadBool("adaptiveRenderQualityEnabled", default: true)  // visionOS: auto-lower compositor Render Quality to hold FPS (slider = ceiling)
-    private var _coneMarchStrength: Float = loadFloat("coneMarchStrength", default: 0.0)  // 0 = off; scales the distance-growing hit threshold (projected pixel footprint, ConeMarchingPen)
+    private var _coneMarchStrength: Float = ControlCatalog.coneMarchStrength.clamp(
+        loadFloat("coneMarchStrength", default: QualityConfig.defaultConeMarchStrength)
+    )  // 0 = off; defaults to 84%, with an extended range up to 200%
     private var _coneCoverageAAEnabled: Bool = loadBool("coneCoverageAAEnabled", default: false)  // CTSS-lite silhouette AA from the cone footprint (fragment path); lets Cone Marching run harder without blobby edges
     // ── Per-scene performance PROFILE (set by FractalPreset.apply on scene load;
     // NOT part of the device-local Quality domain / never persisted to UserDefaults).
@@ -1178,6 +1180,14 @@ final class RenderSettings: @unchecked Sendable {
     var fractalType: FractalModelType {
         get { withLock { _fractalType } }
         set {
+            // UserDefaults can synchronously deliver notifications. Resolve the
+            // persisted replacement before taking the renderer lock, and defer
+            // saving the outgoing snapshot until after releasing it.
+            let restoredBindings = PerFractalGestureStore.load(for: newValue)
+            var outgoingBindings: (
+                bindings: [String: GestureActionBinding],
+                fractalType: FractalModelType
+            )?
             withLock {
                 let oldValue = _fractalType
                 _fractalType = newValue
@@ -1187,10 +1197,10 @@ final class RenderSettings: @unchecked Sendable {
                 // ── Per-fractal gesture binding save / restore ───────────
                 // Save current gesture bindings under the old fractal type.
                 if oldValue != newValue, _persistenceSuppressionDepth == 0 {
-                    PerFractalGestureStore.save(_gestureBindings, for: oldValue)
+                    outgoingBindings = (_gestureBindings, oldValue)
                 }
                 // Try to restore saved bindings for the new fractal type.
-                if let saved = PerFractalGestureStore.load(for: newValue) {
+                if let saved = restoredBindings {
                     _gestureBindings = saved
                 }
 
@@ -1344,6 +1354,12 @@ final class RenderSettings: @unchecked Sendable {
                     }
                 }
             }
+            if let outgoingBindings {
+                PerFractalGestureStore.save(
+                    outgoingBindings.bindings,
+                    for: outgoingBindings.fractalType
+                )
+            }
         }
     }
 
@@ -1455,7 +1471,7 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    /// Cone marching strength (0...1, 0 = off). Scales how far the march
+    /// Cone marching strength (0...2, 0 = off). Scales how far the march
     /// acceptance threshold grows with ray distance, so a ray stops once the
     /// distance field is within ~N projected pixels of footprint (after Mansour's
     /// ConeMarchingPen). Higher = distant geometry resolves in far fewer steps
@@ -1850,6 +1866,10 @@ final class RenderSettings: @unchecked Sendable {
         // Validate binding is appropriate for the hand mode
         let validated = Self.validated(binding, forHandMode: slot.hand)
         let key = slot.persistenceKey
+        var perFractalSnapshot: (
+            bindings: [String: GestureActionBinding],
+            fractalType: FractalModelType
+        )?
         withLock {
             _gestureBindings[key] = validated
             // ── Mutual exclusion: single-hand vs two-hand ──────────────
@@ -1877,13 +1897,17 @@ final class RenderSettings: @unchecked Sendable {
                     }
                 }
             }
+            if _persistenceSuppressionDepth == 0 {
+                perFractalSnapshot = (_gestureBindings, _fractalType)
+            }
         }
         persistGesture()
         // Also save bindings under the current fractal type for per-fractal restore.
-        if !persistenceIsSuppressed {
-            withLock {
-                PerFractalGestureStore.save(_gestureBindings, for: _fractalType)
-            }
+        if let perFractalSnapshot {
+            PerFractalGestureStore.save(
+                perFractalSnapshot.bindings,
+                for: perFractalSnapshot.fractalType
+            )
         }
     }
 
@@ -4539,7 +4563,9 @@ final class RenderSettings: @unchecked Sendable {
                 _foveationStrength = newValue.foveationStrength
                 _smartAdvanceEnabled = newValue.smartAdvanceEnabled
                 _adaptiveRenderQualityEnabled = newValue.adaptiveRenderQualityEnabled
-                _coneMarchStrength = max(0.0, min(1.0, newValue.coneMarchStrength))
+                _coneMarchStrength = ControlCatalog.coneMarchStrength.clamp(
+                    newValue.coneMarchStrength
+                )
                 _coneCoverageAAEnabled = newValue.coneCoverageAAEnabled
                 _overRelaxationMax = max(1.0, min(1.6, newValue.overRelaxationMax))
                 _distanceLODStrength = max(0.0, min(1.0, newValue.distanceLODStrength))

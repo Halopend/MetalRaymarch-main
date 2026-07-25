@@ -95,7 +95,7 @@ enum SceneQualityTarget: String, Codable, CaseIterable, Sendable {
     /// Mac / iOS MetalFX input-scale target (`resolutionScale`, 0.33…1.0).
     var macResolutionScale: Float {
         switch self {
-        case .standard: return 0.75   // platform default
+        case .standard: return 0.5    // platform default
         case .high:     return 1.0    // native input
         case .ultra:    return 1.0    // Mac tops out at native
         }
@@ -128,6 +128,15 @@ enum SceneQualityTarget: String, Codable, CaseIterable, Sendable {
 }
 
 struct QualityConfig: Codable, Equatable, Sendable {
+    /// Default cone-marching strength for the opening scene on a fresh install.
+    /// Kept in one place so RenderSettings, Codable migration, and UI reset agree.
+    static let defaultConeMarchStrength: Float = 0.84
+
+    /// Upper end of the Cone Marching control. Values above 1 intentionally
+    /// extend the footprint beyond the former 100% ceiling for aggressive
+    /// performance/quality evaluation.
+    static let maximumConeMarchStrength: Float = 2.0
+
     /// visionOS compositor render-quality ceiling. Single source of truth for both
     /// `configuration.maxRenderQuality` (set at layer creation — governs drawable
     /// texture memory) and the Render Quality slider's top. 0.7 keeps the compositor
@@ -206,14 +215,14 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // over-relaxation, and measured wins vary with the scene's ray mix, so opt in.
     var smartAdvanceEnabled: Bool = false
 
-    // Cone marching strength (0...1): grow the march hit-threshold with ray
+    // Cone marching strength (0...2): grow the march hit-threshold with ray
     // distance so each ray stops once the distance field falls within ~N pixels
     // of its projected footprint (after Mansour's ConeMarchingPen). 0 = off.
     // Higher = far geometry resolves in far fewer steps (faster) at the cost of
     // softening distant detail; near geometry always keeps full sharpness. The
     // baseline march is already a ~1-pixel cone, so meaningful strength scales the
-    // footprint up to ~16 px. Works on every render path.
-    var coneMarchStrength: Float = 0.0
+    // footprint up to 12 px. Works on every render path.
+    var coneMarchStrength: Float = Self.defaultConeMarchStrength
 
     // Cone-coverage anti-aliasing (CTSS-lite). Derives a silhouette edge-coverage
     // alpha from the cone footprint at the closest lateral approach and composites
@@ -370,7 +379,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         coarsePrepassWarmStartEnabled = try c.decodeIfPresent(Bool.self, forKey: .coarsePrepassWarmStartEnabled) ?? false
         foveationStrength     = try c.decodeIfPresent(Float.self, forKey: .foveationStrength)     ?? 0.0
         smartAdvanceEnabled   = try c.decodeIfPresent(Bool.self,  forKey: .smartAdvanceEnabled)   ?? false
-        coneMarchStrength     = try c.decodeIfPresent(Float.self, forKey: .coneMarchStrength)     ?? 0.0
+        coneMarchStrength     = try c.decodeIfPresent(Float.self, forKey: .coneMarchStrength)     ?? Self.defaultConeMarchStrength
         coneCoverageAAEnabled = try c.decodeIfPresent(Bool.self,  forKey: .coneCoverageAAEnabled) ?? false
         overRelaxationMax     = try c.decodeIfPresent(Float.self, forKey: .overRelaxationMax)     ?? 1.4
         distanceLODStrength   = try c.decodeIfPresent(Float.self, forKey: .distanceLODStrength)   ?? 0.0

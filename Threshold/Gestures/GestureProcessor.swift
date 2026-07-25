@@ -16,6 +16,37 @@
 import Foundation
 import simd
 
+/// Resolves application-command ownership when independent recognizers observe
+/// the same hand pose. Recovery-menu presentation is authoritative from initial
+/// recognition through release; per-finger shortcuts resume after that pose.
+enum GestureCommandArbitration {
+    static func commands(
+        tapOperations: [GestureOperation],
+        menuOperations: [GestureOperation],
+        recoveryPoseClaimed: Bool
+    ) -> [AppCommand] {
+        if menuOperations.contains(.toggleMenu) {
+            return [.toggleRadialMenu]
+        }
+        guard !recoveryPoseClaimed else { return [] }
+
+        return tapOperations.compactMap { operation in
+            switch operation {
+            case .toggleAnimationPlayer:
+                return .toggleAnimationPlayback
+            case .openShapeMenu:
+                return .selectRoute(.shape(.parameters))
+            case .openRenderMenu:
+                return .selectRoute(.quality(.tuning))
+            case .openQuickToggles:
+                return .selectRoute(.quickToggles)
+            case .toggleMenu, .trackGestureUsage:
+                return nil
+            }
+        }
+    }
+}
+
 // MARK: - Gesture Processor
 
 /// Processes hand tracking data and maps gestures to render parameters
@@ -108,6 +139,9 @@ actor GestureProcessor {
     }
 
     func setParameterGesturesSuppressed(_ suppressed: Bool) {
+        if suppressed && !suppressParameterGestures {
+            perFingerTapEngine.reset()
+        }
         suppressParameterGestures = suppressed
     }
 
@@ -167,40 +201,41 @@ actor GestureProcessor {
         // Update cooldown timers in engine states
         grabEngine.tick(deltaTime: deltaTime)
         
-        // Process all gesture mappings (sets targets on RenderSettings)
-        processGestures()
-        
-        // Process special gestures
         let context = GestureContext(leftHand: leftHand, rightHand: rightHand, deltaTime: deltaTime)
 
-        var commands: [AppCommand] = []
-        // Run per-finger tap engine. It cannot emit the recovery-menu command.
-        let tapOps = perFingerTapEngine.process(context: context)
-        for op in tapOps {
-            switch op {
-            case .toggleMenu: break
-            case .toggleAnimationPlayer:
-                commands.append(.toggleAnimationPlayback)
-            case .openShapeMenu:
-                commands.append(.selectRoute(.shape(.parameters)))
-            case .openRenderMenu:
-                commands.append(.selectRoute(.quality(.tuning)))
-            case .openQuickToggles:
-                commands.append(.selectRoute(.quickToggles))
-            default:
-                break
-            }
-        }
-
-        // The recovery engine always runs, including during parameter suppression.
+        // Evaluate recovery-menu ownership before scene gestures. This keeps the
+        // activation/debounce frames from also changing geometry or parameters.
         let menuOps = menuToggleEngine.process(context: context, configuration: configuration)
+        let recoveryPoseClaimed = menuToggleEngine.isClaimingPose
+        processGestures(forceSuppressed: recoveryPoseClaimed)
+
+        // Run both menu-related recognizers before dispatching either result.
+        // The dedicated recovery gesture owns menu presentation for its full
+        // hysteresis-delimited pose. Discard per-finger shortcuts while claimed
+        // so a delayed tap cannot open a route after toggling its window.
+        if recoveryPoseClaimed {
+            perFingerTapEngine.reset()
+        }
+        let tapOps = (suppressParameterGestures || recoveryPoseClaimed)
+            ? []
+            : perFingerTapEngine.process(context: context)
+        let commands = GestureCommandArbitration.commands(
+            tapOperations: tapOps,
+            menuOperations: menuOps,
+            recoveryPoseClaimed: recoveryPoseClaimed
+        )
+        let menuActivationHand: GestureHandMode?
         if menuOps.contains(.toggleMenu) {
-            commands.append(.toggleRadialMenu)
+            menuActivationHand = menuToggleEngine.lastActivationHand
+        } else if commands.contains(where: \.presentsSpatialMenu) {
+            menuActivationHand = perFingerTapEngine.lastMenuActivationHand
+        } else {
+            menuActivationHand = nil
         }
 
         let didCompleteArmGesture = armSliderEngine.process(
             context: context,
-            parametersSuppressed: suppressParameterGestures,
+            parametersSuppressed: suppressParameterGestures || recoveryPoseClaimed,
             grabActive: grabEngine.isActive,
             geometryGestureActive: renderSettings?.isGeometryGestureActive == true,
             renderMutations: &frameRenderMutations
@@ -219,6 +254,7 @@ actor GestureProcessor {
             parameterOperations: frameParameterOperations,
             renderMutations: frameRenderMutations,
             commands: commands,
+            menuActivationHand: menuActivationHand,
             diagnostics: GestureDiagnostics(
                 leftTracked: leftHand.isTracked,
                 rightTracked: rightHand.isTracked,
@@ -232,11 +268,11 @@ actor GestureProcessor {
 
     // MARK: - Gesture Processing
     
-    private func processGestures() {
+    private func processGestures(forceSuppressed: Bool = false) {
         guard let settings = renderSettings else { return }
         
         // ── Suppress parameter gestures while the user is interacting with the menu window ──
-        if suppressParameterGestures {
+        if suppressParameterGestures || forceSuppressed {
             for digit in 1...3 {
                 twoHandScalarEngine.deactivate(digit: digit)
             }
@@ -497,4 +533,16 @@ actor GestureProcessor {
         }
     }
     
+}
+
+private extension AppCommand {
+    var presentsSpatialMenu: Bool {
+        switch self {
+        case .toggleRadialMenu, .selectRoute:
+            return true
+        case .openAnimationEditor, .dismissRadialMenu,
+             .resetViewport, .toggleAnimationPlayback:
+            return false
+        }
+    }
 }

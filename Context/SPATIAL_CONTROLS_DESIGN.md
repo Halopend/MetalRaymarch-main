@@ -1,58 +1,62 @@
-# Spatial Controls
+# Planted Spatial Radial Controls
 
-Threshold's visionOS controls use the same application navigation tree as the
-2-D radial menu, keyboard traversal, and flat controls. The spatial presentation
-does not duplicate destination IDs or invent a second information architecture.
+Threshold's visionOS radial controls consume `NavigationHierarchy.application`,
+the same platform-neutral tree used by the Mac radial menu, keyboard traversal,
+and flat controls. The spatial presentation owns no destination IDs, labels,
+ordering, or route taxonomy.
 
-## Interaction model
+## Interaction contract
 
-- The existing menu gesture opens a volumetric root ring while immersive space
-  is active. Repeating it closes the volume.
-- Shape, Render, and Quick Toggles finger shortcuts focus their spatial
-  destination directly.
-- Gaze targets a glass attachment and pinch confirms it. A two-hand Z-axis
-  rotation gesture turns the ring. The center hub moves back one level or closes.
-- Branches remain in the volume. Dense terminal destinations reveal the existing
-  controls window and activate the same `NavigationHierarchy.Node` route.
-- Quick Toggles is a native spatial ring: Bounding Shape, Surroundings,
-  Self-Shadows, Smart Advance, and Audio Reactive update the live renderer
-  without reconstructing the flat controls.
-- Gestures is a native spatial map of the configured per-finger shortcuts. Its
-  cards identify hand, finger, and action, then follow the same spatial route as
-  the real shortcut.
+- A menu gesture captures the exact world-space center of the hand sample that
+  produced it. The menu frame (origin, upright basis, and head-facing normal) is
+  immutable until dismissal.
+- Later hand samples move a direct cursor through that planted frame. The menu
+  never follows the hand and never attaches to the selected fractal or another
+  scene object.
+- Azimuth selects a sibling. Crossing outward through the current commit radius
+  selects a branch or activates a leaf. Crossing inward through the retreat
+  radius returns one level.
+- The root ring is at 0.19 m and commits at 0.32 m. Descendant targets are at
+  0.46 m and commit at 0.54 m. Rendering and cursor motion are capped at 0.58 m,
+  keeping the deepest interaction within the intended 1.5–2 ft envelope.
+- Angular hysteresis prevents sibling chatter. A gaze-provided candidate may
+  break a tie only near the boundary between adjacent hand-selected sectors; it
+  can never commit a target or override unambiguous hand direction.
+- Losing hand tracking hides the cursor while leaving the planted menu fixed.
+  Reacquisition rearms radius crossings so a tracking jump cannot activate or
+  retreat accidentally.
+- While the menu owns input, scene-changing and per-finger shortcut gestures are
+  suppressed. The dedicated recovery/menu gesture remains active so the user can
+  always dismiss it.
 
-## Performance contract
+Shape, Render, and Quick Toggles shortcuts focus their existing hierarchy node.
+Terminal nodes route through `NavigationStore.activate`, preserving the same
+application behavior as every other navigation surface.
 
-- The volume is a separate `RealityView` window; the raymarch compositor loop is
-  unchanged.
-- Spatial layout has at most nine ordinary navigation attachments. Gesture and
-  quick-control modes replace that ring rather than layering another live ring.
-- The default volume is 72 x 84 x 24 cm. A full-rotation bounds test covers the
-  worst-case ten-card gesture map plus conservative attachment extents.
-- Ring placement evaluates four trigonometric functions per update, independent
-  of item count, then advances by a complex multiply.
-- RealityKit positions are written only when they actually change. Label/status
-  invalidations therefore do not fan out into redundant scene-graph transforms.
-- There is no display link, timer, or per-frame settings synchronization in the
-  spatial controls.
-- The one delayed task is a two-second presentation-failure watchdog. It clears
-  gesture suppression only if the matching volume request never reaches
-  `onAppear`; it performs no recurring work.
+## Rendering contract
 
-`SpatialRadialNavigationTests.layoutThroughput` exercises 20,000 complete
-nine-item layouts with a broad 500 ms regression ceiling. On the 2026-07-19
-development machine it completed in 36 ms in a Debug test build (~1.8 us per
-layout).
+The active renderer is an instanced Metal pass inside the existing
+`LayerRenderer` command buffer. It runs after the raymarch/MetalFX resolve and
+before the compositor's required drawable render-context pass. This avoids the
+separate `RealityView` sibling that previously delayed first-frame submission
+and made immersive startup unreliable.
 
-## Verification and next depth
+Cards, depth guides, hub, and direct-hand cursor are world-space quads projected
+with the drawable's raw world-to-clip matrices, independent of Threshold's
+fractal model transform. Labels come from one lazily-created Core Text atlas;
+one shared instance buffer is partitioned by the renderer's in-flight slot.
+Resources are initialized only when the already-running immersive renderer first
+receives a presentation request.
 
-Pure tests cover navigation/backtracking, focus semantics, 3-D separation,
-rotation rigidity, recurrence accuracy, gesture-map bounds, and layout
-throughput. The feature is compile-checked on
-visionOS, while shared model changes are built on macOS and iPadOS.
+The dormant `SpatialRadialMenuView` remains source-compatible for reference, but
+it is not mounted. The compositor pass is the production spatial presentation.
 
-The next depth is direct spatial scalar editing. It should project the existing
-`RadialSliderBinding` model into a bounded 3-D slider/knob attachment rather than
-adding new render-setting closures to the visionOS view. On-device validation
-must tune angular target spacing, window depth, and comfortable reach before
-that presentation replaces any dense terminal panels.
+## Verification
+
+`SpatialRadialNavigationTests` covers canonical branch/leaf routing, focused
+presentation, sibling replacement, immutable planting, world/local transforms,
+outward traversal, inward retreat, angular hysteresis, gaze tie-breaking,
+tracking-loss rearming, reach limits, layout separation, and layout throughput.
+
+The visionOS target compile-checks the compositor integration and Metal shader.
+The platform-neutral reducer tests run in the macOS test target.

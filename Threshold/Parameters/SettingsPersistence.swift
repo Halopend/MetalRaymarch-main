@@ -18,7 +18,6 @@ import Synchronization
 enum SettingsPersistence {
 
     nonisolated(unsafe) private static let defaults = UserDefaults.standard
-    private static let decoder = JSONDecoder()
 
     // MARK: Namespaced Keys
 
@@ -113,10 +112,16 @@ enum SettingsPersistence {
     /// window.
     private struct PendingSaveState {
         var nextGeneration: UInt64 = 0
+        var latestGenerations: [Domain: UInt64] = [:]
         var tasks: [Domain: (generation: UInt64, data: Data, task: Task<Void, Never>)] = [:]
+        var deferredWrites: [Domain: (generation: UInt64, data: Data)] = [:]
+        /// Writes that are eligible to reach UserDefaults now. Debounced values
+        /// only enter this map when their delay expires (or they are flushed).
+        /// Keeping the newest generation lets an older concurrent writer repair
+        /// the stored value if it happens to finish last.
+        var latestReadyWrites: [Domain: (generation: UInt64, data: Data)] = [:]
     }
     private static let pendingSaves = Mutex(PendingSaveState())
-    private static let persistenceWriteLock = Mutex(())
     private static let debounceDelay: Duration = .milliseconds(300)
 
     // MARK: Generic Save / Load
@@ -135,10 +140,15 @@ enum SettingsPersistence {
     static func save<T: Codable>(_ value: T, domain: Domain) {
         guard !benchmarkHermetic else { return }
         guard let data = encode(value) else { return }
-        persistenceWriteLock.withLock { _ in
-            cancelPendingSave(for: domain)
-            defaults.set(data, forKey: domain.rawValue)
+        let generation = pendingSaves.withLock { state -> UInt64 in
+            state.nextGeneration &+= 1
+            state.tasks.removeValue(forKey: domain)?.task.cancel()
+            state.deferredWrites.removeValue(forKey: domain)
+            state.latestGenerations[domain] = state.nextGeneration
+            state.latestReadyWrites[domain] = (state.nextGeneration, data)
+            return state.nextGeneration
         }
+        commit(data, generation: generation, domain: domain)
     }
 
     static func saveDebounced<T: Codable & Sendable>(_ value: T, domain: Domain) {
@@ -146,25 +156,30 @@ enum SettingsPersistence {
 
         let generation = pendingSaves.withLock { state -> UInt64 in
             state.nextGeneration &+= 1
-            state.tasks[domain]?.task.cancel()
+            state.tasks.removeValue(forKey: domain)?.task.cancel()
+            state.latestGenerations[domain] = state.nextGeneration
+            state.deferredWrites[domain] = (state.nextGeneration, data)
             return state.nextGeneration
         }
 
         let task = Task.detached(priority: .utility) {
             try? await Task.sleep(for: debounceDelay)
             guard !Task.isCancelled else { return }
-            persistenceWriteLock.withLock { _ in
-                pendingSaves.withLock { state in
-                    guard state.tasks[domain]?.generation == generation else { return }
-                    defaults.set(data, forKey: domain.rawValue)
-                    state.tasks.removeValue(forKey: domain)
-                }
+            let shouldCommit = pendingSaves.withLock { state -> Bool in
+                guard state.deferredWrites[domain]?.generation == generation else { return false }
+                state.tasks.removeValue(forKey: domain)
+                state.deferredWrites.removeValue(forKey: domain)
+                state.latestReadyWrites[domain] = (generation, data)
+                return true
             }
+            guard shouldCommit else { return }
+            commit(data, generation: generation, domain: domain)
         }
 
         pendingSaves.withLock { state in
             // A newer call can win between generation allocation and task install.
-            guard state.tasks[domain]?.generation ?? 0 < generation else {
+            guard state.latestGenerations[domain] == generation,
+                  state.deferredWrites[domain]?.generation == generation else {
                 task.cancel()
                 return
             }
@@ -179,20 +194,36 @@ enum SettingsPersistence {
     /// load or animation frame.
     static func flushPendingSaves() {
         guard !benchmarkHermetic else { return }
-        persistenceWriteLock.withLock { _ in
-            pendingSaves.withLock { state in
-                for (domain, pending) in state.tasks {
-                    pending.task.cancel()
-                    defaults.set(pending.data, forKey: domain.rawValue)
-                }
-                state.tasks.removeAll()
+        let writes = pendingSaves.withLock { state -> [(Domain, UInt64, Data)] in
+            for pending in state.tasks.values {
+                pending.task.cancel()
             }
+            let writes = state.deferredWrites.map { domain, pending in
+                state.latestReadyWrites[domain] = pending
+                return (domain, pending.generation, pending.data)
+            }
+            state.tasks.removeAll()
+            state.deferredWrites.removeAll()
+            return writes
+        }
+        for (domain, generation, data) in writes {
+            commit(data, generation: generation, domain: domain)
         }
     }
 
-    private static func cancelPendingSave(for domain: Domain) {
-        pendingSaves.withLock { state in
-            state.tasks.removeValue(forKey: domain)?.task.cancel()
+    /// UserDefaults posts change notifications synchronously. Never hold one of
+    /// our mutexes across `set`: a background write can wait for main-thread
+    /// notification delivery while the main thread waits for that mutex.
+    private static func commit(_ data: Data, generation: UInt64, domain: Domain) {
+        var candidate = (generation: generation, data: data)
+        while true {
+            defaults.set(candidate.data, forKey: domain.rawValue)
+            guard let newer = pendingSaves.withLock({ state -> (generation: UInt64, data: Data)? in
+                guard let latest = state.latestReadyWrites[domain],
+                      latest.generation > candidate.generation else { return nil }
+                return latest
+            }) else { return }
+            candidate = newer
         }
     }
 
@@ -204,6 +235,7 @@ enum SettingsPersistence {
 
     static func load<T: Codable>(_ type: T.Type, domain: Domain) -> T? {
         guard !benchmarkHermetic else { return nil }
+        let decoder = JSONDecoder()
         guard let data = defaults.data(forKey: domain.rawValue),
               let decoded = try? decoder.decode(type, from: data) else { return nil }
         return decoded
@@ -229,7 +261,9 @@ enum SettingsPersistence {
     /// if a domain has never been saved, preserving the hard-coded defaults).
     static func restoreAll(into settings: RenderSettings) {
         if let c = load(GeometryConfig.self,      domain: .geometry)      { settings.geometryConfig = c }
-        if let c = load(QualityConfig.self,       domain: .quality)       { settings.qualityConfig = migrateMacResolutionScale(c) }
+        if let c = load(QualityConfig.self,       domain: .quality) {
+            settings.qualityConfig = migrateConeMarchStrengthDefault(migrateMacResolutionScale(c))
+        }
         if let c = load(ColorConfig.self,         domain: .color)         { settings.colorConfig = c }
         if let c = load(LightingConfig.self,      domain: .lighting)      { settings.lightingConfig = c }
         if let c = load(AudioReactiveConfig.self, domain: .audioReactive) { settings.audioReactiveConfig = c }
@@ -297,6 +331,19 @@ enum SettingsPersistence {
         #endif
     }
 
+    /// One-time migration from the former off-by-default Cone Marching setting.
+    /// Only the exact old default is changed; any tuned nonzero value survives.
+    private static func migrateConeMarchStrengthDefault(_ config: QualityConfig) -> QualityConfig {
+        let flagKey = "didMigrateConeMarchStrengthDefaultTo84"
+        guard !defaults.bool(forKey: flagKey) else { return config }
+        defaults.set(true, forKey: flagKey)
+        guard config.coneMarchStrength == 0 else { return config }
+        var migrated = config
+        migrated.coneMarchStrength = QualityConfig.defaultConeMarchStrength
+        save(migrated, domain: .quality)
+        return migrated
+    }
+
     // MARK: - Music (Typed Section)
 
     static func loadMusicConfig(defaultServicePriority: [String] = []) -> MusicConfig {
@@ -319,7 +366,7 @@ enum SettingsPersistence {
     private static func migrateLegacyMusicKeys(into config: inout MusicConfig, defaultServicePriority: [String]) -> Bool {
         MusicLegacyMigrationAdapter.migrate(
             defaults: defaults,
-            decoder: decoder,
+            decoder: JSONDecoder(),
             config: &config,
             defaultServicePriority: defaultServicePriority
         )

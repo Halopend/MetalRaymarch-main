@@ -78,6 +78,7 @@ struct GestureOutput: Sendable {
     var parameterOperations: [ParameterOperation] = []
     var renderMutations: [GestureRenderMutation] = []
     var commands: [AppCommand] = []
+    var menuActivationHand: GestureHandMode?
     var diagnostics: GestureDiagnostics
     var didUseGesture = false
 }

@@ -11,15 +11,23 @@ final class MenuToggleGestureEngine {
     private static let activationDebounceFrames = 2
 
     private var state = MenuToggleGestureState()
+    /// True for the full hysteresis-delimited recovery pose, including its
+    /// debounce/hold and post-activation frames. GestureProcessor uses this to
+    /// prevent the same held pose from leaking into per-finger shortcuts.
+    private(set) var isClaimingPose = false
+    private(set) var lastActivationHand: GestureHandMode?
     #if DEBUG
     private var debugFrameCounter: Int = 0
     #endif
 
     func reset() {
         state = MenuToggleGestureState()
+        isClaimingPose = false
+        lastActivationHand = nil
     }
 
     func process(context: GestureContext, configuration: GestureConfigurationSnapshot) -> [GestureOperation] {
+        lastActivationHand = nil
         if state.cooldown > 0 {
             state.cooldown = max(0, state.cooldown - context.deltaTime)
         }
@@ -28,6 +36,7 @@ final class MenuToggleGestureEngine {
             state.isActive = false
             state.holdTimer = 0
             state.consecutiveFramesAboveActivate = 0
+            isClaimingPose = false
             return []
         }
 
@@ -39,6 +48,7 @@ final class MenuToggleGestureEngine {
                 state.isActive = false
                 state.holdTimer = 0
                 state.consecutiveFramesAboveActivate = 0
+                isClaimingPose = false
                 return []
             }
         } else {
@@ -46,6 +56,7 @@ final class MenuToggleGestureEngine {
                 state.isActive = false
                 state.holdTimer = 0
                 state.consecutiveFramesAboveActivate = 0
+                isClaimingPose = false
                 return []
             }
         }
@@ -69,6 +80,7 @@ final class MenuToggleGestureEngine {
 
         let strength: Float
         let thresholds: (activate: Float, release: Float)
+        var middleFallbackWon = false
         if mode_usesMiddle {
             strength = primaryStrength
             thresholds = primaryThresholds
@@ -79,6 +91,7 @@ final class MenuToggleGestureEngine {
             let ring = context.rightHand.ringFingerTouchingPalm()
             let middleFallback = max(0, middle - max(0, ring - 0.4))
             strength = max(primaryStrength, middleFallback)
+            middleFallbackWon = middleFallback > primaryStrength
 
             // Floor release at 0.30 so a naturally relaxed middle finger
             // (~0.20 raw) clearly drops below release between toggles.
@@ -105,6 +118,7 @@ final class MenuToggleGestureEngine {
         let shouldBeActive: Bool = state.isActive
             ? (strength >= thresholds.release)
             : (strength >= thresholds.activate)
+        isClaimingPose = shouldBeActive
 
         if shouldBeActive {
             if !state.isActive {
@@ -117,6 +131,11 @@ final class MenuToggleGestureEngine {
                     state.holdTimer = 0
                     state.cooldown = GestureDefaults.menuToggleCooldown
                     state.consecutiveFramesAboveActivate = 0
+                    lastActivationHand = activationHand(
+                        for: mode,
+                        context: context,
+                        middleFallbackWon: middleFallbackWon
+                    )
                     return [.toggleMenu]
                 }
             }
@@ -127,6 +146,22 @@ final class MenuToggleGestureEngine {
         }
 
         return []
+    }
+
+    private func activationHand(
+        for mode: MenuToggleGestureMode,
+        context: GestureContext,
+        middleFallbackWon: Bool
+    ) -> GestureHandMode {
+        guard mode == .wristTap, !middleFallbackWon else { return .right }
+
+        // `wristTapStrength` is evaluated on the wrist being touched, so the
+        // opposite hand is the one performing the activation motion.
+        let leftTapsRight =
+            context.rightHand.wristTapStrength(otherHand: context.leftHand)
+        let rightTapsLeft =
+            context.leftHand.wristTapStrength(otherHand: context.rightHand)
+        return leftTapsRight >= rightTapsLeft ? .left : .right
     }
 
     private func menuToggleStrength(for mode: MenuToggleGestureMode, context: GestureContext) -> Float {

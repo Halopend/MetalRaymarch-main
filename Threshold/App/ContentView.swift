@@ -313,6 +313,41 @@ struct ContentView: View {
             }
             .padding(.top, 8)
         }
+        .overlay {
+            if let fileName = appModel.externalImportLoadingFileName {
+                ZStack {
+                    Color.black.opacity(0.22)
+
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .controlSize(.large)
+                        Text("Loading scene…")
+                            .font(.headline)
+                        Text(fileName)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 280)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 20)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+                    )
+                    .shadow(radius: 16)
+                }
+                .transition(.opacity)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Loading scene \(fileName)")
+            }
+        }
+        .animation(
+            motionSensitiveAnimation(.easeInOut(duration: 0.16)),
+            value: appModel.externalImportLoadingFileName
+        )
         .environment(\.menuAdjustmentActions, MenuAdjustmentActions(
             begin: { appModel.beginMenuAdjustment() },
             end: { appModel.endMenuAdjustment() }
@@ -378,9 +413,11 @@ struct ContentView: View {
             appModel.openSavePresetMenuHandler = {
                 showSaveDestinationSheet = true
             }
+            #if !os(visionOS)
             appModel.openAnimationEditorHandler = {
                 openAnimationEditor()
             }
+            #endif
             cache.startSync(with: appModel.renderSettings, appModel: appModel)
             normalizeDesktopSelectionIfNeeded()
             #if os(visionOS)
@@ -395,7 +432,9 @@ struct ContentView: View {
         .onDisappear {
             cache.stopSync()
             appModel.openSavePresetMenuHandler = nil
+            #if !os(visionOS)
             appModel.openAnimationEditorHandler = nil
+            #endif
             #if os(visionOS)
             spatialRadialMenu.removeActivationHandler(owner: spatialActivationOwner)
             #endif
@@ -578,13 +617,20 @@ struct ContentView: View {
         let autoName = "Preset \(Self.presetDateFormatter.string(from: Date()))"
         let presetName = providedName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = (presetName?.isEmpty == false) ? (presetName ?? autoName) : autoName
-        appModel.presetManager.savePreset(
+        let result = appModel.presetManager.savePreset(
             name: finalName,
             settings: appModel.renderSettings,
             thumbnailData: includeGeneratedPreview ? generatedPresetPreviewData(named: finalName) : nil,
             embeddedFormula: appModel.activeEmbeddedFormula
         )
-        showSaveConfirmation("Saved \"\(finalName)\"")
+        switch result {
+        case .saved:
+            showSaveConfirmation("Saved \"\(finalName)\"")
+        case .queuedForStorage:
+            showSaveConfirmation("Save queued — waiting for iCloud")
+        case .failed(let detail):
+            appModel.errorReporter.report(.preset(.saveFailed(detail)))
+        }
     }
 
     private func showSaveConfirmation(_ message: String) {
@@ -1157,7 +1203,8 @@ struct ContentView: View {
 
     func dismissMenuWindowIfNeeded() {
 #if os(visionOS)
-        appModel.markMenuWindowDismissed()
+        // Window visibility is acknowledged by the scene's onDisappear
+        // callback; dismissWindow itself does not report success.
         dismissWindow(id: appModel.menuWindowID)
 #endif
     }

@@ -116,7 +116,7 @@ class AudioAnalyzer {
     private let inputGain: Float = 25.0        // Amplify quiet input
     private let bassBoost: Float = 1.5         // Bass needs more boost
     private let trebleBoost: Float = 1.2       // Treble boost
-    private let silenceRMSFloor: Float = 0.0015
+    private let silenceRMSFloor: Float = 0.00025 // ~-72 dBFS: reject idle noise without swallowing quiet input
     
     // Timestamp for frame-rate independent smoothing
     private var lastUpdateTime: CFTimeInterval = 0
@@ -334,12 +334,26 @@ class AudioAnalyzer {
         guard frameLength > 0 else { return }
 
         lastSampleTime = ProcessInfo.processInfo.systemUptime
-        
-        let samples = channelData[0]
-        
-        // Calculate RMS for overall level
+
+        // Analyze the strongest channel. Some interfaces and virtual devices put
+        // their live signal on a channel other than channel zero.
+        let channelCount = Int(buffer.format.channelCount)
+        guard channelCount > 0 else { return }
+        let isInterleaved = buffer.format.isInterleaved
+        let sampleStride = isInterleaved ? vDSP_Stride(channelCount) : vDSP_Stride(1)
+        var samples = channelData[0]
         var rms: Float = 0
-        vDSP_rmsqv(samples, 1, &rms, vDSP_Length(frameLength))
+        for channel in 0..<channelCount {
+            let channelSamples = isInterleaved
+                ? channelData[0].advanced(by: channel)
+                : channelData[channel]
+            var channelRMS: Float = 0
+            vDSP_rmsqv(channelSamples, sampleStride, &channelRMS, vDSP_Length(frameLength))
+            if channel == 0 || channelRMS > rms {
+                rms = channelRMS
+                samples = channelSamples
+            }
+        }
 
         // A non-finite RMS means the capture buffer contains NaN/Inf samples
         // (possible after wake-from-sleep or power restoration with a bad SCK buffer).
@@ -389,7 +403,7 @@ class AudioAnalyzer {
         if frameLength >= fftSize {
             // Copy and window the samples
             var windowedSamples = [Float](repeating: 0, count: fftSize)
-            vDSP_vmul(samples, vDSP_Stride(1), windowBuffer, vDSP_Stride(1), &windowedSamples, vDSP_Stride(1), vDSP_Length(fftSize))
+            vDSP_vmul(samples, sampleStride, windowBuffer, vDSP_Stride(1), &windowedSamples, vDSP_Stride(1), vDSP_Length(fftSize))
             
             // Prepare for FFT (real input)
             var realInput = windowedSamples
@@ -419,23 +433,25 @@ class AudioAnalyzer {
             let trebleStart = trebleStartBin
             let trebleEnd = trebleEndBin
             
-            // Sum magnitudes in each band
+            // Integrate spectral energy rather than averaging magnitudes. An
+            // average dilutes a tone by every empty FFT bin in its band, making
+            // the much wider mid and treble ranges appear almost silent.
             if bassEnd > bassStart {
-                var bassSum: Float = 0
-                vDSP_sve(&magnitudeBuffer[bassStart], 1, &bassSum, vDSP_Length(bassEnd - bassStart))
-                bass = bassSum / Float(bassEnd - bassStart) * bassBoost
+                var bassEnergy: Float = 0
+                vDSP_svesq(&magnitudeBuffer[bassStart], 1, &bassEnergy, vDSP_Length(bassEnd - bassStart))
+                bass = sqrt(max(0, bassEnergy)) * bassBoost
             }
             
             if midEnd > midStart {
-                var midSum: Float = 0
-                vDSP_sve(&magnitudeBuffer[midStart], 1, &midSum, vDSP_Length(midEnd - midStart))
-                mid = midSum / Float(midEnd - midStart)
+                var midEnergy: Float = 0
+                vDSP_svesq(&magnitudeBuffer[midStart], 1, &midEnergy, vDSP_Length(midEnd - midStart))
+                mid = sqrt(max(0, midEnergy))
             }
             
             if trebleEnd > trebleStart {
-                var trebleSum: Float = 0
-                vDSP_sve(&magnitudeBuffer[trebleStart], 1, &trebleSum, vDSP_Length(trebleEnd - trebleStart))
-                treble = trebleSum / Float(trebleEnd - trebleStart) * trebleBoost
+                var trebleEnergy: Float = 0
+                vDSP_svesq(&magnitudeBuffer[trebleStart], 1, &trebleEnergy, vDSP_Length(trebleEnd - trebleStart))
+                treble = sqrt(max(0, trebleEnergy)) * trebleBoost
             }
             
             // Apply gain and compression to bands, guarding against non-finite

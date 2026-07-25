@@ -53,6 +53,7 @@ struct TransformationsSection: View {
     @State private var pendingNextEquationID: TransformationLessonID?
     @State private var mappingResultMessage = ""
     @State private var equationError: String?
+    @State private var isEquationCheckHistoryExpanded = false
     @State private var isEquationGuideExpanded = false
     @State private var expandedEducationLevelIDs: Set<Int> = []
     @State private var didInitializeEducationExpansion = false
@@ -65,6 +66,8 @@ struct TransformationsSection: View {
     private var mappedLessonIDsRaw = ""
     @AppStorage(TransformationUnlockProgress.legacyDefaultsKey)
     private var legacyMappedTransformationIDsRaw = ""
+    @AppStorage(TransformationEquationCheckHistoryStore.defaultsKey)
+    private var equationCheckHistoryRaw = ""
 
     private var ops: [SpaceWarpOpValue] {
         // Observe structure only. Slider samples mutate the ignored value mirror and
@@ -147,6 +150,13 @@ struct TransformationsSection: View {
                 pendingNextEquationID = nil
                 equationAccessibilityTarget = nil
             }
+        )
+    }
+    private var focusedEquationChecks: [TransformationEquationCheckRecord] {
+        guard let lessonID = focusedEquationLesson?.id else { return [] }
+        return TransformationEquationCheckHistoryStore.checks(
+            for: lessonID,
+            in: equationCheckHistoryRaw
         )
     }
     private var currentEducationLevel: TransformationEducationLevel {
@@ -558,6 +568,10 @@ struct TransformationsSection: View {
                     .transition(.opacity)
             }
 
+            if !focusedEquationChecks.isEmpty {
+                equationCheckHistory
+            }
+
             DisclosureGroup(isExpanded: $isEquationGuideExpanded) {
                 VStack(alignment: .leading, spacing: 8) {
                     if isEquationGuideExpanded {
@@ -582,6 +596,71 @@ struct TransformationsSection: View {
         .background(RoundedRectangle(cornerRadius: 9).fill(Color.indigo.opacity(0.08)))
         .overlay(RoundedRectangle(cornerRadius: 9)
             .stroke(Color.indigo.opacity(0.28), lineWidth: 1))
+    }
+
+    private var equationCheckHistory: some View {
+        DisclosureGroup(isExpanded: $isEquationCheckHistoryExpanded) {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(focusedEquationChecks) { check in
+                    equationCheckHistoryRow(check)
+                }
+            }
+            .padding(.top, 7)
+        } label: {
+            Label(
+                "Previous Checks (\(focusedEquationChecks.count))",
+                systemImage: "clock.arrow.circlepath"
+            )
+            .font(.caption.weight(.semibold))
+            .transformationActionHitTarget()
+        }
+        .accessibilityHint("Shows earlier translations checked for this lesson.")
+    }
+
+    private func equationCheckHistoryRow(
+        _ check: TransformationEquationCheckRecord
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Label(
+                    check.wasAccepted ? "Accepted" : "Needs work",
+                    systemImage: check.wasAccepted
+                        ? "checkmark.circle.fill"
+                        : "exclamationmark.circle"
+                )
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(check.wasAccepted ? Color.mint : Color.orange)
+                Spacer(minLength: 4)
+                Text(
+                    check.checkedAt,
+                    format: .dateTime
+                        .month(.abbreviated)
+                        .day()
+                        .hour()
+                        .minute()
+                )
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+
+            Text(check.submittedText)
+                .font(.system(.caption2, design: .monospaced))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(check.feedback)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(check.wasAccepted
+                    ? Color.mint.opacity(0.07)
+                    : Color.orange.opacity(0.07))
+        )
+        .accessibilityElement(children: .combine)
     }
 
     private var educationWorkbenchHeader: some View {
@@ -1173,6 +1252,18 @@ struct TransformationsSection: View {
             equationInput,
             for: lesson
         )
+        let freshlyPersistedCheckHistory = UserDefaults.standard.string(
+            forKey: TransformationEquationCheckHistoryStore.defaultsKey
+        ) ?? ""
+        equationCheckHistoryRaw = TransformationEquationCheckHistoryStore.record(
+            equationInput,
+            assessment: attempt,
+            for: lesson.id,
+            merging: [
+                equationCheckHistoryRaw,
+                freshlyPersistedCheckHistory,
+            ]
+        )
         guard attempt == .matched else {
             let message = attempt.guidance
             withAnimation(.easeInOut(duration: 0.15)) {
@@ -1390,17 +1481,17 @@ struct TransformationsSection: View {
         let kind = op.kind
         let enabled = liveOp(op.id)?.isEnabled ?? op.isEnabled
         Group {
+            EffectSliderRow(
+                icon: kind.icon, label: kind.amountLabel,
+                value: Binding(get: { liveOp(op.id)?.strength ?? op.strength },
+                               set: { v in update(op.id) { $0.strength = v } }),
+                range: kind.strengthRange,
+                enabled: .constant(true), onChanged: {}, showToggle: false,
+                valueFormat: { String(format: "%.2f", $0) })
+
             if kind == .coxeter {
                 coxeterEditor(op)
             } else {
-                EffectSliderRow(
-                    icon: kind.icon, label: kind.amountLabel,
-                    value: Binding(get: { liveOp(op.id)?.strength ?? op.strength },
-                                   set: { v in update(op.id) { $0.strength = v } }),
-                    range: kind.strengthRange,
-                    enabled: .constant(true), onChanged: {}, showToggle: false,
-                    valueFormat: { String(format: "%.2f", $0) })
-
                 ForEach(kind.params) { spec in
                     EffectSliderRow(
                         icon: spec.icon, label: spec.label,
@@ -1419,30 +1510,45 @@ struct TransformationsSection: View {
                         enabled: .constant(true), onChanged: {}, showToggle: false,
                         valueFormat: { String(format: "%.2f", $0) })
                 }
+            }
 
-                if let toggle = kind.toggle {
-                    HStack(spacing: 8) {
-                        Label(toggle.label, systemImage: toggle.icon)
-                            .font(.caption)
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { (liveOp(op.id) ?? op).p2 > 0.5 },
-                            set: { value in
-                                update(op.id) { $0.p2 = value ? 1 : 0 }
-                                refresh &+= 1
-                            }))
-                            .labelsHidden()
-                            .toggleStyle(.switch)
-                            .controlSize(.mini)
-                            .accessibilityLabel("\(kind.displayName), \(toggle.label)")
+            if let toggle = kind.toggle {
+                HStack(spacing: 8) {
+                    Label(toggle.label, systemImage: toggle.icon)
+                        .font(.caption)
+                    Spacer()
+                    Toggle("", isOn: Binding(
+                        get: { (liveOp(op.id) ?? op).p2 > 0.5 },
+                        set: { value in
+                            update(op.id) { $0.p2 = value ? 1 : 0 }
+                            refresh &+= 1
+                        }))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .accessibilityLabel("\(kind.displayName), \(toggle.label)")
+                }
+            }
+
+            if let sourceAngle = kind.sourceAngle {
+                EffectSliderRow(
+                    icon: sourceAngle.icon, label: sourceAngle.label,
+                    value: Binding(
+                        get: { (liveOp(op.id) ?? op).axis.z },
+                        set: { value in update(op.id) { $0.axis.z = value } }
+                    ),
+                    range: sourceAngle.range,
+                    enabled: .constant(true), onChanged: {}, showToggle: false,
+                    valueFormat: {
+                        String(format: "%.0f°", $0 * 180 / Float.pi)
                     }
-                }
+                )
+            }
 
-                if kind.usesAxis {
-                    axisRow(op, "\(kind.axisLabel) X", "arrow.left.and.right", \.x)
-                    axisRow(op, "\(kind.axisLabel) Y", "arrow.up.and.down", \.y)
-                    axisRow(op, "\(kind.axisLabel) Z", "arrow.up.left.and.arrow.down.right", \.z)
-                }
+            if kind.usesAxis {
+                axisRow(op, "\(kind.axisLabel) X", "arrow.left.and.right", \.x)
+                axisRow(op, "\(kind.axisLabel) Y", "arrow.up.and.down", \.y)
+                axisRow(op, "\(kind.axisLabel) Z", "arrow.up.left.and.arrow.down.right", \.z)
             }
         }
         .opacity(enabled ? 1.0 : 0.4)
@@ -1918,10 +2024,9 @@ struct TransformationsSection: View {
             valueFormat: { String(format: "%.2f", $0) })
     }
 
-    /// Dedicated editor for the Coxeter [p,q] reflection group: traditional Schläfli
-    /// notation + Coxeter diagram + integer p/q steppers. No blend "amount" — a
-    /// reflection group is discrete (enable/disable is the on/off), and p, q are
-    /// integers (mirror angles π/p, π/q), not continuous sliders.
+    /// Dedicated editor for the discrete part of the Coxeter [p,q] reflection
+    /// group: traditional Schläfli notation, diagram, and integer p/q steppers.
+    /// The common editor supplies the continuous Mirror and Source Angle sliders.
     @ViewBuilder
     private func coxeterEditor(_ op: SpaceWarpOpValue) -> some View {
         let live = liveOp(op.id) ?? op

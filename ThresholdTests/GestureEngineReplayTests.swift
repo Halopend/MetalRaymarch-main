@@ -219,8 +219,75 @@ struct GestureEngineReplayTests {
         )
 
         #expect(output.commands.contains(.toggleRadialMenu))
+        #expect(output.menuActivationHand == .right)
         #expect(output.diagnostics.parametersSuppressed)
         #expect(output.parameterOperations.isEmpty)
+    }
+
+    @Test("recovery pose owns parameter gestures from its debounce frame")
+    func recoveryOwnsActivationFrames() async {
+        let settings = RenderSettings()
+        settings.menuToggleGestureEnabled = true
+        settings.menuToggleGestureMode = .middleAndRingToPalm
+        settings.setBinding(
+            .core(.fractalScale),
+            for: GestureSlot(hand: .both, finger: .index)
+        )
+        let processor = GestureProcessor(
+            renderSettings: settings,
+            parameterPipeline: ParameterPipeline()
+        )
+
+        var left = HandData.zero
+        left.isTracked = true
+        left.thumbTip = SIMD3<Float>(-0.10, 1, 0)
+        left.indexTip = left.thumbTip
+        left.indexPinch = 1
+
+        var right = HandData.zero
+        right.isTracked = true
+        right.thumbTip = SIMD3<Float>(0.10, 1, 0)
+        right.indexTip = right.thumbTip
+        right.indexPinch = 1
+        right.palmCenter = SIMD3<Float>(0.10, 1, 0)
+        right.middleTip = SIMD3<Float>(0.10, 1.20, 0)
+        right.ringTip = SIMD3<Float>(0.10, 1.20, 0)
+
+        for frame in 0..<30 {
+            _ = await processor.process(
+                HandPoseSnapshot(
+                    leftHand: left,
+                    rightHand: right,
+                    timestamp: Double(frame) / 90,
+                    deltaTime: 1 / 90
+                )
+            )
+        }
+
+        right.middleTip = SIMD3<Float>(0.10, 1.01, 0)
+        right.ringTip = SIMD3<Float>(0.11, 1, 0)
+        let first = await processor.process(
+            HandPoseSnapshot(
+                leftHand: left,
+                rightHand: right,
+                timestamp: 30 / 90,
+                deltaTime: 1
+            )
+        )
+        let second = await processor.process(
+            HandPoseSnapshot(
+                leftHand: left,
+                rightHand: right,
+                timestamp: 31 / 90,
+                deltaTime: 1
+            )
+        )
+
+        #expect(first.parameterOperations.isEmpty)
+        #expect(first.renderMutations.isEmpty)
+        #expect(second.parameterOperations.isEmpty)
+        #expect(second.renderMutations.isEmpty)
+        #expect(second.commands == [.toggleRadialMenu])
     }
 
     @Test("neutral synthetic trace stays within processing budget")

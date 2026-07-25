@@ -85,10 +85,9 @@ extension Renderer {
     /// conservative cone coarse-prepass consumer). Mirrors selectPipeline's exact
     /// specialization for the current config, but lives in its OWN cache so the
     /// main pipeline cache stays byte-identical (always FC_COARSE_WARM_START off).
-    /// Built synchronously on a cache miss — this is an opt-in feature, so the
-    /// one-time compile per config only happens while the user has the toggle on.
-    /// Returns nil on build failure; the caller then keeps the base (FC-off)
-    /// pipeline and the cone texture is simply never sampled.
+    /// A cache miss queues a detached single-flight build and returns nil. The
+    /// caller keeps the base (FC-off) pipeline until the variant is ready, so an
+    /// on-demand Metal compile can never stall compositor frame submission.
     func selectCoarseWarmStartPipeline(forIterations iterations: Int, raySteps: Int,
                                        neonMode: Bool = false,
                                        request: RenderPipelineRequest? = nil) -> MTLRenderPipelineState? {
@@ -123,24 +122,12 @@ extension Renderer {
             colorIterations: colorIterations,
             mandelbulbPower: mandelbulbPower
         )
-        do {
-            let pipeline = try Renderer.buildSpecializedPipeline(
-                device: device,
-                layerRenderer: layerRenderer,
-                rasterSampleCount: rasterSampleCount,
-                mtlVertexDescriptor: mtlVertexDescriptor,
-                config: config,
-                fragmentFunctionName: "fragmentShader",
-                coarseWarmStart: true,
-                library: nil,
-                archive: renderPipelineArchive
-            )
-            coarseWarmStartPipelineCache[cacheKey] = pipeline
-            return pipeline
-        } catch {
-            if RENDERER_DEBUG { print("⚠️ [ConeWarmStart] pipeline build failed: \(error)") }
-            return nil
-        }
+        enqueueBackgroundPipelineBuild(
+            cacheKey: cacheKey,
+            config: config,
+            coarseWarmStart: true
+        )
+        return nil
     }
 
     /// Scene-stable feature bakes for exact compute-pipeline keys
@@ -285,9 +272,10 @@ extension Renderer {
 
     // MARK: - Unified Pipeline Management
 
-    /// Gets or builds a specialized pipeline for a given preset.
-    /// Uses the unified pipelineCache to avoid redundant compilation.
-    func getPipeline(forPreset preset: FractalPreset) -> MTLRenderPipelineState {
+    /// Gets or asynchronously builds a specialized pipeline for a given preset.
+    /// Metal compilation runs in the existing detached single-flight builder so
+    /// awaiting this method never monopolizes the Renderer actor.
+    func getPipeline(forPreset preset: FractalPreset) async -> MTLRenderPipelineState {
         let prefix = customCacheKeyPrefix()
         let cacheKey = prefix + preset.pipelineCacheKey
         let library = renderingLibrary()
@@ -306,39 +294,34 @@ extension Renderer {
             return cached
         }
 
-        // Build new specialized pipeline
         let config = FunctionConstantConfig.fromPreset(preset)
-        if RENDERER_DEBUG { print("🔧 [ShaderCompilation] Building NEW pipeline for: \(preset.name) [\(cacheKey)]") }
+        if RENDERER_DEBUG { print("🔧 [ShaderCompilation] Queueing NEW pipeline for: \(preset.name) [\(cacheKey)]") }
 
-        do {
-            let pipeline = try Renderer.buildSpecializedPipeline(
-                device: device,
-                layerRenderer: layerRenderer,
-                rasterSampleCount: rasterSampleCount,
-                mtlVertexDescriptor: mtlVertexDescriptor,
-                config: config,
-                fragmentFunctionName: "fragmentShader",
-                library: library,
-                archive: renderPipelineArchive
-            )
-            pipelineCache[cacheKey] = pipeline  // Store in unified cache
+        await waitForBackgroundRenderPipelineBuild(
+            cacheKey: cacheKey,
+            config: config
+        )
+
+        if let pipeline = pipelineCache[cacheKey] {
             if RENDERER_DEBUG { print("✅ [ShaderCompilation] SUCCESS: Built pipeline [\(cacheKey)]") }
             return pipeline
-        } catch {
-            if RENDERER_DEBUG { print("❌ [ShaderCompilation] FAILED to build preset pipeline [\(cacheKey)]: \(error)") }
-            return pipelineState
         }
+
+        if RENDERER_DEBUG { print("❌ [ShaderCompilation] FAILED to build preset pipeline [\(cacheKey)]") }
+        return pipelineState
     }
 
-    /// Gets or builds a specialized pipeline for specific iteration/ray step values.
-    /// Call this when slider values change to pre-compile the needed pipeline.
-    func getPipeline(forIterations iterations: Int, raySteps: Int) -> MTLRenderPipelineState {
-        // Build cache key matching the preset format
+    /// Gets or asynchronously builds a specialized pipeline for specific
+    /// iteration/ray-step values. Call this when sliders change to pre-compile
+    /// the needed pipeline without blocking compositor frame submission.
+    func getPipeline(
+        forIterations iterations: Int,
+        raySteps: Int
+    ) async -> MTLRenderPipelineState {
         let colorIterations = Int32(appModel.renderSettings.colorIterations)  // Direct read (own lock) — avoids full snapshot
         let fractalType = appModel.renderSettings.fractalType
-        let library = renderingLibrary()
 
-        if fractalType == .custom, library == nil {
+        guard fractalType != .custom || renderingLibrary() != nil else {
             return pipelineState
         }
 
@@ -350,6 +333,18 @@ extension Renderer {
         let qualityMode: Int32 = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
         let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
+        let hasSpaceWarp = !appModel.renderSettings.spaceWarpStack.isEmpty || customShaderHash != nil
+        #if os(macOS)
+        let hasEnvScrunch: Bool? = false
+        let hasHandField: Bool? = false
+        #else
+        let hasEnvScrunch: Bool? = nil
+        let hasHandField: Bool? = nil
+        #endif
+        let deTailKey = FractalPreset.deTailCacheKey(
+            hasEnvScrunch: hasEnvScrunch,
+            hasHandField: hasHandField
+        )
         let keyContext = RenderPipelineKeyContext(
             prefix: customCacheKeyPrefix(),
             fractalTypeRawValue: Int(fractalType.rawValue),
@@ -358,20 +353,21 @@ extension Renderer {
             qualityMode: Int(qualityMode),
             colorIterations: colorIterations,
             powerKey: powerKey,
-            sceneKey: "_B\(bubbleEnabled ? 1 : 0)"
+            sceneKey: "_B\(bubbleEnabled ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)\(deTailKey)"
         )
         let cacheKey = keyContext.exactKey(neonEnabled: neon == 1)
 
-        // Check unified cache first
         if let cached = pipelineCache[cacheKey] {
             return cached
         }
 
-        // Build new specialized pipeline
         let config = FunctionConstantConfig(
             fractalIterations: Int32(iterations),
             shadowIterations: Int32(max(iterations - 2, 2)),
             safetyBubbleEnabled: bubbleEnabled,  // Baked; toggle changes the cache key and rebuilds async
+            hasSpaceWarp: hasSpaceWarp,
+            hasEnvScrunch: hasEnvScrunch,
+            hasHandField: hasHandField,
             qualityMode: qualityMode,
             debugHierarchical: false,
             maxRaySteps: Int32(raySteps),
@@ -381,26 +377,11 @@ extension Renderer {
             mandelbulbPower: mandelbulbPower
         )
 
-        if RENDERER_DEBUG { print("🔧 [ShaderCompilation] Building pipeline for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps)...") }
-
-        do {
-            let pipeline = try Renderer.buildSpecializedPipeline(
-                device: device,
-                layerRenderer: layerRenderer,
-                rasterSampleCount: rasterSampleCount,
-                mtlVertexDescriptor: mtlVertexDescriptor,
-                config: config,
-                fragmentFunctionName: "fragmentShader",
-                library: library,
-                archive: renderPipelineArchive
-            )
-            pipelineCache[cacheKey] = pipeline
-            if RENDERER_DEBUG { print("✅ [ShaderCompilation] Ready: FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps)") }
-            return pipeline
-        } catch {
-            if RENDERER_DEBUG { print("❌ [ShaderCompilation] FAILED for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps): \(error)") }
-            return pipelineState
-        }
+        await waitForBackgroundRenderPipelineBuild(
+            cacheKey: cacheKey,
+            config: config
+        )
+        return pipelineCache[cacheKey] ?? pipelineState
     }
 
     /// Precompiles pipelines for all saved presets on app launch.
@@ -446,7 +427,7 @@ extension Renderer {
                 print("      Neon=\(fc.neonModeEnabled), Quality=\(fc.qualityMode)")
             }
 
-            _ = getPipeline(forPreset: preset)
+            _ = await getPipeline(forPreset: preset)
 
             let functionConstants = preset.deriveFunctionConstants()
             let powerKey = functionConstants.mandelbulbPower.map { "P\($0)" } ?? ""
@@ -1243,6 +1224,20 @@ extension Renderer {
         scheduleArchiveSerialize()
     }
 
+    /// Inserts the cone-prepass fragment variant built by the same detached
+    /// single-flight machinery as ordinary render pipelines.
+    func insertBuiltCoarseWarmStartPipeline(
+        _ pipeline: MTLRenderPipelineState,
+        forKey key: String
+    ) {
+        pendingPipelineBuildKeys.remove(key)
+        backgroundRenderPipelineBuildTasks.removeValue(forKey: key)
+        renderPipelineBuildRetryStates.removeValue(forKey: key)
+        coarseWarmStartPipelineCache[key] = pipeline
+        if RENDERER_DEBUG { print("✅ [ConeWarmStart] Async-built and cached: \(key)") }
+        scheduleArchiveSerialize()
+    }
+
     /// Marks a background build as failed so the pending set doesn't leak.
     func markPipelineBuildFailed(forKey key: String) {
         pendingPipelineBuildKeys.remove(key)
@@ -1303,17 +1298,53 @@ extension Renderer {
         )
     }
 
-    /// Enqueues a detached task to build a specialized render pipeline off-actor,
-    /// then hops back to insert it into `pipelineCache`. Duplicate requests for a
-    /// key already in flight are silently dropped. Runs at low priority so it
-    /// never preempts the render loop.
-    fileprivate func enqueueBackgroundPipelineBuild(
+    /// Waits for an existing single-flight build, or for capacity to enqueue one,
+    /// without holding the Renderer actor while Metal compiles.
+    fileprivate func waitForBackgroundRenderPipelineBuild(
         cacheKey: String,
         config: FunctionConstantConfig
-    ) {
-        if pendingPipelineBuildKeys.contains(cacheKey) { return }
-        if shouldDelayRenderPipelineBuild(forKey: cacheKey) { return }
-        if pendingPipelineBuildKeys.count >= maxPendingRenderPipelineBuilds { return }
+    ) async {
+        while pipelineCache[cacheKey] == nil, !Task.isCancelled {
+            if let buildTask = enqueueBackgroundPipelineBuild(
+                cacheKey: cacheKey,
+                config: config
+            ) {
+                await buildTask.value
+                return
+            }
+
+            // A retry backoff means the previous attempt failed; preserve the
+            // old preparation behavior by returning rather than retry-looping.
+            guard !shouldDelayRenderPipelineBuild(forKey: cacheKey) else { return }
+
+            // All background slots are busy with other keys. Suspend briefly so
+            // their completion callbacks and the render loop can run on this
+            // actor, then claim the next available slot. This matters for the
+            // first custom PSO: silently dropping it would send frame selection
+            // back through its synchronous first-build fallback.
+            do {
+                try await Task.sleep(nanoseconds: 10_000_000)
+            } catch {
+                return
+            }
+        }
+    }
+
+    /// Enqueues a detached task to build a specialized render pipeline off-actor,
+    /// then hops back to insert it into `pipelineCache`. Duplicate requests for a
+    /// key already in flight return the existing task. Runs at low priority so
+    /// it never preempts the render loop.
+    @discardableResult
+    fileprivate func enqueueBackgroundPipelineBuild(
+        cacheKey: String,
+        config: FunctionConstantConfig,
+        coarseWarmStart: Bool = false
+    ) -> Task<Void, Never>? {
+        if pendingPipelineBuildKeys.contains(cacheKey) {
+            return backgroundRenderPipelineBuildTasks[cacheKey]
+        }
+        if shouldDelayRenderPipelineBuild(forKey: cacheKey) { return nil }
+        if pendingPipelineBuildKeys.count >= maxPendingRenderPipelineBuilds { return nil }
         pendingPipelineBuildKeys.insert(cacheKey)
 
         // Capture only Sendable values / references we know are Metal-thread-safe.
@@ -1342,10 +1373,18 @@ extension Renderer {
                     mtlVertexDescriptor: vertexDescriptor,
                     config: config,
                     fragmentFunctionName: fragmentName,
+                    coarseWarmStart: coarseWarmStart,
                     library: customLibrary,
                     archive: archiveRef
                 )
-                await self?.insertBuiltRenderPipeline(pipeline, forKey: cacheKey)
+                if coarseWarmStart {
+                    await self?.insertBuiltCoarseWarmStartPipeline(
+                        pipeline,
+                        forKey: cacheKey
+                    )
+                } else {
+                    await self?.insertBuiltRenderPipeline(pipeline, forKey: cacheKey)
+                }
             } catch {
                 if RENDERER_DEBUG {
                     print("❌ [Pipeline] Background build failed for \(cacheKey): \(error)")
@@ -1354,6 +1393,7 @@ extension Renderer {
             }
         }
         backgroundRenderPipelineBuildTasks[cacheKey] = buildTask
+        return buildTask
     }
 
     /// Compute-path counterpart to `enqueueBackgroundPipelineBuild`. Builds the

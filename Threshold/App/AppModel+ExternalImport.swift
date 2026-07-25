@@ -3,86 +3,187 @@
 //  Threshold
 //
 //  External-file import flow (.threshscene / .threshmp / .threshanim / .threshfx):
-//  open -> preview (with restore-on-cancel) -> commit. Extracted verbatim from
-//  AppModel to keep the app coordinator focused; behaviour is unchanged.
+//  open -> background decode -> preview (with restore-on-cancel) -> commit.
+//  Kept outside AppModel so the app coordinator remains focused.
 //
 
 import Foundation
 
+/// A decoded external document is transferred exactly once from the detached
+/// parser to AppModel's main actor. The payloads are value graphs and remain
+/// immutable while in transit.
+private struct ExternalFileDecodeResult: @unchecked Sendable {
+    enum Payload {
+        case preset(FractalPreset)
+        case animation(AnimationScene)
+        case formula(EmbeddedFormulaContainer)
+    }
+
+    let payload: Payload?
+    let failureDescription: String?
+
+    static func success(_ payload: Payload) -> Self {
+        Self(payload: payload, failureDescription: nil)
+    }
+
+    static func failure(_ description: String) -> Self {
+        Self(payload: nil, failureDescription: description)
+    }
+}
+
 extension AppModel {
 
     func openExternalFile(_ url: URL) {
-        let didStartAccessing = url.startAccessingSecurityScopedResource()
-        defer {
-            if didStartAccessing {
-                url.stopAccessingSecurityScopedResource()
-            }
-        }
+        // Retire an older open request before presenting this one. A generation
+        // guard prevents a cancelled parser from clearing the newer request's
+        // progress UI if its JSON decode finishes late.
+        externalImportDecodeTask?.cancel()
+        externalImportDecodeGeneration &+= 1
+        let generation = externalImportDecodeGeneration
 
         clearExternalPreview(restorePreviewedState: true)
         pendingExternalImport = nil
 
-        // Route by the file-type registry's category rather than re-hardcoding the
-        // extension groups here (single source of truth: ThresholdExportFormat).
-        switch ThresholdExportFormat(fileExtension: url.pathExtension)?.category {
-        case .preset:
-            do {
-                let preset = try presetManager.decodePreset(from: url)
-                pendingExternalImport = ExternalFileImportRequest(
-                    fileName: url.lastPathComponent,
-                    fileExtension: url.pathExtension.lowercased(),
-                    payload: .preset(preset)
-                )
-                ensureWindowContentVisible()
-            } catch {
-                errorReporter.report(.preset(.importFailed("Could not read \(url.lastPathComponent).")))
-            }
-
-        case .animation:
-            do {
-                guard let scene = try animationManager?.decodeScene(from: url) else {
-                    errorReporter.report(.animation(.importFailed("Animation manager is unavailable.")))
-                    return
-                }
-                pendingExternalImport = ExternalFileImportRequest(
-                    fileName: url.lastPathComponent,
-                    fileExtension: url.pathExtension.lowercased(),
-                    payload: .animation(scene)
-                )
-                ensureWindowContentVisible()
-            } catch {
-                errorReporter.report(.animation(.importFailed("Could not read \(url.lastPathComponent).")))
-            }
-
-        case .formula:
-            do {
-                let container = try EmbeddedFormulaContainer.decode(fromContainerAt: url)
-                if container.formula.effectKind == .spaceWarp {
-                    // A space-warp effect applies to the current fractal — install
-                    // it directly rather than routing through the custom-fractal
-                    // preset/preview path (which would force fractalType = .custom).
-                    installSpaceWarp(container.formula)
-                    // Persist immediately so the warp survives relaunch. The other
-                    // external-import paths persist via loadStaticScene's
-                    // .persistLastState option; the direct space-warp install
-                    // bypasses that, so save here to match their guarantee.
-                    saveLastState()
-                    ensureWindowContentVisible()
-                    return
-                }
-                let preset = AppModel.makeCustomPreset(from: container.formula)
-                pendingExternalImport = ExternalFileImportRequest(
-                    fileName: url.lastPathComponent,
-                    fileExtension: "threshfx",
-                    payload: .preset(preset)
-                )
-                ensureWindowContentVisible()
-            } catch {
-                errorReporter.report(.preset(.importFailed("Could not read \(url.lastPathComponent): \(error.localizedDescription)")))
-            }
-
-        case nil:
+        guard let format = ThresholdExportFormat(fileExtension: url.pathExtension) else {
+            externalImportLoadingFileName = nil
             errorReporter.report(.preset(.importFailed("Unsupported Threshold file: \(url.lastPathComponent).")))
+            return
+        }
+
+        // Security-scoped access intentionally spans the detached read/decode:
+        // stopping it immediately after creating the task can make Files/iCloud
+        // URLs fail midway through hydration.
+        let didStartAccessing = url.startAccessingSecurityScopedResource()
+        externalImportLoadingFileName = url.lastPathComponent
+        ensureWindowContentVisible()
+
+        externalImportDecodeTask = Task { @MainActor [weak self] in
+            guard let self else {
+                if didStartAccessing {
+                    url.stopAccessingSecurityScopedResource()
+                }
+                return
+            }
+            defer {
+                if didStartAccessing {
+                    url.stopAccessingSecurityScopedResource()
+                }
+                if externalImportDecodeGeneration == generation {
+                    externalImportLoadingFileName = nil
+                    externalImportDecodeTask = nil
+                }
+            }
+
+            // Give SwiftUI enough time to commit and draw the loading overlay
+            // before a large document starts consuming CPU and memory bandwidth.
+            // This is deliberately short for small files but long enough to span
+            // several display frames on every supported refresh rate.
+            do {
+                try await Task.sleep(for: .milliseconds(120))
+            } catch {
+                return
+            }
+            guard externalImportDecodeGeneration == generation else { return }
+
+            let worker = Task.detached(priority: .userInitiated) {
+                Self.decodeExternalFile(at: url, format: format)
+            }
+            let result = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
+            guard !Task.isCancelled,
+                  externalImportDecodeGeneration == generation else { return }
+
+            finishOpeningExternalFile(
+                result,
+                fileName: url.lastPathComponent,
+                format: format
+            )
+        }
+    }
+
+    private nonisolated static func decodeExternalFile(
+        at url: URL,
+        format: ThresholdExportFormat
+    ) -> ExternalFileDecodeResult {
+        do {
+            switch format.category {
+            case .preset:
+                let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                return .success(.preset(try decoder.decode(FractalPreset.self, from: data)))
+
+            case .animation:
+                let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                return .success(.animation(try decoder.decode(AnimationScene.self, from: data)))
+
+            case .formula:
+                return .success(.formula(try EmbeddedFormulaContainer.decode(fromContainerAt: url)))
+            }
+        } catch {
+            return .failure(error.localizedDescription)
+        }
+    }
+
+    private func finishOpeningExternalFile(
+        _ result: ExternalFileDecodeResult,
+        fileName: String,
+        format: ThresholdExportFormat
+    ) {
+        guard let payload = result.payload else {
+            let detail = result.failureDescription.map { ": \($0)" } ?? ""
+            switch format.category {
+            case .animation:
+                errorReporter.report(.animation(.importFailed("Could not read \(fileName)\(detail)")))
+            case .preset, .formula:
+                errorReporter.report(.preset(.importFailed("Could not read \(fileName)\(detail)")))
+            }
+            return
+        }
+
+        switch payload {
+        case .preset(let preset):
+            pendingExternalImport = ExternalFileImportRequest(
+                fileName: fileName,
+                fileExtension: format.ext,
+                payload: .preset(preset)
+            )
+            ensureWindowContentVisible()
+
+        case .animation(let scene):
+            guard animationManager != nil else {
+                errorReporter.report(.animation(.importFailed("Animation manager is unavailable.")))
+                return
+            }
+            pendingExternalImport = ExternalFileImportRequest(
+                fileName: fileName,
+                fileExtension: format.ext,
+                payload: .animation(scene)
+            )
+            ensureWindowContentVisible()
+
+        case .formula(let container):
+            if container.formula.effectKind == .spaceWarp {
+                // A space-warp effect applies to the current fractal — install
+                // it directly rather than routing through the custom-fractal
+                // preset/preview path.
+                installSpaceWarp(container.formula)
+                saveLastState()
+                ensureWindowContentVisible()
+                return
+            }
+            let preset = AppModel.makeCustomPreset(from: container.formula)
+            pendingExternalImport = ExternalFileImportRequest(
+                fileName: fileName,
+                fileExtension: format.ext,
+                payload: .preset(preset)
+            )
+            ensureWindowContentVisible()
         }
     }
 

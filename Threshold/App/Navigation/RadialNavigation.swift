@@ -244,20 +244,16 @@ enum RadialTransformNodeFactory {
             format: { $0 >= 0.5 ? "On" : "Off" }
         ))
 
-        // Coxeter's reflection group is discrete; its full editor intentionally
-        // exposes only p/q rather than a blend-strength control.
-        if kind != .coxeter {
-            controls.append(sliderNode(
-                id: "\(idPrefix).strength",
-                title: kind.amountLabel,
-                systemImage: kind.icon,
-                range: kind.strengthRange,
-                fallback: snapshot.strength,
-                read: { read(opID)?.strength },
-                write: { value in update(opID) { $0.strength = value } },
-                isEnabled: { read(opID)?.isEnabled == true }
-            ))
-        }
+        controls.append(sliderNode(
+            id: "\(idPrefix).strength",
+            title: kind.amountLabel,
+            systemImage: kind.icon,
+            range: kind.strengthRange,
+            fallback: snapshot.strength,
+            read: { read(opID)?.strength },
+            write: { value in update(opID) { $0.strength = value } },
+            isEnabled: { read(opID)?.isEnabled == true }
+        ))
 
         for spec in kind.params {
             let isDiscrete = kind == .coxeter
@@ -297,6 +293,20 @@ enum RadialTransformNodeFactory {
                 write: { value in update(opID) { $0.p2 = value >= 0.5 ? 1 : 0 } },
                 isEnabled: { read(opID)?.isEnabled == true },
                 format: { $0 >= 0.5 ? "On" : "Off" }
+            ))
+        }
+
+        if let sourceAngle = kind.sourceAngle {
+            controls.append(sliderNode(
+                id: "\(idPrefix).sourceAngle",
+                title: sourceAngle.label,
+                systemImage: sourceAngle.icon,
+                range: sourceAngle.range,
+                fallback: snapshot.axis.z,
+                read: { read(opID)?.axis.z },
+                write: { value in update(opID) { $0.axis.z = value } },
+                isEnabled: { read(opID)?.isEnabled == true },
+                format: { String(format: "%.0f°", $0 * 180 / Float.pi) }
             ))
         }
 

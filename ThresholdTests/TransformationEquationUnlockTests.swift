@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import Threshold
 
@@ -10,7 +11,7 @@ struct TransformationEquationUnlockTests {
         let kindIDs = SpaceWarpKind.allCases.map(\.rawValue)
         let spokenMath = lessons.map(\.spokenMathematicalNotation)
 
-        #expect(lessons.count == 19)
+        #expect(lessons.count == 20)
         #expect(lessons.count == SpaceWarpKind.allCases.count)
         #expect(Set(lessonIDs) == Set(SpaceWarpKind.allCases.map(TransformationLessonID.core)))
         #expect(Set(lessonIDs).count == lessons.count)
@@ -85,7 +86,8 @@ struct TransformationEquationUnlockTests {
         #expect(levels.map(\.kinds) == [
             [.scale, .mirror, .tiling],
             [.ripple, .boxFold, .planeFold, .offsetFold],
-            [.sphereFold, .inversion, .shells, .kaleidoscope, .circle, .scaleRepeat],
+            [.sphereFold, .inversion, .shells, .compressionShells,
+             .kaleidoscope, .circle, .scaleRepeat],
             [.mengerFold, .twist, .bend],
             [.coxeter, .icosahedralCut, .mandelboxStep],
         ])
@@ -337,6 +339,93 @@ struct TransformationEquationUnlockTests {
         #expect(TransformationEquationDraftStore.legacyLessonID(focusedRawID: 999) == nil)
     }
 
+    @Test("Previous checks persist by lesson with newest results first")
+    func previousCheckHistory() {
+        let scale = TransformationLessonID.core(.scale)
+        let mirror = TransformationLessonID.core(.mirror)
+        let firstID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let secondID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        let thirdID = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
+
+        var encoded = TransformationEquationCheckHistoryStore.record(
+            "p = p *",
+            assessment: .incomplete,
+            for: scale,
+            merging: [],
+            id: firstID,
+            checkedAt: Date(timeIntervalSince1970: 10)
+        )
+        encoded = TransformationEquationCheckHistoryStore.record(
+            "p = p * op.strength;",
+            assessment: .matched,
+            for: scale,
+            merging: [encoded],
+            id: secondID,
+            checkedAt: Date(timeIntervalSince1970: 20)
+        )
+        encoded = TransformationEquationCheckHistoryStore.record(
+            "mirror work",
+            assessment: .structureMismatch,
+            for: mirror,
+            merging: [encoded],
+            id: thirdID,
+            checkedAt: Date(timeIntervalSince1970: 30)
+        )
+
+        let scaleChecks = TransformationEquationCheckHistoryStore.checks(
+            for: scale,
+            in: encoded
+        )
+        #expect(scaleChecks.map(\.id) == [secondID, firstID])
+        #expect(scaleChecks.map(\.submittedText) == [
+            "p = p * op.strength;",
+            "p = p *",
+        ])
+        #expect(scaleChecks.map(\.wasAccepted) == [true, false])
+        #expect(scaleChecks[1].feedback == TransformationEquationAttempt.incomplete.guidance)
+        #expect(TransformationEquationCheckHistoryStore.checks(
+            for: mirror,
+            in: encoded
+        ).map(\.id) == [thirdID])
+    }
+
+    @Test("Previous checks are bounded without dropping other lessons first")
+    func previousCheckHistoryBounds() {
+        let scale = TransformationLessonID.core(.scale)
+        let mirror = TransformationLessonID.core(.mirror)
+        var encoded = TransformationEquationCheckHistoryStore.record(
+            "mirror",
+            assessment: .structureMismatch,
+            for: mirror,
+            merging: [],
+            checkedAt: Date(timeIntervalSince1970: 1)
+        )
+        for index in 0..<(TransformationEquationCheckHistoryStore.maximumChecksPerLesson + 2) {
+            encoded = TransformationEquationCheckHistoryStore.record(
+                "scale \(index)",
+                assessment: .structureMismatch,
+                for: scale,
+                merging: [encoded],
+                checkedAt: Date(timeIntervalSince1970: TimeInterval(index + 2))
+            )
+        }
+
+        let scaleChecks = TransformationEquationCheckHistoryStore.checks(
+            for: scale,
+            in: encoded
+        )
+        #expect(
+            scaleChecks.count
+                == TransformationEquationCheckHistoryStore.maximumChecksPerLesson
+        )
+        #expect(scaleChecks.first?.submittedText
+            == "scale \(TransformationEquationCheckHistoryStore.maximumChecksPerLesson + 1)")
+        #expect(TransformationEquationCheckHistoryStore.checks(
+            for: mirror,
+            in: encoded
+        ).count == 1)
+    }
+
     @Test("Representative V1 learners never lose an already-open level")
     func legacyCurriculumCompatibility() {
         let legacySnapshots: [(String, Set<Int>)] = [
@@ -398,7 +487,7 @@ struct TransformationEquationUnlockTests {
         #expect(TransformationEducationPath.levels.allSatisfy {
             TransformationEducationPath.isComplete($0, mappedIDs: everything)
         })
-        #expect(TransformationEducationPath.guideLessons(mappedIDs: everything).count == 19)
+        #expect(TransformationEducationPath.guideLessons(mappedIDs: everything).count == 20)
     }
 
     @Test("Out-of-order knowledge stays mapped without skipping level gates")
@@ -480,7 +569,7 @@ struct TransformationEquationUnlockTests {
             after: after
         ).map(\.id) == [2, 3, 4, 5])
         #expect(TransformationEducationPath.preferredLesson(mappedIDs: after)?.kind == .coxeter)
-        #expect(TransformationEducationPath.unmappedLessonCount(mappedIDs: after) == 8)
+        #expect(TransformationEducationPath.unmappedLessonCount(mappedIDs: after) == 9)
 
         let finalLevelComplete = after.union([
             .core(.coxeter),
@@ -491,7 +580,7 @@ struct TransformationEquationUnlockTests {
             TransformationEducationPath.levels[4],
             mappedIDs: finalLevelComplete
         ))
-        #expect(TransformationEducationPath.unmappedLessonCount(mappedIDs: finalLevelComplete) == 5)
+        #expect(TransformationEducationPath.unmappedLessonCount(mappedIDs: finalLevelComplete) == 6)
     }
 
     @Test("Edit opens the catalog without granting Learn progress")

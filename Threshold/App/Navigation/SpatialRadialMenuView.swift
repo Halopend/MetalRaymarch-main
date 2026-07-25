@@ -15,7 +15,6 @@
         includesGestureEditing: true
       )
     )
-    private(set) var isPresented = false
     private(set) var pendingActivationID: String?
     private(set) var gestureMap: SpatialGestureMapSnapshot?
     private(set) var presentationMode: SpatialRadialPresentationMode = .navigation
@@ -112,7 +111,7 @@
       case .activate(let nodeID):
         pendingActivationID = nodeID
         revealControlsHandler?()
-        deliverPendingActivationIfPossible()
+        schedulePendingActivationDelivery()
         dismiss()
       case .ignored:
         break
@@ -185,7 +184,7 @@
     func installActivationHandler(owner: UUID, _ handler: @escaping (String) -> Void) {
       activationOwner = owner
       activationHandler = handler
-      deliverPendingActivationIfPossible()
+      schedulePendingActivationDelivery()
     }
 
     func removeActivationHandler(owner: UUID) {
@@ -194,23 +193,23 @@
       activationHandler = nil
     }
 
-    func installWindowHandlers(reveal: @escaping () -> Void, dismiss: @escaping () -> Void) {
+    func installPresentationHandlers(reveal: @escaping () -> Void, dismiss: @escaping () -> Void) {
       revealControlsHandler = reveal
       dismissHandler = dismiss
     }
 
-    func markPresented(_ presented: Bool) {
-      isPresented = presented
-      if !presented {
-        navigation.reset()
-        gestureMap = nil
-        presentationMode = .navigation
-        statusMessage = nil
-      }
-    }
-
     func dismiss() {
       dismissHandler?()
+    }
+
+    /// Activation handlers are installed from SwiftUI lifecycle callbacks. Deliver
+    /// pending navigation after that update transaction has completed so route
+    /// mutation never occurs while SwiftUI is evaluating the menu window.
+    private func schedulePendingActivationDelivery() {
+      Task { @MainActor [weak self] in
+        await Task.yield()
+        self?.deliverPendingActivationIfPossible()
+      }
     }
 
     private func deliverPendingActivationIfPossible() {
@@ -218,6 +217,16 @@
       self.pendingActivationID = nil
       activationHandler(pendingActivationID)
     }
+  }
+
+  /// RealityView construction/update callbacks may mutate RealityKit objects, but
+  /// must not write SwiftUI `@State`. These values are runtime bookkeeping only;
+  /// storing them behind a stable, non-observable reference keeps those mutations
+  /// outside SwiftUI's state graph.
+  @MainActor
+  private final class SpatialRadialRuntimeState {
+    var handAnchorSubscription: EventSubscription?
+    var rotationGestureStart: Float?
   }
 
   struct SpatialRadialMenuView: View {
@@ -231,8 +240,7 @@
       physicsSimulation: .none
     )
     @State private var rootEntity = Entity()
-    @State private var handAnchorSubscription: EventSubscription?
-    @State private var rotationGestureStart: Float?
+    @State private var runtime = SpatialRadialRuntimeState()
     @State private var quickControlRevision = 0
 
     private var spatialQuickControls: [ToggleDescriptor] {
@@ -271,8 +279,8 @@
         configureHandAnchor()
         handAnchor.addChild(rootEntity)
         content.add(handAnchor)
-        handAnchorSubscription?.cancel()
-        handAnchorSubscription = content.subscribe(
+        runtime.handAnchorSubscription?.cancel()
+        runtime.handAnchorSubscription = content.subscribe(
           to: SceneEvents.AnchoredStateChanged.self,
           on: handAnchor
         ) { event in
@@ -316,17 +324,10 @@
       }
       .simultaneousGesture(rotationGesture)
       .allowsHitTesting(appModel.isSpatialMenuVisible)
-      .onAppear {
-        updatePresentation(appModel.isSpatialMenuVisible)
-      }
-      .onChange(of: appModel.isSpatialMenuVisible) { _, isVisible in
-        updatePresentation(isVisible)
-      }
       .onDisappear {
-        rotationGestureStart = nil
-        handAnchorSubscription?.cancel()
-        handAnchorSubscription = nil
-        model.markPresented(false)
+        runtime.rotationGestureStart = nil
+        runtime.handAnchorSubscription?.cancel()
+        runtime.handAnchorSubscription = nil
         rootEntity.isEnabled = false
         handAnchor.isEnabled = false
       }
@@ -339,13 +340,13 @@
           guard appModel.isSpatialMenuVisible, rootEntity.isEnabled else { return }
           let axisSign: Double = value.rotation.axis.z < 0 ? -1 : 1
           let delta = Float(value.rotation.angle.radians * axisSign)
-          if rotationGestureStart == nil {
-            rotationGestureStart = model.rotation
+          if runtime.rotationGestureStart == nil {
+            runtime.rotationGestureStart = model.rotation
           }
-          model.setRotation((rotationGestureStart ?? 0) + delta)
+          model.setRotation((runtime.rotationGestureStart ?? 0) + delta)
         }
         .onEnded { _ in
-          rotationGestureStart = nil
+          runtime.rotationGestureStart = nil
         }
     }
 
@@ -689,20 +690,13 @@
       }
     }
 
-    private func updatePresentation(_ isVisible: Bool) {
-      if !isVisible { rotationGestureStart = nil }
-      handAnchor.isEnabled = isVisible
-      updateTrackedContentVisibility(handIsAnchored: handAnchor.isAnchored)
-      model.markPresented(isVisible)
-    }
-
     private func updateTrackedContentVisibility(handIsAnchored: Bool) {
       let shouldShow = SpatialRadialGeometry.shouldShowContent(
         menuRequested: appModel.isSpatialMenuVisible,
         handIsAnchored: handIsAnchored
       )
       rootEntity.isEnabled = shouldShow
-      if !shouldShow { rotationGestureStart = nil }
+      if !shouldShow { runtime.rotationGestureStart = nil }
     }
 
     /// Attachment content may invalidate independently of spatial layout (for

@@ -263,13 +263,13 @@ typedef struct
 {
     // p1/p2/axis are GPU-READY (precomputed by cSpaceWarpStack each frame so the
     // per-step Metal warp fns never redo normalize / log / π÷N / squares / clamps).
-    int   type;       // SpaceWarpKind raw; 0...17 (17 = Mandelbox recurrence step)
+    int   type;       // SpaceWarpKind raw; 0...19 (19 = multi-scale compression shells)
     float strength;   // per-op amount (folds treat as 0..1 blend; Twist/Bend/Ripple as magnitude). 0 = this op is a no-op.
-    float p1;         // PRECOMPUTED: boxFold L · sphere/circle minR² · inversion R² · kaleido seg(π/N) · ripple freq · shells spacing · scaleRepeat log(scale)
+    float p1;         // PRECOMPUTED: boxFold L · sphere/circle minR² · inversion R² · kaleido seg(π/N) · ripple freq · shell/base spacing · scaleRepeat log(scale)
     float p2;         // PRECOMPUTED: sphere/circle maxR²
     float axisX;      // PRE-NORMALIZED axis (Twist/Bend/Ripple)
     float axisY;
-    float axisZ;
+    float axisZ;      // Coxeter: user-authored vertical source angle (radians)
     // First op in a repeat group: low 8 bits = contiguous group length, next
     // 8 bits = pass count, and bit 16 enables Mandelbox `+ original point`
     // feedback after each complete pass. Zero means an ordinary one-pass op.

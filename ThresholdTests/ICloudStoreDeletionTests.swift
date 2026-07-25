@@ -27,6 +27,47 @@ import Foundation
 @Suite(.serialized)
 struct ICloudStoreDeletionTests {
 
+    @Test("Unknown File Provider status is hydrated without blocking on large placeholders")
+    func unknownFileProviderStatusPolicy() {
+        #expect(StorePlaceholderReadPolicy.requiresHydration(
+            isUbiquitous: true,
+            downloadStatus: nil
+        ))
+        #expect(!StorePlaceholderReadPolicy.requiresHydration(
+            isUbiquitous: true,
+            downloadStatus: .downloaded
+        ))
+        #expect(!StorePlaceholderReadPolicy.requiresHydration(
+            isUbiquitous: true,
+            downloadStatus: .current
+        ))
+
+        #expect(StorePlaceholderReadPolicy.canProbeUnknownStatus(
+            downloadStatus: nil,
+            fileSize: 32_000,
+            allocatedSize: 0,
+            maximumSize: 1_000_000
+        ))
+        #expect(!StorePlaceholderReadPolicy.canProbeUnknownStatus(
+            downloadStatus: nil,
+            fileSize: 32_000_000,
+            allocatedSize: 0,
+            maximumSize: 1_000_000
+        ))
+        #expect(StorePlaceholderReadPolicy.canProbeUnknownStatus(
+            downloadStatus: nil,
+            fileSize: 32_000_000,
+            allocatedSize: 4_096,
+            maximumSize: 1_000_000
+        ))
+        #expect(!StorePlaceholderReadPolicy.canProbeUnknownStatus(
+            downloadStatus: .notDownloaded,
+            fileSize: 32_000,
+            allocatedSize: 0,
+            maximumSize: 1_000_000
+        ))
+    }
+
     // MARK: - Harness
 
     /// Make a unique temp store root and point StorageLocation at it. The caller
@@ -161,6 +202,42 @@ struct ICloudStoreDeletionTests {
     }
 
     // MARK: - Presets
+
+    @Test("A successful preset save reports durable storage")
+    func presetSaveReportsSuccess() throws {
+        let root = makeStoreRoot()
+        try Data("[]".utf8).write(to: root.appendingPathComponent(".seeded-bundled.json"))
+        defer { teardown(root) }
+
+        let manager = PresetManager()
+        let result = manager.savePreset(name: "Durable", settings: RenderSettings())
+
+        #expect(result == .saved)
+        let saved = try #require(manager.presets.first { $0.name == "Durable" })
+        #expect(presetFileExists(id: saved.id, in: root))
+    }
+
+    @Test("A failed preset write is reported and does not leave a saved-looking ghost")
+    func presetSaveFailureIsVisible() throws {
+        let blocker = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ThresholdStoreBlocker-\(UUID().uuidString)")
+        try Data("not a directory".utf8).write(to: blocker)
+        StorageLocation.shared.testRootOverride = blocker
+        defer {
+            StorageLocation.shared.testRootOverride = nil
+            try? FileManager.default.removeItem(at: blocker)
+        }
+
+        let manager = PresetManager()
+        let result = manager.savePreset(name: "Cannot Persist", settings: RenderSettings())
+
+        guard case .failed(let detail) = result else {
+            Issue.record("Expected a failed save, got \(result)")
+            return
+        }
+        #expect(!detail.isEmpty)
+        #expect(!manager.presets.contains { $0.name == "Cannot Persist" })
+    }
 
     @Test("PresetManager.replaceAll drops only known ids, never an unknown store file")
     func presetReplaceAllAttributedDeletion() throws {

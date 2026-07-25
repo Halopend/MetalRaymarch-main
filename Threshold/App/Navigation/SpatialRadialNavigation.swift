@@ -28,13 +28,24 @@ struct SpatialRadialNavigationState: Equatable {
   var canGoBack: Bool { !path.isEmpty }
 
   func visibleNodes(in hierarchy: NavigationHierarchy) -> [NavigationHierarchy.Node] {
-    guard let currentID = path.last,
-      let current = hierarchy.node(withID: currentID),
-      current.isBranch
+    visibleNodes(atDepth: path.count, in: hierarchy)
+  }
+
+  /// Returns the sibling ring at a specific hierarchy depth. Depth zero is the
+  /// canonical root ring; every subsequent ring belongs to the selected branch
+  /// immediately inside it.
+  func visibleNodes(
+    atDepth depth: Int,
+    in hierarchy: NavigationHierarchy
+  ) -> [NavigationHierarchy.Node] {
+    guard depth > 0 else { return hierarchy.roots }
+    guard depth <= path.count,
+      let parent = hierarchy.node(withID: path[depth - 1]),
+      parent.isBranch
     else {
-      return hierarchy.roots
+      return []
     }
-    return current.children
+    return parent.children
   }
 
   func currentBranch(in hierarchy: NavigationHierarchy) -> NavigationHierarchy.Node? {
@@ -68,16 +79,46 @@ struct SpatialRadialNavigationState: Equatable {
     nodeID: String,
     in hierarchy: NavigationHierarchy
   ) -> SelectionOutcome {
-    guard let node = visibleNodes(in: hierarchy).first(where: { $0.id == nodeID }) else {
+    select(nodeID: nodeID, atDepth: path.count, in: hierarchy)
+  }
+
+  /// Selects a node on an explicit radial level. Selecting a sibling on an
+  /// earlier level replaces only that branch and discards stale descendants,
+  /// matching the path semantics used by Threshold's 2-D radial menu.
+  mutating func select(
+    nodeID: String,
+    atDepth depth: Int,
+    in hierarchy: NavigationHierarchy
+  ) -> SelectionOutcome {
+    guard depth >= 0,
+      let node = visibleNodes(atDepth: depth, in: hierarchy)
+        .first(where: { $0.id == nodeID })
+    else {
       return .ignored
     }
 
     highlightedNodeID = nil
+    path = Array(path.prefix(depth))
     if node.isBranch {
       path.append(node.id)
       return .navigated(path: path)
     }
     return .activate(nodeID: node.id)
+  }
+
+  mutating func highlight(
+    nodeID: String?,
+    atDepth depth: Int,
+    in hierarchy: NavigationHierarchy
+  ) {
+    guard let nodeID else {
+      highlightedNodeID = nil
+      return
+    }
+    highlightedNodeID = visibleNodes(atDepth: depth, in: hierarchy)
+      .contains(where: { $0.id == nodeID })
+      ? nodeID
+      : nil
   }
 
   mutating func goBack() {
@@ -98,34 +139,285 @@ struct SpatialRadialPlacement: Equatable {
   let position: SIMD3<Float>
 }
 
-/// A compact fan that grows from the menu hand toward the center of the body.
-/// Values are meters in the visionOS RealityView; the pure SIMD output is also
-/// straightforward to test on every platform.
+enum SpatialRadialHand: Equatable, Sendable {
+  case left
+  case right
+}
+
+/// Frozen world-space coordinate frame captured at menu activation. Subsequent
+/// hand and head movement is projected into this frame; none of it mutates the
+/// plant itself.
+struct SpatialRadialPlant: Equatable, Sendable {
+  let origin: SIMD3<Float>
+  let right: SIMD3<Float>
+  let up: SIMD3<Float>
+  let normal: SIMD3<Float>
+  let hand: SpatialRadialHand
+
+  init?(
+    origin: SIMD3<Float>,
+    headPosition: SIMD3<Float>,
+    hand: SpatialRadialHand
+  ) {
+    guard Self.isFinite(origin), Self.isFinite(headPosition) else { return nil }
+
+    var towardHead = headPosition - origin
+    if simd_length_squared(towardHead) < 0.000_001 {
+      towardHead = SIMD3<Float>(0, 0, 1)
+    }
+    let normal = simd_normalize(towardHead)
+
+    let worldUp = SIMD3<Float>(0, 1, 0)
+    var projectedUp = worldUp - normal * simd_dot(worldUp, normal)
+    if simd_length_squared(projectedUp) < 0.000_001 {
+      let fallback = SIMD3<Float>(0, 0, -1)
+      projectedUp = fallback - normal * simd_dot(fallback, normal)
+    }
+    guard simd_length_squared(projectedUp) >= 0.000_001 else { return nil }
+
+    let provisionalUp = simd_normalize(projectedUp)
+    let right = simd_normalize(simd_cross(provisionalUp, normal))
+    let up = simd_normalize(simd_cross(normal, right))
+    guard Self.isFinite(right), Self.isFinite(up), Self.isFinite(normal) else { return nil }
+
+    self.origin = origin
+    self.right = right
+    self.up = up
+    self.normal = normal
+    self.hand = hand
+  }
+
+  func localPosition(of worldPosition: SIMD3<Float>) -> SIMD3<Float> {
+    let delta = worldPosition - origin
+    return SIMD3<Float>(
+      simd_dot(delta, right),
+      simd_dot(delta, up),
+      simd_dot(delta, normal)
+    )
+  }
+
+  func worldPosition(of localPosition: SIMD3<Float>) -> SIMD3<Float> {
+    origin
+      + right * localPosition.x
+      + up * localPosition.y
+      + normal * localPosition.z
+  }
+
+  private static func isFinite(_ value: SIMD3<Float>) -> Bool {
+    value.x.isFinite && value.y.isFinite && value.z.isFinite
+  }
+}
+
+enum SpatialRadialInteractionOutcome: Equatable {
+  case none
+  case highlighted(nodeID: String?, depth: Int)
+  case navigated(path: [String])
+  case retreated(path: [String])
+  case activate(nodeID: String)
+}
+
+/// Platform-neutral direct-hand reducer. Radius moves through hierarchy levels;
+/// azimuth chooses siblings. Gaze is accepted only as a boundary tie-break and
+/// can never commit a selection by itself.
+struct SpatialRadialInteractionState: Equatable {
+  private(set) var navigation = SpatialRadialNavigationState()
+  private(set) var plant: SpatialRadialPlant?
+  private(set) var cursorWorldPosition: SIMD3<Float>?
+  private(set) var cursorLocalPosition: SIMD3<Float>?
+  private(set) var highlightedDepth: Int?
+  private(set) var isActive = false
+
+  private var previousRadius: Float = 0
+  private var needsRearmAfterTrackingLoss = false
+
+  var hand: SpatialRadialHand? { plant?.hand }
+
+  mutating func activate(
+    at handPosition: SIMD3<Float>,
+    headPosition: SIMD3<Float>,
+    hand: SpatialRadialHand,
+    focusing nodeID: String? = nil,
+    in hierarchy: NavigationHierarchy
+  ) -> Bool {
+    guard let captured = SpatialRadialPlant(
+      origin: handPosition,
+      headPosition: headPosition,
+      hand: hand
+    ) else {
+      reset()
+      return false
+    }
+
+    navigation.reset()
+    navigation.focus(nodeID: nodeID, in: hierarchy)
+    plant = captured
+    cursorWorldPosition = handPosition
+    cursorLocalPosition = .zero
+    highlightedDepth = navigation.depth
+    previousRadius = 0
+    needsRearmAfterTrackingLoss = false
+    isActive = true
+    return true
+  }
+
+  mutating func update(
+    handPosition: SIMD3<Float>?,
+    gazeAssistedNodeID: String? = nil,
+    in hierarchy: NavigationHierarchy
+  ) -> SpatialRadialInteractionOutcome {
+    guard isActive, let plant else { return .none }
+    guard let handPosition, Self.isFinite(handPosition) else {
+      cursorWorldPosition = nil
+      cursorLocalPosition = nil
+      needsRearmAfterTrackingLoss = true
+      return .none
+    }
+
+    let local = plant.localPosition(of: handPosition)
+    let radius = hypot(local.x, local.y)
+    cursorWorldPosition = handPosition
+    cursorLocalPosition = local
+
+    if needsRearmAfterTrackingLoss {
+      previousRadius = radius
+      needsRearmAfterTrackingLoss = false
+      return .none
+    }
+
+    let depth = navigation.depth
+    if depth > 0 {
+      let retreatRadius = SpatialRadialGeometry.retreatRadius(forDepth: depth)
+      if previousRadius > retreatRadius, radius <= retreatRadius {
+        navigation.goBack()
+        highlightedDepth = navigation.depth
+        previousRadius = radius
+        updateHighlight(
+          localPosition: local,
+          gazeAssistedNodeID: gazeAssistedNodeID,
+          in: hierarchy
+        )
+        return .retreated(path: navigation.path)
+      }
+    }
+
+    let oldHighlight = navigation.highlightedNodeID
+    updateHighlight(
+      localPosition: local,
+      gazeAssistedNodeID: gazeAssistedNodeID,
+      in: hierarchy
+    )
+
+    let currentDepth = navigation.depth
+    let commitRadius = SpatialRadialGeometry.commitRadius(forDepth: currentDepth)
+    let crossedOutward = previousRadius < commitRadius && radius >= commitRadius
+    previousRadius = radius
+
+    if crossedOutward, let nodeID = navigation.highlightedNodeID {
+      switch navigation.select(nodeID: nodeID, atDepth: currentDepth, in: hierarchy) {
+      case .navigated(let path):
+        highlightedDepth = navigation.depth
+        updateHighlight(
+          localPosition: local,
+          gazeAssistedNodeID: gazeAssistedNodeID,
+          in: hierarchy
+        )
+        return .navigated(path: path)
+      case .activate(let nodeID):
+        isActive = false
+        return .activate(nodeID: nodeID)
+      case .ignored:
+        break
+      }
+    }
+
+    if oldHighlight != navigation.highlightedNodeID || highlightedDepth != currentDepth {
+      highlightedDepth = currentDepth
+      return .highlighted(nodeID: navigation.highlightedNodeID, depth: currentDepth)
+    }
+    return .none
+  }
+
+  mutating func reset() {
+    navigation.reset()
+    plant = nil
+    cursorWorldPosition = nil
+    cursorLocalPosition = nil
+    highlightedDepth = nil
+    previousRadius = 0
+    needsRearmAfterTrackingLoss = false
+    isActive = false
+  }
+
+  private mutating func updateHighlight(
+    localPosition: SIMD3<Float>,
+    gazeAssistedNodeID: String?,
+    in hierarchy: NavigationHierarchy
+  ) {
+    let depth = navigation.depth
+    let nodes = navigation.visibleNodes(atDepth: depth, in: hierarchy)
+    guard !nodes.isEmpty else {
+      navigation.highlight(nodeID: nil, atDepth: depth, in: hierarchy)
+      highlightedDepth = depth
+      return
+    }
+
+    let radius = hypot(localPosition.x, localPosition.y)
+    guard radius >= SpatialRadialGeometry.activationDeadZone else {
+      highlightedDepth = depth
+      return
+    }
+
+    let angle = SpatialRadialGeometry.angle(
+      forLocalPosition: SIMD2<Float>(localPosition.x, localPosition.y)
+    )
+    let currentIndex = navigation.highlightedNodeID.flatMap { highlightedID in
+      nodes.firstIndex(where: { $0.id == highlightedID })
+    }
+    var index = SpatialRadialGeometry.sectorIndex(
+      angle: angle,
+      count: nodes.count,
+      preserving: currentIndex
+    )
+
+    if let gazeAssistedNodeID,
+      let gazeIndex = nodes.firstIndex(where: { $0.id == gazeAssistedNodeID }),
+      SpatialRadialGeometry.isNearSectorBoundary(angle: angle, count: nodes.count),
+      SpatialRadialGeometry.areAdjacentSectors(index, gazeIndex, count: nodes.count)
+    {
+      index = gazeIndex
+    }
+
+    navigation.highlight(nodeID: nodes[index].id, atDepth: depth, in: hierarchy)
+    highlightedDepth = depth
+  }
+
+  private static func isFinite(_ value: SIMD3<Float>) -> Bool {
+    value.x.isFinite && value.y.isFinite && value.z.isFinite
+  }
+}
+
+/// World-space ring layout and interaction thresholds, in meters.
 enum SpatialRadialGeometry {
-  static let singleTrackReach: Float = 0.150
-  static let nearTrackReach: Float = 0.115
-  static let farTrackReach: Float = 0.225
-  static let trackCurve: Float = 0.018
-  static let verticalStep: Float = 0.078
-  static let depthStep: Float = 0.006
-  /// A small amount of two-hand adjustment is useful, but a 15-degree cap
-  /// keeps even the outermost target inside the hand-scale interaction zone.
+  static let activationDeadZone: Float = 0.070
+  static let rootRingRadius: Float = 0.190
+  static let descendantRingRadius: Float = 0.460
+  static let rootCommitRadius: Float = 0.320
+  static let descendantCommitRadius: Float = 0.540
+  static let maximumReach: Float = 0.580
+  static let intendedDeepReach: ClosedRange<Float> = 0.4572...0.6096
+  static let angularHysteresis: Float = .pi / 36
+  static let gazeBoundaryTolerance: Float = .pi / 72
+
+  // Compatibility values retained for the dormant RealityKit prototype. The
+  // active visionOS path is the planted compositor renderer.
   static let maximumFanTilt: Float = .pi / 12
-  static let railLength: Float = farTrackReach + trackCurve
+  static let railLength: Float = maximumReach
   static let hubPosition = SIMD3<Float>(0, 0, 0.012)
-  static let handRelativeOffset = SIMD3<Float>(0, 0.035, -0.025)
+  static let handRelativeOffset = SIMD3<Float>.zero
 
-  /// `aboveHand` points +y toward the person's head and +z toward the ground.
-  /// Rotate the menu plane so its normal points at the person and its top points
-  /// against gravity, independent of palm roll and pitch.
-  static let anchorToFacingOrientation = simd_quatf(
-    angle: -.pi / 2,
-    axis: SIMD3<Float>(1, 0, 0)
-  )
+  static let anchorToFacingOrientation = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
 
-  /// Conservative physical extents for layout regression tests. SwiftUI
-  /// attachment typography can vary, so these slightly exceed the fixed frames.
-  static let ringItemHalfSize = SIMD2<Float>(0.058, 0.034)
+  static let ringItemHalfSize = SIMD2<Float>(0.055, 0.030)
   static let headerHalfSize = SIMD2<Float>(0.145, 0.050)
 
   static func inwardSign(isLeftHanded: Bool) -> Float {
@@ -142,7 +434,7 @@ enum SpatialRadialGeometry {
   }
 
   static func headerPosition(isLeftHanded: Bool) -> SIMD3<Float> {
-    SIMD3<Float>(inwardSign(isLeftHanded: isLeftHanded) * 0.120, 0.235, 0.004)
+    SIMD3<Float>(0, maximumReach + 0.08, 0.004)
   }
 
   static func railPosition(
@@ -150,13 +442,12 @@ enum SpatialRadialGeometry {
     rotation: Float,
     isLeftHanded: Bool
   ) -> SIMD3<Float> {
-    let safeDepth = Float(min(max(depth, 0), 5))
     let safeRotation = constrainedRotation(rotation)
-    let midpoint = inwardSign(isLeftHanded: isLeftHanded) * railLength * 0.5
+    let midpoint = railLength * 0.5
     return SIMD3<Float>(
       midpoint * cos(safeRotation),
       midpoint * sin(safeRotation),
-      -safeDepth * depthStep - 0.016
+      -Float(max(depth, 0)) * 0.004 - 0.016
     )
   }
 
@@ -194,6 +485,92 @@ enum SpatialRadialGeometry {
     )
   }
 
+  static func ringRadius(forDepth depth: Int) -> Float {
+    depth <= 0
+      ? rootRingRadius
+      : min(descendantRingRadius + Float(depth - 1) * 0.035, maximumReach - 0.04)
+  }
+
+  static func commitRadius(forDepth depth: Int) -> Float {
+    depth <= 0
+      ? rootCommitRadius
+      : min(descendantCommitRadius + Float(depth - 1) * 0.015, maximumReach)
+  }
+
+  static func retreatRadius(forDepth depth: Int) -> Float {
+    guard depth > 0 else { return activationDeadZone }
+    if depth == 1 { return rootCommitRadius - 0.05 }
+    return max(
+      activationDeadZone,
+      commitRadius(forDepth: depth - 1) - 0.05
+    )
+  }
+
+  /// Zero points up in the planted plane; angles increase clockwise when viewed
+  /// by the wearer.
+  static func angle(forLocalPosition position: SIMD2<Float>) -> Float {
+    var result = atan2(position.x, position.y)
+    if result < 0 { result += 2 * .pi }
+    return result
+  }
+
+  static func angle(forIndex index: Int, count: Int) -> Float {
+    guard count > 0 else { return 0 }
+    return 2 * .pi * Float(index) / Float(count)
+  }
+
+  static func sectorIndex(
+    angle: Float,
+    count: Int,
+    preserving currentIndex: Int? = nil
+  ) -> Int {
+    guard count > 1 else { return 0 }
+    let step = 2 * Float.pi / Float(count)
+    let normalized = normalizedAngle(angle)
+
+    if let currentIndex, (0..<count).contains(currentIndex) {
+      let center = Self.angle(forIndex: currentIndex, count: count)
+      if angularDistance(normalized, center) <= step * 0.5 + angularHysteresis {
+        return currentIndex
+      }
+    }
+
+    return Int(floor((normalized + step * 0.5) / step)) % count
+  }
+
+  static func isNearSectorBoundary(angle: Float, count: Int) -> Bool {
+    guard count > 1 else { return false }
+    let step = 2 * Float.pi / Float(count)
+    let normalized = normalizedAngle(angle)
+    let nearestCenter = Float(sectorIndex(angle: normalized, count: count)) * step
+    let fromCenter = angularDistance(normalized, nearestCenter)
+    return abs(fromCenter - step * 0.5) <= gazeBoundaryTolerance
+  }
+
+  static func areAdjacentSectors(_ first: Int, _ second: Int, count: Int) -> Bool {
+    guard count > 1 else { return first == second }
+    let distance = abs(first - second)
+    return distance == 0 || distance == 1 || distance == count - 1
+  }
+
+  static func localPosition(
+    index: Int,
+    count: Int,
+    depth: Int,
+    rotation: Float = 0,
+    isLeftHanded: Bool = false
+  ) -> SIMD3<Float> {
+    let direction: Float = isLeftHanded ? -1 : 1
+    let itemAngle = direction * angle(forIndex: index, count: count)
+      + constrainedRotation(rotation)
+    let radius = ringRadius(forDepth: depth)
+    return SIMD3<Float>(
+      sin(itemAngle) * radius,
+      cos(itemAngle) * radius,
+      Float(depth) * 0.004
+    )
+  }
+
   static func placements(
     count: Int,
     depth: Int,
@@ -201,48 +578,33 @@ enum SpatialRadialGeometry {
     isLeftHanded: Bool = false
   ) -> [SpatialRadialPlacement] {
     guard count > 0 else { return [] }
-    let safeDepth = Float(min(max(depth, 0), 5))
-    let sign = inwardSign(isLeftHanded: isLeftHanded)
-    let safeRotation = constrainedRotation(rotation)
-    let rotationCosine = cos(safeRotation)
-    let rotationSine = sin(safeRotation)
-    let nearCount = count <= 5 ? count : (count + 1) / 2
-    let farCount = count - nearCount
-    var result: [SpatialRadialPlacement] = []
-    result.reserveCapacity(count)
-
-    func appendTrack(itemCount: Int, reach: Float, indexOffset: Int, track: Int) {
-      guard itemCount > 0 else { return }
-      let midpoint = Float(itemCount - 1) * 0.5
-      let maxDistanceFromCenter = max(midpoint, 1)
-      for trackIndex in 0..<itemCount {
-        let centeredIndex = Float(trackIndex) - midpoint
-        let vertical = centeredIndex * verticalStep
-        let centerWeight = 1 - abs(centeredIndex) / maxDistanceFromCenter
-        let inward = sign * (reach + centerWeight * trackCurve)
-        let x = inward * rotationCosine - vertical * rotationSine
-        let y = inward * rotationSine + vertical * rotationCosine
-        let index = indexOffset + trackIndex
-        result.append(
-          SpatialRadialPlacement(
-            index: index,
-            angle: atan2(y, x),
-            position: SIMD3<Float>(
-              x,
-              y,
-              -safeDepth * depthStep - Float(track) * 0.008
-            )
-          ))
-      }
+    let safeDepth = max(depth, 0)
+    return (0..<count).map { index in
+      let position = localPosition(
+        index: index,
+        count: count,
+        depth: safeDepth,
+        rotation: rotation,
+        isLeftHanded: isLeftHanded
+      )
+      return SpatialRadialPlacement(
+        index: index,
+        angle: atan2(position.y, position.x),
+        position: position
+      )
     }
+  }
 
-    if farCount == 0 {
-      appendTrack(itemCount: nearCount, reach: singleTrackReach, indexOffset: 0, track: 0)
-    } else {
-      appendTrack(itemCount: nearCount, reach: nearTrackReach, indexOffset: 0, track: 0)
-      appendTrack(itemCount: farCount, reach: farTrackReach, indexOffset: nearCount, track: 1)
-    }
+  private static func normalizedAngle(_ angle: Float) -> Float {
+    guard angle.isFinite else { return 0 }
+    var result = angle.truncatingRemainder(dividingBy: 2 * .pi)
+    if result < 0 { result += 2 * .pi }
     return result
+  }
+
+  private static func angularDistance(_ first: Float, _ second: Float) -> Float {
+    let raw = abs(normalizedAngle(first) - normalizedAngle(second))
+    return min(raw, 2 * .pi - raw)
   }
 }
 

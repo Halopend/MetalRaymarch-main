@@ -363,7 +363,8 @@ enum ControlCatalog {
 
     static let coneMarchStrength = ControlSpec(
         id: "quality.coneMarchStrength", name: "Cone Marching", icon: "triangle",
-        range: 0.0...1.0, defaultValue: 0.0)
+        range: 0.0...QualityConfig.maximumConeMarchStrength,
+        defaultValue: QualityConfig.defaultConeMarchStrength)
 
     static let distanceLODStrength = ControlSpec(
         id: "quality.distanceLODStrength", name: "Distance Falloff", icon: "mountain.2",

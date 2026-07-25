@@ -25,12 +25,15 @@ struct FramePacingTrackerTests {
         for index in 1...30 {
             _ = tracker.recordPresentation(at: 1.0 + Double(index) / 60.0)
         }
-        _ = tracker.recordPresentation(at: 1.75)
+        let event = tracker.recordPresentation(at: 1.75)
 
         let snapshot = tracker.snapshot()
         #expect(snapshot.hitchCount == 1)
         #expect(snapshot.frameGapP99Ms > 100)
         #expect(snapshot.maximumFrameGapMs >= 250)
+        #expect(event.didRecordHitch)
+        #expect(event.lastFrameGapMs >= 250)
+        #expect(!snapshot.didRecordHitch)
     }
 
     @Test("Wake-sized gaps reset the rolling window without inflating every percentile")

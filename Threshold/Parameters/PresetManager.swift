@@ -121,6 +121,39 @@ func exportOffMain(_ produce: @escaping @Sendable () -> URL?,
     }
 }
 
+/// Immediate disposition of a user-authored preset save.
+enum PresetSaveResult: Equatable {
+    case saved
+    case queuedForStorage
+    case failed(String)
+}
+
+/// File Provider-backed iCloud URLs do not always vend
+/// `ubiquitousItemDownloadingStatus` on macOS. Treat an explicit downloaded
+/// state as readable, and only probe an unknown-status placeholder when it is
+/// small (or already has local allocation). Probes run off MainActor.
+enum StorePlaceholderReadPolicy {
+    static func requiresHydration(
+        isUbiquitous: Bool,
+        downloadStatus: URLUbiquitousItemDownloadingStatus?
+    ) -> Bool {
+        guard isUbiquitous else { return false }
+        return downloadStatus != .current && downloadStatus != .downloaded
+    }
+
+    static func canProbeUnknownStatus(
+        downloadStatus: URLUbiquitousItemDownloadingStatus?,
+        fileSize: Int?,
+        allocatedSize: Int?,
+        maximumSize: Int
+    ) -> Bool {
+        guard downloadStatus == nil else { return false }
+        if (allocatedSize ?? 0) > 0 { return true }
+        guard let fileSize else { return false }
+        return fileSize <= maximumSize
+    }
+}
+
 /// Manages saving and loading of presets
 @MainActor
 @Observable
@@ -159,21 +192,33 @@ class PresetManager {
     private struct PresetScanRequest: @unchecked Sendable {
         let root: URL
         let cachedFiles: [URL: CachedPresetFile]
+        let bundledBySeededFileName: [String: FractalPreset]
+        let allowsPlaceholderProbe: Bool
+        let failedPlaceholderProbeURLs: Set<URL>
     }
 
     private struct PresetScanResult: @unchecked Sendable {
         let presets: [FractalPreset]
+        let bundledPlaceholderFallbacks: [FractalPreset]
         let cachedFiles: [URL: CachedPresetFile]
         let fileCount: Int
         let decodedCount: Int
         let reusedCount: Int
         let pendingDownloadCount: Int
+        let retryablePlaceholderCount: Int
+        let failedPlaceholderProbeURLs: Set<URL>
         let cancelled: Bool
     }
 
+    /// Bundle-backed display values for seeded files that are present in the
+    /// active store but not readable yet. They never participate in persistence
+    /// or cross-store merge decisions.
+    private var bundledPlaceholderFallbacks: [FractalPreset] = []
     @ObservationIgnored private var presetFileCache: [URL: CachedPresetFile] = [:]
     @ObservationIgnored private var presetReloadTask: Task<Void, Never>?
     @ObservationIgnored private var presetReloadGeneration: UInt64 = 0
+    @ObservationIgnored private var failedPlaceholderProbeURLs: Set<URL> = []
+    @ObservationIgnored private var mostRecentWriteError: String?
     /// Saves made while iCloud/root discovery is unresolved. They are flushed
     /// before the first reload from that root so the folder-as-truth scan cannot
     /// discard an in-memory scene the user just created.
@@ -317,8 +362,12 @@ class PresetManager {
     /// filtering keys off bundled source IDs, which also catches copies already
     /// seeded into the preset store without hiding user-authored environment scenes.
     var sceneCatalogPresets: [FractalPreset] {
-        Self.filterSceneCatalogPresets(
-            presets,
+        var catalogByID = Dictionary(uniqueKeysWithValues: bundledPlaceholderFallbacks.map { ($0.id, $0) })
+        for preset in presets {
+            catalogByID[preset.id] = preset
+        }
+        return Self.filterSceneCatalogPresets(
+            Array(catalogByID.values).sorted { $0.createdAt > $1.createdAt },
             bundledPresets: Self.bundledPresets(),
             supportsEnvironmentReconstruction: Self.supportsEnvironmentReconstructionInSceneCatalog
         )
@@ -358,6 +407,7 @@ class PresetManager {
         let resourceKeys: Set<URLResourceKey> = [
             .contentModificationDateKey,
             .fileSizeKey,
+            .fileAllocatedSizeKey,
             .isUbiquitousItemKey,
             .ubiquitousItemDownloadingStatusKey
         ]
@@ -375,17 +425,25 @@ class PresetManager {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         var newCache: [URL: CachedPresetFile] = [:]
+        var fallbackByID: [UUID: FractalPreset] = [:]
         var decodedCount = 0
         var reusedCount = 0
         var pendingDownloadCount = 0
+        var retryablePlaceholderCount = 0
+        var didProbePlaceholder = false
+        var failedPlaceholderProbeURLs = request.failedPlaceholderProbeURLs
         let presetURLs = allURLs.sorted { $0.path < $1.path }
 
         for rawURL in presetURLs {
             if Task.isCancelled {
                 return PresetScanResult(
-                    presets: [], cachedFiles: request.cachedFiles, fileCount: presetURLs.count,
+                    presets: [], bundledPlaceholderFallbacks: [],
+                    cachedFiles: request.cachedFiles, fileCount: presetURLs.count,
                     decodedCount: decodedCount, reusedCount: reusedCount,
-                    pendingDownloadCount: pendingDownloadCount, cancelled: true
+                    pendingDownloadCount: pendingDownloadCount,
+                    retryablePlaceholderCount: retryablePlaceholderCount,
+                    failedPlaceholderProbeURLs: failedPlaceholderProbeURLs,
+                    cancelled: true
                 )
             }
 
@@ -397,21 +455,6 @@ class PresetManager {
             )
             let cached = request.cachedFiles[url]
 
-            // File Provider can block a synchronous read for seconds. Request
-            // hydration, preserve any last-good cached value, and let the next
-            // coalesced metadata update perform the decode once it is current.
-            if values?.isUbiquitousItem == true,
-               values?.ubiquitousItemDownloadingStatus != .current {
-                try? FileManager.default.startDownloadingUbiquitousItem(at: url)
-                pendingDownloadCount += 1
-                if let cached {
-                    newCache[url] = cached
-                    byID[cached.preset.id] = cached.preset
-                    reusedCount += 1
-                }
-                continue
-            }
-
             if let cached, cached.signature == signature {
                 newCache[url] = cached
                 byID[cached.preset.id] = cached.preset
@@ -419,8 +462,65 @@ class PresetManager {
                 continue
             }
 
+            let downloadStatus = values?.ubiquitousItemDownloadingStatus
+            let requiresHydration = StorePlaceholderReadPolicy.requiresHydration(
+                isUbiquitous: values?.isUbiquitousItem == true,
+                downloadStatus: downloadStatus
+            )
+            var isPlaceholderProbe = false
+
+            // Legacy iCloud reports an explicit not-downloaded state. Modern
+            // File Provider can instead report nil forever, even though a
+            // background read can materialize the file. Show any known bundled
+            // value immediately, then probe at most one small unknown-status
+            // file per pass so the catalog fills progressively without a long
+            // serial stall.
+            if requiresHydration {
+                try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+                pendingDownloadCount += 1
+
+                let fallback = request.bundledBySeededFileName[url.lastPathComponent]
+                if let fallback {
+                    fallbackByID[fallback.id] = fallback
+                }
+
+                let canProbe = request.allowsPlaceholderProbe &&
+                    !didProbePlaceholder &&
+                    !failedPlaceholderProbeURLs.contains(url) &&
+                    StorePlaceholderReadPolicy.canProbeUnknownStatus(
+                        downloadStatus: downloadStatus,
+                        fileSize: values?.fileSize,
+                        allocatedSize: values?.fileAllocatedSize,
+                        maximumSize: 2 * 1_024 * 1_024
+                    )
+                if canProbe {
+                    didProbePlaceholder = true
+                    isPlaceholderProbe = true
+                } else {
+                    if let cached {
+                        newCache[url] = cached
+                        byID[cached.preset.id] = cached.preset
+                        reusedCount += 1
+                    }
+                    if downloadStatus == nil,
+                       !failedPlaceholderProbeURLs.contains(url),
+                       StorePlaceholderReadPolicy.canProbeUnknownStatus(
+                           downloadStatus: downloadStatus,
+                           fileSize: values?.fileSize,
+                           allocatedSize: values?.fileAllocatedSize,
+                           maximumSize: 2 * 1_024 * 1_024
+                       ) {
+                        retryablePlaceholderCount += 1
+                    }
+                    continue
+                }
+            }
+
             guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
                   let preset = try? decoder.decode(FractalPreset.self, from: data) else {
+                if isPlaceholderProbe {
+                    failedPlaceholderProbeURLs.insert(url)
+                }
                 // An external atomic replace can race the scan. Retain the last
                 // good value until the next metadata callback rather than making
                 // the item briefly disappear from the UI.
@@ -440,11 +540,14 @@ class PresetManager {
 
         return PresetScanResult(
             presets: byID.values.sorted { $0.createdAt > $1.createdAt },
+            bundledPlaceholderFallbacks: fallbackByID.values.sorted { $0.createdAt > $1.createdAt },
             cachedFiles: newCache,
             fileCount: presetURLs.count,
             decodedCount: decodedCount,
             reusedCount: reusedCount,
             pendingDownloadCount: pendingDownloadCount,
+            retryablePlaceholderCount: retryablePlaceholderCount,
+            failedPlaceholderProbeURLs: failedPlaceholderProbeURLs,
             cancelled: false
         )
     }
@@ -549,15 +652,17 @@ class PresetManager {
     private func writeNewPresetFile(_ preset: FractalPreset, root: URL) -> URL? {
         let hasMusic = preset.hasMusicReactiveMappings
         let dir = hasMusic ? StorageLocation.musicPresetsDir(root) : StorageLocation.scenesDir(root)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let ext = ThresholdExportFormat.preset(hasMusic: hasMusic).ext
         let url = dir.appendingPathComponent(Self.sanitizedFileName(preset.name, id: preset.id, ext: ext))
         do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let data = try presetEncoder.encode(preset)
             try data.write(to: url, options: .atomic)
             return url
         } catch {
-            print("Failed to write preset file: \(error)")
+            let detail = error.localizedDescription
+            mostRecentWriteError = detail
+            print("Failed to write preset file: \(detail)")
             return nil
         }
     }
@@ -586,15 +691,23 @@ class PresetManager {
     }
 
     /// Persist a single preset, queueing it while the active root resolves.
-    private func persist(_ preset: FractalPreset) {
+    private func persist(_ preset: FractalPreset) -> PresetSaveResult {
         guard let root = storeRoot else {
             pendingRootWrites[preset.id] = preset
-            return
+            // iCloud discovery can transiently leave the active root nil. Keep a
+            // recoverable local snapshot and retry discovery instead of claiming
+            // the scene was written to a store that does not exist yet.
+            backupCurrentPresetsNow()
+            StorageLocation.shared.resolveICloud()
+            return .queuedForStorage
         }
         invalidatePresetReloadForLocalMutation()
+        mostRecentWriteError = nil
         if writePresetFile(preset, root: root) {
             pendingRootWrites.removeValue(forKey: preset.id)
+            return .saved
         }
+        return .failed(mostRecentWriteError ?? "The scene store could not be written.")
     }
 
     private func flushPendingRootWrites() {
@@ -619,15 +732,23 @@ class PresetManager {
     func loadPresets(forceRefreshBundled: Bool = false, immediate: Bool = false) {
         if forceRefreshBundled { _ = Self.bundledPresets(forceRefresh: true) }
         guard let root = storeRoot else {
-            // iCloud chosen but not resolved yet — stay empty; reload on rootResolved.
+            // iCloud chosen but not resolved yet. Keep saves queued during
+            // discovery visible; rootResolved flushes them before the disk scan.
             presetReloadGeneration &+= 1
             presetReloadTask?.cancel()
             presetFileCache = [:]
-            presets = []
+            bundledPlaceholderFallbacks = []
+            failedPlaceholderProbeURLs = []
+            presets = pendingRootWrites.values.sorted { $0.createdAt > $1.createdAt }
             return
         }
         StorageLocation.shared.ensureLayout(at: root)
-        schedulePresetReload(root: root, reason: immediate ? "initial" : "coalesced", immediate: immediate)
+        schedulePresetReload(
+            root: root,
+            reason: immediate ? "initial" : "coalesced",
+            immediate: immediate,
+            allowsPlaceholderProbe: false
+        )
     }
 
     /// Immediate off-main reload for storage-mode merges, where the merge must
@@ -638,20 +759,61 @@ class PresetManager {
         presetReloadTask?.cancel()
         guard let root = storeRoot else {
             presetFileCache = [:]
+            bundledPlaceholderFallbacks = []
+            failedPlaceholderProbeURLs = []
             presets = []
             return
         }
         StorageLocation.shared.ensureLayout(at: root)
-        let result = await performPresetScan(.init(root: root, cachedFiles: presetFileCache))
+        let result = await performPresetScan(makePresetScanRequest(
+            root: root,
+            allowsPlaceholderProbe: false
+        ))
         guard !result.cancelled else { return }
         applyPresetScanResult(result, root: root, reason: "immediate")
     }
 
-    private func schedulePresetReload(root: URL, reason: String, immediate: Bool) {
+    private func makePresetScanRequest(
+        root: URL,
+        allowsPlaceholderProbe: Bool
+    ) -> PresetScanRequest {
+        let bundledByName = Dictionary(
+            Self.bundledPresets().map { preset in
+                let ext = ThresholdExportFormat.preset(
+                    hasMusic: preset.hasMusicReactiveMappings
+                ).ext
+                return (
+                    Self.sanitizedFileName(preset.name, id: preset.id, ext: ext),
+                    preset
+                )
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return PresetScanRequest(
+            root: root,
+            cachedFiles: presetFileCache,
+            bundledBySeededFileName: bundledByName,
+            allowsPlaceholderProbe: allowsPlaceholderProbe,
+            failedPlaceholderProbeURLs: failedPlaceholderProbeURLs
+        )
+    }
+
+    private func schedulePresetReload(
+        root: URL,
+        reason: String,
+        immediate: Bool,
+        allowsPlaceholderProbe: Bool
+    ) {
+        if !allowsPlaceholderProbe {
+            failedPlaceholderProbeURLs = []
+        }
         presetReloadGeneration &+= 1
         let generation = presetReloadGeneration
         presetReloadTask?.cancel()
-        let request = PresetScanRequest(root: root, cachedFiles: presetFileCache)
+        let request = makePresetScanRequest(
+            root: root,
+            allowsPlaceholderProbe: allowsPlaceholderProbe
+        )
         presetReloadTask = Task { [weak self] in
             if !immediate {
                 do {
@@ -685,25 +847,42 @@ class PresetManager {
                 presetFileCache[url]?.signature != entry.signature
             }
         presetFileCache = result.cachedFiles
-        if cacheChanged {
+        failedPlaceholderProbeURLs = result.failedPlaceholderProbeURLs
+        bundledPlaceholderFallbacks = result.bundledPlaceholderFallbacks
+        if cacheChanged || presets.map(\.id) != result.presets.map(\.id) {
             presets = result.presets
             FractalPreset.clearThumbnailCache()
         }
         print(
             "📂 Preset scan [\(reason)]: files=\(result.fileCount), " +
             "decoded=\(result.decodedCount), reused=\(result.reusedCount), " +
-            "pending=\(result.pendingDownloadCount)"
+            "pending=\(result.pendingDownloadCount), " +
+            "retryable=\(result.retryablePlaceholderCount)"
         )
 
         // Migration/seeding is evaluated only after the detached scan, so its
         // presence checks never perform a second synchronous directory decode.
         let wroteFiles = migrateAndSeedIfNeeded(
             root: root,
-            presentPresetIDs: Set(result.presets.map(\.id))
+            presentPresetIDs: Set(
+                (result.presets + result.bundledPlaceholderFallbacks).map(\.id)
+            )
         )
         if wroteFiles {
             presetFileCache = [:]
-            schedulePresetReload(root: root, reason: "post-migration", immediate: true)
+            schedulePresetReload(
+                root: root,
+                reason: "post-migration",
+                immediate: true,
+                allowsPlaceholderProbe: false
+            )
+        } else if result.retryablePlaceholderCount > 0 {
+            schedulePresetReload(
+                root: root,
+                reason: "placeholder-probe",
+                immediate: false,
+                allowsPlaceholderProbe: true
+            )
         }
     }
 
@@ -802,14 +981,23 @@ class PresetManager {
     }
     
     /// Save current settings as a new preset
-    func savePreset(name: String, settings: RenderSettings, thumbnailData: Data? = nil, embeddedFormula: EmbeddedFormula? = nil) {
+    @discardableResult
+    func savePreset(name: String, settings: RenderSettings, thumbnailData: Data? = nil,
+                    embeddedFormula: EmbeddedFormula? = nil) -> PresetSaveResult {
         let preset = FractalPreset.fromSettings(settings, name: name, thumbnailData: thumbnailData, embeddedFormula: embeddedFormula)
         presets.insert(preset, at: 0) // Add to beginning (newest first)
-        persist(preset)
+        let result = persist(preset)
+        if case .failed = result {
+            // Do not leave an in-memory ghost that looks saved but disappears on
+            // the next folder reload.
+            presets.removeAll { $0.id == preset.id }
+            return result
+        }
         scheduleBackup()
 
         // Track for analytics with full preset data
         UsageAnalytics.shared.trackPresetSaved(preset: preset)
+        return result
     }
 
     /// Delete a preset. Removing its file IS the deletion — under folder-as-truth
@@ -892,7 +1080,7 @@ class PresetManager {
         } else {
             presets.insert(preset, at: 0)
         }
-        persist(preset)
+        _ = persist(preset)
         scheduleBackup()
         FractalPreset.clearThumbnailCache(for: preset.id)
         UsageAnalytics.shared.trackPresetSaved(preset: preset)

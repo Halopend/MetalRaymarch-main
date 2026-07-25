@@ -16,6 +16,10 @@ struct FramePacingSnapshot: Equatable, Sendable {
     var maximumFrameGapMs: Double = 0
     var hitchCount: Int = 0
     var sampleCount: Int = 0
+    /// Populated only by `recordPresentation` for the frame just recorded.
+    /// A plain `snapshot()` is an aggregate and leaves these event fields clear.
+    var lastFrameGapMs: Double = 0
+    var didRecordHitch: Bool = false
 }
 
 struct FramePacingTracker: Sendable {
@@ -39,12 +43,17 @@ struct FramePacingTracker: Sendable {
         if gapMs > 2_000 {
             cumulativeHitchCount += 1
             frameGapsMs.removeAll(keepingCapacity: true)
-            return snapshot(maximumOverride: gapMs)
+            return snapshot(
+                maximumOverride: gapMs,
+                lastFrameGapMs: gapMs,
+                didRecordHitch: true
+            )
         }
 
         let previousMedian = percentile(frameGapsMs, 0.5)
         let relativeThreshold = previousMedian > 0 ? previousMedian * 2.0 : 0
-        if gapMs > max(Self.absoluteHitchThresholdMs, relativeThreshold) {
+        let didRecordHitch = gapMs > max(Self.absoluteHitchThresholdMs, relativeThreshold)
+        if didRecordHitch {
             cumulativeHitchCount += 1
         }
 
@@ -52,18 +61,28 @@ struct FramePacingTracker: Sendable {
         if frameGapsMs.count > Self.maximumRetainedSamples {
             frameGapsMs.removeFirst(frameGapsMs.count - Self.maximumRetainedSamples)
         }
-        return snapshot()
+        return snapshot(
+            maximumOverride: nil,
+            lastFrameGapMs: gapMs,
+            didRecordHitch: didRecordHitch
+        )
     }
 
     func snapshot() -> FramePacingSnapshot {
-        snapshot(maximumOverride: nil)
+        snapshot(maximumOverride: nil, lastFrameGapMs: 0, didRecordHitch: false)
     }
 
-    private func snapshot(maximumOverride: Double?) -> FramePacingSnapshot {
+    private func snapshot(
+        maximumOverride: Double?,
+        lastFrameGapMs: Double,
+        didRecordHitch: Bool
+    ) -> FramePacingSnapshot {
         guard !frameGapsMs.isEmpty else {
             return FramePacingSnapshot(
                 maximumFrameGapMs: maximumOverride ?? 0,
-                hitchCount: cumulativeHitchCount
+                hitchCount: cumulativeHitchCount,
+                lastFrameGapMs: lastFrameGapMs,
+                didRecordHitch: didRecordHitch
             )
         }
 
@@ -74,7 +93,9 @@ struct FramePacingTracker: Sendable {
             frameGapP99Ms: percentile(frameGapsMs, 0.99),
             maximumFrameGapMs: max(maximumOverride ?? 0, frameGapsMs.max() ?? 0),
             hitchCount: cumulativeHitchCount,
-            sampleCount: frameGapsMs.count
+            sampleCount: frameGapsMs.count,
+            lastFrameGapMs: lastFrameGapMs,
+            didRecordHitch: didRecordHitch
         )
     }
 

@@ -40,12 +40,21 @@ struct ThresholdMacApp: App {
         // the render view, hosted in its own window so it can live on another
         // screen (or beside the render window) without covering the fractal.
         Window("Threshold Controls", id: AppModel.controlsWindowID) {
-            ContentView()
-                .environment(appModel)
-                .frame(minWidth: 980, minHeight: 576)
-                .background(Color(white: 0.09))
-                .onAppear { appModel.isControlsWindowOpen = true }
-                .onDisappear { appModel.isControlsWindowOpen = false }
+            ZStack(alignment: .topLeading) {
+                ContentView()
+                    .environment(appModel)
+
+                // Keep the live performance HUD with the controls when they are
+                // broken out instead of leaving it behind over the render view.
+                FPSIndicatorView()
+                    .environment(appModel)
+                    .padding(14)
+                    .allowsHitTesting(false)
+            }
+            .frame(minWidth: 980, minHeight: 576)
+            .background(Color(white: 0.09))
+            .onAppear { appModel.isControlsWindowOpen = true }
+            .onDisappear { appModel.isControlsWindowOpen = false }
         }
         .defaultSize(width: 1040, height: 820)
         .windowResizability(.contentMinSize)
@@ -241,12 +250,14 @@ private struct ThresholdMacRootView: View {
                 // Always-on perf HUD (top-leading, opposite the pin button). Shows
                 // FPS plus the continuous GPU-ms cost so acceleration tuning is
                 // visible even when the frame rate is pinned by the display refresh.
-                FPSIndicatorView()
-                    .environment(appModel)
-                    .padding(.top, panelPadding)
-                    .padding(.leading, panelPadding)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .allowsHitTesting(false)
+                if !appModel.isControlsWindowOpen {
+                    FPSIndicatorView()
+                        .environment(appModel)
+                        .padding(.top, panelPadding)
+                        .padding(.leading, panelPadding)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .allowsHitTesting(false)
+                }
 
                 MacRadialInputMonitor(
                     isPressed: $isShiftPressed,

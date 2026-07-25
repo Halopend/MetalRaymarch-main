@@ -49,9 +49,18 @@ struct ContentStageConfiguration: CompositorLayerConfiguration {
             if configuration.layout == .layered,
                capabilities.supportedLayouts(options: [.progressiveImmersionEnabled]).contains(.layered) {
                 let stencilFormats = capabilities.drawableRenderContextSupportedStencilFormats
-                if let format = stencilFormats.contains(.stencil8) ? MTLPixelFormat.stencil8 : stencilFormats.first {
-                    configuration.drawableRenderContextStencilFormat = format
-                    print("✓ progressive immersion enabled (render-context stencil format: \(format.rawValue))")
+                // The portal pass uses the compositor's depth texture and a
+                // separate stencil attachment. A packed depth/stencil fallback
+                // is not interchangeable: Metal requires both aspects of a
+                // packed format to refer to the same texture, while the
+                // compositor requires its own depth texture here. Enable the
+                // render context only when the separate stencil8 format that
+                // this pass is authored for is actually supported.
+                if stencilFormats.contains(.stencil8) {
+                    configuration.drawableRenderContextStencilFormat = .stencil8
+                    print("✓ progressive immersion enabled (render-context stencil format: \(MTLPixelFormat.stencil8.rawValue))")
+                } else {
+                    print("⚠️ progressive immersion unavailable: separate stencil8 render context is unsupported")
                 }
             }
         }
@@ -102,6 +111,11 @@ struct MetalProjectTestApp: App {
                     appModel.dismissMenuWindowHandler = { [dismissWindow] in
                         dismissWindow(id: appModel.menuWindowID)
                     }
+                    // This app-scoped seam remains alive while the main control
+                    // window is dismissed in immersive mode.
+                    appModel.openAnimationEditorHandler = { [openWindow] in
+                        openWindow(id: AppModel.animationEditorWindowID)
+                    }
                     // CompositorLayer must remain the direct ImmersiveSpace
                     // content. Without a spatial presentation handler, gesture
                     // commands intentionally use AppModel's existing plain
@@ -110,15 +124,29 @@ struct MetalProjectTestApp: App {
 
                     if !hasCompletedIntroOnboarding {
                         openWindow(id: AppModel.onboardingWindowID)
-                        appModel.markMenuWindowDismissed()
                         dismissWindow(id: appModel.menuWindowID)
+                    } else {
+                        // Treat the window scene lifecycle as the source of
+                        // truth; `openWindow` itself cannot report whether
+                        // presentation succeeded. Defer the observed-state
+                        // write past SwiftUI's current view-update turn.
+                        Task { @MainActor in
+                            await Task.yield()
+                            appModel.markMenuWindowPresented()
+                        }
                     }
                 }
                 .onOpenURL { url in
                     appModel.openExternalFile(url)
                 }
-                .onDisappear {
-                    appModel.markMenuWindowDismissed()
+                .onDisappear { [appModel] in
+                    // Match presentation acknowledgement: lifecycle callbacks
+                    // may run during a SwiftUI update, so publish on the next
+                    // main-actor turn.
+                    Task { @MainActor in
+                        await Task.yield()
+                        appModel.markMenuWindowDismissed()
+                    }
                 }
         }
         .defaultSize(width: 1460, height: 820)
@@ -192,18 +220,29 @@ struct MetalProjectTestApp: App {
                         return .mixed
                     }
                 },
-                set: { selectedStyle in
-                    if selectedStyle is MixedImmersionStyle {
-                        if appModel.immersionStylePreference != .mixed {
-                            appModel.immersionStylePreference = .mixed
+                set: { [weak appModel] selectedStyle in
+                    // SwiftUI can write this binding while it is constructing
+                    // the immersive stage. Mutating observed app state inline
+                    // produces "Modifying state during view update" and can
+                    // invalidate CompositorLayer scene creation. Capture only
+                    // the style classification and apply it on the next main
+                    // actor turn.
+                    let selectedMixed = selectedStyle is MixedImmersionStyle
+                    let selectedProgressive = selectedStyle is ProgressiveImmersionStyle
+                    Task { @MainActor [weak appModel] in
+                        guard let appModel else { return }
+                        if selectedMixed {
+                            if appModel.immersionStylePreference != .mixed {
+                                appModel.immersionStylePreference = .mixed
+                            }
+                        } else if selectedProgressive,
+                                  appModel.immersionStylePreference == .mixed {
+                            // A Crown-driven transition out of Mixed should enter the
+                            // fully immersive progressive mode. Preserve `.window`
+                            // when it is already selected: both app modes use the same
+                            // system style but differ in their requested initial amount.
+                            appModel.immersionStylePreference = .immersive
                         }
-                    } else if selectedStyle is ProgressiveImmersionStyle,
-                              appModel.immersionStylePreference == .mixed {
-                        // A Crown-driven transition out of Mixed should enter the
-                        // fully immersive progressive mode. Preserve `.window`
-                        // when it is already selected: both app modes use the same
-                        // system style but differ in their requested initial amount.
-                        appModel.immersionStylePreference = .immersive
                     }
                 }
             ),

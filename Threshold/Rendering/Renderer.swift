@@ -342,6 +342,24 @@ actor Renderer {
     let worldTracking: WorldTrackingProvider
     var handTracking: HandTrackingProvider?
 
+    // === PLANTED SPATIAL RADIAL MENU ===
+    // Navigation is the same canonical hierarchy consumed by the Mac host.
+    // Only the renderer and direct-hand reducer are visionOS-specific.
+    let spatialRadialHierarchy: NavigationHierarchy
+    var spatialRadialInteraction = SpatialRadialInteractionState()
+    var latestSpatialHandPose: HandPoseSnapshot?
+    var pendingSpatialActivationPose: HandPoseSnapshot?
+    var pendingSpatialActivationHand: SpatialRadialHand?
+    var spatialHandTrackingIsRunning = false
+    var lastSpatialHandTrackingLossTime: TimeInterval = -.infinity
+    var spatialRadialPresentationGeneration: UInt64 = 0
+    var latestDevicePosition = SIMD3<Float>.zero
+    var hasValidDevicePose = false
+    var spatialRadialPipeline: MTLRenderPipelineState?
+    var spatialRadialDepthState: MTLDepthStencilState?
+    var spatialRadialInstanceBuffer: MTLBuffer?
+    var spatialRadialLabelAtlas: SpatialRadialLabelAtlas?
+
     // === ENVIRONMENT UNDERSTANDING ===
     // Room tracking supplies a current-room mesh whose oriented rectangular fit
     // drives Bound to Space. Scene reconstruction remains the denser source for
@@ -369,7 +387,11 @@ actor Renderer {
     let layerRenderer: LayerRenderer
     let appModel: AppModel
 
-    init?(_ layerRenderer: LayerRenderer, appModel: AppModel) {
+    init?(
+        _ layerRenderer: LayerRenderer,
+        appModel: AppModel,
+        spatialRadialHierarchy: NavigationHierarchy
+    ) {
         self.layerRenderer = layerRenderer
         self.device = layerRenderer.device
         guard let queue = self.device.makeCommandQueue() else {
@@ -378,6 +400,7 @@ actor Renderer {
         }
         self.commandQueue = queue
         self.appModel = appModel
+        self.spatialRadialHierarchy = spatialRadialHierarchy
         
         // Initialize UI update coordinator to prevent UI blocking during heavy rendering
         self.uiUpdateCoordinator = UIUpdateCoordinator(appModel: appModel)
@@ -668,23 +691,48 @@ actor Renderer {
     @MainActor
     static func startRenderLoop(_ layerRenderer: LayerRenderer, appModel: AppModel) {
         let renderLoopID = appModel.beginRenderLoopRegistration()
-        let renderLoopTask = Task(executorPreference: RendererTaskExecutor.shared) {
-            guard let renderer = Renderer(layerRenderer, appModel: appModel) else {
+        let spatialRadialHierarchy = NavigationHierarchy.application(
+            availability: .resolve(
+                profile: appModel.platformProfile,
+                allowsCustomScenes: AppModel.allowCustomScenes,
+                includesGestureEditing: true
+            )
+        )
+        let renderLoopTask = Task(
+            executorPreference: RendererTaskExecutor.shared
+        ) { [appModel, layerRenderer, spatialRadialHierarchy] in
+            guard let renderer = Renderer(
+                layerRenderer,
+                appModel: appModel,
+                spatialRadialHierarchy: spatialRadialHierarchy
+            ) else {
                 await MainActor.run {
+                    guard appModel.activeRenderLoopID == renderLoopID else {
+                        return
+                    }
                     appModel.immersiveSpaceState = .closed
                     appModel.clearRendererHandlers(renderLoopID: renderLoopID)
                 }
                 return
             }
             
-            // Setup screenshot capture handler
-            await MainActor.run {
+            // Renderer construction performs synchronous driver work. A newer
+            // compositor registration may replace this one while that happens,
+            // so stale tasks must not overwrite the new renderer's handlers.
+            let installedHandlers = await MainActor.run { () -> Bool in
+                guard appModel.activeRenderLoopID == renderLoopID,
+                      !Task.isCancelled else {
+                    return false
+                }
+
+                // Setup screenshot capture handler
                 appModel.captureScreenshotHandler = {
                     await renderer.captureScreenshot()
                 }
                 
-                // Setup pipeline preparation handler
-                // Called before loading a preset to ensure the specialized pipeline is ready
+                // Setup pipeline preparation handler. Queue specialization
+                // off-actor so an on-demand Metal compile can never starve the
+                // serial executor that also submits compositor frames.
                 appModel.preparePipelineHandler = { preset in
                     _ = await renderer.getPipeline(forPreset: preset)
                     await renderer.prewarmComputePipeline(forPreset: preset)
@@ -693,8 +741,12 @@ actor Renderer {
                 // Setup pipeline preparation for specific iteration/ray step values
                 // Called when sliders change to pre-compile the needed pipeline
                 appModel.preparePipelineForValuesHandler = { iterations, raySteps in
-                    // Pre-build render pipeline
-                    _ = await renderer.getPipeline(forIterations: iterations, raySteps: raySteps)
+                    // Build the render PSO detached, awaiting it without holding
+                    // the renderer actor's serial executor.
+                    _ = await renderer.getPipeline(
+                        forIterations: iterations,
+                        raySteps: raySteps
+                    )
                     // Pre-build matching compute pipeline so tileSize=8 path is ready
                     _ = await renderer.selectComputePipeline(fractalIterations: iterations, maxRaySteps: raySteps)
                 }
@@ -718,7 +770,54 @@ actor Renderer {
                         warpStackSource: renderSettings.warpStackCodegenSource,
                         warpStackSignature: renderSettings.warpStackCodegenSignature)
                 }
+
+                // The spatial menu renders inside this compositor layer. Its
+                // presentation closure captures the latest tracked palm once;
+                // later samples move only the cursor through the planted frame.
+                appModel.presentSpatialMenuHandler = {
+                    [weak appModel = appModel, weak renderer] nodeID in
+                    guard let appModel, let renderer else { return }
+                    let generation = appModel.beginSpatialMenuPresentationRequest()
+                    appModel.setSpatialMenuVisible(true)
+                    guard appModel.isSpatialMenuVisible else {
+                        Task { [weak renderer] in
+                            await renderer?.dismissSpatialRadialMenu(
+                                generation: generation
+                            )
+                        }
+                        return
+                    }
+
+                    Task { [weak appModel, weak renderer] in
+                        guard let renderer else { return }
+                        let result = await renderer.presentSpatialRadialMenu(
+                            focusing: nodeID,
+                            generation: generation
+                        )
+                        guard result == .unavailable else { return }
+                        await MainActor.run {
+                            guard let appModel,
+                                  appModel.isCurrentSpatialMenuPresentationRequest(generation)
+                            else { return }
+                            appModel.setSpatialMenuVisible(false)
+                            appModel.revealMenuWindowForSpatialNavigation()
+                        }
+                    }
+                }
+                appModel.dismissSpatialMenuHandler = {
+                    [weak appModel = appModel, weak renderer] in
+                    guard let appModel else { return }
+                    let generation = appModel.beginSpatialMenuPresentationRequest()
+                    appModel.setSpatialMenuVisible(false)
+                    Task { [weak renderer] in
+                        await renderer?.dismissSpatialRadialMenu(
+                            generation: generation
+                        )
+                    }
+                }
+                return true
             }
+            guard installedHandlers, !Task.isCancelled else { return }
 
             // If an embedded formula was already registered (e.g. opening a
             // custom .threshscene/.threshfx from Finder, which opens the
@@ -918,6 +1017,17 @@ actor Renderer {
         let deviceAnchor = worldTracking.state == .running
             ? worldTracking.queryDeviceAnchor(atTimestamp: time)
             : nil
+        if let deviceAnchor, deviceAnchor.isTracked {
+            let transform = deviceAnchor.originFromAnchorTransform
+            latestDevicePosition = SIMD3<Float>(
+                transform.columns.3.x,
+                transform.columns.3.y,
+                transform.columns.3.z
+            )
+            hasValidDevicePose = true
+        } else {
+            hasValidDevicePose = false
+        }
         if deviceAnchor == nil, !hasLoggedMissingDeviceAnchor {
             hasLoggedMissingDeviceAnchor = true
             print("⚠️ Device anchor unavailable; rendering with identity pose until world tracking is ready")
@@ -1188,6 +1298,11 @@ actor Renderer {
                 // Adaptive-compute frames don't write fragment depth — next
                 // fragment frame must not warm-start from stale history.
                 warmStartGate.invalidate()
+                encodeSpatialRadialMenuPass(
+                    commandBuffer: commandBuffer,
+                    drawable: drawable,
+                    preserveSceneDepth: false
+                )
                 if renderContextRequired {
                     encodeDrawableRenderContextPass(commandBuffer: commandBuffer, drawable: drawable)
                 }
@@ -1307,6 +1422,11 @@ actor Renderer {
 
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: fragmentPassPlan.renderPassDescriptor) else {
             if RENDERER_DEBUG { print("⚠️ Failed to create render encoder; skipping frame") }
+            encodeSpatialRadialMenuPass(
+                commandBuffer: commandBuffer,
+                drawable: drawable,
+                preserveSceneDepth: false
+            )
             if renderContextRequired {
                 encodeDrawableRenderContextPass(commandBuffer: commandBuffer, drawable: drawable)
             }
@@ -1459,6 +1579,11 @@ actor Renderer {
             fragmentPassPlan: fragmentPassPlan,
             framePreparation: framePreparation,
             settingsSnapshot: settingsSnapshot
+        )
+        encodeSpatialRadialMenuPass(
+            commandBuffer: commandBuffer,
+            drawable: drawable,
+            preserveSceneDepth: true
         )
         
         frameBreakdown.renderPathEncodeMs = (CACurrentMediaTime() - renderEncodeStart) * 1000.0

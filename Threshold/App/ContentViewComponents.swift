@@ -167,9 +167,7 @@ struct SaveDestinationSheet: View {
     @State private var isConfirmingResetReplacement = false
 
     private var canSave: Bool {
-        guard let choice else { return false }
-        if choice == .resetLocation { return true }
-        return !manualPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        choice != nil
     }
 
     private var primaryActionTitle: String {
@@ -216,8 +214,15 @@ struct SaveDestinationSheet: View {
             }
 
             if choice == .presetCustomName || choice == .presetWithPreview {
-                TextField("Preset name", text: $manualPresetName)
+                TextField("Preset name (optional)", text: $manualPresetName)
                     .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        guard let choice, canSave else { return }
+                        performSave(choice)
+                    }
+                Text("Leave blank to use a timestamped name.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
             HStack {
@@ -237,6 +242,7 @@ struct SaveDestinationSheet: View {
                 .buttonStyle(.borderedProminent)
                 .tint(choice == .resetLocation ? .orange : .blue)
                 .disabled(!canSave)
+                .keyboardShortcut(.defaultAction)
             }
         }
         .padding(16)
