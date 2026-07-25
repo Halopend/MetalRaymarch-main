@@ -77,6 +77,16 @@ struct ThresholdMacApp: App {
         .defaultSize(width: 980, height: 760)
         .windowResizability(.contentMinSize)
 
+        // Live formula editor: its own window so the fractal viewport stays
+        // visible while typing — sliders regenerate per keystroke, the shader
+        // swaps in a debounce later.
+        Window("Formula Editor", id: AppModel.formulaEditorWindowID) {
+            FormulaEditorWindowView()
+                .environment(appModel)
+        }
+        .defaultSize(width: 1180, height: 720)
+        .windowResizability(.contentMinSize)
+
         .commands {
             CommandGroup(replacing: .saveItem) {
                 Button("Save Preset…") {

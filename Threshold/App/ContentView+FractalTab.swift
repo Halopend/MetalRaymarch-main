@@ -173,6 +173,34 @@ extension ContentView {
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            #if os(macOS)
+            if AppModel.allowCustomScenes {
+                HStack(spacing: 8) {
+                    Button {
+                        appModel.formulaEditorSeed = nil
+                        openWindow(id: AppModel.formulaEditorWindowID)
+                    } label: {
+                        Label("New Formula", systemImage: "curlybraces")
+                    }
+                    if cache.fractalType == .custom, let active = appModel.activeEmbeddedFormula {
+                        Button {
+                            appModel.formulaEditorSeed = active
+                            openWindow(id: AppModel.formulaEditorWindowID)
+                        } label: {
+                            Label("Edit \(active.name)", systemImage: "pencil.and.outline")
+                        }
+                    }
+                    Spacer()
+                }
+                .controlSize(.small)
+            } else {
+                Text("Live formula editing unlocks with “Allow custom scenes” in Settings → General.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            #endif
+
             FractalFormulaGrid(cache: cache, presetManager: appModel.presetManager)
         }
     }

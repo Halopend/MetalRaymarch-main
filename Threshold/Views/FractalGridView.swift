@@ -155,7 +155,10 @@ struct FractalGridView: View {
 
     @ViewBuilder
     private func animatedScenesGrid(_ animationManager: AnimationManager?) -> some View {
-        let animatedScenes = animationManager.map { animatedScenes(in: $0) } ?? []
+        // Explicit self: the local binding shadows the method inside its own
+        // initializer on release-toolchain Swift (CI) even though the beta
+        // toolchain resolves it — "cannot call value of non-function type".
+        let animatedScenes = animationManager.map { self.animatedScenes(in: $0) } ?? []
         let staticScenePresets = filteredStaticPresets()
         let activeSelection = currentSceneSelection(
             currentScene: animationManager?.currentScene,

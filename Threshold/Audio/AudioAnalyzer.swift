@@ -477,14 +477,17 @@ final class AudioAnalysisCore: @unchecked Sendable {
     private var fluxFrameCount: Int = 0
     private var needsFluxReseed = true
 
-    // Silence gate with hysteresis: enter after `gateEnterCount` consecutive
-    // quiet buffers (~-75 dBFS), exit immediately above ~-65 dBFS. The dead
-    // band prevents room-tone flicker at a single threshold.
+    // Silence gate with hysteresis: enter after `gateEnterSeconds` of
+    // consecutive quiet audio (~-75 dBFS), exit immediately above ~-65 dBFS.
+    // The dead band prevents room-tone flicker at a single threshold.
+    // Measured in SAMPLES, not delivery callbacks — callback sizes vary by
+    // route (640-frame Bluetooth vs 4800-frame iPad), and counting callbacks
+    // made paused-audio decay latency source-dependent.
     private let gateEnterRMS: Float = 0.00018
     private let gateExitRMS: Float = 0.00056
-    private let gateEnterCount = 3
+    private let gateEnterSeconds: Float = 0.08
     private var gated = false
-    private var quietBufferCount = 0
+    private var quietSampleCount = 0
 
     // Perceptual mapping: normalized position of the level in dBFS between
     // floor and ceiling, with a mild gamma. Replaces linear RMS × fixed gain,
@@ -626,11 +629,11 @@ final class AudioAnalysisCore: @unchecked Sendable {
         // Silence gate with hysteresis so paused music and quiet rooms decay
         // to zero without flickering at a single threshold.
         if rms < gateEnterRMS {
-            quietBufferCount += 1
+            quietSampleCount += frameLength
         } else {
-            quietBufferCount = 0
+            quietSampleCount = 0
         }
-        if !gated, quietBufferCount >= gateEnterCount {
+        if !gated, Float(quietSampleCount) >= sampleRate * gateEnterSeconds {
             gated = true
             pending.removeAll(keepingCapacity: true)
             // Re-seed the flux comparison when sound returns, so resuming
@@ -640,7 +643,7 @@ final class AudioAnalysisCore: @unchecked Sendable {
         if gated {
             if rms >= gateExitRMS {
                 gated = false
-                quietBufferCount = 0
+                quietSampleCount = 0
             } else {
                 targets = Targets()
                 return
@@ -808,7 +811,7 @@ final class AudioAnalysisCore: @unchecked Sendable {
         fluxFrameCount = 0
         needsFluxReseed = true
         gated = false
-        quietBufferCount = 0
+        quietSampleCount = 0
     }
 
     private func perceptualLevel(_ amplitude: Float) -> Float {

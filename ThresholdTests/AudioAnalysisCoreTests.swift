@@ -133,7 +133,9 @@ struct AudioAnalysisCoreTests {
         var targets = try #require(freshTargets(core))
         #expect(targets.overall > 0)
 
-        // Four consecutive silent buffers engage the gate (threshold is 3).
+        // 4096 consecutive silent samples (~85 ms at 48 kHz) engage the gate
+        // (threshold: 80 ms of quiet, measured in samples so delivery size
+        // cannot change the latency).
         for _ in 0..<4 {
             core.ingest(makeBuffer(frames: 1024) { _, _ in 0 })
         }
@@ -150,6 +152,38 @@ struct AudioAnalysisCoreTests {
         ingestSine(into: core, frequency: 60, amplitude: 0.05, totalFrames: 4096, chunk: 1024)
         targets = try #require(freshTargets(core))
         #expect(targets.overall > 0)
+    }
+
+    @Test("Silence-gate latency is measured in samples, not delivery callbacks")
+    func gateLatencyIsDeliverySizeIndependent() throws {
+        // Small Bluetooth-style chunks: 1,920 quiet samples (3 × 640 ≈ 40 ms)
+        // must NOT gate yet — under callback counting they would have.
+        let smallChunks = AudioAnalysisCore()
+        smallChunks.activate(sampleRate: Float(sampleRate))
+        ingestSine(into: smallChunks, frequency: 60, amplitude: 0.25, totalFrames: 8192, chunk: 1024)
+        for _ in 0..<3 {
+            smallChunks.ingest(makeBuffer(frames: 640) { _, _ in 0 })
+        }
+        var targets = try #require(freshTargets(smallChunks))
+        #expect(targets.bass > 0)   // gate still open, levels persist
+
+        // Three more (3,840 total ≈ 80 ms) cross the duration threshold.
+        for _ in 0..<3 {
+            smallChunks.ingest(makeBuffer(frames: 640) { _, _ in 0 })
+        }
+        targets = try #require(freshTargets(smallChunks))
+        #expect(targets.overall == 0)
+        #expect(targets.bass == 0)
+
+        // One jumbo iPad-style callback (4,800 quiet samples ≈ 100 ms) gates
+        // on its own — same duration rule, one delivery.
+        let bigChunks = AudioAnalysisCore()
+        bigChunks.activate(sampleRate: Float(sampleRate))
+        ingestSine(into: bigChunks, frequency: 60, amplitude: 0.25, totalFrames: 9600, chunk: 4800)
+        bigChunks.ingest(makeBuffer(frames: 4800) { _, _ in 0 })
+        targets = try #require(freshTargets(bigChunks))
+        #expect(targets.overall == 0)
+        #expect(targets.bass == 0)
     }
 
     @Test("Resuming audio after silence does not fire a phantom onset")

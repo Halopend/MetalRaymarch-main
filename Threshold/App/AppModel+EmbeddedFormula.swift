@@ -23,6 +23,22 @@ func customSceneDiagnostic(_ message: @autoclosure () -> String) {
 /// know whether the renderer has *actually* compiled the formula (vs. just
 /// having it registered in the catalogs for later activation) check for
 /// `.ready` before applying presets that depend on it.
+/// Result of `installEmbeddedFormulaForLiveEdit` — the editor's compile loop.
+enum LiveEditCompileOutcome {
+    /// Draft compiled and is rendering.
+    case ready
+    /// Custom scenes are disabled in Settings; the editor shows the gate hint.
+    case disabled
+    /// The renderer's activation handler isn't bound yet; retry on next edit.
+    case rendererUnavailable
+    /// `EmbeddedFormula.validate()` rejected the draft (size cap, forbidden
+    /// tokens, missing DE functions). Pre-flight normally catches this first.
+    case invalid(Error)
+    /// Metal compilation failed; the error's description carries the full
+    /// compiler log for line mapping. The previous library keeps rendering.
+    case compileFailed(Error)
+}
+
 enum EmbeddedFormulaInstallResult: Equatable {
     /// Formula is activated and compiled in the renderer, OR no formula was
     /// requested. Safe to apply presets that reference this formula.
@@ -129,6 +145,35 @@ extension AppModel {
             )))
             uninstallEmbeddedFormula()
             return .failed
+        }
+    }
+
+    /// Compile-and-activate for the LIVE FORMULA EDITOR. Differs from
+    /// `installEmbeddedFormulaIfNeededAndWait` in exactly the ways live
+    /// editing needs:
+    ///  - no error banner — compile errors return to the editor, which maps
+    ///    them to source lines and shows them inline;
+    ///  - on failure the previous library keeps rendering (no
+    ///    `uninstallEmbeddedFormula`) — keep-last-good;
+    ///  - `activeEmbeddedFormula` advances only AFTER the handler succeeds,
+    ///    so the renderer's self-heal can never hot-loop a broken draft;
+    ///  - no catalog registration — the editor already registered the draft
+    ///    on the instant (pragma-parse) path.
+    func installEmbeddedFormulaForLiveEdit(_ draft: EmbeddedFormula) async -> LiveEditCompileOutcome {
+        guard AppModel.allowCustomScenes else { return .disabled }
+        do {
+            try draft.validate()
+        } catch {
+            return .invalid(error)
+        }
+        guard let handler = activateEmbeddedFormulaHandler else { return .rendererUnavailable }
+        do {
+            try await handler(draft)
+            activeEmbeddedFormula = draft
+            activeEmbeddedFormulaHash = draft.shortHash
+            return .ready
+        } catch {
+            return .compileFailed(error)
         }
     }
 

@@ -103,6 +103,12 @@ class AppModel {
     static let fractalBrowserWindowID = "FractalBrowserWindow"
     static let animationEditorWindowID = "AnimationEditorWindow"
     static let controlsWindowID = "ControlsWindow"
+    static let formulaEditorWindowID = "FormulaEditorWindow"
+
+    /// User-authored `.threshfx` files in the store's Formulas/ folder.
+    @ObservationIgnored lazy var formulaLibrary = FormulaLibraryStore()
+    /// Formula handed to the editor window on open (nil = start a new one).
+    var formulaEditorSeed: EmbeddedFormula?
     static let fractalSettingsDidChangeNotification = Notification.Name("AppModel.fractalSettingsDidChange")
 
     /// Posted by AppModel when an external-file import needs the immersive

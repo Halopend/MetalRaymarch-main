@@ -452,16 +452,25 @@ final class ThresholdMacInteractiveView: MTKView {
     }
 
     private func handleKey(_ event: NSEvent, isPressed: Bool) -> Bool {
-        guard shouldAcceptViewportInput() else { return false }
+        // Key RELEASES must reach the accumulator even when another surface
+        // has claimed input ownership: a key-up dropped mid-handoff (e.g. the
+        // radial menu opened while W was held) would leave the held-key set
+        // stuck and the camera moving until the key is pressed and released
+        // again — consumeFrame() deliberately preserves held keys.
+        let ownsInput = shouldAcceptViewportInput()
+        guard ownsInput || !isPressed else { return false }
         guard let key = ViewportKeyboardMap.macOS(
             keyCode: event.keyCode,
             characters: event.charactersIgnoringModifiers
         ) else { return false }
-        return inputSink?.applyKeyboard(
+        let handled = inputSink?.applyKeyboard(
             key,
             isPressed: isPressed,
             isRepeat: event.isARepeat
         ) ?? true
+        // A release processed while unowned still propagates (return false →
+        // caller falls through to super) so the owning surface sees it too.
+        return ownsInput ? handled : false
     }
 }
 #endif
