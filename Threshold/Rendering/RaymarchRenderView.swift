@@ -345,6 +345,7 @@ final class ViewportRenderer {
         ProcessInfo.processInfo.environment["THRESHOLD_DIST_CACHE"] == "1"
     private var distCache: FractalDistanceCache?
     private var distCacheInitAttempted = false
+    private var distCacheLastDiagnostic: String?
     /// Bake key for the frame being encoded; nil = cache ineligible this frame
     /// (no bake dispatch, no residency, shader sees enabled == 0).
     private var distCachePendingKey: Int?
@@ -1588,7 +1589,15 @@ final class ViewportRenderer {
         // render pass) so the grid the fragment march reads is never stale.
         var distCacheParams = DistanceCacheParams()
         distCachePendingKey = nil
-        if Self.distCacheRequested, FractalDistanceCache.isEligible(settings: settings) {
+        let cacheReason = FractalDistanceCache.ineligibilityReason(settings: settings)
+        if FractalDistanceCache.diagnosticsEnabled {
+            let diagnostic = cacheReason ?? "eligible: baking model-space conservative bounds"
+            if diagnostic != distCacheLastDiagnostic {
+                print("[distCache] \(diagnostic)")
+                distCacheLastDiagnostic = diagnostic
+            }
+        }
+        if Self.distCacheRequested, cacheReason == nil {
             if distCache == nil, !distCacheInitAttempted {
                 distCacheInitAttempted = true
                 distCache = FractalDistanceCache(device: device)

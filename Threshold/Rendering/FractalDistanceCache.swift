@@ -44,6 +44,13 @@ final class FractalDistanceCache {
     /// bounds that exceed the analytic DE there) and log the result.
     private static let debugValidate =
         ProcessInfo.processInfo.environment["THRESHOLD_DIST_CACHE_DEBUG"] == "1"
+
+    /// Emits the exact cache contract selected for the current frame.  This is
+    /// intentionally separate from GPU validation: an absent validation log
+    /// used to make it impossible to tell whether the cache had been disabled
+    /// before it ever reached the bake.
+    static let diagnosticsEnabled =
+        ProcessInfo.processInfo.environment["THRESHOLD_DIST_CACHE_DIAGNOSTICS"] == "1"
     private var validatePipeline: MTLComputePipelineState?
     private var validateOut: MTLBuffer?
     /// Hash of the DE-shaping parameters the current grid contents were baked
@@ -133,11 +140,24 @@ final class FractalDistanceCache {
     /// Whether the cache may run for this frame's settings. Everything the
     /// bake excludes must be off, and distance-LOD must be off (the march's
     /// reduced-iteration DE can dip below the full-iteration baked bound).
+    static func ineligibilityReason(settings: RenderSettingsSnapshot) -> String? {
+        guard eligibleTypes.contains(settings.fractalType) else {
+            return "formula does not provide the required conservative distance contract"
+        }
+        guard !settings.safetyBubbleEnabled else {
+            return "safety bubble changes the live spatial field"
+        }
+        guard !settings.envScrunchEnabled else {
+            return "environment scrunch changes the live spatial field"
+        }
+        guard settings.distanceLODStrength <= 0 else {
+            return "distance LOD changes the live field by ray distance"
+        }
+        return nil
+    }
+
     static func isEligible(settings: RenderSettingsSnapshot) -> Bool {
-        eligibleTypes.contains(settings.fractalType)
-            && !settings.safetyBubbleEnabled
-            && !settings.envScrunchEnabled
-            && settings.distanceLODStrength <= 0
+        ineligibilityReason(settings: settings) == nil
     }
 
     /// Hash of every parameter that shapes the DE the bake evaluates. Any
