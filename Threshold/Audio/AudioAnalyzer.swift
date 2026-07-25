@@ -460,6 +460,8 @@ final class AudioAnalysisCore: @unchecked Sendable {
     private var imagBuffer: [Float]
     private var magnitudeBuffer: [Float]
     private var prevMagnitudeBuffer: [Float]
+    /// Scratch for the vectorized spectral-flux difference (half-spectrum).
+    private var fluxScratch: [Float]
 
     /// Mono samples awaiting a full analysis window.
     private var pending: [Float] = []
@@ -476,6 +478,16 @@ final class AudioAnalysisCore: @unchecked Sendable {
     private var fluxBaseline: Float = 0
     private var fluxFrameCount: Int = 0
     private var needsFluxReseed = true
+
+    // Strongest-channel selection state. Scanning every channel costs one
+    // full-buffer RMS pass per channel per delivery (8 passes on an 8-channel
+    // interface), so the pick is re-evaluated every `channelScanInterval`
+    // buffers instead — the hot channel doesn't move at audio rates. Accepted
+    // trade: a hard-pan swap re-routes within ~0.3 s instead of instantly.
+    private static let channelScanInterval = 16
+    private var selectedChannelIndex = 0
+    private var channelScanCountdown = 0
+    private var lastChannelCount = 0
 
     // Silence gate with hysteresis: enter after `gateEnterSeconds` of
     // consecutive quiet audio (~-75 dBFS), exit immediately above ~-65 dBFS.
@@ -513,6 +525,7 @@ final class AudioAnalysisCore: @unchecked Sendable {
         imagBuffer = [Float](repeating: 0, count: n)
         magnitudeBuffer = [Float](repeating: 0, count: half)
         prevMagnitudeBuffer = [Float](repeating: 0, count: half)
+        fluxScratch = [Float](repeating: 0, count: half)
         vDSP_hann_window(&windowBuffer, vDSP_Length(n), Int32(vDSP_HANN_NORM))
         computeBandIndices()
         // Pre-size the capture-thread buffers so steady-state ingestion never
@@ -604,19 +617,37 @@ final class AudioAnalysisCore: @unchecked Sendable {
         // hard-panned stereo content the hot side carries the information.
         let isInterleaved = buffer.format.isInterleaved
         let sampleStride = isInterleaved ? vDSP_Stride(channelCount) : vDSP_Stride(1)
-        var selected = channelData[0]
-        var rms: Float = 0
-        for channel in 0..<channelCount {
-            let channelSamples = isInterleaved
-                ? channelData[0].advanced(by: channel)
-                : channelData[channel]
-            var channelRMS: Float = 0
-            vDSP_rmsqv(channelSamples, sampleStride, &channelRMS, vDSP_Length(frameLength))
-            if channel == 0 || channelRMS > rms {
-                rms = channelRMS
-                selected = channelSamples
-            }
+
+        func samples(forChannel channel: Int) -> UnsafeMutablePointer<Float> {
+            isInterleaved ? channelData[0].advanced(by: channel) : channelData[channel]
         }
+
+        var rms: Float = 0
+        if channelCount != lastChannelCount || channelScanCountdown <= 0 {
+            // Full scan: pick the strongest channel. NaN comparisons are
+            // false, so a corrupt channel is skipped in favor of clean ones;
+            // an all-NaN buffer leaves rms at -inf and hits the guard below.
+            var bestChannel = 0
+            var bestRMS = -Float.infinity
+            for channel in 0..<channelCount {
+                var channelRMS: Float = 0
+                vDSP_rmsqv(samples(forChannel: channel), sampleStride,
+                           &channelRMS, vDSP_Length(frameLength))
+                if channelRMS > bestRMS {
+                    bestRMS = channelRMS
+                    bestChannel = channel
+                }
+            }
+            selectedChannelIndex = bestChannel
+            lastChannelCount = channelCount
+            channelScanCountdown = Self.channelScanInterval
+            rms = bestRMS
+        } else {
+            channelScanCountdown -= 1
+            vDSP_rmsqv(samples(forChannel: selectedChannelIndex), sampleStride,
+                       &rms, vDSP_Length(frameLength))
+        }
+        let selected = samples(forChannel: selectedChannelIndex)
 
         // Non-finite RMS means the buffer contains NaN/Inf samples (possible
         // after wake-from-sleep with a bad capture buffer). Read as silence.
@@ -664,16 +695,24 @@ final class AudioAnalysisCore: @unchecked Sendable {
             needsFluxReseed = true
         }
         let copyCount = frameLength - copyStart
-        if monoScratch.count < copyCount {
-            monoScratch = [Float](repeating: 0, count: copyCount)
-        }
         let strideInt = Int(sampleStride)
-        monoScratch.withUnsafeMutableBufferPointer { dst in
-            for i in 0..<copyCount {
-                dst[i] = selected[(copyStart + i) * strideInt]
+        if strideInt == 1 {
+            // Non-interleaved (the common case): the channel is already a
+            // contiguous mono run — append straight from the tap buffer, no
+            // intermediate scratch copy.
+            pending.append(contentsOf: UnsafeBufferPointer(
+                start: selected + copyStart, count: copyCount))
+        } else {
+            if monoScratch.count < copyCount {
+                monoScratch = [Float](repeating: 0, count: copyCount)
             }
+            monoScratch.withUnsafeMutableBufferPointer { dst in
+                for i in 0..<copyCount {
+                    dst[i] = selected[(copyStart + i) * strideInt]
+                }
+            }
+            pending.append(contentsOf: monoScratch[0..<copyCount])
         }
-        pending.append(contentsOf: monoScratch[0..<copyCount])
 
         // Drain full windows through a read offset — one compaction memmove
         // per ingest instead of one per window. Band targets max-merge across
@@ -763,11 +802,23 @@ final class AudioAnalysisCore: @unchecked Sendable {
             return
         }
 
+        // Vectorized positive-difference sum: diff → clamp-below-zero → sum.
         var flux: Float = 0
         let fluxEnd = max(2, min(half, trebleEndBin))  // ignore very-high noise bins
-        for i in 1..<fluxEnd {
-            let d = magnitudeBuffer[i] - prevMagnitudeBuffer[i]
-            if d > 0 { flux += d }
+        let fluxCount = vDSP_Length(fluxEnd - 1)
+        magnitudeBuffer.withUnsafeBufferPointer { current in
+            prevMagnitudeBuffer.withUnsafeBufferPointer { previous in
+                fluxScratch.withUnsafeMutableBufferPointer { scratch in
+                    // vDSP_vsub computes C = A − B with the SUBTRAHEND first.
+                    vDSP_vsub(previous.baseAddress! + 1, 1,
+                              current.baseAddress! + 1, 1,
+                              scratch.baseAddress!, 1, fluxCount)
+                    var floor: Float = 0
+                    vDSP_vthres(scratch.baseAddress!, 1, &floor,
+                                scratch.baseAddress!, 1, fluxCount)
+                    vDSP_sve(scratch.baseAddress!, 1, &flux, fluxCount)
+                }
+            }
         }
         fluxFrameCount += 1
         if fluxFrameCount == 1 {
@@ -812,6 +863,9 @@ final class AudioAnalysisCore: @unchecked Sendable {
         needsFluxReseed = true
         gated = false
         quietSampleCount = 0
+        // Force a fresh strongest-channel scan on the next delivery.
+        channelScanCountdown = 0
+        lastChannelCount = 0
     }
 
     private func perceptualLevel(_ amplitude: Float) -> Float {

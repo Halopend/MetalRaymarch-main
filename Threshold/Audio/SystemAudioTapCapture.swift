@@ -387,7 +387,7 @@ private final class StreamSink: NSObject, SCStreamOutput, SCStreamDelegate, @unc
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio, CMSampleBufferDataIsReady(sampleBuffer) else { return }
-        guard let pcm = Self.makePCMBuffer(from: sampleBuffer) else {
+        guard let pcm = makePCMBuffer(from: sampleBuffer) else {
             if !hasLoggedConversionFailure.exchange(true, ordering: .relaxed) {
                 logger.error("System audio sample buffer could not be converted to PCM; dropping audio (further reports suppressed)")
             }
@@ -406,17 +406,43 @@ private final class StreamSink: NSObject, SCStreamOutput, SCStreamDelegate, @unc
         stopHandler(error)
     }
 
-    /// Convert an SCStream audio `CMSampleBuffer` into an owned
-    /// `AVAudioPCMBuffer` matching its native (Float32) stream format.
-    private static func makePCMBuffer(from sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {
+    // Reusable conversion buffer. Safe because the analysis core consumes
+    // each buffer SYNCHRONOUSLY inside `ingest` (copies the samples out
+    // before returning), and because SCK delivers on one serial queue —
+    // these fields are audioQueue-confined, like the delivery path itself.
+    // Saves an ~8 KB AVAudioPCMBuffer allocation per callback (~50/s).
+    private var scratchPCM: AVAudioPCMBuffer?
+    private var scratchASBD = AudioStreamBasicDescription()
+
+    /// Convert an SCStream audio `CMSampleBuffer` into a PCM buffer matching
+    /// its native (Float32) stream format, reusing the scratch buffer when
+    /// the format and capacity still fit.
+    private func makePCMBuffer(from sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {
         guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
               let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else { return nil }
         var asbd = asbdPtr.pointee
-        guard let format = AVAudioFormat(streamDescription: &asbd) else { return nil }
 
         let frames = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
-        guard frames > 0,
-              let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return nil }
+        guard frames > 0 else { return nil }
+
+        let pcm: AVAudioPCMBuffer
+        if let scratch = scratchPCM,
+           scratch.frameCapacity >= frames,
+           scratchASBD.mSampleRate == asbd.mSampleRate,
+           scratchASBD.mFormatID == asbd.mFormatID,
+           scratchASBD.mFormatFlags == asbd.mFormatFlags,
+           scratchASBD.mChannelsPerFrame == asbd.mChannelsPerFrame,
+           scratchASBD.mBitsPerChannel == asbd.mBitsPerChannel,
+           scratchASBD.mBytesPerFrame == asbd.mBytesPerFrame {
+            pcm = scratch
+        } else {
+            guard let format = AVAudioFormat(streamDescription: &asbd),
+                  let fresh = AVAudioPCMBuffer(pcmFormat: format,
+                                               frameCapacity: max(frames, 4096)) else { return nil }
+            scratchPCM = fresh
+            scratchASBD = asbd
+            pcm = fresh
+        }
         pcm.frameLength = frames
 
         let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(
