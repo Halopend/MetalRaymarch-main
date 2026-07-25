@@ -18,6 +18,75 @@ import AVFoundation
 import Accelerate
 import Synchronization
 import os
+#if os(macOS)
+import AudioToolbox
+import CoreAudio
+
+/// `AVAudioEngine.inputNode` raises an Objective-C exception when macOS has
+/// lost its HAL output component, so that condition cannot be handled by
+/// Swift's `do`/`catch`. Probe the C-level registries first and leave the
+/// engine completely untouched when audio services or the default input are
+/// unavailable.
+enum MacMicrophonePreflightFailure: Equatable, Sendable {
+    case audioComponentUnavailable
+    case noDefaultInputDevice
+
+    var userMessage: String {
+        switch self {
+        case .audioComponentUnavailable:
+            return "macOS audio services are unavailable. Restart your Mac, then try Microphone again."
+        case .noDefaultInputDevice:
+            return "No audio input device is available. Connect or select one in System Settings → Sound → Input, then try again."
+        }
+    }
+}
+
+enum MacMicrophonePreflight {
+    static func failure(
+        hasHALOutputComponent: Bool,
+        hasDefaultInputDevice: Bool
+    ) -> MacMicrophonePreflightFailure? {
+        guard hasHALOutputComponent else { return .audioComponentUnavailable }
+        guard hasDefaultInputDevice else { return .noDefaultInputDevice }
+        return nil
+    }
+
+    static func currentFailure() -> MacMicrophonePreflightFailure? {
+        var componentDescription = AudioComponentDescription(
+            componentType: kAudioUnitType_Output,
+            componentSubType: kAudioUnitSubType_HALOutput,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
+        let hasHALOutputComponent =
+            AudioComponentFindNext(nil, &componentDescription) != nil
+
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var defaultInputDevice = AudioDeviceID(kAudioObjectUnknown)
+        var propertySize = UInt32(MemoryLayout.size(ofValue: defaultInputDevice))
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &propertyAddress,
+            0,
+            nil,
+            &propertySize,
+            &defaultInputDevice
+        )
+        let hasDefaultInputDevice =
+            status == noErr && defaultInputDevice != kAudioObjectUnknown
+
+        return failure(
+            hasHALOutputComponent: hasHALOutputComponent,
+            hasDefaultInputDevice: hasDefaultInputDevice
+        )
+    }
+}
+#endif
 
 /// Analyzes audio input and provides normalized level values for visual effects
 @MainActor
@@ -295,7 +364,15 @@ class AudioAnalyzer {
     #endif
 
     private func setupAudioCapture() {
-        #if !os(macOS)
+        #if os(macOS)
+        // Accessing `AVAudioEngine.inputNode` is itself fatal when the macOS
+        // Audio Component registrar is missing HALOutput. This preflight must
+        // therefore stay before both the engine and input-node creation.
+        if let failure = MacMicrophonePreflight.currentFailure() {
+            errorMessage = failure.userMessage
+            return
+        }
+        #else
         guard activateAudioSession() else { return }
         #endif
 
@@ -303,7 +380,7 @@ class AudioAnalyzer {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
 
-        guard format.sampleRate > 0 else {
+        guard format.sampleRate > 0, format.channelCount > 0 else {
             errorMessage = "No audio input available"
             return
         }

@@ -13,6 +13,41 @@ import Foundation
 import Testing
 @testable import Threshold
 
+#if os(macOS)
+@Suite("macOS microphone preflight")
+struct MacMicrophonePreflightTests {
+    @Test("A missing HAL output component blocks AVAudioEngine access")
+    func missingAudioComponent() {
+        let failure = MacMicrophonePreflight.failure(
+            hasHALOutputComponent: false,
+            hasDefaultInputDevice: true
+        )
+
+        #expect(failure == .audioComponentUnavailable)
+    }
+
+    @Test("A missing default input device blocks AVAudioEngine access")
+    func missingDefaultInputDevice() {
+        let failure = MacMicrophonePreflight.failure(
+            hasHALOutputComponent: true,
+            hasDefaultInputDevice: false
+        )
+
+        #expect(failure == .noDefaultInputDevice)
+    }
+
+    @Test("Available audio services and input pass the preflight")
+    func availableAudioInput() {
+        let failure = MacMicrophonePreflight.failure(
+            hasHALOutputComponent: true,
+            hasDefaultInputDevice: true
+        )
+
+        #expect(failure == nil)
+    }
+}
+#endif
+
 @Suite("Audio analysis core")
 struct AudioAnalysisCoreTests {
 
