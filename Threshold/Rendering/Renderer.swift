@@ -1207,11 +1207,16 @@ actor Renderer {
             // An inactive snapshot is `.empty` with all-zero features (the
             // mixer never pairs isActive == false with live values), so the
             // scaled levels are already zero without an explicit gate.
-            settings.bassLevel = min(1.0, max(0.0, features.bass * bassSens))
-            settings.midLevel = min(1.0, max(0.0, features.mid * midSens))
-            settings.trebleLevel = min(1.0, max(0.0, features.treble * trebleSens))
-            settings.beatIntensity = min(1.0, max(0.0, features.onset * beatSens))
-            settings.audioLevel = min(1.0, max(0.0, features.overall))
+            let bassLevel = min(1.0, max(0.0, features.bass * bassSens))
+            let midLevel = min(1.0, max(0.0, features.mid * midSens))
+            let trebleLevel = min(1.0, max(0.0, features.treble * trebleSens))
+            let beatLevel = min(1.0, max(0.0, features.onset * beatSens))
+            let overallLevel = min(1.0, max(0.0, features.overall))
+            settings.bassLevel = bassLevel
+            settings.midLevel = midLevel
+            settings.trebleLevel = trebleLevel
+            settings.beatIntensity = beatLevel
+            settings.audioLevel = overallLevel
 
             let sanitizePinch: (Float) -> Float = {
                 min(1.0, max(0.0, $0))
