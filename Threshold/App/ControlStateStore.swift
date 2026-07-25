@@ -380,6 +380,36 @@ final class ControlStateStore {
         }
     }
 
+    /// Re-register an edited custom formula definition in place — same
+    /// formula id, new source and/or params — and regenerate the parameter UI
+    /// without losing slider values. This is the live-editing path: unlike
+    /// `pushCustomFormula` it never applies fractal defaults wholesale.
+    ///
+    /// Values are preserved BY INDEX: a param index that exists in both the
+    /// old and new definitions keeps its current value; indices new to the
+    /// draft get the draft's declared default. Layer stacks are cleared so
+    /// gesture/music layers can't keep the old definition's ranges.
+    @MainActor
+    func noteCustomFormulaDefinitionChanged(_ draft: EmbeddedFormula) {
+        let previousIndices = Set(
+            FormulaCatalog.shared.descriptor(for: .custom)?.params.map(\.index) ?? []
+        )
+
+        FormulaCatalog.shared.registerEphemeral(draft)
+        FractalTypeRegistry.registerCustom(draft)
+        parameterPipeline?.clearFormulaStacks()
+
+        if let settings {
+            var params = settings.formulaParams
+            for param in draft.params where !previousIndices.contains(param.index) {
+                FormulaCatalog.setParam(&params, index: param.index, value: param.default)
+            }
+            settings.formulaParams = params
+        }
+        activeCustomFormulaHash = draft.shortHash
+        loadFromSettings()
+    }
+
     /// Select a trusted analytic primitive from the bundled Metal library while
     /// retaining its EmbeddedFormula payload for scene attribution/portability.
     @MainActor

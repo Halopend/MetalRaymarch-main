@@ -43,6 +43,10 @@ final class AudioHub {
     private(set) var mixPolicy: AudioMixPolicy = .exclusive
     private var transitionGate = AudioSourceTransitionGate()
 
+    /// Fixed for the hub's lifetime. Stored (not computed) so the per-frame
+    /// paths don't rebuild an existential array on every access.
+    private let captureSources: [any AudioCaptureSource]
+
     nonisolated private let featureStore: AudioFeatureStore
 
     init(
@@ -51,10 +55,15 @@ final class AudioHub {
         configuration: AudioHubConfiguration = .init()
     ) {
         self.configuration = configuration
-        self.microphone = MicrophoneCaptureSource(analyzer: microphoneAnalyzer)
+        let microphone = MicrophoneCaptureSource(analyzer: microphoneAnalyzer)
+        self.microphone = microphone
         self.appleMusic = AppleMusicMetadataFeatureSource(manager: appleMusicManager)
         #if os(macOS)
-        self.systemOutput = SystemOutputCaptureSource(policy: configuration.systemOutputCapturePolicy)
+        let systemOutput = SystemOutputCaptureSource(policy: configuration.systemOutputCapturePolicy)
+        self.systemOutput = systemOutput
+        self.captureSources = [microphone, systemOutput]
+        #else
+        self.captureSources = [microphone]
         #endif
         self.featureStore = AudioFeatureStore(initialValue: .empty(at: ProcessInfo.processInfo.systemUptime))
     }
@@ -139,12 +148,19 @@ final class AudioHub {
     /// snapshot for the render thread.
     func updateFrame() {
         let now = ProcessInfo.processInfo.systemUptime
+        lastUpdateFrameTime = now
         for source in captureSources {
             source.advanceFrame(at: now)
         }
         appleMusic.advanceFrame()
         refreshFeatureSnapshot(now: now)
     }
+
+    /// Uptime of the most recent `updateFrame()`, whoever drove it. Lets the
+    /// fallback timer skip its tick while the render loop is already driving
+    /// updates, so envelopes see one stable cadence instead of two interleaved
+    /// ones (60 Hz render + 20 Hz timer → jittery deltaTime).
+    @ObservationIgnored private var lastUpdateFrameTime: TimeInterval = 0
 
     func setMixPolicy(_ policy: AudioMixPolicy) {
         mixPolicy = policy
@@ -216,6 +232,10 @@ final class AudioHub {
                     self.refreshFeatureSnapshot()
                     return
                 }
+                // The render loop drove an update moments ago — skip this tick
+                // rather than interleave a second cadence into the envelopes.
+                let now = ProcessInfo.processInfo.systemUptime
+                if now - self.lastUpdateFrameTime < 0.05 { return }
                 self.updateFrame()
             }
         }
@@ -269,14 +289,6 @@ final class AudioHub {
 
     private func captureSource(for sourceID: AudioSourceID) -> (any AudioCaptureSource)? {
         captureSources.first(where: { $0.sourceID == sourceID })
-    }
-
-    private var captureSources: [any AudioCaptureSource] {
-        var sources: [any AudioCaptureSource] = [microphone]
-        #if os(macOS)
-        sources.append(systemOutput)
-        #endif
-        return sources
     }
 
     private var spotifyDescriptor: AudioSourceDescriptor {

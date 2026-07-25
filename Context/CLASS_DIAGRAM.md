@@ -696,13 +696,6 @@ classDiagram
         -scalerPool : PoolEntry[]
         +prepare(inW, inH, outW, outH) Bool
     }
-    class AdaptiveResolutionController {
-        -config : Config
-        -state : Mutex~State~
-        +currentScale(ceiling) Float
-        +record(gpuTime) void
-        +reset() void
-    }
     class BenchmarkManager {
         +isBenchmarking : Bool
         -stats : Dictionary~Int, FractalStats~
@@ -734,7 +727,6 @@ classDiagram
     Renderer *-- MetalFXManager
     Renderer *-- UIUpdateCoordinator
     Renderer *-- ParameterUpdateCoordinator
-    Renderer ..> AdaptiveResolutionController
     Renderer ..> BenchmarkManager
     Renderer ..> RendererTaskExecutor : runs on
     MetalFXManager ..> MacSpatialUpscaler

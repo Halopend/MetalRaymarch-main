@@ -216,6 +216,19 @@ final class FormulaCatalog: @unchecked Sendable {
         byId[descriptor.id] = descriptor
         ephemeralCustomId = descriptor.id
         ephemeralCategory = descriptor.category
+        ephemeralRevision &+= 1
+    }
+
+    /// Identity of the current ephemeral registration, changing on EVERY
+    /// registration — including re-registering the same formula id with
+    /// edited params or source. Consumers that cache anything derived from
+    /// the custom descriptor (e.g. `ParameterNodeRegistry`'s node batch) must
+    /// compare this token, not the descriptor id: a live edit keeps the id
+    /// stable while changing everything the cache was built from.
+    func customRegistrationToken() -> String? {
+        Self.ephemeralLock.lock()
+        defer { Self.ephemeralLock.unlock() }
+        return ephemeralCustomId.map { "\($0)|\(ephemeralRevision)" }
     }
 
     /// Remove the active ephemeral formula registration, if any.
@@ -237,4 +250,6 @@ final class FormulaCatalog: @unchecked Sendable {
     private static let ephemeralLock = NSLock()
     private var ephemeralCustomId: String?
     private var ephemeralCategory: String?
+    /// Monotonic count of ephemeral registrations; see `customRegistrationToken()`.
+    private var ephemeralRevision: UInt64 = 0
 }

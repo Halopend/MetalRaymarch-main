@@ -182,6 +182,26 @@ class AudioAnalyzer {
     /// consumed on read (max-accumulated in the core), so a transient that
     /// lands between ticks is never dropped.
     func tickEnvelopes(at now: TimeInterval) {
+        // Idle fast path: once capture is inactive and every envelope has
+        // decayed below audibility, snap to zero and skip the core lock and
+        // exp() smoothing entirely. The exponential decay never quite reaches
+        // zero on its own, so the snap is also what terminates it. An idle
+        // (never-started) source pays nothing here beyond these comparisons.
+        if !isCapturing,
+           level < 1e-4, bassLevel < 1e-4, midLevel < 1e-4,
+           trebleLevel < 1e-4, onsetLevel < 1e-4 {
+            if level != 0 || bassLevel != 0 || midLevel != 0
+                || trebleLevel != 0 || onsetLevel != 0 {
+                level = 0
+                bassLevel = 0
+                midLevel = 0
+                trebleLevel = 0
+                onsetLevel = 0
+            }
+            lastTickTime = now
+            return
+        }
+
         let deltaTime = lastTickTime > 0 ? Float(now - lastTickTime) : Float(1.0 / 60.0)
         lastTickTime = now
         let dt = max(0.001, min(0.1, deltaTime))

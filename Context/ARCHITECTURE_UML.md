@@ -127,7 +127,6 @@ classDiagram
     }
     class MacSpatialUpscaler
     class MacTemporalUpscaler
-    class AdaptiveResolutionController
     class BuddhabrotRenderer
     class TiltMotionSensor { <<protocol>> }
     class MacMotionSensor
@@ -142,7 +141,6 @@ classDiagram
     Renderer *-- ParameterUpdateCoordinator
     Renderer ..> RendererTaskExecutor : runs on
     Renderer ..> MetalFXManager
-    Renderer ..> AdaptiveResolutionController
     Renderer ..> BuddhabrotRenderer : optional volume path
 
     MetalFXManager ..> MacSpatialUpscaler

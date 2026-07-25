@@ -349,7 +349,10 @@ final class ParameterNodeRegistry: @unchecked Sendable {
     static let shared = ParameterNodeRegistry()
 
     private var formulaBatches: [FractalModelType: ParameterNodeBatch]
-    private var customBatchDescriptorID: String?
+    /// Registration token (id + revision) the cached `.custom` batch was built
+    /// from — NOT the bare descriptor id: a live formula edit re-registers the
+    /// same id with different params, which must invalidate the batch.
+    private var customBatchToken: String?
     private let formulaBatchLock = NSLock()
     /// Core parameter nodes (fractalScale, colorMix).
     /// Keyed by their canonical targetID string (e.g. "core.fractalScale").
@@ -367,7 +370,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             batches[type] = Self.buildFormulaBatch(for: type)
         }
         self.formulaBatches = batches
-        self.customBatchDescriptorID = FormulaCatalog.shared.descriptor(for: .custom)?.id
+        self.customBatchToken = FormulaCatalog.shared.customRegistrationToken()
     }
 
     /// One-time build of engine-level parameter nodes for core geometry and effects.
@@ -406,12 +409,12 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         defer { formulaBatchLock.unlock() }
 
         if type == .custom {
-            let currentDescriptorID = FormulaCatalog.shared.descriptor(for: .custom)?.id
-            if currentDescriptorID != customBatchDescriptorID {
-                formulaBatches[type] = currentDescriptorID == nil
+            let currentToken = FormulaCatalog.shared.customRegistrationToken()
+            if currentToken != customBatchToken {
+                formulaBatches[type] = currentToken == nil
                     ? ParameterNodeBatch(fractalType: type)
                     : Self.buildFormulaBatch(for: type)
-                customBatchDescriptorID = currentDescriptorID
+                customBatchToken = currentToken
             }
         }
 

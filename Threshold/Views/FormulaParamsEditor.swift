@@ -122,6 +122,11 @@ struct FormulaParamsEditor: View {
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
             .onAppear { cachedGroups = Self.buildNodeGroups(for: cache.fractalType) }
             .onChange(of: cache.fractalType) { _, newType in cachedGroups = Self.buildNodeGroups(for: newType) }
+            // A live formula edit keeps fractalType == .custom while changing
+            // the descriptor; the hash is the edit signal the sliders follow.
+            .onChange(of: cache.activeCustomFormulaHash) { _, _ in
+                cachedGroups = Self.buildNodeGroups(for: cache.fractalType)
+            }
         }
     }
 }

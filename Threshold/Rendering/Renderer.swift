@@ -1189,9 +1189,9 @@ actor Renderer {
         )
         
         if isAudioMode {
-            let hasEnabledFingerInputMapping = settings.musicReactiveMappings.contains {
-                $0.isEnabled && $0.source.isFingerInput
-            }
+            // Cached flag: avoids copying the mappings array out of the lock
+            // and scanning it every frame.
+            let hasEnabledFingerInputMapping = settings.hasEnabledFingerInputMapping
 
             // Sensitivity multipliers from user settings
             let bassSens = settings.bassSensitivity

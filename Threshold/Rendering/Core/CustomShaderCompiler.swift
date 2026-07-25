@@ -200,6 +200,14 @@ actor CustomShaderCompiler {
         libraryCache.removeAll()
     }
 
+    /// Drop one cached library by its `combinedHash` key. The live formula
+    /// editor uses this to release superseded draft libraries — every
+    /// keystroke-generation compiles under a fresh source hash and would
+    /// otherwise accumulate in the cache for the whole session.
+    func evict(combinedHash key: String) {
+        libraryCache.removeValue(forKey: key)
+    }
+
     // MARK: - Source synthesis
 
     /// Stitch the user's DE source into the bundled Metal sources to produce a
@@ -210,17 +218,14 @@ actor CustomShaderCompiler {
     /// markers keep their built-in defaults).
     static func synthesizeSource(fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?,
                                  warpStackSource: String? = nil) throws -> String {
-        var pieces: [String] = []
-        pieces.reserveCapacity(9)
-
-        pieces.append("// === Custom effect shader (auto-synthesized at runtime) ===")
-        if let fractal { pieces.append("// Fractal: \(fractal.id) — \(fractal.name) [\(fractal.shortHash)]") }
-        if let spaceWarp { pieces.append("// Space warp: \(spaceWarp.id) — \(spaceWarp.name) [\(spaceWarp.shortHash)]") }
-        pieces.append(Self.synthesizedSourcePrefix)
+        // The pieces preceding the user's DE source come from ONE helper shared
+        // with `fractalUserSourceStartLine`, so compile-log line mapping can
+        // never drift from the actual layout.
+        var pieces = piecesBeforeFractalSource(fractal: fractal, spaceWarp: spaceWarp)
+        pieces.reserveCapacity(pieces.count + 4)
 
         // Custom fractal DE source — defines DE_<stem> + DE_<stem>_Dist.
         if let fractal {
-            pieces.append("// === Embedded fractal source — '\(fractal.id)' ===")
             pieces.append(fractal.metalSource)
             pieces.append("// === End embedded fractal source ===")
         }
@@ -251,6 +256,43 @@ actor CustomShaderCompiler {
         pieces.append(suffix)
 
         return pieces.joined(separator: "\n\n")
+    }
+
+    /// Every synthesized piece that precedes the embedded fractal source, in
+    /// exact emission order. `synthesizeSource` consumes this directly;
+    /// `fractalUserSourceStartLine` derives line offsets from it.
+    private static func piecesBeforeFractalSource(fractal: EmbeddedFormula?,
+                                                  spaceWarp: EmbeddedFormula?) -> [String] {
+        var pieces: [String] = []
+        pieces.reserveCapacity(5)
+        pieces.append("// === Custom effect shader (auto-synthesized at runtime) ===")
+        if let fractal { pieces.append("// Fractal: \(fractal.id) — \(fractal.name) [\(fractal.shortHash)]") }
+        if let spaceWarp { pieces.append("// Space warp: \(spaceWarp.id) — \(spaceWarp.name) [\(spaceWarp.shortHash)]") }
+        pieces.append(Self.synthesizedSourcePrefix)
+        if let fractal { pieces.append("// === Embedded fractal source — '\(fractal.id)' ===") }
+        return pieces
+    }
+
+    /// The 1-based line in the synthesized source where `fractal.metalSource`
+    /// begins. The editor records this at splice time and uses it to map Metal
+    /// compile-log positions (`program_source:LINE:COL`) back to lines of the
+    /// user's own source.
+    static func fractalUserSourceStartLine(fractal: EmbeddedFormula,
+                                           spaceWarp: EmbeddedFormula?) -> Int {
+        let before = piecesBeforeFractalSource(fractal: fractal, spaceWarp: spaceWarp)
+        // Pieces are joined with "\n\n": each prior piece contributes its own
+        // line count plus one blank separator line.
+        return before.reduce(1) { line, piece in
+            line + lineCount(of: piece) + 1
+        }
+    }
+
+    private static func lineCount(of text: String) -> Int {
+        var count = 1
+        for character in text where character == "\n" {
+            count += 1
+        }
+        return count
     }
 
     /// Replace the `// __SPACEWARP_STACK_CODEGEN__` marker with the generated

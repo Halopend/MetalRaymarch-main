@@ -55,8 +55,9 @@ final class StorageLocation {
     nonisolated static let musicPresetsSubdir = "Music Presets"
     nonisolated static let animationsSubdir   = "Animations"
     nonisolated static let settingsSubdir     = "Settings"
+    nonisolated static let formulasSubdir     = "Formulas"
 
-    static let allStoreSubdirs = [scenesSubdir, musicPresetsSubdir, animationsSubdir, settingsSubdir]
+    static let allStoreSubdirs = [scenesSubdir, musicPresetsSubdir, animationsSubdir, settingsSubdir, formulasSubdir]
 
     // MARK: - Notifications
 
@@ -127,6 +128,7 @@ final class StorageLocation {
     nonisolated static func musicPresetsDir(_ root: URL) -> URL { root.appendingPathComponent(musicPresetsSubdir, isDirectory: true) }
     nonisolated static func animationsDir(_ root: URL) -> URL { root.appendingPathComponent(animationsSubdir, isDirectory: true) }
     nonisolated static func settingsDir(_ root: URL) -> URL { root.appendingPathComponent(settingsSubdir, isDirectory: true) }
+    nonisolated static func formulasDir(_ root: URL) -> URL { root.appendingPathComponent(formulasSubdir, isDirectory: true) }
 
     // MARK: - Mode selection
 

@@ -1576,75 +1576,18 @@ final class AnimationManager {
 
     /// Inner hot path. The caller establishes the scene-mutation boundary once
     /// so effect setters cannot rewrite device/user preference blobs.
+    ///
+    /// Split into two halves:
+    /// 1. Change-gated writes stay ordinary setters — they fire once per
+    ///    keyframe change (guarded by the lastKeyframe* caches / != checks)
+    ///    and carry persistence and preset side effects.
+    /// 2. The ~45 unconditional per-frame writes go through one batched
+    ///    settings lock (`applyAnimationKeyframeBatch`) instead of ~45
+    ///    individual acquisitions at 90 Hz. The gated struct writes run
+    ///    FIRST so the batch's per-frame modulated values land on top,
+    ///    matching the original statement order.
     private func applyKeyframeWithoutPersistence(_ keyframe: AnimationKeyframe,
                                                  to settings: RenderSettings) {
-        settings.animationBaseMinDistance = keyframe.minDistance
-        settings.animationBaseFoldingLimit = keyframe.foldingLimit
-        settings.animationBaseSphereRadius = keyframe.sphereRadius
-        settings.animationBaseFractalScale = keyframe.fractalScale
-        settings.animationBasePosition = keyframe.position
-        
-        // Compose gesture (manual) AND music (audio) offsets into the targets so both
-        // survive playback. minDistance/foldingLimit/sphereRadius music arrives via the
-        // mandelbox formula path (audioOffset stays 0 for other types / non-music targets).
-        let minDistance = keyframe.minDistance + settings.manualOffsetMinDistance + settings.audioOffsetMinDistance
-        let foldingLimit = keyframe.foldingLimit + settings.manualOffsetFoldingLimit + settings.audioOffsetFoldingLimit
-        let sphereRadius = keyframe.sphereRadius + settings.manualOffsetSphereRadius + settings.audioOffsetSphereRadius
-        let position = keyframe.position + settings.manualOffsetPosition
-
-        // Set IMMEDIATE values for responsive animation playback
-        // This bypasses the renderer's interpolateToTargets() smoothing.
-        // The music (audio) offset is folded into the live value here so the beat-driven
-        // wiggle is full-amplitude and snappy; the gesture offset stays out of the live
-        // value (it eases in via the target above) to preserve its smooth blend-in feel.
-        settings.minDistance = keyframe.minDistance + settings.audioOffsetMinDistance
-        settings.foldingLimit = keyframe.foldingLimit + settings.audioOffsetFoldingLimit
-        settings.sphereRadius = keyframe.sphereRadius + settings.audioOffsetSphereRadius
-        settings.fractalScale = keyframe.fractalScale + settings.audioOffsetFractalScale
-        settings.scale = keyframe.scale
-        // Iteration budget: skip when the user has manually overridden it for
-        // this scene. The override is cleared on every scene switch so the
-        // scene's saved budget restores on first run.
-        if !userIterationBudgetOverride {
-            settings.baseFractalIterations = keyframe.baseFractalIterations
-            settings.baseMaxRaySteps = keyframe.baseMaxRaySteps
-        }
-        settings.position = keyframe.position
-        // Rotation (quaternion) and zoom (detailScale) use the same animationBase +
-        // manual-override model as position/shape so a grab gesture overrides them even
-        // when the scene animates these channels. Store the scene value as the base, then
-        // compose the gesture override on top (quaternion compose for rotation, additive
-        // for zoom) and write the composed result. Without this, applyKeyframe's per-frame
-        // write stomped the grab every frame in any scene that animates rotation/zoom
-        // (e.g. Ambient Blur), while scenes that don't (e.g. Kaleidoscope) appeared to work.
-        settings.animationBaseDetailScale = keyframe.detailScale
-        settings.animationBaseWorldRotation = keyframe.worldRotation
-        // Floor keeps zoom positive if a wide-range scene drives the base small while a
-        // grab holds a large negative additive offset (the smoothing logs would otherwise clamp).
-        let composedDetailScale = max(0.01, keyframe.detailScale + settings.manualOffsetDetailScale)
-        let composedRotation = (settings.manualRotationOffset * keyframe.worldRotation).normalized
-        settings.detailScale = composedDetailScale
-        settings.targetDetailScale = composedDetailScale
-        settings.worldRotation = composedRotation
-        settings.targetWorldRotation = composedRotation
-        
-        // Apply formula params for all types (unified path)
-        if let vals = keyframe.formulaParamValues {
-            settings.setAnimationBaseFormulaParams(vals)
-        }
-
-        // Legacy "mandelboxSphereProjection" scenes fold into base `.mandelbox` +
-        // the Space-tab Sphere Projection. The old MSP type read projection
-        // blend/radius from formula params[4]/[5] and always projected; reproduce
-        // that here every frame so animated projection radius/blend tracks the
-        // interpolated keyframe (e.g. Scene 9 / Kaleidoscope animate params[5]).
-        if currentScene?.legacyMandelboxSphereProjection == true,
-           let vals = keyframe.formulaParamValues, vals.count > 5 {
-            settings.sphereProjectionEnabled = true
-            settings.sphereProjectionBlend = vals[4]
-            settings.sphereProjectionRadius = vals[5]
-        }
-
           if let lightingMode = keyframe.lightingMode,
               settings.lightingMode != lightingMode {
             settings.lightingMode = lightingMode
@@ -1653,75 +1596,54 @@ final class AnimationManager {
               settings.lightingPreset != lightingPreset {
             settings.lightingPreset = lightingPreset
         }
+        // Hue / Glow / Bloom / Fog / Saturation: write the full effect struct
+        // (which persists + flips the lighting preset to .custom) only when
+        // the scene's keyframe changes; the batch below layers gesture +
+        // music offsets onto the live value every frame without persisting.
+        // Comparing against the cached raw keyframe (not the live, modulated
+        // value) keeps the expensive persisting write from firing once music
+        // is active.
         if let hueRotationEffect = keyframe.hueRotationEffect {
-            settings.sceneDrivesHueSpeed = true
-            settings.animationBaseHueSpeed = hueRotationEffect.speed
             if lastKeyframeHue != hueRotationEffect {
                 lastKeyframeHue = hueRotationEffect
                 settings.hueRotationEffect = hueRotationEffect
             }
-            // Layer music on top of the scene's hue speed every frame (non-persisting).
-            settings.audioModulateHueSpeed(hueRotationEffect.speed + settings.audioOffsetHueSpeed)
         } else {
-            settings.sceneDrivesHueSpeed = false
             lastKeyframeHue = nil
         }
           if let pulseEffect = keyframe.pulseEffect,
               settings.pulseEffect != pulseEffect {
             settings.pulseEffect = pulseEffect
         }
-        // Glow / Bloom / Fog: write the full effect struct (which persists + flips the
-        // lighting preset to .custom) only when the scene's keyframe changes, then layer
-        // gesture + music offsets on top every frame via the non-persisting audioModulate*
-        // setters. Comparing against the cached raw keyframe (not the live, modulated
-        // value) keeps the expensive persisting write from firing once music is active.
         if let glowEffect = keyframe.glowEffect {
-            settings.sceneDrivesGlow = true
-            settings.animationBaseGlowIntensity = glowEffect.intensity
             if lastKeyframeGlow != glowEffect {
                 lastKeyframeGlow = glowEffect
                 settings.glowEffect = glowEffect
             }
-            settings.audioModulateGlowIntensity(glowEffect.intensity
-                + settings.manualOffsetGlowIntensity
-                + settings.audioOffsetGlowIntensity)
         } else {
-            settings.sceneDrivesGlow = false
             lastKeyframeGlow = nil
         }
         if let bloomEffect = keyframe.bloomEffect {
-            settings.sceneDrivesBloom = true
-            settings.animationBaseBloomStrength = bloomEffect.strength
             if lastKeyframeBloom != bloomEffect {
                 lastKeyframeBloom = bloomEffect
                 settings.bloomEffect = bloomEffect
             }
-            settings.audioModulateBloomStrength(bloomEffect.strength
-                + settings.manualOffsetBloomStrength
-                + settings.audioOffsetBloomStrength)
         } else {
-            settings.sceneDrivesBloom = false
             lastKeyframeBloom = nil
         }
         if let fogEffect = keyframe.fogEffect {
-            settings.sceneDrivesFog = true
-            settings.animationBaseFogIntensity = fogEffect.intensity
             if lastKeyframeFog != fogEffect {
                 lastKeyframeFog = fogEffect
                 settings.fogEffect = fogEffect
             }
-            settings.audioModulateFogIntensity(fogEffect.intensity
-                + settings.manualOffsetFogIntensity
-                + settings.audioOffsetFogIntensity)
         } else {
-            settings.sceneDrivesFog = false
             lastKeyframeFog = nil
         }
           if let gradientCycleEffect = keyframe.gradientCycleEffect,
               settings.gradientCycleEffect != gradientCycleEffect {
             settings.gradientCycleEffect = gradientCycleEffect
         }
-        
+
         // ── Per-keyframe color overrides ─────────────────────────────────
         if let preset = keyframe.gradientPreset,
            settings.gradientPreset != preset {
@@ -1740,17 +1662,11 @@ final class AnimationManager {
             settings.gradientSmoothing = sm
         }
         if let sat = keyframe.colorSchemeSaturation {
-            settings.sceneDrivesSaturation = true
-            settings.animationBaseSaturation = sat
             if lastKeyframeSaturation != sat {
                 lastKeyframeSaturation = sat
                 settings.colorSchemeSaturation = max(0.0, min(3.0, sat))
             }
-            settings.audioModulateSaturation(sat
-                + settings.manualOffsetSaturation
-                + settings.audioOffsetSaturation)
         } else {
-            settings.sceneDrivesSaturation = false
             lastKeyframeSaturation = nil
         }
         if let con = keyframe.colorSchemeContrast {
@@ -1779,14 +1695,41 @@ final class AnimationManager {
         if settings.audioReactiveConfig != resolvedMusicConfig {
             settings.audioReactiveConfig = resolvedMusicConfig
         }
-        
-        // Also set TARGETS so they're in sync when animation stops
-        // This allows hand gestures to blend in naturally
-        settings.targetMinDistance = minDistance
-        settings.targetFoldingLimit = foldingLimit
-        settings.targetSphereRadius = sphereRadius
-        settings.targetFractalScale = keyframe.fractalScale + settings.manualOffsetFractalScale + settings.audioOffsetFractalScale
-        settings.targetPosition = position
+
+        // Legacy "mandelboxSphereProjection" scenes fold into base `.mandelbox` +
+        // the Space-tab Sphere Projection. The old MSP type read projection
+        // blend/radius from formula params[4]/[5] and always projected; reproduce
+        // that every frame so animated projection radius/blend tracks the
+        // interpolated keyframe (e.g. Scene 9 / Kaleidoscope animate params[5]).
+        let legacyMSP = currentScene?.legacyMandelboxSphereProjection == true
+        let mspParams: (blend: Float, radius: Float)? = {
+            guard legacyMSP, let vals = keyframe.formulaParamValues, vals.count > 5 else { return nil }
+            return (vals[4], vals[5])
+        }()
+
+        settings.applyAnimationKeyframeBatch(.init(
+            minDistance: keyframe.minDistance,
+            foldingLimit: keyframe.foldingLimit,
+            sphereRadius: keyframe.sphereRadius,
+            fractalScale: keyframe.fractalScale,
+            scale: keyframe.scale,
+            position: keyframe.position,
+            detailScale: keyframe.detailScale,
+            worldRotation: keyframe.worldRotation,
+            // Iteration budget: skip when the user has manually overridden it
+            // for this scene. The override is cleared on every scene switch so
+            // the scene's saved budget restores on first run.
+            baseFractalIterations: userIterationBudgetOverride ? nil : keyframe.baseFractalIterations,
+            baseMaxRaySteps: userIterationBudgetOverride ? nil : keyframe.baseMaxRaySteps,
+            formulaParamValues: keyframe.formulaParamValues,
+            legacyProjectionBlend: mspParams?.blend,
+            legacyProjectionRadius: mspParams?.radius,
+            hueSpeedBase: keyframe.hueRotationEffect?.speed,
+            glowIntensityBase: keyframe.glowEffect?.intensity,
+            bloomStrengthBase: keyframe.bloomEffect?.strength,
+            fogIntensityBase: keyframe.fogEffect?.intensity,
+            saturationBase: keyframe.colorSchemeSaturation
+        ))
     }
 
     /// Returns the keyframe state corresponding to the current playhead time.

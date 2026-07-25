@@ -151,6 +151,7 @@ final class RenderSettings: @unchecked Sendable {
         if SettingsPersistence.load(QualityConfig.self, domain: .quality) == nil {
             SettingsPersistence.save(qualityConfig, domain: .quality)
         }
+        withLock { _recomputeFingerMappingFlag_locked() }
     }
 
     private var _minDistance: Float = 0.8           // 80% of max (1.0) for quality
@@ -222,6 +223,10 @@ final class RenderSettings: @unchecked Sendable {
     private var _fractalBeatPunch: Float                = loadFloat("fractalBeatPunch", default: 0.7)
     private var _fractalAudioDamping: Float             = loadFloat("fractalAudioDamping", default: 0.0)
     private var _musicReactiveMappings: [MusicReactiveMapping] = loadMusicReactiveMappings("musicReactiveMappings")
+    /// Derived from `_musicReactiveMappings`; recomputed by
+    /// `_recomputeFingerMappingFlag_locked()` at every mutation site (init,
+    /// setter, audio-reactive config restore).
+    private var _hasEnabledFingerInputMapping: Bool = false
     private var _tripletMusicGains: [String: Float] = [:]
     
     private var _foldingLimit: Float = 1.0
@@ -995,8 +1000,23 @@ final class RenderSettings: @unchecked Sendable {
         set {
             withLock {
                 _musicReactiveMappings = Self.sanitizeMusicReactiveMappings(newValue)
+                _recomputeFingerMappingFlag_locked()
             }
             persistAudioReactive()
+        }
+    }
+
+    /// Whether any enabled mapping reads a finger-pinch source. Cached and
+    /// recomputed on mutation so the render loops can gate finger-input work
+    /// per frame without copying the mappings array out of the lock and
+    /// scanning it.
+    var hasEnabledFingerInputMapping: Bool {
+        withLock { _hasEnabledFingerInputMapping }
+    }
+
+    private func _recomputeFingerMappingFlag_locked() {
+        _hasEnabledFingerInputMapping = _musicReactiveMappings.contains {
+            $0.isEnabled && $0.source.isFingerInput
         }
     }
 
@@ -3871,6 +3891,159 @@ final class RenderSettings: @unchecked Sendable {
         return output
     }
     
+    // ═══════════════════════════════════════════════════════════════════════════
+    // BATCHED ANIMATION KEYFRAME APPLY
+    // One lock acquisition for the ~45 unconditional per-frame writes of
+    // animation playback (90 Hz), replacing one os_unfair_lock round-trip per
+    // property. Also a coherence fix: the manual/audio offset reads and the
+    // writes they compose into can no longer shear against a concurrent
+    // render-thread access mid-apply.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// The unconditional per-frame portion of an animation keyframe apply.
+    /// Change-gated effect-struct writes (glowEffect, lightingMode, gradient
+    /// preset, …) intentionally stay ordinary setters in AnimationManager:
+    /// they fire once per keyframe change and carry persistence/preset side
+    /// effects that must not be replicated here.
+    struct AnimationKeyframeBatch {
+        var minDistance: Float
+        var foldingLimit: Float
+        var sphereRadius: Float
+        var fractalScale: Float
+        var scale: Float
+        var position: SIMD3<Float>
+        var detailScale: Float
+        var worldRotation: simd_quatf
+        /// nil = user has overridden the iteration budget; keep theirs.
+        var baseFractalIterations: Int?
+        var baseMaxRaySteps: Int?
+        var formulaParamValues: [Float]?
+        /// Legacy mandelboxSphereProjection scenes drive projection from
+        /// formula params every frame; nil for everything else.
+        var legacyProjectionBlend: Float?
+        var legacyProjectionRadius: Float?
+        /// Per-channel scene drives: nil = scene does not drive the channel.
+        var hueSpeedBase: Float?
+        var glowIntensityBase: Float?
+        var bloomStrengthBase: Float?
+        var fogIntensityBase: Float?
+        var saturationBase: Float?
+    }
+
+    /// Apply the per-frame keyframe batch under a single lock. Never persists
+    /// (the animation hot path always runs persistence-suppressed; this method
+    /// writes backing fields directly, like the audioModulate* setters).
+    func applyAnimationKeyframeBatch(_ batch: AnimationKeyframeBatch) {
+        withLock { _applyAnimationKeyframeBatch_locked(batch) }
+    }
+
+    private func _applyAnimationKeyframeBatch_locked(_ batch: AnimationKeyframeBatch) {
+        // Statement order mirrors the pre-batch applyKeyframeWithoutPersistence
+        // exactly; later writes must not observe reordered earlier ones.
+        _animationBaseMinDistance = batch.minDistance
+        _animationBaseFoldingLimit = batch.foldingLimit
+        _animationBaseSphereRadius = batch.sphereRadius
+        _animationBaseFractalScale = batch.fractalScale
+        _animationBasePosition = batch.position
+
+        // Immediate values bypass smoothing for responsive playback. The
+        // audio offset folds into the live value (full-amplitude wiggle); the
+        // gesture offset eases in via the targets below.
+        _minDistance = batch.minDistance + _audioOffsetMinDistance
+        _foldingLimit = batch.foldingLimit + _audioOffsetFoldingLimit
+        _sphereRadius = batch.sphereRadius + _audioOffsetSphereRadius
+        _fractalScale = batch.fractalScale + _audioOffsetFractalScale
+        _scale = batch.scale
+
+        if let iterations = batch.baseFractalIterations {
+            let clamped = iterations.clamped(to: ControlCatalog.iterations.integerRange)
+            _baseFractalIterations = clamped
+            _fractalIterations = clamped
+        }
+        if let raySteps = batch.baseMaxRaySteps {
+            let clamped = raySteps.clamped(to: ControlCatalog.maxRaySteps.integerRange)
+            _baseMaxRaySteps = clamped
+            _maxRaySteps = clamped
+        }
+        _position = batch.position
+
+        // Rotation/zoom: store the scene value as the base, compose the
+        // gesture override on top, write the composed result.
+        _animationBaseDetailScale = batch.detailScale
+        _animationBaseWorldRotation = batch.worldRotation
+        let composedDetailScale = max(0.01, batch.detailScale + _manualOffsetDetailScale)
+        let composedRotation = (_manualRotationOffset * batch.worldRotation).normalized
+        _detailScale = composedDetailScale
+        _targetDetailScale = composedDetailScale
+        _worldRotation = composedRotation
+        _targetWorldRotation = composedRotation
+
+        if let values = batch.formulaParamValues {
+            for index in 0..<16 {
+                let current = FormulaCatalog.getParam(_formulaParams, index: index)
+                let next = index < values.count ? values[index] : current
+                _animationBaseFormulaParams[index] = _clampFormulaParamValue_locked(next, index: index)
+            }
+            _rebuildFormulaParamsFromAnimationState_locked()
+        }
+
+        if let blend = batch.legacyProjectionBlend, let radius = batch.legacyProjectionRadius {
+            _sphereProjectionEnabled = true
+            _sphereProjectionBlend = ControlCatalog.sphereProjectionBlend.clamp(blend)
+            _sphereProjectionRadius = ControlCatalog.sphereProjectionRadius.clamp(radius)
+        }
+
+        // Scene-driven effect channels: drive flag + animation base + the
+        // per-frame modulated live value (same math as the audioModulate*
+        // setters, composed under this one lock).
+        if let hueSpeed = batch.hueSpeedBase {
+            _sceneDrivesHueSpeed = true
+            _animationBaseHueSpeed = hueSpeed
+            _hueRotationEffect.speed = ControlCatalog.hueSpeed.clamp(hueSpeed + _audioOffsetHueSpeed)
+        } else {
+            _sceneDrivesHueSpeed = false
+        }
+        if let glow = batch.glowIntensityBase {
+            _sceneDrivesGlow = true
+            _animationBaseGlowIntensity = glow
+            _glowEffect.intensity = ControlCatalog.glow.clamp(
+                glow + _manualOffsetGlowIntensity + _audioOffsetGlowIntensity)
+        } else {
+            _sceneDrivesGlow = false
+        }
+        if let bloom = batch.bloomStrengthBase {
+            _sceneDrivesBloom = true
+            _animationBaseBloomStrength = bloom
+            _bloomEffect.strength = ControlCatalog.bloom.clamp(
+                bloom + _manualOffsetBloomStrength + _audioOffsetBloomStrength)
+        } else {
+            _sceneDrivesBloom = false
+        }
+        if let fog = batch.fogIntensityBase {
+            _sceneDrivesFog = true
+            _animationBaseFogIntensity = fog
+            _fogEffect.intensity = ControlCatalog.fog.clamp(
+                fog + _manualOffsetFogIntensity + _audioOffsetFogIntensity)
+        } else {
+            _sceneDrivesFog = false
+        }
+        if let saturation = batch.saturationBase {
+            _sceneDrivesSaturation = true
+            _animationBaseSaturation = saturation
+            _colorSchemeSaturation = ControlCatalog.saturation.clamp(
+                saturation + _manualOffsetSaturation + _audioOffsetSaturation)
+        } else {
+            _sceneDrivesSaturation = false
+        }
+
+        // Targets stay in sync so gestures blend naturally when playback stops.
+        _targetMinDistance = batch.minDistance + _manualOffsetMinDistance + _audioOffsetMinDistance
+        _targetFoldingLimit = batch.foldingLimit + _manualOffsetFoldingLimit + _audioOffsetFoldingLimit
+        _targetSphereRadius = batch.sphereRadius + _manualOffsetSphereRadius + _audioOffsetSphereRadius
+        _targetFractalScale = batch.fractalScale + _manualOffsetFractalScale + _audioOffsetFractalScale
+        _targetPosition = batch.position + _manualOffsetPosition
+    }
+
     /// Called by Renderer every frame to smoothly interpolate current values toward targets.
     /// Uses critically-damped spring physics for smooth acceleration/deceleration.
     /// - Parameter deltaTime: Time since last frame in seconds
@@ -4724,6 +4897,7 @@ final class RenderSettings: @unchecked Sendable {
                 _trebleSensitivity = newValue.trebleSensitivity
                 _beatSensitivity = newValue.beatSensitivity
                 _musicReactiveMappings = Self.sanitizeMusicReactiveMappings(newValue.musicReactiveMappings)
+                _recomputeFingerMappingFlag_locked()
                 _tripletMusicGains = newValue.tripletMusicGains
             }
         }
