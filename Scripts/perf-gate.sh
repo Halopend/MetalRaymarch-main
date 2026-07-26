@@ -41,16 +41,24 @@ if [[ "${PERF_GATE_SKIP_BUILD:-0}" != "1" ]]; then
     Scripts/build.sh mac >/dev/null
 fi
 
-# Resolve THIS repo's DerivedData by WorkspacePath — "newest Threshold-*" is
-# wrong whenever a worktree/second checkout has built more recently.
+# Resolve THIS repo's app. build.sh pins -derivedDataPath to the repo-local
+# .build/DerivedData (THRESHOLD_DERIVED_DATA_PATH overrides), so that product is
+# authoritative — a global-DerivedData scan here could silently pick up a STALE
+# app built before the pin. Fall back to the legacy WorkspacePath scan only for
+# trees never built via build.sh (e.g. Xcode-GUI-only checkouts).
 APP=""
-for dd in "$HOME"/Library/Developer/Xcode/DerivedData/Threshold-*; do
-    wp="$(defaults read "$dd/info" WorkspacePath 2>/dev/null || true)"
-    if [[ "$wp" == "$REPO/Threshold.xcodeproj" ]]; then
-        APP="$dd/Build/Products/Debug/Threshold.app"
-        break
-    fi
-done
+LOCAL_APP="${THRESHOLD_DERIVED_DATA_PATH:-$REPO/.build/DerivedData}/Build/Products/Debug/Threshold.app"
+if [[ -x "$LOCAL_APP/Contents/MacOS/Threshold" ]]; then
+    APP="$LOCAL_APP"
+else
+    for dd in "$HOME"/Library/Developer/Xcode/DerivedData/Threshold-*; do
+        wp="$(defaults read "$dd/info" WorkspacePath 2>/dev/null || true)"
+        if [[ "$wp" == "$REPO/Threshold.xcodeproj" ]]; then
+            APP="$dd/Build/Products/Debug/Threshold.app"
+            break
+        fi
+    done
+fi
 [[ -n "$APP" && -x "$APP/Contents/MacOS/Threshold" ]] \
     || { echo "FATAL: no built Threshold.app for $REPO (run without PERF_GATE_SKIP_BUILD)" >&2; exit 2; }
 echo "==> app: $APP"

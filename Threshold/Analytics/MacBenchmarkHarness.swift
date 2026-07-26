@@ -513,6 +513,26 @@ enum MacBenchmarkHarness {
         return store + bundledFallbacks
     }
 
+    /// Resolve a scene by name, re-scanning the store between attempts. The
+    /// harness's immediate `loadPresetsNow` scan can lose a supersede race
+    /// against the app's own startup reload — the cancelled scan returns with
+    /// `presets` still holding only the restored last-state scene, which made
+    /// the gate's canonical scene "not found" while its file sat in the store.
+    /// Bounded rescans make resolution deterministic instead of timing luck.
+    private static func resolvePresetRescanning(named name: String,
+                                                manager: PresetManager) async -> FractalPreset? {
+        for attempt in 0..<6 {
+            if let p = resolvePreset(named: name, in: benchmarkPresetCatalog(manager)) {
+                return p
+            }
+            if attempt < 5 {
+                try? await Task.sleep(for: .milliseconds(400))
+                await manager.loadPresetsNow()
+            }
+        }
+        return nil
+    }
+
     private static func runPlan(path: String, appModel: AppModel,
                                 renderer: ViewportRenderer, settings: RenderSettings) async {
         let plan: BenchPlan
@@ -538,9 +558,11 @@ enum MacBenchmarkHarness {
         var results: [BenchJobResult] = []
         var lastLoadedScene: String?
         for job in jobs {
-            guard let preset = resolvePreset(named: job.scene, in: all) else {
+            guard let preset = await resolvePresetRescanning(named: job.scene,
+                                                             manager: appModel.presetManager) else {
                 log("WARN scene not found: '\(job.scene)' — job '\(job.name)' skipped. Available: "
-                    + all.map { $0.name }.joined(separator: " | "))
+                    + benchmarkPresetCatalog(appModel.presetManager)
+                        .map { $0.name }.joined(separator: " | "))
                 continue
             }
             // Consecutive jobs on the same scene skip the reload + settle: the
@@ -721,11 +743,13 @@ enum MacBenchmarkHarness {
             targets = all.filter { $0.isKeyboardSwitchableStaticPreset }
         } else {
             for name in cfg.scenes {
-                if let p = resolvePreset(named: name, in: all) {
+                if let p = await resolvePresetRescanning(named: name,
+                                                         manager: appModel.presetManager) {
                     targets.append(p)
                 } else {
                     log("WARN scene not found: '\(name)' — available: "
-                        + all.map { $0.name }.joined(separator: " | "))
+                        + benchmarkPresetCatalog(appModel.presetManager)
+                            .map { $0.name }.joined(separator: " | "))
                 }
             }
         }
