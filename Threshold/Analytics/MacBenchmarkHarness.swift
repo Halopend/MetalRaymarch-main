@@ -485,6 +485,20 @@ enum MacBenchmarkHarness {
         // mid-flight when measurement starts makes both the perf numbers (march
         // steps drift run-to-run) and the PNG capture nondeterministic.
         settings.sceneTransitionDuration = 0
+        // Hand attraction is a device-interactive comfort feature that can never
+        // fire headless (no hand tracking on this host), but its code default is
+        // ON and it gates FractalDistanceCache.isEligible — leaving it set makes
+        // THRESHOLD_DIST_CACHE=1 silently dormant in every Mac benchmark. Pin it
+        // off like the other determinism pins above.
+        settings.handAttractionEnabled = false
+        // The safety bubble is user-owned comfort state: scene apply only turns
+        // it ON (scenes cannot clear a user's bubble), so whatever scene loads
+        // FIRST decides it for every later bubble-less scene in the run — the
+        // startup default scene ships bubble-on, silently adding an unauthored
+        // bubble to benchmark frames and blocking FractalDistanceCache
+        // eligibility. Pin it off; scenes that author a bubble still re-enable
+        // it on load, so authored looks (e.g. "Stress test") are unchanged.
+        settings.safetyBubbleEnabled = false
         BenchmarkManager.shared.collectIterations = true
         defer { BenchmarkManager.shared.collectIterations = false }
 

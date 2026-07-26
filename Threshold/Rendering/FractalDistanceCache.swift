@@ -117,17 +117,58 @@ final class FractalDistanceCache {
     private var candidateKey: AtlasKey?
     private var candidateFrameCount = 0
 
-    /// THRESHOLD_DIST_CACHE_DEBUG=1: after each bake, run the GPU validation
-    /// kernel (probes points inside every nonzero voxel and counts stored
-    /// bounds that exceed the analytic DE there) and log the result.
-    private static let debugValidate =
+    /// THRESHOLD_DIST_CACHE_DEBUG=1: after each completed bake, run the GPU
+    /// validation kernel (probes points inside every nonzero voxel and counts
+    /// stored bounds that exceed the analytic DE there) and log the result;
+    /// also log init failures and eligibility changes so a silent A/B run
+    /// can't be misread as "cache active, no win".
+    static let debugLoggingEnabled =
         ProcessInfo.processInfo.environment["THRESHOLD_DIST_CACHE_DEBUG"] == "1"
+    private static var debugValidate: Bool { debugLoggingEnabled }
+
+    /// Last logged ineligibility signature (nil = last frame was eligible or
+    /// nothing logged yet). Render-thread only, like the rest of this class.
+    private static nonisolated(unsafe) var lastIneligibilitySignature: String?
+
+    /// THRESHOLD_DIST_CACHE_DEBUG=1: explain — once per distinct gate
+    /// combination — why a requested cache is not running this frame.
+    static func logIneligibilityOnChange(settings: RenderSettingsSnapshot) {
+        guard debugLoggingEnabled else { return }
+        var reasons: [String] = []
+        if settings.fractalType != .mandelbox { reasons.append("fractalType=\(settings.fractalType.rawValue)") }
+        if settings.safetyBubbleEnabled { reasons.append("safetyBubble") }
+        if settings.handAttractionEnabled { reasons.append("handAttraction") }
+        if settings.envScrunchEnabled { reasons.append("envScrunch") }
+        if settings.distanceLODStrength > 0 { reasons.append("distanceLOD=\(settings.distanceLODStrength)") }
+        let signature = reasons.joined(separator: ",")
+        guard signature != lastIneligibilitySignature else { return }
+        lastIneligibilitySignature = signature
+        print("🧪 [distCache] requested but ineligible: \(signature.isEmpty ? "<no gate failed?>" : signature)")
+    }
     private var validatePipeline: MTLComputePipelineState?
     private var validateOut: MTLBuffer?
 
+    /// Function constants for both cache kernels. `distanceCacheBake` (and the
+    /// validate kernel) reference the shared DE graph's function constants, so
+    /// they MUST be materialized via `makeFunction(name:constantValues:)` — a
+    /// plain `makeFunction(name:)` pipeline build trips a Metal validation
+    /// abort (not a catchable error). Mirror the desktop generic pipeline's
+    /// baked-off tails, and additionally compile out the space-warp seam: the
+    /// seed is CANONICAL (AtlasKey excludes transforms; the march applies the
+    /// stack to the lookup point), so the live warp state must never bake in.
+    private static func kernelConstants() -> MTLFunctionConstantValues {
+        let constants = MTLFunctionConstantValues()
+        var off = false
+        constants.setConstantValue(&off, type: .bool, index: FunctionConstantIndex.hasSpaceWarp.rawValue)
+        constants.setConstantValue(&off, type: .bool, index: FunctionConstantIndex.hasEnvScrunch.rawValue)
+        constants.setConstantValue(&off, type: .bool, index: FunctionConstantIndex.hasHandField.rawValue)
+        return constants
+    }
+
     init?(device: MTLDevice) {
         guard let library = device.makeDefaultLibrary(),
-              let fn = library.makeFunction(name: "distanceCacheBake"),
+              let fn = try? library.makeFunction(name: "distanceCacheBake",
+                                                 constantValues: Self.kernelConstants()),
               let pso = try? device.makeComputePipelineState(function: fn) else { return nil }
         self.device = device
         self.pipeline = pso
@@ -263,7 +304,8 @@ final class FractalDistanceCache {
     ) {
         if validatePipeline == nil,
            let library = device.makeDefaultLibrary(),
-           let fn = library.makeFunction(name: "distanceCacheValidate") {
+           let fn = try? library.makeFunction(name: "distanceCacheValidate",
+                                              constantValues: Self.kernelConstants()) {
             validatePipeline = try? device.makeComputePipelineState(function: fn)
             validateOut = device.makeBuffer(length: MemoryLayout<UInt32>.stride * 3,
                                             options: .storageModeShared)

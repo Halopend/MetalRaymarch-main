@@ -1633,6 +1633,9 @@ final class ViewportRenderer {
             if distCache == nil, !distCacheInitAttempted {
                 distCacheInitAttempted = true
                 distCache = FractalDistanceCache(device: device)
+                if distCache == nil, FractalDistanceCache.debugLoggingEnabled {
+                    print("🧪 [distCache] init FAILED — cache stays off")
+                }
             }
             if let cache = distCache {
                 let key = FractalDistanceCache.bakeKey(settings: settings)
@@ -1640,6 +1643,8 @@ final class ViewportRenderer {
                 distCacheFrameState = frame
                 distCacheParams = frame.params
             }
+        } else if Self.distCacheRequested {
+            FractalDistanceCache.logIneligibilityOnChange(settings: settings)
         }
 
         let smoothFactor = 1.0 - exp(-15.0 * deltaTime)
