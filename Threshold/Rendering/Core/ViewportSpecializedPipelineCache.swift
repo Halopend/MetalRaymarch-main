@@ -167,35 +167,30 @@ final class ViewportSpecializedPipelineBuilder: @unchecked Sendable {
               let vertexFunction = library.makeFunction(name: "screenshotVertexShader")
         else { return nil }
 
-        // Metal function-constant indices mirror FunctionConstantIndex:
-        // 0=iterations, 2=safety bubble, 3=space warp, 6=ray steps,
-        // 7=fractal type, 9=color iterations, 11=shadows,
-        // 12=mandelbulb power, 16=environment, 17=sphere projection,
-        // 18=hand field.
         let constants = MTLFunctionConstantValues()
         var iterations = request.iterations
-        constants.setConstantValue(&iterations, type: .int, index: 0)
+        constants.setConstantValue(&iterations, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
         var raySteps = request.raySteps
-        constants.setConstantValue(&raySteps, type: .int, index: 6)
+        constants.setConstantValue(&raySteps, type: .int, index: FunctionConstantIndex.maxRaySteps.rawValue)
         var fractalType = request.fractalType
-        constants.setConstantValue(&fractalType, type: .int, index: 7)
+        constants.setConstantValue(&fractalType, type: .int, index: FunctionConstantIndex.fractalType.rawValue)
         var colorIterations = request.colorIterations
-        constants.setConstantValue(&colorIterations, type: .int, index: 9)
+        constants.setConstantValue(&colorIterations, type: .int, index: FunctionConstantIndex.colorIterations.rawValue)
         if var power = request.power {
-            constants.setConstantValue(&power, type: .int, index: 12)
+            constants.setConstantValue(&power, type: .int, index: FunctionConstantIndex.mandelbulbPower.rawValue)
         }
         var safetyBubble = request.safetyBubbleEnabled
-        constants.setConstantValue(&safetyBubble, type: .bool, index: 2)
+        constants.setConstantValue(&safetyBubble, type: .bool, index: FunctionConstantIndex.safetyBubbleEnabled.rawValue)
         var shadows = request.shadowsEnabled
-        constants.setConstantValue(&shadows, type: .bool, index: 11)
+        constants.setConstantValue(&shadows, type: .bool, index: FunctionConstantIndex.shadowsEnabled.rawValue)
         var sphereProjection = request.sphereProjectionEnabled
-        constants.setConstantValue(&sphereProjection, type: .bool, index: 17)
+        constants.setConstantValue(&sphereProjection, type: .bool, index: FunctionConstantIndex.sphereProjectionEnabled.rawValue)
         var spaceWarp = request.hasSpaceWarp
-        constants.setConstantValue(&spaceWarp, type: .bool, index: 3)
+        constants.setConstantValue(&spaceWarp, type: .bool, index: FunctionConstantIndex.hasSpaceWarp.rawValue)
         var environment = request.hasEnvScrunch
-        constants.setConstantValue(&environment, type: .bool, index: 16)
+        constants.setConstantValue(&environment, type: .bool, index: FunctionConstantIndex.hasEnvScrunch.rawValue)
         var handField = request.hasHandField
-        constants.setConstantValue(&handField, type: .bool, index: 18)
+        constants.setConstantValue(&handField, type: .bool, index: FunctionConstantIndex.hasHandField.rawValue)
 
         guard let fragmentFunction = try? library.makeFunction(
             name: "fragmentShaderMono",
