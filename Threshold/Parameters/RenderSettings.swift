@@ -3150,6 +3150,7 @@ final class RenderSettings: @unchecked Sendable {
                 spaceWarpParam3: _spaceWarpParam3,
                 spaceWarpAxis: _spaceWarpAxis,
                 spaceWarpStack: packedSpaceWarpStackLocked(),
+                hasAuthoredSpaceWarpOps: !_spaceWarpStack.isEmpty,
                 platformRadius: _platformRadius,
                 platformEnabled: _platformEnabled,
                 audioLevel: _audioLevel,

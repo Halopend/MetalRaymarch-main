@@ -3,6 +3,39 @@ import Dispatch
 import Metal
 import Synchronization
 
+/// Hashable identity of one function-constant specialization. Replaces the
+/// previous interpolated ~60-char String key so the per-frame cache probe
+/// hashes a few machine words instead of formatting and hashing a String.
+struct ViewportPipelineKey: Hashable, Sendable {
+    /// Combined custom-effect source hash when ANY custom library is active
+    /// (custom fractal OR a space warp riding a built-in); nil on the pure
+    /// bundled-library path. Namespaces custom pipelines so library-A's
+    /// FT1000 pipeline is never reused for library-B, and so deactivation can
+    /// evict exactly one effect's set (matches visionOS `CX{hash}_`).
+    let customHash: String?
+    let fractalType: Int32
+    let iterations: Int32
+    let raySteps: Int32
+    let colorIterations: Int32
+    let power: Int32?
+    let safetyBubbleEnabled: Bool
+    let shadowsEnabled: Bool
+    let sphereProjectionEnabled: Bool
+    let hasSpaceWarp: Bool
+    let hasEnvScrunch: Bool
+    let hasHandField: Bool
+
+    /// Human-readable form for pipeline labels — same shape as the retired
+    /// String key. Built once per pipeline compile, never on the frame path.
+    var labelDescription: String {
+        let powerKey = power.map { "_P\($0)" } ?? ""
+        let customPrefix = customHash.map { "CX\($0)_" } ?? ""
+        return customPrefix + "FT\(fractalType)_FI\(iterations)_RS\(raySteps)_CI\(colorIterations)\(powerKey)"
+            + "_B\(safetyBubbleEnabled ? 1 : 0)_SH\(shadowsEnabled ? 1 : 0)_SP\(sphereProjectionEnabled ? 1 : 0)"
+            + "_SW\(hasSpaceWarp ? 1 : 0)_ES\(hasEnvScrunch ? 1 : 0)_HF\(hasHandField ? 1 : 0)"
+    }
+}
+
 /// `Mutex`-protected cache of function-constant–specialized `fragmentShaderMono`
 /// pipelines for the macOS/iOS renderer. Specializing on iteration/ray-step/fractal
 /// counts lets the Metal compiler fully unroll the `Map()` and `Scene()` loops
@@ -18,20 +51,20 @@ import Synchronization
 /// store results without manual lock management.
 final class ViewportSpecializedPipelineCache: Sendable {
     private struct State {
-        var cache: [String: MTLRenderPipelineState] = [:]
-        var pending: Set<String> = []
+        var cache: [ViewportPipelineKey: MTLRenderPipelineState] = [:]
+        var pending: Set<ViewportPipelineKey> = []
     }
 
     private let state = Mutex(State())
 
-    func pipeline(for key: String) -> MTLRenderPipelineState? {
+    func pipeline(for key: ViewportPipelineKey) -> MTLRenderPipelineState? {
         state.withLock { $0.cache[key] }
     }
 
     /// Returns `true` if the caller should kick off a build (not cached and not
     /// already in flight). Marks the key pending so concurrent frames don't
     /// schedule duplicate compiles.
-    func beginBuildIfNeeded(_ key: String) -> Bool {
+    func beginBuildIfNeeded(_ key: ViewportPipelineKey) -> Bool {
         state.withLock { current in
             if current.cache[key] != nil || current.pending.contains(key) { return false }
             current.pending.insert(key)
@@ -39,24 +72,41 @@ final class ViewportSpecializedPipelineCache: Sendable {
         }
     }
 
-    func store(_ pipeline: MTLRenderPipelineState, for key: String) {
+    func store(_ pipeline: MTLRenderPipelineState, for key: ViewportPipelineKey) {
         state.withLock { current in
             current.cache[key] = pipeline
             current.pending.remove(key)
         }
     }
 
-    func failBuild(_ key: String) {
+    func failBuild(_ key: ViewportPipelineKey) {
         _ = state.withLock { $0.pending.remove(key) }
     }
 
-    /// Drop every cached pipeline (and any in-flight build) whose key starts with
-    /// `prefix`. Used to retire a custom formula's `CX{hash}_` pipelines on switch
-    /// or deactivation (pass `"CX"` to clear all custom pipelines).
-    func evict(prefix: String) {
+    /// Drop every cached pipeline (and any in-flight build). Debug
+    /// "Force Recompile" — everything rebuilds lazily on later frames.
+    func evictAll() {
         state.withLock { current in
-            current.cache = current.cache.filter { !$0.key.hasPrefix(prefix) }
-            current.pending = current.pending.filter { !$0.hasPrefix(prefix) }
+            current.cache.removeAll()
+            current.pending.removeAll()
+        }
+    }
+
+    /// Drop every custom-library pipeline (any `customHash`). Used when
+    /// deactivating back to the bundled default library.
+    func evictAllCustom() {
+        state.withLock { current in
+            current.cache = current.cache.filter { $0.key.customHash == nil }
+            current.pending = current.pending.filter { $0.customHash == nil }
+        }
+    }
+
+    /// Retire exactly one custom effect's pipelines (and in-flight builds) on
+    /// effect switch.
+    func evict(customHash: String) {
+        state.withLock { current in
+            current.cache = current.cache.filter { $0.key.customHash != customHash }
+            current.pending = current.pending.filter { $0.customHash != customHash }
         }
     }
 }
@@ -71,7 +121,7 @@ final class ViewportSpecializedPipelineCache: Sendable {
 /// slider drag cannot fan out into a concurrent Metal compile storm.
 final class ViewportSpecializedPipelineBuilder: @unchecked Sendable {
     struct Request: @unchecked Sendable {
-        let key: String
+        let key: ViewportPipelineKey
         let iterations: Int32
         let raySteps: Int32
         let fractalType: Int32
@@ -117,7 +167,7 @@ final class ViewportSpecializedPipelineBuilder: @unchecked Sendable {
     }
 
     func request(_ request: Request) {
-        let (supersededKey, shouldStart): (String?, Bool) = state.withLock { current in
+        let (supersededKey, shouldStart): (ViewportPipelineKey?, Bool) = state.withLock { current in
             let supersededKey = current.wanted?.key == request.key
                 ? nil
                 : current.wanted?.key
@@ -198,7 +248,7 @@ final class ViewportSpecializedPipelineBuilder: @unchecked Sendable {
         ) else { return nil }
 
         let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.label = "Threshold Viewport Specialized [\(request.key)]"
+        descriptor.label = "Threshold Viewport Specialized [\(request.key.labelDescription)]"
         descriptor.vertexFunction = vertexFunction
         descriptor.fragmentFunction = fragmentFunction
         descriptor.vertexDescriptor = vertexDescriptor

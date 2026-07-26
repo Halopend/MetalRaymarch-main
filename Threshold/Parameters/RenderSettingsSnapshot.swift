@@ -31,6 +31,12 @@ struct RenderSettingsSnapshot {
     let spaceWarpParam3: Float
     let spaceWarpAxis: SIMD3<Float>
     let spaceWarpStack: SpaceWarpStack
+    /// Whether the AUTHORED transform stack has any ops — distinct from
+    /// `spaceWarpStack.count`, which is the simplified GPU pack and can drop
+    /// no-op entries. The specialized-pipeline key gates FC_HAS_SPACEWARP on
+    /// this conservative authored form so a strength-0 op mid-drag doesn't
+    /// flip pipelines.
+    let hasAuthoredSpaceWarpOps: Bool
     let platformRadius: Float
     let platformEnabled: Bool
     let audioLevel: Float

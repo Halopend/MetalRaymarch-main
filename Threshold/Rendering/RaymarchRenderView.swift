@@ -71,7 +71,7 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
         let hasEffect = (formula != nil) || (warpStackSource != nil)
         guard hasEffect else {
             set(library: nil, hash: nil)
-            cache.evict(prefix: "CX")   // drop every custom pipeline → back to default library
+            cache.evictAllCustom()   // drop every custom pipeline → back to default library
             return
         }
         let newHash = CustomShaderCompiler.combinedHash(fractal: fractalEffect, spaceWarp: warpEffect, warpStackSignature: warpStackSignature)
@@ -79,7 +79,7 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
         let compiled = try await sharedCompiler(device: device).library(forFractal: fractalEffect, spaceWarp: warpEffect,
                                                                         warpStackSource: warpStackSource, warpStackSignature: warpStackSignature)
         if let old = hash, old != newHash {
-            cache.evict(prefix: "CX\(old)_")   // retire the previous effect's pipelines
+            cache.evict(customHash: old)   // retire the previous effect's pipelines
         }
         set(library: compiled, hash: newHash)
     }
@@ -92,7 +92,7 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
     func forceRecompile(formula: EmbeddedFormula?,
                         device: MTLDevice,
                         cache: ViewportSpecializedPipelineCache) async -> String {
-        cache.evict(prefix: "")                       // drop ALL specialized pipelines
+        cache.evictAll()                              // drop ALL specialized pipelines
         await sharedCompiler(device: device).evictAll()  // force a true source recompile
         set(library: nil, hash: nil)                  // bypass activate()'s no-op guard
 
@@ -564,7 +564,7 @@ final class ViewportRenderer {
         let frameSlot = uniformBufferIndex
         let uniformBuffer = uniformBuffers[frameSlot]
         uniformBufferIndex = (uniformBufferIndex + 1) % uniformBuffers.count
-        writeUniforms(to: uniformBuffer, appModel: appModel)
+        let frameSettings = writeUniforms(to: uniformBuffer, appModel: appModel).settings
 
         let benchBuffer = benchCounterBuffers[frameSlot]
         let collectSteps = BenchmarkManager.shared.shouldCollectSteps
@@ -579,7 +579,7 @@ final class ViewportRenderer {
                 uniformBuffer: uniformBuffer,
                 frame: frame)
         }
-        let pipeline = resolveActivePipeline(appModel: appModel)
+        let pipeline = resolveActivePipeline(appModel: appModel, settings: frameSettings)
         let descriptor = makeOffscreenRenderPassDescriptor(color: color, depth: depth)
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return nil }
         encodeRaymarch(into: encoder, pipeline: pipeline, uniformBuffer: uniformBuffer, benchBuffer: benchBuffer)
@@ -834,11 +834,12 @@ final class ViewportRenderer {
         let frameSlot = uniformBufferIndex
         let uniformBuffer = uniformBuffers[frameSlot]
         uniformBufferIndex = (uniformBufferIndex + 1) % uniformBuffers.count
-        var blitParams = writeUniforms(
+        let frame = writeUniforms(
             to: uniformBuffer,
             appModel: appModel,
             deferEdgeDetection: didUpscale
         )
+        var blitParams = frame.blitParams
 
         // Fractal distance cache: (re)bake before the render pass when a
         // DE-shaping parameter changed. Same command buffer ⇒ never stale.
@@ -872,7 +873,9 @@ final class ViewportRenderer {
         // representative of display pacing, so leave these diagnostics empty
         // there instead of substituting command-buffer completion timestamps.
         let framePacingTracker = self.framePacingTracker
+        #if DEBUG
         let submittedSceneGeneration = appModel.renderSettings.sceneLoadGeneration
+        #endif
         drawable.addPresentedHandler { drawable in
             let event = framePacingTracker.withLock { tracker in
                 tracker.recordPresentation(at: drawable.presentedTime)
@@ -880,6 +883,9 @@ final class ViewportRenderer {
             // Xcode's main-thread hang detector cannot see pauses caused by a
             // blocked render/compiler thread. Emit presentation truth instead:
             // this measures the gap between frames the user actually saw.
+            // DEBUG-only: printing takes a process-wide stdio lock the release
+            // presentation callback should never contend on.
+            #if DEBUG
             if event.didRecordHitch, event.lastFrameGapMs >= 100 {
                 print(
                     "⚠️ Presented-frame pause: " +
@@ -887,10 +893,13 @@ final class ViewportRenderer {
                     "sceneGeneration=\(submittedSceneGeneration)"
                 )
             }
+            #else
+            _ = event
+            #endif
         }
         #endif
 
-        let activePipeline = resolveActivePipeline(appModel: appModel)
+        let activePipeline = resolveActivePipeline(appModel: appModel, settings: frame.settings)
 
         if let temporalPass, let blitPipelineState, let motionPipelineState {
             // 1. Raymarch into the low-resolution offscreen target. Depth is
@@ -1067,8 +1076,13 @@ final class ViewportRenderer {
     /// Kicks off an async build the first time a configuration is seen so future
     /// frames get the fully-unrolled fast path without hitching the render thread.
     /// Updates `appModel.isUsingSpecializedPipeline` (drives the bolt indicator).
-    private func resolveActivePipeline(appModel: AppModel) -> MTLRenderPipelineState {
-        let settings = appModel.renderSettings
+    ///
+    /// `settings` is the SAME `RenderSettingsSnapshot` this frame's uniforms were
+    /// assembled from (threaded out of `writeUniforms`): one locked snapshot per
+    /// frame instead of ~11 individually-locked property reads here, and the
+    /// pipeline key can never desync from the uniform values mid-frame.
+    private func resolveActivePipeline(appModel: AppModel,
+                                       settings: RenderSettingsSnapshot) -> MTLRenderPipelineState {
         // deIterationMismatch biases the baked FC_FRACTAL_ITERATIONS (geometry fold count)
         // while the DE stays normalized to the unbiased count (RenderPrecompute) — reproduces
         // the "Accidental Sphere Projection" under-fold. Negative → fewer folds → sphere.
@@ -1090,19 +1104,11 @@ final class ViewportRenderer {
         let shadowsEnabled = settings.shadowsEnabled
         let sphereProjectionEnabled = settings.sphereProjectionEnabled && settings.sphereProjectionBlend > 0
 
-        let powerKey = power.map { "_P\($0)" } ?? ""
         // Atomic (library, hash) read so the cache-key hash and the build library
-        // always come from the SAME activation. Namespace custom-formula pipelines
-        // by source hash so library-A's FT1000 pipeline is never reused for
-        // library-B (matches visionOS `CX{hash}_`), and so deactivation can evict
-        // exactly one formula's set.
+        // always come from the SAME activation. The key carries the hash whenever
+        // ANY custom library is active (custom fractal OR a space warp riding a
+        // built-in), not only fractalType == .custom.
         let custom = customShaderBox.snapshot()
-        let customPrefix: String = {
-            // Namespace whenever ANY custom library is active (custom fractal OR a
-            // space warp riding a built-in), not only fractalType == .custom.
-            guard let h = custom.hash else { return "" }
-            return "CX\(h)_"
-        }()
         // A scene with NO transforms bakes FC_HAS_SPACEWARP=false, so the whole
         // space-warp seam (applyWarpOp switch, per-op loop, deScale threading) is
         // dead-code-eliminated from the hot DE path. Conservative: any non-empty
@@ -1112,13 +1118,26 @@ final class ViewportRenderer {
         // desync (no stale-pipeline "transforms silently vanish" bug). Toggling the
         // first transform flips the key → cache miss → the generic pipeline (FC unset
         // → defaults ON) renders correctly while the new variant compiles.
-        let hasSpaceWarp = !settings.spaceWarpStack.isEmpty || custom.hash != nil
+        let hasSpaceWarp = settings.hasAuthoredSpaceWarpOps || custom.hash != nil
         // Environment Scrunch and the hand field each add a tail to EVERY DE.
         // Scanned surroundings and hand tracking are visionOS-only renderer
         // inputs, so the desktop variants always compile both tails out.
         let hasEnvScrunch = false
         let hasHandField = false
-        let key = customPrefix + "FT\(fractalType)_FI\(iterations)_RS\(raySteps)_CI\(colorIterations)\(powerKey)_B\(safetyBubbleEnabled ? 1 : 0)_SH\(shadowsEnabled ? 1 : 0)_SP\(sphereProjectionEnabled ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)_ES\(hasEnvScrunch ? 1 : 0)_HF\(hasHandField ? 1 : 0)"
+        let key = ViewportPipelineKey(
+            customHash: custom.hash,
+            fractalType: fractalType,
+            iterations: iterations,
+            raySteps: raySteps,
+            colorIterations: colorIterations,
+            power: power,
+            safetyBubbleEnabled: safetyBubbleEnabled,
+            shadowsEnabled: shadowsEnabled,
+            sphereProjectionEnabled: sphereProjectionEnabled,
+            hasSpaceWarp: hasSpaceWarp,
+            hasEnvScrunch: hasEnvScrunch,
+            hasHandField: hasHandField
+        )
 
         if let specialized = specializedPipelineCache.pipeline(for: key) {
             appModel.isUsingSpecializedPipeline = true
@@ -1151,7 +1170,7 @@ final class ViewportRenderer {
     /// Asynchronously compiles a specialized `fragmentShaderMono` pipeline and
     /// stores it in the cache. Function-constant specialization unrolls the
     /// iteration/ray-step loops and devirtualizes the fractal DE dispatch.
-    private func buildSpecializedPipeline(key: String,
+    private func buildSpecializedPipeline(key: ViewportPipelineKey,
                                           iterations: Int32,
                                           raySteps: Int32,
                                           fractalType: Int32,
@@ -1254,10 +1273,15 @@ final class ViewportRenderer {
         return depthTexture
     }
 
+    /// Returns this frame's blit parameters plus the settings snapshot the
+    /// uniforms were assembled from, so callers resolve the specialized pipeline
+    /// against the exact values that were just written (no second locked read,
+    /// no mid-frame drift between uniforms and pipeline key).
     @discardableResult
     private func writeUniforms(to buffer: MTLBuffer,
                                appModel: AppModel,
-                               deferEdgeDetection: Bool = false) -> ViewportBlitParams {
+                               deferEdgeDetection: Bool = false)
+        -> (blitParams: ViewportBlitParams, settings: RenderSettingsSnapshot) {
         let now = CACurrentMediaTime()
         let deltaTime = max(1.0 / 240.0, min(now - lastFrameTime, 1.0 / 15.0))
         lastFrameTime = now
@@ -1322,9 +1346,11 @@ final class ViewportRenderer {
             uniforms.colorScheme.edgeDetectionEnabled = 0
         }
         let pointer = buffer.contents().bindMemory(to: UniformsArray.self, capacity: 1)
+        // Slot 0 only: fragmentShaderMono and screenshotVertexShader hardcode
+        // uniforms[0]; only the visionOS amplified vertex/fragment pair indexes
+        // slot 1 via amplification_id, and that path never runs here.
         pointer.pointee.uniforms.0 = uniforms
-        pointer.pointee.uniforms.1 = uniforms
-        return blitParams
+        return (blitParams, snapshot)
     }
 
     private func updateTemporalInvalidationState(settings: RenderSettingsSnapshot) {
