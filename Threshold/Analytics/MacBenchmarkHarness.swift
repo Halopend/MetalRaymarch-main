@@ -513,6 +513,26 @@ enum MacBenchmarkHarness {
         return store + bundledFallbacks
     }
 
+    /// Resolve a scene by name, re-scanning the store between attempts. The
+    /// harness's immediate `loadPresetsNow` scan can lose a supersede race
+    /// against the app's own startup reload — the cancelled scan returns with
+    /// `presets` still holding only the restored last-state scene, which made
+    /// the gate's canonical scene "not found" while its file sat in the store.
+    /// Bounded rescans make resolution deterministic instead of timing luck.
+    private static func resolvePresetRescanning(named name: String,
+                                                manager: PresetManager) async -> FractalPreset? {
+        for attempt in 0..<6 {
+            if let p = resolvePreset(named: name, in: benchmarkPresetCatalog(manager)) {
+                return p
+            }
+            if attempt < 5 {
+                try? await Task.sleep(for: .milliseconds(400))
+                await manager.loadPresetsNow()
+            }
+        }
+        return nil
+    }
+
     private static func runPlan(path: String, appModel: AppModel,
                                 renderer: ViewportRenderer, settings: RenderSettings) async {
         let plan: BenchPlan
@@ -538,9 +558,11 @@ enum MacBenchmarkHarness {
         var results: [BenchJobResult] = []
         var lastLoadedScene: String?
         for job in jobs {
-            guard let preset = resolvePreset(named: job.scene, in: all) else {
+            guard let preset = await resolvePresetRescanning(named: job.scene,
+                                                             manager: appModel.presetManager) else {
                 log("WARN scene not found: '\(job.scene)' — job '\(job.name)' skipped. Available: "
-                    + all.map { $0.name }.joined(separator: " | "))
+                    + benchmarkPresetCatalog(appModel.presetManager)
+                        .map { $0.name }.joined(separator: " | "))
                 continue
             }
             // Consecutive jobs on the same scene skip the reload + settle: the
@@ -588,7 +610,22 @@ enum MacBenchmarkHarness {
         log("job '\(job.name)': scene '\(job.scene)' \(job.width)x\(job.height) "
             + "frames=\(job.frames) warmup=\(job.warmup)\(reload ? "" : " (scene cached)")")
         if reload {
+            // The apply runs inside loadStaticScene's fire-and-forget MainActor
+            // Task; under load (shader compiles, other processes) it can land
+            // AFTER a fixed settle, leaving warmup+measurement on the previous
+            // scene — the startup default marches far fewer steps, which is the
+            // fast half of the historical accel-on bimodality. Wait for the
+            // apply to actually land (sceneLoadGeneration bumps in
+            // commitSceneTransition) before starting the settle clock.
+            let generationBefore = settings.sceneLoadGeneration
             appModel.loadStaticScene(preset)
+            for _ in 0..<100 {
+                if settings.sceneLoadGeneration != generationBefore { break }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            if settings.sceneLoadGeneration == generationBefore {
+                log("  WARN scene apply not observed within 10s — measuring anyway")
+            }
             // Let the (snapped) apply + any embedded-DE compile + the renderer's
             // exponential camera smoothers settle before warmup.
             try? await Task.sleep(for: .seconds(job.settleSeconds))
@@ -618,6 +655,16 @@ enum MacBenchmarkHarness {
         log("  effective iters=\(qcNow.baseFractalIterations) raySteps=\(qcNow.baseMaxRaySteps) "
             + "resScale=\(settings.resolutionScale) shadows=\(settings.shadowsEnabled)"
             + (job.ablate.map { " ablate=\($0)" } ?? ""))
+        // Accel provenance: accel-on gpuMs/steps have been observed bimodal
+        // across launches (suspected scene-apply vs QC-override write race).
+        // Log the levers actually in effect so a mode flip is attributable.
+        log(String(format: "  accel coneMarch=%.2f (compat %@) overRelaxMax=%.2f "
+                       + "distLOD=%.2f boundSkip=%@",
+                   qcNow.coneMarchStrength,
+                   settings.sceneConeMarchCompatible ? "true" : "false",
+                   qcNow.overRelaxationMax,
+                   qcNow.distanceLODStrength,
+                   qcNow.boundingSphereSkipEnabled ? "true" : "false"))
 
         // Start every job from the same animation phase, even when PNG capture
         // is disabled. Otherwise A/B jobs render different geometry and their
@@ -633,6 +680,22 @@ enum MacBenchmarkHarness {
             log("  applied param override \(job.params.map { "\($0.0)=\($0.1)" }.joined(separator: ","))")
             try? await Task.sleep(for: .milliseconds(300))
         }
+
+        // Deterministic pipeline: until the specialized (function-constant
+        // unrolled) pipeline finishes its async compile, frames render on the
+        // generic fallback at 2–4× the cost. A compile finishing before, during,
+        // or after the measured window is exactly the accel-on bimodality seen
+        // across launches (all-slow ~30ms vs mixed vs all-fast runs). Spin
+        // prewarm frames until the specialized pipeline is live (bounded — the
+        // Mandelbox mono compile can take ~10s+ on first launch).
+        var prewarm = 0
+        while prewarm < 600 {
+            _ = renderer.renderBenchmarkFrame(appModel: appModel, width: job.width, height: job.height)
+            prewarm += 1
+            if appModel.isUsingSpecializedPipeline { break }
+        }
+        log("  pipeline specialized=\(appModel.isUsingSpecializedPipeline) "
+            + "after \(prewarm) prewarm frame(s)")
 
         for _ in 0..<job.warmup {
             _ = renderer.renderBenchmarkFrame(appModel: appModel, width: job.width, height: job.height)
@@ -721,11 +784,13 @@ enum MacBenchmarkHarness {
             targets = all.filter { $0.isKeyboardSwitchableStaticPreset }
         } else {
             for name in cfg.scenes {
-                if let p = resolvePreset(named: name, in: all) {
+                if let p = await resolvePresetRescanning(named: name,
+                                                         manager: appModel.presetManager) {
                     targets.append(p)
                 } else {
                     log("WARN scene not found: '\(name)' — available: "
-                        + all.map { $0.name }.joined(separator: " | "))
+                        + benchmarkPresetCatalog(appModel.presetManager)
+                            .map { $0.name }.joined(separator: " | "))
                 }
             }
         }

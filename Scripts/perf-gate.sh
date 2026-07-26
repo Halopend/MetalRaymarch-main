@@ -41,16 +41,24 @@ if [[ "${PERF_GATE_SKIP_BUILD:-0}" != "1" ]]; then
     Scripts/build.sh mac >/dev/null
 fi
 
-# Resolve THIS repo's DerivedData by WorkspacePath — "newest Threshold-*" is
-# wrong whenever a worktree/second checkout has built more recently.
+# Resolve THIS repo's app. build.sh pins -derivedDataPath to the repo-local
+# .build/DerivedData (THRESHOLD_DERIVED_DATA_PATH overrides), so that product is
+# authoritative — a global-DerivedData scan here could silently pick up a STALE
+# app built before the pin. Fall back to the legacy WorkspacePath scan only for
+# trees never built via build.sh (e.g. Xcode-GUI-only checkouts).
 APP=""
-for dd in "$HOME"/Library/Developer/Xcode/DerivedData/Threshold-*; do
-    wp="$(defaults read "$dd/info" WorkspacePath 2>/dev/null || true)"
-    if [[ "$wp" == "$REPO/Threshold.xcodeproj" ]]; then
-        APP="$dd/Build/Products/Debug/Threshold.app"
-        break
-    fi
-done
+LOCAL_APP="${THRESHOLD_DERIVED_DATA_PATH:-$REPO/.build/DerivedData}/Build/Products/Debug/Threshold.app"
+if [[ -x "$LOCAL_APP/Contents/MacOS/Threshold" ]]; then
+    APP="$LOCAL_APP"
+else
+    for dd in "$HOME"/Library/Developer/Xcode/DerivedData/Threshold-*; do
+        wp="$(defaults read "$dd/info" WorkspacePath 2>/dev/null || true)"
+        if [[ "$wp" == "$REPO/Threshold.xcodeproj" ]]; then
+            APP="$dd/Build/Products/Debug/Threshold.app"
+            break
+        fi
+    done
+fi
 [[ -n "$APP" && -x "$APP/Contents/MacOS/Threshold" ]] \
     || { echo "FATAL: no built Threshold.app for $REPO (run without PERF_GATE_SKIP_BUILD)" >&2; exit 2; }
 echo "==> app: $APP"
@@ -58,11 +66,19 @@ echo "==> app: $APP"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+# Hermetic preset store: the canonical scene lives in Baselines/scenes/ (it is
+# NOT a bundled preset, and the user's live store may be iCloud-mode, which an
+# unsigned debug build cannot resolve). Stage it into a temp store root and
+# point the app there via THRESHOLD_BENCHMARK_STORE_ROOT.
+mkdir -p "$WORK/store/Scenes"
+cp "$REPO/Baselines/scenes/"*.threshscene "$WORK/store/Scenes/"
+
 run_config() { # $1=name  $2=qc-override ("" for none)
     local name="$1" qc="$2"
     mkdir -p "$WORK/png-$name"
     echo "==> running $name"
     env THRESHOLD_BENCHMARK=1 \
+        THRESHOLD_BENCHMARK_STORE_ROOT="$WORK/store" \
         THRESHOLD_BENCHMARK_SCENES="$SCENE" \
         THRESHOLD_BENCHMARK_SHADOWS=1 \
         THRESHOLD_BENCHMARK_SIZE="$SIZE" \
