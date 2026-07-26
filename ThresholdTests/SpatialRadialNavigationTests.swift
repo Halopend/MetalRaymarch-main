@@ -429,6 +429,119 @@ struct SpatialRadialNavigationTests {
     #expect(checksum.isFinite)
   }
 
+  @Test("Activations near the face plant at the minimum standoff along the same sight line")
+  func plantStandoff() {
+    let head = SIMD3<Float>(0.10, 1.60, 0.20)
+    let closeHand = SIMD3<Float>(0.10, 1.35, -0.05)
+    let planted = SpatialRadialGeometry.plantedOrigin(
+      handPosition: closeHand,
+      headPosition: head
+    )
+
+    #expect(
+      abs(simd_distance(planted, head) - SpatialRadialGeometry.minimumHeadStandoff)
+        < 0.000_01)
+    #expect(
+      simd_distance(
+        simd_normalize(closeHand - head),
+        simd_normalize(planted - head)
+      ) < 0.000_01)
+
+    let farHand = head + simd_normalize(closeHand - head) * 0.9
+    #expect(
+      SpatialRadialGeometry.plantedOrigin(handPosition: farHand, headPosition: head)
+        == farHand)
+  }
+
+  @Test("A released-then-closed pinch commits the highlighted sibling without a sweep")
+  func pinchCommitsHighlight() throws {
+    let tree = hierarchy()
+    var state = SpatialRadialInteractionState()
+    let activated = state.activate(
+      at: .zero,
+      headPosition: SIMD3<Float>(0, 0, 1),
+      hand: .right,
+      in: tree
+    )
+    #expect(activated)
+    let plant = try #require(state.plant)
+    let shapeID = NavigationHierarchy.rootID(for: .shape)
+    let rootIndex = try #require(tree.roots.firstIndex(where: { $0.id == shapeID }))
+    let highlightPosition = handPosition(
+      in: plant,
+      index: rootIndex,
+      count: tree.roots.count,
+      radius: 0.12
+    )
+
+    _ = state.update(handPosition: highlightPosition, pinchStrength: 0.1, in: tree)
+    #expect(state.navigation.highlightedNodeID == shapeID)
+
+    let committed = state.update(handPosition: highlightPosition, pinchStrength: 0.95, in: tree)
+    #expect(committed == .navigated(path: [shapeID]))
+    #expect(state.navigation.path == [shapeID])
+  }
+
+  @Test("A pinch already held at activation cannot commit until released once")
+  func heldPinchRequiresRelease() throws {
+    let tree = hierarchy()
+    var state = SpatialRadialInteractionState()
+    let activated = state.activate(
+      at: .zero,
+      headPosition: SIMD3<Float>(0, 0, 1),
+      hand: .right,
+      in: tree
+    )
+    #expect(activated)
+    let plant = try #require(state.plant)
+    let position = handPosition(in: plant, index: 0, count: tree.roots.count, radius: 0.12)
+
+    _ = state.update(handPosition: position, pinchStrength: 1.0, in: tree)
+    _ = state.update(handPosition: position, pinchStrength: 1.0, in: tree)
+    #expect(state.navigation.path.isEmpty)
+
+    _ = state.update(handPosition: position, pinchStrength: 0.1, in: tree)
+    let committed = state.update(handPosition: position, pinchStrength: 0.95, in: tree)
+    #expect(committed == .navigated(path: [tree.roots[0].id]))
+  }
+
+  @Test("Pinching the hub retreats one level and dismisses from the root")
+  func hubPinchRetreatsAndDismisses() throws {
+    let tree = hierarchy()
+    var state = SpatialRadialInteractionState()
+    let activated = state.activate(
+      at: .zero,
+      headPosition: SIMD3<Float>(0, 0, 1),
+      hand: .right,
+      in: tree
+    )
+    #expect(activated)
+    let plant = try #require(state.plant)
+    let shapeID = NavigationHierarchy.rootID(for: .shape)
+    let rootIndex = try #require(tree.roots.firstIndex(where: { $0.id == shapeID }))
+    let highlightPosition = handPosition(
+      in: plant,
+      index: rootIndex,
+      count: tree.roots.count,
+      radius: 0.12
+    )
+    _ = state.update(handPosition: highlightPosition, pinchStrength: 0.1, in: tree)
+    _ = state.update(handPosition: highlightPosition, pinchStrength: 0.95, in: tree)
+    #expect(state.navigation.path == [shapeID])
+
+    let hubPosition = plant.worldPosition(of: SIMD3<Float>(0.01, 0.01, 0))
+    _ = state.update(handPosition: hubPosition, pinchStrength: 0.1, in: tree)
+    let retreated = state.update(handPosition: hubPosition, pinchStrength: 0.95, in: tree)
+    #expect(retreated == .retreated(path: []))
+    #expect(state.navigation.path.isEmpty)
+    #expect(state.isActive)
+
+    _ = state.update(handPosition: hubPosition, pinchStrength: 0.1, in: tree)
+    let dismissed = state.update(handPosition: hubPosition, pinchStrength: 0.95, in: tree)
+    #expect(dismissed == .dismissed)
+    #expect(!state.isActive)
+  }
+
   @Test("Gesture map preserves hand, finger, action, and configured menu gesture")
   func gestureMapSnapshot() {
     let map = SpatialGestureMapSnapshot.capture(

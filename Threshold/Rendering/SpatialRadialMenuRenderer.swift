@@ -78,7 +78,10 @@ extension Renderer {
         }
 
         return spatialRadialInteraction.activate(
-            at: selected.1,
+            at: SpatialRadialGeometry.plantedOrigin(
+                handPosition: selected.1,
+                headPosition: latestDevicePosition
+            ),
             headPosition: latestDevicePosition,
             hand: selected.0,
             focusing: nodeID,
@@ -130,23 +133,37 @@ extension Renderer {
         guard spatialRadialInteraction.isActive else { return }
 
         let position: SIMD3<Float>?
+        let pinchStrength: Float?
         if let pose, let hand = spatialRadialInteraction.hand {
             position = trackedPalm(for: hand, in: pose)
+            let data = hand == .left ? pose.leftHand : pose.rightHand
+            pinchStrength = data.isTracked ? data.indexPinch : nil
         } else {
             position = nil
+            pinchStrength = nil
         }
 
         let outcome = spatialRadialInteraction.update(
             handPosition: position,
+            pinchStrength: pinchStrength,
             in: spatialRadialHierarchy
         )
-        guard case .activate(let nodeID) = outcome,
-              let target = spatialRadialHierarchy.node(withID: nodeID)?.target else {
-            return
-        }
-
-        Task { @MainActor [weak appModel] in
-            appModel?.activateSpatialNavigationTarget(target)
+        switch outcome {
+        case .activate(let nodeID):
+            guard let target = spatialRadialHierarchy.node(withID: nodeID)?.target else {
+                return
+            }
+            Task { @MainActor [weak appModel] in
+                appModel?.activateSpatialNavigationTarget(target)
+            }
+        case .dismissed:
+            // Pinching the hub at the root closes the menu; the MainActor
+            // handler releases input ownership and bumps the generation.
+            Task { @MainActor [weak appModel] in
+                appModel?.dismissSpatialMenuHandler?()
+            }
+        case .none, .highlighted, .navigated, .retreated:
+            break
         }
     }
 
@@ -322,8 +339,12 @@ extension Renderer {
         append(spatialRadialHierarchy.roots)
         guard !nodes.isEmpty else { return nil }
 
+        // The fragment shader maps a full atlas cell across a full card quad,
+        // so the cell aspect must match ringItemHalfSize or glyphs stretch.
         let cellWidth = 320
-        let cellHeight = 88
+        let cardHalfSize = SpatialRadialGeometry.ringItemHalfSize
+        let cellHeight = Int((CGFloat(cellWidth) * CGFloat(cardHalfSize.y / cardHalfSize.x))
+            .rounded())
         let columns = 4
         let rows = Int(ceil(Double(nodes.count) / Double(columns)))
         let width = cellWidth * columns
@@ -335,7 +356,9 @@ extension Renderer {
         let bitmapInfo =
             CGBitmapInfo.byteOrder32Big.rawValue
             | CGImageAlphaInfo.premultipliedLast.rawValue
-        let font = CTFontCreateWithName("SF Pro Display" as CFString, 23, nil)
+        // ~13% cap height of the (aspect-corrected) cell, matching the caption
+        // weight the RealityKit prototype used on same-sized cards.
+        let font = CTFontCreateWithName("SF Pro Display" as CFString, 32, nil)
         let foreground = CGColor(
             colorSpace: colorSpace,
             components: [1, 1, 1, 1]
@@ -357,7 +380,10 @@ extension Renderer {
 
             context.translateBy(x: 0, y: CGFloat(height))
             context.scaleBy(x: 1, y: -1)
-            context.textMatrix = .identity
+            // The CTM flip gives this context top-down rows (matching how the
+            // buffer is uploaded to Metal), but Core Text lays glyphs out y-up;
+            // without a mirrored text matrix every label renders upside down.
+            context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
 
             for (index, node) in nodes.enumerated() {
                 let column = index % columns

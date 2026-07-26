@@ -344,6 +344,14 @@ class AppModel {
     // Animation/Scene playback manager
     var animationManager: AnimationManager?
     
+    /// Feature gate for the planted spatial radial menu. Disabled for now —
+    /// the direct-hand interaction still needs on-device tuning — so menu
+    /// gestures route to the conventional controls window on every platform.
+    /// The renderer skips installing the spatial presentation handlers when
+    /// false, and every gesture entry point already falls back to the window
+    /// path when those handlers are nil. Flip to re-enable.
+    static let spatialRadialMenuEnabled = false
+
     // Menu window visibility acknowledged by the window scene lifecycle.
     // Gesture requests do not mutate this optimistically because openWindow and
     // dismissWindow provide no success result.

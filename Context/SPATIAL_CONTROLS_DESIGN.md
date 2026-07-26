@@ -1,5 +1,11 @@
 # Planted Spatial Radial Controls
 
+> **Status: gated off.** `AppModel.spatialRadialMenuEnabled` is currently
+> `false` — the direct-hand interaction needs more on-device tuning — so menu
+> gestures route to the conventional controls window. The renderer skips
+> installing the spatial presentation handlers when the gate is off; all code
+> below remains built and unit-tested.
+
 Threshold's visionOS radial controls consume `NavigationHierarchy.application`,
 the same platform-neutral tree used by the Mac radial menu, keyboard traversal,
 and flat controls. The spatial presentation owns no destination IDs, labels,
@@ -7,15 +13,20 @@ ordering, or route taxonomy.
 
 ## Interaction contract
 
-- A menu gesture captures the exact world-space center of the hand sample that
-  produced it. The menu frame (origin, upright basis, and head-facing normal) is
-  immutable until dismissal.
+- A menu gesture captures the world-space center of the hand sample that
+  produced it. Activations closer than 0.70 m to the head plant at that minimum
+  standoff along the same head→hand sight line (the gesture is usually made
+  near the chest, and the full ring planted there fills the field of view); the
+  cursor still starts centered on the hub. The menu frame (origin, upright
+  basis, and head-facing normal) is immutable until dismissal.
 - Later hand samples move a direct cursor through that planted frame. The menu
   never follows the hand and never attaches to the selected fractal or another
   scene object.
-- Azimuth selects a sibling. Crossing outward through the current commit radius
-  selects a branch or activates a leaf. Crossing inward through the retreat
-  radius returns one level.
+- Azimuth selects a sibling. A pinch (released once since activation, then
+  closed) commits the highlighted sibling directly; over the hub it returns one
+  level, or dismisses from the root. Crossing outward through the current
+  commit radius commits the same way for full-arm sweeps. Crossing inward
+  through the retreat radius returns one level.
 - The root ring is at 0.19 m and commits at 0.32 m. Descendant targets are at
   0.46 m and commit at 0.54 m. Rendering and cursor motion are capped at 0.58 m,
   keeping the deepest interaction within the intended 1.5–2 ft envelope.

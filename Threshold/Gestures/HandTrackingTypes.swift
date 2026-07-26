@@ -243,9 +243,23 @@ extension HandPoseSnapshot {
         let middleMeta = position(.middleFingerMetacarpal)
         let ringMeta = position(.ringFingerMetacarpal)
         let pinkyMeta = position(.littleFingerMetacarpal)
-        hand.palmCenter = (indexMeta + middleMeta + ringMeta + pinkyMeta) * 0.25
+        // Average only the joints ARKit actually tracked. An untracked joint
+        // reads .zero here; averaging it in drags palmCenter toward the world
+        // origin while still passing nonzero guards — the spatial menu then
+        // plants at that displaced point.
+        let trackedMetacarpals = [indexMeta, middleMeta, ringMeta, pinkyMeta]
+            .filter { simd_length_squared($0) > 1e-9 }
+        hand.palmCenter = trackedMetacarpals.isEmpty
+            ? .zero
+            : trackedMetacarpals.reduce(SIMD3<Float>.zero, +) / Float(trackedMetacarpals.count)
 
-        let rawNormal = simd_cross(pinkyMeta - indexMeta, middleMeta - hand.wristPosition)
+        let normalInputsTracked = simd_length_squared(indexMeta) > 1e-9
+            && simd_length_squared(middleMeta) > 1e-9
+            && simd_length_squared(pinkyMeta) > 1e-9
+            && simd_length_squared(hand.wristPosition) > 1e-9
+        let rawNormal = normalInputsTracked
+            ? simd_cross(pinkyMeta - indexMeta, middleMeta - hand.wristPosition)
+            : .zero
         let normalLength = simd_length(rawNormal)
         hand.palmNormal = normalLength > 1e-6 ? rawNormal / normalLength : .zero
 

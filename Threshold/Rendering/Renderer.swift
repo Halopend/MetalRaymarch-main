@@ -774,45 +774,49 @@ actor Renderer {
                 // The spatial menu renders inside this compositor layer. Its
                 // presentation closure captures the latest tracked palm once;
                 // later samples move only the cursor through the planted frame.
-                appModel.presentSpatialMenuHandler = {
-                    [weak appModel = appModel, weak renderer] nodeID in
-                    guard let appModel, let renderer else { return }
-                    let generation = appModel.beginSpatialMenuPresentationRequest()
-                    appModel.setSpatialMenuVisible(true)
-                    guard appModel.isSpatialMenuVisible else {
+                // While the feature gate is off, the handlers stay nil and every
+                // menu gesture routes to the conventional controls window.
+                if AppModel.spatialRadialMenuEnabled {
+                    appModel.presentSpatialMenuHandler = {
+                        [weak appModel = appModel, weak renderer] nodeID in
+                        guard let appModel, let renderer else { return }
+                        let generation = appModel.beginSpatialMenuPresentationRequest()
+                        appModel.setSpatialMenuVisible(true)
+                        guard appModel.isSpatialMenuVisible else {
+                            Task { [weak renderer] in
+                                await renderer?.dismissSpatialRadialMenu(
+                                    generation: generation
+                                )
+                            }
+                            return
+                        }
+
+                        Task { [weak appModel, weak renderer] in
+                            guard let renderer else { return }
+                            let result = await renderer.presentSpatialRadialMenu(
+                                focusing: nodeID,
+                                generation: generation
+                            )
+                            guard result == .unavailable else { return }
+                            await MainActor.run {
+                                guard let appModel,
+                                      appModel.isCurrentSpatialMenuPresentationRequest(generation)
+                                else { return }
+                                appModel.setSpatialMenuVisible(false)
+                                appModel.revealMenuWindowForSpatialNavigation()
+                            }
+                        }
+                    }
+                    appModel.dismissSpatialMenuHandler = {
+                        [weak appModel = appModel, weak renderer] in
+                        guard let appModel else { return }
+                        let generation = appModel.beginSpatialMenuPresentationRequest()
+                        appModel.setSpatialMenuVisible(false)
                         Task { [weak renderer] in
                             await renderer?.dismissSpatialRadialMenu(
                                 generation: generation
                             )
                         }
-                        return
-                    }
-
-                    Task { [weak appModel, weak renderer] in
-                        guard let renderer else { return }
-                        let result = await renderer.presentSpatialRadialMenu(
-                            focusing: nodeID,
-                            generation: generation
-                        )
-                        guard result == .unavailable else { return }
-                        await MainActor.run {
-                            guard let appModel,
-                                  appModel.isCurrentSpatialMenuPresentationRequest(generation)
-                            else { return }
-                            appModel.setSpatialMenuVisible(false)
-                            appModel.revealMenuWindowForSpatialNavigation()
-                        }
-                    }
-                }
-                appModel.dismissSpatialMenuHandler = {
-                    [weak appModel = appModel, weak renderer] in
-                    guard let appModel else { return }
-                    let generation = appModel.beginSpatialMenuPresentationRequest()
-                    appModel.setSpatialMenuVisible(false)
-                    Task { [weak renderer] in
-                        await renderer?.dismissSpatialRadialMenu(
-                            generation: generation
-                        )
                     }
                 }
                 return true

@@ -214,11 +214,13 @@ enum SpatialRadialInteractionOutcome: Equatable {
   case navigated(path: [String])
   case retreated(path: [String])
   case activate(nodeID: String)
+  case dismissed
 }
 
 /// Platform-neutral direct-hand reducer. Radius moves through hierarchy levels;
-/// azimuth chooses siblings. Gaze is accepted only as a boundary tie-break and
-/// can never commit a selection by itself.
+/// azimuth chooses siblings; a pinch commits the highlighted sibling (or, over
+/// the hub, retreats/dismisses). Gaze is accepted only as a boundary tie-break
+/// and can never commit a selection by itself.
 struct SpatialRadialInteractionState: Equatable {
   private(set) var navigation = SpatialRadialNavigationState()
   private(set) var plant: SpatialRadialPlant?
@@ -229,6 +231,10 @@ struct SpatialRadialInteractionState: Equatable {
 
   private var previousRadius: Float = 0
   private var needsRearmAfterTrackingLoss = false
+  /// A pinch may commit only after the hand has been seen released once —
+  /// the menu-toggle pose itself can read as a pinch at activation.
+  private var pinchReadyToCommit = false
+  private var previousPinchStrength: Float = 1
 
   var hand: SpatialRadialHand? { plant?.hand }
 
@@ -256,12 +262,15 @@ struct SpatialRadialInteractionState: Equatable {
     highlightedDepth = navigation.depth
     previousRadius = 0
     needsRearmAfterTrackingLoss = false
+    pinchReadyToCommit = false
+    previousPinchStrength = 1
     isActive = true
     return true
   }
 
   mutating func update(
     handPosition: SIMD3<Float>?,
+    pinchStrength: Float? = nil,
     gazeAssistedNodeID: String? = nil,
     in hierarchy: NavigationHierarchy
   ) -> SpatialRadialInteractionOutcome {
@@ -270,6 +279,8 @@ struct SpatialRadialInteractionState: Equatable {
       cursorWorldPosition = nil
       cursorLocalPosition = nil
       needsRearmAfterTrackingLoss = true
+      pinchReadyToCommit = false
+      previousPinchStrength = 1
       return .none
     }
 
@@ -312,21 +323,61 @@ struct SpatialRadialInteractionState: Equatable {
     let crossedOutward = previousRadius < commitRadius && radius >= commitRadius
     previousRadius = radius
 
-    if crossedOutward, let nodeID = navigation.highlightedNodeID {
-      switch navigation.select(nodeID: nodeID, atDepth: currentDepth, in: hierarchy) {
-      case .navigated(let path):
-        highlightedDepth = navigation.depth
-        updateHighlight(
+    if crossedOutward, let nodeID = navigation.highlightedNodeID,
+      let outcome = commitHighlight(
+        nodeID,
+        atDepth: currentDepth,
+        localPosition: local,
+        gazeAssistedNodeID: gazeAssistedNodeID,
+        in: hierarchy
+      )
+    {
+      return outcome
+    }
+
+    // Pinch is the direct confirmation: it commits the highlighted sibling
+    // without requiring the full radial sweep. Over the hub it retreats one
+    // level, or dismisses from the root. The rising edge is only honored after
+    // the hand has been seen released, so the activation pose cannot commit.
+    let pinch = pinchStrength ?? 0
+    let pinchRose = pinchReadyToCommit
+      && previousPinchStrength < SpatialRadialGeometry.pinchCommitThreshold
+      && pinch >= SpatialRadialGeometry.pinchCommitThreshold
+    if pinch <= SpatialRadialGeometry.pinchRearmThreshold {
+      pinchReadyToCommit = true
+    }
+    previousPinchStrength = pinch
+
+    if pinchRose {
+      pinchReadyToCommit = false
+      // The highlight is intentionally sticky through the hub dead zone, so
+      // the radius (not highlight presence) decides between committing the
+      // pointed-at sibling and operating the hub.
+      if radius >= SpatialRadialGeometry.activationDeadZone,
+        let nodeID = navigation.highlightedNodeID
+      {
+        if let outcome = commitHighlight(
+          nodeID,
+          atDepth: currentDepth,
           localPosition: local,
           gazeAssistedNodeID: gazeAssistedNodeID,
           in: hierarchy
-        )
-        return .navigated(path: path)
-      case .activate(let nodeID):
+        ) {
+          return outcome
+        }
+      } else if radius < SpatialRadialGeometry.activationDeadZone {
+        if navigation.canGoBack {
+          navigation.goBack()
+          highlightedDepth = navigation.depth
+          updateHighlight(
+            localPosition: local,
+            gazeAssistedNodeID: gazeAssistedNodeID,
+            in: hierarchy
+          )
+          return .retreated(path: navigation.path)
+        }
         isActive = false
-        return .activate(nodeID: nodeID)
-      case .ignored:
-        break
+        return .dismissed
       }
     }
 
@@ -337,6 +388,32 @@ struct SpatialRadialInteractionState: Equatable {
     return .none
   }
 
+  /// Shared radial-crossing / pinch commit path. Returns nil when the
+  /// hierarchy rejects the selection (stale highlight).
+  private mutating func commitHighlight(
+    _ nodeID: String,
+    atDepth depth: Int,
+    localPosition: SIMD3<Float>,
+    gazeAssistedNodeID: String?,
+    in hierarchy: NavigationHierarchy
+  ) -> SpatialRadialInteractionOutcome? {
+    switch navigation.select(nodeID: nodeID, atDepth: depth, in: hierarchy) {
+    case .navigated(let path):
+      highlightedDepth = navigation.depth
+      updateHighlight(
+        localPosition: localPosition,
+        gazeAssistedNodeID: gazeAssistedNodeID,
+        in: hierarchy
+      )
+      return .navigated(path: path)
+    case .activate(let nodeID):
+      isActive = false
+      return .activate(nodeID: nodeID)
+    case .ignored:
+      return nil
+    }
+  }
+
   mutating func reset() {
     navigation.reset()
     plant = nil
@@ -345,6 +422,8 @@ struct SpatialRadialInteractionState: Equatable {
     highlightedDepth = nil
     previousRadius = 0
     needsRearmAfterTrackingLoss = false
+    pinchReadyToCommit = false
+    previousPinchStrength = 1
     isActive = false
   }
 
@@ -408,6 +487,17 @@ enum SpatialRadialGeometry {
   static let angularHysteresis: Float = .pi / 36
   static let gazeBoundaryTolerance: Float = .pi / 72
 
+  /// The menu gesture is usually made near the chest, and a ring spanning up
+  /// to ~1.2 m planted there fills the whole field of view. Plant the frame at
+  /// least this far from the head, pushed along the head→hand sight line so
+  /// the cursor still starts centered on the hub.
+  static let minimumHeadStandoff: Float = 0.70
+  /// Pinch hysteresis for the direct confirmation. Commit requires a clear
+  /// pinch; re-arming requires a clear release, so tracking jitter around the
+  /// threshold cannot double-commit.
+  static let pinchCommitThreshold: Float = 0.80
+  static let pinchRearmThreshold: Float = 0.45
+
   // Compatibility values retained for the dormant RealityKit prototype. The
   // active visionOS path is the planted compositor renderer.
   static let maximumFanTilt: Float = .pi / 12
@@ -422,6 +512,22 @@ enum SpatialRadialGeometry {
 
   static func inwardSign(isLeftHanded: Bool) -> Float {
     isLeftHanded ? 1 : -1
+  }
+
+  /// Where to plant the menu frame for an activation at `handPosition`: the
+  /// hand itself when it is already comfortably far away, otherwise the same
+  /// sight line extended to the minimum standoff. Keeping the origin on the
+  /// head→hand ray means the cursor starts exactly on the hub either way.
+  static func plantedOrigin(
+    handPosition: SIMD3<Float>,
+    headPosition: SIMD3<Float>
+  ) -> SIMD3<Float> {
+    let towardHand = handPosition - headPosition
+    let distance = simd_length(towardHand)
+    guard distance > 0.001, distance < minimumHeadStandoff else {
+      return handPosition
+    }
+    return headPosition + towardHand * (minimumHeadStandoff / distance)
   }
 
   static func constrainedRotation(_ rotation: Float) -> Float {
