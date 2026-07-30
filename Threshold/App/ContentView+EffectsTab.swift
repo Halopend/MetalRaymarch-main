@@ -37,27 +37,24 @@ extension ContentView {
                     range: ControlCatalog.glow.range,
                     enabled: Binding(get: { cache.lighting.glowEffect.enabled }, set: { cache.lighting.glowEffect.enabled = $0 }),
                     onChanged: { cache.commitGlowEffect() },
-                    musicTargetID: ParameterTargetID.Effect.glow)
+                    musicTargetID: ParameterTargetID.Effect.glow,
+                    pairedColor: Binding(get: { cache.lighting.glowEffect.color }, set: { cache.lighting.glowEffect.color = $0 }))
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "sun.max.fill", label: "Bloom",
                     value: Binding(get: { cache.lighting.bloomEffect.strength }, set: { cache.lighting.bloomEffect.strength = $0 }),
                     range: ControlCatalog.bloom.range,
                     enabled: Binding(get: { cache.lighting.bloomEffect.enabled }, set: { cache.lighting.bloomEffect.enabled = $0 }),
                     onChanged: { cache.commitBloomEffect() },
-                    musicTargetID: ParameterTargetID.Effect.bloom)
-                Divider().padding(.leading, 114)
+                    musicTargetID: ParameterTargetID.Effect.bloom,
+                    pairedColor: Binding(get: { cache.lighting.bloomEffect.color }, set: { cache.lighting.bloomEffect.color = $0 }))
+                Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "cloud.fog.fill", label: "Fog",
                     value: Binding(get: { cache.lighting.fogEffect.intensity }, set: { cache.lighting.fogEffect.intensity = $0 }),
                     range: ControlCatalog.fog.range,
                     enabled: Binding(get: { cache.lighting.fogEffect.enabled }, set: { cache.lighting.fogEffect.enabled = $0 }),
                     onChanged: { cache.commitFogEffect() },
-                    musicTargetID: ParameterTargetID.Effect.fog)
-                Divider().padding(.leading, 114)
-                FogColorPickerRow(
-                    title: "Fog Tint",
-                    color: Binding(get: { cache.lighting.fogEffect.color }, set: { cache.lighting.fogEffect.color = $0 }),
-                    onChanged: { cache.commitFogEffect() }
-                )
+                    musicTargetID: ParameterTargetID.Effect.fog,
+                    pairedColor: Binding(get: { cache.lighting.fogEffect.color }, set: { cache.lighting.fogEffect.color = $0 }))
             }
             .moduleCard(.orange)
             

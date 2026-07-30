@@ -363,11 +363,8 @@ struct ContentView: View {
         .dynamicTypeSize(DS.textSize(forIndex: uiMenuTextSizeIndex))
         #endif
         .animation(motionSensitiveAnimation(.easeInOut(duration: 0.3)), value: appModel.immersiveSpaceState)
-        .background(menuSurfaceFill, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(menuSurfaceStroke, lineWidth: 1)
-        )
+        .background { menuSurfaceBackground }
+        .overlay { menuSurfaceBorder }
         .thresholdGlassBackground(cornerRadius: 20)
         .opacity(isMenuContentVisible ? 1 : 0)
         .animation(motionSensitiveAnimation(.easeInOut(duration: 0.18)), value: isMenuContentVisible)
@@ -558,6 +555,29 @@ struct ContentView: View {
 
     private var menuSurfaceStroke: Color {
         colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.08)
+    }
+
+    @ViewBuilder
+    private var menuSurfaceBackground: some View {
+        if usesCompactWorkspaceLayout {
+            // The iPad inspector is already a bounded system surface. Extending
+            // a rectangular fill through its vertical safe-area insets removes
+            // the empty bands left by treating that column as a floating card.
+            Rectangle()
+                .fill(menuSurfaceFill)
+                .ignoresSafeArea(.container, edges: .vertical)
+        } else {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(menuSurfaceFill)
+        }
+    }
+
+    @ViewBuilder
+    private var menuSurfaceBorder: some View {
+        if !usesCompactWorkspaceLayout {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(menuSurfaceStroke, lineWidth: 1)
+        }
     }
 
     var liveFPSColor: Color {
@@ -756,7 +776,10 @@ struct ContentView: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        // The system inspector supplies the outer vertical boundary on iPad.
+        // Keeping desktop card padding here exposed two black strips above and
+        // below an otherwise full-height controls column.
+        .padding(.vertical, usesCompactWorkspaceLayout ? 0 : 10)
         .frame(minWidth: immersiveLayoutMinimumWidth, minHeight: immersiveLayoutMinimumHeight)
     }
 

@@ -10,6 +10,38 @@ enum RadialInteractionProfile: Sendable {
     var itemSpacing: CGFloat { self == .touch ? 48 : 32 }
 }
 
+/// A restrained "focus magnification" shared by every radial pill. The active
+/// feature receives a little more visual space as the user moves deeper into
+/// the hierarchy, without turning the launcher into a literal loupe or moving
+/// its stable hit target.
+enum RadialFocusMagnification {
+    static func scale(
+        for profile: RadialInteractionProfile,
+        isFocused: Bool,
+        isExpanded: Bool = false,
+        isEngaged: Bool = false
+    ) -> CGFloat {
+        if isExpanded {
+            return profile == .touch ? 1.055 : 1.045
+        }
+        if isFocused || isEngaged {
+            return profile == .touch ? 1.045 : 1.035
+        }
+        return 1
+    }
+
+    static func protectedHalfExtent(
+        _ restingHalfExtent: CGFloat,
+        for profile: RadialInteractionProfile
+    ) -> CGFloat {
+        restingHalfExtent * scale(
+            for: profile,
+            isFocused: false,
+            isExpanded: true
+        )
+    }
+}
+
 enum RadialActivationPolicy {
     static func maximumMovement(for profile: RadialInteractionProfile) -> CGFloat {
         profile == .touch ? 12 : 4
@@ -21,6 +53,13 @@ enum RadialActivationPolicy {
         profile: RadialInteractionProfile
     ) -> Bool {
         activationCount >= 2 && movement <= maximumMovement(for: profile)
+    }
+
+    static func shouldOpenFullControls(
+        activationCount: Int,
+        hasFullControlsAction: Bool
+    ) -> Bool {
+        hasFullControlsAction && activationCount >= 2
     }
 }
 
@@ -67,10 +106,15 @@ final class RadialMenuModel {
 ///    pointer across pills can never mutate app state irreversibly.
 ///  - `fallbackAction` non-nil → a leaf that cannot expose useful quick inputs
 ///    opens the full rectangular controls surface at its routed destination.
+///  - `fullControlsAction` non-nil → a branch can be double-clicked to open the
+///    same destination in the rectangular control panel without giving up its
+///    radial quick-input children.
 ///  - `slider` non-nil      → a terminal quick input scrubs a live value in place.
+///  - `toggle` non-nil      → a terminal binary input switches live in place.
 ///
-/// Branches never run fallback actions. Once quick inputs exist, hover, click,
-/// Return, and Right Arrow all remain inside the quick-menu hierarchy.
+/// Branches never run fallback actions. Their normal activation and hover stay
+/// inside the quick-menu hierarchy; only an explicit double-click follows the
+/// full-controls action.
 final class RadialOverflowFallback {
     let node: RadialNavigationNode
 
@@ -86,7 +130,9 @@ struct RadialNavigationNode: Identifiable {
     let isSelected: Bool
     let children: [RadialNavigationNode]
     let fallbackAction: (() -> Void)?
+    let fullControlsAction: (() -> Void)?
     let slider: RadialSliderBinding?
+    let toggle: RadialToggleBinding?
     /// Optional item budget for the compact radial fan.
     let compactChildrenLimit: Int?
     /// A routed leaf appended when compact projection exceeds its item budget.
@@ -99,19 +145,30 @@ struct RadialNavigationNode: Identifiable {
         isSelected: Bool = false,
         children: [RadialNavigationNode] = [],
         fallbackAction: (() -> Void)? = nil,
+        fullControlsAction: (() -> Void)? = nil,
         slider: RadialSliderBinding? = nil,
+        toggle: RadialToggleBinding? = nil,
         compactChildrenLimit: Int? = nil,
         overflowFallback: RadialOverflowFallback? = nil
     ) {
         assert(
-            fallbackAction == nil || (children.isEmpty && slider == nil),
+            fallbackAction == nil || (children.isEmpty && slider == nil && toggle == nil),
             "Fallback actions belong only on leaves without radial quick inputs."
+        )
+        assert(
+            fullControlsAction == nil || !children.isEmpty,
+            "Full-controls actions decorate navigable radial branches."
+        )
+        assert(
+            slider == nil || toggle == nil,
+            "A radial quick input must be either continuous or binary."
         )
         assert(compactChildrenLimit == nil || !children.isEmpty)
         assert(
             overflowFallback == nil
             || (overflowFallback?.node.children.isEmpty == true
                 && overflowFallback?.node.slider == nil
+                && overflowFallback?.node.toggle == nil
                 && overflowFallback?.node.fallbackAction != nil),
             "Overflow fallbacks must be routed action leaves."
         )
@@ -121,12 +178,45 @@ struct RadialNavigationNode: Identifiable {
         self.isSelected = isSelected
         self.children = children
         self.fallbackAction = fallbackAction
+        self.fullControlsAction = fullControlsAction
         self.slider = slider
+        self.toggle = toggle
         self.compactChildrenLimit = compactChildrenLimit
         self.overflowFallback = overflowFallback
     }
 
     var isBranch: Bool { !children.isEmpty }
+}
+
+/// Live read/write access for a binary radial leaf.
+///
+/// Keeping toggles distinct from sliders gives touch, keyboard, and assistive
+/// technologies an actual on/off interaction instead of exposing a continuous
+/// 0…1 value. Availability is checked again for every write so a dependent
+/// control cannot mutate after the projection was built.
+struct RadialToggleBinding {
+    let read: () -> Bool
+    let write: (Bool) -> Void
+    let isEnabled: () -> Bool
+
+    init(
+        read: @escaping () -> Bool,
+        write: @escaping (Bool) -> Void,
+        isEnabled: @escaping () -> Bool = { true }
+    ) {
+        self.read = read
+        self.write = write
+        self.isEnabled = isEnabled
+    }
+
+    func set(_ value: Bool) {
+        guard isEnabled() else { return }
+        write(value)
+    }
+
+    func toggle() {
+        set(!read())
+    }
 }
 
 /// Live read/write access for one hierarchy slider leaf.
@@ -141,9 +231,9 @@ struct RadialSliderBinding {
     /// Live availability check. A closure keeps dependent controls in sync with
     /// the setting that owns their availability without rebuilding the tree.
     let isEnabled: () -> Bool
-    /// Optional absolute step used by discrete controls such as transform
-    /// enable switches and Coxeter p/q values. Continuous sliders derive their
-    /// keyboard step from a fraction of the authored range instead.
+    /// Optional absolute step used by discrete scalar controls such as Coxeter
+    /// p/q values. Continuous sliders derive their keyboard step from a
+    /// fraction of the authored range instead.
     let keyboardStep: Float?
     /// Compact value label shown inside the pill (e.g. "1.4", "12").
     let format: (Float) -> String
@@ -224,24 +314,22 @@ enum RadialTransformNodeFactory {
         for snapshot: SpaceWarpOpValue,
         position: Int,
         read: @escaping OpReader,
-        update: @escaping OpUpdater
+        update: @escaping OpUpdater,
+        fullControlsAction: (() -> Void)? = nil
     ) -> RadialNavigationNode {
         let kind = snapshot.kind
         let opID = snapshot.id
         let idPrefix = "transform.op.\(opID.uuidString.lowercased())"
         var controls: [RadialNavigationNode] = []
 
-        controls.append(sliderNode(
+        controls.append(toggleNode(
             id: "\(idPrefix).enabled",
             title: "Enabled",
             systemImage: "power",
-            range: 0...1,
-            fallback: snapshot.isEnabled ? 1 : 0,
-            keyboardStep: 1,
-            read: { read(opID).map { $0.isEnabled ? 1 : 0 } },
-            write: { value in update(opID) { $0.isEnabled = value >= 0.5 } },
-            isEnabled: { read(opID) != nil },
-            format: { $0 >= 0.5 ? "On" : "Off" }
+            fallback: snapshot.isEnabled,
+            read: { read(opID)?.isEnabled },
+            write: { value in update(opID) { $0.isEnabled = value } },
+            isEnabled: { read(opID) != nil }
         ))
 
         controls.append(sliderNode(
@@ -282,17 +370,14 @@ enum RadialTransformNodeFactory {
         }
 
         if let toggle = kind.toggle {
-            controls.append(sliderNode(
+            controls.append(toggleNode(
                 id: "\(idPrefix).option",
                 title: toggle.label,
                 systemImage: toggle.icon,
-                range: 0...1,
-                fallback: snapshot.p2,
-                keyboardStep: 1,
-                read: { read(opID)?.p2 },
-                write: { value in update(opID) { $0.p2 = value >= 0.5 ? 1 : 0 } },
-                isEnabled: { read(opID)?.isEnabled == true },
-                format: { $0 >= 0.5 ? "On" : "Off" }
+                fallback: snapshot.p2 >= 0.5,
+                read: { read(opID).map { $0.p2 >= 0.5 } },
+                write: { value in update(opID) { $0.p2 = value ? 1 : 0 } },
+                isEnabled: { read(opID)?.isEnabled == true }
             ))
         }
 
@@ -334,7 +419,8 @@ enum RadialTransformNodeFactory {
             id: idPrefix,
             title: "\(position + 1) · \(kind.displayName)",
             systemImage: kind.icon,
-            children: controls
+            children: controls,
+            fullControlsAction: fullControlsAction
         )
     }
 
@@ -361,6 +447,27 @@ enum RadialTransformNodeFactory {
                 isEnabled: isEnabled,
                 keyboardStep: keyboardStep,
                 format: format ?? valueFormat(for: range)
+            )
+        )
+    }
+
+    private static func toggleNode(
+        id: String,
+        title: String,
+        systemImage: String,
+        fallback: Bool,
+        read: @escaping () -> Bool?,
+        write: @escaping (Bool) -> Void,
+        isEnabled: @escaping () -> Bool
+    ) -> RadialNavigationNode {
+        RadialNavigationNode(
+            id: "toggle.\(id)",
+            title: title,
+            systemImage: systemImage,
+            toggle: RadialToggleBinding(
+                read: { read() ?? fallback },
+                write: write,
+                isEnabled: isEnabled
             )
         )
     }

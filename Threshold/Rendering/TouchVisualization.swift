@@ -95,49 +95,118 @@ final class TouchVisualizationOverlay: UIView {
         isUserInteractionEnabled = false
         backgroundColor = .clear
         isOpaque = false
+
+        let notifications = NotificationCenter.default
+        notifications.addObserver(
+            self,
+            selector: #selector(clearForLifecycleChange),
+            name: UIApplication.willResignActiveNotification,
+            object: nil
+        )
+        notifications.addObserver(
+            self,
+            selector: #selector(clearForLifecycleChange),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        notifications.addObserver(
+            self,
+            selector: #selector(touchVisualizationPreferenceDidChange),
+            name: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard
+        )
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil {
+            clearAll()
+        }
+    }
+
     // MARK: - Touch feed
 
-    func touchesBegan(_ touches: Set<UITouch>) {
-        guard TouchVisualizationSettings.isEnabled else { return }
+    func touchesBegan(_ touches: Set<UITouch>, event: UIEvent?) {
+        guard TouchVisualizationSettings.isEnabled else {
+            clearAll()
+            return
+        }
+
+        let newTouches = touches.filter { indicators[ObjectIdentifier($0)] == nil }
+        let color = color(forTouchCount: indicators.count + newTouches.count)
         for touch in touches {
-            let indicator = Indicator(at: touch.location(in: self), color: currentColor(extraTouches: touches.count))
-            indicators[ObjectIdentifier(touch)] = indicator
+            let identifier = ObjectIdentifier(touch)
+            indicators[identifier]?.container.removeFromSuperlayer()
+            let indicator = Indicator(at: touch.location(in: self), color: color)
+            indicators[identifier] = indicator
             layer.addSublayer(indicator.container)
         }
         retintAll()
+        reconcileActiveTouches(with: event)
     }
 
-    func touchesMoved(_ touches: Set<UITouch>) {
+    func touchesMoved(_ touches: Set<UITouch>, event: UIEvent?) {
+        guard TouchVisualizationSettings.isEnabled else {
+            clearAll()
+            return
+        }
+
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for touch in touches {
             indicators[ObjectIdentifier(touch)]?.container.position = touch.location(in: self)
         }
         CATransaction.commit()
+        reconcileActiveTouches(with: event)
     }
 
-    func touchesEnded(_ touches: Set<UITouch>) {
+    func touchesEnded(_ touches: Set<UITouch>, event: UIEvent?) {
+        guard TouchVisualizationSettings.isEnabled else {
+            clearAll()
+            return
+        }
+
         for touch in touches {
             guard let indicator = indicators.removeValue(forKey: ObjectIdentifier(touch)) else { continue }
             release(indicator, at: touch.location(in: self))
         }
         retintAll()
+        reconcileActiveTouches(with: event)
+    }
+
+    /// Cancellation is an interruption of the whole view-level stream. UIKit
+    /// can report only the recognizer-owned subset, so clearing just `touches`
+    /// here risks leaving a sibling finger's layer behind indefinitely.
+    func touchesCancelled() {
+        clearAll()
+    }
+
+    /// Used by view/window/app lifecycle boundaries that may not deliver a
+    /// matching `touchesEnded` callback.
+    func clearAll() {
+        indicators.removeAll(keepingCapacity: true)
+        layer.sublayers?.forEach {
+            $0.removeAllAnimations()
+            $0.removeFromSuperlayer()
+        }
     }
 
     // MARK: - Internals
 
     /// Tint reflects how the renderer interprets the touch set:
     /// one finger orbits, two (or more) pan/zoom.
-    private func currentColor(extraTouches: Int = 0) -> UIColor {
-        (indicators.count + extraTouches) >= 2 ? Style.panZoomColor : Style.orbitColor
+    private func color(forTouchCount count: Int) -> UIColor {
+        count >= 2 ? Style.panZoomColor : Style.orbitColor
     }
 
     private func retintAll() {
-        let color = currentColor()
+        let color = color(forTouchCount: indicators.count)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for indicator in indicators.values {
@@ -173,6 +242,45 @@ final class TouchVisualizationOverlay: UIView {
         container.add(group, forKey: "release")
 
         CATransaction.commit()
+
+        // Core Animation completion blocks do not run while an app/view layer
+        // tree is paused. This independent cleanup is intentionally redundant:
+        // a released ripple must never become a permanent violet/cyan dot.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Style.rippleDuration + 0.1) {
+            container.removeAllAnimations()
+            container.removeFromSuperlayer()
+        }
+    }
+
+    private func reconcileActiveTouches(with event: UIEvent?) {
+        guard let eventTouches = event?.allTouches else { return }
+        let liveIdentifiers = Set(eventTouches.compactMap { touch -> ObjectIdentifier? in
+            switch touch.phase {
+            case .began, .moved, .stationary:
+                return ObjectIdentifier(touch)
+            case .ended, .cancelled, .regionEntered, .regionMoved, .regionExited:
+                return nil
+            @unknown default:
+                return nil
+            }
+        })
+
+        let staleIdentifiers = indicators.keys.filter { !liveIdentifiers.contains($0) }
+        guard !staleIdentifiers.isEmpty else { return }
+        for identifier in staleIdentifiers {
+            indicators.removeValue(forKey: identifier)?.container.removeFromSuperlayer()
+        }
+        retintAll()
+    }
+
+    @objc private func clearForLifecycleChange() {
+        clearAll()
+    }
+
+    @objc private func touchVisualizationPreferenceDidChange() {
+        if !TouchVisualizationSettings.isEnabled {
+            clearAll()
+        }
     }
 }
 
@@ -202,23 +310,30 @@ final class TouchVisualizingMTKView: MTKView {
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         becomeFirstResponder()
-        touchOverlay.touchesBegan(touches)
+        touchOverlay.touchesBegan(touches, event: event)
         super.touchesBegan(touches, with: event)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        touchOverlay.touchesMoved(touches)
+        touchOverlay.touchesMoved(touches, event: event)
         super.touchesMoved(touches, with: event)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        touchOverlay.touchesEnded(touches)
+        touchOverlay.touchesEnded(touches, event: event)
         super.touchesEnded(touches, with: event)
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        touchOverlay.touchesEnded(touches)
+        touchOverlay.touchesCancelled()
         super.touchesCancelled(touches, with: event)
+    }
+
+    override func willMove(toWindow newWindow: UIWindow?) {
+        if newWindow == nil {
+            touchOverlay.clearAll()
+        }
+        super.willMove(toWindow: newWindow)
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -239,9 +354,14 @@ final class TouchVisualizingMTKView: MTKView {
 
     @discardableResult
     override func resignFirstResponder() -> Bool {
+        touchOverlay.clearAll()
         heldKeyboardUsages.removeAll(keepingCapacity: true)
         inputSink?.setFocus(false)
         return super.resignFirstResponder()
+    }
+
+    func clearTouchVisualizations() {
+        touchOverlay.clearAll()
     }
 
     private func handle(_ press: UIPress, isPressed: Bool) -> Bool {
@@ -261,18 +381,24 @@ final class TouchVisualizingMTKView: MTKView {
             return true
         }
 
-        guard shouldAcceptViewportInput() else { return false }
         guard let semanticKey = ViewportKeyboardMap.iPadOS(
             hidUsage: usage
         ) else { return false }
+        let ownsViewportInput = shouldAcceptViewportInput()
+        // A menu may claim input while a hardware key is still held. Always
+        // deliver that key's release to the viewport accumulator so movement
+        // cannot stick, while returning `false` lets the new owner also observe
+        // the event. New key-downs remain exclusive to the current owner.
+        guard ownsViewportInput || (!isPressed && wasHeld) else { return false }
         if isPressed {
             heldKeyboardUsages.insert(usage)
         }
-        return inputSink?.applyKeyboard(
+        let handled = inputSink?.applyKeyboard(
             semanticKey,
             isPressed: isPressed,
             isRepeat: isPressed && wasHeld
         ) ?? true
+        return ownsViewportInput ? handled : false
     }
 }
 #endif

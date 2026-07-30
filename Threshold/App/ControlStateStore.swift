@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import simd
 
 // MARK: - Gradient Library
 // Isolated @Observable so gradient mutations don't invalidate ControlStateStore observers
@@ -63,6 +64,7 @@ final class ControlStateStore {
     var targetFoldingLimit: Float = 1.0
     var targetSphereRadius: Float = 0.5
     var formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()
+    var scenePrimitives: [ScenePrimitive] = []
     /// Main-actor mirror of the composable Transform stack. The values themselves
     /// are deliberately ignored by Observation: a slider sample must not invalidate
     /// the complete Transformations screen (lesson guide, every card, and every
@@ -221,6 +223,9 @@ final class ControlStateStore {
         if targetFoldingLimit != newFold { targetFoldingLimit = newFold }
         let newSphere = settings.targetSphereRadius
         if targetSphereRadius != newSphere { targetSphereRadius = newSphere }
+        if scenePrimitives != geo.scenePrimitives {
+            scenePrimitives = geo.scenePrimitives
+        }
         let newSpaceWarpStack = settings.spaceWarpStack
         if spaceWarpStack != newSpaceWarpStack {
             let structureChanged = !Self.hasSameSpaceWarpStructure(
@@ -289,6 +294,46 @@ final class ControlStateStore {
         if structureChanged {
             spaceWarpStructureRevision &+= 1
         }
+    }
+
+    func addScenePrimitive(_ kind: ScenePrimitiveKind) {
+        guard scenePrimitives.count < ScenePrimitive.maximumCount else { return }
+        var primitive = ScenePrimitive(kind: kind)
+        // New objects remain immediately distinguishable while keeping the first
+        // addition centered. Users can type exact values into the placement row.
+        let column = scenePrimitives.count % 4
+        primitive.position.x = Float(column) * 2.5
+        if kind == .benchy {
+            // Canonical Benchy is baked floor-up (0...1.6); center it around the
+            // scene origin by default.
+            primitive.position.y = -0.8
+        }
+        scenePrimitives.append(primitive)
+        settings?.scenePrimitives = scenePrimitives
+    }
+
+    @discardableResult
+    func updateScenePrimitive(
+        id: UUID,
+        _ mutate: (inout ScenePrimitive) -> Void
+    ) -> Bool {
+        guard let index = scenePrimitives.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+        mutate(&scenePrimitives[index])
+        scenePrimitives[index].scale = min(max(scenePrimitives[index].scale, 0.01), 30)
+        scenePrimitives[index].dimensions = simd_clamp(
+            scenePrimitives[index].dimensions,
+            SIMD3<Float>(repeating: 0.001),
+            SIMD3<Float>(repeating: 30)
+        )
+        settings?.scenePrimitives = scenePrimitives
+        return true
+    }
+
+    func removeScenePrimitive(id: UUID) {
+        scenePrimitives.removeAll { $0.id == id }
+        settings?.scenePrimitives = scenePrimitives
     }
 
     private static func hasSameSpaceWarpStructure(

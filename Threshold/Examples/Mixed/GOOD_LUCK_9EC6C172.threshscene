@@ -1,4 +1,5 @@
 {
+  "mixedModeScene" : true,
   "audioReactiveConfig" : {
     "bassSensitivity" : 1,
     "beatSensitivity" : 1,

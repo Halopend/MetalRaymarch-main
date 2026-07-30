@@ -143,6 +143,9 @@ struct EffectSliderRow: View {
     /// When set, the slider shows a live "derived value" ghost marker while
     /// music-reactive modulation is driving this parameter.
     var musicTargetID: String? = nil
+    /// Optional color paired with this effect. The color well is placed beside
+    /// the effect name so amount and color read as one compound control.
+    var pairedColor: Binding<SIMD3<Float>>? = nil
 
     var body: some View {
         Group {
@@ -174,22 +177,41 @@ struct EffectSliderRow: View {
                 .font(.caption)
                 .foregroundStyle(enabled ? .primary : .secondary)
                 .frame(width: 16)
+                .accessibilityHidden(true)
             if condensed {
-                Text(label)
-                    .font(.subheadline)
-                    .foregroundStyle(enabled ? .primary : .secondary)
-                    .frame(width: 135, alignment: .leading)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(label)
+                        .font(.subheadline)
+                        .foregroundStyle(enabled ? .primary : .secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(1)
+                        .accessibilityHidden(true)
+                    pairedColorWell
+                }
+                .frame(width: 135)
             } else {
                 Text(label)
                     .font(.subheadline)
                     .foregroundStyle(enabled ? .primary : .secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityHidden(true)
+                if pairedColor != nil {
+                    Spacer(minLength: 8)
+                    pairedColorWell
+                }
             }
         }
-        // The native Slider and Toggle below carry the actionable semantics.
-        // Hiding this repeated visual label avoids an extra VoiceOver stop.
-        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var pairedColorWell: some View {
+        if let pairedColor {
+            EffectColorWell(
+                effectName: label,
+                color: pairedColor,
+                onChanged: onChanged
+            )
+        }
     }
 
     private var sliderControl: some View {

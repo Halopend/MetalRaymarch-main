@@ -84,6 +84,29 @@ struct AnimationSceneStateTests {
         #expect(abs((decoded.baseline?.space.warpStrength ?? -1) - 0.72) < 0.0001)
     }
 
+    @Test("Only an explicitly Mixed scene overrides the user's immersion choice")
+    func sceneImmersionResolution() {
+        let preference = AppModel.ImmersionStylePreference.self
+
+        #expect(preference.resolvedForScene(userPreference: .window, isMixedScene: false) == .window)
+        #expect(preference.resolvedForScene(userPreference: .mixed, isMixedScene: false) == .mixed)
+        #expect(preference.resolvedForScene(userPreference: .immersive, isMixedScene: false) == .immersive)
+        #expect(preference.resolvedForScene(userPreference: .window, isMixedScene: true) == .mixed)
+    }
+
+    @Test("Explicit Mixed animation setting survives Codable")
+    func mixedSettingRoundTrip() throws {
+        var original = scene()
+        original.mixedModeScene = true
+
+        let decoded = try JSONDecoder().decode(
+            AnimationScene.self,
+            from: JSONEncoder().encode(original)
+        )
+
+        #expect(decoded.mixedModeScene == true)
+    }
+
     @MainActor
     @Test("Playback applies baseline first, then the keyframe scale")
     func baselinePlayback() {

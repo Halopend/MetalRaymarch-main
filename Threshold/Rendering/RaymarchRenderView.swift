@@ -235,6 +235,55 @@ struct ThresholdMacRenderView: NSViewRepresentable {
 #endif
 
 
+#if os(iOS)
+/// Keeps `CAMetalLayer.nextDrawable()` off the UI thread.
+///
+/// MetalKit invokes the iPad view delegate from the main run loop. Even with an
+/// in-flight command-buffer gate, `nextDrawable()` can wait for the compositor
+/// to recycle a presented surface. Doing that wait inline prevents SwiftUI from
+/// processing control touches. This provider keeps at most one drawable ready
+/// on a private queue; the render callback either takes it immediately or skips
+/// the frame while a request is pending.
+private final class NonBlockingDrawableProvider: @unchecked Sendable {
+    private weak var layer: CAMetalLayer?
+    private let requestQueue = DispatchQueue(
+        label: "com.puppypower.Threshold.drawable-provider",
+        qos: .userInteractive
+    )
+    private let lock = NSLock()
+    private var readyDrawable: CAMetalDrawable?
+    private var requestInFlight = false
+
+    init(layer: CAMetalLayer) {
+        self.layer = layer
+    }
+
+    func takeOrRequest() -> CAMetalDrawable? {
+        lock.lock()
+        let drawable = readyDrawable
+        readyDrawable = nil
+        let shouldRequest = !requestInFlight
+        if shouldRequest {
+            requestInFlight = true
+        }
+        lock.unlock()
+
+        if shouldRequest {
+            requestQueue.async { [weak self] in
+                guard let self else { return }
+                let drawable = self.layer?.nextDrawable()
+                self.lock.lock()
+                self.readyDrawable = drawable
+                self.requestInFlight = false
+                self.lock.unlock()
+            }
+        }
+
+        return drawable
+    }
+}
+#endif
+
 final class ViewportRenderer {
     private enum SetupError: Error {
         case badVertexDescriptor
@@ -354,7 +403,8 @@ final class ViewportRenderer {
     nonisolated(unsafe) static var benchAblateMode: UInt32 = benchAblateModeEnvDefault
 
     /// Fractal distance seed cache (conservative distance-field grids),
-    /// opt-in via THRESHOLD_DIST_CACHE=1 so the benchmark harness can A/B it.
+    /// opt-in via THRESHOLD_DIST_CACHE=1 while its lookup representation is
+    /// performance-tested across the Mandelbox parameter range.
     private static let distCacheRequested =
         ProcessInfo.processInfo.environment["THRESHOLD_DIST_CACHE"] == "1"
     private var distCache: FractalDistanceCache?
@@ -377,7 +427,11 @@ final class ViewportRenderer {
     private static let keyboardMoveSpeed: Float = 1.6
 
     private let device: MTLDevice
+    private let benchySDFAsset: BenchySDFGPUAsset
     private let metalLayer: CAMetalLayer
+    #if os(iOS)
+    private let drawableProvider: NonBlockingDrawableProvider
+    #endif
     private let commandQueue: MTLCommandQueue
     private let pipelineState: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
@@ -407,7 +461,9 @@ final class ViewportRenderer {
     private let mesh: MTKMesh
     private let meshBindings: [CachedMeshBinding]
     private let uniformBuffers: [MTLBuffer]
-    /// Per-frame GPU atomic counters [stepSum, hitCount] for live step profiling,
+    /// Per-frame GPU atomic counters
+    /// [stepSum, hitCount, atlasQueries, atlasInGrid, atlasSkips]
+    /// for live step profiling and opt-in atlas diagnostics,
     /// ringed alongside `uniformBuffers` so the completion handler can read a slot
     /// the GPU has finished with. Bound every frame; only written by the shader
     /// when profiling is armed (see fragmentShaderMono / benchCollectSteps).
@@ -477,7 +533,11 @@ final class ViewportRenderer {
           depthPixelFormat: MTLPixelFormat,
           clearColor: MTLClearColor) {
         self.device = device
+        self.benchySDFAsset = BenchySDFGPUAsset(device: device)
         self.metalLayer = metalLayer
+        #if os(iOS)
+        self.drawableProvider = NonBlockingDrawableProvider(layer: metalLayer)
+        #endif
         self.depthPixelFormat = depthPixelFormat
         self.colorPixelFormat = colorPixelFormat
         self.clearColor = clearColor
@@ -530,7 +590,7 @@ final class ViewportRenderer {
             guard let buffer = device.makeBuffer(length: Self.alignedUniformsSize, options: .storageModeShared) else { return nil }
             buffer.label = "ThresholdMac Uniforms \(index)"
             buffers.append(buffer)
-            guard let benchBuffer = device.makeBuffer(length: MemoryLayout<UInt32>.stride * 2, options: .storageModeShared) else { return nil }
+            guard let benchBuffer = device.makeBuffer(length: MemoryLayout<UInt32>.stride * 11, options: .storageModeShared) else { return nil }
             benchBuffer.label = "ThresholdMac BenchCounters \(index)"
             benchBuffers.append(benchBuffer)
         }
@@ -557,6 +617,7 @@ final class ViewportRenderer {
     /// used by `captureBenchmarkBytes` so PNG regression captures are
     /// phase-deterministic. Always nil outside the harness.
     private var benchFixedTime: Float?
+    private var didLogDistCacheProfile = false
 
     /// During a pinned-time capture, also pin the CPU-accumulated color-cycle
     /// phases (they integrate ∫speed·dt across the run, so they land at a
@@ -589,13 +650,13 @@ final class ViewportRenderer {
 
         let benchBuffer = benchCounterBuffers[frameSlot]
         let collectSteps = BenchmarkManager.shared.shouldCollectSteps
-        if collectSteps { memset(benchBuffer.contents(), 0, MemoryLayout<UInt32>.stride * 2) }
+        if collectSteps { memset(benchBuffer.contents(), 0, MemoryLayout<UInt32>.stride * 11) }
 
         guard let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
         // Fractal distance cache: bake in the measured command buffer so the
         // harness sees the cache's true amortized cost (rebake only on change).
         if let distCache, let frame = distCacheFrameState {
-            distCache.encodeBakeSliceIfNeeded(
+            distCache.encodePreparationIfNeeded(
                 commandBuffer: commandBuffer,
                 uniformBuffer: uniformBuffer,
                 frame: frame)
@@ -613,9 +674,25 @@ final class ViewportRenderer {
         let gpuMs = max(0.0, (commandBuffer.gpuEndTime - commandBuffer.gpuStartTime) * 1000.0)
         var avgSteps = 0.0
         if collectSteps {
-            let counters = benchBuffer.contents().bindMemory(to: UInt32.self, capacity: 2)
+            let counters = benchBuffer.contents().bindMemory(to: UInt32.self, capacity: 11)
             let hit = counters[1]
             avgSteps = hit > 0 ? Double(counters[0]) / Double(hit) : 0
+            if Self.benchAblateMode == 99,
+               !didLogDistCacheProfile,
+               counters[2] > 0 {
+                let inGridRate = 100.0 * Double(counters[3]) / Double(counters[2])
+                let hitRate = 100.0 * Double(counters[4]) / Double(counters[2])
+                let minPoint = SIMD3<Float>(
+                    -Float(bitPattern: counters[6]),
+                    -Float(bitPattern: counters[8]),
+                    -Float(bitPattern: counters[10]))
+                let maxPoint = SIMD3<Float>(
+                    Float(bitPattern: counters[5]),
+                    Float(bitPattern: counters[7]),
+                    Float(bitPattern: counters[9]))
+                print("[MandelboxAtlas] profile queries=\(counters[2]) inGrid=\(counters[3]) inGridRate=\(String(format: "%.2f", inGridRate))% skips=\(counters[4]) hitRate=\(String(format: "%.2f", hitRate))% transformedMin=\(minPoint) transformedMax=\(maxPoint)")
+                didLogDistCacheProfile = true
+            }
         }
         return (gpuMs, cpuEncodeMs, avgSteps)
     }
@@ -784,10 +861,17 @@ final class ViewportRenderer {
         RenderTrace.end("InFlight Wait", inFlightWaitTraceState)
         guard inFlightWaitResult == .success else { return }
 
-        // Acquire the drawable as late as possible — only after the in-flight
-        // gate has admitted this frame — so a busy drawable pool stalls nothing
-        // but this already-committed frame.
-        guard let drawable = metalLayer.nextDrawable() else {
+        let nextDrawable: CAMetalDrawable?
+        #if os(iOS)
+        // MetalKit calls the iPad delegate on the main run loop, so perform the
+        // potentially blocking CAMetalLayer wait away from the UI thread.
+        nextDrawable = drawableProvider.takeOrRequest()
+        #else
+        nextDrawable = metalLayer.nextDrawable()
+        #endif
+        // If no iPad drawable is prefetched yet, skip this display-link tick
+        // instead of blocking touch delivery.
+        guard let drawable = nextDrawable else {
             inFlightSemaphore.signal()
             return
         }
@@ -864,7 +948,7 @@ final class ViewportRenderer {
         // Fractal distance cache: (re)bake before the render pass when a
         // DE-shaping parameter changed. Same command buffer ⇒ never stale.
         if let distCache, let frame = distCacheFrameState {
-            distCache.encodeBakeSliceIfNeeded(
+            distCache.encodePreparationIfNeeded(
                 commandBuffer: commandBuffer,
                 uniformBuffer: uniformBuffer,
                 frame: frame)
@@ -877,11 +961,11 @@ final class ViewportRenderer {
         let benchBuffer = benchCounterBuffers[frameSlot]
         let collectSteps = BenchmarkManager.shared.shouldCollectSteps
         if collectSteps {
-            memset(benchBuffer.contents(), 0, MemoryLayout<UInt32>.stride * 2)
+            memset(benchBuffer.contents(), 0, MemoryLayout<UInt32>.stride * 11)
         }
         commandBuffer.addCompletedHandler { [avgStepsHolder, benchBuffer, collectSteps] _ in
             guard collectSteps else { avgStepsHolder.withLock { $0 = 0 }; return }
-            let counters = benchBuffer.contents().bindMemory(to: UInt32.self, capacity: 2)
+            let counters = benchBuffer.contents().bindMemory(to: UInt32.self, capacity: 11)
             let hitCount = counters[1]
             let avg = hitCount > 0 ? Double(counters[0]) / Double(hitCount) : 0
             avgStepsHolder.withLock { $0 = avg }
@@ -1055,6 +1139,9 @@ final class ViewportRenderer {
         // Fractal distance cache grid is also bindless (GPU address in the
         // uniforms) — declare residency whenever it's enabled this frame.
         if let buffer = distCacheFrameState?.renderBuffer {
+            encoder.useResource(buffer, usage: .read, stages: .fragment)
+        }
+        if let buffer = benchySDFAsset.buffer {
             encoder.useResource(buffer, usage: .read, stages: .fragment)
         }
         // fragmentShaderMono declares benchCounters at this index; bind every
@@ -1326,7 +1413,10 @@ final class ViewportRenderer {
         // visual-regression diffs are deterministic (color cycles/warps otherwise
         // land at a run-dependent phase). nil in normal use and for perf frames.
         let effectiveElapsed = benchFixedTime ?? Float(now - startTime)
-        var uniforms = makeUniforms(settings: snapshot, elapsedTime: effectiveElapsed, deltaTime: Float(deltaTime))
+        var uniforms = makeUniforms(settings: snapshot,
+                                    animationPlaying: settings.isAnimationPlaying,
+                                    elapsedTime: effectiveElapsed,
+                                    deltaTime: Float(deltaTime))
         let edgeEnabled = deferEdgeDetection && uniforms.colorScheme.edgeDetectionEnabled != 0
         let edgeRadius = edgeEnabled
             ? Float(max(1, min(3, uniforms.colorScheme.edgeDetectionWindowRadius)))
@@ -1618,19 +1708,31 @@ final class ViewportRenderer {
         temporalUpscaler.requestReset()
     }
 
-    private func makeUniforms(settings: RenderSettingsSnapshot, elapsedTime: Float, deltaTime: Float) -> Uniforms {
+    private func makeUniforms(settings: RenderSettingsSnapshot,
+                              animationPlaying: Bool,
+                              elapsedTime: Float,
+                              deltaTime: Float) -> Uniforms {
         // Fractal distance cache: decide eligibility + bake key for this frame.
         // The bake itself is encoded in draw() (same command buffer, before the
         // render pass) so the grid the fragment march reads is never stale.
         var distCacheParams = DistanceCacheParams()
         distCacheFrameState = nil
-        if Self.distCacheRequested, FractalDistanceCache.isEligible(settings: settings) {
+        // Below this cost, a Mandelbox DE is cheaper than the transform,
+        // address, safety-margin, and branch work of even a one-byte cache
+        // lookup. Keep low-iteration authored animations on the analytic path.
+        let distCacheWorthwhile = !animationPlaying ||
+            settings.fractalIterations >= 16
+        if Self.distCacheRequested,
+           distCacheWorthwhile,
+           FractalDistanceCache.isEligible(settings: settings) {
             if distCache == nil, !distCacheInitAttempted {
                 distCacheInitAttempted = true
                 distCache = FractalDistanceCache(device: device)
             }
             if let cache = distCache {
-                let key = FractalDistanceCache.bakeKey(settings: settings)
+                let key = FractalDistanceCache.bakeKey(
+                    settings: settings,
+                    compact: animationPlaying)
                 let frame = cache.prepareFrame(key: key)
                 distCacheFrameState = frame
                 distCacheParams = frame.params
@@ -1795,7 +1897,8 @@ final class ViewportRenderer {
             boundSpaceSize: settings.boundSpaceSize,
             boundAmbientStrength: settings.boundAmbientStrength,
             envScrunch: envScrunch,
-            distCache: distCacheParams)
+            distCache: distCacheParams,
+            benchySDFAddress: benchySDFAsset.gpuAddress)
 
         return assembleUniforms(settings: settings,
                                 effectiveScale: effectiveScale,
@@ -2022,6 +2125,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
     static func dismantleUIView(_ uiView: MTKView, coordinator: Coordinator) {
         uiView.delegate = nil
         if let view = uiView as? TouchVisualizingMTKView {
+            view.clearTouchVisualizations()
             view.inputSink = nil
             view.onRadialMenuRequest = nil
         }
@@ -2039,6 +2143,9 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         private var lastOrbitTranslation: CGPoint = .zero
         private var lastPanTranslation: CGPoint = .zero
         private var lastPinchScale: CGFloat = 1.0
+        private var orbitOwnsInput = false
+        private var panOwnsInput = false
+        private var pinchOwnsInput = false
         private weak var twoFingerPan: UIPanGestureRecognizer?
         private weak var pinch: UIPinchGestureRecognizer?
 
@@ -2094,17 +2201,23 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             // Keep raw touches flowing to the view so the touch
             // visualization overlay can track fingers through the gesture.
             orbit.cancelsTouchesInView = false
+            orbit.delaysTouchesBegan = false
+            orbit.delaysTouchesEnded = false
 
             let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
             pan.minimumNumberOfTouches = 2
             pan.maximumNumberOfTouches = 2
             pan.delegate = self
             pan.cancelsTouchesInView = false
+            pan.delaysTouchesBegan = false
+            pan.delaysTouchesEnded = false
             twoFingerPan = pan
 
             let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
             pinchGesture.delegate = self
             pinchGesture.cancelsTouchesInView = false
+            pinchGesture.delaysTouchesBegan = false
+            pinchGesture.delaysTouchesEnded = false
             pinch = pinchGesture
 
             let doubleTap = LowMovementTapGestureRecognizer(
@@ -2114,6 +2227,8 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             )
             doubleTap.numberOfTapsRequired = 2
             doubleTap.cancelsTouchesInView = false
+            doubleTap.delaysTouchesBegan = false
+            doubleTap.delaysTouchesEnded = false
             doubleTap.delegate = self
 
             view.addGestureRecognizer(orbit)
@@ -2123,6 +2238,21 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         }
 
         func tearDown() {
+            // Dismantling a view can bypass recognizer terminal callbacks.
+            // Balance every successful claim so a stale viewport owner cannot
+            // block the radial menu in the replacement scene/view.
+            if orbitOwnsInput {
+                orbitOwnsInput = false
+                appModel.inputOwnershipStore.release(.viewport)
+            }
+            if panOwnsInput {
+                panOwnsInput = false
+                appModel.inputOwnershipStore.release(.viewport)
+            }
+            if pinchOwnsInput {
+                pinchOwnsInput = false
+                appModel.inputOwnershipStore.release(.viewport)
+            }
             inputController.setFocus(false)
             renderer = nil
             Task { @MainActor [appModel] in
@@ -2149,10 +2279,13 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             let translation = gesture.translation(in: gesture.view)
             switch gesture.state {
             case .began:
-                guard appModel.inputOwnershipStore.claim(.viewport) else { return }
+                guard !orbitOwnsInput,
+                      appModel.inputOwnershipStore.claim(.viewport) else { return }
+                orbitOwnsInput = true
                 lastOrbitTranslation = .zero
                 inputController.setFocus(true)
             case .changed:
+                guard orbitOwnsInput else { return }
                 let delta = SIMD2<Float>(Float(translation.x - lastOrbitTranslation.x),
                                          Float(translation.y - lastOrbitTranslation.y))
                 lastOrbitTranslation = translation
@@ -2161,7 +2294,10 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                 }
             default:
                 lastOrbitTranslation = .zero
-                appModel.inputOwnershipStore.release(.viewport)
+                if orbitOwnsInput {
+                    orbitOwnsInput = false
+                    appModel.inputOwnershipStore.release(.viewport)
+                }
             }
         }
 
@@ -2169,10 +2305,13 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             let translation = gesture.translation(in: gesture.view)
             switch gesture.state {
             case .began:
-                guard appModel.inputOwnershipStore.claim(.viewport) else { return }
+                guard !panOwnsInput,
+                      appModel.inputOwnershipStore.claim(.viewport) else { return }
+                panOwnsInput = true
                 lastPanTranslation = .zero
                 inputController.setFocus(true)
             case .changed:
+                guard panOwnsInput else { return }
                 let delta = SIMD2<Float>(Float(translation.x - lastPanTranslation.x),
                                          Float(translation.y - lastPanTranslation.y))
                 lastPanTranslation = translation
@@ -2181,17 +2320,23 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                 }
             default:
                 lastPanTranslation = .zero
-                appModel.inputOwnershipStore.release(.viewport)
+                if panOwnsInput {
+                    panOwnsInput = false
+                    appModel.inputOwnershipStore.release(.viewport)
+                }
             }
         }
 
         @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
             switch gesture.state {
             case .began:
-                guard appModel.inputOwnershipStore.claim(.viewport) else { return }
+                guard !pinchOwnsInput,
+                      appModel.inputOwnershipStore.claim(.viewport) else { return }
+                pinchOwnsInput = true
                 lastPinchScale = gesture.scale
                 inputController.setFocus(true)
             case .changed:
+                guard pinchOwnsInput else { return }
                 // Mirror the macOS `magnify` convention: pinch-out (scale > 1)
                 // feeds a negative zoom delta, which the renderer maps to a
                 // larger detail scale (zoom in).
@@ -2202,7 +2347,10 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                 }
             default:
                 lastPinchScale = 1.0
-                appModel.inputOwnershipStore.release(.viewport)
+                if pinchOwnsInput {
+                    pinchOwnsInput = false
+                    appModel.inputOwnershipStore.release(.viewport)
+                }
             }
         }
 

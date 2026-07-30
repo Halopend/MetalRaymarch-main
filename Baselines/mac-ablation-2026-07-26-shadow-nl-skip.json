@@ -1,0 +1,438 @@
+{
+  "buildNumber" : "23",
+  "capturedAt" : "2026-07-26T04:08:56Z",
+  "deviceModel" : "arm64",
+  "gitDirty" : true,
+  "gitSHA" : "48d242304dd2",
+  "jobs" : [
+    {
+      "config" : {
+        "frames" : 240,
+        "height" : 1080,
+        "params" : {
+
+        },
+        "qc" : {
+          "boundingSphereSkipEnabled" : 1,
+          "coneMarchStrength" : 1,
+          "distanceLODStrength" : 0.98,
+          "overRelaxationMax" : 1.6
+        },
+        "settleSeconds" : 2.5,
+        "shadows" : true,
+        "warmup" : 60,
+        "width" : 1920
+      },
+      "metrics" : {
+        "cpuEncodeMsAvg" : 0.14830798609182239,
+        "drawableHeight" : 1080,
+        "drawableWidth" : 1920,
+        "fpsAvg" : 36.97635036462606,
+        "fpsMin" : 35.09018176754521,
+        "fractalType" : 17,
+        "frames" : 240,
+        "gpuMsAvg" : 27.044313193133956,
+        "gpuMsMax" : 28.497999999672174,
+        "gpuMsMin" : 25.840124988462776,
+        "gpuMsP95" : 28.023291670251638,
+        "holdSeconds" : 0,
+        "iterationsAvg" : 17.067285534113132,
+        "iters" : 6,
+        "name" : "Stress test",
+        "raySteps" : 168,
+        "renderPath" : "mac-offscreen",
+        "tileSize" : 0,
+        "views" : 1
+      },
+      "name" : "full-a",
+      "scene" : "Stress test"
+    },
+    {
+      "config" : {
+        "ablate" : 13,
+        "frames" : 240,
+        "height" : 1080,
+        "params" : {
+
+        },
+        "qc" : {
+          "boundingSphereSkipEnabled" : 1,
+          "coneMarchStrength" : 1,
+          "distanceLODStrength" : 0.98,
+          "overRelaxationMax" : 1.6
+        },
+        "settleSeconds" : 2.5,
+        "shadows" : true,
+        "warmup" : 60,
+        "width" : 1920
+      },
+      "metrics" : {
+        "cpuEncodeMsAvg" : 0.1548116296665588,
+        "drawableHeight" : 1080,
+        "drawableWidth" : 1920,
+        "fpsAvg" : 42.998710670276495,
+        "fpsMin" : 39.79749708067615,
+        "fractalType" : 17,
+        "frames" : 240,
+        "gpuMsAvg" : 23.256511286308523,
+        "gpuMsMax" : 25.127208326011896,
+        "gpuMsMin" : 21.95912500610575,
+        "gpuMsP95" : 24.20962502947077,
+        "holdSeconds" : 0,
+        "iterationsAvg" : 17.067285534113132,
+        "iters" : 6,
+        "name" : "Stress test",
+        "raySteps" : 168,
+        "renderPath" : "mac-offscreen",
+        "tileSize" : 0,
+        "views" : 1
+      },
+      "name" : "no-normals",
+      "scene" : "Stress test"
+    },
+    {
+      "config" : {
+        "ablate" : 12,
+        "frames" : 240,
+        "height" : 1080,
+        "params" : {
+
+        },
+        "qc" : {
+          "boundingSphereSkipEnabled" : 1,
+          "coneMarchStrength" : 1,
+          "distanceLODStrength" : 0.98,
+          "overRelaxationMax" : 1.6
+        },
+        "settleSeconds" : 2.5,
+        "shadows" : true,
+        "warmup" : 60,
+        "width" : 1920
+      },
+      "metrics" : {
+        "cpuEncodeMsAvg" : 0.15436874843241336,
+        "drawableHeight" : 1080,
+        "drawableWidth" : 1920,
+        "fpsAvg" : 43.748101257959966,
+        "fpsMin" : 41.4190154344435,
+        "fractalType" : 17,
+        "frames" : 240,
+        "gpuMsAvg" : 22.85813489603849,
+        "gpuMsMax" : 24.143500020727515,
+        "gpuMsMin" : 21.730333333835006,
+        "gpuMsP95" : 23.743916652165353,
+        "holdSeconds" : 0,
+        "iterationsAvg" : 17.067285534113132,
+        "iters" : 6,
+        "name" : "Stress test",
+        "raySteps" : 168,
+        "renderPath" : "mac-offscreen",
+        "tileSize" : 0,
+        "views" : 1
+      },
+      "name" : "no-shadows",
+      "scene" : "Stress test"
+    },
+    {
+      "config" : {
+        "ablate" : 11,
+        "frames" : 240,
+        "height" : 1080,
+        "params" : {
+
+        },
+        "qc" : {
+          "boundingSphereSkipEnabled" : 1,
+          "coneMarchStrength" : 1,
+          "distanceLODStrength" : 0.98,
+          "overRelaxationMax" : 1.6
+        },
+        "settleSeconds" : 2.5,
+        "shadows" : true,
+        "warmup" : 60,
+        "width" : 1920
+      },
+      "metrics" : {
+        "cpuEncodeMsAvg" : 0.15558142476947978,
+        "drawableHeight" : 1080,
+        "drawableWidth" : 1920,
+        "fpsAvg" : 37.974625962973185,
+        "fpsMin" : 36.21608324065768,
+        "fractalType" : 17,
+        "frames" : 240,
+        "gpuMsAvg" : 26.333373262847697,
+        "gpuMsMax" : 27.61204168200493,
+        "gpuMsMin" : 25.24029166670516,
+        "gpuMsP95" : 27.36725000431761,
+        "holdSeconds" : 0,
+        "iterationsAvg" : 17.067285534113132,
+        "iters" : 6,
+        "name" : "Stress test",
+        "raySteps" : 168,
+        "renderPath" : "mac-offscreen",
+        "tileSize" : 0,
+        "views" : 1
+      },
+      "name" : "no-colour",
+      "scene" : "Stress test"
+    },
+    {
+      "config" : {
+        "ablate" : 10,
+        "frames" : 240,
+        "height" : 1080,
+        "params" : {
+
+        },
+        "qc" : {
+          "boundingSphereSkipEnabled" : 1,
+          "coneMarchStrength" : 1,
+          "distanceLODStrength" : 0.98,
+          "overRelaxationMax" : 1.6
+        },
+        "settleSeconds" : 2.5,
+        "shadows" : true,
+        "warmup" : 60,
+        "width" : 1920
+      },
+      "metrics" : {
+        "cpuEncodeMsAvg" : 0.1489621528889984,
+        "drawableHeight" : 1080,
+        "drawableWidth" : 1920,
+        "fpsAvg" : 58.34539391281512,
+        "fpsMin" : 54.59235424253158,
+        "fractalType" : 17,
+        "frames" : 240,
+        "gpuMsAvg" : 17.139313541944528,
+        "gpuMsMax" : 18.317583366297185,
+        "gpuMsMin" : 15.868125017732382,
+        "gpuMsP95" : 17.94349995907396,
+        "holdSeconds" : 0,
+        "iterationsAvg" : 17.067285534113132,
+        "iters" : 6,
+        "name" : "Stress test",
+        "raySteps" : 168,
+        "renderPath" : "mac-offscreen",
+        "tileSize" : 0,
+        "views" : 1
+      },
+      "name" : "flat-hits",
+      "scene" : "Stress test"
+    },
+    {
+      "config" : {
+        "frames" : 240,
+        "height" : 1080,
+        "params" : {
+
+        },
+        "qc" : {
+          "boundingSphereSkipEnabled" : 1,
+          "coneMarchStrength" : 1,
+          "distanceLODStrength" : 0.98,
+          "overRelaxationMax" : 1.6
+        },
+        "settleSeconds" : 2.5,
+        "shadows" : true,
+        "warmup" : 60,
+        "width" : 1920
+      },
+      "metrics" : {
+        "cpuEncodeMsAvg" : 0.15250364303938113,
+        "drawableHeight" : 1080,
+        "drawableWidth" : 1920,
+        "fpsAvg" : 36.62060224945644,
+        "fpsMin" : 30.237058573709938,
+        "fractalType" : 17,
+        "frames" : 240,
+        "gpuMsAvg" : 27.307033160953626,
+        "gpuMsMax" : 33.07199996197596,
+        "gpuMsMin" : 25.83491668337956,
+        "gpuMsP95" : 28.95812498172745,
+        "holdSeconds" : 0,
+        "iterationsAvg" : 17.067285534113132,
+        "iters" : 6,
+        "name" : "Stress test",
+        "raySteps" : 168,
+        "renderPath" : "mac-offscreen",
+        "tileSize" : 0,
+        "views" : 1
+      },
+      "name" : "full-b",
+      "scene" : "Stress test"
+    },
+    {
+      "config" : {
+        "frames" : 240,
+        "height" : 1080,
+        "params" : {
+
+        },
+        "qc" : {
+          "boundingSphereSkipEnabled" : 1,
+          "coneMarchStrength" : 1,
+          "distanceLODStrength" : 0.98,
+          "overRelaxationMax" : 1.6
+        },
+        "settleSeconds" : 2.5,
+        "shadows" : true,
+        "warmup" : 60,
+        "width" : 1920
+      },
+      "metrics" : {
+        "cpuEncodeMsAvg" : 0.9605114578638071,
+        "drawableHeight" : 1080,
+        "drawableWidth" : 1920,
+        "fpsAvg" : 63.053358221383924,
+        "fpsMin" : 30.080163640697933,
+        "fractalType" : 0,
+        "frames" : 240,
+        "gpuMsAvg" : 15.859583505274108,
+        "gpuMsMax" : 33.24449999490753,
+        "gpuMsMin" : 14.366749965120107,
+        "gpuMsP95" : 22.140541637782007,
+        "holdSeconds" : 0,
+        "iterationsAvg" : 14.493987724312085,
+        "iters" : 12,
+        "name" : "Bulatov Limit Set",
+        "raySteps" : 200,
+        "renderPath" : "mac-offscreen",
+        "tileSize" : 0,
+        "views" : 1
+      },
+      "name" : "full-a-bulatov",
+      "scene" : "Bulatov Limit Set"
+    },
+    {
+      "config" : {
+        "ablate" : 12,
+        "frames" : 240,
+        "height" : 1080,
+        "params" : {
+
+        },
+        "qc" : {
+          "boundingSphereSkipEnabled" : 1,
+          "coneMarchStrength" : 1,
+          "distanceLODStrength" : 0.98,
+          "overRelaxationMax" : 1.6
+        },
+        "settleSeconds" : 2.5,
+        "shadows" : true,
+        "warmup" : 60,
+        "width" : 1920
+      },
+      "metrics" : {
+        "cpuEncodeMsAvg" : 1.0481414921135486,
+        "drawableHeight" : 1080,
+        "drawableWidth" : 1920,
+        "fpsAvg" : 75.76518794616959,
+        "fpsMin" : 69.99410893640946,
+        "fractalType" : 0,
+        "frames" : 240,
+        "gpuMsAvg" : 13.198673785518622,
+        "gpuMsMax" : 14.286916644778103,
+        "gpuMsMin" : 12.869875004980713,
+        "gpuMsP95" : 13.45675002085045,
+        "holdSeconds" : 0,
+        "iterationsAvg" : 14.489080027102316,
+        "iters" : 12,
+        "name" : "Bulatov Limit Set",
+        "raySteps" : 200,
+        "renderPath" : "mac-offscreen",
+        "tileSize" : 0,
+        "views" : 1
+      },
+      "name" : "no-shadows-bulatov",
+      "scene" : "Bulatov Limit Set"
+    },
+    {
+      "config" : {
+        "ablate" : 10,
+        "frames" : 240,
+        "height" : 1080,
+        "params" : {
+
+        },
+        "qc" : {
+          "boundingSphereSkipEnabled" : 1,
+          "coneMarchStrength" : 1,
+          "distanceLODStrength" : 0.98,
+          "overRelaxationMax" : 1.6
+        },
+        "settleSeconds" : 2.5,
+        "shadows" : true,
+        "warmup" : 60,
+        "width" : 1920
+      },
+      "metrics" : {
+        "cpuEncodeMsAvg" : 0.7353263880456021,
+        "drawableHeight" : 1080,
+        "drawableWidth" : 1920,
+        "fpsAvg" : 97.12158269886187,
+        "fpsMin" : 81.93754985267773,
+        "fractalType" : 0,
+        "frames" : 240,
+        "gpuMsAvg" : 10.296372569428058,
+        "gpuMsMax" : 12.204416678287089,
+        "gpuMsMin" : 9.24262497574091,
+        "gpuMsP95" : 12.045999988913536,
+        "holdSeconds" : 0,
+        "iterationsAvg" : 14.489214820548959,
+        "iters" : 12,
+        "name" : "Bulatov Limit Set",
+        "raySteps" : 200,
+        "renderPath" : "mac-offscreen",
+        "tileSize" : 0,
+        "views" : 1
+      },
+      "name" : "flat-hits-bulatov",
+      "scene" : "Bulatov Limit Set"
+    },
+    {
+      "config" : {
+        "frames" : 240,
+        "height" : 1080,
+        "params" : {
+
+        },
+        "qc" : {
+          "boundingSphereSkipEnabled" : 1,
+          "coneMarchStrength" : 1,
+          "distanceLODStrength" : 0.98,
+          "overRelaxationMax" : 1.6
+        },
+        "settleSeconds" : 2.5,
+        "shadows" : true,
+        "warmup" : 60,
+        "width" : 1920
+      },
+      "metrics" : {
+        "cpuEncodeMsAvg" : 0.7930284720108224,
+        "drawableHeight" : 1080,
+        "drawableWidth" : 1920,
+        "fpsAvg" : 80.87100317163261,
+        "fpsMin" : 75.26011772112538,
+        "fractalType" : 0,
+        "frames" : 240,
+        "gpuMsAvg" : 12.365371527266689,
+        "gpuMsMax" : 13.287250010762364,
+        "gpuMsMin" : 11.99425000231713,
+        "gpuMsP95" : 12.853874999564141,
+        "holdSeconds" : 0,
+        "iterationsAvg" : 14.489291467802913,
+        "iters" : 12,
+        "name" : "Bulatov Limit Set",
+        "raySteps" : 200,
+        "renderPath" : "mac-offscreen",
+        "tileSize" : 0,
+        "views" : 1
+      },
+      "name" : "full-b-bulatov",
+      "scene" : "Bulatov Limit Set"
+    }
+  ],
+  "marketingVersion" : "1",
+  "osVersion" : "27.0.0",
+  "schemaVersion" : 2
+}

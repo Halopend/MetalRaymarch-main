@@ -26,7 +26,7 @@ struct PrimitivesSection: View {
             VStack(alignment: .leading, spacing: 5) {
                 Label("Primitives", systemImage: "cube.transparent")
                     .font(.headline)
-                Text("Choose an analytic base solid, tune its dimensions, then shape it further in Transform. Your transformation stack is preserved when you switch primitives.")
+                Text("Choose an analytic base solid, or assemble several independently placed SDF objects below. Your transformation stack is preserved when you switch the base.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -59,6 +59,8 @@ struct PrimitivesSection: View {
                 .padding(10)
                 .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
             }
+
+            sceneAssemblyEditor
 
             Divider()
 
@@ -191,5 +193,250 @@ struct PrimitivesSection: View {
                 ))
             }
         )
+    }
+
+    private var sceneAssemblyEditor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Scene Objects", systemImage: "square.3.layers.3d")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(cache.scenePrimitives.count)/\(ScenePrimitive.maximumCount)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                Menu {
+                    ForEach(ScenePrimitiveKind.allCases, id: \.self) { kind in
+                        Button {
+                            cache.addScenePrimitive(kind)
+                        } label: {
+                            Label(kind.displayName, systemImage: kind.icon)
+                        }
+                    }
+                } label: {
+                    Label("Add", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(cache.scenePrimitives.count >= ScenePrimitive.maximumCount)
+            }
+
+            Text("Objects are unioned with the active fractal in model space. Enter X, Y, and Z directly for exact placement.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if cache.scenePrimitives.isEmpty {
+                Text("No scene objects yet. Add an analytic solid or the baked 3DBenchy SDF.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+            } else {
+                ForEach(cache.scenePrimitives) { primitive in
+                    scenePrimitiveEditor(primitive)
+                }
+            }
+        }
+        .padding(10)
+        .background(Color.indigo.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.indigo.opacity(0.2), lineWidth: 1)
+        )
+    }
+
+    private func scenePrimitiveEditor(_ primitive: ScenePrimitive) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Label(primitive.kind.displayName, systemImage: primitive.kind.icon)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button(role: .destructive) {
+                    cache.removeScenePrimitive(id: primitive.id)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Remove \(primitive.kind.displayName)")
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Exact Placement")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 7) {
+                    exactField("X", value: scenePositionBinding(id: primitive.id, axis: 0))
+                    exactField("Y", value: scenePositionBinding(id: primitive.id, axis: 1))
+                    exactField("Z", value: scenePositionBinding(id: primitive.id, axis: 2))
+                    exactField("Scale", value: sceneScaleBinding(id: primitive.id))
+                }
+            }
+
+            if !primitive.kind.dimensionDescriptors.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Dimensions")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 7) {
+                        ForEach(primitive.kind.dimensionDescriptors) { descriptor in
+                            exactField(
+                                descriptor.name,
+                                value: sceneDimensionBinding(
+                                    id: primitive.id,
+                                    index: descriptor.index
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            if primitive.kind == .benchy {
+                Text("Signed-distance volume baked from 3dbenchy-2.stl.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(9)
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 9))
+    }
+
+    private func exactField(_ label: String, value: Binding<Float>) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            TextField(
+                label,
+                value: value,
+                format: .number.precision(.fractionLength(0...6))
+            )
+            .textFieldStyle(.roundedBorder)
+            .font(.caption.monospacedDigit())
+            .frame(minWidth: 58)
+        }
+    }
+
+    private func scenePositionBinding(id: UUID, axis: Int) -> Binding<Float> {
+        Binding(
+            get: {
+                guard let value = cache.scenePrimitives.first(where: { $0.id == id }) else {
+                    return 0
+                }
+                return value.position[axis]
+            },
+            set: { newValue in
+                guard newValue.isFinite else { return }
+                cache.updateScenePrimitive(id: id) { $0.position[axis] = newValue }
+            }
+        )
+    }
+
+    private func sceneScaleBinding(id: UUID) -> Binding<Float> {
+        Binding(
+            get: { cache.scenePrimitives.first(where: { $0.id == id })?.scale ?? 1 },
+            set: { newValue in
+                guard newValue.isFinite else { return }
+                cache.updateScenePrimitive(id: id) { $0.scale = newValue }
+            }
+        )
+    }
+
+    private func sceneDimensionBinding(id: UUID, index: Int) -> Binding<Float> {
+        Binding(
+            get: {
+                cache.scenePrimitives.first(where: { $0.id == id })?.dimensions[index] ?? 1
+            },
+            set: { newValue in
+                guard newValue.isFinite else { return }
+                cache.updateScenePrimitive(id: id) { $0.dimensions[index] = newValue }
+            }
+        )
+    }
+}
+
+private extension ScenePrimitiveKind {
+    struct DimensionDescriptor: Identifiable {
+        let index: Int
+        let name: String
+        var id: Int { index }
+    }
+
+    var displayName: String {
+        switch self {
+        case .sphere: return "Sphere"
+        case .box: return "Box"
+        case .torus: return "Torus"
+        case .octahedron: return "Octahedron"
+        case .capsule: return "Capsule"
+        case .cylinder: return "Cylinder"
+        case .cone: return "Cone"
+        case .hexagonalPrism: return "Hex Prism"
+        case .pyramid: return "Pyramid"
+        case .tetrahedron: return "Tetrahedron"
+        case .icosahedron: return "Icosahedron"
+        case .dodecahedron: return "Dodecahedron"
+        case .benchy: return "3DBenchy"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .sphere: return "circle.fill"
+        case .box: return "cube.fill"
+        case .torus: return "circle.dashed"
+        case .octahedron: return "diamond.fill"
+        case .capsule: return "capsule.fill"
+        case .cylinder: return "cylinder.fill"
+        case .cone, .pyramid, .tetrahedron: return "triangle.fill"
+        case .hexagonalPrism, .icosahedron: return "hexagon.fill"
+        case .dodecahedron: return "pentagon.fill"
+        case .benchy: return "ferry.fill"
+        }
+    }
+
+    var dimensionDescriptors: [DimensionDescriptor] {
+        switch self {
+        case .sphere, .octahedron, .tetrahedron, .icosahedron, .dodecahedron:
+            return [DimensionDescriptor(index: 0, name: "Radius")]
+        case .box:
+            return [
+                DimensionDescriptor(index: 0, name: "Half X"),
+                DimensionDescriptor(index: 1, name: "Half Y"),
+                DimensionDescriptor(index: 2, name: "Half Z")
+            ]
+        case .torus:
+            return [
+                DimensionDescriptor(index: 0, name: "Major"),
+                DimensionDescriptor(index: 1, name: "Tube")
+            ]
+        case .capsule:
+            return [
+                DimensionDescriptor(index: 0, name: "Half Length"),
+                DimensionDescriptor(index: 1, name: "Radius")
+            ]
+        case .cylinder:
+            return [
+                DimensionDescriptor(index: 0, name: "Half Height"),
+                DimensionDescriptor(index: 1, name: "Radius")
+            ]
+        case .cone:
+            return [
+                DimensionDescriptor(index: 0, name: "Half Height"),
+                DimensionDescriptor(index: 1, name: "Base Radius")
+            ]
+        case .hexagonalPrism:
+            return [
+                DimensionDescriptor(index: 0, name: "Half Height"),
+                DimensionDescriptor(index: 1, name: "Radius")
+            ]
+        case .pyramid:
+            return [
+                DimensionDescriptor(index: 0, name: "Height"),
+                DimensionDescriptor(index: 1, name: "Base Half Width")
+            ]
+        case .benchy:
+            return []
+        }
     }
 }

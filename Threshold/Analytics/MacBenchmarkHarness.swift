@@ -38,6 +38,16 @@
 //    THRESHOLD_BENCHMARK_OUT=/path.json    output path (PerfRunRecord JSON)
 //    THRESHOLD_BENCHMARK_QC=k=v,k=v        QualityConfig overrides applied after
 //                                          each scene load (see applyQCOverride).
+//    THRESHOLD_BENCHMARK_ANIMATION=name    deterministically play this animation
+//                                          forward on a fixed-rate loop.
+//    THRESHOLD_BENCHMARK_LOOPS=2           complete animation loops to measure.
+//    THRESHOLD_BENCHMARK_ANIMATION_FPS=60  fixed timeline updates per second.
+//    THRESHOLD_BENCHMARK_FREEZE_INTRINSICS=1
+//                                          hold the first keyframe's fractal
+//                                          geometry while other lanes animate.
+//    THRESHOLD_BENCHMARK_FRACTAL_ITERATIONS=24
+//                                          force every animation keyframe to the
+//                                          same DE iteration cost for cache A/Bs.
 //                                          Needed because benchmark launches are
 //                                          hermetic: persisted device-local
 //                                          settings (incl. the acceleration
@@ -141,6 +151,27 @@ enum MacBenchmarkHarness {
         var config: BenchJobConfigEcho
         var metrics: PerfSceneRecord
         var png: String?
+    }
+
+    struct AnimationLoopRecord: Codable {
+        var loop: Int
+        var frames: Int
+        var gpuMsAvg: Double
+        var gpuMsP95: Double
+        var gpuMsMax: Double
+        var cpuEncodeMsAvg: Double
+        var iterationsAvg: Double
+    }
+
+    struct AnimationLoopRun: Codable {
+        var capturedAt: String
+        var animation: String
+        var cacheEnabled: Bool
+        var timelineFPS: Double
+        var loopDurationSeconds: Double
+        var width: Int
+        var height: Int
+        var loops: [AnimationLoopRecord]
     }
 
     struct BenchPlanRunRecord: Codable {
@@ -489,7 +520,15 @@ enum MacBenchmarkHarness {
         defer { BenchmarkManager.shared.collectIterations = false }
 
         let env = ProcessInfo.processInfo.environment
-        if let planPath = env["THRESHOLD_BENCHMARK_PLAN"] {
+        if let animationName = env["THRESHOLD_BENCHMARK_ANIMATION"],
+           !animationName.isEmpty {
+            await runAnimationLoopMode(
+                name: animationName,
+                appModel: appModel,
+                renderer: renderer,
+                settings: settings
+            )
+        } else if let planPath = env["THRESHOLD_BENCHMARK_PLAN"] {
             await runPlan(path: planPath, appModel: appModel, renderer: renderer, settings: settings)
         } else {
             await runEnvMode(appModel: appModel, renderer: renderer, settings: settings)
@@ -511,6 +550,184 @@ enum MacBenchmarkHarness {
         // ordering so duplicate user names resolve exactly as they did before;
         // immutable bundle entries are fallback-only.
         return store + bundledFallbacks
+    }
+
+    /// Deterministic animation benchmark. The normal render loop is not running
+    /// in benchmark mode, so advance the AnimationManager by one fixed timeline
+    /// step before each offscreen frame. This makes cache-off/cache-on runs sample
+    /// exactly the same geometry and keeps loop boundaries independent of GPU speed.
+    private static func runAnimationLoopMode(
+        name: String,
+        appModel: AppModel,
+        renderer: ViewportRenderer,
+        settings: RenderSettings
+    ) async {
+        let env = ProcessInfo.processInfo.environment
+        let cfg = configFromEnv()
+        guard let manager = appModel.animationManager else {
+            log("FATAL animation manager unavailable")
+            return
+        }
+        guard var scene = manager.scenes.first(where: {
+            $0.name.caseInsensitiveCompare(name) == .orderedSame
+        }) else {
+            log("FATAL animation not found: '\(name)' — available: "
+                + manager.scenes.map(\.name).joined(separator: " | "))
+            return
+        }
+        guard scene.keyframes.count >= 2 else {
+            log("FATAL animation '\(scene.name)' has fewer than two keyframes")
+            return
+        }
+
+        if env["THRESHOLD_BENCHMARK_FREEZE_INTRINSICS"] == "1" {
+            let seed = scene.keyframes[0]
+            for index in scene.keyframes.indices {
+                scene.keyframes[index].minDistance = seed.minDistance
+                scene.keyframes[index].fractalScale = seed.fractalScale
+                scene.keyframes[index].foldingLimit = seed.foldingLimit
+                scene.keyframes[index].sphereRadius = seed.sphereRadius
+                scene.keyframes[index].baseFractalIterations = seed.baseFractalIterations
+                scene.keyframes[index].formulaParamValues = seed.formulaParamValues
+            }
+            log("  froze intrinsic Mandelbox geometry at keyframe 0")
+        }
+
+        if let forcedIterations = env["THRESHOLD_BENCHMARK_FRACTAL_ITERATIONS"]
+            .flatMap(Int.init) {
+            let clampedIterations = max(2, forcedIterations)
+            for index in scene.keyframes.indices {
+                scene.keyframes[index].baseFractalIterations = clampedIterations
+            }
+            log("  forced fractal iterations=\(clampedIterations)")
+        }
+
+        let timelineFPS = max(
+            1.0,
+            Double(env["THRESHOLD_BENCHMARK_ANIMATION_FPS"] ?? "") ?? 60.0
+        )
+        let requestedLoops = Int(env["THRESHOLD_BENCHMARK_LOOPS"] ?? "") ?? 2
+        let loopCount = max(2, requestedLoops)
+
+        // Match AnimationManager.segmentDuration and SegmentAdvancer for forced
+        // forward looping, including the final-keyframe → first-keyframe segment.
+        var loopDuration = 0.0
+        for fromIndex in scene.keyframes.indices {
+            let toIndex = (fromIndex + 1) % scene.keyframes.count
+            let durationIndex = max(fromIndex, toIndex)
+            let authored = scene.keyframes[durationIndex].duration
+            loopDuration += authored > 0 ? authored : 2.0
+        }
+        let framesPerLoop = max(1, Int(ceil(loopDuration * timelineFPS)))
+
+        scene.isLooping = true
+        scene.playbackMode = .forward
+        manager.currentScene = scene
+        manager.play()
+        manager.playbackSpeed = 1.0
+        guard manager.isPlaying else {
+            log("FATAL animation '\(scene.name)' did not enter playback")
+            return
+        }
+
+        if let shadows = cfg.shadows {
+            settings.shadowsEnabled = shadows
+        }
+        applyQCOverride(cfg.qcOverride, to: settings)
+        settings.resolutionScale = 1.0
+        settings.tileSize = 0
+
+        // Allocate benchmark targets and compile the active render path without
+        // advancing the timeline or completing a cache bake.
+        _ = renderer.renderBenchmarkFrame(
+            appModel: appModel, width: cfg.width, height: cfg.height
+        )
+
+        log("animation '\(scene.name)' loops=\(loopCount) timeline=\(timelineFPS)Hz "
+            + "duration=\(String(format: "%.3f", loopDuration))s "
+            + "framesPerLoop=\(framesPerLoop) size=\(cfg.width)x\(cfg.height) "
+            + "cache=\(env["THRESHOLD_DIST_CACHE"] == "1" ? "on" : "off")")
+
+        var records: [AnimationLoopRecord] = []
+        for loopIndex in 1...loopCount {
+            var gpu: [Double] = []
+            var cpuSum = 0.0
+            var stepSum = 0.0
+            var stepCount = 0
+            var measured = 0
+
+            for _ in 0..<framesPerLoop {
+                manager.update(deltaTime: 1.0 / timelineFPS)
+                guard let metric = renderer.renderBenchmarkFrame(
+                    appModel: appModel, width: cfg.width, height: cfg.height
+                ) else { continue }
+                measured += 1
+                if metric.gpuMs > 0 {
+                    gpu.append(metric.gpuMs)
+                }
+                cpuSum += metric.cpuEncodeMs
+                if metric.avgSteps > 0 {
+                    stepSum += metric.avgSteps
+                    stepCount += 1
+                }
+            }
+
+            let sortedGPU = gpu.sorted()
+            let record = AnimationLoopRecord(
+                loop: loopIndex,
+                frames: measured,
+                gpuMsAvg: gpu.reduce(0, +) / Double(max(gpu.count, 1)),
+                gpuMsP95: percentile(sortedGPU, 0.95),
+                gpuMsMax: sortedGPU.last ?? 0,
+                cpuEncodeMsAvg: cpuSum / Double(max(measured, 1)),
+                iterationsAvg: stepCount > 0
+                    ? stepSum / Double(stepCount)
+                    : 0
+            )
+            records.append(record)
+            log(String(
+                format: "  loop %d → gpu avg %.3fms p95 %.3fms max %.3fms "
+                    + "steps %.2f cpuEnc %.3fms",
+                loopIndex, record.gpuMsAvg, record.gpuMsP95,
+                record.gpuMsMax, record.iterationsAvg, record.cpuEncodeMsAvg
+            ))
+        }
+        manager.stop()
+
+        if records.count >= 2 {
+            let first = records[0].gpuMsAvg
+            let second = records[1].gpuMsAvg
+            let delta = first > 0 ? 100.0 * (second - first) / first : 0
+            let speedup = second > 0 ? first / second : 0
+            log(String(
+                format: "  loop 2 vs 1 → %+.2f%%, %.3fx",
+                delta, speedup
+            ))
+        }
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        let run = AnimationLoopRun(
+            capturedAt: iso.string(from: Date()),
+            animation: scene.name,
+            cacheEnabled: env["THRESHOLD_DIST_CACHE"] == "1",
+            timelineFPS: timelineFPS,
+            loopDurationSeconds: loopDuration,
+            width: cfg.width,
+            height: cfg.height,
+            loops: records
+        )
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(run).write(
+                to: URL(fileURLWithPath: cfg.outPath),
+                options: .atomic
+            )
+            log("done → \(cfg.outPath)")
+        } catch {
+            log("FATAL animation benchmark write failed: \(error)")
+        }
     }
 
     private static func runPlan(path: String, appModel: AppModel,

@@ -769,7 +769,8 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     /// animation playback does not inherit the previous scene's transform stack.
     var spaceWarpOps: [SpaceWarpOpValue]?
 
-    /// visionOS immersion intent. `true` = Mixed; nil/false = Immersive.
+    /// Explicit visionOS presentation override. `true` makes this scene open in
+    /// Mixed; nil/false preserves the user's selected Immersive/Window/Mixed mode.
     var mixedModeScene: Bool?
     
     /// Optional song that auto-plays when this scene starts
@@ -1113,13 +1114,15 @@ private enum KeyframeLerp {
     static func lerpGlow(_ a: GlowEffect?, _ b: GlowEffect?, t: Float) -> GlowEffect? {
         guard let a, let b else { return t < 0.5 ? a : b }
         return GlowEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
-                          intensity: a.intensity + (b.intensity - a.intensity) * t)
+                          intensity: a.intensity + (b.intensity - a.intensity) * t,
+                          color: a.color + (b.color - a.color) * t)
     }
 
     static func lerpBloom(_ a: BloomEffect?, _ b: BloomEffect?, t: Float) -> BloomEffect? {
         guard let a, let b else { return t < 0.5 ? a : b }
         return BloomEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
-                           strength: a.strength + (b.strength - a.strength) * t)
+                           strength: a.strength + (b.strength - a.strength) * t,
+                           color: a.color + (b.color - a.color) * t)
     }
 
     static func lerpFog(_ a: FogEffect?, _ b: FogEffect?, t: Float) -> FogEffect? {

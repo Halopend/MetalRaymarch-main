@@ -649,7 +649,6 @@ final class AnimationManager {
     /// the baseline for the finished scene.
     @ObservationIgnored private var recordingBaseline: SceneState?
     @ObservationIgnored private var recordingEmbeddedFormula: EmbeddedFormula?
-    @ObservationIgnored private var recordingMixedModeScene: Bool?
     
     /// Sample rate for live recording (samples per second).
     private static let recordingSampleRate: Double = 10.0
@@ -904,14 +903,10 @@ final class AnimationManager {
     // SCENE MANAGEMENT
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// Capture the full scene-owned baseline while keeping presentation as a
-    /// stable raw string (SceneState deliberately does not depend on AppModel).
+    /// Capture the full scene-owned baseline. Presentation is user-owned and is
+    /// intentionally excluded; Mixed is an explicit editor opt-in on the scene.
     private func captureSceneBaseline(from settings: RenderSettings) -> SceneState {
-        var immersionStyle: String?
-        #if os(visionOS)
-        immersionStyle = AppModel.shared?.immersionStyleForRenderer.rawValue
-        #endif
-        return SceneState(capturing: settings, immersionStyle: immersionStyle)
+        SceneState(capturing: settings)
     }
 
     /// Mirror the baseline into the old flat animation fields. Current builds
@@ -938,7 +933,6 @@ final class AnimationManager {
         scene.safetyBubbleShape = baseline.safetyBubble.shape
         scene.safetyBubbleBlend = baseline.safetyBubble.strength
         scene.spaceWarpOps = baseline.space.warpStack.isEmpty ? nil : baseline.space.warpStack
-        scene.mixedModeScene = baseline.presentation.immersionStyle == "mixed" ? true : nil
     }
     
     /// Create a new scene and add current settings as first keyframe
@@ -1134,17 +1128,7 @@ final class AnimationManager {
 
                 #if os(visionOS)
                 if let app = AppModel.shared {
-                    let style: AppModel.ImmersionStylePreference
-                    if scene.mixedModeScene == true {
-                        style = .mixed
-                    } else if let rawStyle = scene.baseline?.presentation.immersionStyle {
-                        style = .fromPersisted(rawStyle)
-                    } else {
-                        style = .immersive
-                    }
-                    app.immersionChangeIsSceneDriven = true
-                    app.immersionStylePreference = style
-                    app.immersionChangeIsSceneDriven = false
+                    app.applySceneImmersionPreference(isMixedScene: scene.mixedModeScene == true)
                 }
                 #endif
 
@@ -1945,7 +1929,6 @@ final class AnimationManager {
         recordingFractalType = settings.fractalType
         recordingBaseline = captureSceneBaseline(from: settings)
         recordingEmbeddedFormula = AppModel.shared?.activeEmbeddedFormula
-        recordingMixedModeScene = recordingBaseline?.presentation.immersionStyle == "mixed" ? true : nil
         isRecording = true
         UsageAnalytics.shared.trackRecordingUsed()
         
@@ -1989,8 +1972,6 @@ final class AnimationManager {
         recordingBaseline = nil
         let recordedEmbeddedFormula = recordingEmbeddedFormula
         recordingEmbeddedFormula = nil
-        let recordedMixedModeScene = recordingMixedModeScene
-        recordingMixedModeScene = nil
         
         guard samples.count >= 2, let lastSample = samples.last else {
             print("⚠️ Live recording too short — need at least 2 samples")
@@ -2025,7 +2006,6 @@ final class AnimationManager {
         scene.fractalType = recordedFractalType ?? renderSettings?.fractalType
         scene.baseline = recordedBaseline
         scene.embeddedFormula = recordedEmbeddedFormula
-        scene.mixedModeScene = recordedMixedModeScene
         if let recordedBaseline {
             populateLegacySceneFields(&scene, from: recordedBaseline)
         }

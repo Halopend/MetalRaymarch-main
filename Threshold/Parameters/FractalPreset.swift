@@ -198,9 +198,9 @@ struct SceneMotionState: Codable, Equatable {
     var infiniteZoomRate: Float = 0.15
 }
 
-/// Presentation intent is kept as a stable string instead of coupling the file
-/// format to AppModel. It preserves all three modes; the old `mixedModeScene`
-/// Boolean could not distinguish Window from Immersive.
+/// Legacy presentation metadata retained for round-trip compatibility. Current
+/// scene loads do not restore this value: Immersive/Window/Mixed is user-owned,
+/// with `mixedModeScene` as the one explicit per-scene Mixed override.
 struct ScenePresentationState: Codable, Equatable {
     var immersionStyle: String?
 }
@@ -292,13 +292,11 @@ struct SceneState: Codable, Equatable {
         settings.targetWorldRotation = geometry.worldRotation
         settings.targetDetailScale = geometry.detailScale
 
+        let preservedResolutionScale = settings.resolutionScale
         var mergedQuality = settings.qualityConfig
         mergedQuality.baseFractalIterations = quality.baseFractalIterations
         mergedQuality.baseMaxRaySteps = quality.baseMaxRaySteps
         if includePerformance {
-            if let resolutionScale = quality.resolutionScale {
-                mergedQuality.resolutionScale = resolutionScale
-            }
             if let tileSize = quality.tileSize {
                 mergedQuality.tileSize = tileSize
             }
@@ -327,6 +325,7 @@ struct SceneState: Codable, Equatable {
         settings.qualityConfig = mergedQuality
         settings.sceneConeMarchCompatible = quality.coneMarchCompatible
         settings.applyRecommendedQuality(quality.recommendedQuality)
+        settings.resolutionScale = preservedResolutionScale
 
         settings.colorConfig = color
         settings.lightingConfig = lighting
@@ -515,7 +514,7 @@ struct FractalPreset: Codable, Identifiable {
     // (QualityConfig) are intentionally NOT included: a scene must not force
     // foveation/cone-march/etc. onto another device.
     var platformEnabled: Bool?            // DisplayConfig — glass-floor on/off
-    var mixedModeScene: Bool?             // visionOS — scene authored for Mixed immersion (passthrough background); nil for Full/Partial
+    var mixedModeScene: Bool?             // visionOS — explicit per-scene request for Mixed immersion (passthrough background)
     var boundingShapeEnabled: Bool?       // Bounding Shape (sphere) clip on/off
     var boundingShapeRadius: Float?       // Bounding Shape radius, model units
     var boundingShapeFogEnabled: Bool?    // legacy — migrated into boundingShapeFogMode on load
@@ -1094,14 +1093,10 @@ struct FractalPreset: Codable, Identifiable {
     /// Create a preset from current render settings
     static func fromSettings(_ settings: RenderSettings, name: String, id: UUID = UUID(), createdAt: Date = Date(), thumbnailData: Data? = nil, embeddedFormula: EmbeddedFormula? = nil) -> FractalPreset {
         var preset = FractalPreset(id: id, name: name, createdAt: createdAt, thumbnailData: thumbnailData)
-        var immersionStyle: String?
-        #if os(visionOS)
-        immersionStyle = AppModel.shared?.immersionStyleForRenderer.rawValue
-        #endif
         // Capture each authored lane once, then derive the legacy projection from
         // this exact canonical value. This prevents canonical and compatibility
         // fields from representing two different instants during live playback.
-        let state = SceneState(capturing: settings, immersionStyle: immersionStyle)
+        let state = SceneState(capturing: settings)
 
         // ── Geometry domain (1 lock acquisition) ──
         let geo = state.geometry
@@ -1207,15 +1202,8 @@ struct FractalPreset: Codable, Identifiable {
         preset.envScrunchReach = qual.envScrunchReach
         preset.envScrunchContain = qual.envScrunchContain
         preset.envScrunchContainFeather = qual.envScrunchContainFeather
-        // Mixed-immersion scene marker (visionOS): recorded only when the scene
-        // is saved while Mixed is active, so loading it can restore the
-        // passthrough presentation. Full/Partial saves leave it nil and loading
-        // never *exits* Mixed — the user controls that from the picker.
-        #if os(visionOS)
-        if state.presentation.immersionStyle == AppModel.ImmersionStylePreference.mixed.rawValue {
-            preset.mixedModeScene = true
-        }
-        #endif
+        // Presentation is deliberately not inferred from the live headset mode.
+        // The user opts a scene into Mixed explicitly from its long-press editor.
         // Composable domain-transform stack (Transformations section). Direct
         // RenderSettings property, not in DisplayConfig. Empty array → nil so older
         // readers and round-trips stay clean.
@@ -1316,7 +1304,9 @@ struct FractalPreset: Codable, Identifiable {
         // projection to layer. Applying synthesized/default flat values here
         // would immediately stomp the canonical domains we just restored.
         if sceneState != nil, !appliesLegacyFlatFields {
-            applyPresentationIntent()
+            if scope == .scene {
+                applyPresentationIntent()
+            }
             applyModuleOverrides(to: settings)
             return
         }
@@ -1379,10 +1369,8 @@ struct FractalPreset: Codable, Identifiable {
         settings.detailScale = ds
         settings.targetDetailScale = ds
         
+        let preservedResolutionScale = settings.resolutionScale
         if includePerformance {
-            if let resolutionScale = resolutionScale {
-                settings.resolutionScale = resolutionScale
-            }
             if let tileSize = tileSize {
                 settings.tileSize = tileSize
             }
@@ -1395,10 +1383,11 @@ struct FractalPreset: Codable, Identifiable {
         //     applies); only an explicit false suppresses it for this scene.
         //   • Recommended quality — high/ultra raise resolution toward target + lift
         //     the governor floor; nil/standard reset the floor to the global minimum.
-        // Ordered AFTER the resolutionScale restore above so the Mac quality raise
-        // composes on top of the scene's own saved resolution.
+        // Scene recommendations may adjust quality floors, but resolution remains
+        // the last value explicitly chosen by the user across scene switches.
         settings.sceneConeMarchCompatible = coneMarchCompatible ?? true
         settings.applyRecommendedQuality(recommendedQuality)
+        settings.resolutionScale = preservedResolutionScale
 
         // The safety bubble is user-owned comfort state: users can disable it,
         // scenes cannot. A scene that uses the bubble as part of its authored
@@ -1512,9 +1501,12 @@ struct FractalPreset: Codable, Identifiable {
         settings.envScrunchContain = envScrunchContain ?? 0
         settings.envScrunchContainFeather = envScrunchContainFeather ?? 0.1
 
-        // Scene-driven immersion (visionOS). v3 preserves Window distinctly;
-        // older files fall back to the legacy Mixed/Immersive Boolean.
-        applyPresentationIntent()
+        // Scene-driven immersion (visionOS). Only the explicit Mixed marker may
+        // override the user's sticky presentation preference. Exact session
+        // restores (last state / preview rollback) never change presentation.
+        if scope == .scene {
+            applyPresentationIntent()
+        }
 
         // v2.0 modular lighting effects — AUTHORITATIVE: every field falls
         // back to its RenderSettings declaration default when absent, so an
@@ -1588,21 +1580,9 @@ struct FractalPreset: Codable, Identifiable {
 
     private func applyPresentationIntent() {
         #if os(visionOS)
-        let sceneStyle: AppModel.ImmersionStylePreference
-        if mixedModeScene == true {
-            // Flat compatibility marker wins when a bundled-scene classifier
-            // adds it after decoding an older document.
-            sceneStyle = .mixed
-        } else if let rawStyle = sceneState?.presentation.immersionStyle {
-            sceneStyle = .fromPersisted(rawStyle)
-        } else {
-            sceneStyle = .immersive
-        }
         Task { @MainActor in
             guard let app = AppModel.shared else { return }
-            app.immersionChangeIsSceneDriven = true
-            app.immersionStylePreference = sceneStyle
-            app.immersionChangeIsSceneDriven = false
+            app.applySceneImmersionPreference(isMixedScene: mixedModeScene == true)
         }
         #endif
     }

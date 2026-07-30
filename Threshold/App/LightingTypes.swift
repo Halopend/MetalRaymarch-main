@@ -129,7 +129,44 @@ struct PulseEffect: LightingEffect {
 struct GlowEffect: LightingEffect {
     var enabled: Bool = false
     var intensity: Float = 0.3      // Glow brightness (0-1)
-    
+    var color: SIMD3<Float> = Self.defaultColor
+
+    /// Matches the cool-white tint used by the shader before glow became
+    /// user-colorable, preserving the appearance of existing scenes.
+    static let defaultColor = SIMD3<Float>(0.95, 0.97, 1.0)
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, intensity, colorRed, colorGreen, colorBlue
+    }
+
+    init(enabled: Bool = false,
+         intensity: Float = 0.3,
+         color: SIMD3<Float> = GlowEffect.defaultColor) {
+        self.enabled = enabled
+        self.intensity = intensity
+        self.color = color
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        intensity = try container.decodeIfPresent(Float.self, forKey: .intensity) ?? 0.3
+        color = SIMD3<Float>(
+            try container.decodeIfPresent(Float.self, forKey: .colorRed) ?? Self.defaultColor.x,
+            try container.decodeIfPresent(Float.self, forKey: .colorGreen) ?? Self.defaultColor.y,
+            try container.decodeIfPresent(Float.self, forKey: .colorBlue) ?? Self.defaultColor.z
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(enabled, forKey: .enabled)
+        try container.encode(intensity, forKey: .intensity)
+        try container.encode(color.x, forKey: .colorRed)
+        try container.encode(color.y, forKey: .colorGreen)
+        try container.encode(color.z, forKey: .colorBlue)
+    }
+
     var primaryValue: Float {
         get { intensity }
         set { intensity = newValue }
@@ -157,7 +194,44 @@ struct GlowEffect: LightingEffect {
 struct BloomEffect: LightingEffect {
     var enabled: Bool = false
     var strength: Float = 0.2       // Bloom intensity (0-1)
-    
+    var color: SIMD3<Float> = Self.defaultColor
+
+    /// Matches the warm-white tint used by the shader before bloom became
+    /// user-colorable, preserving the appearance of existing scenes.
+    static let defaultColor = SIMD3<Float>(1.0, 0.96, 0.88)
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, strength, colorRed, colorGreen, colorBlue
+    }
+
+    init(enabled: Bool = false,
+         strength: Float = 0.2,
+         color: SIMD3<Float> = BloomEffect.defaultColor) {
+        self.enabled = enabled
+        self.strength = strength
+        self.color = color
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        strength = try container.decodeIfPresent(Float.self, forKey: .strength) ?? 0.2
+        color = SIMD3<Float>(
+            try container.decodeIfPresent(Float.self, forKey: .colorRed) ?? Self.defaultColor.x,
+            try container.decodeIfPresent(Float.self, forKey: .colorGreen) ?? Self.defaultColor.y,
+            try container.decodeIfPresent(Float.self, forKey: .colorBlue) ?? Self.defaultColor.z
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(enabled, forKey: .enabled)
+        try container.encode(strength, forKey: .strength)
+        try container.encode(color.x, forKey: .colorRed)
+        try container.encode(color.y, forKey: .colorGreen)
+        try container.encode(color.z, forKey: .colorBlue)
+    }
+
     var primaryValue: Float {
         get { strength }
         set { strength = newValue }

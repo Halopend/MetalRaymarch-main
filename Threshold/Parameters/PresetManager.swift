@@ -1000,6 +1000,37 @@ class PresetManager {
         return result
     }
 
+    /// Persist metadata edited from a scene card (for example its explicit
+    /// visionOS Mixed-immersion opt-in). If the catalog item is currently only
+    /// a bundle/placeholder value, this creates the user's editable store copy.
+    @discardableResult
+    func updatePreset(_ preset: FractalPreset) -> PresetSaveResult {
+        var updated = preset
+        updated.updatedAt = Date()
+
+        let existingIndex = presets.firstIndex { $0.id == updated.id }
+        let previous = existingIndex.map { presets[$0] }
+        if let existingIndex {
+            presets[existingIndex] = updated
+        } else {
+            presets.insert(updated, at: 0)
+        }
+
+        let result = persist(updated)
+        if case .failed = result {
+            if let existingIndex, let previous {
+                presets[existingIndex] = previous
+            } else {
+                presets.removeAll { $0.id == updated.id }
+            }
+            return result
+        }
+
+        FractalPreset.clearThumbnailCache(for: updated.id)
+        scheduleBackup()
+        return result
+    }
+
     /// Delete a preset. Removing its file IS the deletion — under folder-as-truth
     /// that removal is what propagates (iCloud syncs the delete to other devices).
     func deletePreset(_ preset: FractalPreset) {

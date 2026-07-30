@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 enum NavigationPresentationStyle: String, CaseIterable {
     case separateWindow = "Window"
@@ -120,10 +123,9 @@ struct RadialMenuGeometry {
     }
 
     /// Capsules are taller than the raw arc spacing near its ends. Keep enough
-    /// center-to-center room for the resting size plus hover/focus expansion
-    /// (42pt and 30pt pills × the 1.035 hover scale). Deeper rings are shorter,
-    /// so they can remain denser — hover-to-navigate makes every point of
-    /// pointer travel count.
+    /// center-to-center room for the resting size plus focus magnification.
+    /// Deeper pointer rings are shorter, so they can remain denser —
+    /// hover-to-navigate makes every point of pointer travel count.
     private func minimumItemSpacing(depth: Int, sliderRing: Bool) -> CGFloat {
         if interactionProfile == .touch { return interactionProfile.itemSpacing }
         if depth == 0 { return 38 }
@@ -466,11 +468,15 @@ enum RadialHoverDwellPolicy {
     /// Hovering a branch pill this long commits the selection. Long enough
     /// that sweeping across a pill en route to another does not thrash the
     /// deeper rings, short enough to read as instantaneous when aiming at it.
-    static let selectDwell: Duration = .milliseconds(90)
+    static let selectDwell: Duration = .milliseconds(120)
     /// Switching a parent after its child ring is visible gets a wider intent
     /// window. This protects diagonal travel toward the child arc without
     /// making first-time branch discovery feel sluggish.
-    static let parentSwitchDwell: Duration = .milliseconds(175)
+    static let parentSwitchDwell: Duration = .milliseconds(220)
+    /// SwiftUI removes very transparent descendants from hit testing. Keep
+    /// receded siblings visibly subdued but above that cutoff so hovering a
+    /// different root/section can replace the active branch directly.
+    static let recededSiblingOpacity = 0.56
 
     enum EnterResponse: Equatable {
         case arm(dwell: Duration)
@@ -636,7 +642,14 @@ struct RadialMenu: View {
         .frame(width: size.width, height: size.height)
         .coordinateSpace(name: Self.coordinateSpaceName)
         .onAppear {
-            focusedItemID = roots.first(where: \.isSelected)?.id ?? roots.first?.id
+            // Initial paths may open directly onto the active route. Put
+            // hardware-keyboard focus in the deepest visible ring as well, so
+            // keyboard users receive the same zero-traversal quick-control
+            // entry point as touch users.
+            let deepestVisibleNodes = rings.last?.nodes ?? roots
+            focusedItemID = deepestVisibleNodes.first(where: \.isSelected)?.id
+                ?? deepestVisibleNodes.first?.id
+                ?? roots.first?.id
         }
         .onDisappear {
             disarmPendingHover()
@@ -667,6 +680,8 @@ struct RadialMenu: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Control launcher")
+        .accessibilityAddTraits(.isModal)
+        .accessibilityAction(.escape, onDismiss)
     }
 
     static let coordinateSpaceName = "RadialMenu"
@@ -684,7 +699,7 @@ struct RadialMenu: View {
 
         while !nodes.isEmpty {
             let positions: [CGPoint]
-            let isSliderRing = nodes.contains { $0.slider != nil }
+            let isControlRing = nodes.contains { $0.slider != nil || $0.toggle != nil }
             let ringRadius: CGFloat
             let layoutCenter: CGPoint
             var resolvedBaseAngle = ringBaseAngle
@@ -704,7 +719,7 @@ struct RadialMenu: View {
                     count: nodes.count,
                     radius: ringRadius,
                     baseAngle: ringBaseAngle,
-                    sliderRing: isSliderRing,
+                    sliderRing: isControlRing,
                     priorLayouts: layouts
                 )
                 positions = resolved.positions
@@ -756,8 +771,22 @@ struct RadialMenu: View {
             interactionProfile: interactionProfile
         )
         let offsets: [CGFloat] = [0, 0.10, -0.10, 0.20, -0.20, 0.32, -0.32]
-        let halfWidth: CGFloat = sliderRing ? radialSliderWidth * 0.5 : 52
-        let halfHeight: CGFloat = sliderRing ? 17 : 16
+        let restingHalfWidth: CGFloat = sliderRing ? radialSliderWidth * 0.5 : 52
+        let restingHalfHeight = max(
+            interactionProfile.minimumTargetSize * 0.5,
+            sliderRing ? 17 : 16
+        )
+        // Scoring protects the focused/engaged size, not merely the resting
+        // capsule. A pill can therefore grow toward the touch without being
+        // clipped at the edge of an iPad window.
+        let halfWidth = RadialFocusMagnification.protectedHalfExtent(
+            restingHalfWidth,
+            for: interactionProfile
+        )
+        let halfHeight = RadialFocusMagnification.protectedHalfExtent(
+            restingHalfHeight,
+            for: interactionProfile
+        )
         let margin: CGFloat = 12
 
         func score(_ points: [CGPoint], offset: CGFloat) -> CGFloat {
@@ -781,8 +810,19 @@ struct RadialMenu: View {
                             && prior.nodes.indices.contains(priorIndex)
                             && prior.nodes[priorIndex].id == path[prior.depth]
                         if isSelectedParent { continue }
-                        let priorHalfWidth: CGFloat = prior.depth == 0 ? 72 : 52
-                        let priorHalfHeight: CGFloat = prior.depth == 0 ? 20 : 16
+                        let priorRestingHalfWidth: CGFloat = prior.depth == 0 ? 72 : 52
+                        let priorRestingHalfHeight = max(
+                            interactionProfile.minimumTargetSize * 0.5,
+                            prior.depth == 0 ? 20 : 16
+                        )
+                        let priorHalfWidth = RadialFocusMagnification.protectedHalfExtent(
+                            priorRestingHalfWidth,
+                            for: interactionProfile
+                        )
+                        let priorHalfHeight = RadialFocusMagnification.protectedHalfExtent(
+                            priorRestingHalfHeight,
+                            for: interactionProfile
+                        )
                         let priorFrame = CGRect(
                             x: priorPoint.x - priorHalfWidth - 4,
                             y: priorPoint.y - priorHalfHeight - 3,
@@ -863,6 +903,21 @@ struct RadialMenu: View {
                     )
                     .focusable()
                     .focused($focusedItemID, equals: node.id)
+                } else if let toggle = node.toggle {
+                    RadialTogglePill(
+                        node: node,
+                        toggle: toggle,
+                        fixedWidth: radialSliderWidth,
+                        isFocused: focusedItemID == node.id,
+                        sceneAccent: sceneAccent,
+                        interactionProfile: interactionProfile,
+                        onHoverChanged: { hovering in
+                            updateHoveredRing(ring.depth, hovering: hovering)
+                            handleNodeHover(node, depth: ring.depth, hovering: hovering)
+                        }
+                    )
+                    .focusable()
+                    .focused($focusedItemID, equals: node.id)
                 } else {
                     RadialMenuButton(
                         item: node,
@@ -885,6 +940,7 @@ struct RadialMenu: View {
                                 node.fallbackAction?()
                             }
                         },
+                        onOpenFullControls: node.fullControlsAction,
                         onHoverChanged: { hovering in
                             updateHoveredRing(ring.depth, hovering: hovering)
                             handleNodeHover(node, depth: ring.depth, hovering: hovering)
@@ -896,7 +952,11 @@ struct RadialMenu: View {
             // Once this layer opens a child arc, fade its siblings back while
             // keeping the chosen parent fully lit. The resulting bright chain
             // makes the active route through a deep hierarchy immediately clear.
-            .opacity(recedesBehindChildRing ? 0.24 : 1)
+            .opacity(
+                recedesBehindChildRing
+                    ? RadialHoverDwellPolicy.recededSiblingOpacity
+                    : 1
+            )
             .saturation(recedesBehindChildRing ? 0.42 : 1)
             .scaleEffect(recedesBehindChildRing ? 0.97 : 1)
             .position(position)
@@ -1222,13 +1282,25 @@ struct RadialMenu: View {
     private var anchorMark: some View {
         #if os(macOS)
         anchorMarkContent
+            .position(anchor)
             .gesture(WindowDragGesture())
             .help("Drag to move the window")
+            .accessibilityElement()
             .accessibilityLabel("Window drag handle")
             .accessibilityHint("Drag to move the Threshold window")
         #else
-        anchorMarkContent
-            .accessibilityLabel("Radial menu anchor")
+        Button(action: onDismiss) {
+            anchorMarkContent
+                .overlay {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Color.white.opacity(0.92))
+                }
+        }
+        .buttonStyle(.plain)
+        .position(anchor)
+        .accessibilityLabel("Close radial controls")
+        .accessibilityHint("Dismisses the radial control menu")
         #endif
     }
 
@@ -1249,8 +1321,6 @@ struct RadialMenu: View {
             // entering it must disarm a stale dwell (see RadialHoverDwellPolicy).
             if hovering { disarmPendingHover() }
         }
-        .position(anchor)
-        .accessibilityElement()
     }
 
     // MARK: Keyboard navigation
@@ -1317,6 +1387,8 @@ struct RadialMenu: View {
         case .leftArrow:
             if let slider = focusedNode?.slider {
                 slider.step(by: -1)
+            } else if let toggle = focusedNode?.toggle {
+                toggle.set(false)
             } else {
                 retreatOrDismiss()
             }
@@ -1324,6 +1396,10 @@ struct RadialMenu: View {
         case .rightArrow:
             if let slider = focusedNode?.slider {
                 slider.step(by: 1)
+                return .handled
+            }
+            if let toggle = focusedNode?.toggle {
+                toggle.set(true)
                 return .handled
             }
             return expandFocusedBranch() ? .handled : .ignored
@@ -1367,6 +1443,10 @@ struct RadialMenu: View {
         if node.slider != nil {
             // Sliders use Left/Right for adjustment. Consuming activation avoids
             // Space falling through to viewport playback while a slider owns focus.
+            return .handled
+        }
+        if let toggle = node.toggle {
+            toggle.toggle()
             return .handled
         }
         if expandFocusedBranch() { return .handled }
@@ -1425,6 +1505,7 @@ private struct RadialMenuButton: View {
     let sceneAccent: Color
     let interactionProfile: RadialInteractionProfile
     let onActivate: () -> Void
+    let onOpenFullControls: (() -> Void)?
     let onHoverChanged: (Bool) -> Void
 
     @State private var isHovering = false
@@ -1448,7 +1529,7 @@ private struct RadialMenuButton: View {
     }
 
     var body: some View {
-        Button(action: onActivate) {
+        Button(action: handleActivation) {
             HStack(spacing: depth == 0 ? 7 : 6) {
                 Image(systemName: item.systemImage)
                     .font(.system(size: depth == 0 ? 12 : 10.5, weight: .semibold))
@@ -1521,9 +1602,15 @@ private struct RadialMenuButton: View {
             x: 0,
             y: 2
         )
-        .scaleEffect(isHovering ? 1.035 : 1)
-        .animation(.easeOut(duration: 0.12), value: isHovering)
-        .animation(.easeOut(duration: 0.12), value: isFocused)
+        .scaleEffect(RadialFocusMagnification.scale(
+            for: interactionProfile,
+            isFocused: isFocused,
+            isExpanded: isExpanded,
+            isEngaged: isHovering
+        ))
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isHovering)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isFocused)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isExpanded)
         .onHover { hovering in
             guard interactionProfile.supportsHoverNavigation else { return }
             isHovering = hovering
@@ -1562,8 +1649,8 @@ private struct RadialMenuButton: View {
         }
         .help(item.isBranch
             ? isExpanded
-                ? "\(item.title): click to go back one level"
-                : "\(item.title): press Right Arrow to reveal its controls"
+                ? "\(item.title): click to go back one level; double-click to open full controls"
+                : "\(item.title): hover or press Right Arrow to reveal; double-click to open full controls"
             : item.title)
         .accessibilityHint(item.isBranch
             ? isExpanded
@@ -1573,6 +1660,22 @@ private struct RadialMenuButton: View {
                 ? "Press Return to open the full controls for this section."
                 : "Use the available quick control.")
         .accessibilityAddTraits(item.isSelected ? .isSelected : [])
+    }
+
+    private func handleActivation() {
+        #if os(macOS)
+        if let event = NSApp.currentEvent,
+           event.type == .leftMouseUp,
+           RadialActivationPolicy.shouldOpenFullControls(
+               activationCount: event.clickCount,
+               hasFullControlsAction: onOpenFullControls != nil
+           ),
+           let onOpenFullControls {
+            onOpenFullControls()
+            return
+        }
+        #endif
+        onActivate()
     }
 
     private var tabFill: LinearGradient {
@@ -1629,6 +1732,128 @@ private struct RadialMenuButton: View {
         isHovering || isFocused
             ? sceneAccent
             : Color(red: 0.92, green: 0.62, blue: 1.00)
+    }
+}
+
+/// Terminal binary control. It stays in the radial surface after activation so
+/// several related switches can be changed without reopening or traversing the
+/// menu, and it exposes explicit On/Off semantics to keyboard and VoiceOver.
+private struct RadialTogglePill: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let node: RadialNavigationNode
+    let toggle: RadialToggleBinding
+    let fixedWidth: CGFloat
+    let isFocused: Bool
+    let sceneAccent: Color
+    let interactionProfile: RadialInteractionProfile
+    let onHoverChanged: (Bool) -> Void
+
+    @State private var isHovering = false
+    @State private var isPointerInside = false
+
+    private var isEnabled: Bool { toggle.isEnabled() }
+    private var isEmphasized: Bool { isFocused || (isEnabled && isHovering) }
+
+    var body: some View {
+        let value = toggle.read()
+        let enabled = isEnabled
+
+        Button {
+            toggle.toggle()
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: node.systemImage)
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 14)
+
+                Text(node.title)
+                    .font(.system(size: 10.5, weight: isEmphasized ? .bold : .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 3)
+
+                Text(value ? "On" : "Off")
+                    .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(value ? sceneAccent : Color.white.opacity(0.56))
+
+                ZStack {
+                    Capsule()
+                        .fill(value ? sceneAccent.opacity(0.78) : Color.white.opacity(0.16))
+                        .frame(width: 27, height: 16)
+                    Circle()
+                        .fill(value ? Color.white : Color.white.opacity(0.68))
+                        .frame(width: 12, height: 12)
+                        .offset(x: value ? 5.5 : -5.5)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(
+                width: fixedWidth,
+                height: max(30, interactionProfile.minimumTargetSize),
+                alignment: .leading
+            )
+            .background(
+                LinearGradient(
+                    colors: value
+                        ? [
+                            Color(red: 0.12, green: 0.018, blue: 0.20).opacity(0.98),
+                            sceneAccent.opacity(isEmphasized ? 0.56 : 0.36)
+                        ]
+                        : [
+                            Color(red: 0.055, green: 0.012, blue: 0.09).opacity(0.96),
+                            Color(red: 0.25, green: 0.04, blue: 0.38).opacity(0.94)
+                        ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                ),
+                in: Capsule()
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(
+                        isEmphasized ? sceneAccent.opacity(0.78) : Color.white.opacity(0.10),
+                        lineWidth: isEmphasized ? 1.2 : 0.8
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .foregroundStyle(isEmphasized ? Color.white : Color.white.opacity(0.72))
+        .opacity(enabled ? 1 : 0.42)
+        .saturation(enabled ? 1 : 0.18)
+        .shadow(
+            color: isEmphasized ? sceneAccent.opacity(0.38) : Color.black.opacity(0.28),
+            radius: isEmphasized ? 9 : 4,
+            x: 0,
+            y: 2
+        )
+        .scaleEffect(RadialFocusMagnification.scale(
+            for: interactionProfile,
+            isFocused: isFocused,
+            isEngaged: isEnabled && isHovering
+        ))
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isEmphasized)
+        .animation(.easeOut(duration: 0.12), value: enabled)
+        .onHover { hovering in
+            isPointerInside = hovering
+            isHovering = enabled && hovering
+            onHoverChanged(hovering)
+        }
+        .onDisappear {
+            if isPointerInside {
+                isPointerInside = false
+                isHovering = false
+                onHoverChanged(false)
+            }
+        }
+        .help(enabled ? "\(node.title): \(value ? "On" : "Off")" : "\(node.title) is unavailable")
+        .accessibilityLabel(node.title)
+        .accessibilityValue(enabled ? (value ? "On" : "Off") : "\(value ? "On" : "Off"), unavailable")
+        .accessibilityHint(enabled
+            ? "Activate to turn \(value ? "off" : "on"). Left Arrow turns off; Right Arrow turns on."
+            : "This setting is currently unavailable.")
     }
 }
 
@@ -1731,8 +1956,12 @@ private struct RadialSliderPill: View {
             x: 0,
             y: 2
         )
-        .scaleEffect(isEmphasized && !reduceMotion ? 1.03 : 1)
-        .animation(.easeOut(duration: 0.12), value: isEmphasized)
+        .scaleEffect(RadialFocusMagnification.scale(
+            for: interactionProfile,
+            isFocused: isFocused,
+            isEngaged: isEnabled && (isHovering || isDragging)
+        ))
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isEmphasized)
     }
 
     private func sliderInteractions(

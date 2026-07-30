@@ -177,10 +177,16 @@ final class LightingModule: Module, @unchecked Sendable {
             // ── Glow ──
             ModuleParam("glowEnabled", apply: { s, v in setBool(v) { b in var e = s.glowEffect; e.enabled = b; s.glowEffect = e } }),
             ModuleParam("glowIntensity", apply: { s, v in setFloat(v) { f in var e = s.glowEffect; e.intensity = f; s.glowEffect = e } }),
+            ModuleParam("glowColorR", apply: { s, v in setFloat(v) { f in var e = s.glowEffect; e.color.x = f; s.glowEffect = e } }),
+            ModuleParam("glowColorG", apply: { s, v in setFloat(v) { f in var e = s.glowEffect; e.color.y = f; s.glowEffect = e } }),
+            ModuleParam("glowColorB", apply: { s, v in setFloat(v) { f in var e = s.glowEffect; e.color.z = f; s.glowEffect = e } }),
 
             // ── Bloom ──
             ModuleParam("bloomEnabled", apply: { s, v in setBool(v) { b in var e = s.bloomEffect; e.enabled = b; s.bloomEffect = e } }),
             ModuleParam("bloomStrength", apply: { s, v in setFloat(v) { f in var e = s.bloomEffect; e.strength = f; s.bloomEffect = e } }),
+            ModuleParam("bloomColorR", apply: { s, v in setFloat(v) { f in var e = s.bloomEffect; e.color.x = f; s.bloomEffect = e } }),
+            ModuleParam("bloomColorG", apply: { s, v in setFloat(v) { f in var e = s.bloomEffect; e.color.y = f; s.bloomEffect = e } }),
+            ModuleParam("bloomColorB", apply: { s, v in setFloat(v) { f in var e = s.bloomEffect; e.color.z = f; s.bloomEffect = e } }),
 
             // ── Fog ──
             ModuleParam("fogEnabled", apply: { s, v in setBool(v) { b in var e = s.fogEffect; e.enabled = b; s.fogEffect = e } }),

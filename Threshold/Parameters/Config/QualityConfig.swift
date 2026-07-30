@@ -146,6 +146,24 @@ struct QualityConfig: Codable, Equatable, Sendable {
     /// top-end setting.
     static let visionMaxRenderQuality: Float = 0.7
 
+    /// visionOS HDR display output (EDR parity with the Mac/iOS grading
+    /// overhaul). When true the compositor layer requests `rgba16Float` color —
+    /// the compositor's HDR-renderable format, composited as extended linear
+    /// Display P3 — so glow/bloom/specular energy above SDR white survives to
+    /// the panel instead of clipping at 1.0. The shader already returns
+    /// linear-light values (the 8-bit sRGB drawable merely hardware-encoded
+    /// them), so the SDR body of the image is unchanged. Costs 2x color-target
+    /// bandwidth/memory vs bgra8; flip to false to A/B that against the
+    /// adaptive governor.
+    static let visionHDRColorEnabled = true
+
+    /// EDR headroom Vision Pro exposes for float-format compositor layers, in
+    /// SDR-white units (WWDC23 10089: "xrOS supports an EDR headroom of 2.0").
+    /// CompositorServices has no per-frame headroom query (unlike
+    /// NSScreen/UIScreen on Mac/iOS), so this is a platform constant stamped
+    /// into `ColorSchemeParams.edrHeadroom` whenever the layer is rgba16Float.
+    static let visionEDRHeadroom: Float = 2.0
+
     /// Lowest compositor Render Quality the slider / adaptive governor may reach.
     /// Below the old 0.1 floor so the FPS-holding governor (and manual probing) can
     /// trade more sharpness for headroom on heavy scenes.

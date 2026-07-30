@@ -73,6 +73,7 @@ struct FractalGridView: View {
     var tabSelection: Binding<FractalBrowseTab>? = nil
     @AppStorage("FractalGridView.innerTab") private var storedTabSelection: FractalBrowseTab = .jumpingOff
     @SceneStorage("FractalGridView.selectedStaticSceneID") private var selectedStaticSceneIDRaw: String?
+    @State private var selectedStaticSceneForEdit: FractalPreset?
     private let sceneColumns = [GridItem(.adaptive(minimum: 170, maximum: 280), spacing: 12)]
 
     init(
@@ -150,6 +151,11 @@ struct FractalGridView: View {
         .padding(.bottom, 8)
         .onAppear {
             presetManager?.refreshBundledPresets()
+        }
+        .sheet(item: $selectedStaticSceneForEdit) { preset in
+            if let presetManager {
+                StaticSceneSettingsView(preset: preset, presetManager: presetManager)
+            }
         }
     }
 
@@ -260,7 +266,7 @@ struct FractalGridView: View {
                             systemImage: AppIcons.chevronLeftForwardslashChevronRight,
                             thumbnailData: preset.thumbnailData,
                             isSelected: activeSelection == .staticPreset(preset.id),
-                            onEdit: nil
+                            onEdit: staticSceneEditAction(for: preset)
                         ) {
                             selectStaticScenePreset(preset, using: animationManager)
                         }
@@ -306,7 +312,7 @@ struct FractalGridView: View {
                             systemImage: AppIcons.photo,
                             thumbnailData: preset.thumbnailData,
                             isSelected: activeSelection == .staticPreset(preset.id),
-                            onEdit: nil
+                            onEdit: staticSceneEditAction(for: preset)
                         ) {
                             selectStaticScenePreset(preset, using: animationManager)
                         }
@@ -341,7 +347,7 @@ struct FractalGridView: View {
             )
 
             if staticScenePresets.isEmpty {
-                emptySectionLabel("No mixed-mode scenes yet — save a scene while Mixed immersion is active")
+                emptySectionLabel("No mixed-mode scenes yet — long-press any saved scene and enable Open in Mixed Immersion")
             } else {
                 LazyVGrid(columns: sceneColumns, spacing: 12) {
                     ForEach(Array(staticScenePresets.enumerated()), id: \.offset) { _, preset in
@@ -352,7 +358,7 @@ struct FractalGridView: View {
                             systemImage: AppIcons.photo,
                             thumbnailData: preset.thumbnailData,
                             isSelected: activeSelection == .staticPreset(preset.id),
-                            onEdit: nil
+                            onEdit: staticSceneEditAction(for: preset)
                         ) {
                             selectStaticScenePreset(preset, using: animationManager)
                         }
@@ -398,7 +404,7 @@ struct FractalGridView: View {
                             systemImage: AppIcons.musicNote,
                             thumbnailData: preset.thumbnailData,
                             isSelected: activeSelection == .staticPreset(preset.id),
-                            onEdit: nil
+                            onEdit: staticSceneEditAction(for: preset)
                         ) {
                             selectStaticScenePreset(preset, using: animationManager)
                         }
@@ -433,6 +439,13 @@ struct FractalGridView: View {
 
     private func customScenePresets() -> [FractalPreset] {
         filteredStaticPresets().filter(\.isCustomScenePreset)
+    }
+
+    private func staticSceneEditAction(for preset: FractalPreset) -> (() -> Void)? {
+        guard presetManager != nil else { return nil }
+        return {
+            selectedStaticSceneForEdit = preset
+        }
     }
 
     private func animatedScenes(in animationManager: AnimationManager) -> [AnimationScene] {
@@ -643,6 +656,66 @@ struct FractalGridView: View {
             Image(systemName: systemImage)
                 .font(.subheadline)
                 .frame(width: 18)
+        }
+    }
+}
+
+// MARK: - Static Scene Settings
+
+/// Metadata editor reached by long-pressing any static scene card.
+private struct StaticSceneSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @State var preset: FractalPreset
+    let presetManager: PresetManager
+    @State private var saveError: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Presentation") {
+                    Toggle("Open in Mixed Immersion", isOn: Binding(
+                        get: { preset.mixedModeScene == true },
+                        set: { enabled in
+                            preset.mixedModeScene = enabled
+                            preset.sceneState?.presentation.immersionStyle = nil
+                        }
+                    ))
+
+                    Text("When off, loading this scene preserves your selected Immersive, Window, or Mixed mode.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle(preset.name)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }
+                }
+            }
+        }
+        .alert(
+            "Couldn’t Save Scene",
+            isPresented: Binding(
+                get: { saveError != nil },
+                set: { if !$0 { saveError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(saveError ?? "The scene could not be saved.")
+        }
+    }
+
+    private func save() {
+        switch presetManager.updatePreset(preset) {
+        case .saved, .queuedForStorage:
+            dismiss()
+        case .failed(let detail):
+            saveError = detail
         }
     }
 }

@@ -24,7 +24,61 @@
 //  the caller and passed in. This file is in the Quick Look SHARED_SOURCES set.
 
 import Foundation
+import Metal
 import simd
+
+/// Immutable GPU copy of the bundled 3DBenchy signed-distance volume.
+///
+/// The 64-byte file header is intentionally kept off-GPU; the shader sees only
+/// tightly packed Float16 voxels and reaches them through `gpuAddress`.
+final class BenchySDFGPUAsset: @unchecked Sendable {
+    static let resourceName = "Benchy"
+    static let resourceExtension = "sdfbin"
+    static let headerSize = 64
+    static let expectedVoxelBytes = 96 * 96 * 96 * MemoryLayout<UInt16>.stride
+
+    let buffer: MTLBuffer?
+
+    init(device: MTLDevice, bundle: Bundle = .main) {
+        let url = bundle.url(
+            forResource: Self.resourceName,
+            withExtension: Self.resourceExtension
+        ) ?? bundle.url(
+            forResource: Self.resourceName,
+            withExtension: Self.resourceExtension,
+            subdirectory: "Resources"
+        )
+        guard let url,
+              let data = try? Data(contentsOf: url, options: .mappedIfSafe),
+              data.count == Self.headerSize + Self.expectedVoxelBytes,
+              data.prefix(7) == Data("THRSDF1".utf8)
+        else {
+            buffer = nil
+            return
+        }
+
+        let dimension: UInt32 = data.subdata(in: 8..<12).withUnsafeBytes {
+            $0.loadUnaligned(as: UInt32.self)
+        }
+        guard UInt32(littleEndian: dimension) == UInt32(BENCHY_SDF_DIM) else {
+            buffer = nil
+            return
+        }
+
+        let payload = data.dropFirst(Self.headerSize)
+        buffer = payload.withUnsafeBytes { bytes in
+            guard let baseAddress = bytes.baseAddress else { return nil }
+            return device.makeBuffer(
+                bytes: baseAddress,
+                length: payload.count,
+                options: .storageModeShared
+            )
+        }
+        buffer?.label = "3DBenchy signed-distance volume"
+    }
+
+    var gpuAddress: UInt64 { buffer?.gpuAddress ?? 0 }
+}
 
 /// The per-frame, per-platform inputs the shared `Uniforms` assembler cannot
 /// derive from `(snapshot, effectiveScale, time)` alone. Each caller computes
@@ -90,6 +144,53 @@ struct UniformsPlatformInputs {
     // Scanned-environment scrunch + fractal distance cache (bindless grids).
     var envScrunch: EnvScrunchParams
     var distCache: DistanceCacheParams
+    var benchySDFAddress: UInt64
+}
+
+func packedSceneFields(
+    base: EnvScrunchParams,
+    primitives: [ScenePrimitive],
+    benchySDFAddress: UInt64
+) -> EnvScrunchParams {
+    var result = base
+    result.benchySDFAddress = benchySDFAddress
+
+    let active = Array(primitives.prefix(Int(kMaxScenePrimitives)))
+    withUnsafeMutablePointer(to: &result.scenePrimitives) { tuplePointer in
+        tuplePointer.withMemoryRebound(
+            to: ScenePrimitiveGPU.self,
+            capacity: Int(kMaxScenePrimitives)
+        ) { records in
+            for (index, primitive) in active.enumerated() {
+                let position = SIMD3<Float>(
+                    primitive.position.x.isFinite ? primitive.position.x : 0,
+                    primitive.position.y.isFinite ? primitive.position.y : 0,
+                    primitive.position.z.isFinite ? primitive.position.z : 0
+                )
+                let scale = primitive.scale.isFinite
+                    ? min(max(primitive.scale, 0.01), 30)
+                    : 1
+                let dimensions = simd_clamp(
+                    SIMD3<Float>(
+                        primitive.dimensions.x.isFinite ? primitive.dimensions.x : 1,
+                        primitive.dimensions.y.isFinite ? primitive.dimensions.y : 1,
+                        primitive.dimensions.z.isFinite ? primitive.dimensions.z : 1
+                    ),
+                    SIMD3<Float>(repeating: 0.001),
+                    SIMD3<Float>(repeating: 30)
+                )
+                records[index] = ScenePrimitiveGPU(
+                    positionScale: SIMD4<Float>(position, scale),
+                    dimensionsKind: SIMD4<Float>(
+                        dimensions,
+                        Float(primitive.kind.gpuSelector)
+                    )
+                )
+            }
+        }
+    }
+    result.scenePrimitiveCount = Int32(active.count)
+    return result
 }
 
 /// Manual/fallback Bound to Space transform. Authored dimensions retain their
@@ -140,6 +241,11 @@ func assembleUniforms(settings: RenderSettingsSnapshot,
     // Spring blob navigation widget.
     let springLen = simd_length(settings.springDisplacement)
     let springVisible: Int32 = (settings.springActive || springLen > 0.001) ? 1 : 0
+    let envAndSceneFields = packedSceneFields(
+        base: platform.envScrunch,
+        primitives: settings.scenePrimitives,
+        benchySDFAddress: platform.benchySDFAddress
+    )
 
     return Uniforms(projectionMatrix: platform.projectionMatrix,
                     modelViewMatrix: platform.modelViewMatrix,
@@ -216,7 +322,7 @@ func assembleUniforms(settings: RenderSettingsSnapshot,
                     boundSpaceSize: platform.boundSpaceSize,
                     boundAmbientStrength: platform.boundAmbientStrength,
                     modelToBoundSpaceMatrix: platform.boundSpaceWorldToLocalMatrix * platform.modelToWorldMatrix,
-                    envScrunch: platform.envScrunch,
+                    envScrunch: envAndSceneFields,
                     distCache: platform.distCache,
                     boundingShapeCenter: platform.boundingShapeCenter)
 }

@@ -157,6 +157,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _minDistance: Float = 0.8           // 80% of max (1.0) for quality
     private var _scale: Float = 1.0
     private var _position: SIMD3<Float> = SIMD3<Float>(0.1, 0.1, 0.1)
+    private var _scenePrimitives: [ScenePrimitive] = []
     private var _fractalScale: Float = 2.8
     private var _fractalIterations: Int = 9         // Mid quality default
     private var _maxRaySteps: Int = 64              // Mid quality default
@@ -579,6 +580,18 @@ final class RenderSettings: @unchecked Sendable {
     var position: SIMD3<Float> {
         get { withLock { _position } }
         set { withLock { _position = newValue } }
+    }
+
+    /// Independently placed scene-level SDF objects. The renderer has a fixed
+    /// eight-record ABI; enforce that cap at the settings boundary so UI,
+    /// persistence, previews, and the GPU always agree.
+    var scenePrimitives: [ScenePrimitive] {
+        get { withLock { _scenePrimitives } }
+        set {
+            withLock {
+                _scenePrimitives = Array(newValue.prefix(ScenePrimitive.maximumCount))
+            }
+        }
     }
     
     // --- Two-point grab world rotation (unit quaternion) ---
@@ -2935,8 +2948,18 @@ final class RenderSettings: @unchecked Sendable {
     /// configured tint is rotated through the hue wheel by the accumulated
     /// `_fogHuePhase`; otherwise the raw configured color is returned. Caller must
     /// hold the settings lock (reads `_fogEffect` / `_fogHuePhase` backing values).
+    /// Mirrors `BenchmarkMode.isActive` for targets that don't compile Analytics.
+    private static let isBenchmarkProcess: Bool =
+        ProcessInfo.processInfo.environment["THRESHOLD_BENCHMARK"] == "1"
+
     private func effectiveFogColorLocked() -> SIMD3<Float> {
-        guard _fogEffect.hueRotateEnabled else { return _fogEffect.color }
+        // Benchmark runs must be capture-deterministic: `_fogHuePhase` integrates
+        // ∫speed·dt from launch, so its value at the PNG-capture frame varies with
+        // wall-clock startup timing — the one animation phase benchStableColorScheme
+        // cannot pin (the renderer only ever sees the already-shifted color).
+        // Env read directly (not BenchmarkMode) — that type isn't compiled into
+        // every target this file is.
+        guard _fogEffect.hueRotateEnabled, !Self.isBenchmarkProcess else { return _fogEffect.color }
         let turns = _fogHuePhase / (Float.pi * 2.0)   // radians → [0,1) hue turns
         return Self.shiftHue(_fogEffect.color, byTurns: turns)
     }
@@ -3033,7 +3056,20 @@ final class RenderSettings: @unchecked Sendable {
 
         // C array becomes a tuple in Swift — fill all 8 slots
         let gs = (s0, s1, s2, s3, s4, s5, s6, s7)
-        
+
+        @inline(__always)
+        func packRGB10(_ color: SIMD3<Float>) -> UInt32 {
+            @inline(__always)
+            func channel(_ value: Float) -> UInt32 {
+                let safeValue = value.isFinite ? min(max(value, 0.0), 1.0) : 0.0
+                return UInt32((safeValue * 1023.0).rounded())
+            }
+
+            return channel(color.x)
+                | (channel(color.y) << 10)
+                | (channel(color.z) << 20)
+        }
+
         let animationActivity = _animationActivityFactor
 
         return ColorSchemeParams(
@@ -3086,7 +3122,9 @@ final class RenderSettings: @unchecked Sendable {
             beatFlashIntensity: _beatFlashEffect.intensity * animationActivity,
             // Display state, not artistic: 1 = SDR. The interactive renderer
             // stamps the real per-frame EDR headroom before upload.
-            edrHeadroom: 1.0
+            edrHeadroom: 1.0,
+            glowColorRGB10: packRGB10(_glowEffect.color),
+            bloomColorRGB10: packRGB10(_bloomEffect.color)
         )
     }
     
@@ -3134,6 +3172,7 @@ final class RenderSettings: @unchecked Sendable {
                 minDistance: _minDistance,
                 scale: _scale,
                 position: railPosition,
+                scenePrimitives: _scenePrimitives,
                 linearRailWorldOffset: railOffset,
                 fractalScale: _fractalScale,
                 fractalIterations: _fractalIterations,
@@ -4335,6 +4374,21 @@ final class RenderSettings: @unchecked Sendable {
             let sphereSettled = abs(_sphereRadius - _targetSphereRadius) < geometrySettleThreshold
             let scaleSettled = abs(_fractalScale - _targetFractalScale) < geometrySettleThreshold
             let allGeometrySettled = minDistSettled && foldSettled && sphereSettled && scaleSettled
+
+            // Geometry stability is independent of camera convergence. Canonicalize
+            // settled values here so exact consumers (notably the Mandelbox atlas)
+            // do not see endless sub-threshold float drift while the camera is still
+            // easing toward its own target.
+            if allGeometrySettled && !_isGeometryGestureActive {
+                _minDistance = _targetMinDistance
+                _foldingLimit = _targetFoldingLimit
+                _sphereRadius = _targetSphereRadius
+                _fractalScale = _targetFractalScale
+                _velocityMinDistance = 0.0
+                _velocityFoldingLimit = 0.0
+                _velocitySphereRadius = 0.0
+                _velocityFractalScale = 0.0
+            }
             
             switch _geometryState {
             case .dynamic:
@@ -4656,6 +4710,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.sphereRadius = _sphereRadius
                 c.position = _position
                 c.scale = _scale
+                c.scenePrimitives = _scenePrimitives
                 c.worldRotation = _worldRotation
                 c.detailScale = _detailScale
                 return c
@@ -4671,6 +4726,9 @@ final class RenderSettings: @unchecked Sendable {
                 _sphereRadius = newValue.sphereRadius
                 _position = newValue.position
                 _scale = newValue.scale
+                _scenePrimitives = Array(
+                    newValue.scenePrimitives.prefix(ScenePrimitive.maximumCount)
+                )
                 _worldRotation = newValue.worldRotation
                 _detailScale = newValue.detailScale
             }

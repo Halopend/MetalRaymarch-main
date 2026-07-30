@@ -9,6 +9,100 @@
 import Foundation
 import simd
 
+/// A renderable object in the scene-level SDF union.
+///
+/// The active fractal remains the scene's base field. These objects are placed
+/// independently in model space and unioned with it, which makes exact
+/// multi-object layouts possible without recompiling a formula.
+enum ScenePrimitiveKind: String, Codable, CaseIterable, Sendable {
+    case sphere
+    case box
+    case torus
+    case octahedron
+    case capsule
+    case cylinder
+    case cone
+    case hexagonalPrism
+    case pyramid
+    case tetrahedron
+    case icosahedron
+    case dodecahedron
+    case benchy
+
+    /// Stable shader selector. Persisted kinds use strings, but the GPU ABI is
+    /// numeric and must never be renumbered.
+    var gpuSelector: Int32 {
+        switch self {
+        case .sphere: return 0
+        case .box: return 1
+        case .torus: return 2
+        case .octahedron: return 3
+        case .capsule: return 4
+        case .cylinder: return 5
+        case .cone: return 6
+        case .hexagonalPrism: return 7
+        case .pyramid: return 8
+        case .tetrahedron: return 9
+        case .icosahedron: return 10
+        case .dodecahedron: return 11
+        case .benchy: return 12
+        }
+    }
+
+    /// x/y/z are interpreted by the selected kind (radius, half extents,
+    /// height/radius, and so on). Keeping this fixed-width makes scene files
+    /// forward-compatible and the GPU record compact.
+    var defaultDimensions: SIMD3<Float> {
+        switch self {
+        case .sphere, .octahedron, .tetrahedron, .icosahedron, .dodecahedron:
+            return SIMD3<Float>(1, 0, 0)
+        case .box:
+            return SIMD3<Float>(1, 1, 1)
+        case .torus:
+            return SIMD3<Float>(1, 0.25, 0)
+        case .capsule:
+            return SIMD3<Float>(1, 0.35, 0)
+        case .cylinder:
+            return SIMD3<Float>(1, 0.75, 0)
+        case .cone:
+            return SIMD3<Float>(1, 0.85, 0)
+        case .hexagonalPrism:
+            return SIMD3<Float>(1, 0.85, 0)
+        case .pyramid:
+            return SIMD3<Float>(1.6, 0.9, 0)
+        case .benchy:
+            // The baked asset is canonicalized to roughly 2 × 1.6 × 1 model units.
+            return SIMD3<Float>(1, 0, 0)
+        }
+    }
+}
+
+struct ScenePrimitive: Codable, Equatable, Identifiable, Sendable {
+    /// The fixed shader array avoids a separate bindless allocation per frame.
+    static let maximumCount = 8
+
+    var id: UUID
+    var kind: ScenePrimitiveKind
+    /// Exact model-space placement, intentionally exposed as a typed vector.
+    var position: SIMD3<Float>
+    var scale: Float
+    var dimensions: SIMD3<Float>
+
+    init(
+        id: UUID = UUID(),
+        kind: ScenePrimitiveKind,
+        position: SIMD3<Float> = .zero,
+        scale: Float = 1,
+        dimensions: SIMD3<Float>? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.position = position
+        self.scale = scale
+        self.dimensions = dimensions ?? kind.defaultDimensions
+    }
+}
+
 struct GeometryConfig: Codable, Sendable {
     // Fractal type and formula
     var fractalType: FractalModelType = .mandelbox
@@ -23,6 +117,7 @@ struct GeometryConfig: Codable, Sendable {
     // Position & scale
     var position: SIMD3<Float> = .zero
     var scale: Float = 1.0
+    var scenePrimitives: [ScenePrimitive] = []
 
     // Detail transform (two-point grab)
     var worldRotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
@@ -37,7 +132,7 @@ struct GeometryConfig: Codable, Sendable {
     enum CodingKeys: String, CodingKey {
         case fractalType, formulaParamValues
         case minDistance, fractalScale, foldingLimit, sphereRadius
-        case position, scale
+        case position, scale, scenePrimitives
         case worldRotationX, worldRotationY, worldRotationZ, worldRotationW
         case detailScale
     }
@@ -57,6 +152,7 @@ struct GeometryConfig: Codable, Sendable {
         try c.encode(sphereRadius, forKey: .sphereRadius)
         try c.encode(position, forKey: .position)
         try c.encode(scale, forKey: .scale)
+        try c.encode(scenePrimitives, forKey: .scenePrimitives)
 
         try c.encode(worldRotation.imag.x, forKey: .worldRotationX)
         try c.encode(worldRotation.imag.y, forKey: .worldRotationY)
@@ -84,6 +180,10 @@ struct GeometryConfig: Codable, Sendable {
         sphereRadius = try c.decodeIfPresent(Float.self, forKey: .sphereRadius) ?? 0.5
         position = try c.decodeIfPresent(SIMD3<Float>.self, forKey: .position) ?? .zero
         scale = try c.decodeIfPresent(Float.self, forKey: .scale) ?? 1.0
+        scenePrimitives = Array(
+            (try c.decodeIfPresent([ScenePrimitive].self, forKey: .scenePrimitives) ?? [])
+                .prefix(ScenePrimitive.maximumCount)
+        )
 
         let rx = try c.decodeIfPresent(Float.self, forKey: .worldRotationX) ?? 0
         let ry = try c.decodeIfPresent(Float.self, forKey: .worldRotationY) ?? 0
@@ -108,6 +208,7 @@ extension GeometryConfig: Equatable {
               lhs.sphereRadius == rhs.sphereRadius,
               lhs.position == rhs.position,
               lhs.scale == rhs.scale,
+              lhs.scenePrimitives == rhs.scenePrimitives,
               lhs.detailScale == rhs.detailScale
         else { return false }
 

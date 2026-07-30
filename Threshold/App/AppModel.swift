@@ -146,6 +146,7 @@ class AppModel {
     }
 
     private static let runtimeViewModeDefaultsKey = "AppModel.runtimeViewMode"
+    private nonisolated static let immersionStyleDefaultsKey = "immersionStylePreference"
 
     var immersiveSpaceState = ImmersiveSpaceState.closed
     /// True while the controls are broken out into their own macOS window (via the
@@ -186,17 +187,37 @@ class AppModel {
             default: return .immersive
             }
         }
+
+        /// Scenes may opt into Mixed, but may not otherwise replace the user's
+        /// selected presentation mode.
+        static func resolvedForScene(
+            userPreference: ImmersionStylePreference,
+            isMixedScene: Bool
+        ) -> ImmersionStylePreference {
+            isMixedScene ? .mixed : userPreference
+        }
     }
 
+    /// Last mode chosen directly by the user. A Mixed-authored scene may
+    /// temporarily override the effective style, but it must not replace this
+    /// choice: the next ordinary scene returns to the user's mode.
+    @ObservationIgnored private var userImmersionStylePreference: ImmersionStylePreference =
+        .fromPersisted(UserDefaults.standard.string(forKey: immersionStyleDefaultsKey))
+
     var immersionStylePreference: ImmersionStylePreference =
-        .fromPersisted(UserDefaults.standard.string(forKey: "immersionStylePreference")) {
+        .fromPersisted(UserDefaults.standard.string(forKey: immersionStyleDefaultsKey)) {
         didSet {
-            // A scene's presentation intent is live authored state, not a new
-            // user default. Only an explicit picker change updates the launch
-            // preference; scene/animation application sets the renderer mirror
-            // without feeding back into UserDefaults.
-            if !immersionChangeIsSceneDriven, !SettingsPersistence.benchmarkHermetic {
-                UserDefaults.standard.set(immersionStylePreference.rawValue, forKey: "immersionStylePreference")
+            // A scene's explicit Mixed opt-in is a temporary presentation
+            // override, not a new user default. Only a picker change updates the
+            // sticky session/launch preference.
+            if !immersionChangeIsSceneDriven {
+                userImmersionStylePreference = immersionStylePreference
+                if !SettingsPersistence.benchmarkHermetic {
+                    UserDefaults.standard.set(
+                        immersionStylePreference.rawValue,
+                        forKey: Self.immersionStyleDefaultsKey
+                    )
+                }
             }
             immersionStyleForRenderer = immersionStylePreference
             // Containment follows immersion. Entering Mixed resets to the safe,
@@ -229,14 +250,30 @@ class AppModel {
         }
     }
 
-    /// True while a scene load is driving `immersionStylePreference`, so the
-    /// didSet doesn't clobber the bounding fields the scene apply just set.
-    @ObservationIgnored var immersionChangeIsSceneDriven = false
+    /// True while a scene load is applying its explicit Mixed override (or
+    /// returning from one to the user's sticky preference), so didSet doesn't
+    /// persist it or clobber the containment fields applied by the scene.
+    @ObservationIgnored private var immersionChangeIsSceneDriven = false
+
+    /// Applies the only presentation override a scene is allowed to carry.
+    /// Ordinary scenes preserve/restore the user's last explicit picker choice;
+    /// scenes marked Mixed temporarily request passthrough presentation.
+    func applySceneImmersionPreference(isMixedScene: Bool) {
+        let resolvedStyle = ImmersionStylePreference.resolvedForScene(
+            userPreference: userImmersionStylePreference,
+            isMixedScene: isMixedScene
+        )
+        guard immersionStylePreference != resolvedStyle else { return }
+
+        immersionChangeIsSceneDriven = true
+        defer { immersionChangeIsSceneDriven = false }
+        immersionStylePreference = resolvedStyle
+    }
 
     /// Mirror of `immersionStylePreference` readable from the render loop off
     /// the MainActor (same pattern as runtimeViewModeForRenderer).
     @ObservationIgnored nonisolated(unsafe) var immersionStyleForRenderer: ImmersionStylePreference =
-        .fromPersisted(UserDefaults.standard.string(forKey: "immersionStylePreference"))
+        .fromPersisted(UserDefaults.standard.string(forKey: immersionStyleDefaultsKey))
 
     // App activity state (used to avoid submitting GPU work while backgrounded)
     // @ObservationIgnored + nonisolated(unsafe) allows cross-thread access without @Observable macro interference

@@ -1,0 +1,1774 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Threshold Space Transformations Explorer</title>
+<style>:root{color-scheme:light dark;background:light-dark(rgb(255 255 255), rgb(24 24 24))}html,body{margin:0}body{box-sizing:border-box;padding:1rem;background:inherit}iframe{display:block;width:100%;height:calc(100vh - 2rem);margin:0 auto;border:0}</style>
+</head>
+<body>
+<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" title="Threshold Space Transformations Explorer" srcdoc="&lt;!doctype html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;meta name=&quot;referrer&quot; content=&quot;no-referrer&quot;&gt;
+&lt;meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27; &#x27;unsafe-eval&#x27; &#x27;wasm-unsafe-eval&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src &#x27;unsafe-inline&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src &#x27;none&#x27;; object-src &#x27;none&#x27;; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;&quot;&gt;
+&lt;title&gt;Threshold Space Transformations Explorer&lt;/title&gt;
+&lt;style&gt;:root {
+  color-scheme: light dark;
+  background-color: var(
+    --background,
+    var(--color-background-primary, light-dark(rgb(255 255 255), rgb(24 24 24)))
+  ) !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: var(
+    --color-background-primary,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --card: color-mix(in oklab, var(--foreground) 5%, transparent);
+  --card-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --popover: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255), rgb(45 45 45))
+  );
+  --popover-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --primary: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --primary-foreground: var(
+    --color-text-inverse,
+    light-dark(rgb(255 255 255), rgb(13 13 13))
+  );
+  --secondary: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%))
+  );
+  --secondary-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: var(
+    --color-text-secondary,
+    light-dark(rgb(26 28 31 / 49.4%), rgb(255 255 255 / 49.8%))
+  );
+  --accent: var(
+    --color-background-info,
+    light-dark(rgb(229 242 255), rgb(13 39 63))
+  );
+  --accent-foreground: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --destructive: var(
+    --color-text-warning,
+    light-dark(rgb(226 85 7), rgb(255 133 73))
+  );
+  --border: var(
+    --color-border-secondary,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+  --input: var(
+    --color-border-primary,
+    light-dark(
+      rgb(26 28 31 / 11.8%),
+      color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+    )
+  );
+  --ring: var(
+    --color-ring-primary,
+    light-dark(rgb(51 156 255), rgb(131 195 255 / 76%))
+  );
+  --font-size-base: var(--font-text-md-size, 14px);
+  --red: light-dark(rgb(186 38 35), rgb(250 66 62));
+  --green: light-dark(rgb(0 162 64), rgb(64 201 119));
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
+  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
+  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
+  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
+  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, &quot;Segoe UI&quot;, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;,
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --radius: var(--border-radius-lg, 12.5px);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url(&quot;data:image/svg+xml,%3Csvg xmlns=&#x27;http://www.w3.org/2000/svg&#x27; viewBox=&#x27;0 0 17 17&#x27;%3E%3Cpath d=&#x27;M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z&#x27;/%3E%3C/svg%3E&quot;);
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+}
+
+:root[data-theme=&quot;light&quot;] {
+  color-scheme: light;
+}
+
+:root[data-theme=&quot;dark&quot;] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html &gt; body {
+  /* Preserve MCP aliases for older inline renderers without creating :root cycles. */
+  --color-background-primary: var(
+    --background,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --color-text-primary: var(
+    --foreground,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --color-border-secondary: var(
+    --border,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+
+  margin: 0;
+  padding: 5px;
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--font-weight-medium, 500);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+}
+
+.table :is(th, td) {
+  padding-block: 10px;
+  padding-inline: 0 24px;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.table-responsive &gt; .table :is(th, td) {
+  overflow-wrap: break-word;
+}
+
+.table :is(th, td):last-child {
+  padding-inline-end: 0;
+}
+
+.table :is(caption, thead th) {
+  font-weight: 600;
+}
+
+.table thead th {
+  padding-block: 8px;
+  border-bottom-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+
+.table tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+.table.table-sm :is(th, td) {
+  padding-block: 6px;
+}
+
+.table.table-sm :is(th, td):not(:last-child) {
+  padding-inline-end: 16px;
+}
+
+.table :is(.text-end, [align=&quot;right&quot;]) {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.table :is(.text-center, [align=&quot;center&quot;]) {
+  text-align: center;
+}
+
+.table .text-nowrap {
+  white-space: nowrap;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  corner-shape: superellipse(1.5);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget &gt; :not(.card) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls &gt; .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls &gt; .form-label &gt; :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--foreground);
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type=&quot;file&quot;] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type=&quot;file&quot;]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type=&quot;file&quot;]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type=&quot;color&quot;] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+  corner-shape: superellipse(1.5);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type=&quot;checkbox&quot;]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: &quot;&quot;;
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type=&quot;radio&quot;] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type=&quot;radio&quot;]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: &quot;&quot;;
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+    [aria-pressed=&quot;true&quot;],
+    [aria-selected=&quot;true&quot;],
+    .is-selected
+  ) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed=&quot;true&quot;], [aria-selected=&quot;true&quot;], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget &gt; svg {
+  width: 100%;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+
+html&gt;body{padding:0}&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div id=&quot;space-transformations-explorer&quot;&gt;
+  &lt;style&gt;
+    #space-transformations-explorer .warp-stage {
+      display: block;
+      width: 100%;
+      height: auto;
+      overflow: visible;
+    }
+    #space-transformations-explorer .warp-original {
+      fill: none;
+      stroke: var(--muted-foreground);
+      stroke-width: 1;
+      opacity: 0.22;
+    }
+    #space-transformations-explorer .warp-result {
+      fill: none;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      opacity: 0.9;
+    }
+    #space-transformations-explorer .warp-x { stroke: var(--viz-series-1); }
+    #space-transformations-explorer .warp-y { stroke: var(--viz-series-2); }
+    #space-transformations-explorer .warp-z { stroke: var(--viz-series-3); }
+    #space-transformations-explorer .warp-axis {
+      fill: none;
+      stroke: var(--foreground);
+      stroke-width: 1.25;
+      opacity: 0.45;
+    }
+    #space-transformations-explorer .warp-label {
+      fill: var(--foreground);
+      font-weight: 500;
+    }
+    #space-transformations-explorer .warp-caption {
+      fill: var(--muted-foreground);
+    }
+    #space-transformations-explorer .warp-flow {
+      justify-content: center;
+    }
+    #space-transformations-explorer .warp-flow-arrow {
+      color: var(--muted-foreground);
+    }
+    #space-transformations-explorer .warp-equation {
+      overflow-wrap: anywhere;
+    }
+  &lt;/style&gt;
+
+  &lt;div class=&quot;viz-row warp-flow&quot; aria-label=&quot;Domain transformation pipeline&quot;&gt;
+    &lt;span class=&quot;viz-badge&quot;&gt;&lt;code&gt;world point p&lt;/code&gt;&lt;/span&gt;
+    &lt;span class=&quot;warp-flow-arrow&quot; aria-hidden=&quot;true&quot;&gt;→&lt;/span&gt;
+    &lt;span class=&quot;viz-badge&quot;&gt;&lt;code&gt;T(p)&lt;/code&gt;&lt;/span&gt;
+    &lt;span class=&quot;warp-flow-arrow&quot; aria-hidden=&quot;true&quot;&gt;→&lt;/span&gt;
+    &lt;span class=&quot;viz-badge&quot;&gt;&lt;code&gt;DE(T(p))&lt;/code&gt;&lt;/span&gt;
+    &lt;span class=&quot;warp-flow-arrow&quot; aria-hidden=&quot;true&quot;&gt;→&lt;/span&gt;
+    &lt;span class=&quot;viz-badge&quot;&gt;&lt;code&gt;distance ÷ stretch&lt;/code&gt;&lt;/span&gt;
+  &lt;/div&gt;
+
+  &lt;div class=&quot;viz-controls&quot;&gt;
+    &lt;label class=&quot;form-label&quot; for=&quot;stx-kind&quot;&gt;
+      Transformation
+      &lt;select class=&quot;form-select&quot; id=&quot;stx-kind&quot;&gt;
+        &lt;optgroup label=&quot;Mirrors &amp;amp; folds&quot;&gt;
+          &lt;option value=&quot;mirror&quot;&gt;Mirror Fold&lt;/option&gt;
+          &lt;option value=&quot;boxFold&quot;&gt;Box Fold&lt;/option&gt;
+          &lt;option value=&quot;planeFold&quot;&gt;Plane Fold&lt;/option&gt;
+          &lt;option value=&quot;kaleidoscope&quot;&gt;Kaleidoscope&lt;/option&gt;
+          &lt;option value=&quot;mengerFold&quot;&gt;Menger Fold&lt;/option&gt;
+          &lt;option value=&quot;offsetFold&quot;&gt;Offset Fold&lt;/option&gt;
+        &lt;/optgroup&gt;
+        &lt;optgroup label=&quot;Space cutting&quot;&gt;
+          &lt;option value=&quot;coxeter&quot;&gt;Coxeter&lt;/option&gt;
+          &lt;option value=&quot;icosahedralCut&quot;&gt;Icosahedral Space Cut&lt;/option&gt;
+        &lt;/optgroup&gt;
+        &lt;optgroup label=&quot;Spherical &amp;amp; radial&quot;&gt;
+          &lt;option value=&quot;sphereFold&quot;&gt;Sphere Fold&lt;/option&gt;
+          &lt;option value=&quot;inversion&quot;&gt;Sphere Inversion&lt;/option&gt;
+          &lt;option value=&quot;tubeFold&quot;&gt;Tube Fold&lt;/option&gt;
+          &lt;option value=&quot;shells&quot;&gt;Shells&lt;/option&gt;
+          &lt;option value=&quot;compressionShells&quot;&gt;Compression Shells&lt;/option&gt;
+        &lt;/optgroup&gt;
+        &lt;optgroup label=&quot;Self-similar repeats&quot;&gt;
+          &lt;option value=&quot;scaleRepeat&quot;&gt;Scale Repeat&lt;/option&gt;
+          &lt;option value=&quot;tiling&quot;&gt;Tiling&lt;/option&gt;
+          &lt;option value=&quot;scale&quot;&gt;Scale&lt;/option&gt;
+          &lt;option value=&quot;mandelboxStep&quot;&gt;Mandelbox Step&lt;/option&gt;
+        &lt;/optgroup&gt;
+        &lt;optgroup label=&quot;Bend &amp;amp; wave&quot;&gt;
+          &lt;option value=&quot;twist&quot; selected&gt;Twist&lt;/option&gt;
+          &lt;option value=&quot;bend&quot;&gt;Bend&lt;/option&gt;
+          &lt;option value=&quot;ripple&quot;&gt;Ripple&lt;/option&gt;
+        &lt;/optgroup&gt;
+      &lt;/select&gt;
+    &lt;/label&gt;
+
+    &lt;label class=&quot;form-label&quot; for=&quot;stx-strength&quot;&gt;
+      &lt;span id=&quot;stx-strength-label&quot;&gt;Twist&lt;/span&gt;
+      &lt;span id=&quot;stx-strength-value&quot;&gt;0.60&lt;/span&gt;
+      &lt;input class=&quot;form-range&quot; id=&quot;stx-strength&quot; type=&quot;range&quot;&gt;
+    &lt;/label&gt;
+
+    &lt;label class=&quot;form-label&quot; for=&quot;stx-p1&quot; id=&quot;stx-p1-wrap&quot;&gt;
+      &lt;span id=&quot;stx-p1-label&quot;&gt;Parameter 1&lt;/span&gt;
+      &lt;span id=&quot;stx-p1-value&quot;&gt;&lt;/span&gt;
+      &lt;input class=&quot;form-range&quot; id=&quot;stx-p1&quot; type=&quot;range&quot;&gt;
+    &lt;/label&gt;
+
+    &lt;label class=&quot;form-label&quot; for=&quot;stx-p2&quot; id=&quot;stx-p2-wrap&quot;&gt;
+      &lt;span id=&quot;stx-p2-label&quot;&gt;Parameter 2&lt;/span&gt;
+      &lt;span id=&quot;stx-p2-value&quot;&gt;&lt;/span&gt;
+      &lt;input class=&quot;form-range&quot; id=&quot;stx-p2&quot; type=&quot;range&quot;&gt;
+    &lt;/label&gt;
+
+    &lt;label class=&quot;form-label&quot; for=&quot;stx-axis&quot; id=&quot;stx-axis-wrap&quot;&gt;
+      &lt;span id=&quot;stx-axis-label&quot;&gt;Axis&lt;/span&gt;
+      &lt;select class=&quot;form-select&quot; id=&quot;stx-axis&quot;&gt;
+        &lt;option value=&quot;x&quot;&gt;X&lt;/option&gt;
+        &lt;option value=&quot;y&quot; selected&gt;Y&lt;/option&gt;
+        &lt;option value=&quot;z&quot;&gt;Z&lt;/option&gt;
+      &lt;/select&gt;
+    &lt;/label&gt;
+  &lt;/div&gt;
+
+  &lt;div class=&quot;viz-controls&quot;&gt;
+    &lt;div class=&quot;form-check form-switch&quot;&gt;
+      &lt;input class=&quot;form-check-input&quot; id=&quot;stx-show-input&quot; type=&quot;checkbox&quot; checked&gt;
+      &lt;label class=&quot;form-check-label&quot; for=&quot;stx-show-input&quot;&gt;Input-grid overlay&lt;/label&gt;
+    &lt;/div&gt;
+    &lt;div class=&quot;form-check form-switch&quot;&gt;
+      &lt;input class=&quot;form-check-input&quot; id=&quot;stx-show-axes&quot; type=&quot;checkbox&quot; checked&gt;
+      &lt;label class=&quot;form-check-label&quot; for=&quot;stx-show-axes&quot;&gt;Coordinate axes&lt;/label&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;svg class=&quot;warp-stage&quot; id=&quot;stx-stage&quot; viewBox=&quot;0 0 736 390&quot; role=&quot;img&quot; aria-labelledby=&quot;stx-svg-title stx-svg-desc&quot;&gt;
+    &lt;title id=&quot;stx-svg-title&quot;&gt;Interactive three-dimensional domain transformation&lt;/title&gt;
+    &lt;desc id=&quot;stx-svg-desc&quot;&gt;The optional neutral overlay is the original coordinate cage. Colored lines show the transformed cage: X-directed lines use the first series color, Y-directed lines the second, and Z-directed lines the third.&lt;/desc&gt;
+    &lt;g id=&quot;stx-original&quot;&gt;&lt;/g&gt;
+    &lt;g id=&quot;stx-result&quot;&gt;&lt;/g&gt;
+    &lt;g id=&quot;stx-axes&quot;&gt;&lt;/g&gt;
+    &lt;text class=&quot;warp-caption text-small&quot; x=&quot;18&quot; y=&quot;374&quot; id=&quot;stx-overlay-label&quot;&gt;neutral: input-grid overlay&lt;/text&gt;
+    &lt;text class=&quot;warp-label text-small&quot; x=&quot;664&quot; y=&quot;40&quot;&gt;X&lt;/text&gt;
+    &lt;text class=&quot;warp-label text-small&quot; x=&quot;371&quot; y=&quot;28&quot;&gt;Y&lt;/text&gt;
+    &lt;text class=&quot;warp-label text-small&quot; x=&quot;91&quot; y=&quot;96&quot;&gt;Z&lt;/text&gt;
+  &lt;/svg&gt;
+
+  &lt;div class=&quot;text-small text-muted&quot; id=&quot;stx-live&quot; aria-live=&quot;polite&quot;&gt;&lt;/div&gt;
+
+  &lt;div class=&quot;table-responsive&quot;&gt;
+    &lt;table class=&quot;table table-sm&quot; aria-label=&quot;Selected transformation explanation&quot;&gt;
+      &lt;tbody&gt;
+        &lt;tr&gt;
+          &lt;th scope=&quot;row&quot;&gt;Geometric idea&lt;/th&gt;
+          &lt;td id=&quot;stx-idea&quot;&gt;&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+          &lt;th scope=&quot;row&quot;&gt;Equation&lt;/th&gt;
+          &lt;td&gt;&lt;code class=&quot;warp-equation&quot; id=&quot;stx-equation&quot;&gt;&lt;/code&gt;&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+          &lt;th scope=&quot;row&quot;&gt;Distance estimate&lt;/th&gt;
+          &lt;td id=&quot;stx-distance&quot;&gt;&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+          &lt;th scope=&quot;row&quot;&gt;Useful with&lt;/th&gt;
+          &lt;td id=&quot;stx-pairs&quot;&gt;&lt;/td&gt;
+        &lt;/tr&gt;
+      &lt;/tbody&gt;
+    &lt;/table&gt;
+  &lt;/div&gt;
+
+  &lt;div class=&quot;text-small text-muted&quot;&gt;
+    Stack order is left-to-right: a later transformation receives the coordinates produced by every earlier one. Because the point domain is transformed, scaling the coordinates up makes the visible object appear smaller.
+  &lt;/div&gt;
+
+  &lt;script&gt;
+    (() =&gt; {
+      const root = document.getElementById(&quot;space-transformations-explorer&quot;);
+      const kindSelect = root.querySelector(&quot;#stx-kind&quot;);
+      const strength = root.querySelector(&quot;#stx-strength&quot;);
+      const p1 = root.querySelector(&quot;#stx-p1&quot;);
+      const p2 = root.querySelector(&quot;#stx-p2&quot;);
+      const axisSelect = root.querySelector(&quot;#stx-axis&quot;);
+      const showInput = root.querySelector(&quot;#stx-show-input&quot;);
+      const showAxes = root.querySelector(&quot;#stx-show-axes&quot;);
+      const strengthLabel = root.querySelector(&quot;#stx-strength-label&quot;);
+      const strengthValue = root.querySelector(&quot;#stx-strength-value&quot;);
+      const p1Wrap = root.querySelector(&quot;#stx-p1-wrap&quot;);
+      const p2Wrap = root.querySelector(&quot;#stx-p2-wrap&quot;);
+      const axisWrap = root.querySelector(&quot;#stx-axis-wrap&quot;);
+      const p1Label = root.querySelector(&quot;#stx-p1-label&quot;);
+      const p2Label = root.querySelector(&quot;#stx-p2-label&quot;);
+      const p1Value = root.querySelector(&quot;#stx-p1-value&quot;);
+      const p2Value = root.querySelector(&quot;#stx-p2-value&quot;);
+      const axisLabel = root.querySelector(&quot;#stx-axis-label&quot;);
+      const originalGroup = root.querySelector(&quot;#stx-original&quot;);
+      const resultGroup = root.querySelector(&quot;#stx-result&quot;);
+      const axesGroup = root.querySelector(&quot;#stx-axes&quot;);
+      const overlayLabel = root.querySelector(&quot;#stx-overlay-label&quot;);
+      const live = root.querySelector(&quot;#stx-live&quot;);
+      const idea = root.querySelector(&quot;#stx-idea&quot;);
+      const equation = root.querySelector(&quot;#stx-equation&quot;);
+      const distance = root.querySelector(&quot;#stx-distance&quot;);
+      const pairs = root.querySelector(&quot;#stx-pairs&quot;);
+      const ns = &quot;http://www.w3.org/2000/svg&quot;;
+
+      const specs = {
+        mirror: {
+          name: &quot;Mirror Fold&quot;, verb: &quot;Fold&quot;, strength: [0, 1, 0.01, 1],
+          note: &quot;Negative coordinates collapse into the positive octant.&quot;,
+          equation: &quot;p′ = mix(p, |p|, s)&quot;,
+          distance: &quot;An absolute-value reflection is isometric; no DE divisor is needed.&quot;,
+          pairs: &quot;Scale, Offset Fold, Menger Fold&quot;
+        },
+        boxFold: {
+          name: &quot;Box Fold&quot;, verb: &quot;Fold&quot;, strength: [0, 1, 0.01, 1],
+          p1: [&quot;Fold limit&quot;, 0.25, 2, 0.01, 1],
+          p2: [&quot;Hall of mirrors&quot;, 0, 1, 1, 0],
+          note: &quot;Coordinates outside the box reflect inward; repeating mode creates a triangle-wave mirror lattice.&quot;,
+          equation: &quot;p′ = 2·clamp(p, −L, L) − p&quot;,
+          distance: &quot;Each branch has slope ±1, so the full fold is distance-preserving.&quot;,
+          pairs: &quot;Sphere Fold, Scale, Mandelbox feedback&quot;
+        },
+        planeFold: {
+          name: &quot;Plane Fold&quot;, verb: &quot;Fold&quot;, strength: [0, 1, 0.01, 1],
+          p1: [&quot;Distance&quot;, -1.5, 1.5, 0.01, 0], axis: &quot;Plane normal&quot;,
+          note: &quot;Only the half-space behind an aimed plane reflects.&quot;,
+          equation: &quot;if p·n &lt; d: p′ = p − 2s(p·n − d)n&quot;,
+          distance: &quot;A full-strength plane reflection is isometric.&quot;,
+          pairs: &quot;Other Plane Folds, Scale, Scale Repeat&quot;
+        },
+        kaleidoscope: {
+          name: &quot;Kaleidoscope&quot;, verb: &quot;Fold&quot;, strength: [0, 1, 0.01, 1],
+          p1: [&quot;Segments&quot;, 2, 16, 1, 6],
+          note: &quot;The XZ polar angle folds into one repeating wedge.&quot;,
+          equation: &quot;φ′ = mod(|φ| + π/N, 2π/N) − π/N&quot;,
+          distance: &quot;Angular reflections preserve local distance away from wedge seams.&quot;,
+          pairs: &quot;Tiling, Twist, Tube Fold&quot;
+        },
+        mengerFold: {
+          name: &quot;Menger Fold&quot;, verb: &quot;Fold&quot;, strength: [0, 1, 0.01, 1],
+          note: &quot;Absolute values fold to one octant, then coordinates sort from largest to smallest.&quot;,
+          equation: &quot;p′ = mix(p, sort↓(|p|), s)&quot;,
+          distance: &quot;Absolute values and coordinate permutations are isometries.&quot;,
+          pairs: &quot;Scale, Offset Fold, another Menger Fold&quot;
+        },
+        offsetFold: {
+          name: &quot;Offset Fold&quot;, verb: &quot;Fold&quot;, strength: [0, 1, 0.01, 1], axis: &quot;Offset direction&quot;,
+          note: &quot;An off-origin absolute-value crease breaks the symmetry of a plain mirror fold.&quot;,
+          equation: &quot;p′ = mix(p, |p + c|, s)&quot;,
+          distance: &quot;Translation plus reflection does not stretch distance.&quot;,
+          pairs: &quot;Menger Fold, Scale, Box Fold&quot;
+        },
+        coxeter: {
+          name: &quot;Coxeter&quot;, verb: &quot;Mirror&quot;, strength: [0, 1, 0.01, 1],
+          p1: [&quot;p&quot;, 2, 8, 1, 5], p2: [&quot;q&quot;, 2, 8, 1, 3],
+          note: &quot;Three mirror planes repeatedly fold space into a {p,q} fundamental chamber.&quot;,
+          equation: &quot;rₙ(x) = x − 2·min(0, x·n)n&quot;,
+          distance: &quot;Every chamber step is a reflection, so the DE scale remains 1.&quot;,
+          pairs: &quot;Sphere Fold, Scale Repeat, radial primitives&quot;
+        },
+        icosahedralCut: {
+          name: &quot;Icosahedral Space Cut&quot;, verb: &quot;Cut&quot;, strength: [0, 1, 0.01, 1],
+          note: &quot;A fixed {5,3} Coxeter fold maps space into one icosahedral chamber.&quot;,
+          equation: &quot;I₅,₃(x) = (rₙ₂ ∘ rₙ₁ ∘ rₙ₀)ᵏ(x)&quot;,
+          distance: &quot;The fixed chamber is built entirely from reflections.&quot;,
+          pairs: &quot;Sphere Fold, Scale Repeat, Compression Shells&quot;
+        },
+        sphereFold: {
+          name: &quot;Sphere Fold&quot;, verb: &quot;Fold&quot;, strength: [0, 1, 0.01, 1],
+          p1: [&quot;Minimum radius&quot;, 0.1, 1.5, 0.01, 0.5],
+          p2: [&quot;Maximum radius&quot;, 0.2, 2.5, 0.01, 1],
+          note: &quot;The core inflates outward while points beyond the maximum radius remain unchanged.&quot;,
+          equation: &quot;p′ = k(|p|²)p; k = max²/min² or max²/|p|² or 1&quot;,
+          distance: &quot;The renderer divides by the selected radial scale factor.&quot;,
+          pairs: &quot;Box Fold, Scale, Coxeter&quot;
+        },
+        inversion: {
+          name: &quot;Sphere Inversion&quot;, verb: &quot;Invert&quot;, strength: [0, 1, 0.01, 1],
+          p1: [&quot;Radius&quot;, 0.2, 2.5, 0.01, 1],
+          note: &quot;Radius maps roughly to R²/r, exchanging near and far.&quot;,
+          equation: &quot;p′ = p·clamp(R²/|p|², 0.05, 20)&quot;,
+          distance: &quot;The inversion factor is accumulated as a conservative DE divisor.&quot;,
+          pairs: &quot;Shells, Mirror Fold, Scale Repeat&quot;
+        },
+        tubeFold: {
+          name: &quot;Tube Fold&quot;, verb: &quot;Fold&quot;, strength: [0, 1, 0.01, 1],
+          p1: [&quot;Inner radius&quot;, 0.1, 1.5, 0.01, 0.5],
+          p2: [&quot;Outer radius&quot;, 0.2, 2.5, 0.01, 1],
+          note: &quot;A sphere fold in XZ only leaves Y unchanged, producing tube-like structure.&quot;,
+          equation: &quot;(x′,z′) = k(x²+z²)(x,z); y′ = y&quot;,
+          distance: &quot;The XZ radial scale becomes the DE divisor.&quot;,
+          pairs: &quot;Kaleidoscope, Twist, Tiling&quot;
+        },
+        shells: {
+          name: &quot;Shells&quot;, verb: &quot;Fold&quot;, strength: [0, 1, 0.01, 1],
+          p1: [&quot;Spacing&quot;, 0.2, 3, 0.01, 1],
+          note: &quot;Radius becomes a repeating triangle wave, creating equal-width concentric copies.&quot;,
+          equation: &quot;r′ = |r − d·round(r/d)|; p′ = (r′/r)p&quot;,
+          distance: &quot;Its radial slope is ±1 and tangential scale is at most 1.&quot;,
+          pairs: &quot;Sphere Inversion, Mirror Fold, Coxeter&quot;
+        },
+        compressionShells: {
+          name: &quot;Compression Shells&quot;, verb: &quot;Compression&quot;, strength: [0, 1.5, 0.01, 0.7],
+          p1: [&quot;Outer radius&quot;, 0.5, 3, 0.01, 2],
+          p2: [&quot;Region width&quot;, 0.02, 0.12, 0.005, 0.08],
+          note: &quot;Four compact radial bands alternately push and pull at golden-ratio-related scales.&quot;,
+          equation: &quot;r′ = r + (s/3)Σ(−1)ⁱwᵢbᵢ(r)&quot;,
+          distance: &quot;A conservative bound of 1 + strength covers the smooth shoulders.&quot;,
+          pairs: &quot;Icosahedral Cut, Scale Repeat, Sphere Fold&quot;
+        },
+        scaleRepeat: {
+          name: &quot;Scale Repeat&quot;, verb: &quot;Repeat&quot;, strength: [0, 1, 0.01, 1],
+          p1: [&quot;Scale factor&quot;, 1.1, 4, 0.01, 2],
+          note: &quot;Log-radius octaves map into one base band, making growing self-similar copies.&quot;,
+          equation: &quot;p′ = p·s^(−⌊logₛ|p|⌋)&quot;,
+          distance: &quot;Each octave is a uniform scale; its factor becomes the DE divisor.&quot;,
+          pairs: &quot;Coxeter, Plane Fold, Sphere Fold&quot;
+        },
+        tiling: {
+          name: &quot;Tiling&quot;, verb: &quot;Repeat&quot;, strength: [0, 1, 0.01, 1],
+          p1: [&quot;Cell size&quot;, 0.5, 4, 0.01, 2],
+          note: &quot;Each coordinate wraps into a centered Cartesian cell.&quot;,
+          equation: &quot;p′ = p − L·round(p/L)&quot;,
+          distance: &quot;Within each cell this is only a translation.&quot;,
+          pairs: &quot;Kaleidoscope, Twist, analytic primitives&quot;
+        },
+        scale: {
+          name: &quot;Scale&quot;, verb: &quot;Scale&quot;, strength: [-3, 3, 0.01, 1.6],
+          note: &quot;The query domain scales uniformly; the visible object&#x27;s scale changes inversely.&quot;,
+          equation: &quot;p′ = s·p&quot;,
+          distance: &quot;Distance is divided by |s| so ray steps remain conservative.&quot;,
+          pairs: &quot;Any fold; especially Menger and Plane Fold&quot;
+        },
+        mandelboxStep: {
+          name: &quot;Mandelbox Step&quot;, verb: &quot;Scale&quot;, strength: [-3, 3, 0.01, -1.5],
+          p1: [&quot;Fold limit&quot;, 0.25, 2, 0.01, 1],
+          p2: [&quot;Minimum radius&quot;, 0.05, 0.99, 0.01, 0.5],
+          note: &quot;Box fold, sphere fold, signed scale, then add the original sample point.&quot;,
+          equation: &quot;zₙ₊₁ = scale·sphereFold(boxFold(zₙ)) + p₀&quot;,
+          distance: &quot;Its derivative recurrence is affine: de′ = |local scale|·de + de₀.&quot;,
+          pairs: &quot;Mandelbox Seed or repeated grouped steps&quot;
+        },
+        twist: {
+          name: &quot;Twist&quot;, verb: &quot;Twist&quot;, strength: [0, 2, 0.01, 0.6], axis: &quot;Axis&quot;,
+          note: &quot;Rotation angle grows with distance along the axis.&quot;,
+          equation: &quot;p′ = Rₐ(1.5s·p·a)p&quot;,
+          distance: &quot;The implementation treats the twist as a domain warp without an extra divisor.&quot;,
+          pairs: &quot;Tiling, Kaleidoscope, Tube Fold&quot;
+        },
+        bend: {
+          name: &quot;Bend&quot;, verb: &quot;Bend&quot;, strength: [0, 2, 0.01, 0.6], axis: &quot;Axis&quot;,
+          note: &quot;Curvature grows with distance away from the axis.&quot;,
+          equation: &quot;θ = 1.5s|p⊥|; rotate the axial distance by θ&quot;,
+          distance: &quot;The current stack uses the default DE scale of 1.&quot;,
+          pairs: &quot;Scale, Tiling, simple analytic primitives&quot;
+        },
+        ripple: {
+          name: &quot;Ripple&quot;, verb: &quot;Ripple&quot;, strength: [0, 2, 0.01, 0.6],
+          p1: [&quot;Frequency&quot;, 0.1, 8, 0.01, 2], axis: &quot;Axis&quot;,
+          note: &quot;A sine wave displaces coordinates back and forth along the axis.&quot;,
+          equation: &quot;p′ = p + a·s·sin(f·p·a)&quot;,
+          distance: &quot;The current stack uses the default DE scale of 1.&quot;,
+          pairs: &quot;Tiling, Shells, Scale&quot;
+        }
+      };
+
+      const clamp = (x, a, b) =&gt; Math.max(a, Math.min(b, x));
+      const mix = (a, b, t) =&gt; a.map((v, i) =&gt; v * (1 - t) + b[i] * t);
+      const dot = (a, b) =&gt; a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+      const len = a =&gt; Math.hypot(a[0], a[1], a[2]);
+      const mul = (a, s) =&gt; a.map(v =&gt; v * s);
+      const sub = (a, b) =&gt; a.map((v, i) =&gt; v - b[i]);
+      const add = (a, b) =&gt; a.map((v, i) =&gt; v + b[i]);
+      const cross = (a, b) =&gt; [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0]
+      ];
+      const axis = () =&gt; axisSelect.value === &quot;x&quot; ? [1, 0, 0] : axisSelect.value === &quot;z&quot; ? [0, 0, 1] : [0, 1, 0];
+      const smoothstep = (a, b, x) =&gt; {
+        const t = clamp((x - a) / (b - a), 0, 1);
+        return t * t * (3 - 2 * t);
+      };
+      const rodrigues = (p, a, angle) =&gt; {
+        const c = Math.cos(angle);
+        const s = Math.sin(angle);
+        return add(add(mul(p, c), mul(cross(a, p), s)), mul(a, dot(a, p) * (1 - c)));
+      };
+      const coxeterFold = (p, pp, qq) =&gt; {
+        const sp = Math.sin(Math.PI / pp);
+        const cp = Math.cos(Math.PI / pp);
+        const cq = Math.cos(Math.PI / qq);
+        const a = -cq / sp;
+        const b = Math.sqrt(Math.max(0, 1 - a * a));
+        const normals = [[1, 0, 0], [-cp, sp, 0], [0, a, b]];
+        let q = p.slice();
+        for (let i = 0; i &lt; 16; i++) {
+          let folded = false;
+          for (const n of normals) {
+            const d = dot(q, n);
+            if (d &lt; 0) {
+              q = sub(q, mul(n, 2 * d));
+              folded = true;
+            }
+          }
+          if (!folded) break;
+        }
+        return q;
+      };
+      const radialFoldFactor = (r2, rMin, rMax) =&gt; {
+        const min2 = rMin * rMin;
+        const max2 = Math.max(rMax, rMin + 0.01) ** 2;
+        if (r2 &lt; min2) return max2 / min2;
+        if (r2 &lt; max2) return max2 / Math.max(r2, 1e-6);
+        return 1;
+      };
+
+      function transformPoint(input) {
+        const p = input.slice();
+        const kind = kindSelect.value;
+        const s = Number(strength.value);
+        const a = axis();
+        const v1 = Number(p1.value || 0);
+        const v2 = Number(p2.value || 0);
+        const t = clamp(s, 0, 1);
+
+        if (kind === &quot;twist&quot;) return s &lt;= 0 ? p : rodrigues(p, a, s * dot(p, a) * 1.5);
+        if (kind === &quot;bend&quot;) {
+          if (s &lt;= 0) return p;
+          const along = dot(p, a);
+          const perp = sub(p, mul(a, along));
+          const perpLength = len(perp);
+          const angle = s * perpLength * 1.5;
+          const perpDir = perpLength &gt; 1e-6 ? mul(perp, 1 / perpLength) : [0, 0, 0];
+          return add(add(perp, mul(a, along * Math.cos(angle))), mul(perpDir, along * Math.sin(angle)));
+        }
+        if (kind === &quot;mirror&quot;) return mix(p, p.map(Math.abs), t);
+        if (kind === &quot;boxFold&quot;) {
+          const L = Math.max(v1, 0.01);
+          let q;
+          if (v2 &gt; 0.5) {
+            const hall = c =&gt; {
+              const period = 4 * L;
+              const u = c + L;
+              const m = u - period * Math.floor(u / period);
+              return L - Math.abs(m - 2 * L);
+            };
+            q = p.map(hall);
+          } else {
+            q = p.map(c =&gt; 2 * clamp(c, -L, L) - c);
+          }
+          return mix(p, q, t);
+        }
+        if (kind === &quot;sphereFold&quot;) {
+          const f = radialFoldFactor(dot(p, p), v1, v2);
+          return mix(p, mul(p, f), t);
+        }
+        if (kind === &quot;inversion&quot;) {
+          const r2 = Math.max(dot(p, p), 1e-6);
+          return mix(p, mul(p, clamp(v1 * v1 / r2, 0.05, 20)), t);
+        }
+        if (kind === &quot;kaleidoscope&quot;) {
+          const seg = Math.PI / Math.max(Math.round(v1), 2);
+          const ang = Math.atan2(p[2], p[0]);
+          const r = Math.hypot(p[0], p[2]);
+          const foldedAngle = ((Math.abs(ang) + seg) % (2 * seg)) - seg;
+          return mix(p, [Math.cos(foldedAngle) * r, p[1], Math.sin(foldedAngle) * r], t);
+        }
+        if (kind === &quot;ripple&quot;) return s &lt;= 0 ? p : add(p, mul(a, s * Math.sin(dot(p, a) * Math.max(v1, 0.01))));
+        if (kind === &quot;tubeFold&quot;) {
+          const factor = radialFoldFactor(p[0] * p[0] + p[2] * p[2], v1, v2);
+          return mix(p, [p[0] * factor, p[1], p[2] * factor], t);
+        }
+        if (kind === &quot;shells&quot;) {
+          const r = len(p);
+          if (r &lt; 1e-5) return p;
+          const d = Math.max(v1, 0.1);
+          const rNew = Math.abs(r - d * Math.round(r / d));
+          return mix(p, mul(p, rNew / r), t);
+        }
+        if (kind === &quot;compressionShells&quot;) {
+          if (s &lt;= 0) return p;
+          const r = len(p);
+          if (r &lt; 1e-5) return p;
+          const scales = [0.29289321881, 0.38196601125, 0.61803398875, 1];
+          const signs = [1, -1, 1, -1];
+          let displacement = 0;
+          for (let i = 0; i &lt; 4; i++) {
+            const center = Math.max(v1, 0.1) * scales[i];
+            const halfWidth = clamp(v2, 0.02, 0.12) * center;
+            const region = 1 - smoothstep(0.5, 1, Math.abs(r - center) / halfWidth);
+            displacement += signs[i] * halfWidth * region;
+          }
+          return mul(p, Math.max(r + s * displacement / 3, 1e-5) / r);
+        }
+        if (kind === &quot;scaleRepeat&quot;) {
+          const r = len(p);
+          if (r &lt; 1e-5) return p;
+          const logS = Math.log(Math.max(v1, 1.1));
+          const factor = Math.exp(-Math.floor(Math.log(r) / logS) * logS);
+          return mix(p, mul(p, factor), t);
+        }
+        if (kind === &quot;coxeter&quot;) return mix(p, coxeterFold(p, Math.max(2, Math.round(v1)), Math.max(2, Math.round(v2))), t);
+        if (kind === &quot;planeFold&quot;) {
+          const projected = dot(p, a);
+          return projected &lt; v1 ? sub(p, mul(a, 2 * (projected - v1) * t)) : p;
+        }
+        if (kind === &quot;mengerFold&quot;) return mix(p, p.map(Math.abs).sort((x, y) =&gt; y - x), t);
+        if (kind === &quot;tiling&quot;) {
+          const size = Math.max(v1, 0.05);
+          return mix(p, p.map(c =&gt; c - size * Math.round(c / size)), t);
+        }
+        if (kind === &quot;scale&quot;) return mul(p, s);
+        if (kind === &quot;offsetFold&quot;) return mix(p, add(p, mul(a, 0.8)).map(Math.abs), t);
+        if (kind === &quot;mandelboxStep&quot;) {
+          const L = Math.max(v1, 0.01);
+          const folded = p.map(c =&gt; 2 * clamp(c, -L, L) - c);
+          const r2 = dot(folded, folded);
+          const min2 = clamp(v2, 0.01, 0.99) ** 2;
+          const sphereScale = r2 &lt; min2 ? 1 / min2 : r2 &lt; 1 ? 1 / Math.max(r2, 1e-6) : 1;
+          return add(mul(folded, sphereScale * s), input);
+        }
+        if (kind === &quot;icosahedralCut&quot;) return mix(p, coxeterFold(p, 5, 3), t);
+        return p;
+      }
+
+      function project(p) {
+        const yaw = 0.72;
+        const pitch = -0.43;
+        const cy = Math.cos(yaw), sy = Math.sin(yaw);
+        const cp = Math.cos(pitch), sp = Math.sin(pitch);
+        const x1 = cy * p[0] + sy * p[2];
+        const z1 = -sy * p[0] + cy * p[2];
+        const y1 = cp * p[1] - sp * z1;
+        const depth = sp * p[1] + cp * z1;
+        const perspective = 1 / Math.max(0.45, 1 + depth * 0.075);
+        return [368 + x1 * 74 * perspective, 198 - y1 * 74 * perspective];
+      }
+
+      function makeCage() {
+        const lines = [];
+        const anchors = [-1.4, 0, 1.4];
+        const extent = 2.35;
+        const samples = 70;
+        const build = (direction, a, b) =&gt; {
+          const points = [];
+          for (let i = 0; i &lt;= samples; i++) {
+            const v = -extent + (2 * extent * i / samples);
+            points.push(direction === &quot;x&quot; ? [v, a, b] : direction === &quot;y&quot; ? [a, v, b] : [a, b, v]);
+          }
+          lines.push({ direction, points });
+        };
+        for (const a of anchors) for (const b of anchors) build(&quot;x&quot;, a, b);
+        for (const a of anchors) for (const b of anchors) build(&quot;y&quot;, a, b);
+        for (const a of anchors) for (const b of anchors) build(&quot;z&quot;, a, b);
+        return lines;
+      }
+      const cage = makeCage();
+
+      function pathData(points, mapper, breakOnJump) {
+        let d = &quot;&quot;;
+        let previous = null;
+        for (const point of points) {
+          const screen = project(mapper(point));
+          const jump = previous &amp;&amp; Math.hypot(screen[0] - previous[0], screen[1] - previous[1]) &gt; 48;
+          d += (!previous || (breakOnJump &amp;&amp; jump) ? &quot;M&quot; : &quot;L&quot;) + screen[0].toFixed(1) + &quot;,&quot; + screen[1].toFixed(1);
+          previous = screen;
+        }
+        return d;
+      }
+
+      function drawPath(group, d, className) {
+        const path = document.createElementNS(ns, &quot;path&quot;);
+        path.setAttribute(&quot;d&quot;, d);
+        path.setAttribute(&quot;class&quot;, className);
+        path.setAttribute(&quot;vector-effect&quot;, &quot;non-scaling-stroke&quot;);
+        group.appendChild(path);
+      }
+
+      function drawAxes() {
+        axesGroup.replaceChildren();
+        const axes = [
+          [[-2.7, 0, 0], [2.7, 0, 0]],
+          [[0, -2.5, 0], [0, 2.5, 0]],
+          [[0, 0, -2.7], [0, 0, 2.7]]
+        ];
+        for (const pair of axes) drawPath(axesGroup, pathData(pair, p =&gt; p, false), &quot;warp-axis&quot;);
+      }
+
+      function updateOverlayVisibility() {
+        originalGroup.style.display = showInput.checked ? &quot;&quot; : &quot;none&quot;;
+        overlayLabel.style.display = showInput.checked ? &quot;&quot; : &quot;none&quot;;
+        axesGroup.style.display = showAxes.checked ? &quot;&quot; : &quot;none&quot;;
+      }
+
+      function draw() {
+        originalGroup.replaceChildren();
+        resultGroup.replaceChildren();
+        for (const line of cage) {
+          drawPath(originalGroup, pathData(line.points, point =&gt; point, false), &quot;warp-original&quot;);
+          drawPath(resultGroup, pathData(line.points, transformPoint, true), &quot;warp-result warp-&quot; + line.direction);
+        }
+        drawAxes();
+        updateOverlayVisibility();
+        strengthValue.textContent = Number(strength.value).toFixed(2);
+        p1Value.textContent = p1Wrap.hidden ? &quot;&quot; : Number(p1.value).toFixed(Number(p1.step) &gt;= 1 ? 0 : 2);
+        p2Value.textContent = p2Wrap.hidden ? &quot;&quot; : Number(p2.value).toFixed(Number(p2.step) &gt;= 1 ? 0 : 2);
+        const spec = specs[kindSelect.value];
+        live.textContent = spec.name + &quot; — &quot; + spec.note;
+        idea.textContent = spec.note;
+        equation.textContent = spec.equation;
+        distance.textContent = spec.distance;
+        pairs.textContent = spec.pairs;
+      }
+
+      function setRange(input, config) {
+        input.min = config[0];
+        input.max = config[1];
+        input.step = config[2];
+        input.value = config[3];
+      }
+
+      function configure() {
+        const spec = specs[kindSelect.value];
+        strengthLabel.textContent = spec.verb;
+        setRange(strength, spec.strength);
+        p1Wrap.hidden = !spec.p1;
+        if (spec.p1) {
+          p1Label.textContent = spec.p1[0];
+          setRange(p1, spec.p1.slice(1));
+        }
+        p2Wrap.hidden = !spec.p2;
+        if (spec.p2) {
+          p2Label.textContent = spec.p2[0];
+          setRange(p2, spec.p2.slice(1));
+        }
+        axisWrap.hidden = !spec.axis;
+        if (spec.axis) axisLabel.textContent = spec.axis;
+        draw();
+      }
+
+      kindSelect.addEventListener(&quot;change&quot;, configure);
+      strength.addEventListener(&quot;input&quot;, draw);
+      p1.addEventListener(&quot;input&quot;, draw);
+      p2.addEventListener(&quot;input&quot;, draw);
+      axisSelect.addEventListener(&quot;change&quot;, draw);
+      showInput.addEventListener(&quot;change&quot;, updateOverlayVisibility);
+      showAxes.addEventListener(&quot;change&quot;, updateOverlayVisibility);
+      configure();
+    })();
+  &lt;/script&gt;
+&lt;/div&gt;
+
+&lt;script src=&quot;https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set([&quot;top&quot;, &quot;right&quot;, &quot;bottom&quot;, &quot;left&quot;]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+
+  const getTrigger = (target) =&gt;
+    target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest(&quot;[data-tooltip]&quot;)
+      : null;
+  const containsTarget = (trigger, target) =&gt;
+    target?.nodeType != null &amp;&amp; trigger.contains(target);
+  const getContent = (trigger) =&gt;
+    trigger.getAttribute(&quot;data-tooltip&quot;)?.trim() ?? &quot;&quot;;
+  const getPlacement = (trigger) =&gt; {
+    const placement = trigger.getAttribute(&quot;data-tooltip-placement&quot;);
+    return tooltipPlacements.has(placement) ? placement : &quot;top&quot;;
+  };
+  const getTooltip = () =&gt; {
+    if (tooltip == null) {
+      tooltip = document.createElement(&quot;div&quot;);
+      tooltip.id = tooltipId;
+      tooltip.className = &quot;tooltip&quot;;
+      tooltip.setAttribute(&quot;role&quot;, &quot;tooltip&quot;);
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) =&gt; {
+    const ids = new Set(
+      (trigger.getAttribute(&quot;aria-describedby&quot;) ?? &quot;&quot;)
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute(&quot;aria-describedby&quot;);
+    } else {
+      trigger.setAttribute(&quot;aria-describedby&quot;, [...ids].join(&quot; &quot;));
+    }
+  };
+  const clearOpenTimeout = () =&gt; {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) =&gt; {
+    clearOpenTimeout();
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) =&gt; {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-width&quot;,
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-height&quot;,
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: &quot;fixed&quot;,
+    })
+      .then(({ x, y }) =&gt; {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = &quot;visible&quot;;
+      })
+      .catch(() =&gt; {
+        if (activeTrigger === trigger &amp;&amp; request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) =&gt; {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = &quot;hidden&quot;;
+    floating.style.transform = &quot;translate(0, 0)&quot;;
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () =&gt; {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) =&gt; {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() &lt; skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() =&gt; {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) =&gt; {
+    if (event.pointerType === &quot;touch&quot;) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handleLeave = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger?.matches(&quot;:focus-visible&quot;)) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) =&gt; {
+    if (event.key === &quot;Escape&quot;) {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const destroy = () =&gt; {
+    closeTooltip(false);
+    document.removeEventListener(&quot;pointerover&quot;, handlePointerOpen);
+    document.removeEventListener(&quot;pointerout&quot;, handleLeave);
+    document.removeEventListener(&quot;focusin&quot;, handleFocusIn);
+    document.removeEventListener(&quot;focusout&quot;, handleLeave);
+    document.removeEventListener(&quot;keydown&quot;, handleKeyDown);
+    document.removeEventListener(&quot;contextmenu&quot;, handleContextMenu);
+    tooltip = null;
+  };
+
+  document.addEventListener(&quot;pointerover&quot;, handlePointerOpen);
+  document.addEventListener(&quot;pointerout&quot;, handleLeave);
+  document.addEventListener(&quot;focusin&quot;, handleFocusIn);
+  document.addEventListener(&quot;focusout&quot;, handleLeave);
+  document.addEventListener(&quot;keydown&quot;, handleKeyDown);
+  document.addEventListener(&quot;contextmenu&quot;, handleContextMenu);
+  window.addEventListener(&quot;pagehide&quot;, destroy, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-lucide&quot; async src=&quot;https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  const initialize = () =&gt; {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById(&quot;codex-visualization-lucide&quot;)
+    ?.addEventListener(&quot;load&quot;, initialize, { once: true });
+})();
+&lt;/script&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe>
+</body>
+</html>

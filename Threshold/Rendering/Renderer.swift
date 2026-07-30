@@ -18,6 +18,7 @@ let RENDERER_DEBUG = false
 
 actor Renderer {
     let device: MTLDevice
+    let benchySDFAsset: BenchySDFGPUAsset
     let commandQueue: MTLCommandQueue
     /// Wall-clock anchor for ambient time-motion (light-orbit drift, dither, spring
     /// vibration). Replaces the removed AppClock; mirrors the Mac/iOS path's
@@ -387,6 +388,14 @@ actor Renderer {
     let layerRenderer: LayerRenderer
     let appModel: AppModel
 
+    /// Display state stamped into `ColorSchemeParams.edrHeadroom` each frame
+    /// (see RendererGameState). Vision Pro composites float-format layers with
+    /// a fixed 2.0x SDR-white EDR headroom; an 8-bit sRGB layer stays at the
+    /// neutral 1.0 so the display mapping remains pure SDR. Unlike Mac/iOS
+    /// there is no per-frame headroom query, so this is decided once from the
+    /// layer's color format.
+    let displayEDRHeadroom: Float
+
     init?(
         _ layerRenderer: LayerRenderer,
         appModel: AppModel,
@@ -394,6 +403,10 @@ actor Renderer {
     ) {
         self.layerRenderer = layerRenderer
         self.device = layerRenderer.device
+        self.benchySDFAsset = BenchySDFGPUAsset(device: layerRenderer.device)
+        self.displayEDRHeadroom = layerRenderer.configuration.colorFormat == .rgba16Float
+            ? QualityConfig.visionEDRHeadroom
+            : 1.0
         guard let queue = self.device.makeCommandQueue() else {
             if RENDERER_DEBUG { print("❌ Failed to create command queue") }
             return nil
@@ -487,7 +500,7 @@ actor Renderer {
                 fragmentFunctionName: "formatConversionFragmentStereoMerged",
                 archive: self.renderPipelineArchive
             )
-            if RENDERER_DEBUG { print("✓ MetalFX resolve pipelines ready (color=bgra8Unorm_srgb/depth=invalid, depth=invalid/depth=depth32Float, merged=\(metalFXMergedResolvePipeline != nil ? "ok" : "unavailable"))") }
+            if RENDERER_DEBUG { print("✓ MetalFX resolve pipelines ready (color=\(layerRenderer.configuration.colorFormat.rawValue)/depth=invalid, depth=invalid/depth=depth32Float, merged=\(metalFXMergedResolvePipeline != nil ? "ok" : "unavailable"))") }
         } catch {
             if RENDERER_DEBUG { print("⚠️ MetalFX resolve pipeline failed: \(error)") }
             metalFXColorResolvePipeline = nil
@@ -1472,6 +1485,9 @@ actor Renderer {
         if let envGrid = framePreparation.environmentGrid {
             renderEncoder.useResource(envGrid.buffer, usage: .read, stages: .fragment)
         }
+        if let buffer = benchySDFAsset.buffer {
+            renderEncoder.useResource(buffer, usage: .read, stages: .fragment)
+        }
 
         renderEncoder.label = "Primary Render Encoder"
 
@@ -1702,8 +1718,11 @@ actor Renderer {
         // Get camera position from inverse model-view matrix (in model space)
         let cameraPos = SIMD3<Float>(inverseModelView.columns.3.x, inverseModelView.columns.3.y, inverseModelView.columns.3.z)
         
-        // Get color scheme parameters
-        let colorSchemeParams = settingsSnapshot.colorSchemeParams
+        // Get color scheme parameters. Display state, not artistic: the EDR
+        // headroom stamp also tells the compute kernel's encodeComputeOutput
+        // whether the drawable is linear rgba16Float (skip manual sRGB encode).
+        var colorSchemeParams = settingsSnapshot.colorSchemeParams
+        colorSchemeParams.edrHeadroom = displayEDRHeadroom
         
         // Mixed immersion: cap the comfort bubble (see RendererGameState).
         let mixedBubbleCapActive = appModel.immersionStyleForRenderer == .mixed && settingsSnapshot.safetyBubbleMixedAutoShrink
@@ -1912,7 +1931,11 @@ actor Renderer {
             boundSpaceSize: framePreparation.boundSpaceSize,
             boundAmbientStrength: settingsSnapshot.boundAmbientStrength,
             modelToBoundSpaceMatrix: framePreparation.boundSpaceWorldToLocalMatrix * framePreparation.modelMatrix,
-            envScrunch: framePreparation.envScrunch,
+            envScrunch: packedSceneFields(
+                base: framePreparation.envScrunch,
+                primitives: settingsSnapshot.scenePrimitives,
+                benchySDFAddress: benchySDFAsset.gpuAddress
+            ),
             boundingShapeType: settingsSnapshot.boundingShapeType,
             // Pin the Bounding Shape while the Linear Rail slides content through
             // it (0 when the rail is off).
@@ -1937,6 +1960,9 @@ actor Renderer {
         // marches the DE.
         if let envGrid = framePreparation.environmentGrid {
             computeEncoder.useResource(envGrid.buffer, usage: .read)
+        }
+        if let buffer = benchySDFAsset.buffer {
+            computeEncoder.useResource(buffer, usage: .read)
         }
         computeEncoder.setBuffer(uniformBuffer, offset: uniformOffset, index: 0)
         if let rateMapParamBuffer {
@@ -2339,6 +2365,9 @@ actor Renderer {
         if let envGrid = framePreparation.environmentGrid {
             computeEncoder.useResource(envGrid.buffer, usage: .read)
         }
+        if let buffer = benchySDFAsset.buffer {
+            computeEncoder.useResource(buffer, usage: .read)
+        }
 
         // Dispatch over the FULL render target / 8 (so coarse texels line up with
         // the fragment's floor(fragCoord/8)). One thread per coarse texel.
@@ -2424,6 +2453,12 @@ actor Renderer {
             let scaleCorrectedBubbleRadius = bubbleRadiusMeters / max(framePreparation.effectiveScale, 0.001)
             let scaleCorrectedFadeWidth = settingsSnapshot.safetyBubbleFadeWidth / max(framePreparation.effectiveScale, 0.001)
 
+            // Display state, not artistic: the EDR headroom stamp also tells
+            // encodeComputeOutput whether the drawable is linear rgba16Float
+            // (skip the kernel's manual sRGB encode).
+            var stampedColorScheme = settingsSnapshot.colorSchemeParams
+            stampedColorScheme.edrHeadroom = displayEDRHeadroom
+
             var tileUniforms = TileUniforms(
                 invViewMatrix: inverseModelView,
                 invProjMatrix: projection.inverse,
@@ -2503,7 +2538,7 @@ actor Renderer {
                 precomputedLighting: framePreparation.precomputedLighting,
                 precomputedAudio: framePreparation.precomputedAudio,
                 precomputedFog: framePreparation.precomputedFog,
-                colorScheme: settingsSnapshot.colorSchemeParams,
+                colorScheme: stampedColorScheme,
                 screenResolution: screenResolution,
                 rateMapValid: rateMapValid ? 1 : 0,
                 rateMapLayer: UInt32(rateMapLayer),
@@ -2511,7 +2546,11 @@ actor Renderer {
                 boundSpaceSize: framePreparation.boundSpaceSize,
                 boundAmbientStrength: settingsSnapshot.boundAmbientStrength,
                 modelToBoundSpaceMatrix: framePreparation.boundSpaceWorldToLocalMatrix * framePreparation.modelMatrix,
-                envScrunch: framePreparation.envScrunch,
+                envScrunch: packedSceneFields(
+                    base: framePreparation.envScrunch,
+                    primitives: settingsSnapshot.scenePrimitives,
+                    benchySDFAddress: benchySDFAsset.gpuAddress
+                ),
                 boundingShapeType: settingsSnapshot.boundingShapeType,
                 // Pin the Bounding Shape while the Linear Rail slides content
                 // through it (0 when the rail is off).

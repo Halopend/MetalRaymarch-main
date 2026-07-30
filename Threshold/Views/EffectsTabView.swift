@@ -2,44 +2,44 @@
 //  EffectsTabView.swift
 //  Threshold
 //
-//  Extracted from ContentView: Static and Dynamic effects sub-tabs.
-//  Uses EffectSliderRow for consistent slider patterns.
+//  Shared controls for the Effects tab.
 //
 
 import SwiftUI
 
-struct FogColorPickerRow: View {
-    let title: String
+/// Compact color well embedded beside an effect's name by `EffectSliderRow`.
+///
+/// Keeping the color inside the effect row makes “amount + color” a reusable
+/// visual pattern for fog, glow, bloom, and future tinted effects.
+struct EffectColorWell: View {
+    let effectName: String
     @Binding var color: SIMD3<Float>
     let onChanged: () -> Void
     @Environment(\.menuAdjustmentActions) private var menuAdjustmentActions
 
     var body: some View {
-        HStack {
-            Label(title, systemImage: AppIcons.paintpaletteFill)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            ColorPicker(
-                "",
-                selection: Binding(
-                    get: {
-                        Color(
-                            red: Double(color.x),
-                            green: Double(color.y),
-                            blue: Double(color.z)
-                        )
-                    },
-                    set: { newColor in
-                        guard let components = newColor.thresholdRGBComponents else { return }
-                        color = components
-                        onChanged()
-                    }
-                ),
-                supportsOpacity: false
-            )
-            .labelsHidden()
-        }
+        ColorPicker(
+            "\(effectName) Color",
+            selection: Binding(
+                get: {
+                    Color(
+                        red: Double(color.x),
+                        green: Double(color.y),
+                        blue: Double(color.z)
+                    )
+                },
+                set: { newColor in
+                    guard let components = newColor.thresholdRGBComponents else { return }
+                    color = components
+                    onChanged()
+                }
+            ),
+            supportsOpacity: false
+        )
+        .labelsHidden()
+        .controlSize(.small)
+        .help("\(effectName) color")
+        .accessibilityLabel("\(effectName) color")
         // ColorPicker opens the shared NSColorPanel as a separate child window,
         // so the pointer leaves the sidebar's hover region while the panel is
         // up — without this, the sidebar auto-hides out from under the color

@@ -8,7 +8,8 @@
 //  Authors: Daniel White and Paul Nylander
 //  Found: http://www.skytopia.com/project/fractal/mandelbulb.html
 //  params[0]=Power, [1]=Bailout, [2]=DerivBias (DE multiplier for resolution),
-//  [4]=PolarRotation, [8]=Julia(bool), [9-11]=JuliaC
+//  [4]=PolarRotation (azimuth around the Z polar axis),
+//  [8]=Julia(bool), [9-11]=JuliaC
 //
 //  Requires: FractalFormulaCommon.h
 //
@@ -58,12 +59,16 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
     for (; i < iterations && r2 < bailout2 && r2 > minR2Exit; ) {
         float invR  = fast::rsqrt(r2 + 1e-6f); // shared 1/r (avoids div-by-zero)
 
-        float theta = fast::asin(clamp11(z.z * invR)) + polarRot;
+        // Keep the latitude profile centered on both poles. Polar rotation is
+        // an azimuthal phase around the Z axis; adding it to theta would bias
+        // the recurrence toward one pole and destroy axial symmetry.
+        float theta = fast::asin(clamp11(z.z * invR));
         float phi   = fast::atan2(z.y, z.x);
         float rn    = fastPowFromR2(r2, power);
         dr = fma(rn * power * invR, dr, 1.0f);
 
-        float tP = theta * power, pP = phi * power;
+        float tP = theta * power;
+        float pP = fma(phi, power, polarRot);
         float cTheta, cPhi;
         float sTheta = sincos(tP, cTheta);
         float sPhi   = sincos(pP, cPhi);
@@ -125,11 +130,12 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
 
     for (int i = 0; i < iterations && r2 < bailout2 && r2 > minR2Exit; ++i) {
         float invR  = fast::rsqrt(r2 + 1e-6f);
-        float theta = fast::asin(clamp11(z.z * invR)) + polarRot;
+        float theta = fast::asin(clamp11(z.z * invR));
         float phi   = fast::atan2(z.y, z.x);
         float rn    = fastPowFromR2(r2, power);
         dr = fma(rn * power * invR, dr, 1.0f);
-        float tP = theta * power, pP = phi * power;
+        float tP = theta * power;
+        float pP = fma(phi, power, polarRot);
         float cTheta, cPhi;
         float sTheta = sincos(tP, cTheta);
         float sPhi   = sincos(pP, cPhi);

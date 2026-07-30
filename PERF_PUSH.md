@@ -16,6 +16,11 @@ Prioritized performance-debt backlog + phased plan. Companion to
 - Both are **ALU-bound (~68–70%** of GPU time in ALU, windowed counters). Not
   bandwidth, not occupancy-starved by buffers — arithmetic + register pressure.
 - **Shading tail is 2–3 ms flat** across scenes; shadows are its biggest chunk.
+  **SUPERSEDED 2026-07-25** (`Baselines/mac-ablation-2026-07-25.json`, single-launch
+  plan-mode ablation matrix at 48d24230+WIP): on Stress test (accel-on 1080p,
+  29.1 ms full / 17.1 ms flat-hits) the shading tail is **12.0 ms = 41% of the
+  frame** — shadows 6.2 ms, GetNormal 4.9 ms, colour 0.7 ms. On Bulatov the tail
+  is 2.9 ms (shadows ~1.1 ms). The tail is scene-dependent, not flat.
 - **Mandelbox cost grows super-linearly with resolution** (epsilon tightens with
   res → more steps), unlike other formulas.
 - Vision Pro is GPU-bound below 45 fps on heavy scenes; budget is **11.1 ms** for
@@ -34,6 +39,23 @@ Prioritized performance-debt backlog + phased plan. Companion to
 3. A change ships only with a before/after `gpuMsAvg`/`gpuMsP95` pair from the
    same machine + resolution. No estimates. Refuted ideas get logged too.
 
+## Harness caveats (measured 2026-07-25/26)
+
+- **accel-on is bimodal ACROSS LAUNCHES**: identical code lands in either a
+  ~29 ms / steps-17.1 mode or a ~12 ms / steps-2.5 mode per app launch and stays
+  there for the whole run. The steps delta means it is behavioral (cone-march
+  engagement differing at startup, suspected QC-override/scene-apply race), not
+  GPU thermal noise. Until fixed, only compare runs whose steps counters match,
+  or A/B inside one launch via plan mode.
+- Benchmark launches resolve scenes hermetically: `perf-gate.sh` stages
+  `Baselines/scenes/*.threshscene` into a temp store and points the app at it
+  with `THRESHOLD_BENCHMARK_STORE_ROOT` (unsigned debug builds cannot see an
+  iCloud-mode user store, which silently dropped "Stress test" from the catalog).
+- PNG captures are now fog-deterministic: the fog hue-cycle phase integrates
+  from launch and was the one phase `benchStableColorScheme` couldn't pin;
+  benchmark processes now skip fog hue rotation entirely (RenderSettings).
+  Before this fix, Bulatov PNGs differed run-to-run (~0.3–1.3% of pixels).
+
 ## Backlog — scored
 
 Priority = (Impact + Risk) × (6 − Effort), each 1–5.
@@ -46,7 +68,7 @@ Priority = (Impact + Risk) × (6 − Effort), each 1–5.
 | 4 | Measure conservative coarse-pass warm start (landed, default OFF) | 3 | 2 | 1 | 25 | Shipped code nobody has measured. One harness run decides: promote to default or delete. Gated-off unmeasured code is pure debt. |
 | 5 | Resolution-aware epsilon policy | 3 | 2 | 2 | 20 | Mandelbox's super-linear res scaling is an epsilon artifact, not intrinsic cost. A floor/curve on epsilon vs res caps the worst scaling case. |
 | 6 | Annotate PERF_TECHNIQUES.md with measured/refuted/unmeasured status | 2 | 3 | 2 | 20 | 252 techniques with fabricated magnitudes keep getting re-proposed. Marking verdicts stops re-litigating ruled-out ideas (see Bulatov list above). |
-| 7 | Shadow efficiency (step budget, early-out, cheaper march) | 4 | 2 | 3 | 18 | Biggest slice of the flat 2–3 ms shading tail on every scene. Ablate via `THRESHOLD_BENCHMARK_SHADOWS` first to size the ceiling. |
+| 7 | Shadow efficiency (step budget, early-out, cheaper march) | 4 | 2 | 3 | 18 | Biggest slice of the shading tail (6.2 ms of 29.1 ms on Stress test, measured 2026-07-25). **PARTIALLY LANDED 2026-07-26:** N·L≤0 shadow-march skip in `fragmentMain` (exact-zero multiplier in ShadeSurface ⇒ byte-identical, PNG-verified) cut it to 4.3 ms — Stress full 29.15→27.2 ms (−6.6% frame), no-shadows/flat-hits anchors unchanged (`Baselines/mac-ablation-2026-07-25.json` vs `mac-ablation-2026-07-26-shadow-nl-skip.json`). Not yet applied to the dormant adaptive-compute kernel's per-lane fallback sites. Remaining 4.3 ms needs step-budget/march changes (visual-affecting → toggle + measure). |
 | 8 | F16 in shading + secondary rays | 3 | 3 | 3 | 18 | ALU-bound → halving arithmetic width is a direct lever; risk is precision artifacts near surfaces (DE march itself likely must stay F32). |
 | 9 | **Deferred shading (split march → G-buffer → shade pass)** | 5 | 3 | 4 | 16 | The #1 ranked lever from both investigations. The megakernel's register footprint throttles the ALU-bound 70%; splitting shading out shrinks live state for the march loop. Scores mid on the formula only because effort is real — it's the headline of the push. |
 | 10 | Hoist 4× `applySphereProjectionDomain` in `GetNormal` | 2 | 1 | 2 | 12 | Known redundant work in the normal estimator (open item from transform-overhead phase 1). Small, contained. |

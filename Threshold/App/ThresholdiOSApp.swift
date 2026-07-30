@@ -50,6 +50,16 @@ private struct ThresholdiOSRootView: View {
                         .environment(appModel)
                         .inspectorColumnWidth(min: widths.min, ideal: widths.ideal, max: widths.max)
                 }
+                .accessibilityAction(named: Text("Open radial controls")) {
+                    toggleRadialMenu(
+                        at: CGPoint(x: proxy.size.width * 0.5, y: proxy.size.height * 0.5),
+                        viewportSize: proxy.size
+                    )
+                }
+                // The radial menu is a modal interaction surface. Keep the
+                // covered Metal view, inspector, and controls button out of
+                // VoiceOver traversal until the menu is dismissed.
+                .accessibilityHidden(radialMenu.isPresented)
                 .overlay {
                     if radialMenu.isPresented {
                         RadialMenu(
@@ -82,12 +92,6 @@ private struct ThresholdiOSRootView: View {
                         .zIndex(10)
                     }
                 }
-                .accessibilityAction(named: Text("Open radial controls")) {
-                    toggleRadialMenu(
-                        at: CGPoint(x: proxy.size.width * 0.5, y: proxy.size.height * 0.5),
-                        viewportSize: proxy.size
-                    )
-                }
                 .onSceneLoadAutoHide {
                     // Auto-hide the controls inspector when a scene is selected.
                     // (iPad has no pin concept, so it always collapses.)
@@ -115,9 +119,17 @@ private struct ThresholdiOSRootView: View {
             x: min(max(location.x, 24), max(24, viewportSize.width - 24)),
             y: min(max(location.y, 32), max(32, viewportSize.height - 32))
         )
-        let initialPath = appModel.navigationStore.currentRoute.workspaceRoot.map {
+        let route = appModel.navigationStore.currentRoute
+        let projection = radialProjection
+        var preferredPath = route.workspaceRoot.map {
             [NavigationHierarchy.rootID(for: $0)]
         } ?? []
+        // Route controls are flattened for touch, so opening directly to the
+        // current route exposes its most useful controls with no traversal.
+        // Reconciliation naturally falls back to the workspace (or root menu)
+        // when the route has no quick-input branch.
+        preferredPath.append(route.stableID)
+        let initialPath = projection.reconciledPath(preferredPath)
         withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.82)) {
             radialMenu.present(at: anchor, initialPath: initialPath)
         }
@@ -207,6 +219,7 @@ private struct ThresholdiOSInspectorContent: View {
             // enclosing iPad window has a regular size class. Mark the column
             // compact so ContentView selects its rail-free responsive shell.
             .environment(\.horizontalSizeClass, .compact)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(alignment: .leading) {
                 swipeDismissHandle
             }

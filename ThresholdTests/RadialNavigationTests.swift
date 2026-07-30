@@ -9,6 +9,11 @@ struct RadialNavigationProjectionTests {
         var value: Float = 2
     }
 
+    private final class ToggleState {
+        var isEnabled = true
+        var value = false
+    }
+
     private final class TransformStackState {
         var ops: [SpaceWarpOpValue]
 
@@ -128,6 +133,40 @@ struct RadialNavigationProjectionTests {
         #expect(projection.roots[0].children.count == 4)
     }
 
+    @Test("Touch route layout removes section traversal without dropping controls")
+    func touchRouteLayoutIsFlat() {
+        let sections = (1...2).map { section in
+            RadialNavigationNode(
+                id: "section.\(section)",
+                title: "Section \(section)",
+                systemImage: "square.stack",
+                children: (1...2).map { control in
+                    RadialNavigationNode(
+                        id: "control.\(section).\(control)",
+                        title: "Control \(section).\(control)",
+                        systemImage: "slider.horizontal.3",
+                        slider: RadialSliderBinding(
+                            range: 0...1,
+                            read: { 0 },
+                            write: { _ in }
+                        )
+                    )
+                }
+            )
+        }
+
+        #expect(RadialRouteLayoutPolicy.children(
+            from: sections,
+            flattenSections: false
+        ).map(\.id) == ["section.1", "section.2"])
+        #expect(RadialRouteLayoutPolicy.children(
+            from: sections,
+            flattenSections: true
+        ).map(\.id) == [
+            "control.1.1", "control.1.2", "control.2.1", "control.2.2"
+        ])
+    }
+
     @Test("Radial keyboard traversal follows the compact projection")
     func compactKeyboardProjection() {
         let ids = makeOverflowHierarchy().flattenedKeyboardTargets().map(\.id)
@@ -205,6 +244,50 @@ struct RadialNavigationProjectionTests {
         let threeRings = tree.rings(along: ["root.a", "a.1"])
         #expect(threeRings.count == 3)
         #expect(threeRings[2].map(\.id) == ["slider.a.1.x"])
+    }
+
+    @Test("Branches can expose full controls without becoming fallback leaves")
+    func branchFullControlsAction() {
+        var opened = false
+        let node = RadialNavigationNode(
+            id: "look.post-processing",
+            title: "Post Processing",
+            systemImage: "camera.filters",
+            children: [
+                RadialNavigationNode(
+                    id: "slider.bloom",
+                    title: "Bloom",
+                    systemImage: "sun.max",
+                    slider: RadialSliderBinding(
+                        range: 0...1,
+                        read: { 0.5 },
+                        write: { _ in }
+                    )
+                )
+            ],
+            fullControlsAction: { opened = true }
+        )
+
+        #expect(node.isBranch)
+        #expect(node.fallbackAction == nil)
+        node.fullControlsAction?()
+        #expect(opened)
+    }
+
+    @Test("Full controls require a double activation and a routed branch action")
+    func fullControlsActivationPolicy() {
+        #expect(!RadialActivationPolicy.shouldOpenFullControls(
+            activationCount: 1,
+            hasFullControlsAction: true
+        ))
+        #expect(!RadialActivationPolicy.shouldOpenFullControls(
+            activationCount: 2,
+            hasFullControlsAction: false
+        ))
+        #expect(RadialActivationPolicy.shouldOpenFullControls(
+            activationCount: 2,
+            hasFullControlsAction: true
+        ))
     }
 
     @Test("A stale or leaf path entry truncates the walk instead of orphaning rings")
@@ -435,6 +518,27 @@ struct RadialNavigationProjectionTests {
         #expect(state.value == 0)
     }
 
+    @Test("Binary binding toggles explicitly and guards unavailable writes")
+    func binaryToggleBinding() {
+        let state = ToggleState()
+        let binding = RadialToggleBinding(
+            read: { state.value },
+            write: { state.value = $0 },
+            isEnabled: { state.isEnabled }
+        )
+
+        binding.toggle()
+        #expect(state.value)
+        binding.set(false)
+        #expect(!state.value)
+
+        state.isEnabled = false
+        binding.toggle()
+        #expect(!state.value)
+        binding.set(true)
+        #expect(!state.value)
+    }
+
     @Test("Transform branches derive their complete control shape from the warp catalog")
     func transformControlsFollowWarpCatalog() {
         for kind in SpaceWarpKind.allCases {
@@ -451,6 +555,8 @@ struct RadialNavigationProjectionTests {
             #expect(branch.children.count == expectedCount)
             #expect(branch.title == "1 · \(kind.displayName)")
             #expect(branch.children.first?.title == "Enabled")
+            #expect(branch.children.first?.toggle != nil)
+            #expect(branch.children.first?.slider == nil)
 
             let strength = branch.children.first(where: { $0.title == kind.amountLabel })
             #expect(strength?.slider?.range == kind.strengthRange)
@@ -461,6 +567,11 @@ struct RadialNavigationProjectionTests {
             for spec in kind.params {
                 let parameter = branch.children.first(where: { $0.title == spec.label })
                 #expect(parameter?.slider?.range == spec.range)
+            }
+            if let toggle = kind.toggle {
+                let binary = branch.children.first(where: { $0.title == toggle.label })
+                #expect(binary?.toggle != nil)
+                #expect(binary?.slider == nil)
             }
             if kind.usesAxis {
                 #expect(branch.children.contains(where: { $0.title == "\(kind.axisLabel) X" }))
@@ -483,6 +594,9 @@ struct RadialNavigationProjectionTests {
 
         #expect(Set(targets.map(\.id)).count == targets.count)
         #expect(roots[0].id != roots[1].id)
+        #expect(targets.contains(where: {
+            $0.id == "toggle.\(roots[1].id).enabled" && $0.ancestorPath == [roots[1].id]
+        }))
         #expect(targets.contains(where: {
             $0.id.hasPrefix("slider.\(roots[1].id)") && $0.ancestorPath == [roots[1].id]
         }))
@@ -517,7 +631,7 @@ struct RadialNavigationProjectionTests {
         op.isEnabled = false
         let state = TransformStackState([op])
         let branch = transformBranch(op, state: state)
-        let enabled = branch.children.first(where: { $0.title == "Enabled" })!.slider!
+        let enabled = branch.children.first(where: { $0.title == "Enabled" })!.toggle!
         let strength = branch.children.first(where: { $0.title == op.kind.amountLabel })!.slider!
 
         #expect(enabled.isEnabled())
@@ -525,7 +639,7 @@ struct RadialNavigationProjectionTests {
         strength.writeIfEnabled(1.4)
         #expect(state.read(op.id)?.strength == op.strength)
 
-        enabled.step(by: 1)
+        enabled.toggle()
         #expect(state.read(op.id)?.isEnabled == true)
         #expect(strength.isEnabled())
         strength.writeIfEnabled(1.4)

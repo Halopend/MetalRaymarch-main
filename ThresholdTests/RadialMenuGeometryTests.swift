@@ -331,6 +331,11 @@ struct RadialHoverDwellPolicyTests {
         ) == .arm(dwell: RadialHoverDwellPolicy.parentSwitchDwell))
     }
 
+    @Test("Receded branches remain hover targets")
+    func recededBranchesRemainInteractive() {
+        #expect(RadialHoverDwellPolicy.recededSiblingOpacity > 0.5)
+    }
+
     @Test("Enters that must not navigate disarm a stale dwell instead of ignoring it")
     func nonNavigatingEntersDisarm() {
         // Leaf pills: a crossed sibling branch must not steal the ring after

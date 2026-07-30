@@ -146,6 +146,9 @@ extension Renderer {
                 stages: .fragment
             )
         }
+        if let buffer = benchySDFAsset.buffer {
+            renderEncoder.useResource(buffer, usage: .read, stages: .fragment)
+        }
         // fragmentShader declares the benchmark counter buffer; bind a dummy so
         // the screenshot pipeline validates (screenshots never benchmark).
         if let benchBuf = benchCounterBuffers.first {

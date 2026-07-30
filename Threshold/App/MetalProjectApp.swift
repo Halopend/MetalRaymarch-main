@@ -45,6 +45,7 @@ struct ContentStageConfiguration: CompositorLayerConfiguration {
         // .full. NOTE: once configured, the compositor requires the drawable
         // render-context pass before every present in EVERY style — see
         // Renderer.encodeDrawableRenderContextPass.
+        var progressiveImmersionEnabled = false
         if #available(visionOS 26.0, *) {
             if configuration.layout == .layered,
                capabilities.supportedLayouts(options: [.progressiveImmersionEnabled]).contains(.layered) {
@@ -58,10 +59,42 @@ struct ContentStageConfiguration: CompositorLayerConfiguration {
                 // this pass is authored for is actually supported.
                 if stencilFormats.contains(.stencil8) {
                     configuration.drawableRenderContextStencilFormat = .stencil8
+                    progressiveImmersionEnabled = true
                     print("✓ progressive immersion enabled (render-context stencil format: \(MTLPixelFormat.stencil8.rawValue))")
                 } else {
                     print("⚠️ progressive immersion unavailable: separate stencil8 render context is unsupported")
                 }
+            }
+        }
+
+        // === HDR / EDR COLOR OUTPUT ===
+        // rgba16Float is the compositor's HDR-renderable format: content is
+        // composited as extended linear Display P3 with a 2.0x SDR-white EDR
+        // headroom (WWDC23 10089). The raymarch fragment shader already
+        // returns linear-light values — the sRGB drawable merely hardware-
+        // encoded them — so the SDR body renders identically while highlight
+        // energy above 1.0 (glow, bloom, specular; see the display mapping in
+        // Shaders.metal) now reaches the panel instead of clipping. Every
+        // downstream pipeline/texture derives its format from
+        // `layerRenderer.configuration.colorFormat`, so this is the single
+        // decision point. Checked last so the capability query can account for
+        // the progressive-immersion portal machinery configured above.
+        if QualityConfig.visionHDRColorEnabled {
+            let hdrSupported: Bool
+            if #available(visionOS 26.0, *) {
+                let options: LayerRenderer.Capabilities.SupportedColorFormatsOptions =
+                    progressiveImmersionEnabled ? [.progressiveImmersionEnabled] : []
+                hdrSupported = capabilities.supportedColorFormats(options: options).contains(.rgba16Float)
+            } else {
+                // Documented as supported for HDR since visionOS 1.0; the
+                // pre-26 capability list API is deprecated, so trust the docs.
+                hdrSupported = true
+            }
+            if hdrSupported {
+                configuration.colorFormat = .rgba16Float
+                print("✓ HDR color output enabled (rgba16Float, EDR headroom \(QualityConfig.visionEDRHeadroom)x SDR)")
+            } else {
+                print("⚠️ HDR color output unavailable: rgba16Float unsupported for current layer options")
             }
         }
     }
@@ -200,14 +233,13 @@ struct MetalProjectTestApp: App {
                 Renderer.startRenderLoop(layerRenderer, appModel: appModel)
             }
         }
-        // The selection follows the user's Immersive / Mixed preference.
+        // The selection follows the effective Immersive / Window / Mixed preference.
         // Immersive = progressive style starting fully immersed; the Digital
         // Crown dials the portal continuously between full and window size (the compositor's
         // portal mask is encoded by Renderer.encodeDrawableRenderContextPass).
         // Mixed has no portal — the scene composites over passthrough (miss
-        // rays write alpha 0). The setter accepts compositor-driven style
-        // changes so turning the Digital Crown while Mixed can enter the
-        // progressive/immersive presentation instead of snapping back to Mixed.
+        // rays write alpha 0). The picker is authoritative: compositor writes
+        // must not silently replace the mode the user selected.
         .immersionStyle(
             selection: Binding(
                 get: {
@@ -220,31 +252,12 @@ struct MetalProjectTestApp: App {
                         return .mixed
                     }
                 },
-                set: { [weak appModel] selectedStyle in
-                    // SwiftUI can write this binding while it is constructing
-                    // the immersive stage. Mutating observed app state inline
-                    // produces "Modifying state during view update" and can
-                    // invalidate CompositorLayer scene creation. Capture only
-                    // the style classification and apply it on the next main
-                    // actor turn.
-                    let selectedMixed = selectedStyle is MixedImmersionStyle
-                    let selectedProgressive = selectedStyle is ProgressiveImmersionStyle
-                    Task { @MainActor [weak appModel] in
-                        guard let appModel else { return }
-                        if selectedMixed {
-                            if appModel.immersionStylePreference != .mixed {
-                                appModel.immersionStylePreference = .mixed
-                            }
-                        } else if selectedProgressive,
-                                  appModel.immersionStylePreference == .mixed {
-                            // A Crown-driven transition out of Mixed should enter the
-                            // fully immersive progressive mode. Preserve `.window`
-                            // when it is already selected: both app modes use the same
-                            // system style but differ in their requested initial amount.
-                            appModel.immersionStylePreference = .immersive
-                        }
-                    }
-                }
+                // SwiftUI writes this binding while constructing or reconciling
+                // the immersive stage. Those writes describe compositor state,
+                // not an explicit user choice; accepting them made Mixed and
+                // Window snap back to Immersive. The in-app picker writes
+                // `immersionStylePreference` directly.
+                set: { _ in }
             ),
             in: .progressive, .mixed
         )

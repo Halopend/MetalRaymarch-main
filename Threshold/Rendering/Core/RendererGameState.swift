@@ -379,7 +379,11 @@ extension Renderer {
                 floorCenterRadius: floorCircle.centerRadius
             )
 
-            let colorSchemeParams = settingsSnapshot.colorSchemeParams
+            // Display state, not artistic (same stamping contract as the
+            // Mac/iOS draw delegates): float compositor layers get the
+            // platform's fixed EDR headroom, 8-bit sRGB stays at SDR's 1.0.
+            var colorSchemeParams = settingsSnapshot.colorSchemeParams
+            colorSchemeParams.edrHeadroom = displayEDRHeadroom
 
             // Scale-relative safety bubble in METERS (the shared builder applies the
             // /effectiveScale correction). Mixed immersion: cap the comfort bubble to
@@ -435,7 +439,8 @@ extension Renderer {
                 boundAmbientStrength: settingsSnapshot.boundAmbientStrength,
                 envScrunch: envScrunchParams,
                 // Fractal distance cache is a Mac fragment-path prototype; inert here.
-                distCache: DistanceCacheParams())
+                distCache: DistanceCacheParams(),
+                benchySDFAddress: benchySDFAsset.gpuAddress)
 
             return assembleUniforms(settings: settingsSnapshot,
                                     effectiveScale: effectiveScale,

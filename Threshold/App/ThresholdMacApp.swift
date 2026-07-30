@@ -11,6 +11,16 @@ struct ThresholdMacApp: App {
         // Headless offscreen perf sweep (THRESHOLD_BENCHMARK=1). Launched from
         // init because background benchmark runs do not materialize a window.
         if BenchmarkMode.isActive {
+            #if DEBUG || THRESHOLD_TESTING
+            // Hermetic store root for benchmark runs. Unsigned debug builds
+            // cannot resolve the iCloud ubiquity container, so an iCloud-mode
+            // user store silently vanishes from the harness catalog. The gate
+            // stages its benchmark scenes into a temp store and points the app
+            // at it here — before AppModel/PresetManager first resolve a root.
+            if let root = ProcessInfo.processInfo.environment["THRESHOLD_BENCHMARK_STORE_ROOT"] {
+                StorageLocation.shared.testRootOverride = URL(fileURLWithPath: root, isDirectory: true)
+            }
+            #endif
             let model = AppModel()
             _appModel = State(initialValue: model)
             Task { @MainActor in

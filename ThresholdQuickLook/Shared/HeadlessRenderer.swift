@@ -62,7 +62,8 @@ private func hr_matrix4x4(from q: simd_quatf) -> matrix_float4x4 {
 // warm-start = 0.
 func packUniforms(_ settings: RenderSettingsSnapshot,
                   drawableSize: CGSize,
-                  elapsedTime: Float) -> Uniforms {
+                  elapsedTime: Float,
+                  benchySDFAddress: UInt64 = 0) -> Uniforms {
     let smoothedScale = settings.scale
 
     let userRotationMatrix = hr_matrix4x4(from: settings.worldRotation)
@@ -162,7 +163,8 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
         boundSpaceSize: SIMD3<Float>(4.0, 2.5, 4.0),
         boundAmbientStrength: 0.0,
         envScrunch: EnvScrunchParams(),
-        distCache: DistanceCacheParams())
+        distCache: DistanceCacheParams(),
+        benchySDFAddress: benchySDFAddress)
 
     return assembleUniforms(settings: settings,
                             effectiveScale: effectiveScale,
@@ -181,6 +183,7 @@ final class HeadlessRenderer: @unchecked Sendable {
     static let shared: HeadlessRenderer? = try? HeadlessRenderer()
 
     private let device: MTLDevice
+    private let benchySDFAsset: BenchySDFGPUAsset
     private let commandQueue: MTLCommandQueue
     private let pipelineState: MTLRenderPipelineState        // built-in fractals
     private let depthState: MTLDepthStencilState
@@ -205,6 +208,10 @@ final class HeadlessRenderer: @unchecked Sendable {
     init() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { throw Failure.noDevice }
         self.device = device
+        self.benchySDFAsset = BenchySDFGPUAsset(
+            device: device,
+            bundle: Bundle(for: HeadlessRenderer.self)
+        )
         guard let queue = device.makeCommandQueue() else { throw Failure.noQueue }
         self.commandQueue = queue
 
@@ -291,7 +298,12 @@ final class HeadlessRenderer: @unchecked Sendable {
         guard let pipeline = resolvePipeline(for: formula) else { return nil }
         let requested = Int(max(pixelSize.width, pixelSize.height).rounded())
         let side = max(minSide, min(maxSide, requested == 0 ? 512 : requested))
-        let uniforms = packUniforms(snapshot, drawableSize: CGSize(width: side, height: side), elapsedTime: 0)
+        let uniforms = packUniforms(
+            snapshot,
+            drawableSize: CGSize(width: side, height: side),
+            elapsedTime: 0,
+            benchySDFAddress: benchySDFAsset.gpuAddress
+        )
         return renderImage(uniforms: uniforms, side: side, pipeline: pipeline)
     }
 
@@ -305,7 +317,12 @@ final class HeadlessRenderer: @unchecked Sendable {
               let drawable = view.currentDrawable,
               let cmd = commandQueue.makeCommandBuffer() else { return }
         let size = view.drawableSize
-        let uniforms = packUniforms(snapshot, drawableSize: size, elapsedTime: 0)
+        let uniforms = packUniforms(
+            snapshot,
+            drawableSize: size,
+            elapsedTime: 0,
+            benchySDFAddress: benchySDFAsset.gpuAddress
+        )
         rpd.colorAttachments[0].loadAction = .clear
         rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         rpd.depthAttachment.loadAction = .clear
@@ -383,6 +400,9 @@ final class HeadlessRenderer: @unchecked Sendable {
         enc.setViewport(MTLViewport(originX: 0, originY: 0, width: Double(width), height: Double(height), znear: 0, zfar: 1))
         enc.setVertexBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
         enc.setFragmentBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
+        if let buffer = benchySDFAsset.buffer {
+            enc.useResource(buffer, usage: .read, stages: .fragment)
+        }
         enc.setFragmentBuffer(benchBuffer, offset: 0, index: BufferIndex.benchCounters.rawValue)
         for (i, vb) in mesh.vertexBuffers.enumerated() {
             enc.setVertexBuffer(vb.buffer, offset: vb.offset, index: i)

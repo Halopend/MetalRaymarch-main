@@ -158,6 +158,44 @@ struct SceneStatePersistenceTests {
         #expect(abs(color.vignetteStrength - 1.0) < 1e-5)
     }
 
+    @Test("tinted effects preserve custom colors and default legacy payloads")
+    func tintedEffectColorPersistence() throws {
+        let legacyGlow = try JSONDecoder().decode(
+            GlowEffect.self,
+            from: Data(#"{"enabled":true,"intensity":0.4}"#.utf8)
+        )
+        let legacyBloom = try JSONDecoder().decode(
+            BloomEffect.self,
+            from: Data(#"{"enabled":true,"strength":0.25}"#.utf8)
+        )
+
+        #expect(legacyGlow.color == GlowEffect.defaultColor)
+        #expect(legacyBloom.color == BloomEffect.defaultColor)
+
+        let glow = GlowEffect(
+            enabled: true,
+            intensity: 0.7,
+            color: SIMD3<Float>(0.2, 0.4, 0.8)
+        )
+        let bloom = BloomEffect(
+            enabled: true,
+            strength: 0.6,
+            color: SIMD3<Float>(0.9, 0.3, 0.1)
+        )
+
+        let decodedGlow = try JSONDecoder().decode(
+            GlowEffect.self,
+            from: JSONEncoder().encode(glow)
+        )
+        let decodedBloom = try JSONDecoder().decode(
+            BloomEffect.self,
+            from: JSONEncoder().encode(bloom)
+        )
+
+        #expect(decodedGlow == glow)
+        #expect(decodedBloom == bloom)
+    }
+
     @Test("canonical audio mappings determine music-preset classification")
     func canonicalMusicClassification() {
         var preset = FractalPreset(name: "Music")
@@ -180,7 +218,11 @@ struct SceneStatePersistenceTests {
         state.geometry.scale = 2.25
         state.color.cellShadingEnabled = true
         state.color.cellShadingLevels = 7
-        state.lighting.glowEffect = GlowEffect(enabled: true, intensity: 0.81)
+        state.lighting.glowEffect = GlowEffect(
+            enabled: true,
+            intensity: 0.81,
+            color: SIMD3<Float>(0.12, 0.34, 0.56)
+        )
         state.display.platformEnabled = false
         state.quality.boundingShapeEnabled = true
         state.quality.boundingShapeType = SafetyBubbleShapePreset.icosahedron.storedValue
@@ -213,11 +255,72 @@ struct SceneStatePersistenceTests {
         #expect(abs(destination.cellShadingLevels - 7) < 1e-5)
         #expect(destination.glowEffect.enabled)
         #expect(abs(destination.glowEffect.intensity - 0.81) < 1e-5)
+        #expect(destination.glowEffect.color == SIMD3<Float>(0.12, 0.34, 0.56))
         #expect(destination.platformEnabled == false)
         #expect(destination.boundingSphereSkipEnabled)
         #expect(destination.boundingShapeType == SafetyBubbleShapePreset.icosahedron.storedValue)
         #expect(abs(destination.spaceWarpStrength - 0.93) < 1e-5)
         #expect(destination.infiniteZoomEnabled)
+    }
+
+    @Test("scene primitive instances preserve kind, identity, dimensions, and exact placement")
+    func scenePrimitiveRoundTrip() throws {
+        let sphereID = UUID()
+        let benchyID = UUID()
+        let source = RenderSettings()
+        source.scenePrimitives = [
+            ScenePrimitive(
+                id: sphereID,
+                kind: .sphere,
+                position: SIMD3<Float>(1.125, -2.25, 3.5),
+                scale: 0.75,
+                dimensions: SIMD3<Float>(1.4, 0, 0)
+            ),
+            ScenePrimitive(
+                id: benchyID,
+                kind: .benchy,
+                position: SIMD3<Float>(-4, -0.8, 2),
+                scale: 1.25
+            )
+        ]
+
+        let preset = FractalPreset.fromSettings(source, name: "Assembly")
+        let decoded = try JSONDecoder().decode(
+            FractalPreset.self,
+            from: JSONEncoder().encode(preset)
+        )
+        let destination = RenderSettings()
+        decoded.apply(to: destination, includePerformance: false, scope: .session)
+
+        #expect(destination.scenePrimitives.count == 2)
+        #expect(destination.scenePrimitives[0].id == sphereID)
+        #expect(destination.scenePrimitives[0].kind == .sphere)
+        #expect(destination.scenePrimitives[0].position == SIMD3<Float>(1.125, -2.25, 3.5))
+        #expect(destination.scenePrimitives[0].scale == 0.75)
+        #expect(destination.scenePrimitives[0].dimensions == SIMD3<Float>(1.4, 0, 0))
+        #expect(destination.scenePrimitives[1].id == benchyID)
+        #expect(destination.scenePrimitives[1].kind == .benchy)
+        #expect(destination.scenePrimitives[1].position == SIMD3<Float>(-4, -0.8, 2))
+    }
+
+    @Test("scene primitive array is capped at the GPU ABI limit")
+    func scenePrimitiveLimit() {
+        let settings = RenderSettings()
+        settings.scenePrimitives = (0..<(ScenePrimitive.maximumCount + 3)).map {
+            ScenePrimitive(kind: .box, position: SIMD3<Float>(Float($0), 0, 0))
+        }
+        #expect(settings.scenePrimitives.count == ScenePrimitive.maximumCount)
+        #expect(settings.snapshot().scenePrimitives.count == ScenePrimitive.maximumCount)
+    }
+
+    @Test("scene unions disable the base-only Mandelbox distance cache")
+    func scenePrimitiveDisablesDistanceCache() {
+        let settings = RenderSettings()
+        settings.scenePrimitives = [
+            ScenePrimitive(kind: .benchy, position: SIMD3<Float>(2, -0.8, 0))
+        ]
+
+        #expect(!FractalDistanceCache.isEligible(settings: settings.snapshot()))
     }
 
     @Test("Buddhabrot user controls have a complete session checkpoint")

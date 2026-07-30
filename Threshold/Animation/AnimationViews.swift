@@ -736,6 +736,25 @@ struct SceneEditorView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+#if os(visionOS)
+                Divider()
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("Open in Mixed Immersion", isOn: Binding(
+                        get: { scene.mixedModeScene == true },
+                        set: { enabled in
+                            scene.mixedModeScene = enabled
+                            scene.baseline?.presentation.immersionStyle = nil
+                        }
+                    ))
+                    .font(.subheadline)
+
+                    Text("When off, this scene preserves your selected Immersive, Window, or Mixed mode.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+#endif
                 
                 Divider()
                 

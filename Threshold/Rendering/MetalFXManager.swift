@@ -365,10 +365,17 @@ final class MetalFXManager {
         descriptor.outputTextureFormat = configuration.colorFormat
 
         // MetalFX rejects non-perceptual processing whenever either side uses
-        // an sRGB pixel format. The compositor drawable is bgra8Unorm_srgb, so
-        // the scaler must stay in perceptual mode unless the whole MetalFX path
-        // is moved to a linear intermediate format.
-        descriptor.colorProcessingMode = .perceptual
+        // an sRGB pixel format, so sRGB drawables must stay perceptual. Float
+        // formats carry LINEAR extended-range (EDR) data — `.hdr` makes the
+        // scaler apply its own reversible tonemap internally instead of
+        // misreading >1 energy as perceptual values (same switch as the Mac
+        // `ViewportSpatialUpscaler`).
+        switch configuration.colorFormat {
+        case .rgba16Float, .bgra10_xr, .bgra10_xr_srgb, .rg11b10Float:
+            descriptor.colorProcessingMode = .hdr
+        default:
+            descriptor.colorProcessingMode = .perceptual
+        }
 
         // Append any new scalers required to match viewCount.
         for _ in scalers.count..<viewCount {

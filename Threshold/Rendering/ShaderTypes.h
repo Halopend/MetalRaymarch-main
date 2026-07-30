@@ -206,6 +206,10 @@ typedef struct
     // highlight energy above SDR white up to this value. The shader clamps to
     // >= 1, so a zero-initialized struct behaves as SDR.
     float edrHeadroom;
+    // RGB10 colors occupy ColorSchemeParams' former 8-byte trailing alignment
+    // pad, keeping Uniforms and TileUniforms within their existing 2 KB budget.
+    uint32_t glowColorRGB10;
+    uint32_t bloomColorRGB10;
 
     // Note: fog is handled entirely by PrecomputedFog — no per-pixel fog fields here.
     // fogEnabled/fogIntensity live in RenderSettings for CPU precomputation only.
@@ -290,6 +294,18 @@ typedef struct
     int _pad0; int _pad1; int _pad2;  // 16-byte tail alignment
 } SpaceWarpStack;
 
+// === SCENE-LEVEL SDF OBJECTS ===
+// Independently placed primitives unioned with the active fractal. Records live
+// directly in the frame-uniform block: eight objects cost 256 bytes but avoid a
+// second mutable bindless allocation and keep all render paths in lockstep.
+#define kMaxScenePrimitives 8
+#define BENCHY_SDF_DIM 96
+typedef struct
+{
+    vector_float4 positionScale;  // xyz = model-space position, w = uniform scale
+    vector_float4 dimensionsKind; // xyz = kind-specific dimensions, w = stable selector
+} ScenePrimitiveGPU;
+
 // === ENVIRONMENT SCRUNCH (scanned-room proximity field) ===
 // The scanned surroundings (visionOS scene-reconstruction mesh) are baked on
 // the CPU into a band-limited unsigned distance grid in WORLD meters. Desktop
@@ -331,6 +347,13 @@ typedef struct
     // shell on the viewer-visible side of scanned surfaces instead of the
     // mirrored "outside" side of the unsigned distance field.
     vector_float3 viewerModel;
+
+    // Scene object union. Benchy instances share one immutable signed-distance
+    // volume; analytic objects use dimensionsKind directly.
+    ScenePrimitiveGPU scenePrimitives[kMaxScenePrimitives];
+    int scenePrimitiveCount;
+    int _scenePrimitivePad0;
+    uint64_t benchySDFAddress; // half[BENCHY_SDF_DIM^3], canonical local units
 } EnvScrunchParams;
 
 // === FRACTAL DISTANCE CACHE (conservative distance-field grid) ===
@@ -347,17 +370,17 @@ typedef struct
 // renders, only when a DE-shaping parameter actually changed — so the cache is
 // never stale and static frames pay nothing. Model space makes it ZOOM-
 // INVARIANT: camera motion and detail-scale zoom never dirty it.
-// CPU-side gating (see FractalDistanceCache.swift): enabled only for the
-// box-fold family whose DE is a true lower bound, and only while camera-
-// dependent DE terms (safety bubble, hands, env scrunch) and distance-LOD
-// (which fattens the far surface below the baked iteration count) are off.
-#define DIST_CACHE_DIM 64    // grid resolution per axis (half floats, DIM^3)
+// CPU-side gating (see FractalDistanceCache.swift): enabled only for stable,
+// unprojected Mandelboxes without distance-reducing hands, env scrunch, or
+// distance-LOD. Safety-bubble subtraction is compatible because it can only
+// increase the canonical distance.
+#define DIST_CACHE_DIM 128   // grid resolution per axis (uint8 fixed-point, DIM^3)
 typedef struct
 {
     int enabled;             // 0 = off (grid is never dereferenced)
     float nearBandModel;     // cached bound below this → fall back to the analytic DE (model units)
     uint64_t gridAddress;    // MTLBuffer.gpuAddress of half[DIM^3] bounds (model units); 0 = none
-    vector_float3 originModel;   // grid min corner, model space
+    vector_float4 originModel;   // xyz = grid min corner; w = runtime grid dimension
     vector_float3 invCellModel;  // 1 / cell size, per axis (model units)
 } DistanceCacheParams;
 
@@ -687,9 +710,12 @@ typedef struct
 // 2026-07-06: both +16 B — boundingShapeCenter (vector_float3) so the Linear
 // Rail moves content INSIDE a pinned Bounding Shape instead of dragging the
 // shape along, 1984 → 2048 bound.
-static_assert(sizeof(Uniforms) <= 2048,
+// 2026-07-26: both +272 B — eight fixed scene-SDF records + shared Benchy
+// volume address. The hot FractalParams struct is unchanged; records remain
+// behind its existing EnvScrunchParams pointer.
+static_assert(sizeof(Uniforms) <= 2336,
               "Uniforms grew — bump this bound consciously (TECH_DEBT.md #8d)");
-static_assert(sizeof(TileUniforms) <= 2048,
+static_assert(sizeof(TileUniforms) <= 2336,
               "TileUniforms grew — bump this bound consciously (TECH_DEBT.md #8d)");
 static_assert(sizeof(FormulaParams) <= 176,
               "FormulaParams grew — bump this bound consciously (TECH_DEBT.md #8d)");

@@ -8,6 +8,7 @@ struct RenderSettingsSnapshot {
     let minDistance: Float
     let scale: Float
     let position: SIMD3<Float>
+    let scenePrimitives: [ScenePrimitive]
     // World-space translation the Linear Rail animation added on top of the base
     // position this frame (position already includes it). Kept separately so the
     // Bounding Shape can be pinned in place while the rail slides content past it

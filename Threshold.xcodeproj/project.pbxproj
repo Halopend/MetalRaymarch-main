@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		019F9F50C68B7F30AF36B601 /* Benchy.sdfbin in Resources */ = {isa = PBXBuildFile; fileRef = 019F9F50C68B7F30AF36B600 /* Benchy.sdfbin */; };
+		019F9F50C68B7F30AF36B602 /* Benchy.sdfbin in Resources */ = {isa = PBXBuildFile; fileRef = 019F9F50C68B7F30AF36B600 /* Benchy.sdfbin */; };
 		0413E6919957D1EE1296846A /* HeadlessRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A612D1E79204F9301A256B4F /* HeadlessRenderer.swift */; };
 		099D69EE64114830CE6B54E2 /* QuickLookThumbnailing.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C2C60FE2AC612DBC45321348 /* QuickLookThumbnailing.framework */; };
 		0C78E8AD4745827B432CF743 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0CD407A50A4FE37188F833F4 /* Cocoa.framework */; };
@@ -171,6 +173,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		019F9F50C68B7F30AF36B600 /* Benchy.sdfbin */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; name = Benchy.sdfbin; path = Threshold/Resources/Benchy.sdfbin; sourceTree = SOURCE_ROOT; };
 		03E7522477BCD8B767E1FEAD /* LightingTypes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LightingTypes.swift; path = Threshold/App/LightingTypes.swift; sourceTree = SOURCE_ROOT; };
 		03F342DFA88CFE8037D5D593 /* RenderSettings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RenderSettings.swift; path = Threshold/Parameters/RenderSettings.swift; sourceTree = SOURCE_ROOT; };
 		0699360DD28FC3B04D6FADBB /* PerFractalGestureStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PerFractalGestureStore.swift; path = Threshold/Parameters/Config/PerFractalGestureStore.swift; sourceTree = SOURCE_ROOT; };
@@ -419,6 +422,7 @@
 		775CF2DF8ADA929636A032AA /* ThresholdQLThumbnail */ = {
 			isa = PBXGroup;
 			children = (
+				019F9F50C68B7F30AF36B600 /* Benchy.sdfbin */,
 				4FD7A7927E0894DDBB99805F /* FractalPreset.swift */,
 				725149DCC30BFBEC6B030A69 /* RenderSettings.swift */,
 				2120938DEF53F1E5EBDA1AEA /* RenderSettingsSnapshot.swift */,
@@ -755,6 +759,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				019F9F50C68B7F30AF36B601 /* Benchy.sdfbin in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -762,6 +767,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				019F9F50C68B7F30AF36B602 /* Benchy.sdfbin in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
