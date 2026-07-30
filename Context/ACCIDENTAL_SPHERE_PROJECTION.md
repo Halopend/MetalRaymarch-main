@@ -1,5 +1,21 @@
 # Accidental Sphere Projection — root cause, the lost look, and how to rebuild it
 
+**Update (2026-07-30):** a standalone recreation now exists as a custom DE —
+[`Threshold/Examples/Formulas/AccidentalSphereProjection.threshfx`](../Threshold/Examples/Formulas/AccidentalSphereProjection.threshfx)
+plus a bundled scene
+[`Threshold/Examples/Scenes/Accidental Sphere Projection.threshscene`](../Threshold/Examples/Scenes/Accidental%20Sphere%20Projection.threshscene)
+(branch `thrsh/accidental-sphere-projection`). Instead of the `FC_ITER_BIAS` recipe below
+(which biases the shared Mandelbox pipeline), it bakes the mismatch into its own formula:
+the geometry loop runs a `Geometry Folds` param (era: 2, the `f58cc5ea` "sphere mode"
+pinned count) regardless of the scene iteration count, the DE tail subtracts
+`pow(scale, 1 − Norm Iterations)` (era: the full runtime count, ≈ 0), and the orbit
+variant keeps folding to full depth so orbit-trap coloring is projected onto the
+under-folded surface. Era-exact fold math from `MAP_ITERATION_BASIC`; parameter defaults
+taken from the After-Sphere reference recording HUD (Scale 3.32, Box Folding Limit 1.04,
+Sphere Radius 0.75 → Min R² 0.5625, Max Steps 144). Reference capture: image + screen
+recording from the era build, 2026-07-30. Only the user can confirm the exact match; the
+mechanism below remains the reference.
+
 **Status (2026-07-07):** the original distinct look is **NOT reproducible** in the current
 build. The `deIterationMismatch` control is a **failed recreation** — right plumbing, wrong
 mechanism (see below). The only surviving artifact of the real effect is branch

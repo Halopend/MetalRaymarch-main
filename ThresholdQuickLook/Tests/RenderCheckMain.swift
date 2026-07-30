@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import ImageIO
 
 // Render regression check for the Quick Look extension.
 //
@@ -70,6 +71,15 @@ struct RenderCheck {
             }
             guard let cg = renderer.render(preset: preset, pixelSize: CGSize(width: 512, height: 512)) else {
                 failures.append("\(name): render returned nil (\(preset.fractalType))"); continue
+            }
+            // THRESHOLD_QL_PNG_DIR: dump each render as a PNG for visual inspection.
+            if let pngDir = ProcessInfo.processInfo.environment["THRESHOLD_QL_PNG_DIR"] {
+                let dest = URL(fileURLWithPath: pngDir).appendingPathComponent("\(name).png")
+                try? fm.createDirectory(atPath: pngDir, withIntermediateDirectories: true)
+                if let cgDest = CGImageDestinationCreateWithURL(dest as CFURL, "public.png" as CFString, 1, nil) {
+                    CGImageDestinationAddImage(cgDest, cg, nil)
+                    CGImageDestinationFinalize(cgDest)
+                }
             }
             let lum = meanLuminance(cg)
             if wellFramed.contains(name) && lum < blackThreshold {

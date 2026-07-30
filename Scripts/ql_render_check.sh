@@ -86,5 +86,6 @@ xcrun -sdk macosx swiftc -Onone -g -target arm64-apple-macos26.0 \
 
 echo "==> rendering all bundled scenes"
 cd "$REPO"
-THRESHOLD_QL_METALLIB="$BUILD/shaders.metallib" "$BUILD/render-check" "Threshold/Examples/Scenes"
+# Optional first argument: alternate scenes directory (default: bundled examples).
+THRESHOLD_QL_METALLIB="$BUILD/shaders.metallib" "$BUILD/render-check" "${1:-Threshold/Examples/Scenes}"
 echo "==> render check PASSED"

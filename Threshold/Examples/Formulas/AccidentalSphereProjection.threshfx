@@ -1,0 +1,58 @@
+{
+  "formula": {
+    "author": "Threshold (After-Sphere reconstruction)",
+    "category": "Mandelbox",
+    "defaultColorIterations": 12,
+    "defaultIterations": 12,
+    "description": "Reconstruction of the lost After-Sphere look: a Mandelbox whose geometry fold loop runs only a few iterations (era: 2, pinned by the sphere-mode debug pipeline) while the distance normalization and orbit-trap coloring assume the full iteration count. The under-folded field becomes a world of partially folded spheres and the full-depth orbit machinery projects Mandelbox surface detail onto them. Defaults match the After-Sphere reference recording HUD (Scale 3.32, Fold Limit 1.04, Sphere Radius 0.75). See Context/ACCIDENTAL_SPHERE_PROJECTION.md and branch After-Sphere (f50fe1f9, f58cc5ea).",
+    "functionStem": "AccidentalSphereProjection",
+    "id": "com.puppypower.threshold.embedded.accidentalSphereProjection",
+    "kind": "fractal",
+    "metalSource": "// ===== Accidental Sphere Projection (Mandelbox) =====\n// Recreation of the lost After-Sphere look (branch After-Sphere, commits f50fe1f9 +\n// f58cc5ea; Context/ACCIDENTAL_SPHERE_PROJECTION.md). The original was a structural\n// bug: the geometry fold loop ran only the compile-time FC_FRACTAL_ITERATIONS (pinned\n// to 2 by the debug \"sphere mode\" pipeline) while the CPU-side DE normalization term\n// and the color/orbit machinery kept assuming the full runtime iteration count.\n// Under-folded geometry degenerates toward d = (length(p) - |scale-1|) / dr \u2014 a\n// partially folded sphere \u2014 while full-depth orbit traps keep painting Mandelbox\n// surface detail onto it.\n//\n// This DE bakes the mismatch in structurally instead of relying on pipeline state:\n//   - geometry runs exactly \"Geometry Folds\" iterations (era: 2), independent of the\n//     scene iteration count, so the look cannot flicker with pipeline specialization;\n//   - the distance is normalized as if \"Norm Iterations\" folds had run (era: the full\n//     count, which makes the subtracted pow term effectively vanish). Dial it down to\n//     match Geometry Folds to see the \"correct\" low-iteration Mandelbox for contrast;\n//   - the orbit variant keeps folding to the scene iteration count, so orbit traps\n//     project full-depth Mandelbox coloring onto the sphere surface.\n// Era values (from the After-Sphere reference recording HUD): Scale 3.32,\n// Fold Limit 1.04, Sphere Radius 0.75 (Min R^2 0.5625), Geometry Folds 2.\n//\n// @param 0 \"Scale\" default=3.32 min=1.0 max=4.0 step=0.01\n// @param 1 \"Fold Limit\" default=1.04 min=0.25 max=6.0 step=0.01\n// @param 2 \"Min R2\" default=0.5625 min=0.01 max=1.0 step=0.01\n// @param 3 \"Geometry Folds\" default=2 min=0 max=8 step=1\n// @param 4 \"Norm Iterations\" default=12 min=1 max=24 step=1\n\nFORCE_INLINE float DE_AccidentalSphereProjection(float3 pos, FormulaParams fp, float3x3 rot,\n                                  int iterations, int colorIterations,\n                                  thread OrbitData& orbit) {\n    float scale = clamp(fp.params[0], 1.0f, 4.0f);\n    float limit = max(fp.params[1], 0.05f);\n    float minR2 = clamp(fp.params[2], 1e-4f, 1.0f);\n    int geomFolds = clamp(int(round(fp.params[3])), 0, 16);\n    int normIters = clamp(int(round(fp.params[4])), 1, 32);\n    bool hasRotation = hasRot1Precomputed(fp);\n\n    float invMinR2 = 1.0f / minR2;\n    float4 p = float4(pos, 1.0f);\n    float4 p0 = p;\n\n    // Geometry snapshot after geomFolds folds (geomFolds == 0 -> the raw sphere).\n    float3 geomP = p.xyz;\n    float geomW = p.w;\n\n    float trap = 1e20f;\n    int trapIter = 0;\n    float3 trapPos = pos;\n\n    int totalIters = max(geomFolds, clamp(iterations, 0, 32));\n    int i = 0;\n    for (; i < totalIters; ++i) {\n        if (hasRotation) p.xyz = rot * p.xyz;\n        // Era-exact Mandelbox iteration (MAP_ITERATION_BASIC on branch After-Sphere):\n        p.xyz = fma(clamp(p.xyz, -limit, limit), float3(2.0f), -p.xyz);\n        float r2 = dot(p.xyz, p.xyz);\n        UpdateTrapMinR2(trap, trapIter, trapPos, r2, i, colorIterations, p.xyz);\n        float t = clamp(1.0f / max(r2, minR2), 1.0f, invMinR2);\n        p *= t;\n        p = fma(p, float4(scale), p0);\n        if (i + 1 == geomFolds) { geomP = p.xyz; geomW = p.w; }\n    }\n\n    orbit.trap = trap;\n    orbit.trapIteration = trapIter;\n    orbit.trapPosition = trapPos;\n    orbit.finalP = p.xyz;\n    orbit.iterationsUsed = i;\n\n    // The structural mismatch: distance from the under-folded snapshot, normalized as\n    // if normIters folds had run.\n    float d = (length(geomP) - abs(scale - 1.0f)) / max(geomW, 1e-6f);\n    return d - powr(scale, 1.0f - float(normIters));\n}\n\nFORCE_INLINE float DE_AccidentalSphereProjection_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {\n    float scale = clamp(fp.params[0], 1.0f, 4.0f);\n    float limit = max(fp.params[1], 0.05f);\n    float minR2 = clamp(fp.params[2], 1e-4f, 1.0f);\n    int geomFolds = clamp(int(round(fp.params[3])), 0, 16);\n    int normIters = clamp(int(round(fp.params[4])), 1, 32);\n    bool hasRotation = hasRot1Precomputed(fp);\n\n    float invMinR2 = 1.0f / minR2;\n    float4 p = float4(pos, 1.0f);\n    float4 p0 = p;\n\n    // Geometry deliberately ignores the runtime iteration count: the era bug pinned\n    // the fold loop at a low compile-time constant while shading ran full depth.\n    for (int i = 0; i < geomFolds; ++i) {\n        if (hasRotation) p.xyz = rot * p.xyz;\n        p.xyz = fma(clamp(p.xyz, -limit, limit), float3(2.0f), -p.xyz);\n        float r2 = dot(p.xyz, p.xyz);\n        float t = clamp(1.0f / max(r2, minR2), 1.0f, invMinR2);\n        p *= t;\n        p = fma(p, float4(scale), p0);\n    }\n\n    float d = (length(p.xyz) - abs(scale - 1.0f)) / max(p.w, 1e-6f);\n    return d - powr(scale, 1.0f - float(normIters));\n}\n",
+    "name": "Accidental Sphere Projection",
+    "params": [
+      {
+        "default": 3.32,
+        "index": 0,
+        "max": 4.0,
+        "min": 1.0,
+        "name": "Scale",
+        "step": 0.01
+      },
+      {
+        "default": 1.04,
+        "index": 1,
+        "max": 6.0,
+        "min": 0.25,
+        "name": "Fold Limit",
+        "step": 0.01
+      },
+      {
+        "default": 0.5625,
+        "index": 2,
+        "max": 1.0,
+        "min": 0.01,
+        "name": "Min R2",
+        "step": 0.01
+      },
+      {
+        "default": 2.0,
+        "index": 3,
+        "max": 8.0,
+        "min": 0.0,
+        "name": "Geometry Folds",
+        "step": 1.0
+      },
+      {
+        "default": 12.0,
+        "index": 4,
+        "max": 24.0,
+        "min": 1.0,
+        "name": "Norm Iterations",
+        "step": 1.0
+      }
+    ],
+    "schemaVersion": 1
+  },
+  "version": 1
+}
