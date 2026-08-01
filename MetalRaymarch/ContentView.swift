@@ -420,6 +420,16 @@ struct MenuContentView: View {
                     }
                     .buttonStyle(.bordered)
                     .help("Reset position to origin and parameters to defaults")
+
+                    // Fractal history and its renderable Threshold interpretations
+                    Button {
+                        appModel.openAtlasWindow()
+                    } label: {
+                        Label("Atlas", systemImage: "sparkles.rectangle.stack")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(ThresholdBrand.bloom)
+                    .help("Open the Fractal Atlas")
                     
                     // Developer tools button
                     Button {

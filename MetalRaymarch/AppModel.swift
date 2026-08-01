@@ -49,6 +49,7 @@ class AppModel {
     let menuWindowID = "MenuWindow"
     let developerWindowID = "DeveloperWindow"
     let scenesWindowID = "ScenesWindow"
+    let atlasWindowID = "AtlasWindow"
     
     enum ImmersiveSpaceState {
         case closed
@@ -81,6 +82,9 @@ class AppModel {
     
     // Preset management
     let presetManager = PresetManager()
+
+    // Atlas scene slots are intentionally separate from DE-backed presets.
+    let atlasSceneStore = AtlasSceneStore()
     
     // Parameter recording
     var parameterRecorder: ParameterRecorder?
@@ -198,6 +202,9 @@ class AppModel {
     /// Callback to open the scenes window (set by App scene)
     var openScenesWindowHandler: (() -> Void)?
     
+    /// Callback to open the editorial fractal atlas (set by App scene)
+    var openAtlasWindowHandler: (() -> Void)?
+
     /// Open the developer tools window
     func openDeveloperWindow() {
         openDeveloperWindowHandler?()
@@ -206,6 +213,11 @@ class AppModel {
     /// Open the scenes window
     func openScenesWindow() {
         openScenesWindowHandler?()
+    }
+
+    /// Open the Fractal Atlas
+    func openAtlasWindow() {
+        openAtlasWindowHandler?()
     }
     
     /// Toggle menu window visibility - hides window content completely (preserves position)

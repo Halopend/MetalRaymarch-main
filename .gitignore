@@ -1,5 +1,6 @@
 FractalBench/.build
 .DS_Store
+.firecrawl/
 Traces
 MetalRaymarch.xcodeproj/project.xcworkspace/xcuserdata/*
 MetalRaymarch.xcodeproj/project.xcworkspace/xcuserdata

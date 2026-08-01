@@ -70,6 +70,10 @@ struct MetalProjectTestApp: App {
                     appModel.openScenesWindowHandler = {
                         openWindow(id: appModel.scenesWindowID)
                     }
+                    // Set up handler for the Fractal Atlas
+                    appModel.openAtlasWindowHandler = {
+                        openWindow(id: appModel.atlasWindowID)
+                    }
                 }
         }
         .defaultSize(width: 600, height: 250)
@@ -93,6 +97,15 @@ struct MetalProjectTestApp: App {
         .defaultSize(width: 500, height: 600)
         .windowStyle(.plain)
         .windowResizability(.contentSize)
+
+        // Editorial collection of fractal pioneers and renderable interpretations
+        Window("The Fractal Atlas", id: appModel.atlasWindowID) {
+            FractalAtlasView()
+                .environment(appModel)
+        }
+        .defaultSize(width: 1120, height: 780)
+        .windowStyle(.plain)
+        .windowResizability(.contentMinSize)
 
         ImmersiveSpace(id: appModel.immersiveSpaceID) {
             CompositorLayer(configuration: ContentStageConfiguration()) { @MainActor layerRenderer in
