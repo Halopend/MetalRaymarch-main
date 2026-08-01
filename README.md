@@ -1,6 +1,21 @@
 # Threshold
 
+![Threshold ray-marching demo](metal-raymarch-demo.gif)
+
 An artistic real-time fractal renderer (SDF ray-marching in Metal) for **macOS, iPadOS, and visionOS**, with a music-reactive layer, an animation/scene system, and a Quick Look extension that live-renders `.threshscene` files.
+
+A curiosity that has been brewing since Archimedes reached for his compass: make geometry something to sense, not just calculate. Threshold is a continuous, sensory space for exploring higher-dimensional objects through light, motion, sound, and interaction.
+
+## Core focus
+
+- **Performance:** Threshold is built for responsive, real-time fractal rendering. Rendering quality and performance work are measured on the target device rather than inferred from a simulator.
+- **Scene data that travels:** Manage scenes, animations, music presets, and formulas on-device or in **iCloud Drive**. Exported files use the native share sheet, including **AirDrop** wherever it is available.
+- **Assignable spatial interaction:** On visionOS, assign scalar controls or linked **X/Y/Z** parameter triplets to individual fingers for direct, multi-axis scene interaction.
+- **Platform reach:** Threshold currently supports macOS, iPadOS, and visionOS. If project resources allow, we would like to bring this workflow to more platforms without compromising its real-time focus.
+- **MIDI (planned):** MIDI control and integration are planned for a future release; they are not supported in the current build.
+- **Interaction shaping (planned):** A future control-mapping layer will let you insert a function between an input and its target, tuning the response and feel of an interaction.
+
+> **Vision Pro warning:** Performance is heavily dependent on the active scene, quality settings, and device conditions. Threshold is experimental and is not guaranteed to be a comfortable experience. Stop using it if it feels uncomfortable.
 
 ## Why Threshold is open
 
@@ -150,21 +165,23 @@ path is still experimental.
 
 Standalone `.threshfx` files placed in the selected library's `Formulas/` folder
 are discovered automatically and can be exchanged through Files or the normal
-share flow. Scenes, music presets, animations, and formulas live under the
-selected storage root in `Scenes/`, `Music Presets/`, `Animations/`, and
-`Formulas/`, respectively. This keeps a formula or scene portable without
-requiring it to be added to the Xcode project.
+share flow, including AirDrop where it is available. Scenes, music presets,
+animations, and formulas live under the selected storage root in `Scenes/`,
+`Music Presets/`, `Animations/`, and `Formulas/`, respectively. This keeps a
+formula or scene portable without requiring it to be added to the Xcode
+project.
 
 ### iCloud status
 
 Threshold supports two storage modes: **On This Device** and **iCloud Drive**.
-The selected root is the source of truth, and the app watches it for changes.
-An always-local `Backups/` folder provides a safety net and is not synced to
-iCloud. iCloud availability still depends on the user's account, entitlements,
-network, and the build being used. Local command-line builds are intentionally
-unsigned (`CODE_SIGNING_ALLOWED=NO`) and do not have the iCloud entitlement, so
-iCloud behavior should be validated with a signed device or TestFlight build.
-When iCloud is unavailable, local storage remains the reliable fallback.
+The selected root is the source of truth for managing scene data, and the app
+watches it for changes. An always-local `Backups/` folder provides a safety net
+and is not synced to iCloud. iCloud availability still depends on the user's
+account, entitlements, network, and the build being used. Local command-line
+builds are intentionally unsigned (`CODE_SIGNING_ALLOWED=NO`) and do not have
+the iCloud entitlement, so iCloud behavior should be validated with a signed
+device or TestFlight build. When iCloud is unavailable, local storage remains
+the reliable fallback.
 
 ### Categories are intentionally limited
 
