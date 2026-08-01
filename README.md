@@ -15,7 +15,9 @@ A curiosity that has been brewing since Archimedes reached for his compass: make
 - **MIDI (planned):** MIDI control and integration are planned for a future release; they are not supported in the current build.
 - **Interaction shaping (planned):** A future control-mapping layer will let you insert a function between an input and its target, tuning the response and feel of an interaction.
 
-> **Vision Pro warning:** Performance is heavily dependent on the active scene, quality settings, and device conditions. Threshold is experimental and is not guaranteed to be a comfortable experience. Stop using it if it feels uncomfortable.
+> **Vision Pro warning:** Performance is heavily dependent on the active scene, quality settings, and device conditions. Threshold is experimental and is not guaranteed to be a comfortable experience. Stop using it if it feels uncomfortable or switch to a more comfortble expereince. 
+
+![Metal Raymarch demo](metal-raymarch-demo.gif)
 
 ## Why Threshold is open
 
@@ -28,6 +30,7 @@ in the documentation all make a difference.
 The original application code is released under the GNU General Public License,
 version 3 or later. The practical terms are summarized below; the complete GPL
 text is the authoritative agreement.
+
 
 ## GPL licensing agreement
 
@@ -170,6 +173,15 @@ animations, and formulas live under the selected storage root in `Scenes/`,
 `Music Presets/`, `Animations/`, and `Formulas/`, respectively. This keeps a
 formula or scene portable without requiring it to be added to the Xcode
 project.
+
+### Sharing files with a performance report
+
+MetricKit collects performance diagnostics automatically; no performance-report
+file needs to be created or exported. If you have a file that helps reproduce a
+problem, share the original supported Threshold file unchanged—for example a
+`.threshfx` formula or `.threshscene` scene—through Files, AirDrop, or the normal
+feedback channel. Include the device, macOS version, active formula, and steps
+to reproduce the slowdown.
 
 ### iCloud status
 

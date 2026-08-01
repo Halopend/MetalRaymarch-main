@@ -47,6 +47,7 @@ struct ContentView: View {
     @State var animateEditButtonsVisible = false
 #if os(macOS)
     @AppStorage("MacTabLauncher.style") var macTabLauncherStyle: NavigationPresentationStyle = .radial
+    @State var performanceReportStatus: String?
 #endif
     @AppStorage("ContentView.showPerformanceInMenu") var showPerformanceInMenu: Bool = false
     @AppStorage("ContentView.showFPSInHUD") var showFPSInHUD: Bool = true

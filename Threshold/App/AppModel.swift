@@ -359,6 +359,10 @@ class AppModel {
     let presetManager = PresetManager()
     /// Drives the on-device performance sweep that writes the per-build perf log.
     let perfSweepRunner = PerfSweepRunner()
+    /// Receives OS-delivered MetricKit payloads without adding work to the
+    /// render loop. The payloads stay bounded and local until a user chooses to
+    /// share a performance report.
+    let metricKitPerformanceReporter = MetricKitPerformanceReporter()
 
     // Error reporting for transient banners
     let errorReporter = ErrorReporter()

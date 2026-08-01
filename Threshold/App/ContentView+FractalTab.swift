@@ -180,21 +180,21 @@ extension ContentView {
                         appModel.formulaEditorSeed = nil
                         openWindow(id: AppModel.formulaEditorWindowID)
                     } label: {
-                        Label("New Formula", systemImage: "curlybraces")
+                        Label("Open Metal DE Studio", systemImage: "hammer.fill")
                     }
                     if cache.fractalType == .custom, let active = appModel.activeEmbeddedFormula {
                         Button {
                             appModel.formulaEditorSeed = active
                             openWindow(id: AppModel.formulaEditorWindowID)
-                        } label: {
-                            Label("Edit \(active.name)", systemImage: "pencil.and.outline")
-                        }
+                    } label: {
+                        Label("Edit Metal DE: \(active.name)", systemImage: "pencil.and.outline")
+                    }
                     }
                     Spacer()
                 }
                 .controlSize(.small)
             } else {
-                Text("Live formula editing unlocks with “Allow custom scenes” in Settings → General.")
+                Text("Metal DE Studio unlocks with “Allow custom scenes” in Settings → General.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1182,8 +1182,64 @@ extension ContentView {
             performanceSectionHeader("Overview", systemImage: "gauge")
 
             PerformanceMetricsView(cache: cache)
+
+            #if os(macOS)
+            performanceReportCard
+            #endif
         }
     }
+
+    #if os(macOS)
+    private var performanceReportCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Share a performance report", systemImage: "waveform.path.ecg")
+                    .font(.headline)
+                Spacer()
+                Text("MetricKit automatic")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.green)
+            }
+
+            Text("MetricKit quietly collects OS-level performance diagnostics in the background. Submit the current structured sample using the existing Community Sharing preference when you want to share it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text("Have a file to share too? Send the original Threshold file—such as .threshfx or .threshscene—through Files, AirDrop, or your normal feedback channel. Include the device, macOS version, active formula, and steps to reproduce; no performance-report file is needed.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
+            HStack(spacing: 8) {
+                Button {
+                    performanceReportStatus = "Submitting…"
+                    let report = appModel.makePerformanceReport()
+                    Task { @MainActor in
+                        let result = await UsageAnalytics.shared.submitPerformanceReport(report)
+                        performanceReportStatus = switch result {
+                        case .submitted: "Report submitted."
+                        case .sharingDisabled: "Enable Community Sharing to submit."
+                        case .unavailable: "CloudKit is unavailable right now."
+                        case .failed: "Submission failed; please try again later."
+                        }
+                    }
+                } label: {
+                    Label("Submit", systemImage: "arrow.up.circle")
+                }
+                .disabled(!UsageAnalytics.shared.analyticsEnabled)
+            }
+
+            if let performanceReportStatus {
+                Text(performanceReportStatus)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color.indigo.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+    }
+    #endif
 
     /// Tuning — every performance knob in one place: the iteration/ray-step budget,
     /// renderer mode, render quality, and the march-acceleration techniques. (The

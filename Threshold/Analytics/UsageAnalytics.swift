@@ -573,6 +573,43 @@ final class UsageAnalytics {
         await uploadToCloudKit(snapshot)
     }
 
+    /// Submit a structured, compressed performance report. This is separate
+    /// from the background usage snapshot: it only runs after the user presses
+    /// “Submit report”, and it is gated by the existing Community Sharing
+    /// preference. The archive contains no formula source.
+    func submitPerformanceReport(_ report: PerformanceReport) async -> PerformanceReportSubmissionResult {
+        guard analyticsEnabled else { return .sharingDisabled }
+        guard let database = database() else { return .unavailable }
+        guard let archive = try? PerformanceReportArchive.encode(report) else { return .failed }
+
+        let record = CKRecord(recordType: "PerformanceReport")
+        record["timestamp"] = report.capturedAt as NSDate
+        record["schemaVersion"] = report.schemaVersion as NSNumber
+        record["appVersion"] = report.appVersion
+        record["buildNumber"] = report.buildNumber
+        record["deviceModel"] = report.deviceModel
+        record["osVersion"] = report.osVersion
+        record["formulaHash"] = report.activeFormulaHash ?? "built-in"
+        record["fps"] = report.render.fps as NSNumber
+        record["gpuFrameMs"] = report.render.gpuFrameMs as NSNumber
+        record["avgStepsPerPixel"] = report.render.avgStepsPerPixel as NSNumber
+        record["metricKitPayloadCount"] = report.metricKit.payloadCount as NSNumber
+        record["metricKitDiagnosticCount"] = report.metricKit.diagnosticCount as NSNumber
+        record["findingAreas"] = report.findings.map { $0.area.rawValue }.joined(separator: ",")
+        // CloudKit stores the compressed archive as a string so the record is
+        // self-contained and can be copied into the parser without a file
+        // attachment. The bounded MetricKit retention keeps this well below a
+        // normal public-record limit.
+        record["reportArchiveBase64"] = archive.base64EncodedString()
+
+        do {
+            _ = try await database.save(record)
+            return .submitted
+        } catch {
+            return .failed
+        }
+    }
+
     private func uploadToCloudKit(_ snapshot: UsageSnapshot) async {
         guard analyticsEnabled else { return }
         let record = CKRecord(recordType: "UsageSnapshot")
