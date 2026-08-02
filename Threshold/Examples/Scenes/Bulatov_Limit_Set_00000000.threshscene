@@ -1,0 +1,81 @@
+{
+  "aoStrength": 0,
+  "colorIterations": 8,
+  "colorMix": 0.5,
+  "colorScheme": "nebula",
+  "colorSchemeContrast": 1.1,
+  "colorSchemeCurve": 0,
+  "colorSchemeGamma": 0.6,
+  "colorSchemeHighlights": 0.02,
+  "colorSchemeSaturation": 1.55,
+  "colorSchemeShadows": -0.018,
+  "colorSchemeVibrance": 1,
+  "createdAt": "2026-06-30T00:00:00Z",
+  "fogEffect": {
+    "colorBlue": 0.02,
+    "colorGreen": 0.015,
+    "colorRed": 0.01,
+    "enabled": true,
+    "hueRotateEnabled": false,
+    "hueRotateSpeed": 0.1,
+    "intensity": 0.25
+  },
+  "foldingLimit": 1,
+  "formulaParamValues": [
+    0.5,
+    3.1334,
+    0.57735,
+    0.408248,
+    4,
+    7,
+    1,
+    0.55555,
+    17,
+    0.15,
+    31,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "fractalIterations": 12,
+  "fractalScale": 2.8,
+  "fractalType": "mandelbox",
+  "glowEffect": {
+    "colorBlue": 1,
+    "colorGreen": 0.97,
+    "colorRed": 0.95,
+    "enabled": true,
+    "intensity": 0.35
+  },
+  "id": "00000000-0022-0000-0000-000000000001",
+  "maxRaySteps": 300,
+  "minDistance": 0.8,
+  "name": "Bulatov Limit Set",
+  "position": [
+    0,
+    0,
+    -4
+  ],
+  "rating": 0,
+  "scale": 1,
+  "spaceWarpOps": [
+    {
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "id": "00000000-0022-0000-0000-0000000000A0",
+      "isEnabled": true,
+      "p1": 0,
+      "p2": 0,
+      "strength": 0.2,
+      "type": 0
+    }
+  ],
+  "sphereRadius": 0.5,
+  "tonemapStrength": 0,
+  "updatedAt": "2026-06-30T00:00:00Z"
+}

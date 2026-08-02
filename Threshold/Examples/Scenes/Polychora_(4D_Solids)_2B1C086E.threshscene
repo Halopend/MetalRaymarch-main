@@ -1,0 +1,207 @@
+{
+  "aoStrength": 0,
+  "bloomEffect": {
+    "colorBlue": 0.88,
+    "colorGreen": 0.96,
+    "colorRed": 1,
+    "enabled": true,
+    "strength": 0.2
+  },
+  "colorIterations": 8,
+  "colorMix": 0.55,
+  "colorScheme": "ocean",
+  "colorSchemeContrast": 1.08,
+  "colorSchemeCurve": 0,
+  "colorSchemeGamma": 0.85,
+  "colorSchemeHighlights": 0.03,
+  "colorSchemeSaturation": 1.5,
+  "colorSchemeShadows": -0.02,
+  "colorSchemeVibrance": 0.9,
+  "createdAt": "2026-06-28T00:00:00Z",
+  "detailScale": 1,
+  "embeddedFormula": {
+    "author": "Knighty (Fragmentarium), ported by Threshold",
+    "category": "Polychora / 4D",
+    "defaultColorIterations": 8,
+    "defaultIterations": 15,
+    "description": "Knighty's fold-and-cut regular polychora (4D solids) rendered via inverse stereographic projection onto the unit 3-sphere. A point in R3 is lifted to the 3-sphere, rotated, reflected through the symmetry-group mirror planes (nc, nd) Type*(Type-2) times, then the spherical distance to the nearest vertex and edge segments is converted back to a planar distance. Type selects the symmetry group (3=4-simplex/5-cell, 4=hypercube/16-cell family, 5=120/600-cell family); U,V,W,T are barycentric weights placing the principal vertex on a Goursat-tetrahedron node, which morphs between vertex-, edge-, face- and cell-centered solids. This is the spherical (EUCLIDEAN-dot) cousin of the hyperbolic tessellation port.",
+    "functionStem": "Polychora",
+    "id": "com.puppypower.threshold.embedded.polychora",
+    "metalSource": "// ===== Polychora (4D Solids) — Knighty fold-and-cut, stereographic 3-sphere =====\n// Ported from Fragmentarium polychora03.frag (knighty 2012).\n// init() globals recomputed per DE call into Polychora_State.\n\nstruct Polychora_State {\n    float4 nc;       // mirror normal c\n    float4 nd;       // mirror normal d\n    float4 vert;     // principal vertex 'p' (barycentric, normalized onto 3-sphere)\n    float3x3 inRot;  // in-DE RotVector/RotAngle rotation (applied to z4.xyw)\n    int   foldCount; // Type*(Type-2)\n};\n\nFORCE_INLINE Polychora_State Polychora_initState(FormulaParams fp) {\n    Polychora_State st;\n    int type = clamp(int(round(fp.params[0])), 3, 5);\n\n    float U = fp.params[1];\n    float V = fp.params[2];\n    float W = fp.params[3];\n    float T = fp.params[4];\n\n    float3 rotVec = float3(fp.params[7], fp.params[8], fp.params[9]);\n    float  rotAngle = fp.params[10];\n\n    float cospin   = fast::cos(M_PI_F / float(type));\n    float isinpin  = 1.0f / fast::sin(M_PI_F / float(type));\n    float scospin  = fast::sqrt(max(2.0f/3.0f - cospin*cospin, 0.0f));\n    float issinpin = 1.0f / fast::sqrt(max(3.0f - 4.0f*cospin*cospin, 1e-12f));\n\n    float sqrt3 = fast::sqrt(3.0f);\n\n    st.nc = 0.5f * float4(0.0f, -1.0f, sqrt3, 0.0f);\n    st.nd = float4(-cospin, -0.5f, -0.5f/sqrt3, scospin);\n\n    float4 pabc = float4(0.0f, 0.0f, 0.0f, 1.0f);\n    float4 pbdc = 0.5f * sqrt3 * float4(scospin, 0.0f, 0.0f, cospin);\n    float4 pcda = isinpin  * float4(0.0f, 0.5f*sqrt3*scospin, 0.5f*scospin, 1.0f/sqrt3);\n    float4 pdba = issinpin * float4(0.0f, 0.0f, 2.0f*scospin, 1.0f/sqrt3);\n\n    float4 pv = U*pabc + V*pbdc + W*pcda + T*pdba;\n    float  plen = length(pv);\n    st.vert = (plen > 1e-12f) ? (pv / plen) : float4(0.0f, 0.0f, 0.0f, 1.0f);\n\n    float rvLen = length(rotVec);\n    st.inRot = (rvLen > 1e-9f) ? rotationMatrix3(rotVec, rotAngle) : float3x3(1.0f);\n\n    st.foldCount = type * (type - 2); // 3->3, 4->8, 5->15 (<=15)\n    return st;\n}\n\nFORCE_INLINE float4 Polychora_fold(float4 pos, Polychora_State st, int safetyBound) {\n    int n = min(st.foldCount, max(safetyBound, 0));\n    n = min(n, 16); // hard ceiling (Type<=5 => foldCount<=15)\n    for (int i = 0; i < n; ++i) {\n        pos.xy = abs(pos.xy);\n        float t = -2.0f * min(0.0f, dot(pos, st.nc)); pos += t * st.nc;\n        t = -2.0f * min(0.0f, dot(pos, st.nd)); pos += t * st.nd;\n    }\n    return pos;\n}\n\n// spherical -> planar distance conversion (with sign-preserving denom guard)\nFORCE_INLINE float Polychora_DD(float ca, float sa, float r) {\n    float denom = (1.0f - r*r)*ca + 2.0f*r*sa + 1.0f + r*r;\n    denom += (denom >= 0.0f ? 1e-9f : -1e-9f);\n    return r - (2.0f*r*ca - (1.0f - r*r)*sa) / denom;\n}\n\nFORCE_INLINE float Polychora_dist2Vertex(float4 z, float r, Polychora_State st, float vradius) {\n    float ca = dot(z, st.vert);\n    float sa = 0.5f * length(st.vert - z) * length(st.vert + z);\n    return Polychora_DD(ca, sa, r) - vradius;\n}\n\nFORCE_INLINE float Polychora_dist2Segment(float4 z, float4 n, float r, Polychora_State st, float sradius) {\n    float zn = dot(z, n), zp = dot(z, st.vert), np = dot(n, st.vert);\n    float alpha = zp - zn*np, beta = zn - zp*np;\n    float4 pcomb = alpha*st.vert + min(0.0f, beta)*n;\n    float pl = length(pcomb);\n    float4 pmin = (pl > 1e-12f) ? (pcomb / pl) : st.vert;\n    float ca = dot(z, pmin);\n    float sa = 0.5f * length(pmin - z) * length(pmin + z);\n    return Polychora_DD(ca, sa, r) - sradius;\n}\n\nFORCE_INLINE float Polychora_dist2Segments(float4 z, float r, Polychora_State st, float sradius) {\n    float da = Polychora_dist2Segment(z, float4(1.0f,0.0f,0.0f,0.0f), r, st, sradius);\n    float db = Polychora_dist2Segment(z, float4(0.0f,1.0f,0.0f,0.0f), r, st, sradius);\n    float dc = Polychora_dist2Segment(z, st.nc, r, st, sradius);\n    float dd = Polychora_dist2Segment(z, st.nd, r, st, sradius);\n    return min(min(da, db), min(dc, dd));\n}\n\nFORCE_INLINE float DE_Polychora(float3 pos, FormulaParams fp, float3x3 rot,\n                                int iterations, int colorIterations,\n                                thread OrbitData& orbit) {\n    bool hasRotation = hasRot1Precomputed(fp);\n    float3 p3 = hasRotation ? rot * pos : pos;\n\n    Polychora_State st = Polychora_initState(fp);\n    float vradius = max(fp.params[5], 0.0f);\n    float sradius = max(fp.params[6], 0.0f);\n\n    float r = length(p3);\n    float invR = 1.0f / (1.0f + r*r);\n    float4 z4 = float4(2.0f*p3, 1.0f - r*r) * invR; // inverse stereographic projection\n\n    z4.xyw = st.inRot * z4.xyw;\n\n    z4 = Polychora_fold(z4, st, max(iterations, st.foldCount));\n\n    // Orbit trap: folded position on the 3-sphere (min-r2 style metadata)\n    float trapR2 = dot(z4, z4);\n    orbit.trap          = trapR2;\n    orbit.trapIteration = min(st.foldCount, max(colorIterations, 0));\n    orbit.trapPosition  = z4.xyz;\n    orbit.finalP        = z4.xyz;\n    orbit.iterationsUsed = st.foldCount;\n\n    float dv = Polychora_dist2Vertex(z4, r, st, vradius);\n    float ds = Polychora_dist2Segments(z4, r, st, sradius);\n    return min(dv, ds);\n}\n\nFORCE_INLINE float DE_Polychora_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {\n    bool hasRotation = hasRot1Precomputed(fp);\n    float3 p3 = hasRotation ? rot * pos : pos;\n\n    Polychora_State st = Polychora_initState(fp);\n    float vradius = max(fp.params[5], 0.0f);\n    float sradius = max(fp.params[6], 0.0f);\n\n    float r = length(p3);\n    float invR = 1.0f / (1.0f + r*r);\n    float4 z4 = float4(2.0f*p3, 1.0f - r*r) * invR;\n\n    z4.xyw = st.inRot * z4.xyw;\n\n    z4 = Polychora_fold(z4, st, max(iterations, st.foldCount));\n\n    float dv = Polychora_dist2Vertex(z4, r, st, vradius);\n    float ds = Polychora_dist2Segments(z4, r, st, sradius);\n    return min(dv, ds);\n}\n",
+    "name": "Polychora (4D Solids)",
+    "params": [
+      {
+        "default": 5,
+        "index": 0,
+        "max": 5,
+        "min": 3,
+        "name": "Type",
+        "step": 1
+      },
+      {
+        "default": 1,
+        "index": 1,
+        "max": 1,
+        "min": 0,
+        "name": "U",
+        "step": 0.01
+      },
+      {
+        "default": 0,
+        "index": 2,
+        "max": 1,
+        "min": 0,
+        "name": "V",
+        "step": 0.01
+      },
+      {
+        "default": 0,
+        "index": 3,
+        "max": 1,
+        "min": 0,
+        "name": "W",
+        "step": 0.01
+      },
+      {
+        "default": 0,
+        "index": 4,
+        "max": 1,
+        "min": 0,
+        "name": "T",
+        "step": 0.01
+      },
+      {
+        "default": 0.05,
+        "index": 5,
+        "max": 0.5,
+        "min": 0,
+        "name": "Vertex Radius",
+        "step": 0.001
+      },
+      {
+        "default": 0.01,
+        "index": 6,
+        "max": 0.1,
+        "min": 0,
+        "name": "Segment Radius",
+        "step": 0.001
+      },
+      {
+        "default": 1,
+        "index": 7,
+        "max": 1,
+        "min": 0,
+        "name": "Rot Vector X",
+        "step": 0.01
+      },
+      {
+        "default": 1,
+        "index": 8,
+        "max": 1,
+        "min": 0,
+        "name": "Rot Vector Y",
+        "step": 0.01
+      },
+      {
+        "default": 1,
+        "index": 9,
+        "max": 1,
+        "min": 0,
+        "name": "Rot Vector Z",
+        "step": 0.01
+      },
+      {
+        "default": 0,
+        "index": 10,
+        "max": 180,
+        "min": 0,
+        "name": "Rot Angle",
+        "step": 0.5
+      }
+    ],
+    "schemaVersion": 1,
+    "supportedEffectTags": [
+      "safetyBubble"
+    ]
+  },
+  "fogEffect": {
+    "colorBlue": 0.02,
+    "colorGreen": 0.015,
+    "colorRed": 0.01,
+    "enabled": true,
+    "hueRotateEnabled": false,
+    "hueRotateSpeed": 0.1,
+    "intensity": 0.14
+  },
+  "foldingLimit": 1,
+  "formulaParamValues": [
+    5,
+    1,
+    0,
+    0,
+    0,
+    0.05,
+    0.01,
+    1,
+    1,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "fractalIterations": 15,
+  "fractalScale": 2.8,
+  "fractalType": "custom",
+  "glowEffect": {
+    "colorBlue": 1,
+    "colorGreen": 0.97,
+    "colorRed": 0.95,
+    "enabled": true,
+    "intensity": 0.12
+  },
+  "gradientCycleEffect": {
+    "enabled": false,
+    "mirrorLoop": false,
+    "speed": 0.05
+  },
+  "hueRotationEffect": {
+    "enabled": false,
+    "intensity": 1,
+    "speed": 0.05
+  },
+  "id": "2B1C086E-B352-5940-BDF1-F184D7AA6269",
+  "lightingMode": "staticLight",
+  "lightingPreset": "Custom",
+  "lightingSoftness": 0.22,
+  "maxRaySteps": 140,
+  "minDistance": 0.08,
+  "name": "Polychora (4D Solids)",
+  "position": [
+    0,
+    0,
+    -10
+  ],
+  "pulseEffect": {
+    "amount": 0,
+    "enabled": false,
+    "speed": 0
+  },
+  "rating": 0,
+  "resolutionScale": 1,
+  "safetyBubbleBlend": 0,
+  "safetyBubbleEnabled": false,
+  "safetyBubbleRadius": 0,
+  "safetyBubbleShape": 0.5,
+  "scale": 1,
+  "sphereRadius": 0.5,
+  "tileSize": 0,
+  "tonemapStrength": 0,
+  "updatedAt": "2026-06-28T00:00:00Z",
+  "worldRotationW": 1,
+  "worldRotationX": 0,
+  "worldRotationY": 0,
+  "worldRotationZ": 0
+}

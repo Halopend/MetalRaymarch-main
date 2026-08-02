@@ -1,0 +1,207 @@
+{
+  "aoStrength": 0,
+  "bloomEffect": {
+    "colorBlue": 0.88,
+    "colorGreen": 0.96,
+    "colorRed": 1,
+    "enabled": true,
+    "strength": 0.2
+  },
+  "colorIterations": 5,
+  "colorMix": 0.55,
+  "colorScheme": "rainbow",
+  "colorSchemeContrast": 1.08,
+  "colorSchemeCurve": 0,
+  "colorSchemeGamma": 0.85,
+  "colorSchemeHighlights": 0.03,
+  "colorSchemeSaturation": 1.5,
+  "colorSchemeShadows": -0.02,
+  "colorSchemeVibrance": 0.9,
+  "createdAt": "2026-06-28T00:00:00Z",
+  "detailScale": 1,
+  "embeddedFormula": {
+    "author": "Knighty (Fragmentarium), ported by Threshold",
+    "category": "Kleinian",
+    "defaultColorIterations": 5,
+    "defaultIterations": 5,
+    "description": "Theli-at's Pseudo Kleinian (Knighty): a scale-1 Julia box (cubic clamp-fold + inversion with constant offset C) whose final DE is the folded plane abs(p.z - Offset.z), scaled by the accumulated fold factor. Produces dense Kleinian-limit-set architecture with corridors and forests. Loop runs up to the main iteration count but breaks early once the fold converges (p stops changing).",
+    "functionStem": "PseudoKleinian",
+    "id": "com.puppypower.threshold.embedded.pseudokleinian",
+    "metalSource": "// ===== Pseudo Kleinian (Theli-at / Knighty), scale-1 Julia box =====\n// Source: PseudoKleinian.frag / 07-Shape1-PK.frag Thing2. Loop bounded by main\n// iterations with an early convergence break (ap != p in the source -> epsilon\n// break here).\n// Params: 0 Size, 1..3 CSize.xyz, 4..6 C.xyz, 7 DEoffset, 8..10 Offset.xyz.\n// TThickness baked away (only used by the commented \"Thingy\" path).\n// Iterations = source MI. ColorIterations limits orbit-trap iterations.\n\nFORCE_INLINE float DE_PseudoKleinian(float3 pos, FormulaParams fp, float3x3 rot,\n                                     int iterations, int colorIterations,\n                                     thread OrbitData& orbit) {\n    float  Size    = fp.params[0];\n    float3 CSize   = float3(fp.params[1], fp.params[2], fp.params[3]);\n    float3 C       = float3(fp.params[4], fp.params[5], fp.params[6]);\n    float  DEoffset= fp.params[7];\n    float3 Offset  = float3(fp.params[8], fp.params[9], fp.params[10]);\n\n    bool hasRotation = hasRot1Precomputed(fp);\n    float3 p = hasRotation ? rot * pos : pos;\n\n    float DEfactor = 1.0f;\n\n    float trap = 1e20f; int trapIter = 0; float3 trapPos = p;\n    int trapIterations = min(max(colorIterations, 0), iterations);\n\n    int n = clamp(iterations, 0, 64);\n    int i = 0;\n    float3 ap = p + 1.0f; // force first iteration (mirrors ap=p+1)\n    for (; i < n; ++i) {\n        // convergence break: stop once p stopped changing (source: ap != p)\n        if (all(abs(ap - p) < 1e-7f)) break;\n        ap = p;\n\n        // cubic clamp fold\n        p = 2.0f * clamp(p, -CSize, CSize) - p;\n\n        float r2 = dot(p, p);\n\n        // orbit trap on abs(float4(p, r2))\n        if (i < trapIterations) {\n            UpdateTrapMinR2(trap, trapIter, trapPos, r2, i, trapIterations, p);\n        }\n\n        // inversion-ish scale: k = max(Size / r2, 1)\n        float k = max(Size / max(r2, 1e-12f), 1.0f);\n        p *= k;\n        DEfactor *= k;\n\n        p += C;\n\n        // second orbit trap on abs(float4(p, dot(p,p)))\n        if (i < trapIterations) {\n            float r2b = dot(p, p);\n            UpdateTrapMinR2(trap, trapIter, trapPos, r2b, i, trapIterations, p);\n        }\n    }\n\n    orbit.trap          = trap;\n    orbit.trapIteration = trapIter;\n    orbit.trapPosition  = trapPos;\n    orbit.finalP        = p;\n    orbit.iterationsUsed= i;\n\n    // plane DE folded back through the accumulated scale\n    return abs(0.5f * abs(p.z - Offset.z) / max(DEfactor, 1e-12f) - DEoffset);\n}\n\nFORCE_INLINE float DE_PseudoKleinian_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {\n    float  Size    = fp.params[0];\n    float3 CSize   = float3(fp.params[1], fp.params[2], fp.params[3]);\n    float3 C       = float3(fp.params[4], fp.params[5], fp.params[6]);\n    float  DEoffset= fp.params[7];\n    float3 Offset  = float3(fp.params[8], fp.params[9], fp.params[10]);\n\n    bool hasRotation = hasRot1Precomputed(fp);\n    float3 p = hasRotation ? rot * pos : pos;\n\n    float DEfactor = 1.0f;\n\n    int n = clamp(iterations, 0, 64);\n    int i = 0;\n    float3 ap = p + 1.0f;\n    for (; i < n; ++i) {\n        if (all(abs(ap - p) < 1e-7f)) break;\n        ap = p;\n\n        p = 2.0f * clamp(p, -CSize, CSize) - p;\n\n        float r2 = dot(p, p);\n        float k = max(Size / max(r2, 1e-12f), 1.0f);\n        p *= k;\n        DEfactor *= k;\n\n        p += C;\n    }\n\n    return abs(0.5f * abs(p.z - Offset.z) / max(DEfactor, 1e-12f) - DEoffset);\n}",
+    "name": "Pseudo Kleinian",
+    "params": [
+      {
+        "default": 1,
+        "index": 0,
+        "max": 2,
+        "min": 0,
+        "name": "Size",
+        "step": 0.01
+      },
+      {
+        "default": 0.97478,
+        "index": 1,
+        "max": 2,
+        "min": 0,
+        "name": "CSize X",
+        "step": 0.001
+      },
+      {
+        "default": 1.04202,
+        "index": 2,
+        "max": 2,
+        "min": 0,
+        "name": "CSize Y",
+        "step": 0.001
+      },
+      {
+        "default": 0.97478,
+        "index": 3,
+        "max": 2,
+        "min": 0,
+        "name": "CSize Z",
+        "step": 0.001
+      },
+      {
+        "default": -0.05972,
+        "index": 4,
+        "max": 2,
+        "min": -2,
+        "name": "C X",
+        "step": 0.001
+      },
+      {
+        "default": 0.1492,
+        "index": 5,
+        "max": 2,
+        "min": -2,
+        "name": "C Y",
+        "step": 0.001
+      },
+      {
+        "default": -0.29852,
+        "index": 6,
+        "max": 2,
+        "min": -2,
+        "name": "C Z",
+        "step": 0.001
+      },
+      {
+        "default": 0,
+        "index": 7,
+        "max": 0.01,
+        "min": 0,
+        "name": "DE Offset",
+        "step": 0.0001
+      },
+      {
+        "default": 0.43636,
+        "index": 8,
+        "max": 1,
+        "min": -1,
+        "name": "Offset X",
+        "step": 0.001
+      },
+      {
+        "default": 0.85454,
+        "index": 9,
+        "max": 1,
+        "min": -1,
+        "name": "Offset Y",
+        "step": 0.001
+      },
+      {
+        "default": -0.14546,
+        "index": 10,
+        "max": 1,
+        "min": -1,
+        "name": "Offset Z",
+        "step": 0.001
+      }
+    ],
+    "schemaVersion": 1,
+    "supportedEffectTags": [
+      "safetyBubble"
+    ]
+  },
+  "fogEffect": {
+    "colorBlue": 0.02,
+    "colorGreen": 0.015,
+    "colorRed": 0.01,
+    "enabled": true,
+    "hueRotateEnabled": false,
+    "hueRotateSpeed": 0.1,
+    "intensity": 0.14
+  },
+  "foldingLimit": 1,
+  "formulaParamValues": [
+    1,
+    0.97478,
+    1.04202,
+    0.97478,
+    -0.05972,
+    0.1492,
+    -0.29852,
+    0,
+    0.43636,
+    0.85454,
+    -0.14546,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "fractalIterations": 5,
+  "fractalScale": 2.8,
+  "fractalType": "custom",
+  "glowEffect": {
+    "colorBlue": 1,
+    "colorGreen": 0.97,
+    "colorRed": 0.95,
+    "enabled": true,
+    "intensity": 0.12
+  },
+  "gradientCycleEffect": {
+    "enabled": false,
+    "mirrorLoop": false,
+    "speed": 0.05
+  },
+  "hueRotationEffect": {
+    "enabled": false,
+    "intensity": 1,
+    "speed": 0.05
+  },
+  "id": "880ABBF6-13C5-554A-B393-E679FF46151D",
+  "lightingMode": "staticLight",
+  "lightingPreset": "Custom",
+  "lightingSoftness": 0.22,
+  "maxRaySteps": 140,
+  "minDistance": 0.08,
+  "name": "Pseudo Kleinian",
+  "position": [
+    0,
+    0,
+    -4
+  ],
+  "pulseEffect": {
+    "amount": 0,
+    "enabled": false,
+    "speed": 0
+  },
+  "rating": 0,
+  "resolutionScale": 1,
+  "safetyBubbleBlend": 0,
+  "safetyBubbleEnabled": false,
+  "safetyBubbleRadius": 0,
+  "safetyBubbleShape": 0.5,
+  "scale": 1,
+  "sphereRadius": 0.5,
+  "tileSize": 0,
+  "tonemapStrength": 0,
+  "updatedAt": "2026-06-28T00:00:00Z",
+  "worldRotationW": 1,
+  "worldRotationX": 0,
+  "worldRotationY": 0,
+  "worldRotationZ": 0
+}

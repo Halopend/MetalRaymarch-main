@@ -1,0 +1,167 @@
+{
+  "aoStrength": 0,
+  "bloomEffect": {
+    "colorBlue": 0.88,
+    "colorGreen": 0.96,
+    "colorRed": 1,
+    "enabled": true,
+    "strength": 0.2
+  },
+  "colorIterations": 3,
+  "colorMix": 0.55,
+  "colorScheme": "ocean",
+  "colorSchemeContrast": 1.08,
+  "colorSchemeCurve": 0,
+  "colorSchemeGamma": 0.85,
+  "colorSchemeHighlights": 0.03,
+  "colorSchemeSaturation": 1.5,
+  "colorSchemeShadows": -0.02,
+  "colorSchemeVibrance": 0.9,
+  "createdAt": "2026-06-28T00:00:00Z",
+  "detailScale": 1,
+  "embeddedFormula": {
+    "author": "Knighty (Fragmentarium), ported by Threshold",
+    "category": "Kleinian",
+    "defaultColorIterations": 3,
+    "defaultIterations": 9,
+    "description": "Knighty's pseudo-knightyan: a clamp box-fold plus sphere inversion with a cylindrical cross-section distance estimate. The CSize vector sets the per-axis box-fold half-width, Size drives the sphere fold, DEfactor seeds the derivative accumulator (a smooth-blob knob via the +0.05 term), and TwiddleRXY pinches the cylindrical radius. Lives near the origin; orbit-trap colored on the folded position.",
+    "functionStem": "PseudoKnightyan",
+    "id": "com.puppypower.threshold.embedded.pseudoknightyan",
+    "metalSource": "// Pseudo Knightyan (Knighty) — clamp box-fold + sphere inversion, cylindrical DE.\n// Source: Fragmentarium PseudoKnightyan.frag (DE only; raytracer extras ignored).\n// Params: [0-2]=CSize.xyz, [3]=Size, [4]=DEfactor, [5]=TwiddleRXY.\n// Iter -> iterations, ColorIterations -> colorIterations (NOT params).\n// NOTE: derivative accumulates as j *= (k + 0.05), seeded by DEfactor; final\n//       DE = max(rxy - TwiddleRXY, abs(rxy*p.z)/len(p)) / j  (no 0.7 fudge).\n\nFORCE_INLINE float DE_PseudoKnightyan(float3 pos, FormulaParams fp, float3x3 rot,\n                                      int iterations, int colorIterations,\n                                      thread OrbitData& orbit) {\n    float3 cSize    = max(abs(float3(fp.params[0], fp.params[1], fp.params[2])), float3(1e-4f));\n    float3 negCSize = -cSize;\n    float  size     = fp.params[3];\n    float  deFactor = fp.params[4];\n    float  twiddle  = fp.params[5];\n    bool hasRotation = hasRot1Precomputed(fp);\n\n    float3 p = pos;\n    float j = (deFactor != 0.0f) ? deFactor : 1.0f;\n\n    float trap = 1e20f;\n    int trapIter = 0;\n    float3 trapPos = pos;\n    int trapIterations = min(max(colorIterations, 0), iterations);\n\n    int n = clamp(iterations, 0, 200);\n    int i = 0;\n    if (hasRotation) {\n        for (; i < n; ++i) {\n            p = rot * p;\n            // Box fold: 2*clamp(p,-CSize,CSize) - p\n            p = fma(clamp(p, negCSize, cSize), float3(2.0f), -p);\n            // Sphere fold: k = max(Size/dot(p,p), 1)\n            float k = max(size / max(dot(p, p), 1e-6f), 1.0f);\n            p *= k;\n            j *= k + 0.05f;\n            if (i < trapIterations) {\n                float r2 = dot(p, p);\n                if (r2 < trap) { trap = r2; trapIter = i; trapPos = p; }\n            }\n        }\n    } else {\n        for (; i < n; ++i) {\n            p = fma(clamp(p, negCSize, cSize), float3(2.0f), -p);\n            float k = max(size / max(dot(p, p), 1e-6f), 1.0f);\n            p *= k;\n            j *= k + 0.05f;\n            if (i < trapIterations) {\n                float r2 = dot(p, p);\n                if (r2 < trap) { trap = r2; trapIter = i; trapPos = p; }\n            }\n        }\n    }\n\n    float rxy = length(p.xy);\n    float lenP = max(length(p), 1e-6f);\n    float de = max(rxy - twiddle, abs(rxy * p.z) / lenP) / max(abs(j), 1e-6f);\n\n    orbit.trap = trap;\n    orbit.trapIteration = trapIter;\n    orbit.trapPosition = trapPos;\n    orbit.finalP = p;\n    orbit.iterationsUsed = i;\n\n    return de;\n}\n\nFORCE_INLINE float DE_PseudoKnightyan_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {\n    float3 cSize    = max(abs(float3(fp.params[0], fp.params[1], fp.params[2])), float3(1e-4f));\n    float3 negCSize = -cSize;\n    float  size     = fp.params[3];\n    float  deFactor = fp.params[4];\n    float  twiddle  = fp.params[5];\n    bool hasRotation = hasRot1Precomputed(fp);\n\n    float3 p = pos;\n    float j = (deFactor != 0.0f) ? deFactor : 1.0f;\n\n    int n = clamp(iterations, 0, 200);\n    if (hasRotation) {\n        for (int i = 0; i < n; ++i) {\n            p = rot * p;\n            p = fma(clamp(p, negCSize, cSize), float3(2.0f), -p);\n            float k = max(size / max(dot(p, p), 1e-6f), 1.0f);\n            p *= k;\n            j *= k + 0.05f;\n        }\n    } else {\n        for (int i = 0; i < n; ++i) {\n            p = fma(clamp(p, negCSize, cSize), float3(2.0f), -p);\n            float k = max(size / max(dot(p, p), 1e-6f), 1.0f);\n            p *= k;\n            j *= k + 0.05f;\n        }\n    }\n\n    float rxy = length(p.xy);\n    float lenP = max(length(p), 1e-6f);\n    return max(rxy - twiddle, abs(rxy * p.z) / lenP) / max(abs(j), 1e-6f);\n}\n",
+    "name": "Pseudo Knightyan",
+    "params": [
+      {
+        "default": 0.485771,
+        "index": 0,
+        "max": 2,
+        "min": -2,
+        "name": "CSize X",
+        "step": 0.001
+      },
+      {
+        "default": 0.8034414,
+        "index": 1,
+        "max": 2,
+        "min": -2,
+        "name": "CSize Y",
+        "step": 0.001
+      },
+      {
+        "default": 1.062872,
+        "index": 2,
+        "max": 2,
+        "min": -2,
+        "name": "CSize Z",
+        "step": 0.001
+      },
+      {
+        "default": 0.70968,
+        "index": 3,
+        "max": 2,
+        "min": -2,
+        "name": "Size",
+        "step": 0.001
+      },
+      {
+        "default": 1,
+        "index": 4,
+        "max": 10,
+        "min": 0,
+        "name": "DEfactor",
+        "step": 0.01
+      },
+      {
+        "default": 0.8412322,
+        "index": 5,
+        "max": 2,
+        "min": -2,
+        "name": "TwiddleRXY",
+        "step": 0.001
+      }
+    ],
+    "schemaVersion": 1,
+    "supportedEffectTags": [
+      "safetyBubble"
+    ]
+  },
+  "fogEffect": {
+    "colorBlue": 0.02,
+    "colorGreen": 0.015,
+    "colorRed": 0.01,
+    "enabled": true,
+    "hueRotateEnabled": false,
+    "hueRotateSpeed": 0.1,
+    "intensity": 0.14
+  },
+  "foldingLimit": 1,
+  "formulaParamValues": [
+    0.485771,
+    0.8034414,
+    1.062872,
+    0.70968,
+    1,
+    0.8412322,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "fractalIterations": 9,
+  "fractalScale": 2.8,
+  "fractalType": "custom",
+  "glowEffect": {
+    "colorBlue": 1,
+    "colorGreen": 0.97,
+    "colorRed": 0.95,
+    "enabled": true,
+    "intensity": 0.12
+  },
+  "gradientCycleEffect": {
+    "enabled": false,
+    "mirrorLoop": false,
+    "speed": 0.05
+  },
+  "hueRotationEffect": {
+    "enabled": false,
+    "intensity": 1,
+    "speed": 0.05
+  },
+  "id": "F2F53E77-7DDA-51D7-82CD-A640A7E4B965",
+  "lightingMode": "staticLight",
+  "lightingPreset": "Custom",
+  "lightingSoftness": 0.22,
+  "maxRaySteps": 160,
+  "minDistance": 0.08,
+  "name": "Pseudo Knightyan",
+  "position": [
+    0,
+    0,
+    -2
+  ],
+  "pulseEffect": {
+    "amount": 0,
+    "enabled": false,
+    "speed": 0
+  },
+  "rating": 0,
+  "resolutionScale": 1,
+  "safetyBubbleBlend": 0,
+  "safetyBubbleEnabled": false,
+  "safetyBubbleRadius": 0,
+  "safetyBubbleShape": 0.5,
+  "scale": 1,
+  "sphereRadius": 0.5,
+  "tileSize": 0,
+  "tonemapStrength": 0,
+  "updatedAt": "2026-06-28T00:00:00Z",
+  "worldRotationW": 1,
+  "worldRotationX": 0,
+  "worldRotationY": 0,
+  "worldRotationZ": 0
+}
