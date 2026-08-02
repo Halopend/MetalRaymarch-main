@@ -678,6 +678,11 @@ struct SceneEditorView: View {
                 Text("Scene Settings").font(.headline)
                 TextField("Name", text: $scene.name)
                     .textFieldStyle(.roundedBorder)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Tags")
+                        .font(.subheadline.weight(.semibold))
+                    SceneTagEditor(tags: $scene.tags)
+                }
                 Toggle("Loop Animation", isOn: $scene.isLooping)
                 HStack {
                     Text("Playback")

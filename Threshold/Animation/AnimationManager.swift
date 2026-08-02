@@ -576,6 +576,14 @@ final class AnimationManager {
     // ═══════════════════════════════════════════════════════════════════════════
 
     @ObservationIgnored private static let sceneTransitionDurationKey = "AnimationManager.sceneTransitionDuration"
+    @ObservationIgnored private static let musicCueSceneSwitchEnabledKey = "AnimationManager.musicCueSceneSwitchEnabled"
+    @ObservationIgnored private static let musicCueSceneGroupIDsKey = "AnimationManager.musicCueSceneGroupIDs"
+    @ObservationIgnored private static let musicCueSceneSourcesKey = "AnimationManager.musicCueSceneSources"
+    @ObservationIgnored private static let musicCueSceneTraversalModeKey = "AnimationManager.musicCueSceneTraversalMode"
+    @ObservationIgnored private static let musicCueThresholdKey = "AnimationManager.musicCueThreshold"
+    @ObservationIgnored private static let musicCueMinimumIntervalKey = "AnimationManager.musicCueMinimumInterval"
+    @ObservationIgnored private static let defaultMusicCueThreshold: Float = 0.25
+    @ObservationIgnored private static let defaultMusicCueMinimumInterval: TimeInterval = 2
 
     /// Seconds to ease live parameters toward a newly selected scene's starting
     /// point ("Same Scene Transition Time"). `0` = instant switch (legacy
@@ -592,6 +600,513 @@ final class AnimationManager {
             UserDefaults.standard.set(sceneTransitionDuration, forKey: Self.sceneTransitionDurationKey)
             renderSettings?.sceneTransitionDuration = Float(sceneTransitionDuration)
         }
+    }
+
+    /// When enabled, a qualifying audio onset advances to the next selected
+    /// scene target. This is intentionally opt-in: live music commonly has
+    /// more transient events than a scene transition should consume.
+    var musicCueSceneSwitchEnabled: Bool =
+        UserDefaults.standard.bool(forKey: AnimationManager.musicCueSceneSwitchEnabledKey) {
+        didSet {
+            UserDefaults.standard.set(musicCueSceneSwitchEnabled, forKey: Self.musicCueSceneSwitchEnabledKey)
+            musicCueSceneSwitchGate.reset()
+        }
+    }
+
+    /// The broader static-scene catalog and the production loading path live in
+    /// `AppModel`; these seams let the animation-owned switcher include them
+    /// without duplicating embedded-formula preparation or preset application.
+    @ObservationIgnored var musicCueStaticSceneProvider: (() -> [FractalPreset])?
+    @ObservationIgnored var musicCueStaticSceneLoadHandler: ((FractalPreset) -> Void)?
+    @ObservationIgnored var musicCueCurrentStaticSceneIDProvider: (() -> UUID?)?
+
+    /// The user-configured sequence for music cues and quick scene stepping.
+    /// Membership is stored as source-qualified ids rather than scene values so
+    /// it survives renames, edits, and an iCloud scene temporarily not being
+    /// available. UUID-only values from the initial animation-only version are
+    /// read as animation targets for backward compatibility.
+    private(set) var musicCueSceneGroupTargetIDs: Set<String> = {
+        let identifiers = UserDefaults.standard.stringArray(
+            forKey: AnimationManager.musicCueSceneGroupIDsKey
+        ) ?? []
+        return Set(identifiers.compactMap(MusicCueSceneTarget.normalizedStorageID))
+    }() {
+        didSet {
+            let identifiers = musicCueSceneGroupTargetIDs
+                .sorted()
+            UserDefaults.standard.set(identifiers, forKey: Self.musicCueSceneGroupIDsKey)
+            musicCueSceneSwitchGate.reset()
+            resetMusicCueSceneNavigation()
+        }
+    }
+
+    /// The sources combined into the active scene pool. The original manual
+    /// group remains the default, while library sources can be layered on top
+    /// of it to create broader combinations without duplicating scene entries.
+    var musicCueSceneSources: Set<MusicCueSceneSource> = {
+        guard let rawValues = UserDefaults.standard.stringArray(
+            forKey: AnimationManager.musicCueSceneSourcesKey
+        ) else {
+            return [.configuredGroup]
+        }
+        return Set(rawValues.compactMap(MusicCueSceneSource.init(rawValue:)))
+    }() {
+        didSet {
+            UserDefaults.standard.set(
+                musicCueSceneSources.map(\.rawValue).sorted(),
+                forKey: Self.musicCueSceneSourcesKey
+            )
+            musicCueSceneSwitchGate.reset()
+            resetMusicCueSceneNavigation()
+        }
+    }
+
+    /// Ordered, shuffle-bag, and random traversal all operate on the same
+    /// selected pool. The bag/history are reset whenever this choice changes.
+    var musicCueSceneTraversalMode: MusicCueSceneTraversalMode = {
+        guard let rawValue = UserDefaults.standard.string(
+            forKey: AnimationManager.musicCueSceneTraversalModeKey
+        ), let mode = MusicCueSceneTraversalMode(rawValue: rawValue) else {
+            return .ordered
+        }
+        return mode
+    }() {
+        didSet {
+            UserDefaults.standard.set(
+                musicCueSceneTraversalMode.rawValue,
+                forKey: Self.musicCueSceneTraversalModeKey
+            )
+            resetMusicCueSceneNavigation()
+        }
+    }
+
+    /// Minimum normalized onset strength required to count as a scene cue.
+    var musicCueThreshold: Float = {
+        guard UserDefaults.standard.object(forKey: AnimationManager.musicCueThresholdKey) != nil else {
+            return AnimationManager.defaultMusicCueThreshold
+        }
+        let stored = UserDefaults.standard.float(forKey: AnimationManager.musicCueThresholdKey)
+        return stored.isFinite
+            ? stored.clamped(to: 0.05...1)
+            : AnimationManager.defaultMusicCueThreshold
+    }() {
+        didSet {
+            let normalized = musicCueThreshold.isFinite
+                ? musicCueThreshold.clamped(to: 0.05...1)
+                : Self.defaultMusicCueThreshold
+            guard normalized == musicCueThreshold else {
+                musicCueThreshold = normalized
+                return
+            }
+            UserDefaults.standard.set(normalized, forKey: Self.musicCueThresholdKey)
+            musicCueSceneSwitchGate.reset()
+        }
+    }
+
+    /// Cooldown between cue-driven changes. A real music track can emit many
+    /// onsets per bar, so this keeps the scene progression intentional.
+    var musicCueMinimumInterval: TimeInterval = {
+        guard UserDefaults.standard.object(forKey: AnimationManager.musicCueMinimumIntervalKey) != nil else {
+            return AnimationManager.defaultMusicCueMinimumInterval
+        }
+        let stored = UserDefaults.standard.double(forKey: AnimationManager.musicCueMinimumIntervalKey)
+        return stored.isFinite
+            ? stored.clamped(to: 0...30)
+            : AnimationManager.defaultMusicCueMinimumInterval
+    }() {
+        didSet {
+            let normalized = musicCueMinimumInterval.isFinite
+                ? musicCueMinimumInterval.clamped(to: 0...30)
+                : Self.defaultMusicCueMinimumInterval
+            guard normalized == musicCueMinimumInterval else {
+                musicCueMinimumInterval = normalized
+                return
+            }
+            UserDefaults.standard.set(normalized, forKey: Self.musicCueMinimumIntervalKey)
+            musicCueSceneSwitchGate.reset()
+        }
+    }
+
+    @ObservationIgnored private var musicCueSceneSwitchGate = MusicCueSceneSwitchGate()
+
+    /// A one-keyframe animation cannot play through a transition, so it stays
+    /// available elsewhere in the library but is skipped by the cue switcher.
+    private var musicCueGroupAvailableAnimationScenes: [AnimationScene] {
+        scenes.filter { $0.keyframes.count >= 2 }
+    }
+
+    /// Both animation sequences and the static preset catalog can feed the
+    /// switcher. This is the complete catalog; the source toggles below derive
+    /// the active pool from it without constructing duplicate scene objects.
+    var musicCueGroupAvailableTargets: [MusicCueSceneTarget] {
+        let animations = musicCueGroupAvailableAnimationScenes.map { scene in
+            MusicCueSceneTarget(
+                kind: .animation,
+                sourceID: scene.id,
+                name: scene.name,
+                detail: "\(scene.keyframes.count) keyframes",
+                tags: scene.tags
+            )
+        }
+        let staticScenes = (musicCueStaticSceneProvider?() ?? [])
+            .filter { $0.name != "__lastState__" }
+            .map { preset in
+                MusicCueSceneTarget(
+                    kind: .staticScene,
+                sourceID: preset.id,
+                name: preset.name,
+                detail: preset.fractalType.displayName,
+                tags: preset.tags
+                )
+            }
+        return animations + staticScenes
+    }
+
+    /// Targets eligible for cue progression in stable source order. The manual
+    /// group is laid down first, followed by any enabled libraries; an id is
+    /// retained only once so overlapping selections never duplicate a scene.
+    private var musicCueEligibleTargets: [MusicCueSceneTarget] {
+        MusicCueSceneGroupSequence.eligibleTargets(
+            sources: musicCueSceneSources,
+            availableTargets: musicCueGroupAvailableTargets,
+            configuredGroupTargetIDs: musicCueSceneGroupTargetIDs
+        )
+    }
+
+    var musicCueSceneGroupSummary: String {
+        let count = musicCueEligibleTargets.count
+        return count == 1 ? "1 scene" : "\(count) scenes"
+    }
+
+    var musicCueSceneSourceSummary: String {
+        let names = MusicCueSceneSource.allCases
+            .filter { musicCueSceneSources.contains($0) }
+            .map(\.shortDisplayName)
+        return names.isEmpty ? "No sources" : names.joined(separator: " + ")
+    }
+
+    var musicCueSceneSelectionWarning: String? {
+        guard !musicCueSceneSources.isEmpty else {
+            return "Choose at least one scene source."
+        }
+        guard musicCueEligibleTargets.count > 1 else {
+            if musicCueSceneSources == Set([.configuredGroup]) {
+                return "Choose at least two scenes in the configured group."
+            }
+            return "This source combination needs at least two available scenes."
+        }
+        return nil
+    }
+
+    func isMusicCueSceneSourceEnabled(_ source: MusicCueSceneSource) -> Bool {
+        musicCueSceneSources.contains(source)
+    }
+
+    func setMusicCueSceneSource(_ source: MusicCueSceneSource, isEnabled: Bool) {
+        var sources = musicCueSceneSources
+        if isEnabled {
+            sources.insert(source)
+        } else {
+            sources.remove(source)
+        }
+        musicCueSceneSources = sources
+    }
+
+    func isMusicCueTargetSelected(_ target: MusicCueSceneTarget) -> Bool {
+        musicCueSceneGroupTargetIDs.contains(target.id)
+    }
+
+    func setMusicCueTarget(_ target: MusicCueSceneTarget, isSelected: Bool) {
+        var identifiers = musicCueSceneGroupTargetIDs
+        if isSelected {
+            identifiers.insert(target.id)
+        } else {
+            identifiers.remove(target.id)
+        }
+        musicCueSceneGroupTargetIDs = identifiers
+    }
+
+    func selectMusicCueTargets(_ targets: [MusicCueSceneTarget]) {
+        guard !targets.isEmpty else { return }
+        var identifiers = musicCueSceneGroupTargetIDs
+        identifiers.formUnion(targets.map(\.id))
+        musicCueSceneGroupTargetIDs = identifiers
+    }
+
+    func clearMusicCueTargets(_ targets: [MusicCueSceneTarget]) {
+        guard !targets.isEmpty else { return }
+        var identifiers = musicCueSceneGroupTargetIDs
+        identifiers.subtract(targets.map(\.id))
+        musicCueSceneGroupTargetIDs = identifiers
+    }
+
+    func selectAllMusicCueTargets() {
+        var identifiers = musicCueSceneGroupTargetIDs
+        identifiers.formUnion(musicCueGroupAvailableTargets.map(\.id))
+        musicCueSceneGroupTargetIDs = identifiers
+    }
+
+    func clearMusicCueSceneGroup() {
+        musicCueSceneGroupTargetIDs = []
+        lastMusicCueSceneTargetID = nil
+    }
+
+    @ObservationIgnored private var lastMusicCueSceneTargetID: String?
+    @ObservationIgnored private var musicCueShuffleBag: [String] = []
+    @ObservationIgnored private var musicCueSceneHistory: [String] = []
+    @ObservationIgnored private var musicCueSceneHistoryIndex: Int = -1
+
+    private func resetMusicCueSceneNavigation() {
+        musicCueShuffleBag.removeAll(keepingCapacity: true)
+        musicCueSceneHistory.removeAll(keepingCapacity: true)
+        musicCueSceneHistoryIndex = -1
+    }
+
+    private var currentMusicCueSceneTargetID: String? {
+        if let animationID = currentScene?.id {
+            return MusicCueSceneTarget.storageID(kind: .animation, sourceID: animationID)
+        }
+        if let staticSceneID = musicCueCurrentStaticSceneIDProvider?() {
+            return MusicCueSceneTarget.storageID(kind: .staticScene, sourceID: staticSceneID)
+        }
+        return lastMusicCueSceneTargetID
+    }
+
+    private var forwardHistoryMusicCueTargetID: String? {
+        guard musicCueSceneTraversalMode != .ordered,
+              let currentID = currentMusicCueSceneTargetID,
+              musicCueSceneHistory.indices.contains(musicCueSceneHistoryIndex),
+              musicCueSceneHistory[musicCueSceneHistoryIndex] == currentID else {
+            return nil
+        }
+        let forwardIndex = musicCueSceneHistoryIndex + 1
+        guard musicCueSceneHistory.indices.contains(forwardIndex) else { return nil }
+        return musicCueSceneHistory[forwardIndex]
+    }
+
+    var nextMusicCueSceneName: String? {
+        let candidates = musicCueEligibleTargets
+        guard candidates.count > 1 else { return nil }
+
+        switch musicCueSceneTraversalMode {
+        case .ordered:
+            guard let currentID = currentMusicCueSceneTargetID,
+                  let currentIndex = candidates.firstIndex(where: { $0.id == currentID }) else {
+                return candidates.first?.name
+            }
+            return candidates[(currentIndex + 1) % candidates.count].name
+
+        case .shuffleBag:
+            if let historyID = forwardHistoryMusicCueTargetID,
+               let historyTarget = candidates.first(where: { $0.id == historyID }) {
+                return historyTarget.name
+            }
+            if let shuffledID = musicCueShuffleBag.last,
+               let shuffledTarget = candidates.first(where: { $0.id == shuffledID }) {
+                return shuffledTarget.name
+            }
+            return "Shuffled scene"
+
+        case .random:
+            if let historyID = forwardHistoryMusicCueTargetID,
+               let historyTarget = candidates.first(where: { $0.id == historyID }) {
+                return historyTarget.name
+            }
+            return "Random scene"
+        }
+    }
+
+    var canStepMusicCueSceneGroup: Bool {
+        musicCueEligibleTargets.count > 1 && !isRecording
+    }
+
+    var canStepMusicCueSceneGroupBackward: Bool {
+        guard canStepMusicCueSceneGroup else { return false }
+        guard musicCueSceneTraversalMode != .ordered else { return true }
+        guard let currentID = currentMusicCueSceneTargetID,
+              musicCueSceneHistory.indices.contains(musicCueSceneHistoryIndex),
+              musicCueSceneHistory[musicCueSceneHistoryIndex] == currentID else {
+            return false
+        }
+        return musicCueSceneHistoryIndex > 0
+    }
+
+    var canAdvanceScenesOnMusicCue: Bool {
+        musicCueSceneSwitchEnabled && canStepMusicCueSceneGroup
+    }
+
+    /// Receives the coherent audio snapshot published by `AudioHub`. The gate
+    /// only opens for a threshold crossing, and `stepMusicCueSceneGroup(by:)`
+    /// applies the selected source and traversal mechanisms for automatic and
+    /// manual scene changes alike.
+    func consumeMusicCue(_ snapshot: AudioFeatureSnapshot) {
+        guard canStepMusicCueSceneGroup else {
+            musicCueSceneSwitchGate.reset()
+            return
+        }
+        guard musicCueSceneSwitchGate.consume(
+            onset: snapshot.mixed.onset,
+            isEnabled: musicCueSceneSwitchEnabled,
+            isAudioActive: snapshot.isActive,
+            threshold: musicCueThreshold,
+            minimumInterval: musicCueMinimumInterval,
+            at: snapshot.timestamp
+        ) else {
+            return
+        }
+
+        _ = stepMusicCueSceneGroup(by: 1)
+    }
+
+    /// Step through the active pool. This is shared by automatic music cues and
+    /// the canvas left/right-arrow quick controls on macOS and iPadOS.
+    @discardableResult
+    func stepMusicCueSceneGroup(by step: Int) -> MusicCueSceneTarget? {
+        guard !isRecording, step != 0 else { return nil }
+        let candidates = musicCueEligibleTargets
+        guard candidates.count > 1 else { return nil }
+
+        let resolution: (target: MusicCueSceneTarget, historyIndex: Int?)?
+        if musicCueSceneTraversalMode != .ordered,
+           let historyResolution = musicCueHistoryResolution(
+               for: step,
+               candidates: candidates
+           ) {
+            resolution = historyResolution
+        } else {
+            guard step > 0 || musicCueSceneTraversalMode == .ordered,
+                  let target = newMusicCueTarget(
+                      for: step,
+                      candidates: candidates
+                  ) else {
+                return nil
+            }
+            resolution = (target, nil)
+        }
+
+        guard let resolution,
+              activateMusicCueSceneTarget(resolution.target) else {
+            return nil
+        }
+
+        if let historyIndex = resolution.historyIndex {
+            musicCueSceneHistoryIndex = historyIndex
+        } else if musicCueSceneTraversalMode != .ordered {
+            recordMusicCueSceneHistory(resolution.target.id)
+        }
+        lastMusicCueSceneTargetID = resolution.target.id
+        return resolution.target
+    }
+
+    private func musicCueHistoryResolution(
+        for step: Int,
+        candidates: [MusicCueSceneTarget]
+    ) -> (target: MusicCueSceneTarget, historyIndex: Int)? {
+        guard let currentID = currentMusicCueSceneTargetID,
+              musicCueSceneHistory.indices.contains(musicCueSceneHistoryIndex),
+              musicCueSceneHistory[musicCueSceneHistoryIndex] == currentID else {
+            return nil
+        }
+
+        let nextHistoryIndex = musicCueSceneHistoryIndex + (step > 0 ? 1 : -1)
+        guard musicCueSceneHistory.indices.contains(nextHistoryIndex) else { return nil }
+        let targetID = musicCueSceneHistory[nextHistoryIndex]
+        guard let target = candidates.first(where: { $0.id == targetID }) else { return nil }
+        return (target, nextHistoryIndex)
+    }
+
+    private func newMusicCueTarget(
+        for step: Int,
+        candidates: [MusicCueSceneTarget]
+    ) -> MusicCueSceneTarget? {
+        switch musicCueSceneTraversalMode {
+        case .ordered:
+            guard let nextIndex = MusicCueSceneGroupSequence.nextIndex(
+                currentID: currentMusicCueSceneTargetID,
+                candidateIDs: candidates.map(\.id),
+                step: step
+            ) else {
+                return nil
+            }
+            return candidates[nextIndex]
+
+        case .shuffleBag:
+            return nextShuffledMusicCueTarget(from: candidates)
+
+        case .random:
+            let currentID = currentMusicCueSceneTargetID
+            let candidateIDs = MusicCueSceneGroupSequence.nonRepeatingCandidateIDs(
+                currentID: currentID,
+                candidateIDs: candidates.map(\.id)
+            )
+            return candidates
+                .filter { candidateIDs.contains($0.id) }
+                .randomElement()
+        }
+    }
+
+    private func nextShuffledMusicCueTarget(
+        from candidates: [MusicCueSceneTarget]
+    ) -> MusicCueSceneTarget? {
+        let currentID = currentMusicCueSceneTargetID
+        let validIDs = Set(candidates.map(\.id))
+        musicCueShuffleBag.removeAll { identifier in
+            !validIDs.contains(identifier) || identifier == currentID
+        }
+
+        if musicCueShuffleBag.isEmpty {
+            musicCueShuffleBag = MusicCueSceneGroupSequence.nonRepeatingCandidateIDs(
+                currentID: currentID,
+                candidateIDs: candidates.map(\.id)
+            ).shuffled()
+        }
+
+        guard let targetID = musicCueShuffleBag.popLast() else { return nil }
+        return candidates.first(where: { $0.id == targetID })
+    }
+
+    private func recordMusicCueSceneHistory(_ targetID: String) {
+        if musicCueSceneHistoryIndex >= 0,
+           musicCueSceneHistoryIndex < musicCueSceneHistory.count - 1 {
+            musicCueSceneHistory.removeSubrange((musicCueSceneHistoryIndex + 1)..<musicCueSceneHistory.count)
+        }
+        musicCueSceneHistory.append(targetID)
+        musicCueSceneHistoryIndex = musicCueSceneHistory.count - 1
+    }
+
+    private func activateMusicCueSceneTarget(_ target: MusicCueSceneTarget) -> Bool {
+        switch target.kind {
+        case .animation:
+            guard let nextScene = scenes.first(where: { $0.id == target.sourceID }) else { return false }
+            let wasPlaying = playhead.state == .playing
+
+            // Reuse the same RenderSettings transition used for static scene loads.
+            // `currentScene` restarts active playback in its observer; when stopped,
+            // start the newly selected scene explicitly after it is installed.
+            renderSettings?.beginSceneTransitionSnapshot()
+            currentScene = nextScene
+            if !wasPlaying {
+                play()
+            }
+            renderSettings?.commitSceneTransition()
+            return true
+
+        case .staticScene:
+            guard let preset = musicCueStaticSceneProvider?().first(where: { $0.id == target.sourceID }),
+                  let loadStaticScene = musicCueStaticSceneLoadHandler else {
+                return false
+            }
+            // AppModel owns static-preset loading so custom formulas, gesture
+            // overrides, and the existing eased scene-transition path stay intact.
+            loadStaticScene(preset)
+            return true
+        }
+    }
+
+    /// Convenience entry point for an explicit forward cue or UI action.
+    @discardableResult
+    func advanceToNextSceneForMusicCue() -> MusicCueSceneTarget? {
+        stepMusicCueSceneGroup(by: 1)
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1006,6 +1521,7 @@ final class AnimationManager {
     /// For default scenes, saves an edited overlay that preserves the original underneath.
     func updateScene(_ scene: AnimationScene) {
         var updated = scene
+        updated.tags = SceneTagging.normalized(updated.tags)
         updated.modifiedAt = Date()
         
         if DefaultScenes.isDefault(scene.id) {

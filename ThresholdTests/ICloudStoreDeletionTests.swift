@@ -89,6 +89,15 @@ struct ICloudStoreDeletionTests {
         try? FileManager.default.removeItem(at: root)
     }
 
+    /// Mark a harness store as having received every built-in catalog update so
+    /// tests that are unrelated to catalog seeding stay small and deterministic.
+    private func markPresetStoreAsSeeded(_ root: URL) throws {
+        try Data("[]".utf8).write(to: root.appendingPathComponent(".seeded-bundled.json"))
+        try Data("[]".utf8).write(
+            to: root.appendingPathComponent(PresetManager.officialSceneCatalogUpdateMarkerFileName)
+        )
+    }
+
     private var isoEncoder: JSONEncoder {
         let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e
     }
@@ -206,7 +215,7 @@ struct ICloudStoreDeletionTests {
     @Test("A successful preset save reports durable storage")
     func presetSaveReportsSuccess() throws {
         let root = makeStoreRoot()
-        try Data("[]".utf8).write(to: root.appendingPathComponent(".seeded-bundled.json"))
+        try markPresetStoreAsSeeded(root)
         defer { teardown(root) }
 
         let manager = PresetManager()
@@ -244,7 +253,7 @@ struct ICloudStoreDeletionTests {
         let root = makeStoreRoot()
         // Mark the store already-seeded so init doesn't write bundled defaults —
         // keeps the store deterministic for id-specific assertions.
-        try Data("[]".utf8).write(to: root.appendingPathComponent(".seeded-bundled.json"))
+        try markPresetStoreAsSeeded(root)
         defer { teardown(root) }
 
         let mgr = PresetManager()
@@ -260,5 +269,45 @@ struct ICloudStoreDeletionTests {
         #expect(presetFileExists(id: keep.id, in: root))
         #expect(!presetFileExists(id: drop.id, in: root), "an explicitly dropped preset's file is removed")
         #expect(presetFileExists(id: foreign.id, in: root), "an unknown store file is never removed by replaceAll")
+    }
+
+    @Test("Official scene catalog update seeds an existing store once without resurrection")
+    func officialSceneCatalogUpdateSeedsOnce() async throws {
+        let root = makeStoreRoot()
+        // Simulate a store seeded by an older app release: it has the baseline
+        // marker, but not this explicitly approved catalog-update marker.
+        try Data("[]".utf8).write(to: root.appendingPathComponent(".seeded-bundled.json"))
+        defer { teardown(root) }
+
+        let manager = PresetManager()
+        await manager.loadPresetsNow()
+
+        let updateIDs = PresetManager.officialSceneCatalogUpdateIDs
+        #expect(updateIDs.count == 15)
+        for id in updateIDs {
+            #expect(presetFileExists(id: id, in: root), "missing official catalog scene \(id)")
+        }
+
+        let updateMarker = root.appendingPathComponent(
+            PresetManager.officialSceneCatalogUpdateMarkerFileName
+        )
+        #expect(FileManager.default.fileExists(atPath: updateMarker.path))
+
+        let deletedID = try #require(updateIDs.first)
+        let sceneDir = StorageLocation.scenesDir(root)
+        let deletedURL = try #require(
+            FileManager.default.contentsOfDirectory(at: sceneDir, includingPropertiesForKeys: nil)
+                .first { url in
+                    guard let data = try? Data(contentsOf: url),
+                          let preset = try? isoDecoder.decode(FractalPreset.self, from: data)
+                    else { return false }
+                    return preset.id == deletedID
+                }
+        )
+        try FileManager.default.removeItem(at: deletedURL)
+
+        await manager.loadPresetsNow()
+        #expect(!presetFileExists(id: deletedID, in: root),
+                "a catalog update must not resurrect a user-deleted scene")
     }
 }

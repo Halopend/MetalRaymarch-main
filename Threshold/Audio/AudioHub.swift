@@ -49,6 +49,12 @@ final class AudioHub {
 
     nonisolated private let featureStore: AudioFeatureStore
 
+    /// Main-actor observer for consumers that react to a completed, coherent
+    /// audio snapshot (for example cue-driven scene progression). The render
+    /// path continues to read `latestSnapshot()` directly and never waits on
+    /// this callback.
+    @ObservationIgnored var onFeatureSnapshotUpdated: ((AudioFeatureSnapshot) -> Void)?
+
     init(
         microphoneAnalyzer: AudioAnalyzer,
         appleMusicManager: AppleMusicManager,
@@ -259,14 +265,14 @@ final class AudioHub {
             : selectedPCM
         let selection = Set(candidates.map(\.sourceID))
 
-        featureStore.replace(
-            AudioFeatureMixer.mix(
-                contributions: candidates,
-                selectedSourceIDs: selection,
-                policy: mixPolicy,
-                now: now
-            )
+        let snapshot = AudioFeatureMixer.mix(
+            contributions: candidates,
+            selectedSourceIDs: selection,
+            policy: mixPolicy,
+            now: now
         )
+        featureStore.replace(snapshot)
+        onFeatureSnapshotUpdated?(snapshot)
     }
 
     private func resolvedPCMContributions(from contributions: [AudioSourceContribution]) -> [AudioSourceContribution] {

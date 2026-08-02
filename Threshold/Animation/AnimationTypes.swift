@@ -720,6 +720,9 @@ struct SongAttachment: Codable, Equatable {
 struct AnimationScene: Codable, Identifiable, Equatable {
     let id: UUID
     var name: String
+    /// User-authored labels used to build flexible collections in Explore.
+    /// Empty for scenes written before tagging was introduced.
+    var tags: [String]
     var keyframes: [AnimationKeyframe]
     var isLooping: Bool
     /// Playback direction/mode for this scene — forward, reverse, or ping-pong.
@@ -802,7 +805,7 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     /// `legacyMandelboxSphereProjection` flag stays out of the on-disk format
     /// (the synthesized init/encode reference these only).
     private enum CodingKeys: String, CodingKey {
-        case id, name, keyframes, isLooping, playbackMode, createdAt, modifiedAt
+        case id, name, tags, keyframes, isLooping, playbackMode, createdAt, modifiedAt
         case fractalType, baseline, gradientPreset, colorMappingMode, gradientRepeat
         case gradientOffset, gradientSmoothing
         case colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
@@ -823,6 +826,7 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     init(name: String = "New Scene") {
         self.id = UUID()
         self.name = name
+        self.tags = []
         self.keyframes = []
         self.isLooping = true
         self.playbackMode = .forward
@@ -837,6 +841,7 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     init(name: String, initialKeyframe: AnimationKeyframe, fractalType: FractalModelType? = nil) {
         self.id = UUID()
         self.name = name
+        self.tags = []
         self.keyframes = [initialKeyframe]
         self.isLooping = true
         self.playbackMode = .forward
@@ -854,6 +859,7 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id             = try c.decode(UUID.self, forKey: .id)
         name           = try c.decode(String.self, forKey: .name)
+        tags           = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
         keyframes      = try c.decode([AnimationKeyframe].self, forKey: .keyframes)
         isLooping      = try c.decode(Bool.self, forKey: .isLooping)
         playbackMode   = (try? c.decode(AnimationPlaybackMode.self, forKey: .playbackMode)) ?? .forward

@@ -29,6 +29,9 @@ struct ViewportInputActions: OptionSet, Hashable, Sendable {
 struct ViewportInputFrame: Sendable {
     var heldKeys: ViewportMovementKeys = []
     var isShiftPressed: Bool = false
+    /// Mac-only attribution affordance. This stays held across frames so the
+    /// acknowledgement card can remain visible exactly while the I key is down.
+    var isAttributionShortcutHeld: Bool = false
     var orbitDelta: SIMD2<Float> = .zero
     var panDelta: SIMD2<Float> = .zero
     var zoomDelta: Float = 0
@@ -54,6 +57,7 @@ enum ViewportKeyboardKey: Hashable, Sendable {
     case nextScene
     case togglePlayback
     case resetView
+    case showAttribution
 }
 
 enum ViewportKeyboardMap {
@@ -73,6 +77,7 @@ enum ViewportKeyboardMap {
         case "d": return .right
         case " ": return .togglePlayback
         case "r": return .resetView
+        case "i": return .showAttribution
         default: return nil
         }
     }
@@ -105,6 +110,7 @@ protocol ViewportInputSink: AnyObject {
     func addZoom(delta: Float)
     func setMovementKey(_ key: ViewportMovementKeys, isPressed: Bool)
     func setShiftPressed(_ isPressed: Bool)
+    func setAttributionShortcutHeld(_ isPressed: Bool)
     func requestPlaybackToggle()
     func requestReset()
     func requestSceneStep(_ step: Int)
@@ -128,6 +134,8 @@ extension ViewportInputSink {
             setMovementKey(.right, isPressed: isPressed)
         case .shift:
             setShiftPressed(isPressed)
+        case .showAttribution:
+            setAttributionShortcutHeld(isPressed)
         case .previousScene:
             if isPressed && !isRepeat { requestSceneStep(-1) }
         case .nextScene:
@@ -148,6 +156,7 @@ final class ViewportInputAccumulator: ViewportInputSink, Sendable {
     private struct State {
         var heldKeys: ViewportMovementKeys = []
         var isShiftPressed: Bool = false
+        var isAttributionShortcutHeld: Bool = false
         var orbitDelta: SIMD2<Float> = .zero
         var panDelta: SIMD2<Float> = .zero
         var zoomDelta: Float = 0
@@ -162,6 +171,7 @@ final class ViewportInputAccumulator: ViewportInputSink, Sendable {
         state.withLock { current in
             current.heldKeys = []
             current.isShiftPressed = false
+            current.isAttributionShortcutHeld = false
             current.orbitDelta = .zero
             current.panDelta = .zero
             current.zoomDelta = 0
@@ -183,6 +193,12 @@ final class ViewportInputAccumulator: ViewportInputSink, Sendable {
     func setShiftPressed(_ isPressed: Bool) {
         state.withLock { current in
             current.isShiftPressed = isPressed
+        }
+    }
+
+    func setAttributionShortcutHeld(_ isPressed: Bool) {
+        state.withLock { current in
+            current.isAttributionShortcutHeld = isPressed
         }
     }
 
@@ -227,6 +243,7 @@ final class ViewportInputAccumulator: ViewportInputSink, Sendable {
             let frame = ViewportInputFrame(
                 heldKeys: current.heldKeys,
                 isShiftPressed: current.isShiftPressed,
+                isAttributionShortcutHeld: current.isAttributionShortcutHeld,
                 orbitDelta: current.orbitDelta,
                 panDelta: current.panDelta,
                 zoomDelta: current.zoomDelta,

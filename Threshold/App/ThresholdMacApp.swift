@@ -279,6 +279,23 @@ private struct ThresholdMacRootView: View {
                         .allowsHitTesting(false)
                 }
 
+                if appModel.isAttributionShortcutHeld {
+                    AttributionOverlay()
+                        .padding(24)
+                        .frame(
+                            maxWidth: .infinity,
+                            maxHeight: .infinity,
+                            alignment: .bottomLeading
+                        )
+                        .allowsHitTesting(false)
+                        .transition(
+                            reduceMotion
+                                ? .opacity
+                                : .move(edge: .bottom).combined(with: .opacity)
+                        )
+                        .zIndex(10)
+                }
+
                 MacRadialInputMonitor(
                     isPressed: $isShiftPressed,
                     isRadialVisible: radialMenu.isPresented,
@@ -318,6 +335,10 @@ private struct ThresholdMacRootView: View {
                     .allowsHitTesting(false)
             }
             .frame(minWidth: minimumWindowSize.width, minHeight: minimumWindowSize.height)
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.16),
+                value: appModel.isAttributionShortcutHeld
+            )
             .onReceive(
                 NotificationCenter.default.publisher(
                     for: ThresholdMacInteractiveView.didClickViewportNotification

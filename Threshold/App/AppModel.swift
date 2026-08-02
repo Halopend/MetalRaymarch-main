@@ -399,6 +399,11 @@ class AppModel {
     var isMenuWindowVisible: Bool = true
     var isSpatialMenuVisible: Bool = false
     var isMenuInteractionActive: Bool = false
+    #if os(macOS)
+    /// True while the render viewport's acknowledgement shortcut is held.
+    /// The renderer publishes only edge changes, so this remains UI-only state.
+    var isAttributionShortcutHeld: Bool = false
+    #endif
     /// Monotonic token shared by the MainActor presentation edge and Renderer.
     /// It makes rapid open/close/open requests last-writer-wins even though the
     /// renderer calls cross an actor boundary.
@@ -586,6 +591,28 @@ class AppModel {
         
         // Initialize animation manager
         animationManager = AnimationManager(renderSettings: renderSettings)
+
+        // The cue group can include both animations and saved static scenes.
+        // Keep static-scene loading routed through AppModel so custom formulas,
+        // gesture overrides, and the established scene-transition path remain
+        // identical whether the switch comes from a cue or the scene browser.
+        animationManager?.musicCueStaticSceneProvider = { [weak self] in
+            self?.presetManager.sceneCatalogPresets ?? []
+        }
+        animationManager?.musicCueStaticSceneLoadHandler = { [weak self] preset in
+            self?.loadStaticScene(preset)
+        }
+        animationManager?.musicCueCurrentStaticSceneIDProvider = { [weak self] in
+            self?.activeResetPreset?.id
+        }
+
+        // AudioHub publishes one coherent snapshot after each capture tick.
+        // Feed it to the transition controller on the main actor so cue-driven
+        // switches continue to work even when no other music-reactive visual
+        // effect is enabled.
+        audioHub.onFeatureSnapshotUpdated = { [weak self] snapshot in
+            self?.animationManager?.consumeMusicCue(snapshot)
+        }
         
         // Wire up animation manager's pipeline preparation callback
         animationManager?.preparePipelineHandler = { [weak self] iterations, raySteps in
@@ -1021,6 +1048,13 @@ class AppModel {
         refreshMenuInteractionState()
     }
 
+    #if os(macOS)
+    func setAttributionShortcutHeld(_ isHeld: Bool) {
+        guard isAttributionShortcutHeld != isHeld else { return }
+        isAttributionShortcutHeld = isHeld
+    }
+    #endif
+
     func beginSpatialMenuPresentationRequest() -> UInt64 {
         spatialMenuPresentationGeneration &+= 1
         return spatialMenuPresentationGeneration
@@ -1247,9 +1281,22 @@ class AppModel {
     // queue + applyLoadedScene + waitForRendererAndActivate + gesture overrides)
     // lives in AppModel+SceneLoading.swift.
 
+    /// Handles the canvas left/right quick controls. A configured cue group
+    /// takes priority so performers can step their chosen animation sequence
+    /// instantly; without one, preserve the existing static-scene shortcut.
+    @MainActor
+    func cycleConfiguredSceneGroupOrStaticScene(forward: Bool) {
+        if let animationManager,
+           animationManager.canStepMusicCueSceneGroup {
+            _ = animationManager.stepMusicCueSceneGroup(by: forward ? 1 : -1)
+            return
+        }
+        cycleJumpingOffScene(forward: forward)
+    }
+
     /// Loads the previous or next built-in static scene (Jumping Off or Music
-    /// Reactive), wrapping around at the ends. Driven by the keyboard
-    /// left/right shortcut.
+    /// Reactive), wrapping around at the ends. Used by the canvas left/right
+    /// shortcut when no playable cue group has been configured.
     @MainActor
     func cycleJumpingOffScene(forward: Bool) {
         let scenes = presetManager.sceneCatalogPresets

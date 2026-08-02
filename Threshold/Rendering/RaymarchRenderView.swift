@@ -512,6 +512,11 @@ final class ViewportRenderer {
     /// Last value published to the UI; avoids scheduling a MainActor task every
     /// frame when the presentation path is unchanged.
     private var publishedUpscalerPath: String?
+    #if os(macOS)
+    /// Last held state sent to the SwiftUI acknowledgement card. Publishing only
+    /// changes keeps the render loop free of per-frame MainActor work.
+    private var publishedAttributionShortcutHeld = false
+    #endif
     private var temporalInvalidationKey: TemporalInvalidationKey?
 
     // Shared music-reactive engine — same type used by the visionOS `Renderer`,
@@ -1456,6 +1461,16 @@ final class ViewportRenderer {
 
         let input = inputController.consumeFrame()
 
+        #if os(macOS)
+        let shouldShowAttribution = input.isAttributionShortcutHeld
+        if shouldShowAttribution != publishedAttributionShortcutHeld {
+            publishedAttributionShortcutHeld = shouldShowAttribution
+            Task { @MainActor [weak appModel] in
+                appModel?.setAttributionShortcutHeld(shouldShowAttribution)
+            }
+        }
+        #endif
+
         if input.shouldResetView {
             resetViewport(settings: settings)
         }
@@ -1463,7 +1478,7 @@ final class ViewportRenderer {
         if input.sceneStep != 0 {
             let forward = input.sceneStep > 0
             Task { @MainActor [weak appModel] in
-                appModel?.cycleJumpingOffScene(forward: forward)
+                appModel?.cycleConfiguredSceneGroupOrStaticScene(forward: forward)
             }
         }
 

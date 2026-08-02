@@ -12,6 +12,7 @@ struct ViewportInputTests {
         let input = ViewportInputAccumulator()
         input.setMovementKey(.forward, isPressed: true)
         input.setShiftPressed(true)
+        input.setAttributionShortcutHeld(true)
         input.addOrbit(delta: SIMD2<Float>(3, -2))
         input.addPan(delta: SIMD2<Float>(1, 4))
         input.addZoom(delta: 0.5)
@@ -22,6 +23,7 @@ struct ViewportInputTests {
         let first = input.consumeFrame()
         #expect(first.heldKeys == [.forward])
         #expect(first.isShiftPressed)
+        #expect(first.isAttributionShortcutHeld)
         #expect(first.orbitDelta == SIMD2<Float>(3, -2))
         #expect(first.panDelta == SIMD2<Float>(1, 4))
         #expect(first.zoomDelta == 0.5)
@@ -31,6 +33,7 @@ struct ViewportInputTests {
         let second = input.consumeFrame()
         #expect(second.heldKeys == [.forward])
         #expect(second.isShiftPressed)
+        #expect(second.isAttributionShortcutHeld)
         #expect(second.orbitDelta == .zero)
         #expect(second.panDelta == .zero)
         #expect(second.zoomDelta == 0)
@@ -43,6 +46,7 @@ struct ViewportInputTests {
         let input = ViewportInputAccumulator()
         input.setMovementKey([.forward, .right], isPressed: true)
         input.setShiftPressed(true)
+        input.setAttributionShortcutHeld(true)
         input.addOrbit(delta: SIMD2<Float>(1, 1))
         input.requestReset()
         input.setFocus(false)
@@ -50,6 +54,7 @@ struct ViewportInputTests {
         let frame = input.consumeFrame()
         #expect(frame.heldKeys.isEmpty)
         #expect(!frame.isShiftPressed)
+        #expect(!frame.isAttributionShortcutHeld)
         #expect(frame.orbitDelta == .zero)
         #expect(frame.actions.isEmpty)
     }
@@ -109,6 +114,18 @@ struct ViewportInputTests {
         #expect(frame.heldKeys == [.forward])
         #expect(frame.actions == [.togglePlayback])
         #expect(frame.sceneStep == 1)
+    }
+
+    @Test("Mac attribution shortcut remains visible while I is held")
+    func attributionShortcut() {
+        let input = ViewportInputAccumulator()
+        #expect(ViewportKeyboardMap.macOS(keyCode: 0, characters: "i") == .showAttribution)
+
+        input.applyKeyboard(.showAttribution, isPressed: true, isRepeat: false)
+        #expect(input.consumeFrame().isAttributionShortcutHeld)
+
+        input.applyKeyboard(.showAttribution, isPressed: false, isRepeat: false)
+        #expect(!input.consumeFrame().isAttributionShortcutHeld)
     }
 }
 #endif

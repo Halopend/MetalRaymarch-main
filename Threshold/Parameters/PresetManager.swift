@@ -160,6 +160,27 @@ enum StorePlaceholderReadPolicy {
 class PresetManager {
     private(set) var presets: [FractalPreset] = []
     private static var bundledPresetsCache: [FractalPreset]?
+    /// The baseline bundle marker intentionally never re-seeds an existing
+    /// store. This separate, versioned marker lets a deliberate catalog update
+    /// arrive once without resurrecting defaults a user has since deleted.
+    static let officialSceneCatalogUpdateMarkerFileName = ".seeded-official-scenes-v1.json"
+    static let officialSceneCatalogUpdateIDs = Set([
+        "00000000-0022-0000-0000-000000000001", // Bulatov Limit Set
+        "3F4AF708-7B41-4A60-B1A5-9D965E807C9A", // Embedded Mandelbulb
+        "F7A845E9-53F1-4E48-BFB0-7A07650C8E45", // Fractal Cartoon
+        "66E632EF-0C14-414C-9057-7ED1D49A74A5", // Goop again
+        "AC36AB1F-22BE-43C5-82AA-37D4C53BF055", // Great sphere
+        "D9799129-E303-4BB5-84CE-04C047257B59", // Hold
+        "B1D7E3A2-6C44-4F18-9E70-2A91C5D0F3A4", // Hyperbolic Tessellation
+        "2B1C086E-B352-5940-BDF1-F184D7AA6269", // Polychora (4D Solids)
+        "880ABBF6-13C5-554A-B393-E679FF46151D", // Pseudo Kleinian
+        "D3B14883-7F39-542C-BE66-DC7DB104D952", // Pseudo Kleinian Quaternion Julia
+        "F2F53E77-7DDA-51D7-82CD-A640A7E4B965", // Pseudo Knightyan
+        "95B889CF-3C8E-5F65-B5D6-DA1AC9A14725", // Pseudo MandalayBox
+        "48AC358B-764A-44E6-ADEB-96F3073295FE", // Stress test
+        "B4234FA7-8F8B-4700-A0EA-9C4321E635C0", // Wave Rail
+        "35AB0B54-3FCB-4CB0-A7D2-D6F7FFDAD1D1"  // w
+    ].compactMap(UUID.init(uuidString:)))
     private let maxBackupCount: Int? = nil  // nil = unlimited retention
     private var pendingSaveTask: Task<Void, Never>?
     private let saveDebounceNanoseconds: UInt64 = 250_000_000
@@ -606,31 +627,93 @@ class PresetManager {
         }
 
         // Seed bundled defaults ONCE per store. `!present` keeps any migrated/edited
-        // copy; the marker then locks seeding off forever for this store. (A brand
-        // new bundled preset in a future build won't auto-seed into an already-seeded
-        // store — the correct trade for never resurrecting a user deletion.)
-        guard !alreadySeeded else { return wroteFiles }
+        // copy; the marker then locks seeding off forever for this store. A later,
+        // explicitly curated catalog update is handled below with its own marker.
+        if !alreadySeeded {
+            let bundled = Self.bundledPresets()
+            var seedSucceeded = true
+            for preset in bundled where !present.contains(preset.id) {
+                if writeNewPresetFile(preset, root: root) != nil {
+                    present.insert(preset.id)
+                    wroteFiles = true
+                } else {
+                    seedSucceeded = false
+                }
+            }
+            let seededIDs = bundled.map(\.id)
+            if seedSucceeded, let data = try? presetEncoder.encode(seededIDs) {
+                do {
+                    try data.write(to: marker, options: .atomic)
+                } catch {
+                    seedSucceeded = false
+                    print("❌ Failed to write bundled-preset seed marker: \(error)")
+                }
+            }
+            if seedSucceeded {
+                print("🌱 Seeded \(seededIDs.count) bundled preset(s) into store")
+                _ = markOfficialSceneCatalogUpdateApplied(
+                    root: root,
+                    ids: Array(Self.officialSceneCatalogUpdateIDs)
+                )
+            }
+            return wroteFiles
+        }
+
+        if seedOfficialSceneCatalogUpdateIfNeeded(root: root, presentPresetIDs: present) {
+            wroteFiles = true
+        }
+        return wroteFiles
+    }
+
+    /// Adds a deliberately curated bundle update exactly once. The independent
+    /// marker is checked by existence rather than contents for the same File
+    /// Provider reason as the baseline marker: an unhydrated marker must not
+    /// cause a deleted default to reappear.
+    private func seedOfficialSceneCatalogUpdateIfNeeded(
+        root: URL,
+        presentPresetIDs: Set<UUID>
+    ) -> Bool {
+        let marker = root.appendingPathComponent(Self.officialSceneCatalogUpdateMarkerFileName)
+        guard !FileManager.default.fileExists(atPath: marker.path) else { return false }
+
+        let additions = Self.bundledPresets().filter {
+            Self.officialSceneCatalogUpdateIDs.contains($0.id)
+        }
+        guard additions.count == Self.officialSceneCatalogUpdateIDs.count else {
+            print("❌ Official scene catalog update is incomplete in this bundle; deferring seed")
+            return false
+        }
+
+        var present = presentPresetIDs
+        var wroteFiles = false
         var seedSucceeded = true
-        for preset in Self.bundledPresets() where !present.contains(preset.id) {
+        for preset in additions where !present.contains(preset.id) {
             if writeNewPresetFile(preset, root: root) != nil {
+                present.insert(preset.id)
                 wroteFiles = true
             } else {
                 seedSucceeded = false
             }
         }
-        let seededIDs = Self.bundledPresets().map(\.id)
-        if seedSucceeded, let data = try? presetEncoder.encode(seededIDs) {
-            do {
-                try data.write(to: marker, options: .atomic)
-            } catch {
-                seedSucceeded = false
-                print("❌ Failed to write bundled-preset seed marker: \(error)")
-            }
+
+        guard seedSucceeded else { return wroteFiles }
+        guard markOfficialSceneCatalogUpdateApplied(root: root, ids: additions.map(\.id)) else {
+            return wroteFiles
         }
-        if seedSucceeded {
-            print("🌱 Seeded \(seededIDs.count) bundled preset(s) into store")
-        }
+        print("🌱 Seeded \(additions.count) official scene catalog update(s) into store")
         return wroteFiles
+    }
+
+    private func markOfficialSceneCatalogUpdateApplied(root: URL, ids: [UUID]) -> Bool {
+        let marker = root.appendingPathComponent(Self.officialSceneCatalogUpdateMarkerFileName)
+        guard let data = try? presetEncoder.encode(ids) else { return false }
+        do {
+            try data.write(to: marker, options: .atomic)
+            return true
+        } catch {
+            print("❌ Failed to write official scene catalog update marker: \(error)")
+            return false
+        }
     }
 
     // MARK: - Folder store: per-file write / remove
@@ -1006,6 +1089,7 @@ class PresetManager {
     @discardableResult
     func updatePreset(_ preset: FractalPreset) -> PresetSaveResult {
         var updated = preset
+        updated.tags = SceneTagging.normalized(updated.tags)
         updated.updatedAt = Date()
 
         let existingIndex = presets.firstIndex { $0.id == updated.id }

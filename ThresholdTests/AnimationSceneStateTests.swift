@@ -107,6 +107,19 @@ struct AnimationSceneStateTests {
         #expect(decoded.mixedModeScene == true)
     }
 
+    @Test("User animation tags survive Codable")
+    func tagsRoundTrip() throws {
+        var original = scene()
+        original.tags = ["live", "favorites"]
+
+        let decoded = try JSONDecoder().decode(
+            AnimationScene.self,
+            from: JSONEncoder().encode(original)
+        )
+
+        #expect(decoded.tags == ["live", "favorites"])
+    }
+
     @MainActor
     @Test("Playback applies baseline first, then the keyframe scale")
     func baselinePlayback() {

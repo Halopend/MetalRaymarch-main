@@ -73,6 +73,7 @@ struct FractalGridView: View {
     var tabSelection: Binding<FractalBrowseTab>? = nil
     @AppStorage("FractalGridView.innerTab") private var storedTabSelection: FractalBrowseTab = .jumpingOff
     @SceneStorage("FractalGridView.selectedStaticSceneID") private var selectedStaticSceneIDRaw: String?
+    @SceneStorage("FractalGridView.selectedTag") private var selectedTag: String?
     @State private var selectedStaticSceneForEdit: FractalPreset?
     private let sceneColumns = [GridItem(.adaptive(minimum: 170, maximum: 280), spacing: 12)]
 
@@ -119,6 +120,8 @@ struct FractalGridView: View {
         let selectedTab = effectiveTabSelection.wrappedValue
 
         VStack(spacing: 10) {
+            tagFilterBar
+
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     switch selectedTab {
@@ -151,6 +154,11 @@ struct FractalGridView: View {
         .padding(.bottom, 8)
         .onAppear {
             presetManager?.refreshBundledPresets()
+        }
+        .onChange(of: availableTags) { _, tags in
+            if let selectedTag, !tags.contains(where: { $0.caseInsensitiveCompare(selectedTag) == .orderedSame }) {
+                self.selectedTag = nil
+            }
         }
         .sheet(item: $selectedStaticSceneForEdit) { preset in
             if let presetManager {
@@ -208,6 +216,7 @@ struct FractalGridView: View {
                             subtitle: scene.fractalType?.displayName ?? "Any fractal",
                             detail: scene.attachedSong?.title ?? "Visual-only scene",
                             systemImage: scene.attachedSong == nil ? AppIcons.sparklesRectangleStack : AppIcons.musicNote,
+                            tags: scene.tags,
                             showsFlashingWarning: scene.name.localizedCaseInsensitiveContains("ambient blur"),
                             isSelected: activeSelection == .animation(scene.id),
                             onEdit: onEditScene.map { editScene in
@@ -265,6 +274,7 @@ struct FractalGridView: View {
                             detail: staticSceneDetail(for: preset),
                             systemImage: AppIcons.chevronLeftForwardslashChevronRight,
                             thumbnailData: preset.thumbnailData,
+                            tags: preset.tags,
                             isSelected: activeSelection == .staticPreset(preset.id),
                             onEdit: staticSceneEditAction(for: preset)
                         ) {
@@ -311,6 +321,7 @@ struct FractalGridView: View {
                             detail: staticSceneDetail(for: preset),
                             systemImage: AppIcons.photo,
                             thumbnailData: preset.thumbnailData,
+                            tags: preset.tags,
                             isSelected: activeSelection == .staticPreset(preset.id),
                             onEdit: staticSceneEditAction(for: preset)
                         ) {
@@ -357,6 +368,7 @@ struct FractalGridView: View {
                             detail: staticSceneDetail(for: preset),
                             systemImage: AppIcons.photo,
                             thumbnailData: preset.thumbnailData,
+                            tags: preset.tags,
                             isSelected: activeSelection == .staticPreset(preset.id),
                             onEdit: staticSceneEditAction(for: preset)
                         ) {
@@ -403,6 +415,7 @@ struct FractalGridView: View {
                             detail: staticSceneDetail(for: preset),
                             systemImage: AppIcons.musicNote,
                             thumbnailData: preset.thumbnailData,
+                            tags: preset.tags,
                             isSelected: activeSelection == .staticPreset(preset.id),
                             onEdit: staticSceneEditAction(for: preset)
                         ) {
@@ -416,11 +429,15 @@ struct FractalGridView: View {
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.indigo.opacity(0.08)))
     }
 
-    private func filteredStaticPresets() -> [FractalPreset] {
+    private func allStaticPresets() -> [FractalPreset] {
         (presetManager?.sceneCatalogPresets ?? []).filter { preset in
             // Skip transient utility entries if they ever leak into the shared preset list.
             preset.name != "__lastState__"
         }
+    }
+
+    private func filteredStaticPresets() -> [FractalPreset] {
+        allStaticPresets().filter { matchesSelectedTag($0.tags) }
     }
 
     private func jumpingOffPresets() -> [FractalPreset] {
@@ -449,7 +466,63 @@ struct FractalGridView: View {
     }
 
     private func animatedScenes(in animationManager: AnimationManager) -> [AnimationScene] {
-        animationManager.scenes.filter { $0.keyframes.count >= 2 }
+        animationManager.scenes.filter {
+            $0.keyframes.count >= 2 && matchesSelectedTag($0.tags)
+        }
+    }
+
+    private var availableTags: [String] {
+        let staticTags = allStaticPresets().flatMap(\.tags)
+        let animationTags = (animationManager?.scenes ?? []).flatMap(\.tags)
+        return Array(Set(SceneTagging.normalized(staticTags + animationTags)))
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    private func matchesSelectedTag(_ tags: [String]) -> Bool {
+        guard let selectedTag else { return true }
+        return SceneTagging.contains(tags, tag: selectedTag)
+    }
+
+    @ViewBuilder
+    private var tagFilterBar: some View {
+        if !availableTags.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    Label("Tags", systemImage: "tag.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Button {
+                        selectedTag = nil
+                    } label: {
+                        Text("All")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(selectedTag == nil ? Color.white : Color.secondary)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(
+                                Capsule().fill(selectedTag == nil ? Color.accentColor : Color.secondary.opacity(0.12))
+                            )
+                    }
+                    .buttonStyle(.plain)
+
+                    ForEach(availableTags, id: \.self) { tag in
+                        Button {
+                            selectedTag = tag
+                        } label: {
+                            SceneTagPill(
+                                tag: tag,
+                                isSelected: selectedTag?.caseInsensitiveCompare(tag) == .orderedSame
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 12)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Filter scenes by tag")
+        }
     }
     private func emptySectionLabel(_ text: String) -> some View {
         Text(text)
@@ -563,7 +636,7 @@ struct FractalGridView: View {
     }
 
     @ViewBuilder
-    private func sceneCard(title: String, subtitle: String, detail: String, systemImage: String, thumbnailData: Data? = nil, showsFlashingWarning: Bool = false, isSelected: Bool, onEdit: (() -> Void)? = nil, action: @escaping () -> Void) -> some View {
+    private func sceneCard(title: String, subtitle: String, detail: String, systemImage: String, thumbnailData: Data? = nil, tags: [String] = [], showsFlashingWarning: Bool = false, isSelected: Bool, onEdit: (() -> Void)? = nil, action: @escaping () -> Void) -> some View {
         let card = Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 8) {
@@ -591,6 +664,8 @@ struct FractalGridView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+
+                SceneTagRow(tags: tags)
 
                 Spacer(minLength: 0)
 
@@ -685,6 +760,10 @@ private struct StaticSceneSettingsView: View {
                     Text("When off, loading this scene preserves your selected Immersive, Window, or Mixed mode.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                Section("Tags") {
+                    SceneTagEditor(tags: $preset.tags)
                 }
             }
             .navigationTitle(preset.name)

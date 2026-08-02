@@ -25,6 +25,22 @@ import Foundation
 @Suite("FractalPreset — previously-dropped scene state round-trips")
 struct FractalPresetPersistenceTests {
 
+    @Test("User scene tags survive Codable and remain backward-compatible")
+    func tagsRoundTrip() throws {
+        var preset = FractalPreset(name: "Tagged")
+        preset.tags = ["Favorites", "cavern"]
+
+        let data = try JSONEncoder().encode(preset)
+        let decoded = try JSONDecoder().decode(FractalPreset.self, from: data)
+        #expect(decoded.tags == ["Favorites", "cavern"])
+
+        var legacyObject = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        legacyObject.removeValue(forKey: "tags")
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyObject)
+        let legacyDecoded = try JSONDecoder().decode(FractalPreset.self, from: legacyData)
+        #expect(legacyDecoded.tags.isEmpty)
+    }
+
     @Test("Platform / cell-shading / light-rate / extra effects / bubble-fade survive fromSettings → encode → decode → apply")
     func droppedFieldsRoundTrip() throws {
         let settings = RenderSettings()
