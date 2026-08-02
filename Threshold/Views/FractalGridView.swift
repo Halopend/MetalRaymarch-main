@@ -66,6 +66,7 @@ private enum FractalSceneSelection: Equatable {
 struct FractalGridView: View {
     let animationManager: AnimationManager?
     let presetManager: PresetManager?
+    let usesListLayout: Bool
     var onCreateAnimation: (() -> Void)? = nil
     var onEditScene: ((AnimationScene) -> Void)? = nil
     var onLoadAnimationScene: ((AnimationScene) -> Void)? = nil
@@ -81,6 +82,7 @@ struct FractalGridView: View {
         animationManager: AnimationManager?,
         presetManager: PresetManager?,
         tabSelection: Binding<FractalBrowseTab>? = nil,
+        usesListLayout: Bool = false,
         onCreateAnimation: (() -> Void)? = nil,
         onEditScene: ((AnimationScene) -> Void)? = nil,
         onLoadAnimationScene: ((AnimationScene) -> Void)? = nil,
@@ -88,6 +90,7 @@ struct FractalGridView: View {
     ) {
         self.animationManager = animationManager
         self.presetManager = presetManager
+        self.usesListLayout = usesListLayout
         self.tabSelection = tabSelection
         self.onCreateAnimation = onCreateAnimation
         self.onEditScene = onEditScene
@@ -123,7 +126,7 @@ struct FractalGridView: View {
             tagFilterBar
 
             ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: usesListLayout ? 10 : 18) {
                     switch selectedTab {
                     case .jumpingOff:
                         if let animationManager {
@@ -147,8 +150,8 @@ struct FractalGridView: View {
                         customScenesGrid(animationManager)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.horizontal, usesListLayout ? 8 : 12)
+                .padding(.vertical, usesListLayout ? 4 : 8)
             }
         }
         .padding(.bottom, 8)
@@ -209,7 +212,7 @@ struct FractalGridView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 18)
             } else {
-                LazyVGrid(columns: sceneColumns, spacing: 12) {
+                sceneCollectionLayout {
                     ForEach(Array(animatedScenes.enumerated()), id: \.offset) { _, scene in
                         sceneCard(
                             title: scene.name,
@@ -266,7 +269,7 @@ struct FractalGridView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 18)
             } else {
-                LazyVGrid(columns: sceneColumns, spacing: 12) {
+                sceneCollectionLayout {
                     ForEach(Array(presets.enumerated()), id: \.offset) { _, preset in
                         sceneCard(
                             title: preset.name,
@@ -313,7 +316,7 @@ struct FractalGridView: View {
             if staticScenePresets.isEmpty {
                 emptySectionLabel("No jumping-off scenes saved")
             } else {
-                LazyVGrid(columns: sceneColumns, spacing: 12) {
+                sceneCollectionLayout {
                     ForEach(Array(staticScenePresets.enumerated()), id: \.offset) { _, preset in
                         sceneCard(
                             title: preset.name,
@@ -360,7 +363,7 @@ struct FractalGridView: View {
             if staticScenePresets.isEmpty {
                 emptySectionLabel("No mixed-mode scenes yet — long-press any saved scene and enable Open in Mixed Immersion")
             } else {
-                LazyVGrid(columns: sceneColumns, spacing: 12) {
+                sceneCollectionLayout {
                     ForEach(Array(staticScenePresets.enumerated()), id: \.offset) { _, preset in
                         sceneCard(
                             title: preset.name,
@@ -407,7 +410,7 @@ struct FractalGridView: View {
             if staticScenePresets.isEmpty {
                 emptySectionLabel("No music-reactive presets saved")
             } else {
-                LazyVGrid(columns: sceneColumns, spacing: 12) {
+                sceneCollectionLayout {
                     ForEach(Array(staticScenePresets.enumerated()), id: \.offset) { _, preset in
                         sceneCard(
                             title: preset.name,
@@ -456,6 +459,21 @@ struct FractalGridView: View {
 
     private func customScenePresets() -> [FractalPreset] {
         filteredStaticPresets().filter(\.isCustomScenePreset)
+    }
+
+    @ViewBuilder
+    private func sceneCollectionLayout<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if usesListLayout {
+            LazyVStack(alignment: .leading, spacing: 6) {
+                content()
+            }
+        } else {
+            LazyVGrid(columns: sceneColumns, spacing: 12) {
+                content()
+            }
+        }
     }
 
     private func staticSceneEditAction(for preset: FractalPreset) -> (() -> Void)? {
@@ -638,7 +656,27 @@ struct FractalGridView: View {
     @ViewBuilder
     private func sceneCard(title: String, subtitle: String, detail: String, systemImage: String, thumbnailData: Data? = nil, tags: [String] = [], showsFlashingWarning: Bool = false, isSelected: Bool, onEdit: (() -> Void)? = nil, action: @escaping () -> Void) -> some View {
         let card = Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
+            Group {
+                if usesListLayout {
+                    HStack(alignment: .top, spacing: 10) {
+                        sceneCardIcon(systemImage: systemImage, thumbnailData: thumbnailData)
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 6) {
+                                Text(title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                if showsFlashingWarning { FlashingLightIndicator() }
+                            }
+                            Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            SceneTagRow(tags: tags)
+                            if isSelected {
+                                Label("Selected", systemImage: AppIcons.checkmarkCircleFill)
+                                    .font(.caption.weight(.semibold)).foregroundStyle(.blue)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 8) {
                     sceneCardIcon(systemImage: systemImage, thumbnailData: thumbnailData)
 
@@ -674,9 +712,11 @@ struct FractalGridView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.blue)
                 }
+                    }
+                }
             }
-            .frame(maxWidth: .infinity, minHeight: 116, alignment: .leading)
-            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: usesListLayout ? 88 : 116, alignment: .leading)
+            .padding(usesListLayout ? 8 : 12)
             .background(
                 RoundedRectangle(cornerRadius: 12)
                     .fill(isSelected ? Color.blue.opacity(0.2) : Color.white.opacity(0.06))

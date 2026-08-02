@@ -45,6 +45,9 @@ final class MicrophoneCaptureSource: AudioCaptureSource {
 
     var descriptor: AudioSourceDescriptor {
         let availability: AudioSourceAvailability
+#if targetEnvironment(simulator)
+        availability = .unavailable("Microphone capture is unavailable in iPad Simulator. Run Threshold on a physical iPad to use audio input.")
+#else
         if analyzer.isMicrophoneCapturing {
             availability = .active
         } else {
@@ -63,6 +66,7 @@ final class MicrophoneCaptureSource: AudioCaptureSource {
                 availability = .failed("Microphone permission status could not be determined.")
             }
         }
+#endif
 
         return AudioSourceDescriptor(
             id: sourceID,
@@ -80,7 +84,11 @@ final class MicrophoneCaptureSource: AudioCaptureSource {
     }
 
     func startCapture() async -> Bool {
+#if targetEnvironment(simulator)
+        return false
+#else
         await analyzer.startCaptureIfNeeded()
+#endif
     }
 
     func stopCapture() async {

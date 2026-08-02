@@ -33,8 +33,15 @@ extension AppModel {
         // Intents) in lockstep. Runs synchronously (main-actor) before the async
         // apply Task so the stop lands immediately on tap/keypress.
         animationManager?.clearCurrentSceneSelection()
+        staticSceneLoadGeneration &+= 1
+        let generation = staticSceneLoadGeneration
+        staticSceneLoadTask?.cancel()
         let source = options.isEmpty ? "keyboard" : "external"
-        Task { @MainActor in
+        staticSceneLoadTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                if self.staticSceneLoadGeneration == generation { self.staticSceneLoadTask = nil }
+            }
             customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene source=\(source) name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
             if let formula = preset.embeddedFormula, formula.effectKind == .spaceWarp {
                 // A space warp rides the preset's built-in fractalType — install it
@@ -42,6 +49,7 @@ extension AppModel {
                 installSpaceWarp(formula)
             } else if let formula = preset.embeddedFormula {
                 let installResult = await installEmbeddedFormulaIfNeededAndWait(formula)
+                guard !Task.isCancelled, staticSceneLoadGeneration == generation else { return }
                 customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene installEmbeddedFormula returned \(installResult)")
                 if installResult == .failed { return }
                 if installResult == .deferred {
@@ -67,6 +75,7 @@ extension AppModel {
             // can't fire on the next handler binding.
             pendingPresetForActivation = nil
             pendingSceneApplyAfterActivation = nil
+            guard !Task.isCancelled, staticSceneLoadGeneration == generation else { return }
             await applyLoadedScene(preset, options: options)
         }
     }
@@ -167,11 +176,14 @@ extension AppModel {
     ) async {
         if preset.embeddedFormula != nil {
             await preparePipelineHandler?(preset)
-            customSceneDiagnostic("🔬 [CSDiag] applyLoadedScene preparePipelineHandler completed; loading preset NOW")
         } else {
-            Task { await preparePipelineHandler?(preset) }
-            customSceneDiagnostic("🔬 [CSDiag] applyLoadedScene preparePipelineHandler dispatched (fire-and-forget); loading preset NOW")
+            // Serialize pipeline preparation with the preset mutation. The
+            // previous fire-and-forget path let rapid iPad taps overlap shader
+            // setup and settings mutation, which could crash during switching.
+            await preparePipelineHandler?(preset)
         }
+        guard !Task.isCancelled else { return }
+        customSceneDiagnostic("🔬 [CSDiag] applyLoadedScene preparePipelineHandler completed; loading preset NOW")
         // Snapshot the currently displayed parameters so the load can ease
         // from them toward the new preset.
         renderSettings.beginSceneTransitionSnapshot()

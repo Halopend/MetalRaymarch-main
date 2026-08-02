@@ -502,6 +502,11 @@ class AppModel {
     /// silently dropped after the activation wait times out.
     @ObservationIgnored var pendingSceneApplyAfterActivation: (formulaHash: String, apply: @MainActor () -> Void)?
 
+    /// Prevents an older asynchronous scene load from applying after a newer
+    /// selection, which is especially easy to trigger in the iPad scene list.
+    @ObservationIgnored var staticSceneLoadTask: Task<Void, Never>?
+    @ObservationIgnored var staticSceneLoadGeneration: UInt64 = 0
+
     /// Queue an animation-scene apply behind formula activation and nudge the
     /// immersive space open (same UX as the queued-preset path).
     func queueSceneApplyAfterFormulaActivation(formulaHash: String, apply: @escaping @MainActor () -> Void) {

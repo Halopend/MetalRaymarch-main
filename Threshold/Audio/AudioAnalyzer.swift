@@ -325,6 +325,13 @@ class AudioAnalyzer {
         do {
             try session.setCategory(.playAndRecord, options: [.mixWithOthers])
             try session.setActive(true)
+
+            guard session.isInputAvailable, session.inputNumberOfChannels > 0 else {
+                errorMessage = "No microphone input is available on this device."
+                try? session.setActive(false, options: [.notifyOthersOnDeactivation])
+                return false
+            }
+
             return true
         } catch {
             errorMessage = "Could not activate the audio session: \(error.localizedDescription)"
@@ -382,10 +389,18 @@ class AudioAnalyzer {
 
         guard format.sampleRate > 0, format.channelCount > 0 else {
             errorMessage = "No audio input available"
+#if !os(macOS)
+            try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+#endif
             return
         }
 
         core.activate(sampleRate: Float(format.sampleRate))
+
+        // Keep the references before installing the tap so every failure path
+        // can remove it, including an engine-start error after the tap exists.
+        self.audioEngine = engine
+        self.inputNode = input
 
         // The requested tap size is a hint only — the engine may deliver more
         // or fewer frames. The core's internal accumulator makes analysis
@@ -398,14 +413,12 @@ class AudioAnalyzer {
         let core = self.core
         input.installTap(onBus: 0,
                          bufferSize: AVAudioFrameCount(AudioAnalysisCore.windowSize),
-                         format: format) { @Sendable buffer, _ in
+                         format: nil) { @Sendable buffer, _ in
             core.ingest(buffer)
         }
 
         do {
             try engine.start()
-            self.audioEngine = engine
-            self.inputNode = input
             self.isMicrophoneCapturing = true
             self.installConfigurationChangeObserver(for: engine)
             #if !os(macOS)
@@ -418,6 +431,9 @@ class AudioAnalyzer {
             self.core.deactivate()
             self.isMicrophoneCapturing = false
             self.refreshCaptureState(resetLevelsWhenIdle: true)
+#if !os(macOS)
+            try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+#endif
             self.errorMessage = "Failed to start audio: \(error.localizedDescription)"
         }
     }

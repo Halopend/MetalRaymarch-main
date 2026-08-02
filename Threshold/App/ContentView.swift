@@ -55,6 +55,7 @@ struct ContentView: View {
     @State private var showSaveDestinationSheet = false
     @State private var saveConfirmationMessage: String?
     @State private var isControlFinderPresented = false
+    @State private var workspaceSize: CGSize = .zero
     #if os(iOS)
     @State var isAnimationEditorPresented = false
     @State var isWelcomePresented = false
@@ -185,6 +186,12 @@ struct ContentView: View {
 
     private var usesCompactWorkspaceLayout: Bool {
         appModel.platformProfile.platform == .iPadOS && horizontalSizeClass == .compact
+    }
+
+    var usesPortraitIPadLayout: Bool {
+        appModel.platformProfile.platform == .iPadOS
+            && workspaceSize != .zero
+            && workspaceSize.height > workspaceSize.width
     }
 
     /// Shared definition consumed by the regular top-dock/rail grid, compact
@@ -777,6 +784,16 @@ struct ContentView: View {
             }
         }
         .padding(.horizontal, 12)
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .allowsHitTesting(false)
+                    .onAppear { workspaceSize = proxy.size }
+                    .onChange(of: proxy.size) { _, newSize in
+                        workspaceSize = newSize
+                    }
+            }
+        }
         // The system inspector supplies the outer vertical boundary on iPad.
         // Keeping desktop card padding here exposed two black strips above and
         // below an otherwise full-height controls column.
@@ -836,39 +853,86 @@ struct ContentView: View {
     }
 
     private var compactSectionBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(activeWorkspaceNavigationNodes) { node in
-                    compactSectionButton(
-                        title: node.title,
-                        systemImage: node.systemImage,
-                        isSelected: isNavigationNodeSelected(node)
-                    ) { activateNavigationNode(node) }
-                }
+        Group {
+            if usesPortraitIPadLayout {
+                VStack(spacing: 8) {
+                    LazyVGrid(
+                        columns: secondLevelColumns(for: activeWorkspaceNavigationNodes.count),
+                        spacing: 8
+                    ) {
+                        ForEach(activeWorkspaceNavigationNodes) { node in
+                            compactSectionButton(
+                                title: node.title,
+                                systemImage: node.systemImage,
+                                isSelected: isNavigationNodeSelected(node),
+                                fillsGridCell: true
+                            ) { activateNavigationNode(node) }
+                        }
+                    }
 
-                Divider()
-                    .frame(height: 28)
+                    Divider()
 
-                ForEach(navigationHierarchy.utilityRoots) { node in
-                    compactSectionButton(
-                        title: node.title,
-                        systemImage: node.systemImage,
-                        isSelected: isNavigationNodeSelected(node)
-                    ) { activateNavigationNode(node) }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(navigationHierarchy.utilityRoots) { node in
+                                compactSectionButton(
+                                    title: node.title,
+                                    systemImage: node.systemImage,
+                                    isSelected: isNavigationNodeSelected(node)
+                                ) { activateNavigationNode(node) }
+                            }
+                        }
+                        .padding(.horizontal, 2)
+                    }
                 }
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(activeWorkspaceNavigationNodes) { node in
+                            compactSectionButton(
+                                title: node.title,
+                                systemImage: node.systemImage,
+                                isSelected: isNavigationNodeSelected(node)
+                            ) { activateNavigationNode(node) }
+                        }
+
+                        Divider()
+                            .frame(height: 28)
+
+                        ForEach(navigationHierarchy.utilityRoots) { node in
+                            compactSectionButton(
+                                title: node.title,
+                                systemImage: node.systemImage,
+                                isSelected: isNavigationNodeSelected(node)
+                            ) { activateNavigationNode(node) }
+                        }
+                    }
+                    .padding(.horizontal, 2)
+                }
+                .frame(minHeight: 44)
             }
-            .padding(.horizontal, 2)
         }
-        .frame(minHeight: 44)
     }
 
-    private func compactSectionButton(title: String, systemImage: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+    private func secondLevelColumns(for itemCount: Int) -> [GridItem] {
+        let columnCount = max(1, (itemCount + 1) / 2)
+        return Array(repeating: GridItem(.flexible(), spacing: 8), count: columnCount)
+    }
+
+    private func compactSectionButton(
+        title: String,
+        systemImage: String,
+        isSelected: Bool,
+        fillsGridCell: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
                 .font(.caption.weight(.semibold))
                 .lineLimit(1)
                 .padding(.horizontal, 11)
                 .frame(minHeight: 40)
+                .frame(maxWidth: fillsGridCell ? .infinity : nil)
                 .background(
                     Capsule().fill(isSelected ? Color.blue.opacity(0.20) : Color.secondary.opacity(0.08))
                 )

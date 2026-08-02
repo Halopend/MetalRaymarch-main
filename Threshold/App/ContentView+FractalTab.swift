@@ -31,6 +31,7 @@ extension ContentView {
                     animationManager: appModel.animationManager,
                     presetManager: appModel.presetManager,
                     tabSelection: fractalBrowseTabBinding,
+                    usesListLayout: usesPortraitIPadLayout,
                     onCreateAnimation: { openAnimationEditor() },
                     onEditScene: openAnimationEditor,
                     onLoadAnimationScene: { _ in
