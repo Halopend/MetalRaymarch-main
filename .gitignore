@@ -13,6 +13,7 @@ Traces
 .claude/
 build/*
 .build/*
+Sources/*
 
 # LLVM/Clang profiling artifacts (e.g. default.profraw from instrumented runs)
 *.profraw
@@ -32,3 +33,4 @@ Threshold/uml-generated/Rendering.err
 Threshold/uml-generated/Rendering.puml
 Threshold/CLASS_DIAGRAM.md
 Threshold/CLASS_DIAGRAM.md
+Sources/93878A53-B8CC-4913-879F-B44D4556DF1F.mov
