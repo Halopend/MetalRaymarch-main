@@ -175,15 +175,22 @@ extension AppModel {
         options: StaticSceneLoadOptions
     ) async {
         if preset.embeddedFormula != nil {
+            // A custom formula has no usable pipeline until its specialized one
+            // is compiled, so this load genuinely has to wait for the build.
             await preparePipelineHandler?(preset)
+            guard !Task.isCancelled else { return }
+            customSceneDiagnostic("🔬 [CSDiag] applyLoadedScene preparePipelineHandler completed; loading preset NOW")
         } else {
-            // Serialize pipeline preparation with the preset mutation. The
-            // previous fire-and-forget path let rapid iPad taps overlap shader
-            // setup and settings mutation, which could crash during switching.
-            await preparePipelineHandler?(preset)
+            // A built-in fractal already has a working pipeline; specialization
+            // only sharpens it, and the renderer swaps it in when the build
+            // lands. Awaiting it here made every scene tap block on a fresh
+            // Metal compile — seconds on the first visit to each scene on iPad.
+            // Rapid taps are serialized by `loadStaticScene`'s generation guard,
+            // which cancels the older load before it reaches this mutation, so
+            // the await is not what keeps switching safe.
+            Task { await preparePipelineHandler?(preset) }
+            customSceneDiagnostic("🔬 [CSDiag] applyLoadedScene preparePipelineHandler dispatched (fire-and-forget); loading preset NOW")
         }
-        guard !Task.isCancelled else { return }
-        customSceneDiagnostic("🔬 [CSDiag] applyLoadedScene preparePipelineHandler completed; loading preset NOW")
         // Snapshot the currently displayed parameters so the load can ease
         // from them toward the new preset.
         renderSettings.beginSceneTransitionSnapshot()
