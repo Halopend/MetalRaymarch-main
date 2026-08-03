@@ -216,9 +216,11 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     case formulaParam14
     case formulaParam15
 
-    // Composable transform-STACK slots — per-slot master amount, resolved against the
-    // LIVE stack (slot N = the Nth transform card). Up to kMaxSpaceWarpOps (8). Dynamic
-    // like formula slots: nil static target id, surfaced only for slots that exist.
+    // Composable transform-STACK slots — resolved against the LIVE stack (slot N =
+    // the Nth transform card). Each mapping additionally identifies one
+    // descriptor-derived `spaceWarpField`, so a transform can expose multiple
+    // independent audio inputs. Up to kMaxSpaceWarpOps (8). Dynamic like formula
+    // slots: nil static target id, surfaced only for slots that exist.
     case spaceWarp0
     case spaceWarp1
     case spaceWarp2
@@ -456,22 +458,42 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
 
     // MARK: - Default Mapping Factory
 
-    func defaultMapping(for fractalType: FractalModelType, enabled: Bool = true) -> MusicReactiveMapping {
+    func defaultMapping(for fractalType: FractalModelType,
+                        enabled: Bool = true,
+                        spaceWarpField: SpaceWarpField = .strength) -> MusicReactiveMapping {
         MusicReactiveMapping(
             target: self,
             source: defaultSource,
             amount: 1.0,
-            isEnabled: enabled
+            isEnabled: enabled,
+            spaceWarpField: spaceWarpField
         )
     }
 
-    func defaultMapping(enabled: Bool = true) -> MusicReactiveMapping {
+    func defaultMapping(enabled: Bool = true,
+                        spaceWarpField: SpaceWarpField = .strength) -> MusicReactiveMapping {
         MusicReactiveMapping(
             target: self,
             source: defaultSource,
             amount: 1.0,
-            isEnabled: enabled
+            isEnabled: enabled,
+            spaceWarpField: spaceWarpField
         )
+    }
+}
+
+/// The stable logical identity of an audio mapping. Ordinary targets have one
+/// mapping apiece; a transform target has one mapping per exposed field. This is
+/// deliberately non-Codable: persisted scenes retain the compatible
+/// `target` + `spaceWarpField` representation already used by
+/// `MusicReactiveMapping`.
+struct MusicReactiveMappingKey: Hashable, Sendable {
+    let target: MusicReactiveTarget
+    let spaceWarpField: SpaceWarpField?
+
+    init(target: MusicReactiveTarget, spaceWarpField: SpaceWarpField = .strength) {
+        self.target = target
+        self.spaceWarpField = target.isSpaceWarp ? spaceWarpField : nil
     }
 }
 
@@ -532,6 +554,13 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         lfo.sanitizeInPlace()
     }
 
+    /// The identity used for persistence sanitization, UI assignment state, and
+    /// curve-state storage. Each transform field can now respond independently,
+    /// while non-transform targets retain their historical one-mapping behavior.
+    var identityKey: MusicReactiveMappingKey {
+        MusicReactiveMappingKey(target: target, spaceWarpField: spaceWarpField)
+    }
+
     var hasFlashingRisk: Bool {
         isEnabled && target.migrated.hasFlashingRisk && abs(amount) > 0.01
     }
@@ -565,13 +594,13 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
 
     /// Migrate legacy Mandelbox-specific mappings to generic formula param slots.
     static func migrateLegacy(_ mappings: [MusicReactiveMapping]) -> [MusicReactiveMapping] {
-        var seen = Set<MusicReactiveTarget>()
+        var seen = Set<MusicReactiveMappingKey>()
         var result: [MusicReactiveMapping] = []
         for mapping in mappings {
             var mapping = mapping
             let newTarget = mapping.target.migrated
             mapping.target = newTarget
-            guard seen.insert(newTarget).inserted else { continue }
+            guard seen.insert(mapping.identityKey).inserted else { continue }
             result.append(mapping)
         }
         return result

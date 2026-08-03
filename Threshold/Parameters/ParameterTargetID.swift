@@ -31,7 +31,7 @@ enum ParameterTargetID {
     /// Composable transform-stack slots (music-bindable). DYNAMIC, like formula slots:
     /// they resolve against the LIVE stack, so they carry `nil` static target ids and
     /// stay out of the routed-node lockstep (`validateStartupRouting`). The music engine
-    /// folds their offset straight into `spaceWarpStack[slot].strength` per frame.
+    /// folds each mapping's selected `SpaceWarpField` into the live stack per frame.
     enum SpaceWarp {
         static func opStrength(slot: Int) -> String { "spacewarp.\(slot).strength" }
     }

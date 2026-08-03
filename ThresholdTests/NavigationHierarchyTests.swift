@@ -5,8 +5,8 @@ import Testing
 struct NavigationHierarchyTests {
     private func makeHierarchy(
         allowCustomScenes: Bool = false,
-        shapeSections: [ShapeRailSection] = [.parameters, .space],
-        musicSections: [MusicRailSection] = [.playback, .reactive],
+        shapeSections: [ShapeRailSection] = [.formula, .space],
+        musicSections: [MusicRailSection] = [.parameters, .playback, .reactive],
         includesGestureEditing: Bool = false
     ) -> NavigationHierarchy {
         NavigationHierarchy.application(availability: NavigationAvailability(
@@ -37,7 +37,7 @@ struct NavigationHierarchyTests {
     func platformAvailability() {
         let hierarchy = makeHierarchy(
             allowCustomScenes: true,
-            shapeSections: [.parameters, .hands, .bounding],
+            shapeSections: [.formula, .hands, .bounding],
             musicSections: [.playback, .songs],
             includesGestureEditing: true
         )
@@ -46,7 +46,7 @@ struct NavigationHierarchyTests {
             $0.id == "explore.\(ExploreRailSection.customScenes.rawValue)"
         })
         #expect(hierarchy.children(ofWorkspace: .shape).map(\.id) == [
-            "shape.\(ShapeRailSection.parameters.rawValue)",
+            "shape.\(ShapeRailSection.formula.rawValue)",
             "shape.\(ShapeRailSection.hands.rawValue)",
             "shape.\(ShapeRailSection.bounding.rawValue)"
         ])
@@ -65,16 +65,15 @@ struct NavigationHierarchyTests {
     @Test("Keyboard projection is stable preorder with ancestor paths")
     func keyboardProjection() {
         let hierarchy = makeHierarchy(
-            shapeSections: [.parameters],
-            musicSections: []
+            shapeSections: [.formula],
+            musicSections: [.parameters]
         )
         let targets = hierarchy.flattenedKeyboardTargets()
-        let shapeRoot = NavigationHierarchy.rootID(for: .shape)
 
         #expect(targets.first?.id == NavigationHierarchy.rootID(for: .explore))
         #expect(targets.first(where: {
-            $0.id == "shape.\(ShapeRailSection.parameters.rawValue)"
-        })?.ancestorPath == [shapeRoot])
+            $0.id == "input.\(MusicRailSection.parameters.rawValue)"
+        })?.ancestorPath == [NavigationHierarchy.rootID(for: .input)])
         #expect(targets.last?.id == "utility.settings")
     }
 

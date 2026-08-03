@@ -392,12 +392,13 @@ struct ContentView: View {
             }
             appModel.openShapeMenuHandler = {
                 withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) {
-                    activateShapeSection(.parameters)
+                    activateMusicSection(.parameters)
                 }
             }
             appModel.isShapeMenuActiveHandler = {
+                if case .input(.parameters) = appModel.navigationStore.currentRoute { return true }
                 guard case .shape(let section) = appModel.navigationStore.currentRoute else { return false }
-                return [.parameters, .formula, .primitives, .hands].contains(section)
+                return [.formula, .primitives, .hands].contains(section)
             }
             appModel.openRenderMenuHandler = {
                 withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) {
@@ -967,59 +968,95 @@ struct ContentView: View {
     // MARK: - Top Dock
 
     private var topDockBar: some View {
-        return HStack(spacing: 10) {
+        HStack(spacing: 10) {
             ForEach(navigationHierarchy.workspaceRoots) { node in
-                if case .workspace(let root) = node.target {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            activateNavigationNode(node)
-                        }
-                    } label: {
-                        HStack(spacing: 8) {
-                            ZStack(alignment: .topTrailing) {
-                                Image(systemName: node.systemImage)
-                                    .font(.system(size: IconSize.medium, weight: .semibold))
-                                topDockBadge(for: root)
-                            }
-                            Text(node.title)
-                                .font(.subheadline.weight(.semibold))
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(
-                            Capsule()
-                                .fill(activeWorkspaceRoot == root && isPrimaryWorkspaceSelection ? Color.blue.opacity(0.18) : Color.clear)
-                        )
-                        .overlay(
-                            Capsule()
-                                .strokeBorder(activeWorkspaceRoot == root && isPrimaryWorkspaceSelection ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.14), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(activeWorkspaceRoot == root && isPrimaryWorkspaceSelection ? .primary : .secondary)
-                    .accessibilityAddTraits(activeWorkspaceRoot == root && isPrimaryWorkspaceSelection ? .isSelected : [])
-                }
+                workspaceRootPill(node)
             }
 
             Divider()
                 .frame(height: 24)
 
-            Button(action: presentControlFinder) {
-                Label("Find", systemImage: AppIcons.magnifyingglass)
-                    .font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 10)
-                    .background(Capsule().fill(Color.secondary.opacity(0.08)))
-                    .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.16), lineWidth: 1))
+            findControlsButton
+        }
+    }
+
+    /// Narrow-iPad variant of the dock. The single scrolling row fits only the
+    /// first three workspaces in the inspector column, and with no scroll
+    /// indicator the remaining roots (and Find) read as if they do not exist.
+    /// Wrapping them into rows keeps every workspace one tap away, matching how
+    /// `compactSectionBar` already handles its own overflow.
+    private var wrappedTopDockBar: some View {
+        let roots = navigationHierarchy.workspaceRoots
+        // Adaptive rather than a fixed column count: a fixed 3-up grid truncated
+        // "Explore" and "Quality" to "Expl…"/"Qual…" in the portrait inspector,
+        // while a wider Stage Manager window has room for all three across.
+        return VStack(spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 8)], spacing: 8) {
+                ForEach(roots) { node in
+                    workspaceRootPill(node, fillsGridCell: true)
+                }
+            }
+
+            Divider()
+
+            findControlsButton
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func workspaceRootPill(_ node: NavigationHierarchy.Node, fillsGridCell: Bool = false) -> some View {
+        if case .workspace(let root) = node.target {
+            let isActive = activeWorkspaceRoot == root && isPrimaryWorkspaceSelection
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    activateNavigationNode(node)
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: node.systemImage)
+                            .font(.system(size: IconSize.medium, weight: .semibold))
+                        topDockBadge(for: root)
+                    }
+                    Text(node.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(maxWidth: fillsGridCell ? .infinity : nil)
+                .background(
+                    Capsule()
+                        .fill(isActive ? Color.blue.opacity(0.18) : Color.clear)
+                )
+                .overlay(
+                    Capsule()
+                        .strokeBorder(isActive ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.14), lineWidth: 1)
+                )
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Find any control or setting (⌘K)")
-            .accessibilityLabel("Find controls")
-            #if !os(macOS)
-            .keyboardShortcut("k", modifiers: .command)
-            #endif
+            .foregroundStyle(isActive ? .primary : .secondary)
+            .accessibilityAddTraits(isActive ? .isSelected : [])
         }
+    }
+
+    private var findControlsButton: some View {
+        Button(action: presentControlFinder) {
+            Label("Find", systemImage: AppIcons.magnifyingglass)
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 13)
+                .padding(.vertical, 10)
+                .background(Capsule().fill(Color.secondary.opacity(0.08)))
+                .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.16), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help("Find any control or setting (⌘K)")
+        .accessibilityLabel("Find controls")
+        #if !os(macOS)
+        .keyboardShortcut("k", modifiers: .command)
+        #endif
     }
 
     private var topDockOrnament: some View {
@@ -1033,10 +1070,18 @@ struct ContentView: View {
             .padding(.vertical, 10)
             .thresholdGlassBackground(cornerRadius: 18)
 #elseif os(iOS)
-        ScrollView(.horizontal, showsIndicators: false) {
-            topDockBar
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+        Group {
+            if usesPortraitIPadLayout {
+                wrappedTopDockBar
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    topDockBar
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                }
+            }
         }
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -1410,6 +1455,8 @@ struct ContentView: View {
                 switch appModel.navigationStore.currentRoute {
                 case .explore, .shape, .quality:
                     fractalTabContent
+                case .input(.parameters):
+                    parameterTabContent
                 case .animationLibrary:
                     animateTabContent
                 case .look(.color), .look(.mapping), .look(.grading):
@@ -1446,12 +1493,12 @@ struct ContentView: View {
 
     private func normalizeDesktopSelectionIfNeeded() {
         if !supportsGestureEditing, appModel.navigationStore.currentRoute == .gestures {
-            appModel.navigationStore.select(.shape(.parameters))
+            appModel.navigationStore.select(.shape(.formula))
         }
 
         if !appModel.platformProfile.supports(.handTracking),
            appModel.navigationStore.currentRoute == .shape(.hands) {
-            appModel.navigationStore.select(.shape(.parameters))
+            appModel.navigationStore.select(.shape(.formula))
         }
     }
     

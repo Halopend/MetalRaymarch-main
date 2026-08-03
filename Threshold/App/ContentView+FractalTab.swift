@@ -44,12 +44,10 @@ extension ContentView {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            case .shape(.parameters), .shape(.formula), .shape(.primitives), .shape(.hands):
+            case .shape(.formula), .shape(.primitives), .shape(.hands):
                 ScrollView(.vertical, showsIndicators: true) {
                     Group {
                         switch currentRoute {
-                        case .shape(.parameters):
-                            fractalShapeContent
                         case .shape(.formula):
                             fractalFormulaContent
                         case .shape(.primitives):
@@ -94,6 +92,16 @@ extension ContentView {
             default:
                 EmptyView()
             }
+        }
+    }
+
+    /// Parameters are part of the Input workspace so the active scene controls
+    /// sit beside the sources and reactivity controls that can drive them.
+    var parameterTabContent: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            fractalShapeContent
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
         }
     }
     

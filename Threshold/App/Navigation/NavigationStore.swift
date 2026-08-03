@@ -92,7 +92,7 @@ enum WorkspaceRoot: String, CaseIterable, Codable, Hashable, Sendable {
         switch self {
         case .explore: return .explore(.jumpingOff)
         case .input: return .input(.playback)
-        case .shape: return .shape(.parameters)
+        case .shape: return .shape(.formula)
         case .look: return .look(.color)
         case .quality: return .quality(.overview)
         }
@@ -175,6 +175,7 @@ enum AppRoute: Codable, Hashable, Sendable {
 
     static func route(withStableID id: String) -> AppRoute? {
         allWorkspaceRoutes.first { $0.stableID == id }
+            ?? (id == "shape.Parameters" ? .shape(.parameters) : nil)
     }
 }
 
@@ -410,8 +411,10 @@ final class NavigationStore {
         switch route {
         case .explore(.customScenes) where !allowsCustomScenes:
             return .explore(.jumpingOff)
+        case .shape(.parameters):
+            return .input(.parameters)
         case .shape(.hands) where !profile.supports(.handTracking):
-            return .shape(.parameters)
+            return .shape(.formula)
         case .shape(.performance):
             return .quality(.tuning)
         case .look(.reactive):
@@ -443,7 +446,7 @@ final class NavigationStore {
         }
 
         let explore = value("ContentView.exploreRailSection", as: ExploreRailSection.self) ?? .jumpingOff
-        let shape = value("ContentView.shapeRailSection", as: ShapeRailSection.self) ?? .parameters
+        let shape = value("ContentView.shapeRailSection", as: ShapeRailSection.self) ?? .formula
         let look = value("ContentView.visualizationsRailSection", as: VisualizationsRailSection.self) ?? .color
         let input = (value("ContentView.musicRailSection", as: MusicRailSection.self) ?? .playback).canonical
         let quality = value("ContentView.performanceRailSection.v3", as: PerformanceRailSection.self) ?? .overview
@@ -467,7 +470,7 @@ final class NavigationStore {
                     return .explore(ExploreRailSection.allCases.first { $0.browseTab == browse } ?? .jumpingOff)
                 case .shape:
                     switch value("ContentView.shapeInnerTab", as: LegacyShapeInnerTab.self) ?? .parameters {
-                    case .parameters: return .shape(.parameters)
+                    case .parameters: return .input(.parameters)
                     case .formula: return .shape(.formula)
                     case .primitives: return .shape(.primitives)
                     case .hands: return .shape(.hands)
@@ -539,7 +542,7 @@ final class NavigationStore {
         case "exploreAnimated": return .explore(.animated)
         case "exploreMixed": return .explore(.mixed)
         case "exploreCustomScenes": return .explore(.customScenes)
-        case "shapeParameters": return .shape(.parameters)
+        case "shapeParameters": return .input(.parameters)
         case "shapeFormula": return .shape(.formula)
         case "shapePrimitives": return .shape(.primitives)
         case "shapeHands": return .shape(.hands)

@@ -713,6 +713,12 @@ class AppModel {
         storageWatcherObservers.append(transformationDefaultsObserver)
     }
 
+    /// Starts microphone capture once at application launch when the user has
+    /// explicitly enabled that device-local preference.
+    func startMicrophoneAtLaunchIfEnabled() async {
+        await audioHub.startMicrophoneAtLaunchIfEnabled()
+    }
+
     /// The learning mode is a user preference, not scene data, but render-side
     /// modulation still needs the same access boundary as SwiftUI. Seed the shared
     /// lock-backed settings before either renderer starts; the Transformations view
@@ -847,10 +853,11 @@ class AppModel {
     var presentSpatialMenuHandler: ((String?) -> Void)?
     var dismissSpatialMenuHandler: (() -> Void)?
 
-    /// Callback to navigate directly to the Fractal > Shape tab.
+    /// Callback to navigate directly to the active parameter controls.
     var openShapeMenuHandler: (() -> Void)?
 
-    /// Returns true when the Fractal > Shape tab is already active.
+    /// Returns true when the active parameter controls or Shape workspace are
+    /// already active.
     var isShapeMenuActiveHandler: (() -> Bool)?
 
     /// Callback to navigate directly to the Fractal > Render tab.
@@ -905,7 +912,7 @@ class AppModel {
 
     func openShapeMenuFromGesture() {
         if immersiveSpaceState == .open, let presentSpatialMenuHandler {
-            presentSpatialMenuHandler(NavigationHierarchy.rootID(for: .shape))
+            presentSpatialMenuHandler(NavigationHierarchy.rootID(for: .input))
             return
         }
         toggleFractalMenuFromGesture(

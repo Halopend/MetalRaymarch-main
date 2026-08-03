@@ -36,6 +36,7 @@ enum ExploreRailSection: String, CaseIterable, Codable, Hashable, Sendable {
 }
 
 enum ShapeRailSection: String, CaseIterable, Codable, Hashable, Sendable {
+    /// Legacy decode-only value. Parameters now live under the Input workspace.
     case parameters = "Parameters"
     case formula = "Formula"
     case primitives = "Primitives"
@@ -48,7 +49,7 @@ enum ShapeRailSection: String, CaseIterable, Codable, Hashable, Sendable {
     case performance = "Performance"
 
     static let allCases: [ShapeRailSection] = [
-        .parameters, .formula, .primitives, .hands, .space,
+        .formula, .primitives, .hands, .space,
         .transformations, .bounding,
     ]
 
@@ -131,6 +132,7 @@ enum VisualizationsRailSection: String, CaseIterable, Codable, Hashable, Sendabl
 }
 
 enum MusicRailSection: String, CaseIterable, Codable, Hashable, Sendable {
+    case parameters = "Parameters"
     case playback = "Playback"
     case reactive = "Reactive"
     // Legacy persisted routes. Mappings and presets now live on the combined
@@ -142,11 +144,13 @@ enum MusicRailSection: String, CaseIterable, Codable, Hashable, Sendable {
     case albums = "Albums"
 
     static let allCases: [MusicRailSection] = [
-        .playback, .reactive, .songs, .playlists, .albums,
+        .parameters, .playback, .reactive, .songs, .playlists, .albums,
     ]
 
     var title: String {
         switch self {
+        case .parameters:
+            return rawValue
         case .playback:
             return "Source"
         case .reactive:
@@ -158,6 +162,8 @@ enum MusicRailSection: String, CaseIterable, Codable, Hashable, Sendable {
 
     var icon: String {
         switch self {
+        case .parameters:
+            return "slider.horizontal.3"
         case .playback:
             return "waveform.circle.fill"
         case .reactive:  return "waveform.path.ecg"
@@ -170,7 +176,7 @@ enum MusicRailSection: String, CaseIterable, Codable, Hashable, Sendable {
     }
 
     static func availableCases(for profile: PlatformProfile) -> [MusicRailSection] {
-        profile.supports(.musicLibraryBrowsing) ? allCases : [.playback, .reactive]
+        profile.supports(.musicLibraryBrowsing) ? allCases : [.parameters, .playback, .reactive]
     }
 
     /// Resolves old split-page routes to their single current destination.
@@ -178,7 +184,7 @@ enum MusicRailSection: String, CaseIterable, Codable, Hashable, Sendable {
         switch self {
         case .mappings, .presets:
             return .reactive
-        case .playback, .reactive, .songs, .playlists, .albums:
+        case .parameters, .playback, .reactive, .songs, .playlists, .albums:
             return self
         }
     }

@@ -125,7 +125,7 @@ enum RadialMenuProjectionFactory {
         onActivate: @escaping (AppNavigationTarget) -> Void
     ) -> [RadialNavigationNode] {
         switch route {
-        case .shape(.parameters):
+        case .input(.parameters):
             let store = appModel.controlStateStore
             let nodes = ParameterNodeRegistry.shared
                 .formulaBatch(for: store.fractalType)
@@ -153,7 +153,7 @@ enum RadialMenuProjectionFactory {
                 }
             guard !nodes.isEmpty else { return [] }
             return [RadialNavigationNode(
-                id: "shape.parameters.formula",
+                id: "input.parameters.formula",
                 title: "Formula",
                 systemImage: "function",
                 children: nodes,

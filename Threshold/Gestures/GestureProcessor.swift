@@ -35,7 +35,7 @@ enum GestureCommandArbitration {
             case .toggleAnimationPlayer:
                 return .toggleAnimationPlayback
             case .openShapeMenu:
-                return .selectRoute(.shape(.parameters))
+                return .selectRoute(.input(.parameters))
             case .openRenderMenu:
                 return .selectRoute(.quality(.tuning))
             case .openQuickToggles:

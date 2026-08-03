@@ -7,10 +7,10 @@ struct InputNavigationTests {
     @Test("Visible Input sections omit legacy split reactivity routes")
     func visibleSections() {
         #expect(MusicRailSection.allCases == [
-            .playback, .reactive, .songs, .playlists, .albums
+            .parameters, .playback, .reactive, .songs, .playlists, .albums
         ])
 
-        #expect(MusicRailSection.availableCases(for: .macOS) == [.playback, .reactive])
+        #expect(MusicRailSection.availableCases(for: .macOS) == [.parameters, .playback, .reactive])
         #expect(MusicRailSection.availableCases(for: .iPadOS) == MusicRailSection.allCases)
         #expect(MusicRailSection.availableCases(for: .visionOS) == MusicRailSection.allCases)
 

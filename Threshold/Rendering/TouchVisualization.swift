@@ -89,6 +89,11 @@ final class TouchVisualizationOverlay: UIView {
     }
 
     private var indicators: [ObjectIdentifier: Indicator] = [:]
+    /// `UserDefaults` notifications are delivered on the thread that performs
+    /// the write. SettingsPersistence commits debounced values from a utility
+    /// task, so retain a main-queue observer instead of a selector observer
+    /// (which would otherwise enter this UIKit view off the main actor).
+    private var defaultsChangeObserver: NSObjectProtocol?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -109,17 +114,26 @@ final class TouchVisualizationOverlay: UIView {
             name: UIApplication.didEnterBackgroundNotification,
             object: nil
         )
-        notifications.addObserver(
-            self,
-            selector: #selector(touchVisualizationPreferenceDidChange),
-            name: UserDefaults.didChangeNotification,
-            object: UserDefaults.standard
-        )
+        defaultsChangeObserver = notifications.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard,
+            queue: .main
+        ) { [weak self] _ in
+            // `queue: .main` is the dispatch guarantee; state it explicitly
+            // for Swift's actor checker as the callback type itself has no
+            // actor annotation.
+            MainActor.assumeIsolated {
+                self?.touchVisualizationPreferenceDidChange()
+            }
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    deinit {
+    isolated deinit {
+        if let defaultsChangeObserver {
+            NotificationCenter.default.removeObserver(defaultsChangeObserver)
+        }
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -277,7 +291,7 @@ final class TouchVisualizationOverlay: UIView {
         clearAll()
     }
 
-    @objc private func touchVisualizationPreferenceDidChange() {
+    private func touchVisualizationPreferenceDidChange() {
         if !TouchVisualizationSettings.isEnabled {
             clearAll()
         }

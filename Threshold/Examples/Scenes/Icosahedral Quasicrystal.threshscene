@@ -1,0 +1,264 @@
+{
+  "schemaVersion": 3,
+  "id": "00000000-0aa0-4000-9000-000000000101",
+  "name": "Icosahedral Quasicrystal",
+  "createdAt": "2026-08-02T00:00:00Z",
+  "updatedAt": "2026-08-02T00:00:00Z",
+  "fractalType": "custom",
+  "embeddedFormula": {
+    "schemaVersion": 1,
+    "kind": "fractal",
+    "id": "com.puppypower.threshold.embedded.icosahedralquasicrystal",
+    "name": "Icosahedral Quasicrystal",
+    "category": "Quasicrystal",
+    "author": "Threshold",
+    "description": "An aperiodic icosahedral quasicrystal -- ordered everywhere, periodic nowhere, and not a fractal. Six plane waves are aimed down the six five-fold axes of an icosahedron and summed; because those directions stand in golden-ratio proportion, the sum never repeats. Its level sets are a genuine icosahedral quasicrystal, the structure of Al-Mn alloys and of the Khatyrka meteorite -- the only natural quasicrystal ever found. This is the projection picture of a 6D cubic lattice: each wave vector has a Galois conjugate in perpendicular space, and PHASON X/Y/Z slide the field along that hidden space. The solid then rearranges in place instead of translating, which is the real phason degree of freedom of a quasicrystal and the control worth handing to the music engine. SLAB cuts a section normal to a five-fold axis: face that cut and the aperiodic order becomes legible as ten-fold rosettes at golden-ratio spacings. The distance bound is analytic rather than empirical -- the field is a finite trigonometric sum, so its gradient is closed-form and (f - level) / |grad f| is a true first-order Lipschitz estimate; Step Safety only trims the second-order term.",
+    "functionStem": "IcosahedralQuasicrystal",
+    "metalSource": "// === Icosahedral Quasicrystal ===\n// An aperiodic solid, not a fractal.\n//\n// Six plane waves are aimed down the six five-fold axes of an icosahedron and\n// summed. Because the ratios of those directions are irrational (they are the\n// golden ratio), the sum never repeats: the resulting density field is\n// quasiperiodic. Its level sets are a genuine icosahedral quasicrystal, the\n// same structure found in Al-Mn alloys and in the Khatyrka meteorite -- long\n// range icosahedral order with no translational period anywhere in space.\n//\n// This is the projection picture of a 6D cubic lattice: the six wave vectors\n// are the images of the 6D basis in \"parallel\" space, and each has a Galois\n// conjugate in \"perpendicular\" space (tau -> -1/tau). Sliding the field along\n// PERPENDICULAR space is a phason: the atoms do not translate, they rearrange.\n// The Phason X/Y/Z controls do exactly that, which is why animating them makes\n// the solid reshuffle in place instead of drifting.\n//\n// The distance bound is analytic. The field is a finite trigonometric sum, so\n// its gradient is known in closed form and the first-order bound\n// (f - level) / |grad f| is a real Lipschitz estimate rather than a fudge --\n// Step Safety only trims it for the second-order term.\n\n// @param 0 \"Frequency\" default=9 min=0.4 max=20 step=0.01\n// @param 1 \"Level\" default=-0.16 min=-1 max=1 step=0.005\n// @param 2 \"Shell\" default=0 min=0 max=0.6 step=0.005\n// @param 3 \"Phason X\" default=0 min=-8 max=8 step=0.01\n// @param 4 \"Phason Y\" default=0 min=-8 max=8 step=0.01\n// @param 5 \"Phason Z\" default=0 min=-8 max=8 step=0.01\n// @param 6 \"Bound\" default=3.4 min=0 max=12 step=0.05\n// @param 7 \"Step Safety\" default=0.45 min=0.1 max=1 step=0.01\n// @param 8 \"Overtone\" default=0.78 min=0 max=1 step=0.01\n// @param 9 \"Color Spread\" default=1.6 min=0.05 max=8 step=0.01\n// @param 10 \"Slab\" default=0.18 min=0 max=4 step=0.01\n\nconstant float3 qc_par[6] = {\n    float3( 0.0000000000f,  0.5257311121f,  0.8506508084f),\n    float3( 0.0000000000f, -0.5257311121f,  0.8506508084f),\n    float3( 0.5257311121f,  0.8506508084f,  0.0000000000f),\n    float3(-0.5257311121f,  0.8506508084f,  0.0000000000f),\n    float3( 0.8506508084f,  0.0000000000f,  0.5257311121f),\n    float3( 0.8506508084f,  0.0000000000f, -0.5257311121f)\n};\n\n// Galois conjugates of the same six axes (tau -> -1/tau): perpendicular space.\nconstant float3 qc_perp[6] = {\n    float3( 0.0000000000f,  0.8506508084f, -0.5257311121f),\n    float3( 0.0000000000f, -0.8506508084f, -0.5257311121f),\n    float3( 0.8506508084f, -0.5257311121f,  0.0000000000f),\n    float3(-0.8506508084f, -0.5257311121f,  0.0000000000f),\n    float3(-0.5257311121f,  0.0000000000f,  0.8506508084f),\n    float3(-0.5257311121f,  0.0000000000f, -0.8506508084f)\n};\n\nstruct QCField {\n    float  f;        // density, normalized to [-1, 1]\n    float3 grad;     // exact gradient of f\n    float3 perp;     // perpendicular-space coordinate (local environment class)\n    int    dominant; // which five-fold axis is strongest here\n};\n\n// Evaluate the quasiperiodic density and its exact gradient.\n// `harmonics` (the scene's iteration count) adds h*k overtones, which sharpen\n// the smooth blobs into faceted cells; `tilt` is the overtone weight.\nFORCE_INLINE QCField qc_eval(float3 p, float q, float3 phason, int harmonics, float tilt) {\n    QCField r;\n    r.f = 0.0f;\n    r.grad = float3(0.0f);\n    r.perp = float3(0.0f);\n    r.dominant = 0;\n\n    int H = clamp(harmonics, 1, 6);\n    float w = 1.0f;\n    float wsum = 0.0f;\n    float best = -2.0f;\n\n    for (int h = 1; h <= H; ++h) {\n        float fh = float(h);\n        wsum += w;\n        for (int i = 0; i < 6; ++i) {\n            // Parallel-space phase advances with position; perpendicular-space\n            // phase is the phason offset and is constant in space.\n            float base = q * dot(qc_par[i], p) + dot(qc_perp[i], phason);\n            float phase = fh * base;\n            float c = cos(phase);\n            float s = sin(phase);\n            r.f += w * c;\n            r.grad -= (w * fh * q) * s * qc_par[i];\n            if (h == 1) {\n                r.perp += c * qc_perp[i];\n                if (c > best) { best = c; r.dominant = i; }\n            }\n        }\n        w *= tilt;\n    }\n\n    float inv = 1.0f / (6.0f * max(wsum, 1e-6f));\n    r.f *= inv;\n    r.grad *= inv;\n    // The six perpendicular-space axes are icosahedral too, so sum(f_i f_i^T) = 2I\n    // and a sum with |c_i| <= 1 has |perp| <= sqrt(12). Normalizing by that puts\n    // the perpendicular-space radius on [0,1], which is the range the colorizer\n    // wants (it takes sqrt(saturate(trap))).\n    r.perp *= 0.28867513f;   // 1 / sqrt(12)\n    return r;\n}\n\n// Shared body: analytic first-order distance bound to the level set, optionally\n// hollowed into a shell and optionally carved out of a bounding sphere.\nFORCE_INLINE float qc_solve(float3 pos, FormulaParams fp, float3x3 rot, int iterations,\n                            thread QCField& fld) {\n    float  q       = clamp(fp.params[0], 0.05f, 24.0f);\n    float  level   = clamp(fp.params[1], -1.0f, 1.0f);\n    float  shell   = max(fp.params[2], 0.0f);\n    float3 phason  = float3(fp.params[3], fp.params[4], fp.params[5]);\n    float  bound   = fp.params[6];\n    float  safety  = clamp(fp.params[7], 0.05f, 1.0f);\n    float  tilt    = clamp(fp.params[8], 0.0f, 1.0f);\n    float  slab    = fp.params[10];\n\n    float3 p = hasRot1Precomputed(fp) ? (rot * pos) : pos;\n    fld = qc_eval(p, q, phason, iterations, tilt);\n\n    float v = fld.f - level;\n    if (shell > 0.0f) v = fabs(v) - shell;\n\n    // |grad f| is exact, so this is a true first-order bound on the distance to\n    // the level set. Guard the degenerate case at a critical point of f.\n    float gl = max(length(fld.grad), 1e-4f);\n    float d = safety * v / gl;\n\n    if (bound > 0.001f) d = max(d, length(pos) - bound);\n\n    // Slab cut normal to a five-fold axis. Facing this cut is how aperiodic\n    // order actually becomes legible: the section through the solid is a\n    // two-dimensional quasiperiodic tiling with ten-fold rosettes and\n    // golden-ratio spacings, which the bulk view buries.\n    if (slab > 0.001f) d = max(d, fabs(dot(p, qc_par[0])) - slab);\n    return d;\n}\n\nFORCE_INLINE float DE_IcosahedralQuasicrystal_Dist(float3 pos, FormulaParams fp,\n                                                   float3x3 rot, int iterations) {\n    QCField fld;\n    return qc_solve(pos, fp, rot, iterations, fld);\n}\n\nFORCE_INLINE float DE_IcosahedralQuasicrystal(float3 pos, FormulaParams fp,\n                                              float3x3 rot, int iterations,\n                                              int colorIterations,\n                                              thread OrbitData& orbit) {\n    (void)colorIterations;\n    QCField fld;\n    float d = qc_solve(pos, fp, rot, iterations, fld);\n\n    // Color by the hidden 6D structure: the perpendicular-space coordinate is\n    // what distinguishes one local atomic environment from another in a\n    // quasicrystal, and the dominant axis index names the five-fold direction\n    // the local cluster is oriented along.\n    float spread = max(fp.params[9], 0.01f);\n    orbit.trap = saturate(dot(fld.perp, fld.perp) * spread);\n    orbit.trapIteration = fld.dominant;\n    orbit.trapPosition = fld.perp;\n    orbit.finalP = fld.grad;\n    orbit.iterationsUsed = clamp(iterations, 1, 6);\n    return d;\n}\n",
+    "params": [
+      {
+        "index": 0,
+        "name": "Frequency",
+        "default": 9.0,
+        "min": 0.4,
+        "max": 20.0,
+        "step": 0.01
+      },
+      {
+        "index": 1,
+        "name": "Level",
+        "default": -0.16,
+        "min": -1.0,
+        "max": 1.0,
+        "step": 0.005
+      },
+      {
+        "index": 2,
+        "name": "Shell",
+        "default": 0.0,
+        "min": 0.0,
+        "max": 0.6,
+        "step": 0.005
+      },
+      {
+        "index": 3,
+        "name": "Phason X",
+        "default": 0.0,
+        "min": -8.0,
+        "max": 8.0,
+        "step": 0.01
+      },
+      {
+        "index": 4,
+        "name": "Phason Y",
+        "default": 0.0,
+        "min": -8.0,
+        "max": 8.0,
+        "step": 0.01
+      },
+      {
+        "index": 5,
+        "name": "Phason Z",
+        "default": 0.0,
+        "min": -8.0,
+        "max": 8.0,
+        "step": 0.01
+      },
+      {
+        "index": 6,
+        "name": "Bound",
+        "default": 3.4,
+        "min": 0.0,
+        "max": 12.0,
+        "step": 0.05
+      },
+      {
+        "index": 7,
+        "name": "Step Safety",
+        "default": 0.45,
+        "min": 0.1,
+        "max": 1.0,
+        "step": 0.01
+      },
+      {
+        "index": 8,
+        "name": "Overtone",
+        "default": 0.78,
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.01
+      },
+      {
+        "index": 9,
+        "name": "Color Spread",
+        "default": 1.6,
+        "min": 0.05,
+        "max": 8.0,
+        "step": 0.01
+      },
+      {
+        "index": 10,
+        "name": "Slab",
+        "default": 0.18,
+        "min": 0.0,
+        "max": 4.0,
+        "step": 0.01
+      }
+    ],
+    "defaultIterations": 3,
+    "defaultColorIterations": 6,
+    "supportedEffectTags": [
+      "safetyBubble"
+    ]
+  },
+  "formulaParamValues": [
+    9.0,
+    -0.16,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    3.4,
+    0.45,
+    0.78,
+    1.6,
+    0.18,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "fractalIterations": 3,
+  "colorIterations": 6,
+  "fractalScale": 2.0,
+  "foldingLimit": 1.0,
+  "sphereRadius": 0.5,
+  "scale": 1.0,
+  "detailScale": 1.0,
+  "resolutionScale": 1.0,
+  "position": [
+    0,
+    0,
+    -4.6
+  ],
+  "worldRotationW": 0.9619383577895864,
+  "worldRotationX": 0.27326652889271624,
+  "worldRotationY": 0.0,
+  "worldRotationZ": 0.0,
+  "maxRaySteps": 256,
+  "minDistance": 0.95,
+  "tileSize": 0,
+  "coneMarchCompatible": false,
+  "recommendedQuality": "high",
+  "lightingMode": "staticLight",
+  "lightingPreset": "Custom",
+  "lightingSoftness": 0.34,
+  "aoStrength": 0.3,
+  "tonemapStrength": 0.55,
+  "colorScheme": "twilight",
+  "gradientState": {
+    "gradientPreset": "twilight",
+    "gradient": {
+      "id": "00000000-0aa0-4000-8000-000000000001",
+      "name": "Khatyrka",
+      "mappingMode": 5,
+      "repeatCount": 1.0,
+      "offset": 0.0,
+      "smoothing": 0.85,
+      "stops": [
+        {
+          "id": "00000000-0aa0-4000-8000-000000000002",
+          "position": 0.0,
+          "color": [
+            0.02,
+            0.03,
+            0.075
+          ]
+        },
+        {
+          "id": "00000000-0aa0-4000-8000-000000000003",
+          "position": 0.26,
+          "color": [
+            0.075,
+            0.23,
+            0.36
+          ]
+        },
+        {
+          "id": "00000000-0aa0-4000-8000-000000000004",
+          "position": 0.5,
+          "color": [
+            0.29,
+            0.52,
+            0.56
+          ]
+        },
+        {
+          "id": "00000000-0aa0-4000-8000-000000000005",
+          "position": 0.72,
+          "color": [
+            0.98,
+            0.62,
+            0.18
+          ]
+        },
+        {
+          "id": "00000000-0aa0-4000-8000-000000000006",
+          "position": 0.88,
+          "color": [
+            1.0,
+            0.84,
+            0.48
+          ]
+        },
+        {
+          "id": "00000000-0aa0-4000-8000-000000000007",
+          "position": 1.0,
+          "color": [
+            0.93,
+            0.96,
+            1.0
+          ]
+        }
+      ]
+    }
+  },
+  "colorMix": 0.62,
+  "colorSchemeContrast": 1.08,
+  "colorSchemeCurve": 0.03,
+  "colorSchemeGamma": 0.5,
+  "colorSchemeHighlights": 0.5,
+  "colorSchemeSaturation": 1.12,
+  "colorSchemeShadows": 0.02,
+  "colorSchemeVibrance": 0.78,
+  "bloomEffect": {
+    "enabled": true,
+    "strength": 0.26
+  },
+  "glowEffect": {
+    "enabled": true,
+    "intensity": 0.22
+  },
+  "fogEffect": {
+    "enabled": false,
+    "intensity": 0.0
+  },
+  "gradientCycleEffect": {
+    "enabled": false,
+    "mirrorLoop": false,
+    "speed": 0.0
+  },
+  "hueRotationEffect": {
+    "enabled": false,
+    "intensity": 0.0,
+    "speed": 0.0
+  },
+  "pulseEffect": {
+    "amount": 0.0,
+    "enabled": false,
+    "speed": 0.0
+  },
+  "safetyBubbleEnabled": false,
+  "rating": 0
+}

@@ -132,11 +132,14 @@ final class RenderSettings: @unchecked Sendable {
     }
 
     private static func sanitizeMusicReactiveMappings(_ input: [MusicReactiveMapping]) -> [MusicReactiveMapping] {
-        var uniqueTargets = Set<MusicReactiveTarget>()
+        var uniqueMappings = Set<MusicReactiveMappingKey>()
         var cleaned: [MusicReactiveMapping] = []
         for var mapping in input {
-            guard uniqueTargets.insert(mapping.target).inserted else { continue }
             mapping.sanitizeInPlace()
+            // Core/formula targets remain unique by target. Transform stack slots
+            // deliberately retain one mapping per exposed field, so a transform's
+            // amount and its own parameters can react to audio independently.
+            guard uniqueMappings.insert(mapping.identityKey).inserted else { continue }
             cleaned.append(mapping)
         }
         return cleaned
@@ -839,7 +842,8 @@ final class RenderSettings: @unchecked Sendable {
             let slot = entry.key.slot
             guard _spaceWarpStack.indices.contains(slot) else { return }
             let rawKindID = _spaceWarpStack[slot].type
-            guard SpaceWarpKind(rawValue: rawKindID) != nil,
+            guard let kind = SpaceWarpKind(rawValue: rawKindID),
+                  kind.musicFieldDescriptor(entry.key.field) != nil,
                   _spaceWarpAllowsUnmappedInteraction
                     || _spaceWarpMappedKindIDs.contains(rawKindID) else { return }
             allowed[entry.key] = entry.value

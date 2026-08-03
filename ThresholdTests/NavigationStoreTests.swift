@@ -101,7 +101,7 @@ struct NavigationStoreTests {
         let mac = NavigationStore(profile: .macOS, defaults: macDefaults, allowsCustomScenes: false)
 
         mac.select(.shape(.hands))
-        #expect(mac.currentRoute == .shape(.parameters))
+        #expect(mac.currentRoute == .shape(.formula))
         mac.select(.input(.songs))
         #expect(mac.currentRoute == .input(.playback))
         mac.select(.explore(.customScenes))

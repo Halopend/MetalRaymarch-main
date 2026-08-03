@@ -99,6 +99,11 @@ private struct ThresholdiOSRootView: View {
                 }
                 .onDisappear(perform: dismissRadialMenu)
         }
+        .onAppear {
+            Task { @MainActor in
+                await appModel.startMicrophoneAtLaunchIfEnabled()
+            }
+        }
     }
 
     private var radialProjection: RadialNavigationProjection {

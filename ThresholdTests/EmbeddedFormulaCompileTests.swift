@@ -55,16 +55,24 @@ struct EmbeddedFormulaCompileTests {
         let decoder = iso8601Decoder()
 
         // Presets (scene / music-preset) may carry an embedded DE fractal.
-        for url in files(withExtension: "threshscene", in: ["Scenes"])
-                 + files(withExtension: "threshmp", in: ["Scenes"]) {
+        // Keep this list aligned with ExampleSceneDecodeTests. In particular,
+        // the explicit `Custom Scene Example` directory contains the flagship
+        // Polychora 24-Cell sample; it must compile through the runtime path,
+        // not merely decode.
+        let presetDirectories = ["Scenes", "Mixed", "Custom Scene Example", "Music Presets"]
+        for url in files(withExtension: "threshscene", in: presetDirectories)
+                 + files(withExtension: "threshmp", in: presetDirectories) {
             let preset = try decoder.decode(FractalPreset.self, from: Data(contentsOf: url))
             if let formula = preset.embeddedFormula {
                 result.append((url.lastPathComponent, formula))
             }
         }
 
-        // `.threshfx` containers are always an embedded formula (fractal DE or warp).
-        for url in files(withExtension: "threshfx", in: ["Scenes", "Formulas"]) {
+        // `.threshfx` containers are always an embedded formula (fractal DE or
+        // warp). Search every bundled example directory plus the standalone
+        // Formula library, so a future example cannot bypass compile coverage
+        // merely by living beside a scene instead of inside Formulas/.
+        for url in files(withExtension: "threshfx", in: presetDirectories + ["Formulas"]) {
             let container = try EmbeddedFormulaContainer.decode(fromContainerAt: url)
             result.append((url.lastPathComponent, container.formula))
         }

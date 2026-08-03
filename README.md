@@ -1,12 +1,48 @@
 # Threshold
 
-![Threshold ray-marching demo](metal-raymarch-demo.gif)
-
-An artistic real-time fractal renderer (SDF ray-marching in Metal) for **macOS, iPadOS, and visionOS**, with a music-reactive layer, an animation/scene system, and a Quick Look extension that live-renders `.threshscene` files.
+Threshold is a real-time Metal ray marcher for **making, sharing, and
+performing custom fractal scenes** on macOS, iPadOS, and visionOS. A scene can
+carry its own Metal distance-estimation (DE) function alongside its camera,
+lighting, color, and other portable render state—so the geometry travels with
+the look.
 
 A curiosity that has been brewing since Archimedes reached for his compass: make geometry something to sense, not just calculate. Threshold is a continuous, sensory space for exploring higher-dimensional objects through light, motion, sound, and interaction.
 
-## Core focus
+## Custom scenes are the core workflow
+
+Write or import a portable DE, tune it live, then export a self-contained scene.
+
+```mermaid
+flowchart LR
+    source["Metal DE body + parameter metadata"] --> formula["Standalone .threshfx"]
+    formula --> validate["Validate the embedded-DE contract"]
+    scene[".threshscene with camera, lighting, and embeddedFormula"] --> validate
+    validate --> compile["Compile a runtime Metal library"]
+    compile --> render["Render, preview, and edit live"]
+    render --> export["Export a portable .threshscene or .threshfx"]
+```
+
+- **Custom scenes that travel:** A `.threshscene` can embed its distance
+  estimator, so a recipient gets the scene's geometry and its authored
+  presentation together.
+- **A real Metal DE contract:** Threshold injects a validated formula body into
+  its renderer and calls a distance-only function for marching plus an
+  orbit-aware function for coloring.
+- **Live authoring:** On macOS, **Metal DE Studio** provides a source-first
+  edit/compile loop. On every platform, `.threshfx` and `.threshscene` files can
+  be previewed, imported, shared, and reopened.
+- **Designed for the rest of the app:** Custom geometry works at runtime with
+  Threshold's camera, lighting, color, animation, music-reactive controls, and
+  spatial interaction.
+
+Start with the [custom-scene authoring guide](CUSTOM_SCENES.md), then open
+[Sphere Fold (Sample)](Threshold/Examples/Formulas/SampleSphereFold.threshfx),
+[Accidental Sphere Projection](Threshold/Examples/Scenes/Accidental%20Sphere%20Projection.threshscene),
+or [Polychora 24-Cell](<Threshold/Examples/Custom%20Scene%20Example/Polychora%2024-Cell.threshscene>).
+
+> **Experimental feature:** Enable **Settings → Display → Experimental Display → Allow custom scenes** before importing a user-authored DE. Runtime compilation is intentionally opt-in; malformed or expensive formulas can fail to compile or render poorly.
+
+## What Threshold does around the scene
 
 - **Performance:** Threshold is built for responsive, real-time fractal rendering. Rendering quality and performance work are measured on the target device rather than inferred from a simulator.
 - **Scene data that travels:** Manage scenes, animations, music presets, and formulas on-device or in **iCloud Drive**. Exported files use the native share sheet, including **AirDrop** wherever it is available.
@@ -15,9 +51,7 @@ A curiosity that has been brewing since Archimedes reached for his compass: make
 - **MIDI (planned):** MIDI control and integration are planned for a future release; they are not supported in the current build.
 - **Interaction shaping (planned):** A future control-mapping layer will let you insert a function between an input and its target, tuning the response and feel of an interaction.
 
-> **Vision Pro warning:** Performance is heavily dependent on the active scene, quality settings, and device conditions. Threshold is experimental and is not guaranteed to be a comfortable experience. Stop using it if it feels uncomfortable or switch to a more comfortble expereince. 
-
-![Metal Raymarch demo](metal-raymarch-demo.gif)
+> **Vision Pro warning:** Performance is heavily dependent on the active scene, quality settings, and device conditions. Threshold is experimental and is not guaranteed to be a comfortable experience. Stop using it if it feels uncomfortable or switch to a more comfortable experience.
 
 ## Why Threshold is open
 
@@ -100,6 +134,7 @@ Threshold, please let us know at
 acknowledgement.
 
 This file is the fast orientation for a fresh clone. Deeper docs:
+[`CUSTOM_SCENES.md`](CUSTOM_SCENES.md) (custom-scene and embedded-DE guide) ·
 [`CONTRIBUTING.md`](CONTRIBUTING.md) (full build/test guide) ·
 [`ROADMAP.md`](ROADMAP.md) (ordered active work) ·
 [`TECH_DEBT.md`](TECH_DEBT.md) + [`Context/TECH_DEBT_AUDIT_2026-07-07.md`](Context/TECH_DEBT_AUDIT_2026-07-07.md) (debt register) ·
@@ -145,10 +180,10 @@ These are areas for exploration, not promises about the current release. If you
 have a rendering idea, an example scene, or a measurement that could help, we
 would be glad to hear about it.
 
-## Supported files and portable libraries
+## Portable scenes and formulas
 
-Threshold is built around small, exchangeable library files. The formats below
-are the current supported surface:
+Threshold is built around exchangeable files. The formats below are the current
+supported surface:
 
 | Format | What it contains | How it is used |
 | --- | --- | --- |
@@ -159,12 +194,51 @@ are the current supported surface:
 | `.threshlive` | A readable legend plus LZFSE-compressed animation scene | Share a compact, lossless playable animation |
 | `.threshfx` | A standalone custom Metal formula or effect payload | Add a reusable formula to the library |
 
-Embedded distance-estimator (DE) functions are accepted inside supported scene
-and animation files. When one is opened, Threshold can validate the embedded
-payload, register it as a custom formula, and compile it for live rendering. The
-payload must follow Threshold's embedded-formula contract — an arbitrary Metal
-file is not automatically safe or compatible — and this runtime compilation
-path is still experimental.
+### What makes a scene custom
+
+For an embedded formula with `kind: "fractal"`, a custom `.threshscene` is an
+ordinary Threshold scene with an `embeddedFormula` payload. That payload holds
+the Metal DE body, a stable identity, author-facing metadata, and up to 16
+exposed parameters. On load, Threshold validates the payload, grafts it into
+the renderer's known Metal interface, compiles a runtime library, and dispatches
+it as the active custom fractal. A standalone `.threshfx` carries the same
+payload in a small `{ "version": 1, "formula": ... }` wrapper. The separate
+`kind: "spaceWarp"` payload changes the space feeding a built-in DE instead of
+replacing that DE.
+
+Each embedded fractal defines these two Metal entry points, named from its
+`functionStem`:
+
+```metal
+FORCE_INLINE float DE_<Stem>_Dist(float3 pos, FormulaParams fp,
+                                  float3x3 rot, int iterations);
+
+FORCE_INLINE float DE_<Stem>(float3 pos, FormulaParams fp, float3x3 rot,
+                             int iterations, int colorIterations,
+                             thread OrbitData& orbit);
+```
+
+The lean `_Dist` form drives ray marching; the second form returns the matching
+field and supplies orbit data for coloring.
+
+This is deliberately **not** arbitrary `.metal` loading: the source must obey
+the embedded-DE contract and runtime compilation remains experimental. The full
+function signatures, JSON shape, parameter pragmas, and validation limits are
+in [CUSTOM_SCENES.md](CUSTOM_SCENES.md).
+
+### Try a custom scene
+
+1. Build and launch Threshold, then enable **Allow custom scenes** under
+   **Settings → Display → Experimental Display**.
+2. Open or import
+   [Sphere Fold (Sample)](Threshold/Examples/Formulas/SampleSphereFold.threshfx).
+   It is a standalone, editable DE with three parameters.
+3. Load [Accidental Sphere Projection](Threshold/Examples/Scenes/Accidental%20Sphere%20Projection.threshscene)
+   for a complete scene whose DE is embedded, or [Polychora 24-Cell](<Threshold/Examples/Custom%20Scene%20Example/Polychora%2024-Cell.threshscene>)
+   for a 4D stereographic-projection example.
+4. On macOS, open **Shape → Fractal Formula → Metal DE Studio** to create or
+   edit a formula. Export the active result as either a self-contained
+   `.threshscene` or a reusable `.threshfx`.
 
 Standalone `.threshfx` files placed in the selected library's `Formulas/` folder
 are discovered automatically and can be exchanged through Files or the normal
@@ -202,23 +276,19 @@ useful starting points rather than a complete taxonomy, and custom formulas may
 still appear under a general custom category. Better grouping, discovery, and
 community-oriented categories are welcome areas for feedback and contribution.
 
-## Five macOS scenes to showcase
+## Custom-scene examples
 
-For a quick tour of the desktop render path, launch `ThresholdMac` and load
-these five bundled scenes:
+For a quick tour of the custom render path, launch `ThresholdMac` and load these
+bundled scenes:
 
-- [`Crystal Palace`](Threshold/Examples/Scenes/Crystal%20Palace.threshscene) — a
-  richly colored Kleinian composition for a first visual impression.
-- [`Menger Sphere`](Threshold/Examples/Scenes/Menger%20Sphere.threshscene) —
-  compares the classic Menger cube with its spherical transformation controls.
 - [`Accidental Sphere Projection`](Threshold/Examples/Scenes/Accidental%20Sphere%20Projection.threshscene)
-  — a custom Mandelbox reconstruction that shows Threshold’s embedded-formula
-  workflow.
-- [`Rock the cradle`](Threshold/Examples/Scenes/Rock_the_cradle.threshscene) —
-  a Newton-Raphson heightfield demonstrating a very different, terrain-like
-  distance field.
+  — a custom Mandelbox reconstruction with five exposed controls.
+- [`Newton Heightfield`](Threshold/Examples/Scenes/Newton%20Heightfield.threshscene)
+  — a very different, terrain-like distance field.
 - [`Polychora 24-Cell`](<Threshold/Examples/Custom%20Scene%20Example/Polychora%2024-Cell.threshscene>)
-  — a 4D polychoron example rendered through stereographic projection.
+  — a 4D polychoron DE rendered through stereographic projection.
+- [`Sphere Fold (Sample)`](Threshold/Examples/Formulas/SampleSphereFold.threshfx)
+  — a standalone formula to import and edit first.
 
 ## Gotchas that will bite you (keep these in muscle memory)
 

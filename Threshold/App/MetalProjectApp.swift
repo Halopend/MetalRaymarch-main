@@ -122,6 +122,10 @@ struct MetalProjectTestApp: App {
                 .environment(spatialRadialMenu)
                 .background(ImmersiveSpaceAutoOpener().environment(appModel))
                 .onAppear { [appModel, openWindow, dismissWindow] in
+                    Task { @MainActor in
+                        await appModel.startMicrophoneAtLaunchIfEnabled()
+                    }
+
                     // PGO: if this is an instrumented "Generate Optimization
                     // Profile" build, start periodic counter flushing so the
                     // profile survives the SIGKILL teardown typical of

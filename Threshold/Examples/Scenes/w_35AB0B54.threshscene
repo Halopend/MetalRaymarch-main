@@ -54,9 +54,9 @@
   "deIterationMismatch": 0,
   "detailScale": 1.0176544,
   "edgeDetectionEffect": {
-    "enabled": true,
+    "enabled": false,
     "softness": 0.043115318,
-    "strength": 0.98378974,
+    "strength": 0,
     "threshold": 0.10392282,
     "windowRadius": 3
   },
@@ -435,9 +435,9 @@
         "strength": 1.152619
       },
       "edgeDetectionEffect": {
-        "enabled": true,
+        "enabled": false,
         "softness": 0.043115318,
-        "strength": 0.98378974,
+        "strength": 0,
         "threshold": 0.10392282,
         "windowRadius": 3
       },

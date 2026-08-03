@@ -13,6 +13,22 @@ import SwiftUI
 // MARK: - Music Tab Content
 
 struct MusicTabContent: View {
+    /// One live transformation plus every descriptor-derived field that can be
+    /// assigned to audio. The model remains slot-based for scene compatibility;
+    /// `MusicReactiveMappingKey` distinguishes the individual fields.
+    private struct TransformAudioAssignment: Identifiable {
+        let slot: Int
+        let kind: SpaceWarpKind
+        let fields: [SpaceWarpMusicFieldDescriptor]
+
+        var id: Int { slot }
+        var target: MusicReactiveTarget { MusicReactiveTarget.allSpaceWarpCases[slot] }
+
+        func mappingKey(for field: SpaceWarpField) -> MusicReactiveMappingKey {
+            MusicReactiveMappingKey(target: target, spaceWarpField: field)
+        }
+    }
+
     @Environment(\.openWindow) private var openWindow
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.menuAdjustmentActions) private var menuAdjustmentActions
@@ -31,6 +47,8 @@ struct MusicTabContent: View {
     private var mappedLessonIDsRaw = ""
     @AppStorage(TransformationUnlockProgress.legacyDefaultsKey)
     private var legacyMappedTransformationIDsRaw = ""
+    @AppStorage(AudioInputLaunchPreference.microphoneStartsAtLaunchDefaultsKey)
+    private var microphoneStartsAtLaunch = false
     @State private var isShowingVisualizationAddPopover = false
     @State private var isHoldingVisualizationAddAdjustment = false
 
@@ -64,7 +82,7 @@ struct MusicTabContent: View {
         switch canonical {
         case .songs, .playlists, .albums:
             return .playback
-        case .playback, .reactive, .mappings, .presets:
+        case .parameters, .playback, .reactive, .mappings, .presets:
             return canonical
         }
         #else
@@ -104,6 +122,12 @@ struct MusicTabContent: View {
         VStack(spacing: 10) {
             Group {
                 switch effectiveTabSelection.wrappedValue {
+                case .parameters:
+                    // ContentView owns the full parameter page so it can share
+                    // the same scene-control surface with gesture and radial
+                    // navigation. This branch keeps the binding exhaustive for
+                    // callers that use MusicTabContent directly.
+                    EmptyView()
                 case .playback:
                     #if os(macOS)
                     macAudioVisualizerDashboard
@@ -259,6 +283,10 @@ struct MusicTabContent: View {
                 .buttonStyle(.bordered)
             }
 
+            Toggle("Start microphone at launch", isOn: $microphoneStartsAtLaunch)
+                .font(.caption)
+                .help("Automatically start microphone input when Threshold opens.")
+
             if let microphone, case .failed(let message) = microphone.availability {
                 Text(message)
                     .font(.caption2)
@@ -369,7 +397,7 @@ struct MusicTabContent: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             } else if availableMappingTargetsToAdd.isEmpty {
-                Text("All available parameters are already mapped.")
+                Text("All other available parameters are already mapped.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -818,6 +846,12 @@ struct MusicTabContent: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(!source.isActive && !audioHub.canStart(source.id))
+            }
+
+            if source.id == .microphone {
+                Toggle("Start microphone at launch", isOn: $microphoneStartsAtLaunch)
+                    .font(.caption)
+                    .help("Automatically start microphone input when Threshold opens.")
             }
 
             if let message = source.availability.detail {
@@ -1304,6 +1338,10 @@ struct MusicTabContent: View {
                             .foregroundStyle(.secondary)
                     }
 
+                    if !transformAudioAssignments.isEmpty {
+                        transformAudioAssignmentsSection
+                    }
+
                     // Flowed directly into the outer ScrollView (line ~161) — no nested
                     // same-axis scroll. LazyVStack, NOT VStack: users can add many mappings,
                     // and a plain VStack hosts every card's segmented Pickers synchronously
@@ -1318,7 +1356,7 @@ struct MusicTabContent: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
 
-                                    Text(mapping.target.displayName(for: cache.fractalType))
+                                    Text(mappingDisplayName(mapping))
                                         .font(.caption.bold())
 
                                     if mapping.hasFlashingRisk {
@@ -1330,29 +1368,6 @@ struct MusicTabContent: View {
                                 }
 
                                 if canEditMappingTarget(mapping.target) {
-                                    // Transform slots can drive any field of the op, not
-                                    // just its strength — pick from the fields the live
-                                    // transform at this slot actually has.
-                                    if mapping.target.isSpaceWarp,
-                                       let slot = mapping.target.spaceWarpSlot,
-                                       let stack = cache.renderSettings?.spaceWarpStack,
-                                       slot < stack.count {
-                                        let kind = stack[slot].kind
-                                        let fields = kind.musicFields
-                                        if fields.count > 1 {
-                                            Picker("Drives", selection: Binding(
-                                                get: { mappingAt(index)?.spaceWarpField ?? .strength },
-                                                set: { newValue in updateMapping(index) { $0.spaceWarpField = newValue } }
-                                            )) {
-                                                ForEach(fields, id: \.self) { f in
-                                                    Text(kind.musicFieldLabel(f)).tag(f)
-                                                }
-                                            }
-                                            .pickerStyle(.menu)
-                                            .font(.caption)
-                                        }
-                                    }
-
                                     Picker("Source", selection: Binding(
                                         get: { mappingAt(index)?.source ?? .composite },
                                         set: { newValue in updateMapping(index) { $0.source = newValue } }
@@ -1449,6 +1464,131 @@ struct MusicTabContent: View {
         }
     }
 
+    // MARK: - Transformation Audio Assignment
+
+    /// The live stack is the source of this UI. Each field comes from the
+    /// transform's `WarpDescriptor`, so a newly authored transform parameter is
+    /// automatically offered here without a matching Music-tab edit.
+    private var transformAudioAssignments: [TransformAudioAssignment] {
+        // `spaceWarpStack` deliberately skips Observation during slider drags;
+        // this revision changes only when a field list can change (add/remove,
+        // reorder, or transform kind), which is exactly what this strip needs.
+        _ = cache.spaceWarpStructureRevision
+        let stack = cache.spaceWarpStack
+        return stack.enumerated().compactMap { slot, op in
+            guard MusicReactiveTarget.allSpaceWarpCases.indices.contains(slot) else { return nil }
+            let target = MusicReactiveTarget.allSpaceWarpCases[slot]
+            guard canEditMappingTarget(target) else { return nil }
+            return TransformAudioAssignment(
+                slot: slot,
+                kind: op.kind,
+                fields: op.kind.musicFieldDescriptors
+            )
+        }
+    }
+
+    private var transformAudioAssignmentsSection: some View {
+        let assignments = transformAudioAssignments
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Label("Transformation Inputs", systemImage: "circle.hexagongrid")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text("Tap fields to map")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("Each selected field receives its own audio mapping.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            ForEach(assignments) { assignment in
+                transformAudioAssignmentRow(assignment)
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.indigo.opacity(0.08)))
+    }
+
+    private func transformAudioAssignmentRow(_ assignment: TransformAudioAssignment) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: assignment.kind.icon)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("\(assignment.slot + 1). \(assignment.kind.displayName)")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(assignment.fields) { field in
+                        Toggle(isOn: transformMappingBinding(for: assignment, field: field.field)) {
+                            Label(field.label, systemImage: field.icon)
+                                .lineLimit(1)
+                        }
+                        .toggleStyle(.button)
+                        .controlSize(.small)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .accessibilityLabel("Map \(assignment.kind.displayName) \(field.label) to audio")
+                        .help("Map \(field.label) to audio")
+                    }
+                }
+                .padding(.vertical, 1)
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 7).fill(.quaternary.opacity(0.25)))
+    }
+
+    private func transformMappingBinding(for assignment: TransformAudioAssignment,
+                                         field: SpaceWarpField) -> Binding<Bool> {
+        let key = assignment.mappingKey(for: field)
+        return Binding(
+            get: { cache.audioReactive.musicReactiveMappings.contains { $0.identityKey == key } },
+            set: { isMapped in setTransformMapping(assignment, field: field, isMapped: isMapped) }
+        )
+    }
+
+    private func setTransformMapping(_ assignment: TransformAudioAssignment,
+                                     field: SpaceWarpField,
+                                     isMapped: Bool) {
+        let target = assignment.target
+        guard canEditMappingTarget(target) else { return }
+
+        let key = assignment.mappingKey(for: field)
+        var mappings = cache.audioReactive.musicReactiveMappings
+        if isMapped {
+            guard !mappings.contains(where: { $0.identityKey == key }) else { return }
+            var mapping = target.defaultMapping(
+                for: cache.fractalType,
+                enabled: true,
+                spaceWarpField: field
+            )
+            // Newly assigned controls begin with the calm Follow response.
+            mapping.responseCurve = .drift
+            mappings.append(mapping)
+        } else {
+            guard mappings.contains(where: { $0.identityKey == key }) else { return }
+            mappings.removeAll { $0.identityKey == key }
+        }
+
+        cache.audioReactive.musicReactiveMappings = mappings
+        cache.push(\.musicReactiveMappings, value: mappings)
+    }
+
+    private func mappingDisplayName(_ mapping: MusicReactiveMapping) -> String {
+        guard let slot = mapping.target.spaceWarpSlot,
+              cache.spaceWarpStack.indices.contains(slot) else {
+            return mapping.target.displayName(for: cache.fractalType)
+        }
+        let kind = cache.spaceWarpStack[slot].kind
+        return "\(kind.displayName) · \(kind.musicFieldLabel(mapping.spaceWarpField))"
+    }
+
     private func applyPreset(_ preset: ReactivityPreset) {
         // Core sensitivity settings
         let s = preset.settings
@@ -1475,22 +1615,19 @@ struct MusicTabContent: View {
     }
 
     private var availableMappingTargetsToAdd: [MusicReactiveTarget] {
-        let existing = Set(cache.audioReactive.musicReactiveMappings.map(\.target))
-        // One transform-stack slot per active op (slot N = transform card #N+1).
-        let warpCount = cache.renderSettings?.spaceWarpStack.count ?? 0
-        let all = MusicReactiveTarget.availableCases(for: cache.fractalType)
-                + MusicReactiveTarget.availableSpaceWarpCases(count: warpCount)
-        return all.filter {
-            !existing.contains($0) && canEditMappingTarget($0)
+        let existing = Set(cache.audioReactive.musicReactiveMappings.map(\.identityKey))
+        // Transform fields have their own direct, descriptor-derived toggle strip
+        // above. The Add Control popover remains for global and formula controls.
+        return MusicReactiveTarget.availableCases(for: cache.fractalType).filter {
+            !existing.contains(MusicReactiveMappingKey(target: $0)) && canEditMappingTarget($0)
         }
     }
 
     private func canEditMappingTarget(_ target: MusicReactiveTarget) -> Bool {
         guard let slot = target.spaceWarpSlot else { return true }
-        guard let stack = cache.renderSettings?.spaceWarpStack,
-              stack.indices.contains(slot) else { return false }
+        guard cache.spaceWarpStack.indices.contains(slot) else { return false }
         return TransformationAccessPolicy.canInteract(
-            withRawKindID: stack[slot].type,
+            withRawKindID: cache.spaceWarpStack[slot].type,
             mode: transformationExperienceMode,
             mappedIDs: mappedTransformationIDs
         )
@@ -1511,11 +1648,17 @@ struct MusicTabContent: View {
         cache.push(\.musicReactiveMappings, value: mappings)
     }
 
-    private func addMapping(_ target: MusicReactiveTarget) {
+    private func addMapping(_ target: MusicReactiveTarget,
+                            spaceWarpField: SpaceWarpField = .strength) {
         var mappings = cache.audioReactive.musicReactiveMappings
+        let key = MusicReactiveMappingKey(target: target, spaceWarpField: spaceWarpField)
         guard canEditMappingTarget(target),
-              !mappings.contains(where: { $0.target == target }) else { return }
-        var mapping = target.defaultMapping(for: cache.fractalType, enabled: true)
+              !mappings.contains(where: { $0.identityKey == key }) else { return }
+        var mapping = target.defaultMapping(
+            for: cache.fractalType,
+            enabled: true,
+            spaceWarpField: spaceWarpField
+        )
         // Newly added controls default to Follow (the calm, drift response).
         mapping.responseCurve = .drift
         mappings.append(mapping)

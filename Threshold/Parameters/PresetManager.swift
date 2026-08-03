@@ -164,6 +164,11 @@ class PresetManager {
     /// store. This separate, versioned marker lets a deliberate catalog update
     /// arrive once without resurrecting defaults a user has since deleted.
     static let officialSceneCatalogUpdateMarkerFileName = ".seeded-official-scenes-v1.json"
+    /// Existing installs seeded the original `w` asset with a near-max edge
+    /// detector. Keep this correction independent from catalog seeding: it must
+    /// update that exact bad payload without recreating a scene the user deleted.
+    static let wSceneEdgeDetectionFixMarkerFileName = ".migrated-w-edge-detection-v1.json"
+    static let wSceneID = UUID(uuidString: "35AB0B54-3FCB-4CB0-A7D2-D6F7FFDAD1D1")!
     static let officialSceneCatalogUpdateIDs = Set([
         "00000000-0022-0000-0000-000000000001", // Bulatov Limit Set
         "3F4AF708-7B41-4A60-B1A5-9D965E807C9A", // Embedded Mandelbulb
@@ -181,6 +186,13 @@ class PresetManager {
         "B4234FA7-8F8B-4700-A0EA-9C4321E635C0", // Wave Rail
         "35AB0B54-3FCB-4CB0-A7D2-D6F7FFDAD1D1"  // w
     ].compactMap(UUID.init(uuidString:)))
+    private static let legacyWSceneEdgeDetection = EdgeDetectionEffect(
+        enabled: true,
+        strength: 0.98378974,
+        threshold: 0.10392282,
+        softness: 0.043115318,
+        windowRadius: 3
+    )
     private let maxBackupCount: Int? = nil  // nil = unlimited retention
     private var pendingSaveTask: Task<Void, Never>?
     private let saveDebounceNanoseconds: UInt64 = 250_000_000
@@ -716,6 +728,69 @@ class PresetManager {
         }
     }
 
+    /// Correct the exact `w` scene payload shipped before the edge-contour fix.
+    ///
+    /// This is intentionally not another catalog seed: a user may have deleted
+    /// `w`, or tuned its edge detector themselves. Only the original dual
+    /// representation is changed, and a missing scene remains missing.
+    @discardableResult
+    private func migrateLegacyWSceneEdgeDetectionIfNeeded(
+        root: URL,
+        placeholderPresetIDs: Set<UUID>
+    ) -> Bool {
+        let marker = root.appendingPathComponent(Self.wSceneEdgeDetectionFixMarkerFileName)
+        guard !FileManager.default.fileExists(atPath: marker.path) else { return false }
+
+        // A bundled fallback represents an existing but unhydrated iCloud file.
+        // Wait for the real file rather than treating it as a missing/deleted scene.
+        guard !placeholderPresetIDs.contains(Self.wSceneID) else { return false }
+
+        guard let index = presets.firstIndex(where: { $0.id == Self.wSceneID }) else {
+            _ = markLegacyWSceneEdgeDetectionFixApplied(at: marker)
+            return false
+        }
+
+        var preset = presets[index]
+        guard let flatEffect = preset.edgeDetectionEffect,
+              flatEffect == Self.legacyWSceneEdgeDetection,
+              var sceneState = preset.sceneState,
+              sceneState.lighting.edgeDetectionEffect == Self.legacyWSceneEdgeDetection
+        else {
+            // The scene is either user-authored or has already been corrected.
+            _ = markLegacyWSceneEdgeDetectionFixApplied(at: marker)
+            return false
+        }
+
+        // Keep the authored threshold, softness, and radius so the user can turn
+        // the effect back on later without losing its original tuning.
+        var correctedFlatEffect = flatEffect
+        correctedFlatEffect.enabled = false
+        correctedFlatEffect.strength = 0
+        preset.edgeDetectionEffect = correctedFlatEffect
+
+        var correctedCanonicalEffect = sceneState.lighting.edgeDetectionEffect
+        correctedCanonicalEffect.enabled = false
+        correctedCanonicalEffect.strength = 0
+        sceneState.lighting.edgeDetectionEffect = correctedCanonicalEffect
+        preset.sceneState = sceneState
+
+        guard writePresetFile(preset, root: root) else { return false }
+        presets[index] = preset
+        _ = markLegacyWSceneEdgeDetectionFixApplied(at: marker)
+        return true
+    }
+
+    private func markLegacyWSceneEdgeDetectionFixApplied(at marker: URL) -> Bool {
+        guard let data = try? presetEncoder.encode([Self.wSceneID]) else { return false }
+        do {
+            try data.write(to: marker, options: .atomic)
+            return true
+        } catch {
+            print("❌ Failed to write w edge-detection migration marker: \(error)")
+            return false
+        }
+    }
+
     // MARK: - Folder store: per-file write / remove
 
     /// Write one preset as its own file, routed by music-reactivity
@@ -945,12 +1020,18 @@ class PresetManager {
 
         // Migration/seeding is evaluated only after the detached scan, so its
         // presence checks never perform a second synchronous directory decode.
-        let wroteFiles = migrateAndSeedIfNeeded(
+        var wroteFiles = migrateAndSeedIfNeeded(
             root: root,
             presentPresetIDs: Set(
                 (result.presets + result.bundledPlaceholderFallbacks).map(\.id)
             )
         )
+        if !wroteFiles {
+            wroteFiles = migrateLegacyWSceneEdgeDetectionIfNeeded(
+                root: root,
+                placeholderPresetIDs: Set(result.bundledPlaceholderFallbacks.map(\.id))
+            )
+        }
         if wroteFiles {
             presetFileCache = [:]
             schedulePresetReload(

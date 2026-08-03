@@ -37,7 +37,7 @@ final class MusicReactiveEngine {
     /// mapping array changes, leaving the hot path to do only frame-dependent
     /// math (source sampling, curve integration, LFO, and dispatch).
     private struct ResolvedMapping {
-        let target: MusicReactiveTarget
+        let identityKey: MusicReactiveMappingKey
         let source: MusicReactiveSource
         let responseCurve: ResponseCurve
         let targetID: String
@@ -54,12 +54,12 @@ final class MusicReactiveEngine {
         let lfo: LFOSettings
     }
 
-    // MARK: - Per-target oscillator / envelope state
+    // MARK: - Per-mapping oscillator / envelope state
 
-    private var phaseByTarget: [MusicReactiveTarget: Float] = [:]
-    private var decayByTarget: [MusicReactiveTarget: Float] = [:]
-    private var driftByTarget: [MusicReactiveTarget: Float] = [:]
-    private var lfoPhaseByTarget: [MusicReactiveTarget: Float] = [:]
+    private var phaseByMapping: [MusicReactiveMappingKey: Float] = [:]
+    private var decayByMapping: [MusicReactiveMappingKey: Float] = [:]
+    private var driftByMapping: [MusicReactiveMappingKey: Float] = [:]
+    private var lfoPhaseByMapping: [MusicReactiveMappingKey: Float] = [:]
 
     // MARK: - Damped source levels (exponential follower per band)
 
@@ -89,6 +89,10 @@ final class MusicReactiveEngine {
     /// Snapshot of the last user-facing mapping set used to resolve the hot-path
     /// mapping metadata below.
     private var cachedResolvedFractalType: FractalModelType?
+    /// Transform kind/order determines the descriptor-derived range of each
+    /// transform field. Slider values are deliberately omitted so ordinary
+    /// transform edits do not rebuild the resolved-mapping cache every frame.
+    private var cachedResolvedSpaceWarpKinds: [Int32] = []
     private var cachedResolvedMappingsSnapshot: [MusicReactiveMapping] = []
     private var activeResolvedMappings: [ResolvedMapping] = []
 
@@ -169,7 +173,11 @@ final class MusicReactiveEngine {
 
         let activeFractalType = settings.fractalType
         let mappings = settings.musicReactiveMappings
-        refreshResolvedMappingsIfNeeded(for: activeFractalType, mappings: mappings)
+        refreshResolvedMappingsIfNeeded(
+            for: activeFractalType,
+            spaceWarpStack: settings.spaceWarpStack,
+            mappings: mappings
+        )
 
         // Drain manual re-center requests AFTER the mapping refresh (so the
         // targetID→target map is current) and BEFORE the offset loop (so this
@@ -179,7 +187,7 @@ final class MusicReactiveEngine {
         let recenterRequests = settings.drainMusicRecenterRequests()
         if !recenterRequests.isEmpty {
             for mapping in activeResolvedMappings where recenterRequests.contains(mapping.targetID) {
-                resetState(for: mapping.target)
+                resetState(for: mapping.identityKey)
             }
         }
 
@@ -187,8 +195,9 @@ final class MusicReactiveEngine {
                                             tripletGains: settings.tripletMusicGains)
 
         // Transform-stack targets bypass the dispatcher: their smoothed offset is
-        // folded straight into spaceWarpStack[slot].strength at snapshot time. Collected
-        // here and written atomically below (empty write clears removed/stale slots).
+        // folded straight into the selected spaceWarpStack[slot] field at snapshot
+        // time. Collected here and written atomically below (empty write clears
+        // removed/stale fields).
         var spaceWarpOffsets: [SpaceWarpFieldKey: Float] = [:]
         for mapping in activeResolvedMappings {
             // ── 1. Select audio source level (0-1) ──
@@ -225,10 +234,10 @@ final class MusicReactiveEngine {
                 // When audio is loud  → offset oscillates ±maxDeviation.
                 // `motionScale` lets global damping slow the oscillation rate.
                 let phaseSpeed: Float = (2.0 + sourceValue * 4.0) * motionScale  // faster when louder
-                var phase = phaseByTarget[mapping.target] ?? 0
+                var phase = phaseByMapping[mapping.identityKey] ?? 0
                 phase += phaseSpeed * dt
                 phase = phase - floor(phase)
-                phaseByTarget[mapping.target] = phase
+                phaseByMapping[mapping.identityKey] = phase
                 delta = sin(phase * 2.0 * .pi) * sourceValue * maxDeviation * mapping.sign
 
             case .pulse:
@@ -237,9 +246,9 @@ final class MusicReactiveEngine {
                 // `motionScale` slows the decay under damping so pulses hold
                 // longer and the overall response feels calmer/smoother.
                 let attack = sourceValue * sourceValue  // quadratic for sharper onset
-                var decay = decayByTarget[mapping.target] ?? 0
+                var decay = decayByMapping[mapping.identityKey] ?? 0
                 decay = max(attack, decay * exp(-6.0 * motionScale * dt))  // ~170ms decay at damping 0
-                decayByTarget[mapping.target] = decay
+                decayByMapping[mapping.identityKey] = decay
                 delta = decay * maxDeviation * mapping.sign
 
             case .drift:
@@ -248,10 +257,10 @@ final class MusicReactiveEngine {
                 // window makes it lag behind the beat for a "color drift" feel.
                 // Higher damping lengthens the convergence time (calmer drift).
                 let target = sourceValue * maxDeviation * mapping.sign
-                var drifted = driftByTarget[mapping.target] ?? 0
+                var drifted = driftByMapping[mapping.identityKey] ?? 0
                 let driftRate: Float = 2.0 / max(0.15, motionScale)  // seconds to converge
                 drifted += (target - drifted) * min(1.0, dt / driftRate)
-                driftByTarget[mapping.target] = drifted
+                driftByMapping[mapping.identityKey] = drifted
                 delta = drifted
 
             case .hybrid:
@@ -262,17 +271,17 @@ final class MusicReactiveEngine {
                 // Slow large-scale movement (drift backbone).
                 // Higher damping lengthens convergence and slows the vibration.
                 let target = sourceValue * maxDeviation * mapping.sign
-                var drifted = driftByTarget[mapping.target] ?? 0
+                var drifted = driftByMapping[mapping.identityKey] ?? 0
                 let driftRate: Float = 2.4 / max(0.15, motionScale)
                 drifted += (target - drifted) * min(1.0, dt / driftRate)
-                driftByTarget[mapping.target] = drifted
+                driftByMapping[mapping.identityKey] = drifted
 
                 // Fast micro-vibration (wave overlay), still music-driven.
                 let vibrationSpeed: Float = (6.0 + sourceValue * 8.0 + combo * 4.0) * motionScale
-                var phase = phaseByTarget[mapping.target] ?? 0
+                var phase = phaseByMapping[mapping.identityKey] ?? 0
                 phase += vibrationSpeed * dt
                 phase = phase - floor(phase)
-                phaseByTarget[mapping.target] = phase
+                phaseByMapping[mapping.identityKey] = phase
 
                 let vibrationAmplitude = maxDeviation * sourceValue * (0.08 + 0.35 * combo)
                 let vibration = sin(phase * 2.0 * .pi) * vibrationAmplitude * mapping.sign
@@ -285,10 +294,10 @@ final class MusicReactiveEngine {
             // ── 5. Optional LFO overlay ──
             var lfoOffset: Float = 0
             if mapping.lfo.enabled {
-                var phase = lfoPhaseByTarget[mapping.target] ?? 0
+                var phase = lfoPhaseByMapping[mapping.identityKey] ?? 0
                 phase += mapping.lfo.frequency * dt
                 phase = phase - floor(phase)
-                lfoPhaseByTarget[mapping.target] = phase
+                lfoPhaseByMapping[mapping.identityKey] = phase
                 lfoOffset = mapping.lfo.shape.evaluate(phase: phase) * mapping.lfo.amplitude * maxDeviation
             }
 
@@ -371,16 +380,20 @@ final class MusicReactiveEngine {
         dampedComposite = 0
     }
 
-    /// Rebuild the per-mapping hot-path metadata only when the fractal type or
-    /// the user-facing mapping array changes.
+    /// Rebuild the per-mapping hot-path metadata only when the fractal type,
+    /// transform kinds/order, or user-facing mapping array changes.
     private func refreshResolvedMappingsIfNeeded(for activeFractalType: FractalModelType,
+                                                 spaceWarpStack: [SpaceWarpOpValue],
                                                  mappings: [MusicReactiveMapping]) {
+        let spaceWarpKinds = spaceWarpStack.map(\.type)
         guard cachedResolvedFractalType != activeFractalType ||
+                cachedResolvedSpaceWarpKinds != spaceWarpKinds ||
                 cachedResolvedMappingsSnapshot != mappings else {
             return
         }
 
-        if cachedResolvedFractalType != activeFractalType {
+        if cachedResolvedFractalType != activeFractalType ||
+            cachedResolvedSpaceWarpKinds != spaceWarpKinds {
             clearCurveState()
         } else {
             resetStateForChangedMappings(previous: cachedResolvedMappingsSnapshot,
@@ -388,16 +401,31 @@ final class MusicReactiveEngine {
         }
 
         cachedResolvedFractalType = activeFractalType
+        cachedResolvedSpaceWarpKinds = spaceWarpKinds
         cachedResolvedMappingsSnapshot = mappings
         activeResolvedMappings.removeAll(keepingCapacity: true)
         activeResolvedMappings.reserveCapacity(mappings.count)
 
         for mapping in mappings where mapping.isEnabled {
             guard let targetID = mapping.target.parameterTargetID(for: activeFractalType) else { continue }
-            let allowed = mapping.target.allowedRange(for: activeFractalType)
+
+            let allowed: ClosedRange<Float>
+            if let slot = mapping.target.spaceWarpSlot {
+                // Transform-field availability, label, and range are authored by
+                // the WarpDescriptor. A stale mapping for a removed or changed
+                // transform is ignored until its field is available again.
+                guard spaceWarpStack.indices.contains(slot),
+                      let field = spaceWarpStack[slot].kind.musicFieldDescriptor(mapping.spaceWarpField) else {
+                    continue
+                }
+                allowed = field.range
+            } else {
+                allowed = mapping.target.allowedRange(for: activeFractalType)
+            }
+
             activeResolvedMappings.append(
                 ResolvedMapping(
-                    target: mapping.target,
+                    identityKey: mapping.identityKey,
                     source: mapping.source,
                     responseCurve: mapping.responseCurve,
                     targetID: targetID,
@@ -417,51 +445,51 @@ final class MusicReactiveEngine {
         }
     }
 
-    /// Reset curve state for targets that were removed, newly added, or had
-    /// their mapping definition changed. This preserves continuity only for
-    /// targets whose mapping remains exactly the same.
+    /// Reset curve state for mappings that were removed, newly added, or had
+    /// their definition changed. This preserves continuity for other fields of
+    /// the same transform when one field is adjusted independently.
     private func resetStateForChangedMappings(previous: [MusicReactiveMapping],
                                              next: [MusicReactiveMapping]) {
-        let previousByTarget = Dictionary(uniqueKeysWithValues: previous.filter(\.isEnabled).map { ($0.target, $0) })
-        let nextByTarget = Dictionary(uniqueKeysWithValues: next.filter(\.isEnabled).map { ($0.target, $0) })
-        let activeTargets = Set(nextByTarget.keys)
+        let previousByKey = Dictionary(uniqueKeysWithValues: previous.filter(\.isEnabled).map { ($0.identityKey, $0) })
+        let nextByKey = Dictionary(uniqueKeysWithValues: next.filter(\.isEnabled).map { ($0.identityKey, $0) })
+        let activeKeys = Set(nextByKey.keys)
 
-        for (target, previousMapping) in previousByTarget {
-            guard let nextMapping = nextByTarget[target] else {
-                resetState(for: target)
+        for (key, previousMapping) in previousByKey {
+            guard let nextMapping = nextByKey[key] else {
+                resetState(for: key)
                 continue
             }
             if previousMapping != nextMapping {
-                resetState(for: target)
+                resetState(for: key)
             }
         }
 
-        for target in activeTargets where previousByTarget[target] == nil {
-            resetState(for: target)
+        for key in activeKeys where previousByKey[key] == nil {
+            resetState(for: key)
         }
 
-        pruneState(keeping: activeTargets)
+        pruneState(keeping: activeKeys)
     }
 
-    private func resetState(for target: MusicReactiveTarget) {
-        phaseByTarget.removeValue(forKey: target)
-        decayByTarget.removeValue(forKey: target)
-        driftByTarget.removeValue(forKey: target)
-        lfoPhaseByTarget.removeValue(forKey: target)
+    private func resetState(for key: MusicReactiveMappingKey) {
+        phaseByMapping.removeValue(forKey: key)
+        decayByMapping.removeValue(forKey: key)
+        driftByMapping.removeValue(forKey: key)
+        lfoPhaseByMapping.removeValue(forKey: key)
     }
 
     private func clearCurveState() {
-        phaseByTarget.removeAll()
-        decayByTarget.removeAll()
-        driftByTarget.removeAll()
-        lfoPhaseByTarget.removeAll()
+        phaseByMapping.removeAll()
+        decayByMapping.removeAll()
+        driftByMapping.removeAll()
+        lfoPhaseByMapping.removeAll()
     }
 
-    private func pruneState(keeping activeTargets: Set<MusicReactiveTarget>) {
-        phaseByTarget = phaseByTarget.filter { activeTargets.contains($0.key) }
-        decayByTarget = decayByTarget.filter { activeTargets.contains($0.key) }
-        driftByTarget = driftByTarget.filter { activeTargets.contains($0.key) }
-        lfoPhaseByTarget = lfoPhaseByTarget.filter { activeTargets.contains($0.key) }
+    private func pruneState(keeping activeKeys: Set<MusicReactiveMappingKey>) {
+        phaseByMapping = phaseByMapping.filter { activeKeys.contains($0.key) }
+        decayByMapping = decayByMapping.filter { activeKeys.contains($0.key) }
+        driftByMapping = driftByMapping.filter { activeKeys.contains($0.key) }
+        lfoPhaseByMapping = lfoPhaseByMapping.filter { activeKeys.contains($0.key) }
     }
 
     /// Returns the cached `formulaParamSlot → gain` lookup, rebuilding it only

@@ -92,6 +92,15 @@ struct ICloudStoreDeletionTests {
     /// Mark a harness store as having received every built-in catalog update so
     /// tests that are unrelated to catalog seeding stay small and deterministic.
     private func markPresetStoreAsSeeded(_ root: URL) throws {
+        try markPresetStoreAsSeededBeforeWSceneEdgeDetectionFix(root)
+        try Data("[]".utf8).write(
+            to: root.appendingPathComponent(PresetManager.wSceneEdgeDetectionFixMarkerFileName)
+        )
+    }
+
+    /// Simulate a store seeded by the release immediately before the targeted
+    /// `w` edge-contour correction.
+    private func markPresetStoreAsSeededBeforeWSceneEdgeDetectionFix(_ root: URL) throws {
         try Data("[]".utf8).write(to: root.appendingPathComponent(".seeded-bundled.json"))
         try Data("[]".utf8).write(
             to: root.appendingPathComponent(PresetManager.officialSceneCatalogUpdateMarkerFileName)
@@ -136,17 +145,37 @@ struct ICloudStoreDeletionTests {
     }
 
     private func presetFileExists(id: UUID, in root: URL) -> Bool {
+        storedPreset(id: id, in: root) != nil
+    }
+
+    private func storedPreset(id: UUID, in root: URL) -> FractalPreset? {
         for dir in [StorageLocation.scenesDir(root), StorageLocation.musicPresetsDir(root)] {
             guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
             for url in files where ["threshscene", "threshmp"].contains(url.pathExtension) {
                 if let data = try? Data(contentsOf: url),
                    let p = try? isoDecoder.decode(FractalPreset.self, from: data),
                    p.id == id {
-                    return true
+                    return p
                 }
             }
         }
-        return false
+        return nil
+    }
+
+    private func legacyWScene() -> FractalPreset {
+        let edge = EdgeDetectionEffect(
+            enabled: true,
+            strength: 0.98378974,
+            threshold: 0.10392282,
+            softness: 0.043115318,
+            windowRadius: 3
+        )
+        var preset = FractalPreset(id: PresetManager.wSceneID, name: "w")
+        preset.edgeDetectionEffect = edge
+        var sceneState = SceneState()
+        sceneState.lighting.edgeDetectionEffect = edge
+        preset.sceneState = sceneState
+        return preset
     }
 
     // MARK: - Scenes
@@ -309,5 +338,71 @@ struct ICloudStoreDeletionTests {
         await manager.loadPresetsNow()
         #expect(!presetFileExists(id: deletedID, in: root),
                 "a catalog update must not resurrect a user-deleted scene")
+    }
+
+    @Test("Legacy w scene disables only its shipped synthetic edge contour")
+    func legacyWSceneEdgeDetectionMigrates() async throws {
+        let root = makeStoreRoot()
+        try markPresetStoreAsSeededBeforeWSceneEdgeDetectionFix(root)
+        defer { teardown(root) }
+
+        try plantPreset(legacyWScene(), in: root)
+        let manager = PresetManager()
+        await manager.loadPresetsNow()
+
+        let migrated = try #require(storedPreset(id: PresetManager.wSceneID, in: root))
+        let flat = try #require(migrated.edgeDetectionEffect)
+        #expect(!flat.enabled)
+        #expect(flat.strength == 0)
+        #expect(flat.threshold == 0.10392282)
+        #expect(flat.softness == 0.043115318)
+        #expect(flat.windowRadius == 3)
+
+        let canonical = migrated.sceneState?.lighting.edgeDetectionEffect
+        #expect(canonical?.isActive == false)
+        #expect(canonical?.threshold == 0.10392282)
+        #expect(canonical?.softness == 0.043115318)
+        #expect(canonical?.windowRadius == 3)
+        #expect(FileManager.default.fileExists(atPath: root
+            .appendingPathComponent(PresetManager.wSceneEdgeDetectionFixMarkerFileName).path))
+    }
+
+    @Test("Custom w edge settings are never overwritten by the contour migration")
+    func customWSceneEdgeDetectionRemainsUntouched() async throws {
+        let root = makeStoreRoot()
+        try markPresetStoreAsSeededBeforeWSceneEdgeDetectionFix(root)
+        defer { teardown(root) }
+
+        var custom = legacyWScene()
+        var edge = try #require(custom.edgeDetectionEffect)
+        edge.strength = 0.6
+        custom.edgeDetectionEffect = edge
+        var sceneState = try #require(custom.sceneState)
+        sceneState.lighting.edgeDetectionEffect = edge
+        custom.sceneState = sceneState
+        try plantPreset(custom, in: root)
+
+        let manager = PresetManager()
+        await manager.loadPresetsNow()
+
+        let stored = try #require(storedPreset(id: PresetManager.wSceneID, in: root))
+        #expect(stored.edgeDetectionEffect == edge)
+        #expect(stored.sceneState?.lighting.edgeDetectionEffect == edge)
+        #expect(FileManager.default.fileExists(atPath: root
+            .appendingPathComponent(PresetManager.wSceneEdgeDetectionFixMarkerFileName).path))
+    }
+
+    @Test("Deleted w scene stays deleted during the contour migration")
+    func missingWSceneIsNotReseededByContourMigration() async throws {
+        let root = makeStoreRoot()
+        try markPresetStoreAsSeededBeforeWSceneEdgeDetectionFix(root)
+        defer { teardown(root) }
+
+        let manager = PresetManager()
+        await manager.loadPresetsNow()
+
+        #expect(!presetFileExists(id: PresetManager.wSceneID, in: root))
+        #expect(FileManager.default.fileExists(atPath: root
+            .appendingPathComponent(PresetManager.wSceneEdgeDetectionFixMarkerFileName).path))
     }
 }

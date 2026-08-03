@@ -221,7 +221,7 @@ enum ParameterCatalog {
 
         ParameterDescriptor(
             spec: ControlCatalog.fractalScale,
-            placement: .presented(route: .shape(.parameters), section: "Geometry", order: 0, presentations: .all),
+            placement: .presented(route: .input(.parameters), section: "Geometry", order: 0, presentations: .all),
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, tripletGroupKey: nil),

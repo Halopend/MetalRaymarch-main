@@ -117,11 +117,6 @@ struct ControlFinderDestination: Identifiable {
 
         // Shape
         destination(
-            ShapeRailSection.parameters,
-            description: "Adjust the active fractal's primary shape parameters.",
-            keywords: ["slider", "sculpt", "fold", "scale", "radius", "iterations"]
-        ),
-        destination(
             ShapeRailSection.formula,
             description: "Choose the distance-estimator formula that defines the fractal.",
             keywords: ["fractal type", "distance estimator", "mandelbox", "mandelbulb", "menger", "julia"]
@@ -208,7 +203,12 @@ struct ControlFinderDestination: Identifiable {
             keywords: ["quality", "performance", "renderer", "iterations", "ray steps", "metalfx", "adaptive compute", "speed"]
         ),
 
-        // Music
+        // Input
+        destination(
+            MusicRailSection.parameters,
+            description: "Adjust the active fractal's primary shape parameters.",
+            keywords: ["parameter", "slider", "sculpt", "fold", "scale", "radius", "iterations"]
+        ),
         destination(
             MusicRailSection.playback,
             description: "Choose microphone, system audio, or music playback and monitor the live signal.",

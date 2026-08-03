@@ -25,6 +25,8 @@ jobs:
         run: bash -n Scripts/*.sh .githooks/pre-commit
       - name: Reject duplicate artifacts
         run: Scripts/check_no_duplicate_suffix.sh --all
+      - name: Reject oversized files
+        run: Scripts/check_no_large_files.sh --all
       - name: Validate mixed-scene metadata
         run: python3 Scripts/mark_mixed_scenes.py --check
 

@@ -176,7 +176,9 @@ struct ThresholdMacRenderView: NSViewRepresentable {
             metalLayer.device = device
             metalLayer.pixelFormat = view.colorPixelFormat
             metalLayer.framebufferOnly = true
-            metalLayer.drawableSize = view.drawableSize
+            if view.drawableSize.width > 1, view.drawableSize.height > 1 {
+                metalLayer.drawableSize = view.drawableSize
+            }
             // Ask the compositor for EDR; actual headroom is read per frame in
             // draw(in:) and fed to the shader's display mapping.
             metalLayer.wantsExtendedDynamicRangeContent = true
@@ -417,6 +419,35 @@ final class ViewportRenderer {
     private static let maxBuffersInFlight = 2
     private static let defaultTargetPosition = SIMD3<Float>(0.1, 0.1, 0.1)
     private static let minDetailScale: Float = 0.05
+    /// Physical iPads can reject MetalFX temporal's private history allocation
+    /// for a full-resolution HDR drawable (`mach_vm_allocate` error 0x4), most
+    /// commonly when a persisted sub-native Definition value activates the
+    /// scaler during launch. Spatial MetalFX uses a much smaller resource set
+    /// and preserves the requested render scale, so iPad stays on that path.
+    /// macOS retains temporal reconstruction where the larger pooled history is
+    /// supported and already performance-tested.
+    private static let temporalUpscalingEnabled: Bool = {
+        #if os(iOS)
+        false
+        #else
+        true
+        #endif
+    }()
+    /// Depth clamp (`MTLDepthClipMode.clamp`) is unsupported by the Simulator's
+    /// Metal implementation, and Metal has no runtime query for it — so calling
+    /// `setDepthClipMode(.clamp)` there trips
+    /// `MTLValidateFeatureSupport: 'Depth Clip Mode is not supported on this
+    /// device'` and aborts the process the moment API validation is on, which is
+    /// Xcode's Debug default. Skipping it costs only the zoomed-in background
+    /// hole described at the call site, and only in the Simulator; every real
+    /// device keeps the clamp.
+    private static let supportsDepthClamp: Bool = {
+        #if targetEnvironment(simulator)
+        false
+        #else
+        true
+        #endif
+    }()
     // Manual scroll/pinch zoom ceiling. Raised for infinite-zoom: lets manual zoom
     // dive as deep as the auto driver (RenderSettings.infiniteZoomMaxScale). The
     // fp32-safe band ends ~4096× before the Phase 2 octave-rebase is needed.
@@ -610,6 +641,7 @@ final class ViewportRenderer {
     }
 
     func drawableSizeDidChange(_ size: CGSize) {
+        guard size.width > 1, size.height > 1 else { return }
         drawableSize = size
         metalLayer.drawableSize = size
     }
@@ -824,7 +856,8 @@ final class ViewportRenderer {
                 drawableHeight,
                 max(1, Int((Float(drawableHeight) * temporalScale).rounded(.up)))
             )
-            if motionPipelineState != nil,
+            if Self.temporalUpscalingEnabled,
+               motionPipelineState != nil,
                temporalUpscaler.prepare(inputWidth: temporalInputWidth,
                                         inputHeight: temporalInputHeight,
                                         outputWidth: drawableWidth,
@@ -1135,7 +1168,10 @@ final class ViewportRenderer {
         // punching a background hole that widens as you zoom. Clamp depth instead of
         // clipping so the proxy always covers the screen; the fragment shader writes
         // its own per-pixel hit depth anyway, so clamped proxy z is inert.
-        encoder.setDepthClipMode(.clamp)
+        // Guarded: the Simulator has no depth clamp and aborts under API validation.
+        if Self.supportsDepthClamp {
+            encoder.setDepthClipMode(.clamp)
+        }
         for binding in meshBindings {
             encoder.setVertexBuffer(binding.buffer, offset: binding.offset, index: binding.bufferIndex)
         }
@@ -2177,7 +2213,9 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             metalLayer.device = device
             metalLayer.pixelFormat = view.colorPixelFormat
             metalLayer.framebufferOnly = true
-            metalLayer.drawableSize = view.drawableSize
+            if view.drawableSize.width > 1, view.drawableSize.height > 1 {
+                metalLayer.drawableSize = view.drawableSize
+            }
             // Extended linear sRGB (MTKView.colorspace is macOS-only) + ask the
             // compositor for EDR; actual headroom is read per frame in
             // draw(in:) and fed to the shader's display mapping.

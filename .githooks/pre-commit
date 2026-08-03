@@ -8,6 +8,10 @@ cd "$(git rev-parse --show-toplevel)"
 # "Bar copy.metal"). Fast, offline, no false positives on legit numbered series.
 Scripts/check_no_duplicate_suffix.sh
 
+# Reject oversized binaries before they become permanent history. Also fast and
+# offline — it only stats the staged file list.
+Scripts/check_no_large_files.sh
+
 # NOTE: heavier gates (full test suite, embed-freshness, Quick Look render, perf)
 # are intentionally NOT run here — they need a clean build and are too slow for a
 # pre-commit. Run them before pushing:  Scripts/build.sh test   (see README).

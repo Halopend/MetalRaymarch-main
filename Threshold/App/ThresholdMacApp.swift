@@ -366,6 +366,9 @@ private struct ThresholdMacRootView: View {
         }
         .onAppear {
             migrateLegacyNavigationPreferenceIfNeeded()
+            Task { @MainActor in
+                await appModel.startMicrophoneAtLaunchIfEnabled()
+            }
             appModel.openControlFinderHandler = {
                 isControlFinderPresented = true
             }

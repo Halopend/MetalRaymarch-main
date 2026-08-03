@@ -85,6 +85,17 @@ struct ExampleSceneDecodeTests {
         }
     }
 
+    @Test("w ships without synthetic dark edge contours")
+    func wSceneDisablesEdgeDetection() throws {
+        let url = Self.examplesDir
+            .appendingPathComponent("Scenes")
+            .appendingPathComponent("w_35AB0B54.threshscene")
+        let preset = try Self.iso8601Decoder().decode(FractalPreset.self, from: Data(contentsOf: url))
+
+        #expect(preset.edgeDetectionEffect?.isActive == false)
+        #expect(preset.sceneState?.lighting.edgeDetectionEffect.isActive == false)
+    }
+
     @Test("Every .threshmp decodes as a FractalPreset (music-preset path)")
     func threshmpsDecode() throws {
         let decoder = Self.iso8601Decoder()

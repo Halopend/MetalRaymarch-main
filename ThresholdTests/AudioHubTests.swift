@@ -4,6 +4,20 @@ import Testing
 
 @Suite("Audio hub feature policy")
 struct AudioHubTests {
+    @Test("Microphone launch preference is opt-in")
+    func microphoneLaunchPreferenceIsOptIn() {
+        let suiteName = "AudioHubTests.microphoneLaunchPreference.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            Issue.record("Could not create isolated UserDefaults suite")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        #expect(!AudioInputLaunchPreference.microphoneStartsAtLaunch(in: defaults))
+        defaults.set(true, forKey: AudioInputLaunchPreference.microphoneStartsAtLaunchDefaultsKey)
+        #expect(AudioInputLaunchPreference.microphoneStartsAtLaunch(in: defaults))
+    }
+
     @Test("Finger-pinch sources are not offered on platforms without hand tracking")
     func fingerSourcesAbsentFromPickerWithoutHandTracking() {
         // The test host is macOS: pinch levels are hardwired zero here, so a

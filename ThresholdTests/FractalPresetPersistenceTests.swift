@@ -1109,6 +1109,46 @@ struct SpaceWarpMusicFieldTests {
         #expect(mappings.first?.source == .bass)
     }
 
+    @Test("Transform fields retain independent music mappings")
+    func transformFieldMappingsUseFieldIdentity() {
+        let settings = RenderSettings()
+        let strength = MusicReactiveMapping(
+            target: .spaceWarp0,
+            source: .bass,
+            amount: 1,
+            isEnabled: true,
+            spaceWarpField: .strength
+        )
+        let frequency = MusicReactiveMapping(
+            target: .spaceWarp0,
+            source: .treble,
+            amount: 2,
+            isEnabled: true,
+            spaceWarpField: .param1
+        )
+        let duplicateFrequency = MusicReactiveMapping(
+            target: .spaceWarp0,
+            source: .mid,
+            amount: 3,
+            isEnabled: true,
+            spaceWarpField: .param1
+        )
+
+        settings.musicReactiveMappings = [strength, frequency, duplicateFrequency]
+
+        let mappings = settings.musicReactiveMappings
+        #expect(mappings.count == 2)
+        #expect(mappings.map(\.identityKey) == [strength.identityKey, frequency.identityKey])
+        #expect(mappings.map(\.source) == [.bass, .treble])
+    }
+
+    @Test("Non-transform field values do not create duplicate mappings")
+    func nonTransformMappingIdentityIgnoresSpaceWarpField() {
+        let defaultKey = MusicReactiveMappingKey(target: .glow)
+        let incidentalFieldKey = MusicReactiveMappingKey(target: .glow, spaceWarpField: .param1)
+        #expect(defaultKey == incidentalFieldKey)
+    }
+
     @Test("musicFields exposes exactly the fields each transform actually has")
     func musicFieldsMatchTransform() {
         #expect(SpaceWarpKind.mirror.musicFields == [.strength])                       // no params, no axis
@@ -1117,6 +1157,13 @@ struct SpaceWarpMusicFieldTests {
         #expect(SpaceWarpKind.coxeter.musicFields == [.strength, .param1, .param2, .axisZ])
         #expect(SpaceWarpKind.coxeter.musicFieldLabel(.axisZ) == "Source Angle")
         #expect(SpaceWarpKind.coxeter.range(for: .axisZ) == (-Float.pi...Float.pi))
+
+        // The UI projects this descriptor list directly, so field labels/ranges
+        // cannot drift from a transform's authored WarpDescriptor.
+        let rippleFields = SpaceWarpKind.ripple.musicFieldDescriptors
+        #expect(rippleFields.map(\.field) == [.strength, .param1, .axisX, .axisY, .axisZ])
+        #expect(rippleFields.first(where: { $0.field == .param1 })?.label == "Frequency")
+        #expect(rippleFields.first(where: { $0.field == .param1 })?.range == 0.1...8.0)
     }
 }
 

@@ -64,44 +64,85 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable, Sendable {
     var tagline: String { descriptor.tagline }
     var family: WarpFamily { descriptor.family }
 
-    /// The fields of this transform that make sense to music-drive: always the master
-    /// amount, plus whichever scalar slots and axis it actually uses. Drives the
-    /// Music-tab field picker so users can't bind a param a transform doesn't have.
-    var musicFields: [SpaceWarpField] {
-        var fields: [SpaceWarpField] = [.strength]
-        if params.contains(where: { $0.slot == 1 }) { fields.append(.param1) }
-        if params.contains(where: { $0.slot == 2 }) { fields.append(.param2) }
-        if usesAxis {
-            fields += [.axisX, .axisY, .axisZ]
-        } else if sourceAngle != nil {
-            fields.append(.axisZ)
+    /// Every field this transform can expose to audio, generated from the same
+    /// descriptor that builds its editor. Adding a scalar parameter, an axis, or a
+    /// source angle therefore automatically adds the matching audio assignment
+    /// control — there is no second per-transform list to keep in sync.
+    var musicFieldDescriptors: [SpaceWarpMusicFieldDescriptor] {
+        var fields = [
+            SpaceWarpMusicFieldDescriptor(
+                field: .strength,
+                label: amountLabel,
+                icon: icon,
+                range: strengthRange
+            )
+        ]
+
+        for parameter in params {
+            let field: SpaceWarpField
+            switch parameter.slot {
+            case 1: field = .param1
+            case 2: field = .param2
+            default: continue
+            }
+            fields.append(
+                SpaceWarpMusicFieldDescriptor(
+                    field: field,
+                    label: parameter.label,
+                    icon: parameter.icon,
+                    range: parameter.range
+                )
+            )
         }
+
+        if usesAxis {
+            fields += [
+                SpaceWarpMusicFieldDescriptor(field: .axisX, label: "\(axisLabel) X", icon: "arrow.left.and.right", range: -1...1),
+                SpaceWarpMusicFieldDescriptor(field: .axisY, label: "\(axisLabel) Y", icon: "arrow.up.and.down", range: -1...1),
+                SpaceWarpMusicFieldDescriptor(field: .axisZ, label: "\(axisLabel) Z", icon: "arrow.up.left.and.arrow.down.right", range: -1...1)
+            ]
+        } else if let sourceAngle {
+            fields.append(
+                SpaceWarpMusicFieldDescriptor(
+                    field: .axisZ,
+                    label: sourceAngle.label,
+                    icon: sourceAngle.icon,
+                    range: sourceAngle.range
+                )
+            )
+        }
+
+        // `WarpToggleSpec` is intentionally not included: it represents a binary
+        // mode, whereas music mappings produce continuous additive offsets.
+
         return fields
+    }
+
+    /// The fields of this transform that make sense to music-drive. Kept as a
+    /// convenience projection for existing callers; `musicFieldDescriptors` is the
+    /// source of truth for the field's label, icon, and valid range.
+    var musicFields: [SpaceWarpField] {
+        musicFieldDescriptors.map(\.field)
+    }
+
+    func musicFieldDescriptor(_ field: SpaceWarpField) -> SpaceWarpMusicFieldDescriptor? {
+        musicFieldDescriptors.first(where: { $0.field == field })
     }
 
     /// Human label for one music-drivable field, using this transform's own naming
     /// (e.g. `.strength` → "Twist", `.param1` → "Fold Limit", `.axisX` → "Offset X").
     func musicFieldLabel(_ field: SpaceWarpField) -> String {
-        switch field {
-        case .strength: return amountLabel
-        case .param1:   return params.first(where: { $0.slot == 1 })?.label ?? "Param 1"
-        case .param2:   return params.first(where: { $0.slot == 2 })?.label ?? "Param 2"
-        case .axisX:    return "\(axisLabel) X"
-        case .axisY:    return "\(axisLabel) Y"
-        case .axisZ:    return sourceAngle?.label ?? "\(axisLabel) Z"
-        }
+        musicFieldDescriptor(field)?.label ?? field.displayName
     }
 
     /// Valid range for a music-driven field (used to clamp the audio-folded value).
     func range(for field: SpaceWarpField) -> ClosedRange<Float> {
+        if let descriptor = musicFieldDescriptor(field) { return descriptor.range }
         switch field {
-        case .strength: return strengthRange
-        case .param1:   return params.first(where: { $0.slot == 1 })?.range ?? 0...1
-        case .param2:   return params.first(where: { $0.slot == 2 })?.range ?? 0...1
-        case .axisZ:
-            return sourceAngle?.range ?? -1...1
-        case .axisX, .axisY:
-            return -1...1   // matches the axis sliders
+        case .axisX, .axisY, .axisZ:
+            return -1...1
+        case .strength, .param1, .param2:
+            return 0...1
         }
     }
 
@@ -138,7 +179,7 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable, Sendable {
 /// `.strength` (the only field bindable before this existed), so old scenes decode
 /// unchanged. `param1`/`param2` map to the op's two scalar slots; `axisX/Y/Z` to the
 /// direction/offset vector.
-enum SpaceWarpField: String, Codable, CaseIterable, Sendable {
+enum SpaceWarpField: String, Codable, CaseIterable, Hashable, Sendable {
     case strength, param1, param2, axisX, axisY, axisZ
 
     var displayName: String {
@@ -168,6 +209,18 @@ struct WarpParamSpec: Identifiable {
     let range: ClosedRange<Float>
     let defaultValue: Float
     var id: Int { slot }
+}
+
+/// Audio-facing presentation of one editable transform field. Instances are
+/// generated by `SpaceWarpKind.musicFieldDescriptors` from `WarpDescriptor`, so
+/// the Transformations editor and Music UI always expose the same parameters.
+struct SpaceWarpMusicFieldDescriptor: Identifiable {
+    let field: SpaceWarpField
+    let label: String
+    let icon: String
+    let range: ClosedRange<Float>
+
+    var id: String { field.rawValue }
 }
 
 /// A per-operator boolean OPTION (e.g. Box Fold "Hall of Mirrors"). Stored in the

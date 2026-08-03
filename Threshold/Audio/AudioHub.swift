@@ -11,6 +11,17 @@ import Foundation
 import Observation
 import Synchronization
 
+/// Device-local launch preference for microphone capture. It intentionally
+/// lives outside scene audio-reactivity settings so opening a saved scene never
+/// changes whether the microphone starts with the app.
+enum AudioInputLaunchPreference {
+    static let microphoneStartsAtLaunchDefaultsKey = "audio.microphone.startsAtLaunch"
+
+    static func microphoneStartsAtLaunch(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: microphoneStartsAtLaunchDefaultsKey)
+    }
+}
+
 private final class AudioFeatureStore: @unchecked Sendable {
     private let value: Mutex<AudioFeatureSnapshot>
 
@@ -42,6 +53,7 @@ final class AudioHub {
     private(set) var selectedSourceID: AudioSourceID?
     private(set) var mixPolicy: AudioMixPolicy = .exclusive
     private var transitionGate = AudioSourceTransitionGate()
+    @ObservationIgnored private var didHandleMicrophoneLaunchPreference = false
 
     /// Fixed for the hub's lifetime. Stored (not computed) so the per-frame
     /// paths don't rebuild an existential array on every access.
@@ -72,6 +84,21 @@ final class AudioHub {
         self.captureSources = [microphone]
         #endif
         self.featureStore = AudioFeatureStore(initialValue: .empty(at: ProcessInfo.processInfo.systemUptime))
+    }
+
+    /// Applies the user's microphone launch preference once per app-model
+    /// lifetime. A remounted root view must not restart input that the user
+    /// explicitly stopped during the current session.
+    func startMicrophoneAtLaunchIfEnabled() async {
+        guard !didHandleMicrophoneLaunchPreference else { return }
+        didHandleMicrophoneLaunchPreference = true
+
+        guard !SettingsPersistence.benchmarkHermetic,
+              AudioInputLaunchPreference.microphoneStartsAtLaunch() else {
+            return
+        }
+
+        _ = await start(.microphone)
     }
 
     /// The sole render-thread entry point. It returns one coherent set of

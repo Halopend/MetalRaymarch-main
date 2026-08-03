@@ -48,7 +48,7 @@ struct ControlCatalogConvergenceTests {
         let cache = ControlCatalogProjectionCache()
         let key = ControlCatalogProjectionKey(
             profile: .macOS,
-            route: .shape(.parameters),
+            route: .input(.parameters),
             presentation: .radial2D,
             fractalType: .mandelbox,
             catalogRevision: 1,

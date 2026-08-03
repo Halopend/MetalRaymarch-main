@@ -626,30 +626,47 @@ struct FractalGridView: View {
     }
 
     private func browserHeader(title: String, systemImage: String, description: String, current: String, accentColor: Color) -> some View {
-        ZStack(alignment: .topTrailing) {
-            VStack(spacing: 4) {
-                Label(title, systemImage: systemImage)
-                    .font(.headline)
-                    .lineLimit(1)
-
-                Text(description)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity)
-
-            Text("Current: \(current)")
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(accentColor)
+        // The title block is centred in the full width, so overlaying the
+        // "Current:" pill on top of it only reads correctly while the column is
+        // wide enough that the two never meet. In the iPad inspector they do —
+        // the pill printed straight through the section title. The list layout
+        // therefore stacks them instead of overlaying.
+        let titleBlock = VStack(spacing: 4) {
+            Label(title, systemImage: systemImage)
+                .font(.headline)
                 .lineLimit(1)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule()
-                        .fill(accentColor.opacity(0.12))
-                )
+
+            Text(description)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+
+        let currentPill = Text("Current: \(current)")
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(accentColor)
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule()
+                    .fill(accentColor.opacity(0.12))
+            )
+
+        return Group {
+            if usesListLayout {
+                VStack(spacing: 6) {
+                    titleBlock
+                    currentPill
+                }
+            } else {
+                ZStack(alignment: .topTrailing) {
+                    titleBlock
+                    currentPill
+                }
+            }
         }
     }
 

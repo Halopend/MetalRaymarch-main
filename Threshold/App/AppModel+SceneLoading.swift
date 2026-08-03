@@ -174,23 +174,22 @@ extension AppModel {
         _ preset: FractalPreset,
         options: StaticSceneLoadOptions
     ) async {
-        if preset.embeddedFormula != nil {
-            // A custom formula has no usable pipeline until its specialized one
-            // is compiled, so this load genuinely has to wait for the build.
-            await preparePipelineHandler?(preset)
-            guard !Task.isCancelled else { return }
-            customSceneDiagnostic("🔬 [CSDiag] applyLoadedScene preparePipelineHandler completed; loading preset NOW")
-        } else {
-            // A built-in fractal already has a working pipeline; specialization
-            // only sharpens it, and the renderer swaps it in when the build
-            // lands. Awaiting it here made every scene tap block on a fresh
-            // Metal compile — seconds on the first visit to each scene on iPad.
-            // Rapid taps are serialized by `loadStaticScene`'s generation guard,
-            // which cancels the older load before it reaches this mutation, so
-            // the await is not what keeps switching safe.
-            Task { await preparePipelineHandler?(preset) }
-            customSceneDiagnostic("🔬 [CSDiag] applyLoadedScene preparePipelineHandler dispatched (fire-and-forget); loading preset NOW")
-        }
+        // Custom and built-in scenes wait here alike: a custom formula has no
+        // usable pipeline until its specialized one is compiled, and a built-in
+        // one may be specialized from the very settings this function is about
+        // to mutate, so neither may overlap the mutation below.
+        //
+        // NOTE: only the visionOS compositor renderer installs
+        // `preparePipelineHandler` (see `Renderer.startRenderLoop`;
+        // `Rendering/Renderer.swift` is excluded from the ThresholdMac and
+        // ThresholdiOS targets). On iPad/Mac this is a no-op, and prewarming is
+        // not needed there: `ViewportRenderer.selectPipeline` builds the
+        // specialized pipeline in the background and draws the current frame
+        // with the generic one. Rapid iPad scene taps are made safe by the
+        // generation/cancellation guards in `loadStaticScene`, not by this await.
+        await preparePipelineHandler?(preset)
+        guard !Task.isCancelled else { return }
+        customSceneDiagnostic("🔬 [CSDiag] applyLoadedScene preparePipelineHandler completed; loading preset NOW")
         // Snapshot the currently displayed parameters so the load can ease
         // from them toward the new preset.
         renderSettings.beginSceneTransitionSnapshot()

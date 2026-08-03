@@ -26,7 +26,7 @@ enum ThresholdControlArea: String, AppEnum {
         switch self {
         case .explore: return .explore(.jumpingOff)
         case .input: return .input(.playback)
-        case .shape: return .shape(.parameters)
+        case .shape: return .shape(.formula)
         case .look: return .look(.color)
         case .quality: return .quality(.overview)
         case .quickToggles: return .quickToggles
