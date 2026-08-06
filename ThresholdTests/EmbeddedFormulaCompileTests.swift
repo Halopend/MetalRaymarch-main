@@ -22,7 +22,7 @@ import Foundation
 import Metal
 @testable import Threshold
 
-@Suite("External loading — embedded distance-estimator formulas compile to an MTLLibrary")
+@Suite("External loading — embedded GPU effects compile to an MTLLibrary")
 struct EmbeddedFormulaCompileTests {
 
     /// Repo `Threshold/Examples` directory, located relative to this source file.
@@ -65,6 +65,9 @@ struct EmbeddedFormulaCompileTests {
             let preset = try decoder.decode(FractalPreset.self, from: Data(contentsOf: url))
             if let formula = preset.embeddedFormula {
                 result.append((url.lastPathComponent, formula))
+            }
+            if let lighting = preset.embeddedLighting {
+                result.append(("\(url.lastPathComponent) [lighting]", lighting))
             }
         }
 
@@ -223,6 +226,8 @@ struct EmbeddedFormulaCompileTests {
     func haveEmbeddedFormulas() throws {
         let formulas = try Self.collectEmbeddedFormulas()
         #expect(!formulas.isEmpty, "no embedded-formula example assets found under \(Self.examplesDir.path)")
+        #expect(formulas.contains { $0.formula.effectKind == .lighting },
+                "no custom-lighting .threshfx example found under \(Self.examplesDir.path)")
     }
 
     @Test("Every embedded formula compiles through the production CustomShaderCompiler")
@@ -239,15 +244,25 @@ struct EmbeddedFormulaCompileTests {
         let compiler = CustomShaderCompiler(device: device)
 
         for (source, formula) in formulas {
-            let isWarp = formula.effectKind == .spaceWarp
-            let kind = isWarp ? "space-warp" : "DE"
+            let fractal: EmbeddedFormula?
+            let spaceWarp: EmbeddedFormula?
+            let lighting: EmbeddedFormula?
+            let kind: String
+            switch formula.effectKind {
+            case .fractal:
+                (fractal, spaceWarp, lighting, kind) = (formula, nil, nil, "DE")
+            case .spaceWarp:
+                (fractal, spaceWarp, lighting, kind) = (nil, formula, nil, "space-warp")
+            case .lighting:
+                (fractal, spaceWarp, lighting, kind) = (nil, nil, formula, "lighting")
+            }
             do {
-                // Route exactly as Renderer.activateEmbeddedFormula does: a warp
-                // rides the built-in DEs (spaceWarp slot), a fractal supplies its
-                // own DE (fractal slot).
+                // Route exactly as Renderer.activateEmbeddedFormula does: each
+                // effect occupies its independent compiler slot.
                 _ = try await compiler.library(
-                    forFractal: isWarp ? nil : formula,
-                    spaceWarp: isWarp ? formula : nil
+                    forFractal: fractal,
+                    spaceWarp: spaceWarp,
+                    lighting: lighting
                 )
             } catch {
                 // The error carries the exact Metal compiler diagnostic (file:line +
@@ -257,4 +272,245 @@ struct EmbeddedFormulaCompileTests {
             }
         }
     }
+
+    #if os(macOS)
+    @Test("macOS viewport installs and detaches a lighting-only library")
+    func macViewportLightingActivation() async throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            Issue.record("No Metal device available; skipping macOS viewport activation coverage")
+            return
+        }
+        guard let lighting = try Self.collectEmbeddedFormulas()
+            .map(\.formula)
+            .first(where: { $0.effectKind == .lighting }) else {
+            Issue.record("No bundled lighting fixture found")
+            return
+        }
+
+        let box = ViewportCustomShaderBox()
+        let vertexDescriptor = MTLVertexDescriptor()
+        vertexDescriptor.attributes[VertexAttribute.position.rawValue].format = .float3
+        vertexDescriptor.attributes[VertexAttribute.position.rawValue].bufferIndex = BufferIndex.meshPositions.rawValue
+        vertexDescriptor.attributes[VertexAttribute.texcoord.rawValue].format = .float2
+        vertexDescriptor.attributes[VertexAttribute.texcoord.rawValue].bufferIndex = BufferIndex.meshGenerics.rawValue
+        vertexDescriptor.layouts[BufferIndex.meshPositions.rawValue].stride = 12
+        vertexDescriptor.layouts[BufferIndex.meshGenerics.rawValue].stride = 8
+        box.configureGenericPipelineFactory(
+            ViewportCustomGenericPipelineFactory(
+                device: device,
+                colorPixelFormat: .rgba16Float,
+                depthPixelFormat: .depth32Float,
+                vertexDescriptor: vertexDescriptor
+            )
+        )
+        let cache = ViewportSpecializedPipelineCache()
+        try await box.activate(nil, lighting: lighting, device: device, cache: cache)
+
+        let active = box.snapshot()
+        #expect(active.library != nil)
+        #expect(active.genericPipeline != nil)
+        #expect(active.hash == CustomShaderCompiler.combinedHash(
+            fractal: nil,
+            spaceWarp: nil,
+            lighting: lighting
+        ))
+
+        try await box.activate(nil, device: device, cache: cache)
+        let detached = box.snapshot()
+        #expect(detached.library == nil)
+        #expect(detached.hash == nil)
+    }
+
+    @Test("Bundled lighting demo materially changes the public material ABI")
+    func bundledLightingDemoChangesMaterialOutputs() async throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            Issue.record("No Metal device available; skipping lighting behavior probe")
+            return
+        }
+
+        let url = Self.examplesDir
+            .appendingPathComponent("Formulas")
+            .appendingPathComponent("IridescentRimLighting.threshfx")
+        let lighting = try EmbeddedFormulaContainer
+            .decode(fromContainerAt: url)
+            .formula
+        #expect(lighting.effectKind == .lighting)
+        let defaultParameterValues = lighting.resolvedParameterValues()
+        var authoredParameterValues = defaultParameterValues
+        authoredParameterValues[0] = 0.0  // no tint
+        authoredParameterValues[1] = 0.0  // no rim emission
+        authoredParameterValues[3] = 0.0  // no specular response
+        authoredParameterValues[4] = 256.0
+        authoredParameterValues[6] = 2.0
+        authoredParameterValues[7] = 2.0
+        authoredParameterValues[8] = 0.0  // no base emission
+        let parameterBanks = defaultParameterValues + authoredParameterValues
+
+        // Execute the external author's real Metal entry point with a tiny
+        // one-thread harness. This proves numerical behavior, not merely that
+        // the full renderer accepted the source and built a pipeline.
+        let source = """
+        #include <metal_stdlib>
+        using namespace metal;
+        #define FORCE_INLINE __attribute__((always_inline)) inline
+
+        struct ThresholdMaterial {
+            half3 baseColor;
+            half3 specularTint;
+            half3 emission;
+            float diffuseScale;
+            float ambientScale;
+            float specularScale;
+            float specularPower;
+        };
+
+        struct CustomLightingParams {
+            float values[16];
+        };
+
+        struct ThresholdLightingContext {
+            float3 position;
+            float3 normal;
+            float3 viewDirection;
+            float3 spotDirection;
+            float3 sunDirection;
+            float spotAttenuation;
+            float sunDiffuseScale;
+            float lightIntensity;
+            float hostSpecularPower;
+            float animationTime;
+            half shadowSpot;
+            half shadowSun;
+            CustomLightingParams params;
+        };
+
+        inline float thresholdLightingParam(ThresholdLightingContext context, uint index)
+        {
+            return context.params.values[min(index, 15u)];
+        }
+
+        \(lighting.metalSource)
+
+        kernel void probeLighting(device float4 *output [[buffer(0)]],
+                                  device const CustomLightingParams *parameterBanks [[buffer(1)]],
+                                  uint tid [[thread_position_in_grid]])
+        {
+            if (tid >= 2) return;
+
+            ThresholdLightingContext context;
+            context.position = float3(0.0f);
+            context.normal = normalize(float3(3.7f, -2.1f, 0.0f));
+            context.viewDirection = float3(0.0f, 0.0f, 1.0f);
+            context.spotDirection = float3(0.0f, 1.0f, 0.0f);
+            context.sunDirection = float3(1.0f, 0.0f, 0.0f);
+            context.spotAttenuation = 1.0f;
+            context.sunDiffuseScale = 1.0f;
+            context.lightIntensity = 1.0f;
+            context.hostSpecularPower = 128.0f;
+            context.animationTime = 0.0f;
+            context.shadowSpot = 1.0h;
+            context.shadowSun = 1.0h;
+            for (uint i = 0; i < 16; ++i) {
+                context.params.values[i] = parameterBanks[tid].values[i];
+            }
+
+            ThresholdMaterial host;
+            host.baseColor = half3(0.8h, 0.7h, 0.6h);
+            host.specularTint = half3(1.0h);
+            host.emission = half3(0.0h);
+            host.diffuseScale = 1.0f;
+            host.ambientScale = 1.0f;
+            host.specularScale = 1.0f;
+            host.specularPower = context.hostSpecularPower;
+
+            ThresholdMaterial result = Lighting_IridescentRimLighting(context, host);
+            uint outputIndex = tid * 4u;
+            output[outputIndex + 0u] = float4(float3(result.baseColor), result.diffuseScale);
+            output[outputIndex + 1u] = float4(float3(result.specularTint), result.specularScale);
+            output[outputIndex + 2u] = float4(float3(result.emission), result.specularPower);
+            output[outputIndex + 3u] = float4(result.ambientScale, 0.0f, 0.0f, 0.0f);
+        }
+        """
+
+        let library = try await device.makeLibrary(source: source, options: nil)
+        guard let function = library.makeFunction(name: "probeLighting"),
+              let queue = device.makeCommandQueue(),
+              let output = device.makeBuffer(
+                length: MemoryLayout<SIMD4<Float>>.stride * 8,
+                options: .storageModeShared
+              ),
+              let parameters = device.makeBuffer(
+                length: MemoryLayout<Float>.stride * parameterBanks.count,
+                options: .storageModeShared
+              ),
+              let commandBuffer = queue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            Issue.record("Could not create the lighting behavior probe")
+            return
+        }
+
+        let parameterPointer = parameters.contents().bindMemory(
+            to: Float.self,
+            capacity: parameterBanks.count
+        )
+        for (index, value) in parameterBanks.enumerated() {
+            parameterPointer[index] = value
+        }
+
+        let pipeline = try await device.makeComputePipelineState(function: function)
+        encoder.setComputePipelineState(pipeline)
+        encoder.setBuffer(output, offset: 0, index: 0)
+        encoder.setBuffer(parameters, offset: 0, index: 1)
+        encoder.dispatchThreads(
+            MTLSize(width: 2, height: 1, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: 1, height: 1, depth: 1)
+        )
+        encoder.endEncoding()
+        commandBuffer.commit()
+        await commandBuffer.completed()
+        guard commandBuffer.status == .completed else {
+            Issue.record("Lighting behavior probe failed: \(commandBuffer.error?.localizedDescription ?? "unknown GPU error")")
+            return
+        }
+
+        let pointer = output.contents().assumingMemoryBound(to: SIMD4<Float>.self)
+        let values = Array(UnsafeBufferPointer(start: pointer, count: 8))
+        let base = values[0]
+        let specular = values[1]
+        let emission = values[2]
+        let ambient = values[3]
+        let authoredBase = values[4]
+        let authoredSpecular = values[5]
+        let authoredEmission = values[6]
+        let authoredAmbient = values[7]
+
+        let baseDistance = sqrt(
+            pow(base.x - 0.8, 2) + pow(base.y - 0.7, 2) + pow(base.z - 0.6, 2)
+        )
+        let specularDistanceFromWhite = sqrt(
+            pow(specular.x - 1.0, 2) + pow(specular.y - 1.0, 2) + pow(specular.z - 1.0, 2)
+        )
+        #expect(baseDistance > 0.25, "demo must visibly replace the host base colour")
+        #expect(max(emission.x, max(emission.y, emission.z)) > 0.5,
+                "demo must emit a bright, unmistakable rim")
+        #expect(specularDistanceFromWhite > 0.25, "demo must visibly tint host specular")
+        #expect(specular.w >= 4.0, "demo specular scale must be obviously stronger")
+        #expect(emission.w < 128.0, "demo must broaden the host's specular highlight")
+        #expect(base.w < 1.0, "demo must modify diffuse scale")
+        #expect(ambient.x < 1.0, "demo must modify ambient scale")
+
+        // Both invocations ran in one dispatch through one compiled pipeline.
+        // Their output difference can therefore only come from the live bank.
+        #expect(abs(authoredBase.w - 2.0) < 0.01,
+                "authored diffuse response must reach the material hook")
+        #expect(abs(authoredAmbient.x - 2.0) < 0.01,
+                "authored ambient response must reach the material hook")
+        #expect(abs(authoredSpecular.w) < 0.01,
+                "authored specular strength must reach the material hook")
+        #expect(abs(authoredEmission.w - 256.0) < 0.01,
+                "authored highlight tightness must reach the material hook")
+        #expect(max(authoredEmission.x, max(authoredEmission.y, authoredEmission.z)) < 0.01,
+                "zero authored emission must remove the demo glow")
+    }
+    #endif
 }

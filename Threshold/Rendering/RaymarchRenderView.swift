@@ -12,6 +12,52 @@ import AppKit
 
 // MARK: - Custom Shader Box (runtime-compiled .threshfx → Mac/iPad)
 
+/// Immutable, Sendable pipeline recipe used to turn a runtime `MTLLibrary` into
+/// an immediately renderable generic viewport PSO. Specialized PSOs can take a
+/// second compile; this prevents a newly imported lighting effect from vanishing
+/// behind the bundled default pipeline during that interval.
+final class ViewportCustomGenericPipelineFactory: @unchecked Sendable {
+    private let device: MTLDevice
+    private let colorPixelFormat: MTLPixelFormat
+    private let depthPixelFormat: MTLPixelFormat
+    private let vertexDescriptor: MTLVertexDescriptor
+
+    init(device: MTLDevice,
+         colorPixelFormat: MTLPixelFormat,
+         depthPixelFormat: MTLPixelFormat,
+         vertexDescriptor: MTLVertexDescriptor) {
+        self.device = device
+        self.colorPixelFormat = colorPixelFormat
+        self.depthPixelFormat = depthPixelFormat
+        self.vertexDescriptor = vertexDescriptor.copy() as! MTLVertexDescriptor
+    }
+
+    func makePipeline(library: MTLLibrary) throws -> MTLRenderPipelineState {
+        guard let vertexFunction = library.makeFunction(name: "screenshotVertexShader") else {
+            throw CustomShaderCompilerError.libraryUnavailable
+        }
+        let constants = MTLFunctionConstantValues()
+        var hasEnvironment = false
+        constants.setConstantValue(&hasEnvironment, type: .bool, index: 16)
+        var hasHandField = false
+        constants.setConstantValue(&hasHandField, type: .bool, index: 18)
+        let fragmentFunction = try library.makeFunction(
+            name: "fragmentShaderMono",
+            constantValues: constants
+        )
+
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.label = "Threshold Custom Generic Pipeline"
+        descriptor.vertexFunction = vertexFunction
+        descriptor.fragmentFunction = fragmentFunction
+        descriptor.vertexDescriptor = vertexDescriptor
+        descriptor.rasterSampleCount = 1
+        descriptor.colorAttachments[0].pixelFormat = colorPixelFormat
+        descriptor.depthAttachmentPixelFormat = depthPixelFormat
+        return try device.makeRenderPipelineState(descriptor: descriptor)
+    }
+}
+
 /// NSLock-guarded holder for the active runtime-compiled custom `MTLLibrary` and
 /// its `EmbeddedFormula.shortHash`, plus the per-renderer `CustomShaderCompiler`.
 ///
@@ -25,7 +71,10 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
     private let lock = NSLock()
     private var _library: MTLLibrary?
     private var _hash: String?
+    private var _genericPipeline: MTLRenderPipelineState?
+    private var _genericPipelineFactory: ViewportCustomGenericPipelineFactory?
     private var _compiler: CustomShaderCompiler?
+    private var _activationGeneration: UInt64 = 0
 
     /// The active custom library, or nil when no custom formula is installed.
     var library: MTLLibrary? { lock.lock(); defer { lock.unlock() }; return _library }
@@ -36,8 +85,18 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
     /// this so the cache-key hash and the build library always come from the SAME
     /// activation — two separate getter calls could otherwise tear if an
     /// activation lands between them (caching a library-B pipeline under hash-A).
-    func snapshot() -> (library: MTLLibrary?, hash: String?) {
-        lock.lock(); defer { lock.unlock() }; return (_library, _hash)
+    func snapshot() -> (library: MTLLibrary?, hash: String?, genericPipeline: MTLRenderPipelineState?) {
+        lock.lock(); defer { lock.unlock() }
+        return (_library, _hash, _genericPipeline)
+    }
+
+    func configureGenericPipelineFactory(_ factory: ViewportCustomGenericPipelineFactory) {
+        lock.lock(); _genericPipelineFactory = factory; lock.unlock()
+    }
+
+    private func genericPipelineFactory() -> ViewportCustomGenericPipelineFactory? {
+        lock.lock(); defer { lock.unlock() }
+        return _genericPipelineFactory
     }
 
     private func sharedCompiler(device: MTLDevice) -> CustomShaderCompiler {
@@ -49,7 +108,32 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
     }
 
     private func set(library: MTLLibrary?, hash: String?) {
-        lock.lock(); _library = library; _hash = hash; lock.unlock()
+        lock.lock(); _library = library; _hash = hash; _genericPipeline = nil; lock.unlock()
+    }
+
+    private func beginActivation() -> UInt64 {
+        lock.lock()
+        _activationGeneration &+= 1
+        let generation = _activationGeneration
+        lock.unlock()
+        return generation
+    }
+
+    private func isCurrentActivation(_ generation: UInt64) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return _activationGeneration == generation
+    }
+
+    private func publish(library: MTLLibrary?, hash: String?,
+                         genericPipeline: MTLRenderPipelineState?,
+                         generation: UInt64) -> (didPublish: Bool, previousHash: String?) {
+        lock.lock(); defer { lock.unlock() }
+        guard _activationGeneration == generation else { return (false, nil) }
+        let previousHash = _hash
+        _library = library
+        _hash = hash
+        _genericPipeline = genericPipeline
+        return (true, previousHash)
     }
 
     /// Compile + install a custom embedded formula (or pass nil to deactivate).
@@ -57,31 +141,66 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
     /// render and main threads. Library + hash are published together under one
     /// lock so a frame never sees library-A with hash-B.
     func activate(_ formula: EmbeddedFormula?,
+                  lighting: EmbeddedFormula? = nil,
                   warpStackSource: String? = nil,
                   warpStackSignature: String = "s0",
                   device: MTLDevice,
                   cache: ViewportSpecializedPipelineCache) async throws {
+        let generation = beginActivation()
         // Effect set = optional .threshfx (fractal DE OR space warp) + the composable
         // transform-stack codegen. Key the library + pipelines by the combined hash so
         // distinct effect sets never alias. A built-in fractal + non-empty stack rides
         // a custom library exactly as a .threshfx warp on a built-in does.
         let isWarp = (formula?.effectKind == .spaceWarp)
-        let fractalEffect = isWarp ? nil : formula
+        let isLighting = (formula?.effectKind == .lighting)
+        let fractalEffect = (isWarp || isLighting) ? nil : formula
         let warpEffect = isWarp ? formula : nil
-        let hasEffect = (formula != nil) || (warpStackSource != nil)
+        let lightingEffect = lighting ?? (isLighting ? formula : nil)
+        let hasEffect = (fractalEffect != nil) || (warpEffect != nil)
+            || (lightingEffect != nil) || (warpStackSource != nil)
         guard hasEffect else {
-            set(library: nil, hash: nil)
-            cache.evict(prefix: "CX")   // drop every custom pipeline → back to default library
+            let published = publish(library: nil, hash: nil,
+                                    genericPipeline: nil, generation: generation)
+            if published.didPublish {
+                cache.evict(prefix: "CX")   // drop every custom pipeline → back to default library
+            }
             return
         }
-        let newHash = CustomShaderCompiler.combinedHash(fractal: fractalEffect, spaceWarp: warpEffect, warpStackSignature: warpStackSignature)
-        if hash == newHash, library != nil { return }   // unchanged → no-op
-        let compiled = try await sharedCompiler(device: device).library(forFractal: fractalEffect, spaceWarp: warpEffect,
-                                                                        warpStackSource: warpStackSource, warpStackSignature: warpStackSignature)
-        if let old = hash, old != newHash {
+        let newHash = CustomShaderCompiler.combinedHash(fractal: fractalEffect,
+                                                        spaceWarp: warpEffect,
+                                                        lighting: lightingEffect,
+                                                        warpStackSignature: warpStackSignature)
+        let current = snapshot()
+        if current.hash == newHash, current.library != nil { return }   // unchanged → no-op
+        let compiled: MTLLibrary
+        do {
+            compiled = try await sharedCompiler(device: device).library(
+                forFractal: fractalEffect,
+                spaceWarp: warpEffect,
+                lighting: lightingEffect,
+                warpStackSource: warpStackSource,
+                warpStackSignature: warpStackSignature
+            )
+        } catch {
+            // A newer immutable effect-set request superseded this compile.
+            // Its result owns publication and error reporting.
+            if !isCurrentActivation(generation) { return }
+            throw error
+        }
+        let genericPipeline: MTLRenderPipelineState?
+        do {
+            genericPipeline = try genericPipelineFactory()?.makePipeline(library: compiled)
+        } catch {
+            if !isCurrentActivation(generation) { return }
+            throw error
+        }
+        let published = publish(library: compiled, hash: newHash,
+                                genericPipeline: genericPipeline,
+                                generation: generation)
+        guard published.didPublish else { return }
+        if let old = published.previousHash, old != newHash {
             cache.evict(prefix: "CX\(old)_")   // retire the previous effect's pipelines
         }
-        set(library: compiled, hash: newHash)
     }
 
     /// Debug "Force Recompile": drop every cached specialized pipeline and the
@@ -90,20 +209,23 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
     /// rebuild lazily in `resolveActivePipeline`, so this is safe to call while
     /// the render thread is live. Returns a short status summary for the UI.
     func forceRecompile(formula: EmbeddedFormula?,
+                        lighting: EmbeddedFormula? = nil,
                         device: MTLDevice,
                         cache: ViewportSpecializedPipelineCache) async -> String {
         cache.evict(prefix: "")                       // drop ALL specialized pipelines
         await sharedCompiler(device: device).evictAll()  // force a true source recompile
         set(library: nil, hash: nil)                  // bypass activate()'s no-op guard
 
-        guard let formula else {
+        guard formula != nil || lighting != nil else {
             return "Cleared the pipeline cache — rebuilding on next frames."
         }
         do {
-            try await activate(formula, device: device, cache: cache)
-            return "Recompiled '\(formula.name)' and cleared the pipeline cache."
+            try await activate(formula, lighting: lighting, device: device, cache: cache)
+            let names = [formula?.name, lighting?.name].compactMap { $0 }.joined(separator: " + ")
+            return "Recompiled '\(names)' and cleared the pipeline cache."
         } catch {
-            return "⚠️ Recompile of '\(formula.name)' failed: \(error.localizedDescription)"
+            let names = [formula?.name, lighting?.name].compactMap { $0 }.joined(separator: " + ")
+            return "⚠️ Recompile of '\(names)' failed: \(error.localizedDescription)"
         }
     }
 }
@@ -195,7 +317,7 @@ struct ThresholdMacRenderView: NSViewRepresentable {
             // visionOS-only). Binding here triggers the handler's didSet, which
             // re-activates any formula loaded before the view existed.
             if let renderer {
-                appModel.activateEmbeddedFormulaHandler = renderer.embeddedFormulaActivator(renderSettings: appModel.renderSettings)
+                appModel.activateEmbeddedFormulaHandler = renderer.embeddedFormulaActivator(appModel: appModel)
                 appModel.forceShaderRecompileHandler = renderer.shaderRecompiler(appModel: appModel)
             }
             appModel.viewportCommandHandler = { [weak inputAccumulator] command in
@@ -337,6 +459,7 @@ final class ViewportRenderer {
         let safetyBubbleFadeWidth: Int32
         let safetyBubbleStrength: Int32
         let formulaParams: SIMD16<Int32>
+        let customLightingParams: SIMD16<Int32>
 
         init(settings: RenderSettingsSnapshot) {
             fractalType = settings.fractalType.rawValue
@@ -375,6 +498,17 @@ final class ViewportRenderer {
                 Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 13)),
                 Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 14)),
                 Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 15))
+            )
+            let lighting = settings.customLightingParams.valuesArray()
+            customLightingParams = SIMD16<Int32>(
+                Self.quantize(lighting[0]), Self.quantize(lighting[1]),
+                Self.quantize(lighting[2]), Self.quantize(lighting[3]),
+                Self.quantize(lighting[4]), Self.quantize(lighting[5]),
+                Self.quantize(lighting[6]), Self.quantize(lighting[7]),
+                Self.quantize(lighting[8]), Self.quantize(lighting[9]),
+                Self.quantize(lighting[10]), Self.quantize(lighting[11]),
+                Self.quantize(lighting[12]), Self.quantize(lighting[13]),
+                Self.quantize(lighting[14]), Self.quantize(lighting[15])
             )
         }
 
@@ -509,6 +643,12 @@ final class ViewportRenderer {
     /// Updated only by drawable presentation callbacks, so it measures what the
     /// user actually saw rather than how often MTKView attempted to draw.
     private let framePacingTracker = OSAllocatedUnfairLock(initialState: FramePacingTracker())
+    #if os(iOS)
+    /// One-shot handshake for the launch UI. Renderer construction only proves
+    /// that pipelines exist; the workspace is ready to reveal after a drawable
+    /// has actually reached presentation (GPU completion in Simulator).
+    private let startupFramePresentationState = OSAllocatedUnfairLock(initialState: false)
+    #endif
     // GPU time per frame, smoothed. Written on the command-buffer completion
     // thread, read on the render thread — hence the lock. Surfaces the real,
     // vsync-independent render cost to the perf HUD.
@@ -602,6 +742,14 @@ final class ViewportRenderer {
             depthPixelFormat: depthPixelFormat,
             vertexDescriptor: builtVertexDescriptor,
             cache: specializedPipelineCache
+        )
+        customShaderBox.configureGenericPipelineFactory(
+            ViewportCustomGenericPipelineFactory(
+                device: device,
+                colorPixelFormat: colorPixelFormat,
+                depthPixelFormat: depthPixelFormat,
+                vertexDescriptor: builtVertexDescriptor
+            )
         )
         mesh = builtMesh
 
@@ -1033,6 +1181,42 @@ final class ViewportRenderer {
         }
         #endif
 
+        #if os(iOS)
+        let startupFramePresentationState = self.startupFramePresentationState
+        let needsStartupReadinessSignal = startupFramePresentationState.withLock { !$0 }
+        if needsStartupReadinessSignal {
+            #if targetEnvironment(simulator)
+            // CAMetalDrawable presentation callbacks are unavailable in the
+            // Simulator, so successful GPU completion is its closest reliable
+            // readiness boundary.
+            commandBuffer.addCompletedHandler { [weak appModel, startupFramePresentationState] buffer in
+                guard buffer.status == .completed else { return }
+                let shouldPublish = startupFramePresentationState.withLock { didPublish in
+                    guard !didPublish else { return false }
+                    didPublish = true
+                    return true
+                }
+                guard shouldPublish else { return }
+                Task { @MainActor [weak appModel] in
+                    appModel?.rendererStartupWarmupComplete = true
+                }
+            }
+            #else
+            drawable.addPresentedHandler { [weak appModel, startupFramePresentationState] _ in
+                let shouldPublish = startupFramePresentationState.withLock { didPublish in
+                    guard !didPublish else { return false }
+                    didPublish = true
+                    return true
+                }
+                guard shouldPublish else { return }
+                Task { @MainActor [weak appModel] in
+                    appModel?.rendererStartupWarmupComplete = true
+                }
+            }
+            #endif
+        }
+        #endif
+
         let activePipeline = resolveActivePipeline(appModel: appModel)
 
         if let temporalPass, let blitPipelineState, let motionPipelineState {
@@ -1294,7 +1478,10 @@ final class ViewportRenderer {
             )
         }
         appModel.isUsingSpecializedPipeline = false
-        return pipelineState
+        // A custom library is not interchangeable with the bundled pipeline.
+        // Use its generic PSO while its fully-specialized key compiles so an
+        // imported lighting effect is visible continuously from activation.
+        return custom.genericPipeline ?? pipelineState
     }
 
     /// Asynchronously compiles a specialized `fragmentShaderMono` pipeline and
@@ -1336,15 +1523,16 @@ final class ViewportRenderer {
     /// compiled library is a drop-in for `default.metallib`, so the existing
     /// function-constant specialization renders the custom DE. Captures only
     /// Sendable values (box, cache, device), never the renderer itself.
-    func embeddedFormulaActivator(renderSettings: RenderSettings) -> @Sendable (EmbeddedFormula?) async throws -> Void {
+    func embeddedFormulaActivator(appModel: AppModel) -> @Sendable (EmbeddedFormula?, EmbeddedFormula?) async throws -> Void {
         let box = customShaderBox
         let cache = specializedPipelineCache
         let device = self.device
+        let renderSettings = appModel.renderSettings
         // RenderSettings is @unchecked Sendable; it carries the composable
         // transform-stack codegen (regenerated on structural change) that we bake
         // into the compiled library so a built-in fractal + stack runs unrolled.
-        return { formula in
-            try await box.activate(formula,
+        return { formula, lighting in
+            try await box.activate(formula, lighting: lighting,
                                    warpStackSource: renderSettings.warpStackCodegenSource,
                                    warpStackSignature: renderSettings.warpStackCodegenSignature,
                                    device: device, cache: cache)
@@ -1361,8 +1549,11 @@ final class ViewportRenderer {
         let cache = specializedPipelineCache
         let device = self.device
         return {
-            let formula = await MainActor.run { appModel.activeEmbeddedFormula }
-            return await box.forceRecompile(formula: formula, device: device, cache: cache)
+            let (formula, lighting) = await MainActor.run {
+                (appModel.activeEmbeddedFormula, appModel.activeEmbeddedLighting)
+            }
+            return await box.forceRecompile(formula: formula, lighting: lighting,
+                                            device: device, cache: cache)
         }
     }
 
@@ -2197,7 +2388,12 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         private var orbitOwnsInput = false
         private var panOwnsInput = false
         private var pinchOwnsInput = false
+        private var scenePanOwnsInput = false
+        private var didTriggerSceneStepForCurrentPan = false
+        private var cameraRecognizersSuspendedForScenePan = false
+        private weak var oneFingerOrbit: UIPanGestureRecognizer?
         private weak var twoFingerPan: UIPanGestureRecognizer?
+        private weak var threeFingerScenePan: UIPanGestureRecognizer?
         private weak var pinch: UIPinchGestureRecognizer?
 
         init(appModel: AppModel) {
@@ -2229,12 +2425,13 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                                             depthPixelFormat: view.depthStencilPixelFormat,
                                             clearColor: view.clearColor)
             renderer?.drawableSizeDidChange(view.drawableSize)
-            appModel.rendererStartupWarmupComplete = renderer != nil
+            // Readiness is published by ViewportRenderer only after its first
+            // successful drawable presentation, not merely after construction.
             // Compile + activate runtime `.threshfx` formulas on Mac/iPad (was
             // visionOS-only). Binding here triggers the handler's didSet, which
             // re-activates any formula loaded before the view existed.
             if let renderer {
-                appModel.activateEmbeddedFormulaHandler = renderer.embeddedFormulaActivator(renderSettings: appModel.renderSettings)
+                appModel.activateEmbeddedFormulaHandler = renderer.embeddedFormulaActivator(appModel: appModel)
                 appModel.forceShaderRecompileHandler = renderer.shaderRecompiler(appModel: appModel)
             }
             appModel.viewportCommandHandler = { [weak inputController] command in
@@ -2256,6 +2453,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             orbit.cancelsTouchesInView = false
             orbit.delaysTouchesBegan = false
             orbit.delaysTouchesEnded = false
+            oneFingerOrbit = orbit
 
             let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
             pan.minimumNumberOfTouches = 2
@@ -2265,6 +2463,23 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             pan.delaysTouchesBegan = false
             pan.delaysTouchesEnded = false
             twoFingerPan = pan
+
+            // Scene navigation is based on horizontal distance instead of
+            // UIKit's stricter swipe velocity heuristic. Exact touch counts
+            // keep this isolated from one-finger orbit and two-finger camera
+            // pan, while firing during `.changed` makes it feel immediate.
+            let scenePan = UIPanGestureRecognizer(
+                target: self,
+                action: #selector(handleScenePan(_:))
+            )
+            scenePan.minimumNumberOfTouches = 3
+            scenePan.maximumNumberOfTouches = 3
+            scenePan.delegate = self
+            scenePan.cancelsTouchesInView = false
+            scenePan.delaysTouchesBegan = false
+            scenePan.delaysTouchesEnded = false
+            scenePan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+            threeFingerScenePan = scenePan
 
             let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
             pinchGesture.delegate = self
@@ -2286,6 +2501,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
 
             view.addGestureRecognizer(orbit)
             view.addGestureRecognizer(pan)
+            view.addGestureRecognizer(scenePan)
             view.addGestureRecognizer(pinchGesture)
             view.addGestureRecognizer(doubleTap)
         }
@@ -2306,6 +2522,11 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                 pinchOwnsInput = false
                 appModel.inputOwnershipStore.release(.viewport)
             }
+            if scenePanOwnsInput {
+                scenePanOwnsInput = false
+                appModel.inputOwnershipStore.release(.viewport)
+            }
+            cameraRecognizersSuspendedForScenePan = false
             inputController.setFocus(false)
             renderer = nil
             Task { @MainActor [appModel] in
@@ -2338,7 +2559,8 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                 lastOrbitTranslation = .zero
                 inputController.setFocus(true)
             case .changed:
-                guard orbitOwnsInput else { return }
+                guard orbitOwnsInput,
+                      !scenePanOwnsInput else { return }
                 let delta = SIMD2<Float>(Float(translation.x - lastOrbitTranslation.x),
                                          Float(translation.y - lastOrbitTranslation.y))
                 lastOrbitTranslation = translation
@@ -2364,7 +2586,8 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                 lastPanTranslation = .zero
                 inputController.setFocus(true)
             case .changed:
-                guard panOwnsInput else { return }
+                guard panOwnsInput,
+                      !scenePanOwnsInput else { return }
                 let delta = SIMD2<Float>(Float(translation.x - lastPanTranslation.x),
                                          Float(translation.y - lastPanTranslation.y))
                 lastPanTranslation = translation
@@ -2383,12 +2606,21 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
             switch gesture.state {
             case .began:
-                guard !pinchOwnsInput,
+                guard gesture.numberOfTouches == 2,
+                      !pinchOwnsInput,
                       appModel.inputOwnershipStore.claim(.viewport) else { return }
                 pinchOwnsInput = true
                 lastPinchScale = gesture.scale
                 inputController.setFocus(true)
             case .changed:
+                // UIPinchGestureRecognizer accepts more than two fingers. Once
+                // a third arrives, stop zoom ownership so the exact-three-touch
+                // scene pan can proceed without also changing the camera.
+                guard gesture.numberOfTouches == 2,
+                      !scenePanOwnsInput else {
+                    finishPinchInteraction()
+                    return
+                }
                 guard pinchOwnsInput else { return }
                 // Mirror the macOS `magnify` convention: pinch-out (scale > 1)
                 // feeds a negative zoom delta, which the renderer maps to a
@@ -2399,12 +2631,90 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                     inputController.addZoom(delta: -delta * 18.0)
                 }
             default:
-                lastPinchScale = 1.0
-                if pinchOwnsInput {
-                    pinchOwnsInput = false
-                    appModel.inputOwnershipStore.release(.viewport)
-                }
+                finishPinchInteraction()
             }
+        }
+
+        private func finishPinchInteraction() {
+            lastPinchScale = 1.0
+            if pinchOwnsInput {
+                pinchOwnsInput = false
+                appModel.inputOwnershipStore.release(.viewport)
+            }
+        }
+
+        @objc private func handleScenePan(_ gesture: UIPanGestureRecognizer) {
+            switch gesture.state {
+            case .began:
+                guard !scenePanOwnsInput,
+                      appModel.inputOwnershipStore.claim(.viewport) else { return }
+                scenePanOwnsInput = true
+                didTriggerSceneStepForCurrentPan = false
+                inputController.clearCameraDeltas()
+                suspendCameraRecognizersForScenePan()
+            case .changed:
+                triggerSceneStepIfNeeded(from: gesture)
+            case .ended:
+                triggerSceneStepIfNeeded(from: gesture)
+                finishScenePanInteraction()
+            default:
+                finishScenePanInteraction()
+            }
+        }
+
+        private func triggerSceneStepIfNeeded(from gesture: UIPanGestureRecognizer) {
+            guard scenePanOwnsInput,
+                  !didTriggerSceneStepForCurrentPan else { return }
+            let translation = gesture.translation(in: gesture.view)
+            let step = SceneSwipeGesturePolicy.sceneStep(
+                for: SIMD2(Float(translation.x), Float(translation.y))
+            )
+            guard step != 0 else { return }
+
+            didTriggerSceneStepForCurrentPan = true
+            inputController.requestSceneStep(step)
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+
+        private func finishScenePanInteraction() {
+            didTriggerSceneStepForCurrentPan = false
+            if scenePanOwnsInput {
+                scenePanOwnsInput = false
+                appModel.inputOwnershipStore.release(.viewport)
+            }
+            resumeCameraRecognizersAfterScenePan()
+        }
+
+        private func suspendCameraRecognizersForScenePan() {
+            guard !cameraRecognizersSuspendedForScenePan else { return }
+            cameraRecognizersSuspendedForScenePan = true
+
+            oneFingerOrbit?.isEnabled = false
+            twoFingerPan?.isEnabled = false
+            pinch?.isEnabled = false
+
+            // UIKit normally delivers cancellation callbacks when a recognizer
+            // is disabled. Balance defensively in case teardown/routing skips
+            // one; each callback clears its flag before this check can repeat.
+            lastOrbitTranslation = .zero
+            if orbitOwnsInput {
+                orbitOwnsInput = false
+                appModel.inputOwnershipStore.release(.viewport)
+            }
+            lastPanTranslation = .zero
+            if panOwnsInput {
+                panOwnsInput = false
+                appModel.inputOwnershipStore.release(.viewport)
+            }
+            finishPinchInteraction()
+        }
+
+        private func resumeCameraRecognizersAfterScenePan() {
+            guard cameraRecognizersSuspendedForScenePan else { return }
+            cameraRecognizersSuspendedForScenePan = false
+            oneFingerOrbit?.isEnabled = true
+            twoFingerPan?.isEnabled = true
+            pinch?.isEnabled = true
         }
 
         @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
@@ -2415,18 +2725,41 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            appModel.inputOwnershipStore.canConsume(.viewport)
+            guard appModel.inputOwnershipStore.canConsume(.viewport) else { return false }
+            if gestureRecognizer === threeFingerScenePan,
+               UIAccessibility.isVoiceOverRunning {
+                return false
+            }
+            if gestureRecognizer === pinch {
+                return gestureRecognizer.numberOfTouches == 2
+            }
+            return true
         }
 
-        // Allow the two-finger pan and pinch to run together (natural combined
-        // pan + zoom); keep the one-finger orbit exclusive.
+        // Allow natural two-finger pan + zoom. Any continuous camera gesture
+        // can already be active while fingers land one by one, so it must be
+        // allowed to coexist briefly with the scene pan before suspension.
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
             let pair: Set<ObjectIdentifier> = [ObjectIdentifier(gestureRecognizer), ObjectIdentifier(other)]
-            var allowed: Set<ObjectIdentifier> = []
-            if let twoFingerPan { allowed.insert(ObjectIdentifier(twoFingerPan)) }
-            if let pinch { allowed.insert(ObjectIdentifier(pinch)) }
-            return pair.isSubset(of: allowed)
+            if let twoFingerPan, let pinch,
+               pair == [ObjectIdentifier(twoFingerPan), ObjectIdentifier(pinch)] {
+                return true
+            }
+            if let threeFingerScenePan {
+                let scenePanID = ObjectIdentifier(threeFingerScenePan)
+                let cameraRecognizers: [UIGestureRecognizer?] = [
+                    oneFingerOrbit,
+                    twoFingerPan,
+                    pinch,
+                ]
+                for cameraRecognizer in cameraRecognizers.compactMap({ $0 }) {
+                    if pair == [scenePanID, ObjectIdentifier(cameraRecognizer)] {
+                        return true
+                    }
+                }
+            }
+            return false
         }
     }
 }

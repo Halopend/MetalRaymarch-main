@@ -14,6 +14,7 @@ Traces
 build/*
 .build/*
 Sources/*
+OptimizationProfiles/*
 
 # LLVM/Clang profiling artifacts (e.g. default.profraw from instrumented runs)
 *.profraw

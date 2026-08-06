@@ -3651,6 +3651,79 @@ FORCE_INLINE float computeAO(float3 hitPos, float3 nor, FractalParams params, fl
 // Schlick-fresnel specular contribution. Shadow computation (including
 // visionOS's tile-shared-shadow optimization) stays at each call site; this
 // function only consumes the resulting shadow scalars.
+//
+// Custom `.threshfx` lighting effects target this small, host-owned ABI. They
+// modify material intent; Threshold remains responsible for applying lights,
+// shadows, AO, cel shading, fog, glow, and post effects exactly once.
+struct ThresholdMaterial {
+    half3 baseColor;
+    half3 specularTint;
+    half3 emission;
+    float diffuseScale;
+    float ambientScale;
+    float specularScale;
+    float specularPower;
+};
+
+struct ThresholdLightingContext {
+    float3 position;
+    float3 normal;
+    float3 viewDirection;
+    float3 spotDirection;
+    float3 sunDirection;
+    float spotAttenuation;
+    float sunDiffuseScale;
+    float lightIntensity;
+    float hostSpecularPower;
+    float animationTime;
+    half shadowSpot;
+    half shadowSun;
+    CustomLightingParams params;
+};
+
+// Public, bounds-safe accessor for values declared by EmbeddedFormula.params.
+// Keeping storage in a host-owned wrapper lets this ABI evolve without making
+// external effects depend on the C array's imported representation.
+FORCE_INLINE float thresholdLightingParam(ThresholdLightingContext context, uint index)
+{
+    return context.params.values[min(index, 15u)];
+}
+
+// Runtime source synthesis replaces this marker with the external effect and a
+// generated adapter that calls `Lighting_<functionStem>`.
+// __CUSTOM_LIGHTING__
+#ifndef THRESHOLD_CUSTOM_LIGHTING
+FORCE_INLINE ThresholdMaterial applyCustomLightingMaterial(ThresholdLightingContext context,
+                                                            ThresholdMaterial material)
+{
+    (void)context;
+    return material;
+}
+#endif
+
+FORCE_INLINE ThresholdMaterial sanitizeThresholdMaterial(ThresholdMaterial material,
+                                                          ThresholdMaterial fallback)
+{
+    float3 base = float3(material.baseColor);
+    float3 tint = float3(material.specularTint);
+    float3 emission = float3(material.emission);
+    material.baseColor = all(isfinite(base))
+        ? half3(clamp(base, float3(0.0f), float3(64.0f))) : fallback.baseColor;
+    material.specularTint = all(isfinite(tint))
+        ? half3(clamp(tint, float3(0.0f), float3(64.0f))) : fallback.specularTint;
+    material.emission = all(isfinite(emission))
+        ? half3(clamp(emission, float3(0.0f), float3(64.0f))) : fallback.emission;
+    material.diffuseScale = isfinite(material.diffuseScale)
+        ? clamp(material.diffuseScale, 0.0f, 8.0f) : fallback.diffuseScale;
+    material.ambientScale = isfinite(material.ambientScale)
+        ? clamp(material.ambientScale, 0.0f, 8.0f) : fallback.ambientScale;
+    material.specularScale = isfinite(material.specularScale)
+        ? clamp(material.specularScale, 0.0f, 16.0f) : fallback.specularScale;
+    material.specularPower = isfinite(material.specularPower)
+        ? clamp(material.specularPower, 1.0f, 512.0f) : fallback.specularPower;
+    return material;
+}
+
 FORCE_INLINE half3 ShadeSurface(float3 hitPos, float3 nor, float3 viewDir,
                                  float3 spot, float atten, float3 sunDir,
                                  float sunDiffuseScale, float lightIntensity, float specPower,
@@ -3658,11 +3731,45 @@ FORCE_INLINE half3 ShadeSurface(float3 hitPos, float3 nor, float3 viewDir,
                                  ColorSchemeParams colorScheme,
                                  FractalParams params, float foldingLimit,
                                  int iterations, int fractalType, FormulaParams fp,
+                                 CustomLightingParams customLightingParams,
                                  half roomAmbientOcc = 1.0h)
 {
+    ThresholdMaterial hostMaterial;
+    hostMaterial.baseColor = baseColor;
+    hostMaterial.specularTint = half3(1.0h);
+    hostMaterial.emission = half3(0.0h);
+    hostMaterial.diffuseScale = 1.0f;
+    hostMaterial.ambientScale = 1.0f;
+    hostMaterial.specularScale = 1.0f;
+    hostMaterial.specularPower = specPower;
+
+    ThresholdMaterial material = hostMaterial;
+#ifdef THRESHOLD_CUSTOM_LIGHTING
+    ThresholdLightingContext lightingContext;
+    lightingContext.position = hitPos;
+    lightingContext.normal = nor;
+    lightingContext.viewDirection = viewDir;
+    lightingContext.spotDirection = spot;
+    lightingContext.sunDirection = sunDir;
+    lightingContext.spotAttenuation = atten;
+    lightingContext.sunDiffuseScale = sunDiffuseScale;
+    lightingContext.lightIntensity = lightIntensity;
+    lightingContext.hostSpecularPower = specPower;
+    lightingContext.animationTime = colorScheme.animTime;
+    lightingContext.shadowSpot = shaSpot;
+    lightingContext.shadowSun = shaSun;
+    lightingContext.params = customLightingParams;
+    material = sanitizeThresholdMaterial(
+        applyCustomLightingMaterial(lightingContext, hostMaterial), hostMaterial);
+#endif
+
     float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
-    half bri = quantizeCelLight(half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity), colorScheme);
-    half briSun = quantizeCelLight(half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale), colorScheme);
+    half spotLight = quantizeCelLight(
+        half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity), colorScheme);
+    half sunLight = quantizeCelLight(
+        half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale), colorScheme);
+    half bri = spotLight * half(material.diffuseScale);
+    half briSun = sunLight * half(material.diffuseScale);
 
     // Real ambient occlusion (optional, blended in by colorScheme.aoStrength).
     // At aoStrength == 0 this is byte-identical to the old flat hemisphere
@@ -3678,22 +3785,26 @@ FORCE_INLINE half3 ShadeSurface(float3 hitPos, float3 nor, float3 viewDir,
     }
     // Bound to Space room ambient: contact occlusion from the bounded room's
     // walls/floor/ceiling (1 when off — see roomAmbientOcclusion).
-    ambient *= roomAmbientOcc;
+    ambient *= roomAmbientOcc * half(material.ambientScale);
 
-    half3 col = (baseColor * bri * shaSpot) + (baseColor * briSun * shaSun) + (baseColor * ambient);
+    half3 col = (material.baseColor * bri * shaSpot)
+        + (material.baseColor * briSun * shaSun)
+        + (material.baseColor * ambient);
 
     if (colorScheme.cellShadingEnabled == 0) {
         float NoV = saturate(dot(nor, viewDir));
         float fresnel = fma(1.0f - 0.04f, powr(max(1.0f - NoV, 0.0f), 5.0f), 0.04f);
         float3 Hspot = normalize(spot + viewDir);
         float3 Hsun = normalize(sunDir + viewDir);
-        float specSpot = powr(max(dot(nor, Hspot), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
-        float specSun = powr(max(dot(nor, Hsun), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
-        col += half3(specSpot) * shaSpot * bri;
-        col += half3(specSun) * shaSun * briSun;
+        float specSpot = powr(max(dot(nor, Hspot), kPowEpsilon), material.specularPower)
+            * kSpecularIntensity * fresnel * material.specularScale;
+        float specSun = powr(max(dot(nor, Hsun), kPowEpsilon), material.specularPower)
+            * kSpecularIntensity * fresnel * material.specularScale;
+        col += material.specularTint * half(specSpot) * shaSpot * spotLight;
+        col += material.specularTint * half(specSun) * shaSun * sunLight;
     }
 
-    return col;
+    return col + material.emission;
 }
 
 // === Temporal-reprojection shared helpers (extracted from adaptiveHierarchical8x8) ===
@@ -4415,7 +4526,8 @@ kernel void adaptiveHierarchical8x8(
         col = ShadeSurface(p, nor, V, spot, atten, sunDir, sunDiffuseScale, lightIntensity,
                             uniforms.precomputedLighting.specPower, shaSpot, shaSun, col,
                             uniforms.colorScheme, fractalParams, uniforms.foldingLimit,
-                            lodIterations, fractalType, uniforms.formulaParams, roomAmb);
+                            lodIterations, fractalType, uniforms.formulaParams,
+                            uniforms.customLightingParams, roomAmb);
     }
 
     // Apply fog, glow, and clamp using helper functions
@@ -4851,7 +4963,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             col = ShadeSurface(p, nor, V, spot, atten, sunDir, sunDiffuseScale, lightIntensity,
                                 uniforms.precomputedLighting.specPower, shaSpot, shaSun, col,
                                 uniforms.colorScheme, fractalParams, uniforms.foldingLimit,
-                                lodIterations, fractalType, uniforms.formulaParams, roomAmb);
+                                lodIterations, fractalType, uniforms.formulaParams,
+                                uniforms.customLightingParams, roomAmb);
         }
         // Depth already written at start of this block via clipPos
         }

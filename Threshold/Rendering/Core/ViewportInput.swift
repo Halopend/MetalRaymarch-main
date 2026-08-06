@@ -101,6 +101,27 @@ enum ViewportKeyboardMap {
     }
 }
 
+/// Shared distance-and-direction policy for direct scene browsing gestures.
+/// Unlike `UISwipeGestureRecognizer`, this deliberately has no velocity
+/// requirement, so a slow three-finger drag remains a valid scene step.
+enum SceneSwipeGesturePolicy {
+    static let activationDistance: Float = 32
+    static let horizontalDominance: Float = 1.15
+
+    /// Returns +1 for a leftward drag (next), -1 for a rightward drag
+    /// (previous), and zero until the gesture is intentional enough to act on.
+    static func sceneStep(for translation: SIMD2<Float>) -> Int {
+        guard translation.x.isFinite, translation.y.isFinite else { return 0 }
+        let horizontalDistance = abs(translation.x)
+        let verticalDistance = abs(translation.y)
+        guard horizontalDistance >= activationDistance,
+              horizontalDistance >= verticalDistance * horizontalDominance else {
+            return 0
+        }
+        return translation.x < 0 ? 1 : -1
+    }
+}
+
 /// The single native-adapter boundary for mouse, trackpad, touch, and hardware
 /// keyboard events. Platform views translate events; this sink owns semantics.
 protocol ViewportInputSink: AnyObject {
@@ -217,6 +238,16 @@ final class ViewportInputAccumulator: ViewportInputSink, Sendable {
     func addZoom(delta: Float) {
         state.withLock { current in
             current.zoomDelta += delta
+        }
+    }
+
+    /// Drops only camera motion queued while fingers were landing for a
+    /// three-finger scene gesture. Keyboard state and discrete actions survive.
+    func clearCameraDeltas() {
+        state.withLock { current in
+            current.orbitDelta = .zero
+            current.panDelta = .zero
+            current.zoomDelta = 0
         }
     }
 

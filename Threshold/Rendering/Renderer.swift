@@ -777,9 +777,10 @@ actor Renderer {
                 // Setup custom-shader (.threshfx) activation handler. Also carries
                 // the composable transform-stack codegen (read from RenderSettings)
                 // so a built-in fractal + stack compiles a specialized library.
-                appModel.activateEmbeddedFormulaHandler = { [renderSettings = appModel.renderSettings] formula in
+                appModel.activateEmbeddedFormulaHandler = { [renderSettings = appModel.renderSettings] formula, lighting in
                     try await renderer.activateEmbeddedFormula(
                         formula,
+                        lighting: lighting,
                         warpStackSource: renderSettings.warpStackCodegenSource,
                         warpStackSignature: renderSettings.warpStackCodegenSignature)
                 }
@@ -836,35 +837,10 @@ actor Renderer {
             }
             guard installedHandlers, !Task.isCancelled else { return }
 
-            // If an embedded formula was already registered (e.g. opening a
-            // custom .threshscene/.threshfx from Finder, which opens the
-            // immersive space with `activeEmbeddedFormula` already set), activate
-            // it so the renderer compiles the custom MTLLibrary instead of
-            // rendering fog/sky only.
-            //
-            // CRITICAL: this must NOT be awaited before `renderLoop()`. A fresh
-            // custom-shader compile takes ~0.5-5s, and on visionOS the compositor
-            // kills the app (no Swift trace) if the first frame doesn't arrive
-            // shortly after the immersive space opens. Awaiting the compile here
-            // delayed first-frame past that deadline — which is exactly why every
-            // custom scene opened externally crashed EXCEPT the active/default one
-            // (a `libraryCache` hit that returns instantly). Activate
-            // concurrently instead: the render loop starts immediately and
-            // submits frames (the frame path renders a safe fallback and
-            // `scheduleCustomLibrarySelfHeal` swaps the custom DE in once the
-            // library is ready). The compile itself is also off-thread now
-            // (CustomShaderCompiler.library uses the async makeLibrary API).
-            let pendingFormula = await MainActor.run { appModel.activeEmbeddedFormula }
-            if let pending = pendingFormula, !pending.isBundledConstructionPrimitive {
-                customSceneDiagnostic("🔬 [CSDiag] Handler ready — scheduling deferred activation for '\(pending.name)' hash=\(pending.shortHash) (concurrent; does NOT block first frame)")
-                Task {
-                    do {
-                        try await renderer.activateEmbeddedFormula(pending)
-                    } catch {
-                        customSceneDiagnostic("🔬 [CSDiag] ❌ Deferred activation failed: \(error)")
-                    }
-                }
-            }
+            // Assigning `activateEmbeddedFormulaHandler` above launches its
+            // didSet activation concurrently. Keep that as the single owner of
+            // cold-start compilation so the first compositor frame is never
+            // blocked and duplicate activation generations cannot race.
 
             guard !Task.isCancelled else {
                 await MainActor.run {
@@ -1916,6 +1892,7 @@ actor Renderer {
             floorPlane: framePreparation.perEye[viewIndex].floorPlane,
             floorCenterRadius: framePreparation.perEye[viewIndex].floorCenterRadius,
             formulaParams: settingsSnapshot.formulaParams,
+            customLightingParams: settingsSnapshot.customLightingParams,
             currentViewProjMatrix: currentViewProj,
             previousViewProjMatrix: previousViewProjMatrices[viewIndex],
             currentInvViewProjMatrix: currentViewProj.inverse,
@@ -2531,6 +2508,7 @@ actor Renderer {
                 floorPlane: framePreparation.perEye[viewIndex].floorPlane,
                 floorCenterRadius: framePreparation.perEye[viewIndex].floorCenterRadius,
                 formulaParams: settingsSnapshot.formulaParams,
+                customLightingParams: settingsSnapshot.customLightingParams,
                 currentViewProjMatrix: projection * modelView,
                 previousViewProjMatrix: previousViewProjMatrices[viewIndex],
                 currentInvViewProjMatrix: (projection * modelView).inverse,

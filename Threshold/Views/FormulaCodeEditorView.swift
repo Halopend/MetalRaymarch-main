@@ -65,7 +65,7 @@ struct FormulaEditorWindowView: View {
                 .foregroundStyle(.secondary)
             Text("Metal DE Studio is experimental")
                 .font(.headline)
-            Text("Enable “Allow custom scenes” in Settings → General to write a Metal distance estimator on your Mac.")
+            Text("Enable “Allow custom scenes” in Settings → Display → Experimental Display to write a Metal distance estimator on your Mac.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

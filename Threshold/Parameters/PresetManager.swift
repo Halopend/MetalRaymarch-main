@@ -159,6 +159,11 @@ enum StorePlaceholderReadPolicy {
 @Observable
 class PresetManager {
     private(set) var presets: [FractalPreset] = []
+    /// Cold-launch readiness for the iPad bootstrap surface. This stays false
+    /// through the first detached folder scan and any one-time bundled-scene
+    /// seeding pass, so the app does not reveal an apparently frozen workspace
+    /// while those main-actor writes are still in progress.
+    private(set) var isInitialLoadComplete = false
     private static var bundledPresetsCache: [FractalPreset]?
     /// The baseline bundle marker intentionally never re-seeds an existing
     /// store. This separate, versioned marker lets a deliberate catalog update
@@ -898,6 +903,9 @@ class PresetManager {
             bundledPlaceholderFallbacks = []
             failedPlaceholderProbeURLs = []
             presets = pendingRootWrites.values.sorted { $0.createdAt > $1.createdAt }
+            // Root discovery can continue in the background; an unresolved
+            // iCloud container must not leave the launch screen up forever.
+            isInitialLoadComplete = true
             return
         }
         StorageLocation.shared.ensureLayout(at: root)
@@ -1048,6 +1056,13 @@ class PresetManager {
                 allowsPlaceholderProbe: true
             )
         }
+
+        // A write pass always schedules an immediate verification scan above.
+        // Only publish readiness once a complete pass needs no more migration
+        // or seeding work; placeholder hydration is intentionally progressive.
+        if !wroteFiles {
+            isInitialLoadComplete = true
+        }
     }
 
     /// Bundled defaults are seeded once per store; there's nothing to "re-merge"
@@ -1147,8 +1162,15 @@ class PresetManager {
     /// Save current settings as a new preset
     @discardableResult
     func savePreset(name: String, settings: RenderSettings, thumbnailData: Data? = nil,
-                    embeddedFormula: EmbeddedFormula? = nil) -> PresetSaveResult {
-        let preset = FractalPreset.fromSettings(settings, name: name, thumbnailData: thumbnailData, embeddedFormula: embeddedFormula)
+                    embeddedFormula: EmbeddedFormula? = nil,
+                    embeddedLighting: EmbeddedFormula? = nil) -> PresetSaveResult {
+        let preset = FractalPreset.fromSettings(
+            settings,
+            name: name,
+            thumbnailData: thumbnailData,
+            embeddedFormula: embeddedFormula,
+            embeddedLighting: embeddedLighting
+        )
         presets.insert(preset, at: 0) // Add to beginning (newest first)
         let result = persist(preset)
         if case .failed = result {
@@ -1421,8 +1443,15 @@ extension PresetManager {
     }
     
     /// Save current settings as "last state" for restore on next launch
-    func saveLastState(from settings: RenderSettings, embeddedFormula: EmbeddedFormula? = nil) {
-        let preset = FractalPreset.fromSettings(settings, name: "__lastState__", embeddedFormula: embeddedFormula)
+    func saveLastState(from settings: RenderSettings,
+                       embeddedFormula: EmbeddedFormula? = nil,
+                       embeddedLighting: EmbeddedFormula? = nil) {
+        let preset = FractalPreset.fromSettings(
+            settings,
+            name: "__lastState__",
+            embeddedFormula: embeddedFormula,
+            embeddedLighting: embeddedLighting
+        )
         
         do {
             let encoder = JSONEncoder()

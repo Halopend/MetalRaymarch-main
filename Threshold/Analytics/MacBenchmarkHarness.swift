@@ -503,7 +503,7 @@ enum MacBenchmarkHarness {
 
         // Mirror the view's Coordinator so embedded-DE (.threshfx) scenes compile.
         appModel.activateEmbeddedFormulaHandler =
-            renderer.embeddedFormulaActivator(renderSettings: appModel.renderSettings)
+            renderer.embeddedFormulaActivator(appModel: appModel)
         appModel.forceShaderRecompileHandler = renderer.shaderRecompiler(appModel: appModel)
         appModel.rendererStartupWarmupComplete = true
 

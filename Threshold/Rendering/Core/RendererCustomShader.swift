@@ -40,14 +40,17 @@ extension Renderer {
 
         Task { [weak self] in
             guard let self else { return }
-            let (formula, stackSrc, stackSig) = await MainActor.run {
+            let (formula, lighting, stackSrc, stackSig) = await MainActor.run {
                 (self.appModel.activeEmbeddedFormula,
+                 self.appModel.activeEmbeddedLighting,
                  self.appModel.renderSettings.warpStackCodegenSource,
                  self.appModel.renderSettings.warpStackCodegenSignature)
             }
-            if formula != nil || stackSrc != nil {
+            if formula != nil || lighting != nil || stackSrc != nil {
                 do {
-                    try await self.activateEmbeddedFormula(formula, warpStackSource: stackSrc, warpStackSignature: stackSig)
+                    try await self.activateEmbeddedFormula(formula, lighting: lighting,
+                                                           warpStackSource: stackSrc,
+                                                           warpStackSignature: stackSig)
                     print("🔧 [CustomScene] Self-heal: recompiled effect set after a frame requested it with no library installed")
                 } catch {
                     print("❌ [CustomScene] Self-heal activation failed: \(error)")
@@ -105,36 +108,49 @@ extension Renderer {
     ///
     /// Throws if Metal compilation fails. The renderer continues to function
     /// (built-in fractal types unaffected).
-    /// Activate the current EFFECT SET = (custom fractal/warp formula) + (composable
-    /// transform stack codegen). Any of the three may be absent. The stack codegen
+    /// Activate the current EFFECT SET = (custom fractal/warp formula) + optional
+    /// custom lighting + composable transform stack codegen. Any slot may be absent.
+    /// The stack codegen
     /// (`warpStackSource`/`warpStackSignature`) is read from `RenderSettings` by the
     /// caller and baked into the combined hash so distinct stacks compile + cache
     /// distinct libraries. A built-in fractal with a non-empty stack rides a custom
     /// library exactly as a `.threshfx` warp on a built-in does.
     func activateEmbeddedFormula(_ formula: EmbeddedFormula?,
+                                 lighting: EmbeddedFormula? = nil,
                                  warpStackSource: String? = nil,
                                  warpStackSignature: String = "s0") async throws {
-        customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula ENTRY formula=\(formula?.name ?? "nil") stackSig=\(warpStackSignature) currentHash=\(customShaderHash ?? "nil") libraryPresent=\(customShaderLibrary != nil)")
+        let activationGeneration = Renderer.customShaderState.beginActivation()
+        customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula ENTRY formula=\(formula?.name ?? "nil") lighting=\(lighting?.name ?? "nil") stackSig=\(warpStackSignature) currentHash=\(customShaderHash ?? "nil") libraryPresent=\(customShaderLibrary != nil)")
 
         let isWarp = (formula?.effectKind == .spaceWarp)
-        let fractalEffect = isWarp ? nil : formula
+        let isLighting = (formula?.effectKind == .lighting)
+        let fractalEffect = (isWarp || isLighting) ? nil : formula
         let warpEffect = isWarp ? formula : nil
-        let hasEffect = (formula != nil) || (warpStackSource != nil)
+        let lightingEffect = lighting ?? (isLighting ? formula : nil)
+        let hasEffect = (fractalEffect != nil) || (warpEffect != nil)
+            || (lightingEffect != nil) || (warpStackSource != nil)
 
         guard hasEffect else {
             // Nothing active (no formula, empty stack) → detach, fall back to the
             // bundled default library. Pipelines stay cached (hash-namespaced, inert).
-            if customShaderLibrary != nil {
+            let hadLibrary = customShaderLibrary != nil
+            let didPublish = Renderer.customShaderState.publish(
+                library: nil,
+                hash: nil,
+                generation: activationGeneration
+            )
+            if didPublish, hadLibrary {
                 customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula DEACTIVATE — library detached, pipelines retained")
                 warmStartGate.invalidate()
                 resetPipelineFastPaths()
-                customShaderLibrary = nil
-                customShaderHash = nil
             }
             return
         }
 
-        let newHash = CustomShaderCompiler.combinedHash(fractal: fractalEffect, spaceWarp: warpEffect, warpStackSignature: warpStackSignature)
+        let newHash = CustomShaderCompiler.combinedHash(fractal: fractalEffect,
+                                                        spaceWarp: warpEffect,
+                                                        lighting: lightingEffect,
+                                                        warpStackSignature: warpStackSignature)
 
         // Already active and unchanged — no work (self-heal retries, startup
         // re-activations, and stack slider tweaks that didn't change structure).
@@ -152,11 +168,22 @@ extension Renderer {
         // library's runtime-loop fallback keeps rendering the current stack.
         customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula compiling library… stackSig=\(warpStackSignature)")
         let compiler = ensureCompiler()
-        let library = try await compiler.library(forFractal: fractalEffect, spaceWarp: warpEffect,
-                                                 warpStackSource: warpStackSource, warpStackSignature: warpStackSignature)
-
-        customShaderLibrary = library
-        customShaderHash = newHash
+        let library: MTLLibrary
+        do {
+            library = try await compiler.library(forFractal: fractalEffect,
+                                                 spaceWarp: warpEffect,
+                                                 lighting: lightingEffect,
+                                                 warpStackSource: warpStackSource,
+                                                 warpStackSignature: warpStackSignature)
+        } catch {
+            if !Renderer.customShaderState.isCurrentActivation(activationGeneration) { return }
+            throw error
+        }
+        guard Renderer.customShaderState.publish(
+            library: library,
+            hash: newHash,
+            generation: activationGeneration
+        ) else { return }
         retainCustomShaderPipelines(mostRecentHash: newHash)
 
         customSceneDiagnostic("🔬 [CSDiag] ✅ activateEmbeddedFormula INSTALLED hash=\(newHash) — library now present")
@@ -189,16 +216,20 @@ extension Renderer {
         // compiler's library cache and detaching the live library forces
         // `activateEmbeddedFormula` past its no-op guard and re-runs the Metal
         // compiler instead of returning the cached `MTLLibrary`.
-        let formula = await MainActor.run { appModel.activeEmbeddedFormula }
-        if let formula {
+        let (formula, lighting) = await MainActor.run {
+            (appModel.activeEmbeddedFormula, appModel.activeEmbeddedLighting)
+        }
+        if formula != nil || lighting != nil {
             await ensureCompiler().evictAll()
             customShaderLibrary = nil
             customShaderHash = nil
             do {
-                try await activateEmbeddedFormula(formula)
-                return "Recompiled '\(formula.name)' and cleared \(renderCount) render / \(computeCount) compute pipelines."
+                try await activateEmbeddedFormula(formula, lighting: lighting)
+                let names = [formula?.name, lighting?.name].compactMap { $0 }.joined(separator: " + ")
+                return "Recompiled '\(names)' and cleared \(renderCount) render / \(computeCount) compute pipelines."
             } catch {
-                return "⚠️ Recompile of '\(formula.name)' failed: \(error.localizedDescription)"
+                let names = [formula?.name, lighting?.name].compactMap { $0 }.joined(separator: " + ")
+                return "⚠️ Recompile of '\(names)' failed: \(error.localizedDescription)"
             }
         }
 
@@ -277,6 +308,7 @@ extension Renderer {
         private var library: MTLLibrary?
         private var hash: String?
         private var compiler: CustomShaderCompiler?
+        private var activationGeneration: UInt64 = 0
 
         func currentLibrary() -> MTLLibrary? {
             lock.lock()
@@ -295,6 +327,27 @@ extension Renderer {
             self.library = library
             self.hash = hash
             lock.unlock()
+        }
+
+        func beginActivation() -> UInt64 {
+            lock.lock()
+            activationGeneration &+= 1
+            let generation = activationGeneration
+            lock.unlock()
+            return generation
+        }
+
+        func isCurrentActivation(_ generation: UInt64) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            return activationGeneration == generation
+        }
+
+        func publish(library: MTLLibrary?, hash: String?, generation: UInt64) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            guard activationGeneration == generation else { return false }
+            self.library = library
+            self.hash = hash
+            return true
         }
 
         func compiler(for device: MTLDevice) -> CustomShaderCompiler {

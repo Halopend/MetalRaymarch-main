@@ -45,7 +45,7 @@ final class FormulaEditorModel {
         case live
         /// The last compile failed; see `compileDiagnostics`.
         case compileFailed
-        /// Custom scenes are disabled in Settings → General.
+        /// Custom scenes are disabled in Settings → Display → Experimental Display.
         case disabled
         /// The renderer hasn't bound its activation handler yet.
         case rendererUnavailable

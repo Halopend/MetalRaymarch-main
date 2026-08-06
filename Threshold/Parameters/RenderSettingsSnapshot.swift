@@ -45,6 +45,7 @@ struct RenderSettingsSnapshot {
     let resolutionScale: Float
     let fractalType: FractalModelType
     let formulaParams: FormulaParams
+    let customLightingParams: CustomLightingParams
     let tileSize: Int
     let debugHierarchical: Bool
     let coherentPacketEnabled: Bool

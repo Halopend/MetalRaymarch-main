@@ -125,6 +125,16 @@ typedef struct
     uint32_t _formulaPad[3];           // Keep 16-byte alignment for uniform packing
 } FormulaParams;
 
+// Independent values for an imported lighting `.threshfx`. Lighting effects
+// deliberately do not reuse FormulaParams: a lighting control must never alter
+// geometry, invalidate a fractal specialization, or collide with a space warp.
+// Metadata (names/ranges/defaults) stays in EmbeddedFormula.params; only these
+// live scalar values cross the per-frame Swift -> Metal boundary.
+typedef struct
+{
+    float values[16];
+} CustomLightingParams;
+
 // Maximum gradient stops supported (matches GradientColorSystem.swift)
 #define MAX_GRADIENT_STOPS 8
 
@@ -494,6 +504,7 @@ typedef struct
     vector_float4 floorCenterRadius; // xyz = model-space center, w = radius in model units
     
     FormulaParams formulaParams;  // Generic formula parameters (non-Mandelbox)
+    CustomLightingParams customLightingParams; // Independent imported-lighting values
     
     // === PRECOMPUTED VALUES (frame-uniform, computed on CPU) ===
     PrecomputedFractalParams precomputedFractal;  // Eliminates per-pixel powr() and division
@@ -648,6 +659,7 @@ typedef struct
     vector_float4 floorCenterRadius; // xyz = model-space center, w = radius in model units
     
     FormulaParams formulaParams;  // Generic formula parameters (non-Mandelbox)
+    CustomLightingParams customLightingParams; // Independent imported-lighting values
     
     // === TEMPORAL REPROJECTION ===
     matrix_float4x4 currentViewProjMatrix;   // Current frame: modelView * projection (for depth write)
@@ -713,12 +725,16 @@ typedef struct
 // 2026-07-26: both +272 B — eight fixed scene-SDF records + shared Benchy
 // volume address. The hot FractalParams struct is unchanged; records remain
 // behind its existing EnvScrunchParams pointer.
-static_assert(sizeof(Uniforms) <= 2336,
+// 2026-08-05: both +64 B — an independent 16-float custom-lighting bank. It
+// cannot alias FormulaParams because lighting and geometry compose at runtime.
+static_assert(sizeof(Uniforms) <= 2400,
               "Uniforms grew — bump this bound consciously (TECH_DEBT.md #8d)");
-static_assert(sizeof(TileUniforms) <= 2336,
+static_assert(sizeof(TileUniforms) <= 2400,
               "TileUniforms grew — bump this bound consciously (TECH_DEBT.md #8d)");
 static_assert(sizeof(FormulaParams) <= 176,
               "FormulaParams grew — bump this bound consciously (TECH_DEBT.md #8d)");
+static_assert(sizeof(CustomLightingParams) == 64,
+              "CustomLightingParams must remain a compact 16-float ABI");
 #endif
 
 #endif /* ShaderTypes_h */

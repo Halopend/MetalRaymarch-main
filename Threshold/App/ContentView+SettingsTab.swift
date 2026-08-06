@@ -8,6 +8,7 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Identifiable wrapper so the export share sheet is presented via
 /// `sheet(item:)` — guarantees the URL exists when the sheet body builds.
@@ -74,6 +75,16 @@ extension ContentView {
                 .padding(.vertical, 12)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+        }
+        .fileImporter(
+            isPresented: $isImportingCustomEffect,
+            allowedContentTypes: [
+                UTType(filenameExtension: ThresholdExportFormat.customFormula.ext) ?? .data
+            ],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case .success(let urls) = result, let url = urls.first else { return }
+            appModel.openExternalFile(url)
         }
     }
 
@@ -343,7 +354,7 @@ extension ContentView {
 #endif
 
     /// iOS-only toggle for the fingertip glow indicators drawn over the
-    /// render view (cyan = orbit, violet = pan/zoom).
+    /// render view (cyan = orbit, violet = pan/zoom, amber = scene navigation).
 #if os(iOS)
     private var touchIndicatorsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -351,7 +362,7 @@ extension ContentView {
                 VStack(alignment: .leading, spacing: 2) {
                     Label("Touch Indicators", systemImage: AppIcons.handTapFill)
                         .font(.headline)
-                    Text("Shows a glowing dot under each finger on the fractal view, tinted by gesture: cyan while orbiting, violet while panning or zooming.")
+                    Text("Shows a glowing dot under each finger on the fractal view, tinted by gesture: cyan while orbiting, violet while panning or zooming, and amber while switching scenes with three fingers.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -432,7 +443,7 @@ extension ContentView {
     }
 #endif
 
-    /// Display-flavored experimental toggles. The custom-shenes enable is
+    /// Display-flavored experimental toggles. The custom-scenes enable is
     /// a display-runtime knob (it gates whether the renderer tries to
     /// compile user-supplied shaders), so it lives here.
     private var experimentalDisplaySection: some View {
@@ -461,6 +472,77 @@ extension ContentView {
             }
             .tint(.orange)
 
+            if allowCustomScenes {
+                Divider()
+
+                VStack(alignment: .leading, spacing: 6) {
+                    let isDemoCurrent = appModel.activeEmbeddedLighting?.id
+                        == AppModel.bundledLightingDemoID
+                        && appModel.activeEmbeddedLighting?.sourceHash
+                        == AppModel.bundledLightingDemoSourceHash
+                    let isOlderDemo = appModel.activeEmbeddedLighting?.id
+                        == AppModel.bundledLightingDemoID && !isDemoCurrent
+                    let isDemoRendered = isDemoCurrent
+                        && appModel.customLightingRuntimeState.isActive
+                    let isDemoBusy = isDemoCurrent
+                        && appModel.customLightingRuntimeState.isBusy
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Custom Lighting Smoke Test")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Turns the current fractal vivid cyan/magenta with a bright emissive rim. If it loads, the difference is intentionally impossible to miss.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 8)
+                        VStack(alignment: .trailing, spacing: 6) {
+                            Button {
+                                Task { @MainActor in
+                                    let result = await appModel.installBundledLightingDemo()
+                                    if result != .failed {
+                                        appModel.saveLastState()
+                                    }
+                                }
+                            } label: {
+                                if isDemoBusy {
+                                    HStack(spacing: 6) {
+                                        ProgressView().controlSize(.small)
+                                        Text("Compiling…")
+                                    }
+                                } else if isDemoRendered {
+                                    Label("Demo Active", systemImage: AppIcons.checkmarkCircleFill)
+                                } else if isOlderDemo {
+                                    Label("Update Lighting Demo", systemImage: "arrow.triangle.2.circlepath")
+                                } else {
+                                    Label("Load Lighting Demo", systemImage: AppIcons.lightbulbMax)
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.purple)
+                            .disabled(appModel.customLightingRuntimeState.isBusy || isDemoRendered)
+
+                            Button {
+                                isImportingCustomEffect = true
+                            } label: {
+                                Label("Import .threshfx…", systemImage: "folder")
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(appModel.customLightingRuntimeState.isBusy)
+                        }
+                    }
+
+                }
+            }
+
+            // Keep controls and detach reachable even if the user turns the
+            // experimental import gate off after attaching an effect.
+            if let lighting = appModel.activeEmbeddedLighting {
+                Divider()
+                importedLightingControls(lighting)
+            }
+
             VStack(alignment: .leading, spacing: 4) {
                 CompactValueSlider(
                     title: "Sphere Projection Mismatch (δ)",
@@ -484,6 +566,154 @@ extension ContentView {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
+    }
+
+    @ViewBuilder
+    private func importedLightingControls(_ lighting: EmbeddedFormula) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Imported Lighting", systemImage: AppIcons.lightbulbMax)
+                        .font(.subheadline.weight(.semibold))
+                    Text(lighting.name)
+                        .font(.headline)
+                    if let author = lighting.author, !author.isEmpty {
+                        Text("by \(author)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 8)
+                customLightingStatusLabel
+            }
+
+            if let description = lighting.formulaDescription, !description.isEmpty {
+                Text(description)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text("Applies to every fractal. Control changes update GPU uniforms live without recompiling the effect.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if lighting.visibleParameters.isEmpty {
+                Text("This effect exposes no controls. Edit and reimport its source to change it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(lighting.visibleParameters) { descriptor in
+                        customLightingParameterRow(descriptor)
+                    }
+                }
+                .disabled(!appModel.customLightingRuntimeState.isActive)
+            }
+
+            HStack {
+                Button {
+                    appModel.resetCustomLightingParameters()
+                    appModel.saveLastState()
+                } label: {
+                    Label("Reset Controls", systemImage: AppIcons.arrowCounterclockwise)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(
+                    !appModel.customLightingRuntimeState.isActive
+                        || appModel.customLightingParametersAreAtDefaults
+                )
+
+                Spacer()
+
+                Button("Detach Lighting", role: .destructive) {
+                    appModel.uninstallEmbeddedLighting()
+                    appModel.saveLastState()
+                }
+                .buttonStyle(.borderless)
+                .font(.caption.weight(.semibold))
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.08)))
+        .accessibilityIdentifier("customLighting.controls")
+    }
+
+    @ViewBuilder
+    private var customLightingStatusLabel: some View {
+        switch appModel.customLightingRuntimeState {
+        case .inactive:
+            Label("Inactive", systemImage: "minus.circle")
+                .foregroundStyle(.secondary)
+        case .waitingForRenderer:
+            Label("Queued", systemImage: "clock")
+                .foregroundStyle(.orange)
+        case .compiling:
+            HStack(spacing: 4) {
+                ProgressView().controlSize(.mini)
+                Text("Compiling")
+            }
+            .foregroundStyle(.purple)
+        case .active:
+            Label("Rendering", systemImage: AppIcons.checkmarkCircleFill)
+                .foregroundStyle(.green)
+        }
+    }
+
+    @ViewBuilder
+    private func customLightingParameterRow(_ descriptor: FormulaParamDescriptor) -> some View {
+        if descriptor.isBool == true {
+            Toggle(
+                descriptor.name,
+                isOn: Binding(
+                    get: { appModel.customLightingParameterValue(at: descriptor.index) >= 0.5 },
+                    set: { enabled in
+                        appModel.setCustomLightingParameter(
+                            index: descriptor.index,
+                            value: enabled ? 1 : 0
+                        )
+                        appModel.saveLastState()
+                    }
+                )
+            )
+            .font(.caption)
+            .tint(.purple)
+            .accessibilityIdentifier("customLighting.param.\(descriptor.index)")
+        } else {
+            CompactValueSlider(
+                title: descriptor.name,
+                value: Binding(
+                    get: { appModel.customLightingParameterValue(at: descriptor.index) },
+                    set: { value in
+                        appModel.setCustomLightingParameter(index: descriptor.index, value: value)
+                    }
+                ),
+                range: descriptor.min...descriptor.max,
+                step: descriptor.step,
+                display: formatCustomLightingValue(
+                    appModel.customLightingParameterValue(at: descriptor.index),
+                    step: descriptor.step
+                ),
+                tint: .purple,
+                onEditingChanged: { editing in
+                    if !editing { appModel.saveLastState() }
+                }
+            )
+            .accessibilityIdentifier("customLighting.param.\(descriptor.index)")
+        }
+    }
+
+    private func formatCustomLightingValue(_ value: Float, step: Float) -> String {
+        let decimals: Int
+        if step >= 1 {
+            decimals = 0
+        } else {
+            decimals = min(4, max(1, Int(ceil(-log10(Double(step))))))
+        }
+        return String(format: "%.*f", decimals, value)
     }
 
     // MARK: - Gestures sub-view
@@ -661,7 +891,8 @@ extension ContentView {
                         let preset = FractalPreset.fromSettings(
                             appModel.renderSettings,
                             name: "Export",
-                            embeddedFormula: appModel.activeEmbeddedFormula
+                            embeddedFormula: appModel.activeEmbeddedFormula,
+                            embeddedLighting: appModel.activeEmbeddedLighting
                         )
                         exportOffMain({ PresetManager.exportPresetFile(preset) }) { url in
                             exportShareItem = ExportShareItem(url: url)
@@ -680,7 +911,8 @@ extension ContentView {
                         var preset = FractalPreset.fromSettings(
                             appModel.renderSettings,
                             name: "Music Export",
-                            embeddedFormula: appModel.activeEmbeddedFormula
+                            embeddedFormula: appModel.activeEmbeddedFormula,
+                            embeddedLighting: appModel.activeEmbeddedLighting
                         )
                         preset.musicReactiveMappings = appModel.renderSettings.musicReactiveMappings
                         let musicPreset = preset
@@ -787,6 +1019,53 @@ extension ContentView {
                 }
                 .padding(10)
                 .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
+            }
+
+            // ── Custom Lighting Export / Detach ─────────────────────────
+            if let lighting = appModel.activeEmbeddedLighting {
+                VStack(spacing: 8) {
+                    HStack {
+                        Label("Custom Lighting", systemImage: AppIcons.lightbulbMax)
+                            .font(.headline)
+                        Spacer()
+                        Text("applies to every fractal")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("An external material modifier is active. Threshold still owns its lights, shadows, AO, fog, glow, and post-processing.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(lighting.name).font(.subheadline.weight(.medium))
+                            if let author = lighting.author, !author.isEmpty {
+                                Text("by \(author)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Button("Detach", role: .destructive) {
+                            appModel.uninstallEmbeddedLighting()
+                            appModel.saveLastState()
+                        }
+                        .buttonStyle(.bordered)
+                        Button {
+                            let container = EmbeddedFormulaContainer(formula: lighting)
+                            exportOffMain({ container.exportToFile() }) { url in
+                                exportShareItem = ExportShareItem(url: url)
+                            }
+                        } label: {
+                            Label("Export Lighting (.threshfx)", systemImage: AppIcons.docBadgeArrowUp)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.purple)
+                    }
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
             }
 
             // ── Animation Scene Export ───────────────────────────────────

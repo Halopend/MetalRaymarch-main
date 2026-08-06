@@ -61,35 +61,23 @@ not need to know every part of the renderer to help: trying the app, reporting a
 rough edge, suggesting an interaction, sharing a scene, or improving a sentence
 in the documentation all make a difference.
 
-The original application code is released under the GNU General Public License,
-version 3 or later. The practical terms are summarized below; the complete GPL
-text is the authoritative agreement.
+Threshold's original application code is free software under the **GNU General
+Public License, version 3 or later** (`GPL-3.0-or-later`). No separate
+permission or fee is required to run it for any purpose, including commercial
+use, or to make private changes. Sharing covered source or binaries is allowed
+under the GPL's notice, source-availability, and copyleft conditions.
 
+The authoritative GPLv3 text is in [`LICENSE`](LICENSE). The plain-language
+[`NOTICE.md`](NOTICE.md) explains the scope, redistribution obligations,
+warranty, branding, and what happens to scenes, formulas, renders, and other
+output. Known imported material and unresolved provenance are recorded in
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). In particular, repository
+presence or attribution alone is not permission to reuse third-party material.
 
-## GPL licensing agreement
-
-Unless a source file or imported asset includes a more specific notice, the
-Threshold application code is licensed as **GPL-3.0-or-later**. You may use,
-study, copy, modify, and share that covered code, provided you follow the GPL
-terms when you redistribute it or distribute a work based on it. In particular:
-
-- Keep the copyright and license notices with the covered code.
-- Make the corresponding source available when the GPL requires it.
-- License covered modifications and larger combined works under GPL-compatible
-  terms, as required by the GPL.
-- Include the GPL notice and warranty disclaimer with distributions.
-
-If you submit application-code changes through a pull request, please submit
-only work you have the right to share and understand that accepted changes will
-be distributed under the project's GPL-3.0-or-later terms. This is a friendly
-summary, not a replacement for the license: read the
-[full GNU GPL v3 text](https://www.gnu.org/licenses/gpl-3.0.html) before
-redistributing the project.
-
-The GPL notice applies to Threshold's original application code. Imported
-formulas, shaders, artwork, and other third-party material keep their own
-attribution and license notes; those notices remain part of the terms for that
-material and must be checked before redistribution.
+This summary is not a substitute for the GPL or a file-specific license. Files
+created with Threshold are not automatically GPL-covered merely because the app
+processed them, but copied starter code, samples, and third-party content keep
+the terms that apply to those portions.
 
 ## Contributing
 

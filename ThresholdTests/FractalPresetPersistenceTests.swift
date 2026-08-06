@@ -25,6 +25,18 @@ import Foundation
 @Suite("FractalPreset — previously-dropped scene state round-trips")
 struct FractalPresetPersistenceTests {
 
+    private static var exampleLighting: EmbeddedFormula {
+        get throws {
+            let repoRoot = URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+            let url = repoRoot.appendingPathComponent(
+                "Threshold/Examples/Formulas/IridescentRimLighting.threshfx"
+            )
+            return try EmbeddedFormulaContainer.decode(fromContainerAt: url).formula
+        }
+    }
+
     @Test("User scene tags survive Codable and remain backward-compatible")
     func tagsRoundTrip() throws {
         var preset = FractalPreset(name: "Tagged")
@@ -39,6 +51,55 @@ struct FractalPresetPersistenceTests {
         let legacyData = try JSONSerialization.data(withJSONObject: legacyObject)
         let legacyDecoded = try JSONDecoder().decode(FractalPreset.self, from: legacyData)
         #expect(legacyDecoded.tags.isEmpty)
+    }
+
+    @Test("Custom lighting persists independently from custom geometry")
+    func embeddedLightingRoundTrip() throws {
+        let lighting = try Self.exampleLighting
+        let settings = RenderSettings()
+        settings.fractalType = .mandelbulb
+
+        // Use the same slot in the two independent banks. A regression that
+        // aliases lighting onto FormulaParams will make one of these values win.
+        var geometry = settings.formulaParams
+        FormulaCatalog.setParam(&geometry, index: 3, value: 42)
+        settings.formulaParams = geometry
+
+        var authoredLightingValues = lighting.resolvedParameterValues()
+        authoredLightingValues[0] = 0.2
+        authoredLightingValues[3] = 13.5
+        authoredLightingValues[9] = 0
+        authoredLightingValues[15] = 999 // undeclared: must not survive resolution
+        settings.setCustomLightingParameterValues(authoredLightingValues)
+        let expectedLightingValues = lighting.resolvedParameterValues(
+            overrides: authoredLightingValues
+        )
+
+        let preset = FractalPreset.fromSettings(
+            settings,
+            name: "Lit Mandelbulb",
+            embeddedLighting: lighting
+        )
+        let decoded = try JSONDecoder().decode(
+            FractalPreset.self,
+            from: JSONEncoder().encode(preset)
+        )
+
+        #expect(decoded.fractalType == .mandelbulb)
+        #expect(decoded.embeddedFormula == nil)
+        #expect(decoded.embeddedLighting == lighting)
+        #expect(preset.embeddedLightingParamValues == expectedLightingValues)
+        #expect(decoded.embeddedLightingParamValues == expectedLightingValues)
+        #expect(decoded.isCustomScenePreset)
+
+        let restored = RenderSettings()
+        decoded.apply(to: restored, scope: .session)
+
+        #expect(restored.fractalType == .mandelbulb)
+        #expect(FormulaCatalog.getParam(restored.formulaParams, index: 3) == 42)
+        #expect(restored.customLightingParameterValues == expectedLightingValues)
+        #expect(restored.customLightingParameterValues[3] == 13.5)
+        #expect(restored.customLightingParameterValues[15] == 0)
     }
 
     @Test("Platform / cell-shading / light-rate / extra effects / bubble-fade survive fromSettings → encode → decode → apply")

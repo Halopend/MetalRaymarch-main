@@ -72,11 +72,29 @@ struct AnimationEditorWindowView: View {
         }
         #if os(iOS)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Done") { dismiss() }
+        // This view owns a NavigationSplitView, so a toolbar attached outside
+        // that container is not guaranteed to receive visible navigation
+        // chrome on iPad. Keep dismissal in a real, persistent top bar instead.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Animation Editor")
+                        .font(.headline)
+
+                    Spacer()
+
+                    Button("Done") { dismiss() }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityHint("Closes the animation editor")
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.bar)
+
+                Divider()
             }
         }
+        .accessibilityAction(.escape) { dismiss() }
         #else
         .frame(minWidth: 920, minHeight: 620)
         #endif

@@ -43,6 +43,10 @@ enum EffectKind: String, Codable, Equatable, Sendable {
     /// A space-domain warp: defines `customSpaceWarp` + `customSpaceWarpDEScale`,
     /// injected at `// __CUSTOM_SPACE_WARP__`; applies to any fractal.
     case spaceWarp
+    /// A surface-material modifier: defines `Lighting_<stem>`, injected immediately
+    /// before Threshold's shared lighting assembly; applies to any fractal without
+    /// replacing Threshold's shadows, AO, fog, glow, or post-processing.
+    case lighting
 }
 
 // MARK: - Embedded formula payload
@@ -715,6 +719,7 @@ extension EmbeddedFormula {
         case missingFunctionDefinition(String)
         case duplicateParamIndex(Int)
         case paramIndexOutOfRange(Int)
+        case invalidParamDescriptor(Int, String)
 
         var description: String {
             switch self {
@@ -736,6 +741,8 @@ extension EmbeddedFormula {
                 return "Embedded formula has duplicate parameter index \(i)."
             case .paramIndexOutOfRange(let i):
                 return "Embedded formula parameter index \(i) is out of range (must be 0...15)."
+            case .invalidParamDescriptor(let index, let reason):
+                return "Embedded formula parameter \(index) is invalid: \(reason)."
             }
         }
     }
@@ -784,12 +791,16 @@ extension EmbeddedFormula {
             // Bare names: the compiler's `#define THRESHOLD_CUSTOM_SPACE_WARP`
             // skips the built-in defaults, so there is no symbol collision.
             requiredFunctions = ["customSpaceWarp", "customSpaceWarpDEScale"]
+        case .lighting:
+            requiredFunctions = ["Lighting_\(functionStem)"]
         }
         for fn in requiredFunctions where !Self.containsFunctionDefinition(in: metalSource, named: fn) {
             throw ValidationError.missingFunctionDefinition(fn)
         }
 
-        // Parameter index bounds + uniqueness.
+        // Parameter metadata drives generated controls for fractal and lighting
+        // effects alike. Validate external JSON as strictly as source pragmas so
+        // malformed ranges can never reach SwiftUI Slider or the GPU.
         var seen = Set<Int>()
         for p in params {
             guard p.index >= 0 && p.index < 16 else {
@@ -798,7 +809,58 @@ extension EmbeddedFormula {
             if !seen.insert(p.index).inserted {
                 throw ValidationError.duplicateParamIndex(p.index)
             }
+            guard !p.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ValidationError.invalidParamDescriptor(p.index, "the display name is empty")
+            }
+            guard p.default.isFinite, p.min.isFinite, p.max.isFinite, p.step.isFinite else {
+                throw ValidationError.invalidParamDescriptor(p.index, "all numeric fields must be finite")
+            }
+            guard p.min < p.max else {
+                throw ValidationError.invalidParamDescriptor(p.index, "min must be less than max")
+            }
+            guard p.default >= p.min, p.default <= p.max else {
+                throw ValidationError.invalidParamDescriptor(p.index, "default must be inside min...max")
+            }
+            guard p.step > 0 else {
+                throw ValidationError.invalidParamDescriptor(p.index, "step must be positive")
+            }
+            if p.isBool == true, p.min > 0 || p.max < 1 {
+                throw ValidationError.invalidParamDescriptor(
+                    p.index, "a bool range must contain both 0 and 1"
+                )
+            }
         }
+    }
+
+    /// Visible controls in deterministic author order. Hidden descriptors still
+    /// receive defaults and persisted values; they are simply omitted from UI.
+    var visibleParameters: [FormulaParamDescriptor] {
+        params
+            .filter { $0.isHidden != true }
+            .sorted { lhs, rhs in
+                lhs.index == rhs.index ? lhs.name < rhs.name : lhs.index < rhs.index
+            }
+    }
+
+    /// Resolve a complete, finite 16-value bank from descriptor defaults plus
+    /// optional persisted/live overrides. Only declared indices accept an
+    /// override; undeclared slots stay zero and bools are normalized to 0/1.
+    func resolvedParameterValues(overrides: [Float]? = nil) -> [Float] {
+        var result = [Float](repeating: 0, count: 16)
+        for descriptor in params {
+            var value = descriptor.default
+            if let overrides,
+               descriptor.index < overrides.count,
+               overrides[descriptor.index].isFinite {
+                value = overrides[descriptor.index]
+            }
+            value = min(max(value, descriptor.min), descriptor.max)
+            if descriptor.isBool == true {
+                value = value >= 0.5 ? 1 : 0
+            }
+            result[descriptor.index] = value
+        }
+        return result
     }
 
     private static func validateFunctionStem(_ stem: String) throws {

@@ -59,6 +59,27 @@ struct ViewportInputTests {
         #expect(frame.actions.isEmpty)
     }
 
+    @Test("Scene gesture cleanup drops camera motion but preserves discrete input")
+    func sceneGestureCameraCleanup() {
+        let input = ViewportInputAccumulator()
+        input.setMovementKey(.forward, isPressed: true)
+        input.addOrbit(delta: SIMD2(4, 2))
+        input.addPan(delta: SIMD2(-3, 7))
+        input.addZoom(delta: 0.75)
+        input.requestReset()
+        input.requestSceneStep(1)
+
+        input.clearCameraDeltas()
+
+        let frame = input.consumeFrame()
+        #expect(frame.heldKeys == [.forward])
+        #expect(frame.orbitDelta == .zero)
+        #expect(frame.panDelta == .zero)
+        #expect(frame.zoomDelta == 0)
+        #expect(frame.actions == [.resetView])
+        #expect(frame.sceneStep == 1)
+    }
+
     @Test("Concurrent producers are lossless across one drain")
     func concurrentProducers() {
         let input = ViewportInputAccumulator()
@@ -114,6 +135,16 @@ struct ViewportInputTests {
         #expect(frame.heldKeys == [.forward])
         #expect(frame.actions == [.togglePlayback])
         #expect(frame.sceneStep == 1)
+    }
+
+    @Test("Scene swipes use forgiving horizontal distance without a velocity requirement")
+    func sceneSwipePolicy() {
+        #expect(SceneSwipeGesturePolicy.sceneStep(for: SIMD2(-32, 4)) == 1)
+        #expect(SceneSwipeGesturePolicy.sceneStep(for: SIMD2(32, -4)) == -1)
+        #expect(SceneSwipeGesturePolicy.sceneStep(for: SIMD2(-31, 0)) == 0)
+        #expect(SceneSwipeGesturePolicy.sceneStep(for: SIMD2(40, 40)) == 0)
+        #expect(SceneSwipeGesturePolicy.sceneStep(for: SIMD2(80, -20)) == -1)
+        #expect(SceneSwipeGesturePolicy.sceneStep(for: SIMD2(.nan, 0)) == 0)
     }
 
     @Test("Mac attribution shortcut remains visible while I is held")

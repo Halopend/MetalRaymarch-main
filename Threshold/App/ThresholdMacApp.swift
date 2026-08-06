@@ -279,6 +279,31 @@ private struct ThresholdMacRootView: View {
                         .allowsHitTesting(false)
                 }
 
+                // This host is always mounted with the Metal viewport. Keep
+                // import errors and custom-lighting truth here rather than in
+                // the auto-hiding controls panel, so "compiling" and "active"
+                // cannot disappear merely because the pointer leaves the menu.
+                VStack(spacing: 8) {
+                    ErrorBannerView(errorReporter: appModel.errorReporter)
+                    CustomLightingStatusChip(
+                        state: appModel.customLightingRuntimeState,
+                        onDetach: {
+                            appModel.uninstallEmbeddedLighting()
+                            appModel.saveLastState()
+                        }
+                    )
+                }
+                .frame(width: min(max(proxy.size.width - 32, 1), 760))
+                .fixedSize(horizontal: false, vertical: true)
+                .position(x: proxy.size.width / 2, y: panelPadding + 52)
+                .animation(.easeInOut(duration: 0.16), value: appModel.customLightingRuntimeState)
+                .zIndex(20)
+
+                if let fileName = appModel.externalImportLoadingFileName {
+                    ExternalFileLoadingOverlay(fileName: fileName)
+                        .zIndex(30)
+                }
+
                 if appModel.isAttributionShortcutHeld {
                     AttributionOverlay()
                         .padding(24)

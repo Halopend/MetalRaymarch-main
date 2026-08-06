@@ -2,6 +2,29 @@
 import os
 import simd
 
+extension CustomLightingParams {
+    /// Build the compact GPU bank from user-authored values. Non-finite input is
+    /// never allowed across the shader boundary; descriptor-aware clamping lives
+    /// in EmbeddedFormula and this is the final defensive packing layer.
+    init(values: [Float]) {
+        self.init()
+        Swift.withUnsafeMutableBytes(of: &self) { raw in
+            let floats = raw.bindMemory(to: Float.self)
+            for index in 0..<min(16, floats.count) {
+                let value = index < values.count ? values[index] : 0
+                floats[index] = value.isFinite ? value : 0
+            }
+        }
+    }
+
+    func valuesArray() -> [Float] {
+        Swift.withUnsafeBytes(of: self) { raw in
+            let floats = raw.bindMemory(to: Float.self)
+            return (0..<min(16, floats.count)).map { floats[$0] }
+        }
+    }
+}
+
 struct GestureConfigurationSnapshot: Sendable {
     let version: UInt64
     let menuToggleEnabled: Bool
@@ -253,6 +276,10 @@ final class RenderSettings: @unchecked Sendable {
 
     private var _fractalType: FractalModelType = .mandelbox  // Current fractal type
     private var _formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()  // Generic formula params
+    // Imported lighting owns a distinct scalar bank. It must never share the
+    // geometry FormulaParams slots because lighting index 0 can coexist with,
+    // for example, Mandelbulb Power at geometry index 0.
+    private var _customLightingParams = CustomLightingParams()
     private var _tileSize: Int = 0                   // 0=disabled (fragment), 8=8x8 adaptive hierarchical compute
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
     private var _coherentPacketEnabled: Bool = loadBool("coherentPacketEnabled", default: false)  // Experimental predict-validate raymarch (Stages 0-3)
@@ -1410,6 +1437,19 @@ final class RenderSettings: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    var customLightingParams: CustomLightingParams {
+        get { withLock { _customLightingParams } }
+        set { withLock { _customLightingParams = newValue } }
+    }
+
+    var customLightingParameterValues: [Float] {
+        withLock { _customLightingParams.valuesArray() }
+    }
+
+    func setCustomLightingParameterValues(_ values: [Float]) {
+        withLock { _customLightingParams = CustomLightingParams(values: values) }
     }
 
     // 0 = disabled (standard per-pixel raymarch)
@@ -3209,6 +3249,7 @@ final class RenderSettings: @unchecked Sendable {
                 resolutionScale: _resolutionScale,
                 fractalType: _fractalType,
                 formulaParams: fp,
+                customLightingParams: _customLightingParams,
                 tileSize: _tileSize,
                 debugHierarchical: _debugHierarchical,
                 coherentPacketEnabled: _coherentPacketEnabled,

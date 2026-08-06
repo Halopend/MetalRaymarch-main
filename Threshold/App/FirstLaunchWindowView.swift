@@ -366,6 +366,11 @@ struct FirstLaunchWindowView: View {
                     title: "Quick Access",
                     detail: "Pin the sections you revisit so they remain one click away in the rail."
                 )
+                IntroTipRow(
+                    icon: "hand.draw",
+                    title: "Canvas gestures",
+                    detail: "One finger orbits, two fingers pan or zoom, and a three-finger horizontal swipe changes scenes. The scene name appears after every successful switch."
+                )
             }
         } detail: {
             Text("Threshold organizes controls into Explore, Shape, Visualizations, Music, and Performance. Each workspace has a shorter section list, and Find can bypass the hierarchy entirely.")

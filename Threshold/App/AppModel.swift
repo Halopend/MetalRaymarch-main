@@ -86,6 +86,35 @@ struct ExternalFileImportRequest: Identifiable {
     let payload: ExternalFileImportPayload
 }
 
+enum SceneNavigationDirection: Equatable {
+    case previous
+    case next
+}
+
+/// A completed manual scene step. The unique id lets transient UI replace an
+/// older confirmation and restart its dismissal timer even when the same scene
+/// is selected twice through wrapping navigation.
+struct SceneNavigationFeedback: Identifiable, Equatable {
+    let id: UUID
+    let direction: SceneNavigationDirection
+    let sceneName: String
+}
+
+/// Carries the semantic direction through asynchronous static-scene loading.
+/// This stays internal to AppModel; UI only observes the completed feedback.
+struct ManualSceneNavigationRequest: Equatable {
+    let id: UUID
+    let direction: SceneNavigationDirection
+}
+
+/// Tracks the target of the newest in-flight static-scene step. Without this
+/// cursor, several quick card swipes all calculate from the last *applied*
+/// scene and repeatedly request the same neighbor while loading is in flight.
+struct ManualStaticSceneNavigationCursor: Equatable {
+    let requestID: UUID
+    let sceneID: UUID
+}
+
 @MainActor
 @Observable
 class AppModel {
@@ -410,6 +439,16 @@ class AppModel {
     @ObservationIgnored var spatialMenuPresentationGeneration: UInt64 = 0
     @ObservationIgnored private(set) var activeResetPreset: FractalPreset?
 
+    /// Latest successfully applied manual scene step. The iPad canvas observes
+    /// this to distinguish three-finger navigation from two-finger camera input.
+    var sceneNavigationFeedback: SceneNavigationFeedback?
+    /// Scoped while AnimationManager resolves a manual mixed cue-group step, so
+    /// its synchronous static-scene callback can preserve direction metadata.
+    @ObservationIgnored var activeManualSceneNavigationRequest: ManualSceneNavigationRequest?
+    /// Immediate cursor for rapid fallback-catalog browsing. Cleared when the
+    /// latest requested static scene applies or a non-manual load takes over.
+    @ObservationIgnored var manualStaticSceneNavigationCursor: ManualStaticSceneNavigationCursor?
+
     @ObservationIgnored private let menuWindowRetoggleGuardInterval: CFTimeInterval = 0.45
     @ObservationIgnored private var lastMenuWindowOpenedAt: CFTimeInterval = 0
 
@@ -434,18 +473,38 @@ class AppModel {
     // Called when sliders change to pre-compile the needed pipeline
     var preparePipelineForValuesHandler: ((Int, Int) async -> Void)?
 
-    // Embedded-formula activation handler (set by Renderer).
-    // When non-nil, AppModel can ask the renderer to compile + install a custom
-    // MTLLibrary for a `.threshfx` formula. Pass `nil` to detach.
-    var activateEmbeddedFormulaHandler: ((EmbeddedFormula?) async throws -> Void)? {
+    // Embedded-effect activation handler (set by Renderer). Both slots travel in
+    // one immutable request so an async compiler never pairs a primary effect
+    // with lighting read from a newer AppModel state.
+    var activateEmbeddedFormulaHandler: ((EmbeddedFormula?, EmbeddedFormula?) async throws -> Void)? {
         didSet {
             guard let handler = activateEmbeddedFormulaHandler else { return }
             let formula = activeEmbeddedFormula
             let rendererFormula = formula?.isBundledConstructionPrimitive == true ? nil : formula
+            let lighting = activeEmbeddedLighting
             let queuedPreset = pendingPresetForActivation
+            let queuedNavigationRequest = pendingPresetSceneNavigationRequest
+            let queuedLoadGeneration = pendingPresetLoadGeneration
+            let queuedApplyOptions = pendingPresetApplyOptions
+            customLightingRuntimeState = lighting.map {
+                .compiling(name: $0.name)
+            } ?? .inactive
             Task { @MainActor in
                 do {
-                    try await handler(rendererFormula)
+                    try await handler(rendererFormula, lighting)
+                    if self.activeEmbeddedFormulaHash == formula?.shortHash,
+                       self.activeEmbeddedLightingHash == lighting?.shortHash {
+                        // The library has now been published. Commit its staged
+                        // value bank only at this boundary so an outgoing
+                        // lighting effect never consumes incoming slot meanings.
+                        self.configureCustomLightingParameters(
+                            for: lighting,
+                            overrides: self.customLightingParameterValues
+                        )
+                        self.customLightingRuntimeState = lighting.map {
+                            .active(name: $0.name)
+                        } ?? .inactive
+                    }
                     // If a preset was queued behind a deferred activation,
                     // apply it now. This is the late-binding path that
                     // handles imports that happened *before* the user
@@ -455,9 +514,22 @@ class AppModel {
                     // triggered this didSet, so the formula is now compiled
                     // and we can apply the preset.
                     if let queued = queuedPreset,
-                       queued.embeddedFormula?.shortHash == formula?.shortHash {
+                       let queuedGeneration = queuedLoadGeneration,
+                       pendingPresetForActivation?.id == queued.id,
+                       pendingPresetLoadGeneration == queuedGeneration,
+                       staticSceneLoadGeneration == queuedGeneration,
+                       queued.embeddedFormula?.shortHash == formula?.shortHash,
+                       queued.embeddedLighting?.shortHash == lighting?.shortHash {
+                        pendingEmbeddedEffectSetRollback = nil
                         pendingPresetForActivation = nil
-                        await applyLoadedScene(queued, options: [])
+                        pendingPresetSceneNavigationRequest = nil
+                        pendingPresetLoadGeneration = nil
+                        pendingPresetApplyOptions = []
+                        await applyLoadedScene(
+                            queued,
+                            options: queuedApplyOptions,
+                            manualSceneNavigationRequest: queuedNavigationRequest
+                        )
                     }
                     // Same late-binding drain for a queued animation scene.
                     if let queuedScene = pendingSceneApplyAfterActivation,
@@ -466,11 +538,34 @@ class AppModel {
                         queuedScene.apply()
                     }
                 } catch {
+                    // A newer request may have replaced both AppModel slots
+                    // while this asynchronous compile was in flight. Its state
+                    // must never be detached by the obsolete failure.
+                    guard self.activeEmbeddedFormulaHash == formula?.shortHash,
+                          self.activeEmbeddedLightingHash == lighting?.shortHash else { return }
                     self.errorReporter.report(.preset(.importFailed(
                         "Failed to compile custom shader: \(error.localizedDescription)"
                     )))
-                    self.uninstallEmbeddedFormula()
+                    // Lighting is the additive/experimental slot. If a combined
+                    // startup compile fails, detach it first and keep the user's
+                    // geometry selection intact; the detach recompiles the
+                    // remaining primary effect set.
+                    let restored = await self.restoreDeferredEffectSetAfterFailure(
+                        expectedPrimary: formula,
+                        expectedLighting: lighting,
+                        using: handler
+                    )
+                    if !restored {
+                        if self.activeEmbeddedLighting != nil {
+                            self.uninstallEmbeddedLighting()
+                        } else {
+                            self.uninstallEmbeddedFormula()
+                        }
+                    }
                     self.pendingPresetForActivation = nil
+                    self.pendingPresetSceneNavigationRequest = nil
+                    self.pendingPresetLoadGeneration = nil
+                    self.pendingPresetApplyOptions = []
                 }
             }
         }
@@ -486,6 +581,24 @@ class AppModel {
     /// across previews/imports.
     @ObservationIgnored var activeEmbeddedFormulaHash: String?
 
+    /// Independently active custom lighting material modifier. Unlike
+    /// `activeEmbeddedFormula`, this never changes `fractalType` and can ride any
+    /// built-in or custom distance estimator.
+    var activeEmbeddedLighting: EmbeddedFormula?
+
+    /// Observable mirror of the active lighting effect's dedicated GPU bank.
+    /// Always contains 16 values; only indices declared by the effect are
+    /// editable. Kept outside ControlStateStore so geometry resets/switches can
+    /// never overwrite lighting controls with same-numbered formula slots.
+    var customLightingParameterValues: [Float] = Array(repeating: 0, count: 16)
+
+    /// Unlike `activeEmbeddedLighting`, this only reaches `.active` after the
+    /// renderer has successfully published the compiled Metal library.
+    var customLightingRuntimeState: CustomLightingRuntimeState = .inactive
+
+    /// Source hash of `activeEmbeddedLighting`, used to skip redundant imports.
+    @ObservationIgnored var activeEmbeddedLightingHash: String?
+
     /// Preset that was queued behind a deferred formula activation (e.g. a
     /// `.threshfx` imported before the user entered the immersive space).
     /// Set by `loadStaticScene` when the install is `.deferred`, and
@@ -493,6 +606,20 @@ class AppModel {
     /// renderer has compiled the formula. Cleared on success, on failure,
     /// and on every successful direct (non-deferred) load.
     @ObservationIgnored var pendingPresetForActivation: FractalPreset?
+    /// Manual swipe metadata paired with pendingPresetForActivation. Keeping it
+    /// separate avoids changing the existing queued-preset persistence payload.
+    @ObservationIgnored var pendingPresetSceneNavigationRequest: ManualSceneNavigationRequest?
+    /// Scene-load generation paired with the queued preset. Async Metal
+    /// compilation may finish after a preview is cancelled or superseded; this
+    /// token prevents that stale task from applying its captured scene later.
+    @ObservationIgnored var pendingPresetLoadGeneration: UInt64?
+    /// Side effects that must wait for the queued scene state itself to apply.
+    /// In particular, lastState must not combine staged effects with outgoing
+    /// render settings while a cold-start Metal compile is still pending.
+    @ObservationIgnored var pendingPresetApplyOptions: StaticSceneLoadOptions = []
+    /// Effect set that was active before a renderer-unavailable scene staged a
+    /// custom primary/lighting pair. Consumed on successful startup or rollback.
+    @ObservationIgnored var pendingEmbeddedEffectSetRollback: EmbeddedEffectSetRollbackSnapshot?
 
     /// Animation-scene counterpart of `pendingPresetForActivation`: an external
     /// `.threshanim`/`.threshanimv` whose embedded formula couldn't activate in
@@ -605,7 +732,10 @@ class AppModel {
             self?.presetManager.sceneCatalogPresets ?? []
         }
         animationManager?.musicCueStaticSceneLoadHandler = { [weak self] preset in
-            self?.loadStaticScene(preset)
+            self?.loadStaticScene(
+                preset,
+                manualSceneNavigationRequest: self?.activeManualSceneNavigationRequest
+            )
         }
         animationManager?.musicCueCurrentStaticSceneIDProvider = { [weak self] in
             self?.activeResetPreset?.id
@@ -676,12 +806,27 @@ class AppModel {
 
         // Restore last scene/session state if available. If it carries an
         // embedded formula, install it so custom scenes survive app relaunch.
-        if let restoredPreset = presetManager.restoreLastState(to: renderSettings),
-           let formula = restoredPreset.embeddedFormula {
-            if formula.effectKind == .spaceWarp {
-                installSpaceWarp(formula)
-            } else {
-                installEmbeddedFormulaIfNeeded(formula)
+        if let restoredPreset = presetManager.restoreLastState(to: renderSettings) {
+            if let formula = restoredPreset.embeddedFormula {
+                if formula.effectKind == .spaceWarp {
+                    installSpaceWarp(formula)
+                } else {
+                    installEmbeddedFormulaIfNeeded(formula)
+                }
+            }
+            if let lighting = restoredPreset.embeddedLighting {
+                let currentLighting = Self.currentBundledLightingDemo(
+                    replacingPersisted: lighting
+                )
+                let restoredValues = currentLighting.sourceHash == lighting.sourceHash
+                    ? restoredPreset.embeddedLightingParamValues
+                    : nil
+                Task { @MainActor in
+                    _ = await installEmbeddedLighting(
+                        currentLighting,
+                        parameterValues: restoredValues
+                    )
+                }
             }
         }
         
@@ -752,7 +897,11 @@ class AppModel {
     
     /// Save current state for restore on next launch
     func saveLastState() {
-        presetManager.saveLastState(from: renderSettings, embeddedFormula: activeEmbeddedFormula)
+        presetManager.saveLastState(
+            from: renderSettings,
+            embeddedFormula: activeEmbeddedFormula,
+            embeddedLighting: activeEmbeddedLighting
+        )
         // Scene/session state is already checkpointed above. Flush only
         // user-originated debounced writes; a blanket save of the live renderer
         // would undo the scene mutation boundary and overwrite device defaults.
@@ -987,8 +1136,9 @@ class AppModel {
         // Activate now if the renderer is up; otherwise the handler's didSet
         // re-activates `activeEmbeddedFormula` when it binds (cold-start opens).
         if let handler = activateEmbeddedFormulaHandler {
+            let lighting = activeEmbeddedLighting
             Task { @MainActor in
-                do { try await handler(warp) }
+                do { try await handler(warp, lighting) }
                 catch {
                     self.errorReporter.report(.preset(.importFailed("Failed to compile space warp: \(error.localizedDescription)")))
                     // Clear stale state so a failed warp doesn't linger.
@@ -1235,6 +1385,8 @@ class AppModel {
     func switchFractalType(_ type: FractalModelType) {
         guard renderSettings.fractalType != type else { return }
 
+        manualStaticSceneNavigationCursor = nil
+
         // A custom distance estimator is tied to `.custom`; detach it before
         // selecting a built-in type. Custom space warps intentionally survive
         // type changes because they apply to every fractal.
@@ -1258,7 +1410,8 @@ class AppModel {
             name: preset.name,
             id: preset.id,
             createdAt: preset.createdAt,
-            embeddedFormula: activeEmbeddedFormula
+            embeddedFormula: activeEmbeddedFormula,
+            embeddedLighting: activeEmbeddedLighting
         )
         snapshot.thumbnailData = nil
         activeResetPreset = snapshot
@@ -1273,7 +1426,8 @@ class AppModel {
         var snapshot = FractalPreset.fromSettings(
             renderSettings,
             name: name,
-            embeddedFormula: activeEmbeddedFormula
+            embeddedFormula: activeEmbeddedFormula,
+            embeddedLighting: activeEmbeddedLighting
         )
         snapshot.thumbnailData = nil
         activeResetPreset = snapshot
@@ -1298,26 +1452,53 @@ class AppModel {
     /// instantly; without one, preserve the existing static-scene shortcut.
     @MainActor
     func cycleConfiguredSceneGroupOrStaticScene(forward: Bool) {
+        let request = ManualSceneNavigationRequest(
+            id: UUID(),
+            direction: forward ? .next : .previous
+        )
+
         if let animationManager,
            animationManager.canStepMusicCueSceneGroup {
-            _ = animationManager.stepMusicCueSceneGroup(by: forward ? 1 : -1)
+            manualStaticSceneNavigationCursor = nil
+            activeManualSceneNavigationRequest = request
+            defer { activeManualSceneNavigationRequest = nil }
+
+            guard let target = animationManager.stepMusicCueSceneGroup(by: forward ? 1 : -1) else {
+                return
+            }
+            // Static cue targets complete through AppModel.applyLoadedScene;
+            // animation targets have already committed their transition when
+            // stepMusicCueSceneGroup returns.
+            if target.kind == .animation {
+                completeManualSceneNavigation(request, sceneName: target.name)
+            }
             return
         }
-        cycleJumpingOffScene(forward: forward)
+        cycleJumpingOffScene(
+            forward: forward,
+            manualSceneNavigationRequest: request
+        )
     }
 
     /// Loads the previous or next built-in static scene (Jumping Off or Music
     /// Reactive), wrapping around at the ends. Used by the canvas left/right
     /// shortcut when no playable cue group has been configured.
     @MainActor
-    func cycleJumpingOffScene(forward: Bool) {
+    func cycleJumpingOffScene(
+        forward: Bool,
+        manualSceneNavigationRequest: ManualSceneNavigationRequest? = nil
+    ) {
         let scenes = presetManager.sceneCatalogPresets
             .filter { $0.name != "__lastState__" && $0.isKeyboardSwitchableStaticPreset }
         guard !scenes.isEmpty else { return }
 
-        let currentIndex = activeResetPreset.flatMap { active in
+        let cursorIndex = manualStaticSceneNavigationCursor.flatMap { cursor in
+            scenes.firstIndex(where: { $0.id == cursor.sceneID })
+        }
+        let appliedIndex = activeResetPreset.flatMap { active in
             scenes.firstIndex(where: { $0.id == active.id })
         }
+        let currentIndex = cursorIndex ?? appliedIndex
 
         let nextIndex: Int
         if let currentIndex {
@@ -1327,7 +1508,39 @@ class AppModel {
             nextIndex = forward ? 0 : scenes.count - 1
         }
 
-        loadStaticScene(scenes[nextIndex])
+        let nextScene = scenes[nextIndex]
+        if let manualSceneNavigationRequest {
+            manualStaticSceneNavigationCursor = ManualStaticSceneNavigationCursor(
+                requestID: manualSceneNavigationRequest.id,
+                sceneID: nextScene.id
+            )
+        } else {
+            manualStaticSceneNavigationCursor = nil
+        }
+
+        loadStaticScene(
+            nextScene,
+            manualSceneNavigationRequest: manualSceneNavigationRequest
+        )
+    }
+
+    /// Publish only after the selected scene has reached its semantic apply
+    /// point. Static loads call this from applyLoadedScene; animation loads call
+    /// it after AnimationManager has committed the new current scene.
+    @MainActor
+    func completeManualSceneNavigation(
+        _ request: ManualSceneNavigationRequest,
+        sceneName: String
+    ) {
+        if manualStaticSceneNavigationCursor?.requestID == request.id {
+            manualStaticSceneNavigationCursor = nil
+        }
+        let trimmedName = sceneName.trimmingCharacters(in: .whitespacesAndNewlines)
+        sceneNavigationFeedback = SceneNavigationFeedback(
+            id: request.id,
+            direction: request.direction,
+            sceneName: trimmedName.isEmpty ? "Untitled Scene" : trimmedName
+        )
     }
 
 

@@ -8,6 +8,105 @@
 
 import SwiftUI
 
+struct CustomLightingStatusChip: View {
+    let state: CustomLightingRuntimeState
+    let onDetach: () -> Void
+
+    var body: some View {
+        switch state {
+        case .inactive:
+            EmptyView()
+
+        case .waitingForRenderer(let name):
+            chip(accent: .orange) {
+                Image(systemName: "clock")
+                Text("Custom lighting queued:").fontWeight(.semibold)
+                Text(name).lineLimit(1)
+                detachButton
+            }
+
+        case .compiling(let name):
+            chip(accent: .purple) {
+                ProgressView().controlSize(.small)
+                Text("Compiling custom lighting:").fontWeight(.semibold)
+                Text(name).lineLimit(1)
+                detachButton
+            }
+
+        case .active(let name):
+            chip(accent: .purple) {
+                Image(systemName: AppIcons.lightbulbMax)
+                Text("Custom lighting active:").fontWeight(.semibold)
+                Text(name).lineLimit(1)
+                detachButton
+            }
+        }
+    }
+
+    private var detachButton: some View {
+        Button(action: onDetach) {
+            Image(systemName: "xmark")
+                .font(.caption.weight(.bold))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Detach custom lighting")
+    }
+
+    private func chip<Content: View>(
+        accent: Color,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(spacing: 8) {
+            content()
+        }
+        .font(.callout)
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(accent.opacity(0.55), lineWidth: 1))
+        .transition(.move(edge: .top).combined(with: .opacity))
+        .accessibilityElement(children: .contain)
+    }
+}
+
+struct ExternalFileLoadingOverlay: View {
+    let fileName: String
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.22)
+
+            VStack(spacing: 12) {
+                ProgressView()
+                    .controlSize(.large)
+                Text("Loading Threshold file…")
+                    .font(.headline)
+                Text(fileName)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 280)
+                Text("External GPU effects may take a moment to compile.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 20)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+            )
+            .shadow(radius: 16)
+        }
+        .transition(.opacity)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Loading Threshold file \(fileName)")
+    }
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MARK: - ContentView
@@ -72,6 +171,7 @@ struct ContentView: View {
     // the per-tab `extension ContentView` files).
     @State var renamingGradientIndex: Int? = nil
     @State var renamingGradientName: String = ""
+    @State var isImportingCustomEffect = false
     @AppStorage("allowCustomScenes") var allowCustomScenes: Bool = false
     /// Menu text size (Dynamic Type). Index into `DS.textSizeSteps`; the "Text
     /// Size" slider in Settings ▸ Display writes it and the menu body applies it
@@ -302,10 +402,12 @@ struct ContentView: View {
         }
         .overlay(alignment: .top) {
             VStack(spacing: 8) {
+                #if !os(macOS)
                 // Surfaces ErrorReporter failures (preset/animation import, etc.) that
                 // were previously reported but never shown. Transient: self-dismisses
                 // and only renders while currentError is set.
                 ErrorBannerView(errorReporter: appModel.errorReporter)
+                #endif
 
                 if let saveConfirmationMessage {
                     Label(saveConfirmationMessage, systemImage: AppIcons.checkmarkCircleFill)
@@ -318,39 +420,27 @@ struct ContentView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                         .accessibilityLabel(saveConfirmationMessage)
                 }
+
+                #if !os(macOS)
+                CustomLightingStatusChip(
+                    state: appModel.customLightingRuntimeState,
+                    onDetach: {
+                            appModel.uninstallEmbeddedLighting()
+                            appModel.saveLastState()
+                    }
+                )
+                #endif
             }
             .padding(.top, 8)
         }
         .overlay {
+            #if os(macOS)
+            EmptyView()
+            #else
             if let fileName = appModel.externalImportLoadingFileName {
-                ZStack {
-                    Color.black.opacity(0.22)
-
-                    VStack(spacing: 12) {
-                        ProgressView()
-                            .controlSize(.large)
-                        Text("Loading scene…")
-                            .font(.headline)
-                        Text(fileName)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .frame(maxWidth: 280)
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 20)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
-                    )
-                    .shadow(radius: 16)
-                }
-                .transition(.opacity)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Loading scene \(fileName)")
+                ExternalFileLoadingOverlay(fileName: fileName)
             }
+            #endif
         }
         .animation(
             motionSensitiveAnimation(.easeInOut(duration: 0.16)),
@@ -613,18 +703,15 @@ struct ContentView: View {
         // displayed values, apply the reset target, then ease back to it (rather
         // than snapping). commitSceneTransition is a no-op when the transition
         // duration is 0 or an animation is playing.
-        appModel.renderSettings.beginSceneTransitionSnapshot()
         if let preset = appModel.activeResetPreset {
-            appModel.presetManager.loadPreset(
-                preset,
-                into: appModel.renderSettings,
-                resetEnvironment: true
-            )
-            appModel.applyPresetGestureOverridesIfNeeded(for: preset)
-            appModel.syncGestureProcessor()
-        } else {
-            appModel.applyFractalDefaults()
+            // Reset points can carry both a custom DE and a lighting sidecar.
+            // Route through the same atomic effect-set loader as scene changes
+            // so the library, lighting bank, and observable controls agree.
+            appModel.loadStaticScene(preset)
+            return
         }
+        appModel.renderSettings.beginSceneTransitionSnapshot()
+        appModel.applyFractalDefaults()
         appModel.renderSettings.commitSceneTransition()
         cache.loadFromSettings()
     }
@@ -650,7 +737,8 @@ struct ContentView: View {
             name: finalName,
             settings: appModel.renderSettings,
             thumbnailData: includeGeneratedPreview ? generatedPresetPreviewData(named: finalName) : nil,
-            embeddedFormula: appModel.activeEmbeddedFormula
+            embeddedFormula: appModel.activeEmbeddedFormula,
+            embeddedLighting: appModel.activeEmbeddedLighting
         )
         switch result {
         case .saved:

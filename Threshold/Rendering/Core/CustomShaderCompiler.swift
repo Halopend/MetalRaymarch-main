@@ -122,14 +122,18 @@ actor CustomShaderCompiler {
     /// The library exposes the same fragment/compute/vertex entry points as the
     /// bundled `default.metallib` — function-constant specialization for `FI`/`RS`/etc.
     /// continues to work via `library.makeFunction(name:constantValues:)`.
-    /// Stable cache key for an effect set (fractal + space warp). Distinct from a
+    /// Stable cache key for an effect set (fractal + space warp + lighting). Distinct from a
     /// single formula's `sourceHash`, so old and combined entries never collide.
     /// `warpStackSignature` is RETIRED (warp codegen was removed; the stack renders
     /// via the bundled count-driven runtime loop). It is now always "s0", kept only
     /// so the cache key shape is unchanged for the custom-FORMULA path.
     static func combinedHash(fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?,
+                             lighting: EmbeddedFormula? = nil,
                              warpStackSignature: String = "s0") -> String {
-        "f\(fractal?.shortHash ?? "0")w\(spaceWarp?.shortHash ?? "0")\(warpStackSignature)"
+        // `m2` is the host material ABI revision. Bump it whenever the public
+        // ThresholdMaterial / ThresholdLightingContext contract changes so a
+        // stale in-memory library can never be reused against a new adapter.
+        "m2f\(fractal?.shortHash ?? "0")w\(spaceWarp?.shortHash ?? "0")l\(lighting?.shortHash ?? "0")\(warpStackSignature)"
     }
 
     /// Compile (or return cached) the combined library for an effect set.
@@ -149,12 +153,15 @@ actor CustomShaderCompiler {
     /// hands the work to Metal's own compile queue and suspends the actor,
     /// freeing the cooperative thread so frames keep flowing.
     func library(forFractal fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?,
+                 lighting: EmbeddedFormula? = nil,
                  warpStackSource: String? = nil, warpStackSignature: String = "s0") async throws -> MTLLibrary {
-        let key = Self.combinedHash(fractal: fractal, spaceWarp: spaceWarp, warpStackSignature: warpStackSignature)
+        let key = Self.combinedHash(fractal: fractal, spaceWarp: spaceWarp,
+                                    lighting: lighting, warpStackSignature: warpStackSignature)
         if let cached = libraryCache[key] {
             return cached
         }
-        let source = try Self.synthesizeSource(fractal: fractal, spaceWarp: spaceWarp, warpStackSource: warpStackSource)
+        let source = try Self.synthesizeSource(fractal: fractal, spaceWarp: spaceWarp,
+                                               lighting: lighting, warpStackSource: warpStackSource)
         let options = MTLCompileOptions()
         if #available(visionOS 2.0, *) {
             options.mathMode = .fast
@@ -163,7 +170,10 @@ actor CustomShaderCompiler {
         }
 
         let device = self.device
-        let formulaName = fractal?.name ?? spaceWarp?.name ?? "effect"
+        let effectNames = [fractal?.name, spaceWarp?.name, lighting?.name]
+            .compactMap { $0 }
+            .joined(separator: " + ")
+        let formulaName = effectNames.isEmpty ? "effect set" : effectNames
         do {
             let lib: MTLLibrary = try await withCheckedThrowingContinuation { continuation in
                 // The completion handler runs on a Metal-owned thread, not this
@@ -214,9 +224,11 @@ actor CustomShaderCompiler {
     /// self-contained string suitable for `device.makeLibrary(source:)`.
     /// Stitch the active effect SET into one self-contained Metal source. A custom
     /// fractal DE is injected at the dispatch markers; a custom space warp is
-    /// injected at `// __CUSTOM_SPACE_WARP__`. Either may be nil (the corresponding
+    /// injected at `// __CUSTOM_SPACE_WARP__`; custom lighting is adapted at
+    /// `// __CUSTOM_LIGHTING__`. Any may be nil (the corresponding
     /// markers keep their built-in defaults).
     static func synthesizeSource(fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?,
+                                 lighting: EmbeddedFormula? = nil,
                                  warpStackSource: String? = nil) throws -> String {
         // The pieces preceding the user's DE source come from ONE helper shared
         // with `fractalUserSourceStartLine`, so compile-log line mapping can
@@ -245,6 +257,9 @@ actor CustomShaderCompiler {
         var suffix = Self.synthesizedSourceSuffix
         if let spaceWarp {
             suffix = try injectCustomSpaceWarp(suffix, warpSource: spaceWarp.metalSource)
+        }
+        if let lighting {
+            suffix = try injectCustomLighting(suffix, lighting: lighting)
         }
         // Composable transform stack codegen — unrolled, type-dispatched
         // spaceWarpStackApply/DEScale. A custom .threshfx warp (above) takes
@@ -322,6 +337,27 @@ actor CustomShaderCompiler {
         // === Embedded space-warp source ===
         \(warpSource)
         // === End embedded space-warp source ===
+        """
+        return src.replacingOccurrences(of: marker, with: replacement)
+    }
+
+    /// Replace the material-hook marker with the external source and a generated,
+    /// typed adapter. The adapter makes Metal validate the exact public ABI rather
+    /// than relying only on the lightweight function-name check in `validate()`.
+    static func injectCustomLighting(_ src: String, lighting: EmbeddedFormula) throws -> String {
+        let marker = "// __CUSTOM_LIGHTING__"
+        guard src.contains(marker) else { throw CustomShaderCompilerError.missingDispatchMarker(marker) }
+        let replacement = """
+        // __CUSTOM_LIGHTING__ (custom material modifier injected)
+        #define THRESHOLD_CUSTOM_LIGHTING
+        // === Embedded lighting source — '\(lighting.id)' ===
+        \(lighting.metalSource)
+        // === End embedded lighting source ===
+        FORCE_INLINE ThresholdMaterial applyCustomLightingMaterial(ThresholdLightingContext context,
+                                                                    ThresholdMaterial material)
+        {
+            return Lighting_\(lighting.functionStem)(context, material);
+        }
         """
         return src.replacingOccurrences(of: marker, with: replacement)
     }

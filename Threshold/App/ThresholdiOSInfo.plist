@@ -13,7 +13,9 @@
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
-		<string></string>
+		<string>LaunchBackground</string>
+		<key>UIImageName</key>
+		<string>LaunchWindowIcon</string>
 	</dict>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>

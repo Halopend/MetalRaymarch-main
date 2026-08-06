@@ -96,7 +96,7 @@ extension AppModel {
             guard !Task.isCancelled,
                   externalImportDecodeGeneration == generation else { return }
 
-            finishOpeningExternalFile(
+            await finishOpeningExternalFile(
                 result,
                 fileName: url.lastPathComponent,
                 format: format
@@ -134,7 +134,7 @@ extension AppModel {
         _ result: ExternalFileDecodeResult,
         fileName: String,
         format: ThresholdExportFormat
-    ) {
+    ) async {
         guard let payload = result.payload else {
             let detail = result.failureDescription.map { ": \($0)" } ?? ""
             switch format.category {
@@ -177,6 +177,17 @@ extension AppModel {
                 ensureWindowContentVisible()
                 return
             }
+            if container.formula.effectKind == .lighting {
+                // Lighting is an additive sidecar: compile it against whatever
+                // fractal/warp is active, without opening a custom-fractal preview
+                // or changing geometry. Await here so the existing external-file
+                // progress overlay remains visible through runtime Metal compile;
+                // previously it vanished after JSON decoding and looked inert.
+                let installResult = await installEmbeddedLighting(container.formula)
+                if installResult != .failed { saveLastState() }
+                ensureWindowContentVisible()
+                return
+            }
             let preset = AppModel.makeCustomPreset(from: container.formula)
             pendingExternalImport = ExternalFileImportRequest(
                 fileName: fileName,
@@ -201,7 +212,8 @@ extension AppModel {
                 externalPreviewRestorePreset = FractalPreset.fromSettings(
                     renderSettings,
                     name: "__externalPreviewRestore__",
-                    embeddedFormula: activeEmbeddedFormula
+                    embeddedFormula: activeEmbeddedFormula,
+                    embeddedLighting: activeEmbeddedLighting
                 )
             }
             if !externalPreviewCapturedEmbeddedFormula {
@@ -352,21 +364,52 @@ extension AppModel {
 
     func clearExternalPreview(restorePreviewedState: Bool) {
         if restorePreviewedState {
-            if externalPreviewCapturedEmbeddedFormula {
+            // Runtime Metal compilation is not instant. Invalidate the active
+            // scene-load generation before restoring the preview snapshot so a
+            // cancelled/superseded preview cannot resume and overwrite it.
+            staticSceneLoadGeneration &+= 1
+            staticSceneLoadTask?.cancel()
+            staticSceneLoadTask = nil
+            pendingPresetForActivation = nil
+            pendingPresetSceneNavigationRequest = nil
+            pendingPresetLoadGeneration = nil
+            pendingPresetApplyOptions = []
+            pendingEmbeddedEffectSetRollback = nil
+        }
+        if restorePreviewedState {
+            if let preset = externalPreviewRestorePreset {
+                let restoreGeneration = staticSceneLoadGeneration
+                Task { @MainActor [self] in
+                    let result = await activateEmbeddedEffectSetForSceneLoad(
+                        primary: preset.embeddedFormula,
+                        lighting: preset.embeddedLighting,
+                        lightingParameterValues: preset.embeddedLightingParamValues
+                    )
+                    guard result != .failed,
+                          staticSceneLoadGeneration == restoreGeneration else { return }
+                    preset.apply(
+                        to: renderSettings,
+                        resetEnvironment: true,
+                        scope: .session
+                    )
+                    // Preset.apply updates the packed renderer copy; keep the
+                    // observable sliders on the same resolved values as well.
+                    configureCustomLightingParameters(
+                        for: preset.embeddedLighting,
+                        overrides: preset.embeddedLightingParamValues
+                    )
+                    syncGestureProcessor()
+                    NotificationCenter.default.post(
+                        name: AppModel.fractalSettingsDidChangeNotification,
+                        object: nil
+                    )
+                }
+            } else if externalPreviewCapturedEmbeddedFormula {
                 if let formula = externalPreviewRestoreEmbeddedFormula {
                     installEmbeddedFormulaIfNeeded(formula)
                 } else {
                     uninstallEmbeddedFormula()
                 }
-            }
-            if let preset = externalPreviewRestorePreset {
-                preset.apply(
-                    to: renderSettings,
-                    resetEnvironment: true,
-                    scope: .session
-                )
-                syncGestureProcessor()
-                NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
             }
             if externalPreviewCapturedScene {
                 animationManager?.currentScene = externalPreviewRestoreScene

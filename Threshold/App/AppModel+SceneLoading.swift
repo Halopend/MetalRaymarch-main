@@ -21,8 +21,12 @@ extension AppModel {
     @MainActor
     func loadStaticScene(
         _ preset: FractalPreset,
-        options: StaticSceneLoadOptions = []
+        options: StaticSceneLoadOptions = [],
+        manualSceneNavigationRequest: ManualSceneNavigationRequest? = nil
     ) {
+        if manualSceneNavigationRequest == nil {
+            manualStaticSceneNavigationCursor = nil
+        }
         // Exit keyframe-animation mode before loading a static scene. While an
         // animation is playing, `RenderSettings.isAnimationPlaying` makes the
         // effective-target getters return the per-frame `animationBase` and the
@@ -43,40 +47,40 @@ extension AppModel {
                 if self.staticSceneLoadGeneration == generation { self.staticSceneLoadTask = nil }
             }
             customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene source=\(source) name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
-            if let formula = preset.embeddedFormula, formula.effectKind == .spaceWarp {
-                // A space warp rides the preset's built-in fractalType — install it
-                // and fall through to apply the rest of the scene normally.
-                installSpaceWarp(formula)
-            } else if let formula = preset.embeddedFormula {
-                let installResult = await installEmbeddedFormulaIfNeededAndWait(formula)
-                guard !Task.isCancelled, staticSceneLoadGeneration == generation else { return }
-                customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene installEmbeddedFormula returned \(installResult)")
-                if installResult == .failed { return }
-                if installResult == .deferred {
-                    // Renderer isn't up yet (typical: .threshfx opened from
-                    // Finder before the user entered the immersive space).
-                    // The formula is registered in the catalogs and
-                    // `activeEmbeddedFormula` is set, but the renderer's
-                    // activation handler is nil, so we can't compile the
-                    // MTLLibrary yet. The renderer will pick this up the
-                    // moment it starts (its startup reads
-                    // `activeEmbeddedFormula` and calls the activation
-                    // handler), so we just queue the preset-apply behind the
-                    // handler and return immediately. The user can enter the
-                    // scene at their own pace and the scene will load.
-                    queuePresetApplyAfterFormulaActivation(preset, options: options)
-                    return
-                }
-            } else {
-                uninstallEmbeddedFormula()
+            let installResult = await activateEmbeddedEffectSetForSceneLoad(
+                primary: preset.embeddedFormula,
+                lighting: preset.embeddedLighting,
+                lightingParameterValues: preset.embeddedLightingParamValues
+            )
+            guard !Task.isCancelled, staticSceneLoadGeneration == generation else { return }
+            customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene effect-set activation returned \(installResult)")
+            if installResult == .failed { return }
+            if installResult == .deferred {
+                // Renderer isn't up yet (typical: an external scene opened
+                // before immersive presentation). Both immutable effect slots
+                // are staged; the handler's didSet compiles them together.
+                queuePresetApplyAfterFormulaActivation(
+                    preset,
+                    options: options,
+                    manualSceneNavigationRequest: manualSceneNavigationRequest,
+                    loadGeneration: generation
+                )
+                return
             }
             // Direct (non-deferred) load: clear any leftover queued preset /
             // scene from a previous deferred import, so a stale queued apply
             // can't fire on the next handler binding.
             pendingPresetForActivation = nil
+            pendingPresetSceneNavigationRequest = nil
+            pendingPresetLoadGeneration = nil
+            pendingPresetApplyOptions = []
             pendingSceneApplyAfterActivation = nil
             guard !Task.isCancelled, staticSceneLoadGeneration == generation else { return }
-            await applyLoadedScene(preset, options: options)
+            await applyLoadedScene(
+                preset,
+                options: options,
+                manualSceneNavigationRequest: manualSceneNavigationRequest
+            )
         }
     }
 
@@ -89,6 +93,8 @@ extension AppModel {
     func queuePresetApplyAfterFormulaActivation(
         _ preset: FractalPreset,
         options: StaticSceneLoadOptions,
+        manualSceneNavigationRequest: ManualSceneNavigationRequest? = nil,
+        loadGeneration: UInt64,
         timeout: TimeInterval = 10
     ) {
         // Persist + close the import sheet immediately so the user gets
@@ -97,9 +103,6 @@ extension AppModel {
         // what waits for the renderer to come up.
         if options.contains(.saveToLibrary) {
             _ = presetManager.importPreset(preset)
-        }
-        if options.contains(.persistLastState) {
-            saveLastState()
         }
         if options.contains(.closeExternalSheet) {
             clearExternalPreview(restorePreviewedState: false)
@@ -113,6 +116,10 @@ extension AppModel {
         // 10s timeout has expired: the renderer's startup picks up
         // `activeEmbeddedFormula` and the didSet consumes the queued preset.
         pendingPresetForActivation = preset
+        pendingPresetSceneNavigationRequest = manualSceneNavigationRequest
+        pendingPresetLoadGeneration = loadGeneration
+        pendingPresetApplyOptions = options.contains(.persistLastState)
+            ? [.persistLastState] : []
         // Auto-open the immersive space if the user is on the menu (or in
         // any state other than already-open). The view that owns
         // @Environment(\.openImmersiveSpace) observes the notification and
@@ -129,6 +136,9 @@ extension AppModel {
             customSceneDiagnostic("🔬 [CSDiag] queuePresetApplyAfterFormulaActivation name='\(preset.name)' hash=\(preset.embeddedFormula?.shortHash ?? "nil")")
             let deadline = Date().addingTimeInterval(timeout)
             while activateEmbeddedFormulaHandler == nil {
+                guard staticSceneLoadGeneration == loadGeneration,
+                      pendingPresetForActivation?.id == preset.id,
+                      pendingPresetLoadGeneration == loadGeneration else { return }
                 if Date() > deadline {
                     errorReporter.report(.preset(.importFailed(
                         "Custom scene is queued. Enter the immersive space to compile and render the custom shader."
@@ -137,30 +147,10 @@ extension AppModel {
                 }
                 try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
             }
-            // Handler is now bound. Activate the formula, then run the
-            // standard preset-apply path. The renderer's startup also runs
-            // its own one-shot activation on `activeEmbeddedFormula`; the
-            // activation is a no-op when hash + library already match.
-            if let handler = activateEmbeddedFormulaHandler,
-               let formula = preset.embeddedFormula {
-                do {
-                    try await handler(formula)
-                } catch {
-                    errorReporter.report(.preset(.importFailed(
-                        "Failed to compile custom shader: \(error.localizedDescription)"
-                    )))
-                    uninstallEmbeddedFormula()
-                    pendingPresetForActivation = nil
-                    return
-                }
-            }
-            // If didSet hasn't already drained pendingPresetForActivation
-            // (it may have, since it fires whenever the handler is bound),
-            // apply the preset now and clear the slot.
-            if pendingPresetForActivation != nil {
-                pendingPresetForActivation = nil
-                await applyLoadedScene(preset, options: [])
-            }
+            // Binding the handler synchronously launches its didSet activation,
+            // which owns both compilation and the queued-preset drain. Do not
+            // start a duplicate compile here: a superseded call can return before
+            // the publishing call and make scene application race the pipeline.
         }
     }
 
@@ -172,7 +162,8 @@ extension AppModel {
     @MainActor
     func applyLoadedScene(
         _ preset: FractalPreset,
-        options: StaticSceneLoadOptions
+        options: StaticSceneLoadOptions,
+        manualSceneNavigationRequest: ManualSceneNavigationRequest? = nil
     ) async {
         // Custom and built-in scenes wait here alike: a custom formula has no
         // usable pipeline until its specialized one is compiled, and a built-in
@@ -217,6 +208,12 @@ extension AppModel {
             pendingExternalImport = nil
             ensureWindowContentVisible()
         }
+        if let manualSceneNavigationRequest {
+            completeManualSceneNavigation(
+                manualSceneNavigationRequest,
+                sceneName: preset.name
+            )
+        }
     }
 
     /// Wait for the renderer's custom-shader activation handler to bind, then
@@ -260,7 +257,7 @@ extension AppModel {
         // cover the case where our poll won the race. The activation is a
         // no-op when the hash + library already match.
         do {
-            try await handler(formula)
+            try await handler(formula, activeEmbeddedLighting)
             return true
         } catch {
             errorReporter.report(.preset(.importFailed(
