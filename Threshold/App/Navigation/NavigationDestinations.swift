@@ -94,7 +94,7 @@ enum VisualizationsRailSection: String, CaseIterable, Codable, Hashable, Sendabl
     case reactive = "Reactive"
 
     static let allCases: [VisualizationsRailSection] = [
-        .color, .mapping, .atmosphere, .grading, .motion, .transition,
+        .color, .atmosphere, .grading, .motion, .transition,
     ]
 
     /// A safe destination when opening the top-level Look workspace. Older
@@ -107,6 +107,8 @@ enum VisualizationsRailSection: String, CaseIterable, Codable, Hashable, Sendabl
 
     var title: String {
         switch self {
+        case .color:
+            return "Color & Mapping"
         case .grading:
             // Keep the raw value "Grading" stable for existing @AppStorage
             // navigation state while presenting the broader scene-control home.

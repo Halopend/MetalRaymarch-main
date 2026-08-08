@@ -18,7 +18,10 @@ extension ContentView {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 12) {
                     switch currentRoute {
-                    case .look(.color): coloringGradientContent
+                    case .look(.color):
+                        coloringGradientContent
+                        Divider().padding(.vertical, 4)
+                        coloringMappingContent
                     case .look(.mapping): coloringMappingContent
                     case .look(.grading): coloringGradingContent
                     default: EmptyView()
@@ -32,7 +35,7 @@ extension ContentView {
     private var coloringGradientContent: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Gradient Coloring", systemImage: AppIcons.paintbrushFill)
+                Label("Gradient Colors", systemImage: AppIcons.paintbrushFill)
                     .font(.headline)
                 Spacer()
                 Text("Current: \(cache.color.gradientState.gradientPreset?.displayName ?? cache.gradientLibrary.savedCustomGradients.first(where: { $0.id == cache.color.gradientState.gradient.id })?.name ?? "Custom")")
@@ -174,7 +177,7 @@ extension ContentView {
     private var coloringMappingContent: some View {
         VStack(spacing: 12) {
             HStack {
-                Label("Mapping Mode", systemImage: AppIcons.target).font(.headline)
+                Label("Color Mapping", systemImage: AppIcons.target).font(.headline)
                 Spacer()
                 Text(cache.color.gradientState.gradient.mappingMode.displayName)
                     .font(.caption2.weight(.semibold))

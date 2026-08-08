@@ -419,6 +419,8 @@ final class NavigationStore {
             return .quality(.tuning)
         case .look(.reactive):
             return .input(.reactive)
+        case .look(.mapping):
+            return .look(.color)
         case .input(let section):
             let canonical = section.canonical
             if [.songs, .playlists, .albums].contains(canonical),
@@ -484,7 +486,7 @@ final class NavigationStore {
             case .coloring:
                 switch value("ContentView.coloringSubTab", as: LegacyColoringSubTab.self) ?? .gradient {
                 case .gradient: return .look(.color)
-                case .mapping: return .look(.mapping)
+                case .mapping: return .look(.color)
                 case .grading: return .look(.grading)
                 }
             case .effects:
@@ -551,7 +553,7 @@ final class NavigationStore {
         case "shapeBounding": return .shape(.bounding)
         case "shapePerformance": return .quality(.tuning)
         case "visualizationsColor": return .look(.color)
-        case "visualizationsMapping": return .look(.mapping)
+        case "visualizationsMapping": return .look(.color)
         case "visualizationsGrading": return .look(.grading)
         case "visualizationsMotion": return .look(.motion)
         case "visualizationsAtmosphere": return .look(.atmosphere)

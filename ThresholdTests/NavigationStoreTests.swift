@@ -123,7 +123,7 @@ struct NavigationStoreTests {
             allowsCustomScenes: true,
             includesGestureEditing: true
         ))
-        let expected = AppRoute.look(.mapping)
+        let expected = AppRoute.look(.color)
         let hierarchyTarget = hierarchy.node(withID: expected.stableID)!.target
         let finderTarget = ControlFinderDestination.catalog.first {
             $0.target.stableID == expected.stableID

@@ -163,13 +163,8 @@ struct ControlFinderDestination: Identifiable {
         // Visualizations
         destination(
             VisualizationsRailSection.color,
-            description: "Choose, save, and edit gradient colors.",
-            keywords: ["gradient", "palette", "colour", "color stops", "preset"]
-        ),
-        destination(
-            VisualizationsRailSection.mapping,
-            description: "Choose how fractal distance and orbit data map into the gradient.",
-            keywords: ["mapping mode", "orbit trap", "distance", "color mix", "offset"]
+            description: "Choose gradient colors and control how fractal distance and orbit data map into them.",
+            keywords: ["gradient", "palette", "colour", "color stops", "preset", "mapping mode", "orbit trap", "distance", "color mix", "offset"]
         ),
         destination(
             VisualizationsRailSection.grading,

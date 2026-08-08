@@ -6,7 +6,7 @@ struct ControlFinderDestinationTests {
     @Test("Opening Look replaces a removed saved section with Color")
     func staleLookSectionFallsBackToColor() {
         #expect(VisualizationsRailSection.reactive.lookWorkspaceDestination == .color)
-        #expect(VisualizationsRailSection.mapping.lookWorkspaceDestination == .mapping)
+        #expect(VisualizationsRailSection.mapping.lookWorkspaceDestination == .color)
         #expect(VisualizationsRailSection.allCases.allSatisfy {
             $0.lookWorkspaceDestination == $0
         })
