@@ -234,6 +234,19 @@ extension AppModel {
                 externalPreviewRestoreScene = animationManager?.currentScene
                 externalPreviewCapturedScene = true
             }
+            // Capture the full primary+lighting effect set (like the preset
+            // branch above): a previewed scene whose formula is lighting-kind
+            // installs via installEmbeddedLighting, and cancellation must be
+            // able to put the prior lighting sidecar back, not just the
+            // primary formula.
+            if externalPreviewRestorePreset == nil {
+                externalPreviewRestorePreset = FractalPreset.fromSettings(
+                    renderSettings,
+                    name: "__externalPreviewRestore__",
+                    embeddedFormula: activeEmbeddedFormula,
+                    embeddedLighting: activeEmbeddedLighting
+                )
+            }
             if !externalPreviewCapturedEmbeddedFormula {
                 externalPreviewRestoreEmbeddedFormula = activeEmbeddedFormula
                 externalPreviewCapturedEmbeddedFormula = true

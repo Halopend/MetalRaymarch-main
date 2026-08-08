@@ -22,7 +22,13 @@ private let bundledLightingDemoIDValue = "com.puppypower.threshold.example.iride
 @MainActor
 private enum BundledLightingDemoResource {
     static let result: Result<EmbeddedFormula, Error> = {
+        // Builds that preserve the synchronized resource hierarchy package the
+        // demo under Examples/Formulas; flattened builds put it at the root.
         guard let url = Bundle.main.url(
+            forResource: bundledLightingDemoResourceNameValue,
+            withExtension: "threshfx",
+            subdirectory: "Examples/Formulas"
+        ) ?? Bundle.main.url(
             forResource: bundledLightingDemoResourceNameValue,
             withExtension: "threshfx"
         ) else {
