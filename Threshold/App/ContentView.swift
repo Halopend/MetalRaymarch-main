@@ -1559,7 +1559,10 @@ struct ContentView: View {
                                     tabSelection: musicSectionBinding)
                 case .look(.transition):
                     if let animationManager = appModel.animationManager {
-                        TransitionTabContent(animationManager: animationManager)
+                        TransitionTabContent(
+                            animationManager: animationManager,
+                            musicService: appModel.musicService
+                        )
                     } else {
                         EmptyView()
                     }

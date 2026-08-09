@@ -19,7 +19,7 @@ enum MusicCueSceneSource: String, CaseIterable, Identifiable, Hashable, Sendable
 
     var displayName: String {
         switch self {
-        case .configuredGroup: return "Configured Group"
+        case .configuredGroup: return "Active Scene Set"
         case .animationLibrary: return "Animation Library"
         case .staticSceneLibrary: return "Static Scene Library"
         }
@@ -27,7 +27,7 @@ enum MusicCueSceneSource: String, CaseIterable, Identifiable, Hashable, Sendable
 
     var shortDisplayName: String {
         switch self {
-        case .configuredGroup: return "Group"
+        case .configuredGroup: return "Set"
         case .animationLibrary: return "Animations"
         case .staticSceneLibrary: return "Static Scenes"
         }
@@ -43,7 +43,7 @@ enum MusicCueSceneSource: String, CaseIterable, Identifiable, Hashable, Sendable
 
     var detail: String {
         switch self {
-        case .configuredGroup: return "Only the scenes you select below"
+        case .configuredGroup: return "Only the scenes in the selected set below"
         case .animationLibrary: return "Every keyframed animation"
         case .staticSceneLibrary: return "Every saved static scene"
         }

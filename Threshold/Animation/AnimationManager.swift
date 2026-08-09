@@ -578,6 +578,8 @@ final class AnimationManager {
     @ObservationIgnored private static let sceneTransitionDurationKey = "AnimationManager.sceneTransitionDuration"
     @ObservationIgnored private static let musicCueSceneSwitchEnabledKey = "AnimationManager.musicCueSceneSwitchEnabled"
     @ObservationIgnored private static let musicCueSceneGroupIDsKey = "AnimationManager.musicCueSceneGroupIDs"
+    @ObservationIgnored private static let musicCueSceneSetsKey = "AnimationManager.musicCueSceneSets"
+    @ObservationIgnored private static let activeMusicCueSceneSetIDKey = "AnimationManager.activeMusicCueSceneSetID"
     @ObservationIgnored private static let musicCueSceneSourcesKey = "AnimationManager.musicCueSceneSources"
     @ObservationIgnored private static let musicCueSceneTraversalModeKey = "AnimationManager.musicCueSceneTraversalMode"
     @ObservationIgnored private static let musicCueThresholdKey = "AnimationManager.musicCueThreshold"
@@ -620,24 +622,84 @@ final class AnimationManager {
     @ObservationIgnored var musicCueStaticSceneLoadHandler: ((FractalPreset) -> Void)?
     @ObservationIgnored var musicCueCurrentStaticSceneIDProvider: (() -> UUID?)?
 
-    /// The user-configured sequence for music cues and quick scene stepping.
-    /// Membership is stored as source-qualified ids rather than scene values so
-    /// it survives renames, edits, and an iCloud scene temporarily not being
-    /// available. UUID-only values from the initial animation-only version are
-    /// read as animation targets for backward compatibility.
-    private(set) var musicCueSceneGroupTargetIDs: Set<String> = {
-        let identifiers = UserDefaults.standard.stringArray(
-            forKey: AnimationManager.musicCueSceneGroupIDsKey
-        ) ?? []
-        return Set(identifiers.compactMap(MusicCueSceneTarget.normalizedStorageID))
-    }() {
+    /// The saved scene sets for music cues and quick scene stepping. Each set
+    /// is a named subset of switchable scenes; the active set supplies the
+    /// configured pool. On first launch after the update the pre-sets single
+    /// configured group migrates into an initial "My Scenes" set.
+    private(set) var musicCueSceneSets: [MusicCueSceneSet] = AnimationManager.loadStoredMusicCueSceneSets() {
         didSet {
-            let identifiers = musicCueSceneGroupTargetIDs
-                .sorted()
-            UserDefaults.standard.set(identifiers, forKey: Self.musicCueSceneGroupIDsKey)
+            persistMusicCueSceneSets()
+            let oldActiveTargets = oldValue.first { $0.id == activeMusicCueSceneSetID }?.targetIDs
+            if oldActiveTargets != activeMusicCueSceneSet?.targetIDs {
+                musicCueSceneSwitchGate.reset()
+                resetMusicCueSceneNavigation()
+            }
+        }
+    }
+
+    /// Which saved set currently feeds the Configured Group pool. Nil when no
+    /// sets exist yet.
+    private(set) var activeMusicCueSceneSetID: UUID? = AnimationManager.loadStoredActiveMusicCueSceneSetID() {
+        didSet {
+            if let id = activeMusicCueSceneSetID {
+                UserDefaults.standard.set(id.uuidString, forKey: Self.activeMusicCueSceneSetIDKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.activeMusicCueSceneSetIDKey)
+            }
+            guard oldValue != activeMusicCueSceneSetID else { return }
+            persistMusicCueSceneSets()
             musicCueSceneSwitchGate.reset()
             resetMusicCueSceneNavigation()
         }
+    }
+
+    var activeMusicCueSceneSet: MusicCueSceneSet? {
+        musicCueSceneSets.first { $0.id == activeMusicCueSceneSetID }
+    }
+
+    /// The active set's membership — the value every existing pool/traversal
+    /// consumer reads. Empty when no set is active.
+    var musicCueSceneGroupTargetIDs: Set<String> {
+        activeMusicCueSceneSet?.targetIDs ?? []
+    }
+
+    private static func loadStoredMusicCueSceneSets() -> [MusicCueSceneSet] {
+        if let data = UserDefaults.standard.data(forKey: musicCueSceneSetsKey),
+           let sets = try? JSONDecoder().decode([MusicCueSceneSet].self, from: data) {
+            return sets
+        }
+        let migrated = MusicCueSceneSet.migratingLegacyGroup(
+            rawTargetIDs: UserDefaults.standard.stringArray(forKey: musicCueSceneGroupIDsKey) ?? []
+        )
+        // Persist the migration right away: the migrated set's id is freshly
+        // generated, and the active-set loader below re-reads this storage, so
+        // both reads must observe the same ids.
+        if !migrated.isEmpty, let data = try? JSONEncoder().encode(migrated) {
+            UserDefaults.standard.set(data, forKey: musicCueSceneSetsKey)
+        }
+        return migrated
+    }
+
+    private static func loadStoredActiveMusicCueSceneSetID() -> UUID? {
+        let sets = loadStoredMusicCueSceneSets()
+        if let raw = UserDefaults.standard.string(forKey: activeMusicCueSceneSetIDKey),
+           let id = UUID(uuidString: raw),
+           sets.contains(where: { $0.id == id }) {
+            return id
+        }
+        return sets.first?.id
+    }
+
+    private func persistMusicCueSceneSets() {
+        if let data = try? JSONEncoder().encode(musicCueSceneSets) {
+            UserDefaults.standard.set(data, forKey: Self.musicCueSceneSetsKey)
+        }
+        // Mirror the active set into the pre-sets key so downgraded builds
+        // still see a sensible configured group.
+        UserDefaults.standard.set(
+            musicCueSceneGroupTargetIDs.sorted(),
+            forKey: Self.musicCueSceneGroupIDsKey
+        )
     }
 
     /// The sources combined into the active scene pool. The original manual
@@ -791,7 +853,10 @@ final class AnimationManager {
         }
         guard musicCueEligibleTargets.count > 1 else {
             if musicCueSceneSources == Set([.configuredGroup]) {
-                return "Choose at least two scenes in the configured group."
+                if musicCueSceneSets.isEmpty {
+                    return "Create a scene set with at least two scenes."
+                }
+                return "Add at least two scenes to the active set."
             }
             return "This source combination needs at least two available scenes."
         }
@@ -812,43 +877,123 @@ final class AnimationManager {
         musicCueSceneSources = sources
     }
 
-    func isMusicCueTargetSelected(_ target: MusicCueSceneTarget) -> Bool {
-        musicCueSceneGroupTargetIDs.contains(target.id)
+    // MARK: Scene set management
+
+    func musicCueSceneSet(id: UUID) -> MusicCueSceneSet? {
+        musicCueSceneSets.first { $0.id == id }
     }
 
-    func setMusicCueTarget(_ target: MusicCueSceneTarget, isSelected: Bool) {
-        var identifiers = musicCueSceneGroupTargetIDs
-        if isSelected {
-            identifiers.insert(target.id)
-        } else {
-            identifiers.remove(target.id)
+    /// Creates a new set and makes it active so the editor and the switcher
+    /// immediately operate on it.
+    @discardableResult
+    func createMusicCueSceneSet(named name: String? = nil) -> MusicCueSceneSet {
+        let set = MusicCueSceneSet(name: name ?? defaultMusicCueSceneSetName())
+        musicCueSceneSets.append(set)
+        activeMusicCueSceneSetID = set.id
+        return set
+    }
+
+    private func defaultMusicCueSceneSetName() -> String {
+        let existing = Set(musicCueSceneSets.map(\.name))
+        var index = musicCueSceneSets.count + 1
+        var candidate = "Set \(index)"
+        while existing.contains(candidate) {
+            index += 1
+            candidate = "Set \(index)"
         }
-        musicCueSceneGroupTargetIDs = identifiers
+        return candidate
     }
 
-    func selectMusicCueTargets(_ targets: [MusicCueSceneTarget]) {
+    func activateMusicCueSceneSet(_ id: UUID) {
+        guard musicCueSceneSets.contains(where: { $0.id == id }) else { return }
+        activeMusicCueSceneSetID = id
+    }
+
+    func renameMusicCueSceneSet(_ id: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        mutateMusicCueSceneSet(id) { $0.name = trimmed }
+    }
+
+    func deleteMusicCueSceneSet(_ id: UUID) {
+        guard let index = musicCueSceneSets.firstIndex(where: { $0.id == id }) else { return }
+        musicCueSceneSets.remove(at: index)
+        if activeMusicCueSceneSetID == id {
+            activeMusicCueSceneSetID = musicCueSceneSets.first?.id
+        }
+    }
+
+    /// Attach (or detach, with nil) the song that starts with this set.
+    func setAttachedSong(_ song: SongAttachment?, forMusicCueSceneSet id: UUID) {
+        mutateMusicCueSceneSet(id) { $0.attachedSong = song }
+    }
+
+    /// Start a set: make it active, ensure the configured pool is a source,
+    /// and — when a song is attached — begin playback with cue-driven scene
+    /// advancement enabled, entering the set right away so the switch to the
+    /// curated visuals is immediate.
+    func startMusicCueSceneSet(_ id: UUID) {
+        guard let set = musicCueSceneSet(id: id) else { return }
+        activateMusicCueSceneSet(id)
+        if !musicCueSceneSources.contains(.configuredGroup) {
+            var sources = musicCueSceneSources
+            sources.insert(.configuredGroup)
+            musicCueSceneSources = sources
+        }
+        guard let song = set.attachedSong else { return }
+        musicCueSceneSwitchEnabled = true
+        playSongHandler?(song)
+        if let currentID = currentMusicCueSceneTargetID,
+           !set.targetIDs.contains(currentID) {
+            _ = stepMusicCueSceneGroup(by: 1)
+        } else if currentMusicCueSceneTargetID == nil {
+            _ = stepMusicCueSceneGroup(by: 1)
+        }
+    }
+
+    private func mutateMusicCueSceneSet(_ id: UUID, _ transform: (inout MusicCueSceneSet) -> Void) {
+        guard let index = musicCueSceneSets.firstIndex(where: { $0.id == id }) else { return }
+        var set = musicCueSceneSets[index]
+        transform(&set)
+        musicCueSceneSets[index] = set
+    }
+
+    // MARK: Set membership editing
+
+    func isMusicCueTargetSelected(_ target: MusicCueSceneTarget, in setID: UUID) -> Bool {
+        musicCueSceneSet(id: setID)?.targetIDs.contains(target.id) ?? false
+    }
+
+    func setMusicCueTarget(_ target: MusicCueSceneTarget, isSelected: Bool, in setID: UUID) {
+        mutateMusicCueSceneSet(setID) { set in
+            if isSelected {
+                set.targetIDs.insert(target.id)
+            } else {
+                set.targetIDs.remove(target.id)
+            }
+        }
+    }
+
+    func selectMusicCueTargets(_ targets: [MusicCueSceneTarget], in setID: UUID) {
         guard !targets.isEmpty else { return }
-        var identifiers = musicCueSceneGroupTargetIDs
-        identifiers.formUnion(targets.map(\.id))
-        musicCueSceneGroupTargetIDs = identifiers
+        mutateMusicCueSceneSet(setID) { $0.targetIDs.formUnion(targets.map(\.id)) }
     }
 
-    func clearMusicCueTargets(_ targets: [MusicCueSceneTarget]) {
+    func clearMusicCueTargets(_ targets: [MusicCueSceneTarget], in setID: UUID) {
         guard !targets.isEmpty else { return }
-        var identifiers = musicCueSceneGroupTargetIDs
-        identifiers.subtract(targets.map(\.id))
-        musicCueSceneGroupTargetIDs = identifiers
+        mutateMusicCueSceneSet(setID) { $0.targetIDs.subtract(targets.map(\.id)) }
     }
 
-    func selectAllMusicCueTargets() {
-        var identifiers = musicCueSceneGroupTargetIDs
-        identifiers.formUnion(musicCueGroupAvailableTargets.map(\.id))
-        musicCueSceneGroupTargetIDs = identifiers
+    func selectAllMusicCueTargets(in setID: UUID) {
+        let all = musicCueGroupAvailableTargets.map(\.id)
+        mutateMusicCueSceneSet(setID) { $0.targetIDs.formUnion(all) }
     }
 
-    func clearMusicCueSceneGroup() {
-        musicCueSceneGroupTargetIDs = []
-        lastMusicCueSceneTargetID = nil
+    func clearMusicCueSceneSetTargets(in setID: UUID) {
+        mutateMusicCueSceneSet(setID) { $0.targetIDs.removeAll() }
+        if setID == activeMusicCueSceneSetID {
+            lastMusicCueSceneTargetID = nil
+        }
     }
 
     @ObservationIgnored private var lastMusicCueSceneTargetID: String?

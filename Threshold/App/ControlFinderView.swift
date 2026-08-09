@@ -183,8 +183,8 @@ struct ControlFinderDestination: Identifiable {
         ),
         destination(
             VisualizationsRailSection.transition,
-            description: "Set scene-change timing and interpolation behavior.",
-            keywords: ["transition", "duration", "crossfade", "interpolation", "scene change"]
+            description: "Set scene-change timing, interpolation, and scene sets for cue-driven switching.",
+            keywords: ["transition", "duration", "crossfade", "interpolation", "scene change", "scene set", "playlist", "music cue", "attached song"]
         ),
         // Performance
         destination(

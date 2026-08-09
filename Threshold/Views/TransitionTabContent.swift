@@ -4,14 +4,21 @@
 //
 //  Controls for smoothed scene transitions. Hosts the
 //  "Same Scene Transition Time" slider which eases live parameters
-//  toward a newly selected scene's starting keyframe over time.
+//  toward a newly selected scene's starting keyframe over time, and the
+//  Cue Scene Switcher's saved scene sets — named subsets of scenes the
+//  performer can switch between, optionally driven by an attached song.
 //
 
 import SwiftUI
 
 struct TransitionTabContent: View {
     @Bindable var animationManager: AnimationManager
-    @State private var isShowingMusicCueGroupEditor = false
+    var musicService: MusicService?
+
+    private struct EditingSet: Identifiable {
+        let id: UUID
+    }
+    @State private var editingSet: EditingSet?
 
     var body: some View {
         VStack(spacing: 10) {
@@ -19,6 +26,7 @@ struct TransitionTabContent: View {
                 VStack(spacing: 10) {
                     headerSection
                     transitionTimeSection
+                    sceneSetsSection
                     musicCueSceneSection
                 }
                 .padding(.bottom, 10)
@@ -27,8 +35,12 @@ struct TransitionTabContent: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .sheet(isPresented: $isShowingMusicCueGroupEditor) {
-            MusicCueSceneGroupEditor(animationManager: animationManager)
+        .sheet(item: $editingSet) { editing in
+            MusicCueSceneSetEditor(
+                animationManager: animationManager,
+                musicService: musicService,
+                setID: editing.id
+            )
         }
     }
 
@@ -71,6 +83,115 @@ struct TransitionTabContent: View {
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04)))
     }
+
+    // MARK: Scene sets
+
+    private var sceneSetsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Scene Sets", systemImage: "square.stack.3d.up")
+                    .font(.subheadline.bold())
+                Spacer()
+                Button {
+                    let set = animationManager.createMusicCueSceneSet()
+                    editingSet = EditingSet(id: set.id)
+                } label: {
+                    Label("New Set", systemImage: "plus")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            Text("Curate named subsets of scenes to switch between. The selected set feeds music cues and the canvas arrow keys. Attach a song to a set to run it hands-free.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            if animationManager.musicCueSceneSets.isEmpty {
+                Text("No sets yet — create one, then pick the scenes it should switch between.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 8)
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(animationManager.musicCueSceneSets) { set in
+                        sceneSetRow(set)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.teal.opacity(0.06)))
+    }
+
+    private func sceneSetRow(_ set: MusicCueSceneSet) -> some View {
+        let isActive = animationManager.activeMusicCueSceneSetID == set.id
+        return HStack(spacing: 8) {
+            Button {
+                animationManager.activateMusicCueSceneSet(set.id)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(isActive ? .teal : .secondary)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(set.name)
+                            .font(.caption.bold())
+                            .foregroundStyle(.primary)
+                        Text(sceneSetDetail(set))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if set.attachedSong != nil {
+                Button {
+                    animationManager.startMusicCueSceneSet(set.id)
+                } label: {
+                    Image(systemName: "play.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.teal)
+                }
+                .buttonStyle(.plain)
+                .help("Start this set: play its song and advance scenes on music cues")
+            }
+
+            Menu {
+                Button("Edit Set", systemImage: "slider.horizontal.3") {
+                    editingSet = EditingSet(id: set.id)
+                }
+                Button(role: .destructive) {
+                    animationManager.deleteMusicCueSceneSet(set.id)
+                } label: {
+                    Label("Delete Set", systemImage: "trash")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .foregroundStyle(.secondary)
+            }
+            .fixedSize()
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isActive ? Color.teal.opacity(0.12) : Color.primary.opacity(0.035))
+        )
+    }
+
+    private func sceneSetDetail(_ set: MusicCueSceneSet) -> String {
+        let count = set.targetIDs.count
+        let scenes = count == 1 ? "1 scene" : "\(count) scenes"
+        if let song = set.attachedSong {
+            return "\(scenes) · \(song.title) — \(song.artist)"
+        }
+        return scenes
+    }
+
+    // MARK: Cue switcher
 
     private var musicCueSceneSection: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -115,21 +236,12 @@ struct TransitionTabContent: View {
             .padding(8)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.035)))
 
-            HStack {
-                Button {
-                    isShowingMusicCueGroupEditor = true
-                } label: {
-                    Label("Configure Group", systemImage: "slider.horizontal.3")
+            Picker("Selection", selection: $animationManager.musicCueSceneTraversalMode) {
+                ForEach(MusicCueSceneTraversalMode.allCases) { mode in
+                    Label(mode.displayName, systemImage: mode.systemImage).tag(mode)
                 }
-                .buttonStyle(.bordered)
-
-                Picker("Selection", selection: $animationManager.musicCueSceneTraversalMode) {
-                    ForEach(MusicCueSceneTraversalMode.allCases) { mode in
-                        Label(mode.displayName, systemImage: mode.systemImage).tag(mode)
-                    }
-                }
-                .pickerStyle(.menu)
             }
+            .pickerStyle(.menu)
 
             Text(animationManager.musicCueSceneTraversalMode.detail)
                 .font(.caption2)
@@ -234,23 +346,31 @@ struct TransitionTabContent: View {
     }
 }
 
-private struct MusicCueSceneGroupEditor: View {
+// MARK: - Set editor
+
+private struct MusicCueSceneSetEditor: View {
     let animationManager: AnimationManager
+    let musicService: MusicService?
+    let setID: UUID
     @Environment(\.dismiss) private var dismiss
     @State private var selectedTag: String?
+    @State private var showSongPicker = false
 
     var body: some View {
         NavigationStack {
             List {
+                nameSection
+                songSection
+
                 if targets.isEmpty {
                     ContentUnavailableView(
                         "No Switchable Scenes",
                         systemImage: "rectangle.stack.badge.play",
-                        description: Text("Add keyframes to an animation or save a static scene before adding it to the cue group.")
+                        description: Text("Add keyframes to an animation or save a static scene before adding it to a set.")
                     )
                 } else {
                     Section {
-                        Text("Use tags to find a collection quickly, then select the visible scenes together. Enable Configured Group in the Transition menu to use this curated set alone or combine it with either library.")
+                        Text("Use tags to find a collection quickly, then select the visible scenes together. Enable Active Scene Set in the Transition menu to use this curated set alone or combine it with either library.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -276,17 +396,17 @@ private struct MusicCueSceneGroupEditor: View {
                     }
                 }
             }
-            .navigationTitle("Cue Scene Group")
+            .navigationTitle("Scene Set")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Clear") {
-                        animationManager.clearMusicCueSceneGroup()
+                        animationManager.clearMusicCueSceneSetTargets(in: setID)
                     }
-                    .disabled(animationManager.musicCueSceneGroupTargetIDs.isEmpty)
+                    .disabled(editedSet?.targetIDs.isEmpty ?? true)
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button("Select All") {
-                        animationManager.selectAllMusicCueTargets()
+                        animationManager.selectAllMusicCueTargets(in: setID)
                     }
                     .disabled(targets.isEmpty)
                 }
@@ -296,6 +416,91 @@ private struct MusicCueSceneGroupEditor: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showSongPicker) {
+            SongPickerSheet(musicService: musicService) { track in
+                Task {
+                    guard let musicService else { return }
+                    let attachment = await musicService.makeAttachment(from: track)
+                    animationManager.setAttachedSong(attachment, forMusicCueSceneSet: setID)
+                }
+            }
+        }
+    }
+
+    private var editedSet: MusicCueSceneSet? {
+        animationManager.musicCueSceneSet(id: setID)
+    }
+
+    private var nameSection: some View {
+        Section("Name") {
+            TextField(
+                "Set name",
+                text: Binding(
+                    get: { editedSet?.name ?? "" },
+                    set: { animationManager.renameMusicCueSceneSet(setID, to: $0) }
+                )
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var songSection: some View {
+        Section("Attached Song") {
+            if let song = editedSet?.attachedSong {
+                HStack(spacing: 8) {
+                    Image(systemName: AppIcons.musicNote)
+                        .foregroundStyle(.teal)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(song.title).font(.caption).lineLimit(1)
+                        Text(song.artist).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                    Button {
+                        animationManager.setAttachedSong(nil, forMusicCueSceneSet: setID)
+                    } label: {
+                        Image(systemName: AppIcons.xmarkCircleFill)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            #if os(macOS)
+            Text("Attached-song playback isn't available in the macOS build. Use audio input reactivity for music-driven scene changes.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            #else
+            Text("Starting the set plays this song and advances scenes on music cues automatically.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
+            Button {
+                Task {
+                    guard let musicService,
+                          let attachment = await musicService.captureAttachmentWithFallbacks() else { return }
+                    animationManager.setAttachedSong(attachment, forMusicCueSceneSet: setID)
+                }
+            } label: {
+                Label(
+                    editedSet?.attachedSong == nil ? "Attach Now Playing" : "Replace with Now Playing",
+                    systemImage: AppIcons.linkBadgePlus
+                )
+                .font(.caption)
+            }
+            .disabled(musicService?.nowPlayingUnified == nil)
+
+            Button {
+                showSongPicker = true
+            } label: {
+                Label(
+                    editedSet?.attachedSong == nil ? "Browse Library" : "Choose from Library",
+                    systemImage: AppIcons.musicNoteList
+                )
+                .font(.caption)
+            }
+            .disabled(!(musicService?.hasAnyConnection ?? false))
+            #endif
         }
     }
 
@@ -353,11 +558,11 @@ private struct MusicCueSceneGroupEditor: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Select Visible") {
-                    animationManager.selectMusicCueTargets(visibleTargets)
+                    animationManager.selectMusicCueTargets(visibleTargets, in: setID)
                 }
                 .buttonStyle(.bordered)
                 Button("Clear Visible") {
-                    animationManager.clearMusicCueTargets(visibleTargets)
+                    animationManager.clearMusicCueTargets(visibleTargets, in: setID)
                 }
                 .buttonStyle(.bordered)
             }
@@ -386,8 +591,8 @@ private struct MusicCueSceneGroupEditor: View {
 
     private func selectionBinding(for target: MusicCueSceneTarget) -> Binding<Bool> {
         Binding(
-            get: { animationManager.isMusicCueTargetSelected(target) },
-            set: { animationManager.setMusicCueTarget(target, isSelected: $0) }
+            get: { animationManager.isMusicCueTargetSelected(target, in: setID) },
+            set: { animationManager.setMusicCueTarget(target, isSelected: $0, in: setID) }
         )
     }
 }
