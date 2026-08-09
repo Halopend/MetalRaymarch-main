@@ -166,9 +166,17 @@ class PresetManager {
     private(set) var isInitialLoadComplete = false
     private static var bundledPresetsCache: [FractalPreset]?
     /// The baseline bundle marker intentionally never re-seeds an existing
-    /// store. This separate, versioned marker lets a deliberate catalog update
-    /// arrive once without resurrecting defaults a user has since deleted.
+    /// store. Each entry in `officialCatalogUpdates` carries its own versioned
+    /// marker so a deliberate catalog update arrives exactly once without
+    /// resurrecting defaults a user has since deleted. Updates are applied in
+    /// order, so a store that skipped several releases receives every
+    /// generation it is missing.
+    struct OfficialCatalogUpdate {
+        let markerFileName: String
+        let ids: Set<UUID>
+    }
     static let officialSceneCatalogUpdateMarkerFileName = ".seeded-official-scenes-v1.json"
+    static let officialMusicPresetCatalogUpdateMarkerFileName = ".seeded-official-scenes-v2.json"
     /// Existing installs seeded the original `w` asset with a near-max edge
     /// detector. Keep this correction independent from catalog seeding: it must
     /// update that exact bad payload without recreating a scene the user deleted.
@@ -191,6 +199,51 @@ class PresetManager {
         "B4234FA7-8F8B-4700-A0EA-9C4321E635C0", // Wave Rail
         "35AB0B54-3FCB-4CB0-A7D2-D6F7FFDAD1D1"  // w
     ].compactMap(UUID.init(uuidString:)))
+    /// v2: the 2026-08 music-preset drop promoted from the working iCloud store.
+    static let officialMusicPresetCatalogUpdateIDs = Set([
+        "12538C1A-8A0A-4F0E-9C47-76CE3CCBEB41", // 11
+        "A591B61A-2D13-4567-B555-C182158B6D4A", // Aaa
+        "24E95293-F293-40E8-956D-DAAB4586E486", // Angel
+        "C787446B-73FF-46E5-9538-BB8212FE13D5", // BATT
+        "1EA5F7B8-F7BC-4E08-B296-BA5A7B577583", // Baal3
+        "327C57B2-CC84-4604-93E1-236F014C21E1", // Banana bonnet
+        "A4AAF425-99CD-4446-8602-68F798C56083", // Blue hero
+        "2D5C1112-F995-480C-BE90-D9CC55440D32", // Buggy reset
+        "1E08F8AC-77CE-4616-BB36-71A440A9E7A0", // Cartoon Life
+        "26097079-D6D7-4DE2-84FD-A9DF10BD3DAD", // Chords
+        "F43C1F99-A804-4B73-B9D9-8FB1D0BC3F99", // Disappearing act
+        "F88D66E1-9180-475E-90BE-1B325790F4DF", // Escaping boundaries
+        "A9A2DDCB-72C9-4DA5-B7A7-D94F8AEF752E", // Fleur
+        "A4CC0A16-9EAD-41E0-BAFC-579936D9EFA4", // Free a a bird
+        "203BC310-D591-430C-A982-3561850F3CE8", // Fun
+        "719B541B-69BD-480E-BA19-19FB658314EE", // Knocker
+        "AB6DD09E-FDE5-4D84-A0B7-59046450F2B2", // Mono Lisa
+        "4F7B7DB9-50C0-4843-B80B-FD599AFC1031", // Mountain
+        "654A6ED8-2773-449C-A73F-100AC727D3D4", // Mpva
+        "11AB86DE-AE7B-452A-B1B7-05A963B8C72D", // Pool
+        "1564CE4F-9DB6-410D-87EC-FC8924B66D96", // Pull-up
+        "7C7E4627-7385-4E6C-8241-01A2A538C42A", // Ring around the Rosie
+        "79BCD40E-4AE1-4818-A340-7B5DDC477526", // Room
+        "5F1DFE4B-CBEE-4684-A05E-BBB97A79C93D", // Rooms2
+        "BA218EBF-8198-4CBA-90AB-125D87B347D7", // Silent Shout
+        "CFD42F09-1F7B-4190-B288-9AE523B6A799", // Wavving
+        "9E9E0831-B188-4638-98CE-608D50D71C71", // Yacctm
+        "A7FCE90B-D5CA-462F-8823-313B27FEACB4", // corner cut
+        "9971C8D0-310F-4282-816C-F852CD9699FC", // static
+        "1E99CEAF-9709-4258-B205-F40DE7B86337"  // what's it like
+    ].compactMap(UUID.init(uuidString:)))
+    /// Applied oldest-first. Append a new generation here (with a fresh marker
+    /// filename) whenever curated bundle content must reach existing stores.
+    static let officialCatalogUpdates: [OfficialCatalogUpdate] = [
+        OfficialCatalogUpdate(
+            markerFileName: officialSceneCatalogUpdateMarkerFileName,
+            ids: officialSceneCatalogUpdateIDs
+        ),
+        OfficialCatalogUpdate(
+            markerFileName: officialMusicPresetCatalogUpdateMarkerFileName,
+            ids: officialMusicPresetCatalogUpdateIDs
+        )
+    ]
     private static let legacyWSceneEdgeDetection = EdgeDetectionEffect(
         enabled: true,
         strength: 0.98378974,
@@ -668,16 +721,23 @@ class PresetManager {
             }
             if seedSucceeded {
                 print("🌱 Seeded \(seededIDs.count) bundled preset(s) into store")
-                _ = markOfficialSceneCatalogUpdateApplied(
-                    root: root,
-                    ids: Array(Self.officialSceneCatalogUpdateIDs)
-                )
+                for update in Self.officialCatalogUpdates {
+                    _ = markOfficialCatalogUpdateApplied(update, root: root)
+                }
             }
             return wroteFiles
         }
 
-        if seedOfficialSceneCatalogUpdateIfNeeded(root: root, presentPresetIDs: present) {
-            wroteFiles = true
+        for update in Self.officialCatalogUpdates {
+            let result = seedOfficialCatalogUpdateIfNeeded(
+                update,
+                root: root,
+                presentPresetIDs: present
+            )
+            present.formUnion(result.seededIDs)
+            if result.wroteFiles {
+                wroteFiles = true
+            }
         }
         return wroteFiles
     }
@@ -686,44 +746,47 @@ class PresetManager {
     /// marker is checked by existence rather than contents for the same File
     /// Provider reason as the baseline marker: an unhydrated marker must not
     /// cause a deleted default to reappear.
-    private func seedOfficialSceneCatalogUpdateIfNeeded(
+    private func seedOfficialCatalogUpdateIfNeeded(
+        _ update: OfficialCatalogUpdate,
         root: URL,
         presentPresetIDs: Set<UUID>
-    ) -> Bool {
-        let marker = root.appendingPathComponent(Self.officialSceneCatalogUpdateMarkerFileName)
-        guard !FileManager.default.fileExists(atPath: marker.path) else { return false }
+    ) -> (wroteFiles: Bool, seededIDs: Set<UUID>) {
+        let marker = root.appendingPathComponent(update.markerFileName)
+        guard !FileManager.default.fileExists(atPath: marker.path) else { return (false, []) }
 
         let additions = Self.bundledPresets().filter {
-            Self.officialSceneCatalogUpdateIDs.contains($0.id)
+            update.ids.contains($0.id)
         }
-        guard additions.count == Self.officialSceneCatalogUpdateIDs.count else {
-            print("❌ Official scene catalog update is incomplete in this bundle; deferring seed")
-            return false
+        guard additions.count == update.ids.count else {
+            print("❌ Official catalog update \(update.markerFileName) is incomplete in this bundle; deferring seed")
+            return (false, [])
         }
 
         var present = presentPresetIDs
+        var seeded: Set<UUID> = []
         var wroteFiles = false
         var seedSucceeded = true
         for preset in additions where !present.contains(preset.id) {
             if writeNewPresetFile(preset, root: root) != nil {
                 present.insert(preset.id)
+                seeded.insert(preset.id)
                 wroteFiles = true
             } else {
                 seedSucceeded = false
             }
         }
 
-        guard seedSucceeded else { return wroteFiles }
-        guard markOfficialSceneCatalogUpdateApplied(root: root, ids: additions.map(\.id)) else {
-            return wroteFiles
+        guard seedSucceeded else { return (wroteFiles, seeded) }
+        guard markOfficialCatalogUpdateApplied(update, root: root) else {
+            return (wroteFiles, seeded)
         }
-        print("🌱 Seeded \(additions.count) official scene catalog update(s) into store")
-        return wroteFiles
+        print("🌱 Seeded official catalog update \(update.markerFileName) (\(additions.count) preset(s)) into store")
+        return (wroteFiles, seeded)
     }
 
-    private func markOfficialSceneCatalogUpdateApplied(root: URL, ids: [UUID]) -> Bool {
-        let marker = root.appendingPathComponent(Self.officialSceneCatalogUpdateMarkerFileName)
-        guard let data = try? presetEncoder.encode(ids) else { return false }
+    private func markOfficialCatalogUpdateApplied(_ update: OfficialCatalogUpdate, root: URL) -> Bool {
+        let marker = root.appendingPathComponent(update.markerFileName)
+        guard let data = try? presetEncoder.encode(update.ids.sorted { $0.uuidString < $1.uuidString }) else { return false }
         do {
             try data.write(to: marker, options: .atomic)
             return true
