@@ -103,6 +103,11 @@ extension ContentView {
                                 },
                                 isPlaying: animationManager.isPlaying
                                     && animationManager.currentScene?.id == scene.id,
+                                isPaused: animationManager.isPaused
+                                    && animationManager.currentScene?.id == scene.id,
+                                onPause: animateEditButtonsVisible ? nil : {
+                                    animationManager.pause()
+                                },
                                 onStop: animateEditButtonsVisible ? nil : {
                                     animationManager.stop()
                                 }

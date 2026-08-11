@@ -129,6 +129,7 @@ struct FractalPresetPersistenceTests {
         edge.threshold = 0.09
         edge.softness = 0.04
         edge.windowRadius = 3
+        edge.color = SIMD3<Float>(0.18, 0.52, 0.94)
         settings.edgeDetectionEffect = edge
 
         // Safety bubble edge fade — get-only on RenderSettings, set via the config.
@@ -168,6 +169,7 @@ struct FractalPresetPersistenceTests {
         #expect(abs((decoded.edgeDetectionEffect?.threshold ?? -1) - 0.09) < 1e-5)
         #expect(abs((decoded.edgeDetectionEffect?.softness ?? -1) - 0.04) < 1e-5)
         #expect(decoded.edgeDetectionEffect?.windowRadius == 3)
+        #expect(decoded.edgeDetectionEffect?.color == SIMD3<Float>(0.18, 0.52, 0.94))
         #expect(decoded.safetyBubbleFadeEnabled == false)
         #expect(abs((decoded.safetyBubbleFadeWidth ?? -1) - 0.4) < 1e-5)
 
@@ -193,6 +195,7 @@ struct FractalPresetPersistenceTests {
         #expect(abs(fresh.edgeDetectionEffect.threshold - 0.09) < 1e-5)
         #expect(abs(fresh.edgeDetectionEffect.softness - 0.04) < 1e-5)
         #expect(fresh.edgeDetectionEffect.windowRadius == 3)
+        #expect(fresh.edgeDetectionEffect.color == SIMD3<Float>(0.18, 0.52, 0.94))
         #expect(fresh.safetyBubbleFadeEnabled == false)
         #expect(abs(fresh.safetyBubbleFadeWidth - 0.4) < 1e-5)
     }
@@ -206,6 +209,7 @@ struct FractalPresetPersistenceTests {
         edge.threshold = 9
         edge.softness = -2
         edge.windowRadius = 99
+        edge.color = SIMD3<Float>(-1, 0.5, 2)
         settings.edgeDetectionEffect = edge
 
         let normalizedOff = settings.edgeDetectionEffect
@@ -214,6 +218,7 @@ struct FractalPresetPersistenceTests {
         #expect(normalizedOff.threshold == ControlCatalog.edgeThreshold.range.upperBound)
         #expect(normalizedOff.softness == ControlCatalog.edgeSoftness.range.lowerBound)
         #expect(normalizedOff.windowRadius == Int(ControlCatalog.edgeWindowRadius.range.upperBound))
+        #expect(normalizedOff.color == SIMD3<Float>(0, 0.5, 1))
         #expect(settings.snapshot().colorSchemeParams.edgeDetectionEnabled == 0)
 
         edge = normalizedOff
@@ -221,13 +226,37 @@ struct FractalPresetPersistenceTests {
         settings.edgeDetectionEffect = edge
         #expect(settings.edgeDetectionEffect.isActive)
         #expect(abs(settings.edgeDetectionEffect.strength - 0.6) < 1e-5)
-        #expect(settings.snapshot().colorSchemeParams.edgeDetectionEnabled == 1)
+        let colorScheme = settings.snapshot().colorSchemeParams
+        #expect(colorScheme.edgeDetectionEnabled == 1)
+        #expect((colorScheme.edgeColorRGB10 & 0x3FF) == 0)
+        #expect(((colorScheme.edgeColorRGB10 >> 10) & 0x3FF) == 512)
+        #expect(((colorScheme.edgeColorRGB10 >> 20) & 0x3FF) == 1023)
 
         edge = settings.edgeDetectionEffect
         edge.setStrength(0)
         settings.edgeDetectionEffect = edge
         #expect(settings.edgeDetectionEffect.enabled == false)
         #expect(settings.snapshot().colorSchemeParams.edgeDetectionEnabled == 0)
+    }
+
+    @Test("Legacy edge settings without a color keep their original black outline")
+    func legacyEdgeColorDefaultsToBlack() throws {
+        let json = """
+        {
+          "enabled": true,
+          "strength": 0.8,
+          "threshold": 0.1,
+          "softness": 0.06,
+          "windowRadius": 1
+        }
+        """
+
+        let edge = try JSONDecoder().decode(
+            EdgeDetectionEffect.self,
+            from: Data(json.utf8)
+        )
+
+        #expect(edge.color == EdgeDetectionEffect.defaultColor)
     }
 
     @Test("Bound to Space survives scene encode/decode/apply")
@@ -589,6 +618,10 @@ struct FractalPresetPersistenceTests {
         #expect(SpaceWarpKind.compressionShells.descriptor.gpuApplyFn == "warpCompressionShells")
         #expect(SpaceWarpKind.compressionShells.descriptor.gpuDEScaleFn == "warpCompressionShellsDEScale")
         #expect(SpaceWarpKind.mandelboxStep.descriptor.gpuApplyFn == "warpMandelboxStep")
+        #expect(SpaceWarpKind.voronoi3D.rawValue == 20)
+        #expect(SpaceWarpKind.voronoi3D.descriptor.gpuApplyFn == "warpVoronoi3D")
+        #expect(SpaceWarpKind.voronoi3D.descriptor.gpuDEScaleFn == "warpVoronoi3DDEScale")
+        #expect(SpaceWarpKind.voronoi3D.family == .distortion)
     }
 
     @Test("Pack recipes have stable identity, declared requirements, and fresh ops")
@@ -803,6 +836,18 @@ struct FractalPresetPersistenceTests {
         #expect(abs(pbf.p1 - 1.0) < 1e-5)   // fold limit precomputed (max(1,0.01))
         #expect(abs(pbf.p2 - 1.0) < 1e-5)   // toggle flag passes through
         #expect(SpaceWarpKind.boxFold.toggle != nil)
+        // Voronoi clamps density/jitter but preserves its XYZ phase as a raw offset.
+        var voronoi = SpaceWarpOpValue(kind: .voronoi3D)
+        voronoi.p1 = 0
+        voronoi.p2 = 2
+        voronoi.axis = SIMD3<Float>(0.25, -0.5, 0.75)
+        let pvoronoi = packed(voronoi)
+        #expect(pvoronoi.type == 20)
+        #expect(abs(pvoronoi.p1 - 0.01) < 1e-5)
+        #expect(abs(pvoronoi.p2 - 1.0) < 1e-5)
+        #expect(abs(pvoronoi.axisX - 0.25) < 1e-5)
+        #expect(abs(pvoronoi.axisY - (-0.5)) < 1e-5)
+        #expect(abs(pvoronoi.axisZ - 0.75) < 1e-5)
     }
 
     @Test("SpaceWarpStackSimplifier collapses only EXACT-equivalent adjacent ops")
@@ -1060,6 +1105,25 @@ struct FractalPresetPersistenceTests {
 
         // Only the effective (snapshot) value is gated; the user's setting is intact.
         #expect(abs(settings.coneMarchStrength - 0.8) < 1e-6)
+    }
+
+    @Test("Switching static scenes defaults Cone Marching off")
+    func staticSceneSwitchDefaultsConeMarchingOff() {
+        let settings = RenderSettings()
+        settings.withPersistenceSuppressed {
+            settings.coneMarchStrength = 0.8
+            settings.sceneConeMarchCompatible = true
+        }
+
+        FractalPreset(name: "Next").apply(
+            to: settings,
+            includePerformance: false,
+            scope: .scene
+        )
+
+        #expect(settings.coneMarchStrength == 0)
+        #expect(settings.sceneConeMarchCompatible)
+        #expect(settings.snapshot().coneMarchStrength == 0)
     }
 
     @Test("Per-scene profile is AUTHORITATIVE: a plain scene resets the gate + governor floor (no leak)")

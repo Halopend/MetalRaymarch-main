@@ -183,7 +183,7 @@ class PresetManager {
     static let wSceneEdgeDetectionFixMarkerFileName = ".migrated-w-edge-detection-v1.json"
     static let wSceneID = UUID(uuidString: "35AB0B54-3FCB-4CB0-A7D2-D6F7FFDAD1D1")!
     static let officialSceneCatalogUpdateIDs = Set([
-        "00000000-0022-0000-0000-000000000001", // Bulatov Limit Set
+        "00000000-0022-0000-0000-000000000001", // Distorted
         "3F4AF708-7B41-4A60-B1A5-9D965E807C9A", // Embedded Mandelbulb
         "F7A845E9-53F1-4E48-BFB0-7A07650C8E45", // Fractal Cartoon
         "66E632EF-0C14-414C-9057-7ED1D49A74A5", // Goop again

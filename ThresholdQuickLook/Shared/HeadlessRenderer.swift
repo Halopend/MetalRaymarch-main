@@ -304,7 +304,12 @@ final class HeadlessRenderer: @unchecked Sendable {
             elapsedTime: 0,
             benchySDFAddress: benchySDFAsset.gpuAddress
         )
-        return renderImage(uniforms: uniforms, side: side, pipeline: pipeline)
+        return renderImage(
+            uniforms: uniforms,
+            postFilterStack: snapshot.postFilterStack,
+            side: side,
+            pipeline: pipeline
+        )
     }
 
     /// Live-render a snapshot into an interactive MTKView's current drawable.
@@ -327,8 +332,15 @@ final class HeadlessRenderer: @unchecked Sendable {
         rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         rpd.depthAttachment.loadAction = .clear
         rpd.depthAttachment.clearDepth = 1.0
-        guard encodeDraw(uniforms: uniforms, passDescriptor: rpd, width: Int(size.width),
-                         height: Int(size.height), pipeline: pipeline, commandBuffer: cmd) else { return }
+        guard encodeDraw(
+            uniforms: uniforms,
+            postFilterStack: snapshot.postFilterStack,
+            passDescriptor: rpd,
+            width: Int(size.width),
+            height: Int(size.height),
+            pipeline: pipeline,
+            commandBuffer: cmd
+        ) else { return }
         cmd.present(drawable)
         cmd.commit()
     }
@@ -384,7 +396,8 @@ final class HeadlessRenderer: @unchecked Sendable {
     /// Shared draw: binds pipeline + uniforms + proxy mesh into a render pass.
     /// Returns false if the encoder or uniform buffer could not be created.
     @discardableResult
-    private func encodeDraw(uniforms: Uniforms, passDescriptor rpd: MTLRenderPassDescriptor,
+    private func encodeDraw(uniforms: Uniforms, postFilterStack: PostFilterStack,
+                            passDescriptor rpd: MTLRenderPassDescriptor,
                             width: Int, height: Int, pipeline: MTLRenderPipelineState,
                             commandBuffer cmd: MTLCommandBuffer) -> Bool {
         var uniformsArray = UniformsArray(uniforms: (uniforms, uniforms))
@@ -400,6 +413,12 @@ final class HeadlessRenderer: @unchecked Sendable {
         enc.setViewport(MTLViewport(originX: 0, originY: 0, width: Double(width), height: Double(height), znear: 0, zfar: 1))
         enc.setVertexBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
         enc.setFragmentBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
+        var stack = postFilterStack
+        enc.setFragmentBytes(
+            &stack,
+            length: MemoryLayout<PostFilterStack>.stride,
+            index: BufferIndex.postFilters.rawValue
+        )
         if let buffer = benchySDFAsset.buffer {
             enc.useResource(buffer, usage: .read, stages: .fragment)
         }
@@ -418,7 +437,8 @@ final class HeadlessRenderer: @unchecked Sendable {
         return true
     }
 
-    private func renderImage(uniforms: Uniforms, side: Int, pipeline: MTLRenderPipelineState) -> CGImage? {
+    private func renderImage(uniforms: Uniforms, postFilterStack: PostFilterStack,
+                             side: Int, pipeline: MTLRenderPipelineState) -> CGImage? {
         let colorDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm,
                                                                  width: side, height: side, mipmapped: false)
         colorDesc.usage = [.renderTarget, .shaderRead]
@@ -442,8 +462,15 @@ final class HeadlessRenderer: @unchecked Sendable {
         rpd.depthAttachment.clearDepth = 1.0
 
         guard let cmd = commandQueue.makeCommandBuffer() else { return nil }
-        guard encodeDraw(uniforms: uniforms, passDescriptor: rpd, width: side, height: side,
-                         pipeline: pipeline, commandBuffer: cmd) else { return nil }
+        guard encodeDraw(
+            uniforms: uniforms,
+            postFilterStack: postFilterStack,
+            passDescriptor: rpd,
+            width: side,
+            height: side,
+            pipeline: pipeline,
+            commandBuffer: cmd
+        ) else { return nil }
         if let blit = cmd.makeBlitCommandEncoder() {
             blit.synchronize(resource: colorTex)
             blit.endEncoding()

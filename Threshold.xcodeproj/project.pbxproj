@@ -43,6 +43,8 @@
 		48DD30AFDC864E1A8827943A /* HandAttractionConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1BCB01768C3439E8FADC03A /* HandAttractionConfig.swift */; };
 		49BC12B5450C58391BAE94F0 /* ColorConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C77DE10DC1B71A0E493B68 /* ColorConfig.swift */; };
 		4A877657E95AE14A71970EA1 /* EmbeddedFormula.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82382DEE190B80E008CB478A /* EmbeddedFormula.swift */; };
+		A6C2F1039B4E7D1F20A00003 /* StrictJSONDuplicateKeyValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6C2F1039B4E7D1F20A00001 /* StrictJSONDuplicateKeyValidator.swift */; };
+		A6C2F1039B4E7D1F20A00004 /* StrictJSONDuplicateKeyValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6C2F1039B4E7D1F20A00002 /* StrictJSONDuplicateKeyValidator.swift */; };
 		4CEAD909CE739CAC4DA53FB1 /* MenuToggleGestureMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13E0E291C71A2ACF08D9B125 /* MenuToggleGestureMode.swift */; };
 		4D1917EA83801D257DFD0C48 /* PerFractalGestureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0699360DD28FC3B04D6FADBB /* PerFractalGestureStore.swift */; };
 		4EFA6DEAD08F625897C00F1A /* SafetyBubbleConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 794BF202BA7BBC02F4FB580F /* SafetyBubbleConfig.swift */; };
@@ -219,6 +221,8 @@
 		794BF202BA7BBC02F4FB580F /* SafetyBubbleConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SafetyBubbleConfig.swift; path = Threshold/Parameters/Config/SafetyBubbleConfig.swift; sourceTree = SOURCE_ROOT; };
 		7D3E7246F6CB0F47DC18ED2B /* SpaceWarpStackModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SpaceWarpStackModel.swift; path = Threshold/Parameters/SpaceWarpStackModel.swift; sourceTree = SOURCE_ROOT; };
 		82382DEE190B80E008CB478A /* EmbeddedFormula.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EmbeddedFormula.swift; path = Threshold/Formulas/EmbeddedFormula.swift; sourceTree = SOURCE_ROOT; };
+		A6C2F1039B4E7D1F20A00001 /* StrictJSONDuplicateKeyValidator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = StrictJSONDuplicateKeyValidator.swift; path = Threshold/Formulas/StrictJSONDuplicateKeyValidator.swift; sourceTree = SOURCE_ROOT; };
+		A6C2F1039B4E7D1F20A00002 /* StrictJSONDuplicateKeyValidator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = StrictJSONDuplicateKeyValidator.swift; path = Threshold/Formulas/StrictJSONDuplicateKeyValidator.swift; sourceTree = SOURCE_ROOT; };
 		84464F5A5A3EA90D108BE9DE /* Shaders.metal */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.metal; name = Shaders.metal; path = Threshold/Rendering/Shaders.metal; sourceTree = SOURCE_ROOT; };
 		8BC439643071C561249FAE99 /* ThresholdQLThumbnail.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ThresholdQLThumbnail.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		8C5071304A573C4CD0927CB1 /* AudioReactiveConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AudioReactiveConfig.swift; path = Threshold/Parameters/Config/AudioReactiveConfig.swift; sourceTree = SOURCE_ROOT; };
@@ -437,6 +441,7 @@
 				4C4C2711EDD0ADF31E98102F /* GradientColorSystem.swift */,
 				5B0B6169B9B8A1360E944DC7 /* QualityPreset.swift */,
 				E545B25635280FB3482A5087 /* EmbeddedFormula.swift */,
+				A6C2F1039B4E7D1F20A00002 /* StrictJSONDuplicateKeyValidator.swift */,
 				8C5071304A573C4CD0927CB1 /* AudioReactiveConfig.swift */,
 				8CF999AB55321EF1A29B2E81 /* ColorConfig.swift */,
 				CC2F260C2CC12A247CE2D6A2 /* DisplayConfig.swift */,
@@ -497,6 +502,7 @@
 				5452116D4975BC87388B1C02 /* GradientColorSystem.swift */,
 				9B5411800B6D0D91693D68E1 /* QualityPreset.swift */,
 				82382DEE190B80E008CB478A /* EmbeddedFormula.swift */,
+				A6C2F1039B4E7D1F20A00001 /* StrictJSONDuplicateKeyValidator.swift */,
 				9824E07E16D25804B68E737E /* AudioReactiveConfig.swift */,
 				A7C77DE10DC1B71A0E493B68 /* ColorConfig.swift */,
 				0E6BB73C659675040DDD03FF /* DisplayConfig.swift */,
@@ -994,6 +1000,7 @@
 				5D184D4FF06420DC33FC962B /* GradientColorSystem.swift in Sources */,
 				E79882988E5316F7F61F910B /* QualityPreset.swift in Sources */,
 				4A877657E95AE14A71970EA1 /* EmbeddedFormula.swift in Sources */,
+				A6C2F1039B4E7D1F20A00003 /* StrictJSONDuplicateKeyValidator.swift in Sources */,
 				FCE029F5DBCF2DF1E35858EF /* AudioReactiveConfig.swift in Sources */,
 				49BC12B5450C58391BAE94F0 /* ColorConfig.swift in Sources */,
 				7F879C27C7EA06C8218D36C1 /* DisplayConfig.swift in Sources */,
@@ -1075,6 +1082,7 @@
 				C1F735C7CF3E52333F476B7B /* GradientColorSystem.swift in Sources */,
 				43FA8D042392D8E6EE3CCFA8 /* QualityPreset.swift in Sources */,
 				B42B9A0364377B46F0BB7B3E /* EmbeddedFormula.swift in Sources */,
+				A6C2F1039B4E7D1F20A00004 /* StrictJSONDuplicateKeyValidator.swift in Sources */,
 				12F0366CA391F2B1BB85989A /* AudioReactiveConfig.swift in Sources */,
 				96D8C7C1BB7F302AE4AD8BC6 /* ColorConfig.swift in Sources */,
 				19B79F332D334628ECF85242 /* DisplayConfig.swift in Sources */,

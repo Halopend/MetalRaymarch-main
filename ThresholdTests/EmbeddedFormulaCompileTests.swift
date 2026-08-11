@@ -225,9 +225,110 @@ struct EmbeddedFormulaCompileTests {
     @Test("At least one embedded-formula example exists to exercise the compiler")
     func haveEmbeddedFormulas() throws {
         let formulas = try Self.collectEmbeddedFormulas()
+        func hasStandaloneFile(_ kind: EffectKind) -> Bool {
+            formulas.contains {
+                $0.source.hasSuffix(".threshfx") && $0.formula.effectKind == kind
+            }
+        }
         #expect(!formulas.isEmpty, "no embedded-formula example assets found under \(Self.examplesDir.path)")
-        #expect(formulas.contains { $0.formula.effectKind == .lighting },
+        #expect(hasStandaloneFile(.fractal),
+                "no custom-fractal .threshfx example found under \(Self.examplesDir.path)")
+        #expect(hasStandaloneFile(.spaceWarp),
+                "no custom-space-warp .threshfx example found under \(Self.examplesDir.path)")
+        #expect(hasStandaloneFile(.lighting),
                 "no custom-lighting .threshfx example found under \(Self.examplesDir.path)")
+    }
+
+    @MainActor
+    @Test("Bundled Voronoi menu modifier loads from the packaged .threshfx resource")
+    func bundledVoronoiMenuResourceLoads() throws {
+        let hash = try #require(
+            AppModel.bundledVoronoiSpaceWarpSourceHash,
+            "the app bundle could not decode the Voronoi space-warp .threshfx"
+        )
+        #expect(hash == "586ec7bc5db26d4029d8b0ff003e3ddbf1ca845262c87f95d51f51b9d5974218")
+        #expect(AppModel.bundledVoronoiSpaceWarpControlProfileSourceHashes.contains(hash))
+
+        let lookalike = EmbeddedFormula(
+            kind: .spaceWarp,
+            id: AppModel.bundledVoronoiSpaceWarpID,
+            name: "Unrecognized Voronoi revision",
+            functionStem: "DifferentSource",
+            metalSource: """
+            FORCE_INLINE float3 customSpaceWarp(float3 p, float s, float a, float b, float c) {
+                return p + float3(a, b, c) * s;
+            }
+            FORCE_INLINE float customSpaceWarpDEScale(float3 p, float s, float a, float b, float c) {
+                return 1.0f + abs(s);
+            }
+            """,
+            params: []
+        )
+        #expect(AppModel.customSpaceWarpControlProfile(for: lookalike) == .generic)
+    }
+
+    @Test("A space-warp .threshfx file validates and compiles in the production warp slot")
+    func diskSpaceWarpContainerCompiles() async throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            Issue.record("No Metal device available; skipping space-warp .threshfx compile coverage")
+            return
+        }
+
+        // Keep this fixture test-owned: it must cross the real file decoder without
+        // adding a synthetic effect to the app's shipped Examples catalog.
+        let fixture = EmbeddedFormula(
+            kind: .spaceWarp,
+            id: "test.disk-space-warp",
+            name: "Disk Space Warp",
+            functionStem: "DiskSpaceWarp",
+            metalSource: """
+            FORCE_INLINE float3 customSpaceWarp(
+                float3 p, float strength, float param1, float param2, float param3
+            ) {
+                if (strength <= 0.0f) { return p; }
+                float frequency = max(abs(param1), 0.01f);
+                float phase = frequency * p.y + param3;
+                float3 offset = float3(sin(phase), 0.0f, cos(phase));
+                return p + offset * (strength * param2);
+            }
+
+            FORCE_INLINE float customSpaceWarpDEScale(
+                float3 p, float strength, float param1, float param2, float param3
+            ) {
+                (void)p;
+                (void)param3;
+                if (strength <= 0.0f) { return 1.0f; }
+                return 1.0f + abs(strength * param1 * param2);
+            }
+            """,
+            params: []
+        )
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ThresholdTests-SpaceWarp-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let file = directory.appendingPathComponent("DiskSpaceWarp.threshfx")
+        try EmbeddedFormulaContainer(formula: fixture).encode().write(to: file, options: .atomic)
+        #expect(file.pathExtension == "threshfx")
+
+        // This is the same validating disk boundary used by AppModel.openExternalFile.
+        let decoded = try EmbeddedFormulaContainer.decode(fromContainerAt: file)
+        #expect(decoded.version == EmbeddedFormulaContainer.currentVersion)
+        #expect(decoded.formula.effectKind == .spaceWarp)
+        #expect(decoded.formula == fixture)
+
+        let compiler = CustomShaderCompiler(device: device)
+        let cacheKey = CustomShaderCompiler.combinedHash(
+            fractal: nil,
+            spaceWarp: decoded.formula
+        )
+        let library = try await compiler.library(
+            forFractal: nil,
+            spaceWarp: decoded.formula
+        )
+        #expect(library.makeFunction(name: "vertexShader") != nil)
+        await compiler.evict(combinedHash: cacheKey)
     }
 
     @Test("Every embedded formula compiles through the production CustomShaderCompiler")
@@ -242,6 +343,7 @@ struct EmbeddedFormulaCompileTests {
 
         let formulas = try Self.collectEmbeddedFormulas()
         let compiler = CustomShaderCompiler(device: device)
+        var compiledKeys = Set<String>()
 
         for (source, formula) in formulas {
             let fractal: EmbeddedFormula?
@@ -256,6 +358,12 @@ struct EmbeddedFormulaCompileTests {
             case .lighting:
                 (fractal, spaceWarp, lighting, kind) = (nil, nil, formula, "lighting")
             }
+            let cacheKey = CustomShaderCompiler.combinedHash(
+                fractal: fractal,
+                spaceWarp: spaceWarp,
+                lighting: lighting
+            )
+            guard compiledKeys.insert(cacheKey).inserted else { continue }
             do {
                 // Route exactly as Renderer.activateEmbeddedFormula does: each
                 // effect occupies its independent compiler slot.
@@ -270,6 +378,12 @@ struct EmbeddedFormulaCompileTests {
                 // MSL does not provide. Surfaced in the test failure / .xcresult.
                 Issue.record("Embedded \(kind) '\(formula.name)' from \(source) FAILED to compile: \(error)")
             }
+
+            // This test validates every payload in one process, unlike normal app
+            // usage. Do not retain one full MTLLibrary per catalog entry: the
+            // production cache API itself is covered elsewhere, and holding the
+            // entire catalog needlessly raises peak memory while this test runs.
+            await compiler.evict(combinedHash: cacheKey)
         }
     }
 

@@ -1,4 +1,5 @@
 import Foundation
+import simd
 import Testing
 @testable import Threshold
 
@@ -11,7 +12,7 @@ struct TransformationEquationUnlockTests {
         let kindIDs = SpaceWarpKind.allCases.map(\.rawValue)
         let spokenMath = lessons.map(\.spokenMathematicalNotation)
 
-        #expect(lessons.count == 20)
+        #expect(lessons.count == 21)
         #expect(lessons.count == SpaceWarpKind.allCases.count)
         #expect(Set(lessonIDs) == Set(SpaceWarpKind.allCases.map(TransformationLessonID.core)))
         #expect(Set(lessonIDs).count == lessons.count)
@@ -88,7 +89,7 @@ struct TransformationEquationUnlockTests {
             [.ripple, .boxFold, .planeFold, .offsetFold],
             [.sphereFold, .inversion, .shells, .compressionShells,
              .kaleidoscope, .circle, .scaleRepeat],
-            [.mengerFold, .twist, .bend],
+            [.mengerFold, .twist, .bend, .voronoi3D],
             [.coxeter, .icosahedralCut, .mandelboxStep],
         ])
         #expect(orderedKinds.count == SpaceWarpKind.allCases.count)
@@ -487,7 +488,7 @@ struct TransformationEquationUnlockTests {
         #expect(TransformationEducationPath.levels.allSatisfy {
             TransformationEducationPath.isComplete($0, mappedIDs: everything)
         })
-        #expect(TransformationEducationPath.guideLessons(mappedIDs: everything).count == 20)
+        #expect(TransformationEducationPath.guideLessons(mappedIDs: everything).count == 21)
     }
 
     @Test("Out-of-order knowledge stays mapped without skipping level gates")
@@ -569,7 +570,7 @@ struct TransformationEquationUnlockTests {
             after: after
         ).map(\.id) == [2, 3, 4, 5])
         #expect(TransformationEducationPath.preferredLesson(mappedIDs: after)?.kind == .coxeter)
-        #expect(TransformationEducationPath.unmappedLessonCount(mappedIDs: after) == 9)
+        #expect(TransformationEducationPath.unmappedLessonCount(mappedIDs: after) == 10)
 
         let finalLevelComplete = after.union([
             .core(.coxeter),
@@ -580,7 +581,7 @@ struct TransformationEquationUnlockTests {
             TransformationEducationPath.levels[4],
             mappedIDs: finalLevelComplete
         ))
-        #expect(TransformationEducationPath.unmappedLessonCount(mappedIDs: finalLevelComplete) == 6)
+        #expect(TransformationEducationPath.unmappedLessonCount(mappedIDs: finalLevelComplete) == 7)
     }
 
     @Test("Edit opens the catalog without granting Learn progress")
@@ -904,5 +905,98 @@ struct TransformationEquationUnlockTests {
         #expect(step?.contains("return fma(folded") == true)
         #expect(deUpdate?.contains("float currentDE, float originDE") == true)
         #expect(deUpdate?.contains("return fma(currentDE") == true)
+    }
+
+    @Test("3-D cellular transform exposes its complete Metal implementation")
+    func sourceScannerFindsVoronoiField() {
+        let warp = WarpSource.metalFunction(named: "warpVoronoi3D")
+        let deScale = WarpSource.metalFunction(named: "warpVoronoi3DDEScale")
+
+        #expect(warp?.contains("for (int z = -1; z <= 1; ++z)") == true)
+        #expect(warp?.contains("for (int z = -2; z <= 2; ++z)") == true)
+        #expect(warp?.contains("outerLowerBound * outerLowerBound <= secondNearest") == true)
+        #expect(warp?.contains("dot(toCell, toCell) > secondNearest") == true)
+        #expect(warp?.contains("secondNearest") == true)
+        #expect(warp?.contains("smoothstep(0.0f, 1.0f, gap)") == true)
+        #expect(deScale?.contains("1.0f + 7.0f * op.strength") == true)
+        #expect(EmbeddedMetalSources.shadersMetal.contains(
+            "case 20: return warpVoronoi3D(p, op);"
+        ))
+        #expect(EmbeddedMetalSources.shadersMetal.contains(
+            "case 20: return warpVoronoi3DDEScale(p, op);"
+        ))
+    }
+
+    @Test("Exact Voronoi envelope removes the 27-site lattice seam")
+    func voronoiEnvelopeContinuity() {
+        func fractional(_ value: SIMD3<Float>) -> SIMD3<Float> {
+            SIMD3<Float>(
+                value.x - value.x.rounded(.down),
+                value.y - value.y.rounded(.down),
+                value.z - value.z.rounded(.down)
+            )
+        }
+
+        func siteHash(_ coordinate: SIMD3<Float>) -> SIMD3<Float> {
+            var value = fractional(
+                coordinate * SIMD3<Float>(0.1031, 0.1030, 0.0973)
+            )
+            let shuffled = SIMD3<Float>(value.y, value.x, value.z)
+            value += SIMD3<Float>(repeating: simd_dot(
+                value,
+                shuffled + SIMD3<Float>(repeating: 33.33)
+            ))
+            return fractional(
+                (SIMD3<Float>(value.x, value.x, value.y)
+                    + SIMD3<Float>(value.y, value.x, value.x))
+                    * SIMD3<Float>(value.z, value.y, value.x)
+            )
+        }
+
+        func displacement(at q: SIMD3<Float>, radius: Int) -> SIMD3<Float> {
+            let cell = SIMD3<Float>(
+                q.x.rounded(.down), q.y.rounded(.down), q.z.rounded(.down)
+            )
+            let local = fractional(q)
+            var nearest = Float.greatestFiniteMagnitude
+            var secondNearest = Float.greatestFiniteMagnitude
+            var nearestDelta = SIMD3<Float>(repeating: 0)
+            for z in -radius...radius {
+                for y in -radius...radius {
+                    for x in -radius...radius {
+                        let neighbour = SIMD3<Float>(Float(x), Float(y), Float(z))
+                        let delta = neighbour + siteHash(cell + neighbour) - local
+                        let distanceSquared = simd_dot(delta, delta)
+                        if distanceSquared < nearest {
+                            secondNearest = nearest
+                            nearest = distanceSquared
+                            nearestDelta = delta
+                        } else if distanceSquared < secondNearest {
+                            secondNearest = distanceSquared
+                        }
+                    }
+                }
+            }
+            let gap = max(sqrt(secondNearest) - sqrt(nearest), 0)
+            let t = min(gap, 1)
+            return nearestDelta * (t * t * (3 - 2 * t))
+        }
+
+        // This deterministic site layout made F2 leave the old 3³ window as x
+        // crossed 9, producing a visible discontinuity. The exact 5³ envelope
+        // keeps the same global first two sites available on both sides.
+        let boundary = SIMD3<Float>(9, -5.8389229, -5.4423645)
+        let epsilon: Float = 0.0001
+        let left = boundary - SIMD3<Float>(epsilon, 0, 0)
+        let right = boundary + SIMD3<Float>(epsilon, 0, 0)
+        let approximateJump = simd_length(
+            displacement(at: left, radius: 1) - displacement(at: right, radius: 1)
+        )
+        let exactJump = simd_length(
+            displacement(at: left, radius: 2) - displacement(at: right, radius: 2)
+        )
+
+        #expect(approximateJump > 0.04)
+        #expect(exactJump < 0.001)
     }
 }

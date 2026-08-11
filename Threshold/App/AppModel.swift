@@ -115,6 +115,55 @@ struct ManualStaticSceneNavigationCursor: Equatable {
     let sceneID: UUID
 }
 
+/// The exact logical effect set confirmed by the current renderer activation.
+/// `activeEmbedded*Hash` is staged before Metal compilation, so it cannot by
+/// itself prove that an animation scene's shader dependency is renderable yet.
+struct PublishedEmbeddedEffectSet: Equatable {
+    let primaryHash: String?
+    let lightingHash: String?
+    let operationGeneration: UInt64
+}
+
+enum EmbeddedFormulaPublicationSlot: Equatable {
+    case primary
+    case lighting
+
+    init(effectKind: EffectKind) {
+        self = effectKind == .lighting ? .lighting : .primary
+    }
+}
+
+enum PendingFormulaSceneApplyDecision: Equatable {
+    case discard
+    case waitForPublication
+    case apply
+
+    static func resolve(
+        expectedFormulaHash: String,
+        slot: EmbeddedFormulaPublicationSlot,
+        activeFormulaHash: String?,
+        activeLightingHash: String?,
+        publication: PublishedEmbeddedEffectSet?,
+        currentOperationGeneration: UInt64,
+        requiresActiveRuntime: Bool,
+        runtimeIsActive: Bool
+    ) -> Self {
+        let activeDependencyHash = switch slot {
+        case .primary: activeFormulaHash
+        case .lighting: activeLightingHash
+        }
+        guard activeDependencyHash == expectedFormulaHash else { return .discard }
+        guard publication == PublishedEmbeddedEffectSet(
+            primaryHash: activeFormulaHash,
+            lightingHash: activeLightingHash,
+            operationGeneration: currentOperationGeneration
+        ), !requiresActiveRuntime || runtimeIsActive else {
+            return .waitForPublication
+        }
+        return .apply
+    }
+}
+
 @MainActor
 @Observable
 class AppModel {
@@ -478,6 +527,11 @@ class AppModel {
     // with lighting read from a newer AppModel state.
     var activateEmbeddedFormulaHandler: ((EmbeddedFormula?, EmbeddedFormula?) async throws -> Void)? {
         didSet {
+            // Handler replacement is a renderer-publication boundary. Invalidate
+            // both any previous confirmation and same-hash work owned by the old
+            // renderer before starting the new renderer's activation.
+            let operationGeneration = beginEmbeddedEffectSetOperation()
+            publishedEmbeddedEffectSet = nil
             guard let handler = activateEmbeddedFormulaHandler else { return }
             let formula = activeEmbeddedFormula
             let rendererFormula = formula?.isBundledConstructionPrimitive == true ? nil : formula
@@ -486,13 +540,27 @@ class AppModel {
             let queuedNavigationRequest = pendingPresetSceneNavigationRequest
             let queuedLoadGeneration = pendingPresetLoadGeneration
             let queuedApplyOptions = pendingPresetApplyOptions
+            customSpaceWarpControlProfile = formula?.effectKind == .spaceWarp
+                ? Self.customSpaceWarpControlProfile(for: formula)
+                : .generic
+            customSpaceWarpRuntimeState = formula?.effectKind == .spaceWarp
+                ? .compiling(name: formula?.name ?? "External Space Warp")
+                : .inactive
             customLightingRuntimeState = lighting.map {
                 .compiling(name: $0.name)
             } ?? .inactive
             Task { @MainActor in
+                // The task is scheduled after didSet returns. A newer direct
+                // effect operation may claim ownership before it ever starts;
+                // never let this obsolete handler call supersede that renderer
+                // request merely because its captured hashes later match again.
+                guard self.isCurrentEmbeddedEffectSetOperation(operationGeneration) else {
+                    return
+                }
                 do {
                     try await handler(rendererFormula, lighting)
-                    if self.activeEmbeddedFormulaHash == formula?.shortHash,
+                    if self.isCurrentEmbeddedEffectSetOperation(operationGeneration),
+                       self.activeEmbeddedFormulaHash == formula?.shortHash,
                        self.activeEmbeddedLightingHash == lighting?.shortHash {
                         // The library has now been published. Commit its staged
                         // value bank only at this boundary so an outgoing
@@ -501,47 +569,55 @@ class AppModel {
                             for: lighting,
                             overrides: self.customLightingParameterValues
                         )
-                        self.customLightingRuntimeState = lighting.map {
-                            .active(name: $0.name)
-                        } ?? .inactive
-                    }
-                    // If a preset was queued behind a deferred activation,
-                    // apply it now. This is the late-binding path that
-                    // handles imports that happened *before* the user
-                    // entered the immersive space: the queued Task in
-                    // `queuePresetApplyAfterFormulaActivation` may have
-                    // already timed out, but the renderer's startup
-                    // triggered this didSet, so the formula is now compiled
-                    // and we can apply the preset.
-                    if let queued = queuedPreset,
-                       let queuedGeneration = queuedLoadGeneration,
-                       pendingPresetForActivation?.id == queued.id,
-                       pendingPresetLoadGeneration == queuedGeneration,
-                       staticSceneLoadGeneration == queuedGeneration,
-                       queued.embeddedFormula?.shortHash == formula?.shortHash,
-                       queued.embeddedLighting?.shortHash == lighting?.shortHash {
-                        pendingEmbeddedEffectSetRollback = nil
-                        pendingPresetForActivation = nil
-                        pendingPresetSceneNavigationRequest = nil
-                        pendingPresetLoadGeneration = nil
-                        pendingPresetApplyOptions = []
-                        await applyLoadedScene(
-                            queued,
-                            options: queuedApplyOptions,
-                            manualSceneNavigationRequest: queuedNavigationRequest
+                        self.reconcilePublishedEmbeddedEffectSetRuntime(
+                            primary: formula,
+                            lighting: lighting
                         )
-                    }
-                    // Same late-binding drain for a queued animation scene.
-                    if let queuedScene = pendingSceneApplyAfterActivation,
-                       queuedScene.formulaHash == formula?.shortHash {
-                        pendingSceneApplyAfterActivation = nil
-                        queuedScene.apply()
+                        _ = self.recordPublishedEmbeddedEffectSet(
+                            primaryHash: formula?.shortHash,
+                            lightingHash: lighting?.shortHash,
+                            operationGeneration: operationGeneration
+                        )
+                        // Any exact effect-set publication consumes the rollback
+                        // point captured before its deferred staging. A standalone
+                        // space-warp import also becomes durable only now, after
+                        // Metal has accepted and published the source.
+                        self.pendingEmbeddedEffectSetRollback = nil
+                        if formula?.effectKind == .spaceWarp,
+                           let formulaHash = formula?.shortHash,
+                           self.pendingCustomSpaceWarpPersistenceHash == formulaHash {
+                            self.pendingCustomSpaceWarpPersistenceHash = nil
+                            self.saveLastState()
+                        }
+                        // If a preset was queued behind a deferred activation,
+                        // apply it only inside this exact, current publication
+                        // boundary. A superseded renderer callback returns
+                        // normally and must not drain staged scene state.
+                        if let queued = queuedPreset,
+                           let queuedGeneration = queuedLoadGeneration,
+                           pendingPresetForActivation?.id == queued.id,
+                           pendingPresetLoadGeneration == queuedGeneration,
+                           staticSceneLoadGeneration == queuedGeneration,
+                           queued.embeddedFormula?.shortHash == formula?.shortHash,
+                           queued.embeddedLighting?.shortHash == lighting?.shortHash {
+                            pendingPresetForActivation = nil
+                            pendingPresetSceneNavigationRequest = nil
+                            pendingPresetLoadGeneration = nil
+                            pendingPresetApplyOptions = []
+                            await applyLoadedScene(
+                                queued,
+                                options: queuedApplyOptions,
+                                manualSceneNavigationRequest: queuedNavigationRequest
+                            )
+                        }
+                        drainPendingSceneApplyIfPublished()
                     }
                 } catch {
                     // A newer request may have replaced both AppModel slots
                     // while this asynchronous compile was in flight. Its state
                     // must never be detached by the obsolete failure.
-                    guard self.activeEmbeddedFormulaHash == formula?.shortHash,
+                    guard self.isCurrentEmbeddedEffectSetOperation(operationGeneration),
+                          self.activeEmbeddedFormulaHash == formula?.shortHash,
                           self.activeEmbeddedLightingHash == lighting?.shortHash else { return }
                     self.errorReporter.report(.preset(.importFailed(
                         "Failed to compile custom shader: \(error.localizedDescription)"
@@ -553,8 +629,31 @@ class AppModel {
                     let restored = await self.restoreDeferredEffectSetAfterFailure(
                         expectedPrimary: formula,
                         expectedLighting: lighting,
+                        operationGeneration: operationGeneration,
                         using: handler
                     )
+                    // Rollback itself awaits a renderer publication. A newer
+                    // effect operation may have taken ownership during that
+                    // suspension; in that case it also owns every pending queue.
+                    guard self.isCurrentEmbeddedEffectSetOperation(operationGeneration) else {
+                        return
+                    }
+                    if let formulaHash = formula?.shortHash,
+                       self.pendingCustomSpaceWarpPersistenceHash == formulaHash {
+                        self.pendingCustomSpaceWarpPersistenceHash = nil
+                    }
+                    if let lightingHash = lighting?.shortHash,
+                       self.pendingCustomLightingPersistenceHash == lightingHash {
+                        self.pendingCustomLightingPersistenceHash = nil
+                    }
+                    if let queuedHash = self.pendingSceneApplyAfterActivation?.formulaHash,
+                       queuedHash == formula?.shortHash || queuedHash == lighting?.shortHash {
+                        self.pendingSceneApplyAfterActivation = nil
+                    }
+                    self.pendingPresetForActivation = nil
+                    self.pendingPresetSceneNavigationRequest = nil
+                    self.pendingPresetLoadGeneration = nil
+                    self.pendingPresetApplyOptions = []
                     if !restored {
                         if self.activeEmbeddedLighting != nil {
                             self.uninstallEmbeddedLighting()
@@ -562,10 +661,6 @@ class AppModel {
                             self.uninstallEmbeddedFormula()
                         }
                     }
-                    self.pendingPresetForActivation = nil
-                    self.pendingPresetSceneNavigationRequest = nil
-                    self.pendingPresetLoadGeneration = nil
-                    self.pendingPresetApplyOptions = []
                 }
             }
         }
@@ -580,6 +675,16 @@ class AppModel {
     /// redundant recompilation when the same formula is referenced multiple times
     /// across previews/imports.
     @ObservationIgnored var activeEmbeddedFormulaHash: String?
+
+    /// Reaches `.active` only after the renderer publishes a library containing
+    /// the staged external space-warp source. This observable mirror drives the
+    /// Transformations menu without tracking the large source payload itself.
+    var customSpaceWarpRuntimeState: CustomSpaceWarpRuntimeState = .inactive
+
+    /// Controls may only claim Voronoi semantics when the active source matches a
+    /// recognized app-shipped revision; arbitrary external warps keep a generic
+    /// presentation because their three scalar meanings are author-defined.
+    var customSpaceWarpControlProfile: CustomSpaceWarpControlProfile = .generic
 
     /// Independently active custom lighting material modifier. Unlike
     /// `activeEmbeddedFormula`, this never changes `fractalType` and can ride any
@@ -621,13 +726,43 @@ class AppModel {
     /// custom primary/lighting pair. Consumed on successful startup or rollback.
     @ObservationIgnored var pendingEmbeddedEffectSetRollback: EmbeddedEffectSetRollbackSnapshot?
 
+    /// Monotonic ownership token for AppModel-side effect-set transactions. The
+    /// renderer independently suppresses stale publication, but its `Void`
+    /// activation callback cannot tell callers whether they published. Async
+    /// callers use this generation to avoid committing cleanup or persistence
+    /// after a newer primary/lighting operation has taken ownership.
+    @ObservationIgnored var embeddedEffectSetOperationGeneration: UInt64 = 0
+
+    /// Nil until the current renderer has confirmed publication of the exact
+    /// staged primary+lighting pair for the current AppModel operation token.
+    @ObservationIgnored var publishedEmbeddedEffectSet: PublishedEmbeddedEffectSet?
+
+    /// A standalone/menu space-warp install must not reach `lastState.json`
+    /// until the renderer has actually published its Metal library. Deferred
+    /// installs record their staged hash here; handler binding commits it on
+    /// success and discards it on compile failure or cancellation.
+    @ObservationIgnored var pendingCustomSpaceWarpPersistenceHash: String?
+
+    /// Standalone custom-lighting installs follow the same publication rule as
+    /// external space warps. The intent is staged by the install operation
+    /// itself (rather than by its post-await caller), so an older same-source
+    /// caller cannot clear or recreate a newer request's checkpoint.
+    @ObservationIgnored var pendingCustomLightingPersistenceHash: String?
+
+    /// Trailing debounce for the external modifier's live uniform controls.
+    /// Rewriting the complete last-state document for every slider sample can
+    /// otherwise stall the main actor and churn the file system.
+    @ObservationIgnored var customSpaceWarpSettingsPersistenceTask: Task<Void, Never>?
+
     /// Animation-scene counterpart of `pendingPresetForActivation`: an external
-    /// `.threshanim`/`.threshanimv` whose embedded formula couldn't activate in
-    /// time (renderer not up). The apply closure runs from the activation
-    /// handler's didSet once the formula is compiled, so the scene loads when
-    /// the user eventually enters the immersive space instead of being
-    /// silently dropped after the activation wait times out.
-    @ObservationIgnored var pendingSceneApplyAfterActivation: (formulaHash: String, apply: @MainActor () -> Void)?
+    /// `.threshanim`/`.threshanimv` whose embedded formula has not yet reached a
+    /// confirmed renderer publication. The apply closure runs only after the
+    /// exact primary+lighting pair is published for the current operation.
+    @ObservationIgnored var pendingSceneApplyAfterActivation: (
+        formulaHash: String,
+        effectKind: EffectKind,
+        apply: @MainActor () -> Void
+    )?
 
     /// Prevents an older asynchronous scene load from applying after a newer
     /// selection, which is especially easy to trigger in the iPad scene list.
@@ -636,22 +771,161 @@ class AppModel {
 
     /// Queue an animation-scene apply behind formula activation and nudge the
     /// immersive space open (same UX as the queued-preset path).
-    func queueSceneApplyAfterFormulaActivation(formulaHash: String, apply: @escaping @MainActor () -> Void) {
-        // If the activation handler is already bound, the handler's didSet has
-        // already fired and will NOT fire again — a closure stored now would
-        // never drain. This happens on the narrow path where the renderer came
-        // up (handler bound) but the formula activation threw during the wait.
-        // Apply immediately instead of queuing into a slot nothing will read.
-        if activateEmbeddedFormulaHandler != nil {
+    func queueSceneApplyAfterFormulaActivation(
+        formula: EmbeddedFormula,
+        apply: @escaping @MainActor () -> Void
+    ) {
+        switch pendingFormulaSceneApplyDecision(
+            expectedFormulaHash: formula.shortHash,
+            effectKind: formula.effectKind
+        ) {
+        case .discard:
+            return
+        case .apply:
             apply()
             return
+        case .waitForPublication:
+            pendingSceneApplyAfterActivation = (
+                formula.shortHash,
+                formula.effectKind,
+                apply
+            )
         }
-        pendingSceneApplyAfterActivation = (formulaHash, apply)
         if immersiveSpaceState != .open {
             NotificationCenter.default.post(
                 name: AppModel.requestOpenImmersiveSpaceNotification,
                 object: nil
             )
+        }
+    }
+
+    func pendingFormulaSceneApplyDecision(
+        expectedFormulaHash: String,
+        effectKind: EffectKind
+    ) -> PendingFormulaSceneApplyDecision {
+        let requiresActiveRuntime = effectKind == .spaceWarp || effectKind == .lighting
+        let runtimeIsActive = effectKind == .lighting
+            ? customLightingRuntimeState.isActive
+            : customSpaceWarpRuntimeState.isActive
+        return PendingFormulaSceneApplyDecision.resolve(
+            expectedFormulaHash: expectedFormulaHash,
+            slot: EmbeddedFormulaPublicationSlot(effectKind: effectKind),
+            activeFormulaHash: activeEmbeddedFormulaHash,
+            activeLightingHash: activeEmbeddedLightingHash,
+            publication: publishedEmbeddedEffectSet,
+            currentOperationGeneration: embeddedEffectSetOperationGeneration,
+            requiresActiveRuntime: requiresActiveRuntime,
+            runtimeIsActive: runtimeIsActive
+        )
+    }
+
+    /// Record only a handler completion that still owns the exact staged effect
+    /// set. Renderer activations may return normally after being superseded, so
+    /// both operation ownership and both logical hashes are mandatory.
+    @discardableResult
+    func recordPublishedEmbeddedEffectSet(
+        primaryHash: String?,
+        lightingHash: String?,
+        operationGeneration: UInt64
+    ) -> Bool {
+        guard isCurrentEmbeddedEffectSetOperation(operationGeneration),
+              activeEmbeddedFormulaHash == primaryHash,
+              activeEmbeddedLightingHash == lightingHash else { return false }
+        publishedEmbeddedEffectSet = PublishedEmbeddedEffectSet(
+            primaryHash: primaryHash,
+            lightingHash: lightingHash,
+            operationGeneration: operationGeneration
+        )
+        consumePendingEffectPersistenceIfPublished()
+        return true
+    }
+
+    func hasCurrentPublishedEmbeddedEffectSet(
+        primaryHash: String?,
+        lightingHash: String?
+    ) -> Bool {
+        activeEmbeddedFormulaHash == primaryHash
+            && activeEmbeddedLightingHash == lightingHash
+            && publishedEmbeddedEffectSet == PublishedEmbeddedEffectSet(
+                primaryHash: primaryHash,
+                lightingHash: lightingHash,
+                operationGeneration: embeddedEffectSetOperationGeneration
+            )
+    }
+
+    /// Consume standalone-install persistence only at an exact renderer
+    /// publication boundary. One publication may satisfy both intents, so write
+    /// the complete last-state document at most once.
+    func consumePendingEffectPersistenceIfPublished() {
+        var shouldSave = false
+
+        if let expectedHash = pendingCustomSpaceWarpPersistenceHash {
+            switch pendingFormulaSceneApplyDecision(
+                expectedFormulaHash: expectedHash,
+                effectKind: .spaceWarp
+            ) {
+            case .apply:
+                pendingCustomSpaceWarpPersistenceHash = nil
+                shouldSave = true
+            case .discard:
+                pendingCustomSpaceWarpPersistenceHash = nil
+            case .waitForPublication:
+                break
+            }
+        }
+
+        if let expectedHash = pendingCustomLightingPersistenceHash {
+            switch pendingFormulaSceneApplyDecision(
+                expectedFormulaHash: expectedHash,
+                effectKind: .lighting
+            ) {
+            case .apply:
+                pendingCustomLightingPersistenceHash = nil
+                shouldSave = true
+            case .discard:
+                pendingCustomLightingPersistenceHash = nil
+            case .waitForPublication:
+                break
+            }
+        }
+
+        if shouldSave {
+            saveLastState()
+        }
+    }
+
+    /// Every renderer activation publishes the complete primary+lighting pair,
+    /// even when the user initiated only one slot. Reconcile both mirrors at the
+    /// same boundary so a partial operation cannot leave the other slot stuck in
+    /// `.compiling` after its source is already live.
+    func reconcilePublishedEmbeddedEffectSetRuntime(
+        primary: EmbeddedFormula?,
+        lighting: EmbeddedFormula?
+    ) {
+        customLightingRuntimeState = lighting.map {
+            .active(name: $0.name)
+        } ?? .inactive
+        customSpaceWarpRuntimeState = primary?.effectKind == .spaceWarp
+            ? .active(name: primary?.name ?? "External Space Warp")
+            : .inactive
+    }
+
+    func drainPendingSceneApplyIfPublished() {
+        guard let queued = pendingSceneApplyAfterActivation else { return }
+        switch pendingFormulaSceneApplyDecision(
+            expectedFormulaHash: queued.formulaHash,
+            effectKind: queued.effectKind
+        ) {
+        case .discard:
+            // The staged formula was replaced or rolled back. Retaining this
+            // closure would let an unrelated future same-hash activation
+            // resurrect an import the user has already superseded.
+            pendingSceneApplyAfterActivation = nil
+        case .waitForPublication:
+            break
+        case .apply:
+            pendingSceneApplyAfterActivation = nil
+            queued.apply()
         }
     }
     
@@ -1112,41 +1386,13 @@ class AppModel {
         closeMenuWindow(reason: "scene load", bypassGuard: true)
     }
 
-    /// Load a space-warp `.threshfx` into the single active custom slot WITHOUT
-    /// changing the fractal type — the warp applies to whatever fractal is active.
-    /// Gated by `allowCustomScenes`; nudges `spaceWarpStrength` up so it's visible.
+    /// Compatibility wrapper for synchronous startup restore. Interactive import
+    /// and preview flows await `installEmbeddedSpaceWarp` so status and scene
+    /// application follow actual Metal publication.
     @MainActor
     func installSpaceWarp(_ warp: EmbeddedFormula) {
-        guard Self.allowCustomScenes else {
-            errorReporter.report(.preset(.importFailed("Enable “Allow custom scenes” in Settings to load space warps.")))
-            return
-        }
-        do { try warp.validate() } catch {
-            errorReporter.report(.preset(.importFailed("Invalid space warp: \(error.localizedDescription)")))
-            return
-        }
-        activeEmbeddedFormula = warp
-        // Set the hash too, so `uninstallEmbeddedFormula()` (whose guard is
-        // `activeEmbeddedFormulaHash != nil`) can detach the warp when a plain
-        // scene is later loaded.
-        activeEmbeddedFormulaHash = warp.shortHash
-        if renderSettings.spaceWarpStrength <= 0 {
-            renderSettings.spaceWarpStrength = 0.6
-        }
-        // Activate now if the renderer is up; otherwise the handler's didSet
-        // re-activates `activeEmbeddedFormula` when it binds (cold-start opens).
-        if let handler = activateEmbeddedFormulaHandler {
-            let lighting = activeEmbeddedLighting
-            Task { @MainActor in
-                do { try await handler(warp, lighting) }
-                catch {
-                    self.errorReporter.report(.preset(.importFailed("Failed to compile space warp: \(error.localizedDescription)")))
-                    // Clear stale state so a failed warp doesn't linger.
-                    self.activeEmbeddedFormula = nil
-                    self.activeEmbeddedFormulaHash = nil
-                    self.renderSettings.spaceWarpStrength = 0
-                }
-            }
+        Task { @MainActor in
+            _ = await installEmbeddedSpaceWarp(warp)
         }
     }
 

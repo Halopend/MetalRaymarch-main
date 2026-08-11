@@ -141,6 +141,21 @@ struct FormulaEditorModelTests {
         #expect(model.compileDiagnostics.isEmpty)
     }
 
+    @Test("A superseded renderer operation never claims the draft is live")
+    func supersededCompileReturnsToIdle() async {
+        let recorder = CompileRecorder()
+        recorder.outcome = .superseded
+        let model = makeModel(recorder: recorder)
+        model.setSource(validSource)
+
+        model.compileNow()
+        #expect(model.status == .compiling)
+        await waitUntil { model.status == .idle }
+
+        #expect(model.status == .idle)
+        #expect(model.compileDiagnostics.isEmpty)
+    }
+
     @Test("Pragma errors and unresolved stems block compilation up front")
     func preflightBlocks() async {
         let recorder = CompileRecorder()

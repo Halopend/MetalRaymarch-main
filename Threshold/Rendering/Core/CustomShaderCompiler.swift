@@ -24,8 +24,10 @@ import Foundation
 @preconcurrency import Metal
 
 /// Errors that can occur while compiling an embedded formula.
-enum CustomShaderCompilerError: Error, CustomStringConvertible {
+enum CustomShaderCompilerError: Error, CustomStringConvertible, LocalizedError {
     case missingDispatchMarker(String)
+    case effectKindMismatch(slot: String, actual: EffectKind)
+    case compilerBusy
     case metalCompileFailed(formula: String, detail: String)
     case libraryUnavailable
 
@@ -33,12 +35,18 @@ enum CustomShaderCompilerError: Error, CustomStringConvertible {
         switch self {
         case .missingDispatchMarker(let m):
             return "Embedded shader template is missing dispatch marker '\(m)'. Verify the Generate Metal Embeds build phase."
+        case .effectKindMismatch(let slot, let actual):
+            return "A \(actual.rawValue) effect cannot be installed in the \(slot) shader slot."
+        case .compilerBusy:
+            return "The custom-shader compiler is busy. Wait for the current imports to finish and try again."
         case .metalCompileFailed(let name, let detail):
             return "Custom shader '\(name)' failed to compile: \(detail)"
         case .libraryUnavailable:
             return "Custom shader library is unavailable (compiler not initialised)."
         }
     }
+
+    var errorDescription: String? { description }
 }
 
 /// Compiles `EmbeddedFormula` payloads into runnable `MTLLibrary` instances.
@@ -108,9 +116,14 @@ actor CustomShaderCompiler {
 
     private static let strippedDispatchTemplate = stripLocalIncludes(EmbeddedMetalSources.fractalFormulasH)
     private static let synthesizedSourceSuffix = shaderSections.body
+    private static let maxCachedLibraries = 8
+    private static let maxPendingCompiles = 4
 
     private let device: MTLDevice
     private var libraryCache: [String: MTLLibrary] = [:]
+    private var libraryCacheLRU: [String] = []
+    private var inFlightCompiles: [String: Task<MTLLibrary, Error>] = [:]
+    private var compilationTail: Task<Void, Never>?
 
     init(device: MTLDevice) {
         self.device = device
@@ -130,10 +143,10 @@ actor CustomShaderCompiler {
     static func combinedHash(fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?,
                              lighting: EmbeddedFormula? = nil,
                              warpStackSignature: String = "s0") -> String {
-        // `m2` is the host material ABI revision. Bump it whenever the public
+        // `m3` is the host material/cache-identity revision. Bump it whenever the public
         // ThresholdMaterial / ThresholdLightingContext contract changes so a
         // stale in-memory library can never be reused against a new adapter.
-        "m2f\(fractal?.shortHash ?? "0")w\(spaceWarp?.shortHash ?? "0")l\(lighting?.shortHash ?? "0")\(warpStackSignature)"
+        "m3f\(fractal?.sourceHash ?? "0")w\(spaceWarp?.sourceHash ?? "0")l\(lighting?.sourceHash ?? "0")\(warpStackSignature)"
     }
 
     /// Compile (or return cached) the combined library for an effect set.
@@ -155,10 +168,22 @@ actor CustomShaderCompiler {
     func library(forFractal fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?,
                  lighting: EmbeddedFormula? = nil,
                  warpStackSource: String? = nil, warpStackSignature: String = "s0") async throws -> MTLLibrary {
+        // Validate at the final trust boundary, before even consulting the
+        // library cache. Callers normally validate during import, but the
+        // compiler is also used by live editing and tests and must not let an
+        // invalid payload alias a previously cached valid shader.
+        try Self.validateEffectInputs(fractal: fractal, spaceWarp: spaceWarp, lighting: lighting)
         let key = Self.combinedHash(fractal: fractal, spaceWarp: spaceWarp,
                                     lighting: lighting, warpStackSignature: warpStackSignature)
         if let cached = libraryCache[key] {
+            touchCachedLibrary(key)
             return cached
+        }
+        if let existing = inFlightCompiles[key] {
+            return try await existing.value
+        }
+        guard inFlightCompiles.count < Self.maxPendingCompiles else {
+            throw CustomShaderCompilerError.compilerBusy
         }
         let source = try Self.synthesizeSource(fractal: fractal, spaceWarp: spaceWarp,
                                                lighting: lighting, warpStackSource: warpStackSource)
@@ -174,31 +199,50 @@ actor CustomShaderCompiler {
             .compactMap { $0 }
             .joined(separator: " + ")
         let formulaName = effectNames.isEmpty ? "effect set" : effectNames
-        do {
-            let lib: MTLLibrary = try await withCheckedThrowingContinuation { continuation in
-                // The completion handler runs on a Metal-owned thread, not this
-                // actor's executor; it only resumes the continuation, so it
-                // touches no actor-isolated state.
-                device.makeLibrary(source: source, options: options) { library, error in
-                    if let library {
-                        continuation.resume(returning: library)
-                    } else {
-                        continuation.resume(throwing: error ?? CustomShaderCompilerError.metalCompileFailed(
-                            formula: formulaName,
-                            detail: "Metal returned no library and no error."
-                        ))
+
+        // Metal compilation itself is not cancellable. Serialize distinct
+        // sources, deduplicate identical requests, and cap the pending queue so
+        // rapid hostile imports cannot fan out unbounded compiler work.
+        let predecessor = compilationTail
+        let compileTask = Task<MTLLibrary, Error> {
+            if let predecessor { await predecessor.value }
+            do {
+                return try await withCheckedThrowingContinuation { continuation in
+                    // The completion handler runs on a Metal-owned thread; it
+                    // only resumes the continuation and touches no actor state.
+                    device.makeLibrary(source: source, options: options) { library, error in
+                        if let library {
+                            continuation.resume(returning: library)
+                        } else {
+                            continuation.resume(throwing: error ?? CustomShaderCompilerError.metalCompileFailed(
+                                formula: formulaName,
+                                detail: "Metal returned no library and no error."
+                            ))
+                        }
                     }
                 }
+            } catch let error as CustomShaderCompilerError {
+                throw error
+            } catch {
+                throw CustomShaderCompilerError.metalCompileFailed(
+                    formula: formulaName,
+                    detail: (error as NSError).localizedDescription
+                )
             }
-            libraryCache[key] = lib
+        }
+        inFlightCompiles[key] = compileTask
+        compilationTail = Task<Void, Never> {
+            _ = try? await compileTask.value
+        }
+
+        do {
+            let lib = try await compileTask.value
+            inFlightCompiles.removeValue(forKey: key)
+            cacheLibrary(lib, forKey: key)
             return lib
-        } catch let error as CustomShaderCompilerError {
-            throw error
         } catch {
-            throw CustomShaderCompilerError.metalCompileFailed(
-                formula: formulaName,
-                detail: (error as NSError).localizedDescription
-            )
+            inFlightCompiles.removeValue(forKey: key)
+            throw error
         }
     }
 
@@ -208,6 +252,7 @@ actor CustomShaderCompiler {
     /// Metal compiler.
     func evictAll() {
         libraryCache.removeAll()
+        libraryCacheLRU.removeAll()
     }
 
     /// Drop one cached library by its `combinedHash` key. The live formula
@@ -216,6 +261,21 @@ actor CustomShaderCompiler {
     /// otherwise accumulate in the cache for the whole session.
     func evict(combinedHash key: String) {
         libraryCache.removeValue(forKey: key)
+        libraryCacheLRU.removeAll { $0 == key }
+    }
+
+    private func touchCachedLibrary(_ key: String) {
+        libraryCacheLRU.removeAll { $0 == key }
+        libraryCacheLRU.append(key)
+    }
+
+    private func cacheLibrary(_ library: MTLLibrary, forKey key: String) {
+        libraryCache[key] = library
+        touchCachedLibrary(key)
+        while libraryCacheLRU.count > Self.maxCachedLibraries {
+            let evicted = libraryCacheLRU.removeFirst()
+            libraryCache.removeValue(forKey: evicted)
+        }
     }
 
     // MARK: - Source synthesis
@@ -230,6 +290,7 @@ actor CustomShaderCompiler {
     static func synthesizeSource(fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?,
                                  lighting: EmbeddedFormula? = nil,
                                  warpStackSource: String? = nil) throws -> String {
+        try validateEffectInputs(fractal: fractal, spaceWarp: spaceWarp, lighting: lighting)
         // The pieces preceding the user's DE source come from ONE helper shared
         // with `fractalUserSourceStartLine`, so compile-log line mapping can
         // never drift from the actual layout.
@@ -281,11 +342,45 @@ actor CustomShaderCompiler {
         var pieces: [String] = []
         pieces.reserveCapacity(5)
         pieces.append("// === Custom effect shader (auto-synthesized at runtime) ===")
-        if let fractal { pieces.append("// Fractal: \(fractal.id) — \(fractal.name) [\(fractal.shortHash)]") }
-        if let spaceWarp { pieces.append("// Space warp: \(spaceWarp.id) — \(spaceWarp.name) [\(spaceWarp.shortHash)]") }
+        // Only hash-derived ASCII is emitted into generated comments. Human
+        // metadata is untrusted and must never gain source-code semantics via
+        // an embedded newline or control scalar.
+        if let fractal { pieces.append("// Fractal source [\(fractal.sourceHash)]") }
+        if let spaceWarp { pieces.append("// Space-warp source [\(spaceWarp.sourceHash)]") }
         pieces.append(Self.synthesizedSourcePrefix)
-        if let fractal { pieces.append("// === Embedded fractal source — '\(fractal.id)' ===") }
+        if let fractal { pieces.append("// === Embedded fractal source [\(fractal.sourceHash)] ===") }
         return pieces
+    }
+
+    private static func validateEffectInputs(
+        fractal: EmbeddedFormula?,
+        spaceWarp: EmbeddedFormula?,
+        lighting: EmbeddedFormula?
+    ) throws {
+        if let fractal {
+            try fractal.validate()
+            guard fractal.effectKind == .fractal else {
+                throw CustomShaderCompilerError.effectKindMismatch(
+                    slot: EffectKind.fractal.rawValue, actual: fractal.effectKind
+                )
+            }
+        }
+        if let spaceWarp {
+            try spaceWarp.validate()
+            guard spaceWarp.effectKind == .spaceWarp else {
+                throw CustomShaderCompilerError.effectKindMismatch(
+                    slot: EffectKind.spaceWarp.rawValue, actual: spaceWarp.effectKind
+                )
+            }
+        }
+        if let lighting {
+            try lighting.validate()
+            guard lighting.effectKind == .lighting else {
+                throw CustomShaderCompilerError.effectKindMismatch(
+                    slot: EffectKind.lighting.rawValue, actual: lighting.effectKind
+                )
+            }
+        }
     }
 
     /// The 1-based line in the synthesized source where `fractal.metalSource`
@@ -350,7 +445,7 @@ actor CustomShaderCompiler {
         let replacement = """
         // __CUSTOM_LIGHTING__ (custom material modifier injected)
         #define THRESHOLD_CUSTOM_LIGHTING
-        // === Embedded lighting source — '\(lighting.id)' ===
+        // === Embedded lighting source [\(lighting.sourceHash)] ===
         \(lighting.metalSource)
         // === End embedded lighting source ===
         FORCE_INLINE ThresholdMaterial applyCustomLightingMaterial(ThresholdLightingContext context,

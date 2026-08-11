@@ -366,7 +366,30 @@ extension ContentView {
     private var fractalTransformContent: some View {
         VStack(spacing: 12) {
             TransformationsSection(renderSettings: appModel.renderSettings,
-                                   cache: cache)
+                                   cache: cache,
+                                   customSpaceWarpRuntimeState: appModel.customSpaceWarpRuntimeState,
+                                   customSpaceWarpControlProfile: appModel.customSpaceWarpControlProfile,
+                                   loadBundledVoronoiSpaceWarp: {
+                                       Task { @MainActor in
+                                           let result = await appModel.installBundledVoronoiSpaceWarp()
+                                           if let expectedHash = AppModel.bundledVoronoiSpaceWarpShortHash {
+                                               appModel.persistCustomSpaceWarpInstall(
+                                                   result,
+                                                   expectedHash: expectedHash
+                                               )
+                                           }
+                                       }
+                                   },
+                                   detachCustomSpaceWarp: {
+                                       Task { @MainActor in
+                                           if await appModel.uninstallEmbeddedSpaceWarpAndWait() {
+                                               appModel.saveLastState()
+                                           }
+                                       }
+                                   },
+                                   persistCustomSpaceWarpSettings: {
+                                       appModel.scheduleCustomSpaceWarpSettingsPersistence()
+                                   })
         }
     }
 

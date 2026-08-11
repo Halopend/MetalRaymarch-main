@@ -429,13 +429,23 @@ final class ViewportRenderer {
         var previousViewProjNoJitter: matrix_float4x4
     }
 
-    /// Mirrors the blit parameters in Shaders.metal. Edge detection is deferred to
-    /// the full-resolution MetalFX resolve so its outline is measured in output
-    /// pixels instead of being enlarged with the low-resolution source image.
+    /// Mirrors the blit parameters in Shaders.metal. The complete ordered output-
+    /// filter stack is deferred to the full-resolution MetalFX resolve so local
+    /// effects and sampled outlines share authored order at output resolution.
     private struct ViewportBlitParams {
-        /// x = enabled window radius (0 means off), y = strength,
-        /// z = threshold, w = softness.
-        var edge: SIMD4<Float> = .zero
+        var postFilterStack = PostFilterStack()
+        var time: Float = 0
+        var pad0: Float = 0
+        var pad1: Float = 0
+        var pad2: Float = 0
+    }
+
+    /// Per-frame routing for output filters. The authored stack is always kept
+    /// for the full-resolution blit; the raymarch stack is empty only when an
+    /// upscale path will execute that blit.
+    private struct ViewportFramePostFilterParams {
+        var blitParams: ViewportBlitParams
+        var raymarchStack: PostFilterStack
     }
 
     private struct TemporalInvalidationKey: Equatable {
@@ -831,7 +841,7 @@ final class ViewportRenderer {
         let frameSlot = uniformBufferIndex
         let uniformBuffer = uniformBuffers[frameSlot]
         uniformBufferIndex = (uniformBufferIndex + 1) % uniformBuffers.count
-        writeUniforms(to: uniformBuffer, appModel: appModel)
+        let framePostFilters = writeUniforms(to: uniformBuffer, appModel: appModel)
 
         let benchBuffer = benchCounterBuffers[frameSlot]
         let collectSteps = BenchmarkManager.shared.shouldCollectSteps
@@ -849,7 +859,13 @@ final class ViewportRenderer {
         let pipeline = resolveActivePipeline(appModel: appModel)
         let descriptor = makeOffscreenRenderPassDescriptor(color: color, depth: depth)
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return nil }
-        encodeRaymarch(into: encoder, pipeline: pipeline, uniformBuffer: uniformBuffer, benchBuffer: benchBuffer)
+        encodeRaymarch(
+            into: encoder,
+            pipeline: pipeline,
+            uniformBuffer: uniformBuffer,
+            benchBuffer: benchBuffer,
+            postFilterStack: framePostFilters.raymarchStack
+        )
         encoder.endEncoding()
         let cpuEncodeMs = (CACurrentMediaTime() - cpuStart) * 1000.0
 
@@ -1125,11 +1141,13 @@ final class ViewportRenderer {
         let frameSlot = uniformBufferIndex
         let uniformBuffer = uniformBuffers[frameSlot]
         uniformBufferIndex = (uniformBufferIndex + 1) % uniformBuffers.count
-        var blitParams = writeUniforms(
+        let framePostFilters = writeUniforms(
             to: uniformBuffer,
             appModel: appModel,
-            deferEdgeDetection: didUpscale
+            deferPostFilters: didUpscale
         )
+        var blitParams = framePostFilters.blitParams
+        let raymarchPostFilterStack = framePostFilters.raymarchStack
 
         // Fractal distance cache: (re)bake before the render pass when a
         // DE-shaping parameter changed. Same command buffer ⇒ never stale.
@@ -1229,7 +1247,13 @@ final class ViewportRenderer {
                 commandBuffer.commit()
                 return
             }
-            encodeRaymarch(into: encoder, pipeline: activePipeline, uniformBuffer: uniformBuffer, benchBuffer: benchBuffer)
+            encodeRaymarch(
+                into: encoder,
+                pipeline: activePipeline,
+                uniformBuffer: uniformBuffer,
+                benchBuffer: benchBuffer,
+                postFilterStack: raymarchPostFilterStack
+            )
             encoder.endEncoding()
 
             // 2. Motion-vector pass: reconstruct world position from depth and
@@ -1287,7 +1311,13 @@ final class ViewportRenderer {
                 commandBuffer.commit()
                 return
             }
-            encodeRaymarch(into: encoder, pipeline: activePipeline, uniformBuffer: uniformBuffer, benchBuffer: benchBuffer)
+            encodeRaymarch(
+                into: encoder,
+                pipeline: activePipeline,
+                uniformBuffer: uniformBuffer,
+                benchBuffer: benchBuffer,
+                postFilterStack: raymarchPostFilterStack
+            )
             encoder.endEncoding()
 
             // 2. MetalFX spatial upscale → full-resolution output.
@@ -1318,7 +1348,13 @@ final class ViewportRenderer {
                 commandBuffer.commit()
                 return
             }
-            encodeRaymarch(into: encoder, pipeline: activePipeline, uniformBuffer: uniformBuffer, benchBuffer: benchBuffer)
+            encodeRaymarch(
+                into: encoder,
+                pipeline: activePipeline,
+                uniformBuffer: uniformBuffer,
+                benchBuffer: benchBuffer,
+                postFilterStack: raymarchPostFilterStack
+            )
             encoder.endEncoding()
 
             wasTemporalActive = false
@@ -1341,7 +1377,8 @@ final class ViewportRenderer {
     private func encodeRaymarch(into encoder: MTLRenderCommandEncoder,
                                 pipeline: MTLRenderPipelineState,
                                 uniformBuffer: MTLBuffer,
-                                benchBuffer: MTLBuffer) {
+                                benchBuffer: MTLBuffer,
+                                postFilterStack: PostFilterStack) {
         encoder.setRenderPipelineState(pipeline)
         encoder.setDepthStencilState(depthState)
         // The raymarch proxy is a radius-100 ellipsoid drawn from the inside; the
@@ -1361,6 +1398,12 @@ final class ViewportRenderer {
         }
         encoder.setVertexBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
         encoder.setFragmentBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
+        var stack = postFilterStack
+        encoder.setFragmentBytes(
+            &stack,
+            length: MemoryLayout<PostFilterStack>.stride,
+            index: BufferIndex.postFilters.rawValue
+        )
         // Fractal distance cache grid is also bindless (GPU address in the
         // uniforms) — declare residency whenever it's enabled this frame.
         if let buffer = distCacheFrameState?.renderBuffer {
@@ -1597,7 +1640,7 @@ final class ViewportRenderer {
     @discardableResult
     private func writeUniforms(to buffer: MTLBuffer,
                                appModel: AppModel,
-                               deferEdgeDetection: Bool = false) -> ViewportBlitParams {
+                               deferPostFilters: Bool = false) -> ViewportFramePostFilterParams {
         let now = CACurrentMediaTime()
         let deltaTime = max(1.0 / 240.0, min(now - lastFrameTime, 1.0 / 15.0))
         lastFrameTime = now
@@ -1649,25 +1692,19 @@ final class ViewportRenderer {
                                     animationPlaying: settings.isAnimationPlaying,
                                     elapsedTime: effectiveElapsed,
                                     deltaTime: Float(deltaTime))
-        let edgeEnabled = deferEdgeDetection && uniforms.colorScheme.edgeDetectionEnabled != 0
-        let edgeRadius = edgeEnabled
-            ? Float(max(1, min(3, uniforms.colorScheme.edgeDetectionWindowRadius)))
-            : 0.0
-        let blitParams = ViewportBlitParams(edge: SIMD4<Float>(
-            edgeRadius,
-            uniforms.colorScheme.edgeDetectionStrength,
-            uniforms.colorScheme.edgeDetectionThreshold,
-            uniforms.colorScheme.edgeDetectionSoftness
-        ))
-        if edgeEnabled {
-            // Do not burn the synthetic outline into MetalFX color/history.
-            // The existing full-resolution blit pass applies it after upscale.
-            uniforms.colorScheme.edgeDetectionEnabled = 0
-        }
+        let fullPostFilterStack = snapshot.postFilterStack
+        let blitParams = ViewportBlitParams(
+            postFilterStack: fullPostFilterStack,
+            time: uniforms.time
+        )
+        let raymarchStack = deferPostFilters ? PostFilterStack() : fullPostFilterStack
         let pointer = buffer.contents().bindMemory(to: UniformsArray.self, capacity: 1)
         pointer.pointee.uniforms.0 = uniforms
         pointer.pointee.uniforms.1 = uniforms
-        return blitParams
+        return ViewportFramePostFilterParams(
+            blitParams: blitParams,
+            raymarchStack: raymarchStack
+        )
     }
 
     private func updateTemporalInvalidationState(settings: RenderSettingsSnapshot) {

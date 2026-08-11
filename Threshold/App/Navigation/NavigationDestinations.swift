@@ -133,6 +133,26 @@ enum VisualizationsRailSection: String, CaseIterable, Codable, Hashable, Sendabl
     }
 }
 
+/// Third-level destinations within Look → Post Processing. Keeping these as
+/// navigation values (rather than ad-hoc booleans in the view) provides stable
+/// labels and ordering as the section grows.
+enum PostProcessingSection: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case color = "Color"
+    case style = "Style"
+    case filters = "Filters"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .color: return "slider.horizontal.3"
+        case .style: return "wand.and.sparkles"
+        case .filters: return "camera.filters"
+        }
+    }
+
+}
+
 enum MusicRailSection: String, CaseIterable, Codable, Hashable, Sendable {
     case parameters = "Parameters"
     case playback = "Playback"

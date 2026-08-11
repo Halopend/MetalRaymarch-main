@@ -67,7 +67,14 @@ it in Threshold to render and edit it.
    [`IridescentRimLighting.threshfx`](Threshold/Examples/Formulas/IridescentRimLighting.threshfx)
    or your own `kind: "lighting"` file. A standalone DE such as
    [`SampleSphereFold.threshfx`](Threshold/Examples/Formulas/SampleSphereFold.threshfx)
-   uses the same importer but follows the custom-fractal preview flow.
+   uses the same importer but follows the custom-fractal preview flow. A domain
+   modifier such as
+   [`Voronoi3DFieldSpaceWarp.threshfx`](Threshold/Examples/Formulas/Voronoi3DFieldSpaceWarp.threshfx)
+   is decoded from disk and runtime-compiled into the external `spaceWarp` slot,
+   applying immediately to the current fractal. The same real container is
+   available in **Shape → Transformations → Add → External Modifiers**; it appears
+   as a global `.threshfx` card because v1 external warps temporarily override
+   (but do not erase) the ordered built-in transformation stack.
 5. Then open a fully authored scene:
 
    - [`Accidental Sphere Projection.threshscene`](Threshold/Examples/Scenes/Accidental%20Sphere%20Projection.threshscene)
@@ -171,7 +178,8 @@ Threshold's renderer rather than accepting a general Metal project.
   Both must return the same underlying distance field. The orbit-aware function
   must set `trap`, `trapIteration`, `trapPosition`, `finalP`, and
   `iterationsUsed`.
-- Keep `metalSource` at or below 64 KiB. `#include`, `#import`, and `@import`
+- Keep the complete `.threshfx` document at or below 512 KiB and `metalSource`
+  at or below 64 KiB. Preprocessor directives (all `#` syntax) and `@import`
   are rejected, so put the formula body directly in the payload.
 - Use unique parameter indexes from `0` through `15`. The renderer passes these
   values every frame, so changing a value does not require recompiling the DE.
@@ -340,7 +348,7 @@ production runtime compiler. For Metal or Quick Look changes, also run
 
 | Symptom | Check |
 | --- | --- |
-| The scene refuses to load. | Enable **Allow custom scenes** and make sure the payload is a fractal DE (`kind: "fractal"` or legacy omitted `kind`), not `kind: "spaceWarp"`. |
+| The scene refuses to load. | Enable **Allow custom scenes** and verify that `kind` matches the functions supplied: a DE pair for `fractal`, the custom-warp pair for `spaceWarp`, or `Lighting_<stem>` for `lighting`. |
 | The compiler says a DE is missing. | The function stem and both required names must match exactly. |
 | The formula compiles but coloring looks wrong. | Ensure the full DE writes every `OrbitData` field and uses the same geometry as the `_Dist` variant. |
 | A file works locally but not after sharing. | Export the `.threshscene` with its active formula embedded, or share the `.threshfx` alongside the scene. |

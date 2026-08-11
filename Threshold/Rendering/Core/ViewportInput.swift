@@ -1,5 +1,27 @@
-#if os(macOS) || os(iOS)
 import simd
+
+/// Shared distance-and-direction policy for direct scene browsing gestures.
+/// Unlike `UISwipeGestureRecognizer`, this deliberately has no velocity
+/// requirement, so a slow drag remains a valid scene step.
+enum SceneSwipeGesturePolicy {
+    static let activationDistance: Float = 32
+    static let horizontalDominance: Float = 1.15
+
+    /// Returns +1 for a leftward drag (next), -1 for a rightward drag
+    /// (previous), and zero until the gesture is intentional enough to act on.
+    static func sceneStep(for translation: SIMD2<Float>) -> Int {
+        guard translation.x.isFinite, translation.y.isFinite else { return 0 }
+        let horizontalDistance = abs(translation.x)
+        let verticalDistance = abs(translation.y)
+        guard horizontalDistance >= activationDistance,
+              horizontalDistance >= verticalDistance * horizontalDominance else {
+            return 0
+        }
+        return translation.x < 0 ? 1 : -1
+    }
+}
+
+#if os(macOS) || os(iOS)
 import Synchronization
 #if os(macOS)
 import AppKit
@@ -98,27 +120,6 @@ enum ViewportKeyboardMap {
         case 225, 229: return .shift          // left/right Shift
         default: return nil
         }
-    }
-}
-
-/// Shared distance-and-direction policy for direct scene browsing gestures.
-/// Unlike `UISwipeGestureRecognizer`, this deliberately has no velocity
-/// requirement, so a slow three-finger drag remains a valid scene step.
-enum SceneSwipeGesturePolicy {
-    static let activationDistance: Float = 32
-    static let horizontalDominance: Float = 1.15
-
-    /// Returns +1 for a leftward drag (next), -1 for a rightward drag
-    /// (previous), and zero until the gesture is intentional enough to act on.
-    static func sceneStep(for translation: SIMD2<Float>) -> Int {
-        guard translation.x.isFinite, translation.y.isFinite else { return 0 }
-        let horizontalDistance = abs(translation.x)
-        let verticalDistance = abs(translation.y)
-        guard horizontalDistance >= activationDistance,
-              horizontalDistance >= verticalDistance * horizontalDominance else {
-            return 0
-        }
-        return translation.x < 0 ? 1 : -1
     }
 }
 

@@ -74,7 +74,7 @@ struct ControlFinderDestinationTests {
     }
 
     @Test("Search uses titles, descriptions, paths, and synonyms")
-    func keywordSearch() {
+    func keywordSearch() throws {
         let fog = ControlFinderDestination.results(matching: "fog", on: .visionOS)
         #expect(fog.contains { $0.target == .route(.look(.atmosphere)) })
 
@@ -85,7 +85,13 @@ struct ControlFinderDestinationTests {
         #expect(colour.first?.id == "look.Color")
 
         let edge = ControlFinderDestination.results(matching: "edge outline", on: .macOS)
-        #expect(edge.contains { $0.target == .route(.look(.grading)) })
+        let edgeDestination = try #require(edge.first {
+            $0.title == PostProcessingFilterKind.edgeDetection.displayName
+        })
+        #expect(edgeDestination.target == .route(.look(.grading)))
+        #expect(edgeDestination.postProcessingSection == .filters)
+        #expect(edgeDestination.postProcessingFilter == .edgeDetection)
+        #expect(edgeDestination.path == "Look › Post Processing › Filters")
 
         let custom = ControlFinderDestination.results(matching: "threshfx", on: .macOS)
         #expect(custom.first?.id == "explore.Custom Scenes")
@@ -95,5 +101,29 @@ struct ControlFinderDestinationTests {
 
         let preset = ControlFinderDestination.results(matching: "reactivity preset", on: .macOS)
         #expect(preset.first?.id == "input.Reactive")
+    }
+
+    @Test("Post Processing exposes stable third-level sections and filter catalog entries")
+    func postProcessingNavigationDepth() throws {
+        #expect(PostProcessingSection.allCases == [.color, .style, .filters])
+        #expect(PostProcessingFilterKind.allCases == [
+            .edgeDetection, .monochrome, .sepia, .invert,
+            .posterize, .grain, .scanlines,
+        ])
+
+        let filters = ControlFinderDestination.catalog.filter {
+            $0.postProcessingSection == .filters
+        }
+        #expect(filters.count == PostProcessingFilterKind.allCases.count)
+        let edge = try #require(filters.first {
+            $0.postProcessingFilter == .edgeDetection
+        })
+        #expect(edge.target == .route(.look(.grading)))
+
+        let posterize = try #require(filters.first {
+            $0.postProcessingFilter == .posterize
+        })
+        #expect(posterize.title == PostProcessingFilterKind.posterize.displayName)
+        #expect(posterize.searchKeywords.contains("levels"))
     }
 }

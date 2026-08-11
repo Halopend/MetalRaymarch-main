@@ -272,10 +272,11 @@ classDiagram
 ## 4. Formulas subsystem
 
 A class-based registry. `FractalTypeDescriptor` is a base **class** (`@unchecked Sendable`);
-each fractal is a `final class` subclass. `FractalTypeRegistry` resolves them by `rawValue`,
-with a lock-protected overlay for runtime-loaded custom formulas (`EmbeddedFormula` →
-`CustomFractalDescriptor`). (It was a protocol until 2026-07; converted to a class — see
-the `FractalTypeDescriptor.swift` header.)
+concrete fractals are `final` subclasses. Closely related Mandelbulb descriptors inherit
+their shared quality, polar-rotation, scale, and gesture policy through
+`MandelbulbFamilyDescriptor`. `FractalTypeRegistry` resolves descriptors by the raw value
+derived from their strongly typed `FractalModelType` identity, with a lock-protected overlay
+for runtime-loaded custom formulas (`EmbeddedFormula` → `CustomFractalDescriptor`).
 
 ```mermaid
 classDiagram
@@ -283,6 +284,7 @@ classDiagram
 
     class FractalTypeDescriptor {
         <<class @unchecked Sendable>>
+        type: FractalModelType
         displayName, icon, category
         defaultFormulaParams()
         gestureRanges / bindings
@@ -303,6 +305,7 @@ classDiagram
     }
 
     class MandelboxDescriptor { <<final class>> }
+    class MandelbulbFamilyDescriptor { <<class>> }
     class MandelbulbDescriptor { <<final class>> }
     class MengerDescriptor { <<final class>> }
     class MandelbulbJuliaDescriptor { <<final class>> }
@@ -311,17 +314,20 @@ classDiagram
     class MengerSphereDescriptor { <<final class>> }
     class TheliPseudoKleinianDescriptor { <<final class>> }
     class KleinianDescriptor { <<final class>> }
+    class BoxFoldMandelbulbDescriptor { <<final class>> }
     class CustomFractalDescriptor { <<final class>> }
 
     MandelboxDescriptor --|> FractalTypeDescriptor
-    MandelbulbDescriptor --|> FractalTypeDescriptor
+    MandelbulbFamilyDescriptor --|> FractalTypeDescriptor
+    MandelbulbDescriptor --|> MandelbulbFamilyDescriptor
     MengerDescriptor --|> FractalTypeDescriptor
-    MandelbulbJuliaDescriptor --|> FractalTypeDescriptor
+    MandelbulbJuliaDescriptor --|> MandelbulbFamilyDescriptor
     QuaternionJuliaDescriptor --|> FractalTypeDescriptor
     OctahedronDescriptor --|> FractalTypeDescriptor
     MengerSphereDescriptor --|> FractalTypeDescriptor
     TheliPseudoKleinianDescriptor --|> FractalTypeDescriptor
     KleinianDescriptor --|> FractalTypeDescriptor
+    BoxFoldMandelbulbDescriptor --|> MandelbulbFamilyDescriptor
     CustomFractalDescriptor --|> FractalTypeDescriptor
 
     FractalTypeRegistry o-- FractalTypeDescriptor

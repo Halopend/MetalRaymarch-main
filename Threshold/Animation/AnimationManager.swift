@@ -534,8 +534,14 @@ final class AnimationManager {
         didSet {
             // Reset playhead when scene changes
             if currentScene?.id != oldValue?.id {
+                pendingConeMarchResetSceneID = isRestoringSceneSelection
+                    ? nil
+                    : currentScene?.id
                 let wasPlaying = playhead.state == .playing
                 playhead.reset()
+                if !wasPlaying {
+                    playhead.state = .stopped
+                }
                 playhead.sceneID = currentScene?.id
                 uiPlayhead = playhead
 
@@ -563,6 +569,21 @@ final class AnimationManager {
     /// each time the user switches to a different scene, so the scene's saved
     /// budget is restored on the first run.
     @ObservationIgnored var userIterationBudgetOverride: Bool = false
+
+    /// A scene selection may happen before playback actually applies its
+    /// baseline. Keep the reset pending until that semantic apply point so a
+    /// failed/non-playable selection does not alter the currently rendered scene.
+    @ObservationIgnored private var pendingConeMarchResetSceneID: UUID?
+    @ObservationIgnored private var isRestoringSceneSelection = false
+
+    /// Restores selection metadata during preview/session rollback. This is not
+    /// a user scene switch, so it must not arm a reset that fires on next resume.
+    func restoreCurrentSceneSelection(_ scene: AnimationScene?) {
+        isRestoringSceneSelection = true
+        currentScene = scene
+        isRestoringSceneSelection = false
+        pendingConeMarchResetSceneID = nil
+    }
 
     /// Mark the iteration budget as user-overridden so animation playback
     /// stops clobbering it. Call from any UI control that mutates
@@ -1285,6 +1306,11 @@ final class AnimationManager {
     var isPlaying: Bool {
         uiPlayhead.state == .playing
     }
+
+    /// Whether playback is paused at the current playhead position.
+    var isPaused: Bool {
+        uiPlayhead.state == .paused
+    }
     
     // ═══════════════════════════════════════════════════════════════════════════
     // LIVE SESSION RECORDING
@@ -1721,6 +1747,12 @@ final class AnimationManager {
             return
         }
 
+        if playhead.state == .paused,
+           playhead.sceneID == currentScene?.id {
+            resume()
+            return
+        }
+
         // Force the first keyframe to re-assert every effect (the caches gate the
         // persisting effect setters, so a stale cache would skip the initial write).
         resetKeyframeEffectCaches()
@@ -1728,11 +1760,17 @@ final class AnimationManager {
         let isStartingFromBeginning = playhead.state == .stopped ||
             (playhead.currentKeyframeIndex == 0 && playhead.elapsedInSegment <= 0.0001)
         
+        var didResetConeMarching = false
+
         // Restore the complete scene baseline before pipeline precompilation:
         // fractal type is part of GeometryConfig and is baked into function
         // constants. The legacy flat fields remain compatibility overrides.
         if let settings = renderSettings, let scene = currentScene {
             settings.withPersistenceSuppressed {
+                didResetConeMarching = resetConeMarchingIfNeeded(
+                    for: scene,
+                    settings: settings
+                )
                 settings.clearAnimationManualOffsets()
                 settings.clearAudioPlaybackOffsets()
                 settings.setSpaceWarpAudioOffsets([:])
@@ -1859,6 +1897,13 @@ final class AnimationManager {
             }
         }
 
+        if didResetConeMarching {
+            NotificationCenter.default.post(
+                name: AppModel.fractalSettingsDidChangeNotification,
+                object: nil
+            )
+        }
+
         // Signal render loop to tick animation updates every frame.
         // Renderer gates animationManager.update(...) behind this flag.
         renderSettings?.isAnimationPlaying = true
@@ -1906,11 +1951,21 @@ final class AnimationManager {
 
     /// Pause playback
     func pause() {
+        guard playhead.state == .playing else { return }
         playhead.state = .paused
         uiPlayhead = playhead
         attachedSongFadeVelocityScale = 1.0
         renderSettings?.isAnimationPlaying = false
         renderSettings?.commitAnimationOffsetsToTargets()
+    }
+
+    /// Resume from a paused playhead without resetting scene state or restarting audio.
+    private func resume() {
+        guard playhead.state == .paused else { return }
+        renderSettings?.isAnimationPlaying = true
+        playhead.state = .playing
+        uiPlayhead = playhead
+        uiThrottleCounter = 0
     }
     
     /// Stop playback and reset to beginning
@@ -1998,6 +2053,16 @@ final class AnimationManager {
     func jumpToKeyframe(_ index: Int) {
         guard let scene = currentScene,
               scene.keyframes.indices.contains(index) else { return }
+
+        let didResetConeMarching: Bool
+        if let settings = renderSettings {
+            didResetConeMarching = resetConeMarchingIfNeeded(
+                for: scene,
+                settings: settings
+            )
+        } else {
+            didResetConeMarching = false
+        }
         
         playhead.currentKeyframeIndex = index
         playhead.elapsedInSegment = 0
@@ -2005,6 +2070,25 @@ final class AnimationManager {
         
         // Apply the keyframe immediately
         applyKeyframe(scene.keyframes[index])
+
+        if didResetConeMarching {
+            NotificationCenter.default.post(
+                name: AppModel.fractalSettingsDidChangeNotification,
+                object: nil
+            )
+        }
+    }
+
+    /// Consumes the reset only when the selected scene reaches an apply path.
+    /// Replaying or resuming the same scene therefore preserves a manual opt-in.
+    private func resetConeMarchingIfNeeded(
+        for scene: AnimationScene,
+        settings: RenderSettings
+    ) -> Bool {
+        guard pendingConeMarchResetSceneID == scene.id else { return false }
+        settings.resetConeMarchingForSceneSwitch()
+        pendingConeMarchResetSceneID = nil
+        return true
     }
     
     /// Precompile shader pipelines for all keyframes in the current scene.

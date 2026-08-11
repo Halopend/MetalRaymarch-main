@@ -30,6 +30,10 @@ struct ColorConfig: Codable, Equatable, Sendable {
     var tonemapStrength: Float = 0.0       // 0.0 - 1.0 (0 = old plain clamp, default)
     /// 1 preserves the historical always-on vignette; 0 is fully off.
     var vignetteStrength: Float = 1.0
+    /// Ordered output filters. `nil` means this payload predates the stack and
+    /// the legacy `LightingConfig.edgeDetectionEffect` remains authoritative.
+    /// An explicit empty array means the scene intentionally has no filters.
+    var postFilterStack: [PostFilterInstance]? = nil
 
     // Auto-transition
     var colorSchemeAutoTransition: Bool = false
@@ -46,7 +50,7 @@ struct ColorConfig: Codable, Equatable, Sendable {
         case colorSchemeGamma, colorSchemeVibrance, colorSchemeCurve
         case colorSchemeShadows, colorSchemeHighlights, lightingSoftness
         case cellShadingEnabled, cellShadingLevels, aoStrength, tonemapStrength
-        case vignetteStrength
+        case vignetteStrength, postFilterStack
         case colorSchemeAutoTransition, colorSchemeAutoInterval
         case colorSchemeTransitionDuration
     }
@@ -70,6 +74,8 @@ struct ColorConfig: Codable, Equatable, Sendable {
         aoStrength = try c.decodeIfPresent(Float.self, forKey: .aoStrength) ?? 0.0
         tonemapStrength = try c.decodeIfPresent(Float.self, forKey: .tonemapStrength) ?? 0.0
         vignetteStrength = try c.decodeIfPresent(Float.self, forKey: .vignetteStrength) ?? 1.0
+        postFilterStack = try c.decodeIfPresent([PostFilterInstance].self, forKey: .postFilterStack)?
+            .normalizedPostFilterStack()
         colorSchemeAutoTransition = try c.decodeIfPresent(Bool.self, forKey: .colorSchemeAutoTransition) ?? false
         colorSchemeAutoInterval = try c.decodeIfPresent(Float.self, forKey: .colorSchemeAutoInterval) ?? 30.0
         colorSchemeTransitionDuration = try c.decodeIfPresent(Float.self, forKey: .colorSchemeTransitionDuration) ?? 2.0
@@ -93,6 +99,7 @@ struct ColorConfig: Codable, Equatable, Sendable {
         aoStrength = ControlCatalog.aoStrength.clamp(aoStrength)
         tonemapStrength = ControlCatalog.tonemapStrength.clamp(tonemapStrength)
         vignetteStrength = ControlCatalog.vignetteStrength.clamp(vignetteStrength)
+        postFilterStack = postFilterStack?.normalizedPostFilterStack()
         colorSchemeAutoInterval = ControlCatalog.colorSchemeAutoInterval.clamp(colorSchemeAutoInterval)
         colorSchemeTransitionDuration = ControlCatalog.colorSchemeTransitionDuration.clamp(colorSchemeTransitionDuration)
     }

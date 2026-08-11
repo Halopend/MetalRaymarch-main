@@ -1325,6 +1325,9 @@ struct FractalPreset: Codable, Identifiable {
                                          includePerformance: Bool,
                                          resetEnvironment: Bool,
                                          scope: SceneRestoreScope) {
+        if scope == .scene {
+            settings.resetConeMarchingForSceneSwitch()
+        }
         if resetEnvironment {
             settings.audioReactiveConfig = AudioReactiveConfig()
         }

@@ -288,8 +288,11 @@ private struct ThresholdMacRootView: View {
                     CustomLightingStatusChip(
                         state: appModel.customLightingRuntimeState,
                         onDetach: {
-                            appModel.uninstallEmbeddedLighting()
-                            appModel.saveLastState()
+                            Task { @MainActor in
+                                if await appModel.uninstallEmbeddedLightingAndWait() {
+                                    appModel.saveLastState()
+                                }
+                            }
                         }
                     )
                 }
@@ -305,7 +308,13 @@ private struct ThresholdMacRootView: View {
                 }
 
                 if appModel.isAttributionShortcutHeld {
-                    AttributionOverlay()
+                    AttributionOverlay(
+                        baseDistanceEstimator: BaseDistanceEstimatorInfo.resolve(
+                            fractalType: appModel.renderSettings.fractalType,
+                            formulaParams: appModel.renderSettings.formulaParams,
+                            embeddedFormula: appModel.activeEmbeddedFormula
+                        )
+                    )
                         .padding(24)
                         .frame(
                             maxWidth: .infinity,
@@ -359,6 +368,11 @@ private struct ThresholdMacRootView: View {
                     .frame(width: 0, height: 0)
                     .allowsHitTesting(false)
             }
+            .sceneNavigationFeedbackOverlay(
+                isObscured: radialMenu.isPresented,
+                instruction: "Arrow keys · Swipe card",
+                bottomPadding: panelPadding
+            )
             .frame(minWidth: minimumWindowSize.width, minHeight: minimumWindowSize.height)
             .animation(
                 reduceMotion ? nil : .easeOut(duration: 0.16),

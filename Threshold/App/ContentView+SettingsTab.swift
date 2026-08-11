@@ -7,6 +7,7 @@
 //  views and helper methods live here.
 //
 
+import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -83,8 +84,18 @@ extension ContentView {
             ],
             allowsMultipleSelection: false
         ) { result in
-            guard case .success(let urls) = result, let url = urls.first else { return }
-            appModel.openExternalFile(url)
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                appModel.openExternalFile(url)
+            case .failure(let error):
+                let nsError = error as NSError
+                guard !(nsError.domain == NSCocoaErrorDomain
+                        && nsError.code == NSUserCancelledError) else { return }
+                appModel.errorReporter.report(.preset(.importFailed(
+                    "Could not select a .threshfx file: \(error.localizedDescription)"
+                )))
+            }
         }
     }
 
@@ -237,6 +248,10 @@ extension ContentView {
             // controls.
             handednessSection
 
+#if os(macOS) || os(iOS)
+            sceneNavigationFeedbackSection
+#endif
+
             // Text size — Dynamic Type for the menu. visionOS only: Mac/iPad
             // already honor the system text-size setting, so an in-app knob would
             // be redundant there.
@@ -261,6 +276,25 @@ extension ContentView {
             experimentalDisplaySection
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var sceneNavigationFeedbackSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(isOn: $showSceneNavigationFeedback) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Scene Switcher Panel", systemImage: "rectangle.stack.badge.play")
+                        .font(.headline)
+                    Text("Shows the current scene with previous and next controls after you switch scenes. Keyboard, swipe, and accessibility scene navigation continue to work when the panel is hidden.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .tint(.orange)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.07)))
     }
 
 #if os(macOS)
@@ -500,10 +534,7 @@ extension ContentView {
                         VStack(alignment: .trailing, spacing: 6) {
                             Button {
                                 Task { @MainActor in
-                                    let result = await appModel.installBundledLightingDemo()
-                                    if result != .failed {
-                                        appModel.saveLastState()
-                                    }
+                                    _ = await appModel.installBundledLightingDemo()
                                 }
                             } label: {
                                 if isDemoBusy {
@@ -630,8 +661,11 @@ extension ContentView {
                 Spacer()
 
                 Button("Detach Lighting", role: .destructive) {
-                    appModel.uninstallEmbeddedLighting()
-                    appModel.saveLastState()
+                    Task { @MainActor in
+                        if await appModel.uninstallEmbeddedLightingAndWait() {
+                            appModel.saveLastState()
+                        }
+                    }
                 }
                 .buttonStyle(.borderless)
                 .font(.caption.weight(.semibold))
@@ -1048,8 +1082,11 @@ extension ContentView {
                         }
                         Spacer()
                         Button("Detach", role: .destructive) {
-                            appModel.uninstallEmbeddedLighting()
-                            appModel.saveLastState()
+                            Task { @MainActor in
+                                if await appModel.uninstallEmbeddedLightingAndWait() {
+                                    appModel.saveLastState()
+                                }
+                            }
                         }
                         .buttonStyle(.bordered)
                         Button {

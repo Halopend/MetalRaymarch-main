@@ -216,58 +216,6 @@ extension AppModel {
         }
     }
 
-    /// Wait for the renderer's custom-shader activation handler to bind, then
-    /// ask it to compile and install the supplied formula's MTLLibrary.
-    ///
-    /// On visionOS the handler binds as soon as the user enters the immersive
-    /// space (see `Renderer.startRenderLoop`); on iOS / macOS the renderer
-    /// runs as soon as the main view appears, so the handler is usually
-    /// already present by the time a user-driven import happens.
-    ///
-    /// We poll the handler — not `rendererStartupWarmupComplete` — because the
-    /// handler is the *minimum* signal that "the renderer is alive and can
-    /// accept activations." Warmup is a stronger signal (compute pipelines
-    /// cached) but it can lag by several seconds; the handler binds first.
-    ///
-    /// If the user never enters the immersive space, we give up after
-    /// `timeout` seconds and return `false` — the renderer-side deferred
-    /// activation block will still pick up `activeEmbeddedFormula` if/when
-    /// the user later enters the scene, so the formula is not lost.
-    @MainActor
-    func waitForRendererAndActivate(_ formula: EmbeddedFormula, timeout: TimeInterval = 10) async -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while activateEmbeddedFormulaHandler == nil {
-            if Date() > deadline {
-                errorReporter.report(.preset(.importFailed(
-                    "Custom scene is queued. Enter the immersive space to compile and render the custom shader."
-                )))
-                return false
-            }
-            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
-        }
-        guard let handler = activateEmbeddedFormulaHandler else {
-            // Lost the race: the renderer torn down between our poll and now.
-            errorReporter.report(.preset(.importFailed(
-                "Custom scene is queued. Enter the immersive space to compile and render the custom shader."
-            )))
-            return false
-        }
-        // The renderer's startup also re-reads activeEmbeddedFormula and
-        // activates it the moment the handler binds, but call again here to
-        // cover the case where our poll won the race. The activation is a
-        // no-op when the hash + library already match.
-        do {
-            try await handler(formula, activeEmbeddedLighting)
-            return true
-        } catch {
-            errorReporter.report(.preset(.importFailed(
-                "Failed to compile custom shader: \(error.localizedDescription)"
-            )))
-            uninstallEmbeddedFormula()
-            return false
-        }
-    }
-
     /// Applies preset-specific gesture binding overrides for known scenes.
     func applyPresetGestureOverridesIfNeeded(for preset: FractalPreset) {
         let normalizedName = preset.name

@@ -40,7 +40,8 @@ typedef NS_ENUM(EnumBackingType, BufferIndex)
     BufferIndexMeshPositions = 0,
     BufferIndexMeshGenerics  = 1,
     BufferIndexUniforms      = 2,
-    BufferIndexBenchCounters = 3   // device atomic_uint[2] = {stepSum, hitCount} for the benchmark iteration counter
+    BufferIndexBenchCounters = 3,  // device atomic_uint[2] = {stepSum, hitCount} for the benchmark iteration counter
+    BufferIndexPostFilters   = 4   // constant PostFilterStack; kept out of the hot Uniforms / TileUniforms ABI
 };
 
 typedef NS_ENUM(EnumBackingType, VertexAttribute)
@@ -135,6 +136,32 @@ typedef struct
     float values[16];
 } CustomLightingParams;
 
+// === ORDERED OUTPUT-FILTER STACK ===
+// A compact, scene-owned list of post filters. Pixel-local operations can be
+// evaluated in registers; the single sampled edge operation splits the list
+// into local prefix/suffix ranges so texture-backed paths preserve authored
+// order without allocating one intermediate texture per local filter.
+#define kMaxPostFilterOps 8
+typedef struct
+{
+    int type;
+    float amount;
+    float param1;
+    float param2;
+    float param3;
+    uint32_t colorRGB10;
+    uint32_t _pad0;
+    uint32_t _pad1;
+} PostFilterOp;
+typedef struct
+{
+    PostFilterOp ops[kMaxPostFilterOps];
+    int count;
+    int _pad0;
+    int _pad1;
+    int _pad2;
+} PostFilterStack;
+
 // Maximum gradient stops supported (matches GradientColorSystem.swift)
 #define MAX_GRADIENT_STOPS 8
 
@@ -175,7 +202,7 @@ typedef struct
     float gradientOffset;             // Shifts gradient start (0-1)
     float gradientSmoothing;          // 0 = sharp, 1 = smooth transitions (default 1.0)
     int gradientLoopSmooth;           // 0 = hard cut at edges, 1 = smooth wrap (last stop blends to first)
-    float _gradPad[1];                // Alignment padding for gradient section
+    uint32_t edgeColorRGB10;          // Edge outline tint; reuses the gradient section's former alignment pad
     
     // === MODULAR LIGHTING EFFECTS ===
     // Animation time (shared by all effects)
@@ -199,7 +226,7 @@ typedef struct
     int bloomEnabled;                 // 0 = off, 1 = on
     float bloomStrength;              // Bloom intensity (0-1)
 
-    // Screen-space edge detector (fragment path; compute path remains unchanged)
+    // Screen-space edge detector
     int edgeDetectionEnabled;         // 0 = off, 1 = on
     float edgeDetectionStrength;      // Outline blend amount (0-1)
     float edgeDetectionThreshold;     // Luminance gradient threshold
@@ -284,11 +311,11 @@ typedef struct
 {
     // p1/p2/axis are GPU-READY (precomputed by cSpaceWarpStack each frame so the
     // per-step Metal warp fns never redo normalize / log / π÷N / squares / clamps).
-    int   type;       // SpaceWarpKind raw; 0...19 (19 = multi-scale compression shells)
+    int   type;       // SpaceWarpKind raw; 0...20 (20 = 3-D Voronoi distortion field)
     float strength;   // per-op amount (folds treat as 0..1 blend; Twist/Bend/Ripple as magnitude). 0 = this op is a no-op.
-    float p1;         // PRECOMPUTED: boxFold L · sphere/circle minR² · inversion R² · kaleido seg(π/N) · ripple freq · shell/base spacing · scaleRepeat log(scale)
-    float p2;         // PRECOMPUTED: sphere/circle maxR²
-    float axisX;      // PRE-NORMALIZED axis (Twist/Bend/Ripple)
+    float p1;         // PRECOMPUTED: boxFold L · sphere/circle minR² · inversion R² · kaleido seg(π/N) · ripple freq · shell/base spacing · scaleRepeat log(scale) · Voronoi density
+    float p2;         // PRECOMPUTED: sphere/circle maxR² · Voronoi jitter
+    float axisX;      // PRE-NORMALIZED axis (Twist/Bend/Ripple); raw offset for Voronoi
     float axisY;
     float axisZ;      // Coxeter: user-authored vertical source angle (radians)
     // First op in a repeat group: low 8 bits = contiguous group length, next
@@ -735,6 +762,10 @@ static_assert(sizeof(FormulaParams) <= 176,
               "FormulaParams grew — bump this bound consciously (TECH_DEBT.md #8d)");
 static_assert(sizeof(CustomLightingParams) == 64,
               "CustomLightingParams must remain a compact 16-float ABI");
+static_assert(sizeof(PostFilterOp) == 32,
+              "PostFilterOp must remain a compact 32-byte C ABI");
+static_assert(sizeof(PostFilterStack) == 272,
+              "PostFilterStack must remain eight 32-byte ops plus a 16-byte tail");
 #endif
 
 #endif /* ShaderTypes_h */

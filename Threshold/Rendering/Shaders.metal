@@ -206,6 +206,10 @@ typedef struct
 {
     float4 position [[position]];
     float2 texCoord;
+    // Preserve clip-space position for screen-space post effects. Dividing the
+    // perspective-interpolated xy by w in the fragment yields viewport-linear
+    // coordinates without pre-dividing horizon vertices whose clip w is zero.
+    float3 screenClip;
     float3 modelPos;
 } ColorInOut;
 
@@ -232,6 +236,7 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
     }
     float4 position = float4(proxyPos, 1);
     out.position = uniforms.projectionMatrix * uniforms.modelViewMatrix * position;
+    out.screenClip = out.position.xyw;
     out.texCoord = in.texCoord;
     out.modelPos = proxyPos;
 
@@ -256,10 +261,37 @@ vertex ColorInOut screenshotVertexShader(Vertex in [[stage_in]],
     }
     float4 position = float4(proxyPos, 1);
     out.position = uniforms.projectionMatrix * uniforms.modelViewMatrix * position;
+    out.screenClip = out.position.xyw;
     out.texCoord = in.texCoord;
     out.modelPos = proxyPos;
 
     return out;
+}
+
+FORCE_INLINE float2 postFilterScreenUV(float3 screenClip)
+{
+    float clipW = screenClip.z;
+    float safeClipW = (isfinite(clipW) && abs(clipW) > 1.0e-6f)
+        ? clipW
+        : (clipW < 0.0f ? -1.0e-6f : 1.0e-6f);
+    float2 ndc = screenClip.xy / safeClipW;
+    if (!all(isfinite(ndc))) return float2(0.5f);
+    return float2(ndc.x * 0.5f + 0.5f, 0.5f - ndc.y * 0.5f);
+}
+
+FORCE_INLINE float postFilterPixelExtent(float candidate)
+{
+    return (isfinite(candidate) && candidate > 1.0e-6f)
+        ? candidate
+        : (1.0f / 16384.0f);
+}
+
+FORCE_INLINE float2 postFilterPixelSize(float2 candidate)
+{
+    return float2(
+        postFilterPixelExtent(candidate.x),
+        postFilterPixelExtent(candidate.y)
+    );
 }
 
 // --- Fractal Code Port ---
@@ -679,7 +711,7 @@ static_assert(sizeof(FractalParams) <= 160,
 // directly — no runtime switch. Each handles strength internally (identity at
 // strength 0). type/param semantics:
 //   0 Twist · 1 Bend · 2 Mirror Fold · 3 Box Fold · 4 Sphere Fold
-//   5 Spherical Inversion · 6 Kaleidoscope · 7 Ripple
+//   5 Spherical Inversion · 6 Kaleidoscope · 7 Ripple · … · 20 3-D Voronoi
 FORCE_INLINE float3 warpAxisNorm(SpaceWarpOp op) {
     // Axis is pre-normalized on the CPU (cSpaceWarpStack), so this is a plain load.
     return float3(op.axisX, op.axisY, op.axisZ);
@@ -773,6 +805,102 @@ FORCE_INLINE float3 warpRipple(float3 p, SpaceWarpOp op) {      // 7
     float3 axis = warpAxisNorm(op);
     float freq = op.p1;   // precomputed max(freq, 0.01)
     return p + axis * (strength * sin(dot(p, axis) * freq));
+}
+
+// 3-D Voronoi distortion field. Seed F1/F2 from the 3×3×3 neighbourhood, then
+// inspect the outer shell of a 5×5×5 envelope only where that cell's AABB can
+// beat F2. The envelope is exact: two adjacent-cell sites are always within √3
+// of a point in the base cell, while every site beyond the envelope is at least 2
+// units away. The F2−F1 mask is zero where cells meet, so the winning-site vector
+// can change without tearing the domain. Scaling displacement by 1/density keeps
+// Amount visually consistent as cells become finer or coarser. axisXYZ is a raw
+// phase offset in cell coordinates (not a normalized direction).
+FORCE_INLINE float3 warpVoronoi3D(float3 p, SpaceWarpOp op) {   // 20
+    float strength = op.strength; if (strength <= 0.0f) return p;
+    float density = op.p1;
+    float jitter = op.p2;
+    float3 offset = float3(op.axisX, op.axisY, op.axisZ);
+    float3 q = p * density + offset;
+    float3 cell = floor(q);
+    float3 local = fract(q);
+    float nearest = 1.0e10f;
+    float secondNearest = 1.0e10f;
+    float3 nearestDelta = float3(0.0f);
+
+    for (int z = -1; z <= 1; ++z) {
+        for (int y = -1; y <= 1; ++y) {
+            for (int x = -1; x <= 1; ++x) {
+                float3 neighbour = float3(x, y, z);
+                float3 hash = fract((cell + neighbour)
+                    * float3(0.1031f, 0.1030f, 0.0973f));
+                hash += dot(hash, hash.yxz + 33.33f);
+                hash = fract((hash.xxy + hash.yxx) * hash.zyx);
+                float3 site = neighbour + mix(float3(0.5f), hash, jitter);
+                float3 delta = site - local;
+                float distanceSquared = dot(delta, delta);
+                if (distanceSquared < nearest) {
+                    secondNearest = nearest;
+                    nearest = distanceSquared;
+                    nearestDelta = delta;
+                } else if (distanceSquared < secondNearest) {
+                    secondNearest = distanceSquared;
+                }
+            }
+        }
+    }
+
+    // A 3×3×3 Worley search can miss F2 (and rarely F1) when a jittered site
+    // just outside the window is close to a base-cell face. Check the remaining
+    // 98 cells in the exact 5³ envelope, but hash only cells whose closest possible
+    // feature point can improve the current second-nearest distance.
+    float siteMargin = 0.5f * (1.0f - jitter);
+    float nearestFace = min(min(local.x, 1.0f - local.x),
+                            min(local.y, min(1.0f - local.y,
+                                             min(local.z, 1.0f - local.z))));
+    float outerLowerBound = 1.0f + siteMargin + nearestFace;
+    if (outerLowerBound * outerLowerBound <= secondNearest + 1e-6f) {
+        for (int z = -2; z <= 2; ++z) {
+            for (int y = -2; y <= 2; ++y) {
+                for (int x = -2; x <= 2; ++x) {
+                    if (x >= -1 && x <= 1
+                        && y >= -1 && y <= 1
+                        && z >= -1 && z <= 1) continue;
+
+                    float3 neighbour = float3(x, y, z);
+                    float3 cellMin = neighbour + siteMargin;
+                    float3 cellMax = neighbour + (1.0f - siteMargin);
+                    float3 toCell = max(max(cellMin - local, local - cellMax), 0.0f);
+                    if (dot(toCell, toCell) > secondNearest + 1e-6f) continue;
+
+                    float3 hash = fract((cell + neighbour)
+                        * float3(0.1031f, 0.1030f, 0.0973f));
+                    hash += dot(hash, hash.yxz + 33.33f);
+                    hash = fract((hash.xxy + hash.yxx) * hash.zyx);
+                    float3 site = neighbour + mix(float3(0.5f), hash, jitter);
+                    float3 delta = site - local;
+                    float distanceSquared = dot(delta, delta);
+                    if (distanceSquared < nearest) {
+                        secondNearest = nearest;
+                        nearest = distanceSquared;
+                        nearestDelta = delta;
+                    } else if (distanceSquared < secondNearest) {
+                        secondNearest = distanceSquared;
+                    }
+                }
+            }
+        }
+    }
+
+    float gap = max(sqrt(secondNearest) - sqrt(nearest), 0.0f);
+    float interior = smoothstep(0.0f, 1.0f, gap);
+    return p + nearestDelta * (strength * interior / density);
+}
+
+// F1 and F2 are each 1-Lipschitz; the smoothstep slope and maximum nearest-site
+// distance in a unit lattice bound this map's local stretch below 1 + 7*strength.
+FORCE_INLINE float warpVoronoi3DDEScale(float3 p, SpaceWarpOp op) {
+    (void)p;
+    return op.strength > 0.0f ? 1.0f + 7.0f * op.strength : 1.0f;
 }
 
 // ── Radial / nested / self-similar family ───────────────────────────────────
@@ -1017,9 +1145,10 @@ FORCE_INLINE float3 applyWarpOp(float3 p, float3 stackOrigin, SpaceWarpOp op) {
         case 17: return warpMandelboxStep(p, stackOrigin, op);
         case 18: return warpCoxeter(p, op);
         case 19: return warpCompressionShells(p, op);
+        case 20: return warpVoronoi3D(p, op);
     }
 }
-// Conservative DE divisor for one op (only radial / scaling warps stretch distance).
+// Conservative DE divisor for one op when its point map can stretch distance.
 FORCE_INLINE float warpOpDEScale(float3 p, SpaceWarpOp op) {
     switch (op.type) {
         case 4:  return warpSphereFoldDEScale(p, op);
@@ -1028,6 +1157,7 @@ FORCE_INLINE float warpOpDEScale(float3 p, SpaceWarpOp op) {
         case 10: return warpScaleRepeatDEScale(p, op);
         case 15: return warpScaleDEScale(p, op);
         case 19: return warpCompressionShellsDEScale(p, op);
+        case 20: return warpVoronoi3DDEScale(p, op);
         default: return 1.0f;
     }
 }
@@ -3331,6 +3461,173 @@ FORCE_INLINE half3 unpackRGB10(uint packed)
     return half3(channels);
 }
 
+// Ordered post-filter ABI selectors. Keep these values in lockstep with the
+// host-side stack packer; zero/unknown records are strict identities.
+constant int kPostFilterEdge = 1;
+constant int kPostFilterMonochrome = 2;
+constant int kPostFilterSepia = 3;
+constant int kPostFilterInvert = 4;
+constant int kPostFilterPosterize = 5;
+constant int kPostFilterGrain = 6;
+constant int kPostFilterScanlines = 7;
+
+FORCE_INLINE int postFilterCount(constant PostFilterStack& stack)
+{
+    return clamp(stack.count, 0, int(kMaxPostFilterOps));
+}
+
+FORCE_INLINE float postFilterHash(float3 p)
+{
+    p = fract(p * 0.1031f);
+    p += dot(p, p.yzx + 33.33f);
+    return fract((p.x + p.y) * p.z);
+}
+
+// Pixel-local operation shared by direct fragment, compute, and resolve paths.
+// `amount` is always applied by the host, guaranteeing zero is identity even
+// when an individual operation's full-strength response is non-identity.
+FORCE_INLINE float3 applyPostFilterLocalOp(float3 color,
+                                            float2 uv,
+                                            float2 uvPixelSize,
+                                            float time,
+                                            constant PostFilterOp& op)
+{
+    float amount = saturate(op.amount);
+    if (amount <= 0.0f) return color;
+
+    float3 filtered = color;
+    switch (op.type) {
+        case kPostFilterMonochrome: {
+            float luma = dot(color, float3(0.2126f, 0.7152f, 0.0722f));
+            filtered = float3(luma);
+            break;
+        }
+        case kPostFilterSepia: {
+            filtered = float3(
+                dot(color, float3(0.393f, 0.769f, 0.189f)),
+                dot(color, float3(0.349f, 0.686f, 0.168f)),
+                dot(color, float3(0.272f, 0.534f, 0.131f))
+            );
+            break;
+        }
+        case kPostFilterInvert:
+            filtered = 1.0f - saturate(color);
+            break;
+        case kPostFilterPosterize: {
+            float levels = clamp(floor(op.param1 + 0.5f), 2.0f, 32.0f);
+            float steps = levels - 1.0f;
+            filtered = floor(saturate(color) * steps + 0.5f) / steps;
+            break;
+        }
+        case kPostFilterGrain: {
+            float frequency = clamp(op.param1, 1.0f, 2048.0f);
+            float frame = floor(time * 24.0f);
+            float noise = postFilterHash(float3(floor(uv * frequency), frame)) - 0.5f;
+            filtered = max(color + noise * 0.24f, 0.0f);
+            break;
+        }
+        case kPostFilterScanlines: {
+            // `density` is authored as cycles across the output height. Cap it
+            // at one cycle per two pixel rows: frequencies above that alias to
+            // flat dimming or moire (the default 480 cycles was degenerate at
+            // common 480/960-pixel heights). Sample at the row's leading edge
+            // so the Nyquist case is a stable dark/light alternation instead of
+            // repeatedly landing on the cosine zero crossing.
+            float pixelHeight = postFilterPixelExtent(uvPixelSize.y);
+            float density = min(clamp(op.param1, 1.0f, 2048.0f),
+                                0.5f / pixelHeight);
+            float darkness = saturate(op.param2);
+            float rowAlignedY = uv.y - 0.5f * pixelHeight;
+            float band = 0.5f + 0.5f * cos(rowAlignedY * density * 6.28318530718f);
+            filtered = color * (1.0f - darkness * band);
+            break;
+        }
+        default:
+            return color;
+    }
+    return mix(color, filtered, amount);
+}
+
+FORCE_INLINE float3 applyPostFilterLocalRange(float3 color,
+                                               float2 uv,
+                                               float2 uvPixelSize,
+                                               float time,
+                                               constant PostFilterStack& stack,
+                                               int begin,
+                                               int end)
+{
+    int count = postFilterCount(stack);
+    int lo = clamp(begin, 0, count);
+    int hi = clamp(end, lo, count);
+    for (int index = lo; index < hi; ++index) {
+        color = applyPostFilterLocalOp(color, uv, uvPixelSize, time,
+                                       stack.ops[index]);
+    }
+    return color;
+}
+
+FORCE_INLINE int postFilterEdgeIndex(constant PostFilterStack& stack)
+{
+    int count = postFilterCount(stack);
+    for (int index = 0; index < count; ++index) {
+        if (stack.ops[index].type == kPostFilterEdge && stack.ops[index].amount > 0.0f) {
+            return index;
+        }
+    }
+    return -1;
+}
+
+FORCE_INLINE float3 applyPostFilterEdge(float3 color,
+                                         float gradient,
+                                         constant PostFilterOp& op)
+{
+    float threshold = max(op.param1, 0.0f);
+    float softness = max(op.param2, 0.001f);
+    float edge = smoothstep(threshold, threshold + softness, gradient);
+    float3 edgeColor = float3(unpackRGB10(op.colorRGB10));
+    return mix(color, edgeColor, edge * saturate(op.amount));
+}
+
+// Direct render path: all local prefix operations run before the derivative so
+// authored order changes what the edge detector sees. The local suffix then
+// consumes the outlined color. Radius scales the one-pixel derivative response;
+// texture-backed paths below use the exact sampled sliding window.
+FORCE_INLINE float3 applyPostFilterStackDirect(float3 color,
+                                                float2 uv,
+                                                float2 uvPixelSize,
+                                                float time,
+                                                constant PostFilterStack& stack,
+                                                bool active)
+{
+    int count = postFilterCount(stack);
+    if (count == 0) return color;
+
+    int edgeIndex = postFilterEdgeIndex(stack);
+    if (edgeIndex < 0) {
+        return active
+            ? applyPostFilterLocalRange(color, uv, uvPixelSize, time,
+                                        stack, 0, count)
+            : color;
+    }
+
+    if (active) {
+        color = applyPostFilterLocalRange(color, uv, uvPixelSize, time,
+                                          stack, 0, edgeIndex);
+    }
+    // Keep the derivative outside non-uniform control flow. Fully transparent
+    // lanes retain their original RGB, so neighboring active lanes see the
+    // same passthrough/glow values that existed before output filters.
+    float luma = dot(color, float3(0.2126f, 0.7152f, 0.0722f));
+    float radius = clamp(floor(stack.ops[edgeIndex].param3 + 0.5f), 1.0f, 3.0f);
+    float gradient = length(float2(dfdx(luma), dfdy(luma))) * radius;
+    if (active) {
+        color = applyPostFilterEdge(color, gradient, stack.ops[edgeIndex]);
+        color = applyPostFilterLocalRange(color, uv, uvPixelSize, time,
+                                          stack, edgeIndex + 1, count);
+    }
+    return color;
+}
+
 half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, PrecomputedAudio audio, half limitFlash = 0.0h, half rayGlow = 0.0h)
 {
     // Pre-baked audio bands/energy (CPU computed) for reuse
@@ -4793,6 +5090,9 @@ FORCE_INLINE half3 compositeSpringBlob(half3 col, float2 uv, Uniforms uniforms) 
 
 inline FragmentOutput fragmentMain(ColorInOut in,
                                    constant Uniforms& uniforms,
+                                   constant PostFilterStack& postFilterStack,
+                                   float2 screenUV,
+                                   float2 screenPixelSize,
                                    float2 fragCoord,
                                    float time,
                                    float warmStartT = -1.0f,
@@ -5054,19 +5354,6 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     float2 blobUV = in.texCoord * 2.0f - 1.0f;
     col = compositeSpringBlob(col, blobUV, uniforms);
 
-    // Final-color edge post effect. Mac/iPad MetalFX frames patch this flag off
-    // and apply the same operation after upscale in macBlitFragment, keeping a
-    // one-input-pixel outline from expanding into a blocky output line. Placing
-    // the native version here keeps ordering consistent across both paths.
-    if (uniforms.colorScheme.edgeDetectionEnabled != 0) {
-        half luma = dot(col, half3(0.2126h, 0.7152h, 0.0722h));
-        half gradient = length(half2(dfdx(luma), dfdy(luma)));
-        half threshold = half(uniforms.colorScheme.edgeDetectionThreshold);
-        half softness = max(half(uniforms.colorScheme.edgeDetectionSoftness), 0.001h);
-        half edge = smoothstep(threshold, threshold + softness, gradient);
-        col = mix(col, half3(0.0h), edge * half(uniforms.colorScheme.edgeDetectionStrength));
-    }
-
     // Partial immersion (visionOS): miss rays go transparent so the compositor
     // shows passthrough instead of the black background. RGB keeps the fog/glow
     // contribution — under premultiplied alpha it composites additively over
@@ -5086,26 +5373,84 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             outAlpha = (uniforms.boundingFogEnabled == 2) ? 1.0f : float(boundFade);
         }
     }
+
+    // Ordered output-filter stack. Fully transparent passthrough misses retain
+    // their existing RGB (including additive glow) and alpha exactly.
+    col = half3(applyPostFilterStackDirect(float3(col), screenUV,
+                                            screenPixelSize, uniforms.time,
+                                            postFilterStack, outAlpha > 0.0f));
     output.color = float4(float3(col), outAlpha);
     return output;
 }
 
-FORCE_INLINE float edgeLumaAt(texture2d_array<float, access::read> texture,
-                              int2 q,
-                              uint eye)
+// Return logical screen UV plus the logical width/height covered by one
+// physical texel. A rasterization-rate map makes that footprint
+// position-dependent.
+FORCE_INLINE float4 postFilterSampleCoordinates(
+    int2 p,
+    int2 viewportOrigin,
+    int2 viewportSize,
+    constant TileUniforms& uniforms,
+    constant rasterization_rate_map_data& rateMapData)
 {
-    int x = clamp(q.x, 0, int(texture.get_width()) - 1);
-    int y = clamp(q.y, 0, int(texture.get_height()) - 1);
-    float3 c = texture.read(uint2(x, y), eye).rgb;
-    return dot(c, float3(0.2126f, 0.7152f, 0.0722f));
+    float2 physicalCenter = float2(p - viewportOrigin) + 0.5f;
+    if (uniforms.rateMapValid != 0) {
+        rasterization_rate_map_decoder decoder(rateMapData);
+        float2 screenSize = max(uniforms.screenResolution, 1.0f);
+        float2 screenCenter = decoder.map_physical_to_screen_coordinates(
+            physicalCenter, uniforms.rateMapLayer);
+        float screenLeft = decoder.map_physical_to_screen_coordinates(
+            physicalCenter - float2(0.5f, 0.0f), uniforms.rateMapLayer).x;
+        float screenRight = decoder.map_physical_to_screen_coordinates(
+            physicalCenter + float2(0.5f, 0.0f), uniforms.rateMapLayer).x;
+        float screenTop = decoder.map_physical_to_screen_coordinates(
+            physicalCenter - float2(0.0f, 0.5f), uniforms.rateMapLayer).y;
+        float screenBottom = decoder.map_physical_to_screen_coordinates(
+            physicalCenter + float2(0.0f, 0.5f), uniforms.rateMapLayer).y;
+        float2 pixelSize = postFilterPixelSize(float2(
+            abs(screenRight - screenLeft) / screenSize.x,
+            abs(screenBottom - screenTop) / screenSize.y
+        ));
+        return float4(screenCenter / screenSize, pixelSize);
+    }
+
+    float2 viewportExtent = max(float2(viewportSize), 1.0f);
+    return float4(physicalCenter / viewportExtent, 1.0f / viewportExtent);
 }
 
-// Sliding-window luminance edge pass for the adaptive compute renderer.
-// The window radius is user-controlled (1...3). We read completed color from
-// one texture and write into a separate texture so there is no read/write race.
-kernel void edgeDetectSlidingWindow(
+FORCE_INLINE float4 postFilterReadPrefix(
+    texture2d_array<float, access::read> texture,
+    int2 q,
+    uint eye,
+    constant TileUniforms& uniforms,
+    constant rasterization_rate_map_data& rateMapData,
+    constant PostFilterStack& stack,
+    int prefixEnd)
+{
+    int2 viewportOrigin = int2(uniforms.viewportOrigin);
+    int2 viewportSize = int2(uniforms.resolution);
+    int2 hi = viewportOrigin + max(viewportSize - 1, int2(0));
+    int2 p = clamp(q, viewportOrigin, hi);
+    float4 coordinates = postFilterSampleCoordinates(
+        p, viewportOrigin, viewportSize, uniforms, rateMapData);
+    float4 sample = texture.read(uint2(p), eye);
+    if (sample.a > 0.0f) {
+        sample.rgb = applyPostFilterLocalRange(sample.rgb, coordinates.xy,
+                                               coordinates.zw, uniforms.time,
+                                               stack, 0, prefixEnd);
+    }
+    return sample;
+}
+
+// Whole ordered-stack pass for the adaptive compute renderer. Pixel-local
+// operations before the normalized edge are evaluated for the center and every
+// edge neighbour; suffix operations consume the outlined center. Source and
+// destination remain separate so sampled filters never race in-place writes.
+kernel void postFilterStackKernel(
     uint3 gid [[thread_position_in_grid]],
     constant TileUniforms& uniforms [[buffer(0)]],
+    constant PostFilterStack& stack [[buffer(1)]],
+    constant rasterization_rate_map_data& rateMapData [[buffer(2)]],
     texture2d_array<float, access::read> sourceTexture [[texture(0)]],
     texture2d_array<float, access::write> destinationTexture [[texture(1)]])
 {
@@ -5113,26 +5458,50 @@ kernel void edgeDetectSlidingWindow(
     uint2 viewportSize = uint2(uniforms.resolution);
     if (viewportPixel.x >= viewportSize.x || viewportPixel.y >= viewportSize.y) return;
 
-    uint2 p = uint2(uniforms.viewportOrigin) + viewportPixel;
+    int2 viewportOrigin = int2(uniforms.viewportOrigin);
+    int2 viewportSizeInt = int2(viewportSize);
+    int2 p = viewportOrigin + int2(viewportPixel);
     uint eye = uniforms.eyeIndex;
-    int radius = max(1, min(3, uniforms.colorScheme.edgeDetectionWindowRadius));
+    int count = postFilterCount(stack);
+    int edgeIndex = postFilterEdgeIndex(stack);
+    int prefixEnd = edgeIndex < 0 ? count : edgeIndex;
 
-    float gx = 0.0f;
-    float gy = 0.0f;
-    float sampleCount = 0.0f;
-    for (int offset = -3; offset <= 3; ++offset) {
-        if (abs(offset) > radius) continue;
-        gx += edgeLumaAt(sourceTexture, int2(p) + int2(radius, offset), eye) - edgeLumaAt(sourceTexture, int2(p) - int2(radius, offset), eye);
-        gy += edgeLumaAt(sourceTexture, int2(p) + int2(offset, radius), eye) - edgeLumaAt(sourceTexture, int2(p) - int2(offset, radius), eye);
-        sampleCount += 2.0f;
+    float4 center = postFilterReadPrefix(sourceTexture, p, eye, uniforms,
+                                         rateMapData, stack, prefixEnd);
+    if (center.a <= 0.0f) {
+        destinationTexture.write(center, uint2(p), eye);
+        return;
     }
-    float gradient = length(float2(gx, gy)) / max(sampleCount, 1.0f);
-    float threshold = uniforms.colorScheme.edgeDetectionThreshold;
-    float softness = max(uniforms.colorScheme.edgeDetectionSoftness, 0.001f);
-    float edge = smoothstep(threshold, threshold + softness, gradient);
-    float3 source = sourceTexture.read(p, eye).rgb;
-    float3 result = mix(source, float3(0.0f), edge * uniforms.colorScheme.edgeDetectionStrength);
-    destinationTexture.write(float4(result, sourceTexture.read(p, eye).a), p, eye);
+    float3 result = center.rgb;
+
+    if (edgeIndex >= 0) {
+        int radius = int(clamp(floor(stack.ops[edgeIndex].param3 + 0.5f), 1.0f, 3.0f));
+        float gx = 0.0f;
+        float gy = 0.0f;
+        float sampleCount = 0.0f;
+        for (int offset = -3; offset <= 3; ++offset) {
+            if (abs(offset) > radius) continue;
+            float3 right = postFilterReadPrefix(sourceTexture, p + int2(radius, offset), eye,
+                                                 uniforms, rateMapData, stack, prefixEnd).rgb;
+            float3 left = postFilterReadPrefix(sourceTexture, p + int2(-radius, offset), eye,
+                                                uniforms, rateMapData, stack, prefixEnd).rgb;
+            float3 bottom = postFilterReadPrefix(sourceTexture, p + int2(offset, radius), eye,
+                                                  uniforms, rateMapData, stack, prefixEnd).rgb;
+            float3 top = postFilterReadPrefix(sourceTexture, p + int2(offset, -radius), eye,
+                                               uniforms, rateMapData, stack, prefixEnd).rgb;
+            gx += dot(right - left, float3(0.2126f, 0.7152f, 0.0722f));
+            gy += dot(bottom - top, float3(0.2126f, 0.7152f, 0.0722f));
+            sampleCount += 2.0f;
+        }
+        float gradient = length(float2(gx, gy)) / max(sampleCount, 1.0f);
+        result = applyPostFilterEdge(result, gradient, stack.ops[edgeIndex]);
+        float4 coordinates = postFilterSampleCoordinates(
+            p, viewportOrigin, viewportSizeInt, uniforms, rateMapData);
+        result = applyPostFilterLocalRange(result, coordinates.xy, coordinates.zw,
+                                           uniforms.time, stack, edgeIndex + 1, count);
+    }
+
+    destinationTexture.write(float4(result, center.a), uint2(p), eye);
 }
 
 // Reproject this pixel's ray into the previous frame's depth buffer and return
@@ -5188,11 +5557,18 @@ FORCE_INLINE float computeWarmStartT(
 fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
                                constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
                                device atomic_uint* benchCounters [[buffer(BufferIndexBenchCounters)]],
+                               constant PostFilterStack& postFilterStack [[buffer(BufferIndexPostFilters)]],
                                ushort ampId [[amplification_id]],
                                depth2d_array<float, access::sample> prevDepthTex [[texture(TextureIndexPrevDepth), function_constant(FC_WARM_START_ON)]],
                                texture2d_array<float, access::read> coarseStartTex [[texture(TextureIndexCoarseWarmStart), function_constant(FC_COARSE_WS_ON)]])
 {
     constant Uniforms& uniforms = uniformsArray.uniforms[ampId];
+    // Evaluate derivatives before the divergent raymarch body. Derivatives in
+    // non-uniform control flow have undefined results on helper lanes.
+    float2 screenUV = postFilterScreenUV(in.screenClip);
+    float2 screenPixelSize = postFilterPixelSize(float2(
+        abs(dfdx(screenUV.x)), abs(dfdy(screenUV.y))
+    ));
     float2 fragCoord = in.position.xy;
 
     // === GMT-FRACTALS: Halton Sub-Pixel Jitter ===
@@ -5244,15 +5620,21 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     float coarseWarmStartT = coarseWS;
 
     // Render fractal
-    return fragmentMain(in, uniforms, fragCoord, uniforms.time, warmStartT,
+    return fragmentMain(in, uniforms, postFilterStack, screenUV, screenPixelSize,
+                        fragCoord, uniforms.time, warmStartT,
                         benchCounters, coarseWarmStartT, true);
 }
 
 fragment FragmentOutput fragmentShaderMono(ColorInOut in [[stage_in]],
                                constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
-                               device atomic_uint* benchCounters [[buffer(BufferIndexBenchCounters)]])
+                               device atomic_uint* benchCounters [[buffer(BufferIndexBenchCounters)]],
+                               constant PostFilterStack& postFilterStack [[buffer(BufferIndexPostFilters)]])
 {
     constant Uniforms& uniforms = uniformsArray.uniforms[0];
+    float2 screenUV = postFilterScreenUV(in.screenClip);
+    float2 screenPixelSize = postFilterPixelSize(float2(
+        abs(dfdx(screenUV.x)), abs(dfdy(screenUV.y))
+    ));
     float2 fragCoord = in.position.xy;
 
     fragCoord += uniforms.jitterOffset;
@@ -5260,7 +5642,8 @@ fragment FragmentOutput fragmentShaderMono(ColorInOut in [[stage_in]],
     // benchCounters is always bound by the Mac renderer; fragmentMain only writes
     // it when uniforms.benchCollectSteps != 0 (step-profiling armed), so normal
     // frames pay nothing. No warm start on the mono path → warmStartT = -1.
-    return fragmentMain(in, uniforms, fragCoord, uniforms.time, -1.0f,
+    return fragmentMain(in, uniforms, postFilterStack, screenUV, screenPixelSize,
+                        fragCoord, uniforms.time, -1.0f,
                         benchCounters, -1.0f, false);
 }
 
@@ -5271,8 +5654,9 @@ fragment FragmentOutput fragmentShaderMono(ColorInOut in [[stage_in]],
 struct FormatConversionParams {
     float aspectCorrection;  // physicalAspect / screenAspect (< 1.0 means horizontally squished)
     float rcasStrength;      // RCAS sharpening strength: 0.0 = off, 1.0 = max
+    float time;
     float pad0;
-    float pad1;
+    PostFilterStack postFilterStack;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -5332,6 +5716,85 @@ static inline float3 rcasSharpen(
     return clamp(result, min(mn4, e), max(mx4, e));
 }
 
+static inline float4 resolvedPostFilterSample(
+    texture2d_array<float> texture,
+    float2 uv,
+    uint eye,
+    float rcasStrength
+) {
+    constexpr sampler s(filter::nearest, address::clamp_to_edge);
+    float2 rcpSize = 1.0f / float2(texture.get_width(), texture.get_height());
+    float2 sampleUV = clamp(uv, rcpSize * 0.5f, 1.0f - rcpSize * 0.5f);
+    float4 sample = texture.sample(s, sampleUV, eye);
+    if (rcasStrength > 0.0f) {
+        sample.rgb = rcasSharpen(texture, sampleUV, rcpSize, eye, rcasStrength);
+    }
+    return sample;
+}
+
+static inline float4 resolvedPostFilterPrefixSample(
+    texture2d_array<float> texture,
+    float2 uv,
+    uint eye,
+    constant FormatConversionParams& params,
+    float2 pixelSize,
+    int prefixEnd
+) {
+    float4 sample = resolvedPostFilterSample(texture, uv, eye, params.rcasStrength);
+    if (sample.a > 0.0f) {
+        sample.rgb = applyPostFilterLocalRange(sample.rgb, uv, pixelSize,
+                                                params.time, params.postFilterStack,
+                                                0, prefixEnd);
+    }
+    return sample;
+}
+
+static inline float4 applyResolvedPostFilterStack(
+    texture2d_array<float> texture,
+    float2 uv,
+    uint eye,
+    constant FormatConversionParams& params,
+    float2 pixelSize
+) {
+    constant PostFilterStack& stack = params.postFilterStack;
+    int count = postFilterCount(stack);
+    int edgeIndex = postFilterEdgeIndex(stack);
+    int prefixEnd = edgeIndex < 0 ? count : edgeIndex;
+    float4 center = resolvedPostFilterPrefixSample(texture, uv, eye, params,
+                                                    pixelSize, prefixEnd);
+    if (center.a <= 0.0f) return center;
+    if (count == 0 || edgeIndex < 0) return center;
+
+    float2 rcpSize = 1.0f / float2(texture.get_width(), texture.get_height());
+    int radius = int(clamp(floor(stack.ops[edgeIndex].param3 + 0.5f), 1.0f, 3.0f));
+    float gx = 0.0f;
+    float gy = 0.0f;
+    float sampleCount = 0.0f;
+    for (int offset = -3; offset <= 3; ++offset) {
+        if (abs(offset) > radius) continue;
+        float2 rightUV = uv + float2(radius, offset) * rcpSize;
+        float2 leftUV = uv + float2(-radius, offset) * rcpSize;
+        float2 bottomUV = uv + float2(offset, radius) * rcpSize;
+        float2 topUV = uv + float2(offset, -radius) * rcpSize;
+        float3 right = resolvedPostFilterPrefixSample(texture, rightUV, eye, params,
+                                                       pixelSize, prefixEnd).rgb;
+        float3 left = resolvedPostFilterPrefixSample(texture, leftUV, eye, params,
+                                                      pixelSize, prefixEnd).rgb;
+        float3 bottom = resolvedPostFilterPrefixSample(texture, bottomUV, eye, params,
+                                                        pixelSize, prefixEnd).rgb;
+        float3 top = resolvedPostFilterPrefixSample(texture, topUV, eye, params,
+                                                     pixelSize, prefixEnd).rgb;
+        gx += dot(right - left, float3(0.2126f, 0.7152f, 0.0722f));
+        gy += dot(bottom - top, float3(0.2126f, 0.7152f, 0.0722f));
+        sampleCount += 2.0f;
+    }
+    float gradient = length(float2(gx, gy)) / max(sampleCount, 1.0f);
+    center.rgb = applyPostFilterEdge(center.rgb, gradient, stack.ops[edgeIndex]);
+    center.rgb = applyPostFilterLocalRange(center.rgb, uv, pixelSize, params.time,
+                                            stack, edgeIndex + 1, count);
+    return center;
+}
+
 // Full-screen triangle vertex shader - generates vertices procedurally
 // Supports stereo via amplification_id for render_target_array_index
 struct FormatConversionVertexOut {
@@ -5370,16 +5833,11 @@ fragment float4 formatConversionFragmentStereo(FormatConversionVertexOut in [[st
         uv.x = 0.5 + (uv.x - 0.5) * params.aspectCorrection;
     }
 
-    float2 rcpSize = 1.0 / float2(sourceTexture.get_width(), sourceTexture.get_height());
-
-    float3 color;
-    if (params.rcasStrength > 0.0) {
-        color = rcasSharpen(sourceTexture, uv, rcpSize, in.eyeIndex, params.rcasStrength);
-    } else {
-        constexpr sampler s(filter::nearest, address::clamp_to_edge);
-        color = sourceTexture.sample(s, uv, in.eyeIndex).rgb;
-    }
-    return float4(color, 1.0);
+    float2 pixelSize = postFilterPixelSize(float2(
+        abs(dfdx(uv.x)), abs(dfdy(uv.y))
+    ));
+    return applyResolvedPostFilterStack(sourceTexture, uv, in.eyeIndex, params,
+                                        pixelSize);
 }
 
 struct DepthOutput {
@@ -5405,15 +5863,11 @@ fragment ColorDepthOutput formatConversionFragmentStereoMerged(FormatConversionV
 
     ColorDepthOutput out;
 
-    float2 rcpSize = 1.0 / float2(sourceColor.get_width(), sourceColor.get_height());
-    float3 color;
-    if (params.rcasStrength > 0.0) {
-        color = rcasSharpen(sourceColor, uv, rcpSize, in.eyeIndex, params.rcasStrength);
-    } else {
-        constexpr sampler s(filter::nearest, address::clamp_to_edge);
-        color = sourceColor.sample(s, uv, in.eyeIndex).rgb;
-    }
-    out.color = float4(color, 1.0);
+    float2 pixelSize = postFilterPixelSize(float2(
+        abs(dfdx(uv.x)), abs(dfdy(uv.y))
+    ));
+    out.color = applyResolvedPostFilterStack(sourceColor, uv, in.eyeIndex, params,
+                                             pixelSize);
 
     constexpr sampler depthSampler(mag_filter::nearest, min_filter::nearest,
                                     address::clamp_to_edge);
@@ -5460,42 +5914,70 @@ vertex MacBlitVertexOut macBlitVertex(uint vertexID [[vertex_id]]) {
 }
 
 struct MacBlitParams {
-    // x = enabled window radius (0 means off), y = strength,
-    // z = threshold, w = softness.
-    float4 edge;
+    PostFilterStack postFilterStack;
+    float time;
+    float pad0;
+    float pad1;
+    float pad2;
 };
+
+static inline float4 macPostFilterPrefixSample(texture2d<float> texture,
+                                                float2 uv,
+                                                constant MacBlitParams& params,
+                                                int prefixEnd) {
+    constexpr sampler s(mag_filter::nearest, min_filter::nearest, address::clamp_to_edge);
+    float2 rcpSize = 1.0f / float2(texture.get_width(), texture.get_height());
+    float2 sampleUV = clamp(uv, rcpSize * 0.5f, 1.0f - rcpSize * 0.5f);
+    float4 sample = texture.sample(s, sampleUV);
+    if (sample.a > 0.0f) {
+        sample.rgb = applyPostFilterLocalRange(sample.rgb, sampleUV, rcpSize,
+                                                params.time,
+                                                params.postFilterStack, 0, prefixEnd);
+    }
+    return sample;
+}
+
+static inline float4 applyMacPostFilterStack(texture2d<float> texture,
+                                              float2 uv,
+                                              constant MacBlitParams& params) {
+    constant PostFilterStack& stack = params.postFilterStack;
+    int count = postFilterCount(stack);
+    int edgeIndex = postFilterEdgeIndex(stack);
+    int prefixEnd = edgeIndex < 0 ? count : edgeIndex;
+    float2 rcpSize = 1.0f / float2(texture.get_width(), texture.get_height());
+    float4 center = macPostFilterPrefixSample(texture, uv, params, prefixEnd);
+    if (center.a <= 0.0f) return center;
+    if (count == 0 || edgeIndex < 0) return center;
+
+    int radius = int(clamp(floor(stack.ops[edgeIndex].param3 + 0.5f), 1.0f, 3.0f));
+    float gx = 0.0f;
+    float gy = 0.0f;
+    float sampleCount = 0.0f;
+    for (int offset = -3; offset <= 3; ++offset) {
+        if (abs(offset) > radius) continue;
+        float3 right = macPostFilterPrefixSample(texture, uv + float2(radius, offset) * rcpSize,
+                                                  params, prefixEnd).rgb;
+        float3 left = macPostFilterPrefixSample(texture, uv + float2(-radius, offset) * rcpSize,
+                                                 params, prefixEnd).rgb;
+        float3 bottom = macPostFilterPrefixSample(texture, uv + float2(offset, radius) * rcpSize,
+                                                   params, prefixEnd).rgb;
+        float3 top = macPostFilterPrefixSample(texture, uv + float2(offset, -radius) * rcpSize,
+                                                params, prefixEnd).rgb;
+        gx += dot(right - left, float3(0.2126f, 0.7152f, 0.0722f));
+        gy += dot(bottom - top, float3(0.2126f, 0.7152f, 0.0722f));
+        sampleCount += 2.0f;
+    }
+    float gradient = length(float2(gx, gy)) / max(sampleCount, 1.0f);
+    center.rgb = applyPostFilterEdge(center.rgb, gradient, stack.ops[edgeIndex]);
+    center.rgb = applyPostFilterLocalRange(center.rgb, uv, rcpSize, params.time,
+                                            stack, edgeIndex + 1, count);
+    return center;
+}
 
 fragment float4 macBlitFragment(MacBlitVertexOut in [[stage_in]],
                                 texture2d<float> source [[texture(0)]],
                                 constant MacBlitParams& params [[buffer(0)]]) {
-    constexpr sampler s(mag_filter::nearest, min_filter::nearest, address::clamp_to_edge);
-    float3 color = source.sample(s, in.texCoord).rgb;
-
-    if (params.edge.x > 0.0f) {
-        const float3 lumaWeights = float3(0.2126f, 0.7152f, 0.0722f);
-        float gradient;
-        if (params.edge.x < 1.5f) {
-            // Default radius: quad derivatives reuse the one center fetch, so
-            // post-upscale edge enhancement adds no texture samples or pass.
-            float luma = dot(color, lumaWeights);
-            gradient = length(float2(dfdx(luma), dfdy(luma)));
-        } else {
-            // Wider user-selected windows opt into four taps. The common radius
-            // 1 path above remains the performant one-fetch implementation.
-            float2 offset = params.edge.x
-                / float2(source.get_width(), source.get_height());
-            float left = dot(source.sample(s, in.texCoord - float2(offset.x, 0.0f)).rgb, lumaWeights);
-            float right = dot(source.sample(s, in.texCoord + float2(offset.x, 0.0f)).rgb, lumaWeights);
-            float top = dot(source.sample(s, in.texCoord - float2(0.0f, offset.y)).rgb, lumaWeights);
-            float bottom = dot(source.sample(s, in.texCoord + float2(0.0f, offset.y)).rgb, lumaWeights);
-            gradient = 0.5f * length(float2(right - left, bottom - top));
-        }
-        float softness = max(params.edge.w, 0.001f);
-        float outline = smoothstep(params.edge.z, params.edge.z + softness, gradient);
-        color = mix(color, float3(0.0f), outline * params.edge.y);
-    }
-
-    return float4(color, 1.0);
+    return applyMacPostFilterStack(source, in.texCoord, params);
 }
 
 // === macOS temporal-upscaling motion vectors (Stage B) ===

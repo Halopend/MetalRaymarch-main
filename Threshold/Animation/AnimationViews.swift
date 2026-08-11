@@ -428,10 +428,10 @@ struct SceneRowView: View {
     let onSelect: () -> Void
     var onEdit: (() -> Void)? = nil
     var onPlay: (() -> Void)? = nil
-    /// `true` when this row's scene is the one currently playing back. Swaps the
-    /// green Play button for a red Stop button so a running animation can be
-    /// halted from the same control.
+    /// Playback state is scoped by the caller to this row's scene.
     var isPlaying: Bool = false
+    var isPaused: Bool = false
+    var onPause: (() -> Void)? = nil
     var onStop: (() -> Void)? = nil
     var onResetDefault: (() -> Void)? = nil
 
@@ -502,20 +502,36 @@ struct SceneRowView: View {
                             }
                     )
                 }
-                if isPlaying, let onStop {
-                    Button { onStop() } label: {
-                        Image(systemName: AppIcons.stopFill)
+                if isPlaying, let onPause {
+                    Button { onPause() } label: {
+                        Image(systemName: AppIcons.pauseFill)
                     }
                     .buttonStyle(.bordered)
-                    .tint(.red)
-                    .help("Stop animation")
-                } else if let onPlay {
+                    .tint(.orange)
+                    .help("Pause animation")
+                    .accessibilityLabel("Pause \(scene.name)")
+                    .accessibilityHint("Keeps the current animation position")
+                }
+                if !isPlaying, let onPlay {
                     Button { onPlay() } label: {
                         Image(systemName: AppIcons.playFill)
                     }
                     .buttonStyle(.bordered)
                     .tint(.green)
                     .disabled(scene.keyframes.count < 2)
+                    .help(isPaused ? "Resume animation" : "Play animation")
+                    .accessibilityLabel(isPaused ? "Resume \(scene.name)" : "Play \(scene.name)")
+                    .accessibilityHint(isPaused ? "Continues from the paused position" : "Starts the animation")
+                }
+                if (isPlaying || isPaused), let onStop {
+                    Button { onStop() } label: {
+                        Image(systemName: AppIcons.stopFill)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                    .help("Stop animation")
+                    .accessibilityLabel("Stop \(scene.name)")
+                    .accessibilityHint("Returns the animation to the beginning")
                 }
                 if let onEdit {
                     Button { onEdit() } label: {
@@ -614,29 +630,31 @@ struct SceneEditorView: View {
 
                     Spacer(minLength: 0)
 
-                    Button {
-                        if animationManager.isPlaying,
-                           animationManager.currentScene?.id == scene.id {
-                            animationManager.stop()
-                        } else {
-                            animationManager.currentScene = scene
-                            animationManager.play()
-                        }
-                    } label: {
-                        let isPlaying = animationManager.isPlaying
-                            && animationManager.currentScene?.id == scene.id
+                    Button(action: toggleScenePlayback) {
                         Label(
-                            isPlaying ? "Stop" : "Play",
-                            systemImage: isPlaying ? AppIcons.stopFill : AppIcons.playFill
+                            isCurrentScenePlaying ? "Pause" : (isCurrentScenePaused ? "Resume" : "Play"),
+                            systemImage: isCurrentScenePlaying ? AppIcons.pauseFill : AppIcons.playFill
                         )
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
-                    .tint(animationManager.isPlaying && animationManager.currentScene?.id == scene.id ? .red : .green)
+                    .tint(isCurrentScenePlaying ? .orange : .green)
                     .disabled(scene.keyframes.count < 2)
                     .help(scene.keyframes.count < 2
                         ? "Add one more keyframe to preview this animation"
-                        : "Preview this animation")
+                        : (isCurrentScenePlaying ? "Pause this animation" : (isCurrentScenePaused ? "Resume this animation" : "Preview this animation")))
+
+                    if isCurrentScenePlaying || isCurrentScenePaused {
+                        Button {
+                            animationManager.stop()
+                        } label: {
+                            Label("Stop", systemImage: AppIcons.stopFill)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                        .tint(.red)
+                        .help("Stop this animation and return to the beginning")
+                    }
 
 #if !os(macOS)
                     Button(isEditMode == .active ? "Done Reorder" : "Reorder") {
@@ -1030,6 +1048,28 @@ struct SceneEditorView: View {
         }
         .onChange(of: scene) { _, _ in persistSceneIfNeeded() }
         .onDisappear { persistSceneIfNeeded() }
+    }
+
+    private var isCurrentScenePlaying: Bool {
+        animationManager.isPlaying && animationManager.currentScene?.id == scene.id
+    }
+
+    private var isCurrentScenePaused: Bool {
+        animationManager.isPaused && animationManager.currentScene?.id == scene.id
+    }
+
+    private func toggleScenePlayback() {
+        if isCurrentScenePlaying {
+            animationManager.pause()
+            return
+        }
+
+        if animationManager.currentScene?.id != scene.id {
+            animationManager.currentScene = scene
+        }
+        if !animationManager.isPlaying {
+            animationManager.play()
+        }
     }
     
     @ViewBuilder

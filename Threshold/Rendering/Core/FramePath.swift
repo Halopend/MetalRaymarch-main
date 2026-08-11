@@ -31,6 +31,9 @@ struct RendererFragmentPassPlan {
     let resolutionScale: Float
 #if canImport(MetalFX)
     let metalFXBundle: RendererMetalFXBundle?
+    /// True only when the full-resolution resolve path is available, so the
+    /// low-resolution raymarch may safely bind an empty output-filter stack.
+    let defersPostFilters: Bool
 #endif
 }
 

@@ -37,6 +37,7 @@ flowchart LR
 
 Start with the [custom-scene authoring guide](CUSTOM_SCENES.md), then open
 [Sphere Fold (Sample)](Threshold/Examples/Formulas/SampleSphereFold.threshfx),
+[3D Voronoi Field (Space Warp)](Threshold/Examples/Formulas/Voronoi3DFieldSpaceWarp.threshfx),
 [Accidental Sphere Projection](Threshold/Examples/Scenes/Accidental%20Sphere%20Projection.threshscene),
 or [Polychora 24-Cell](<Threshold/Examples/Custom%20Scene%20Example/Polychora%2024-Cell.threshscene>).
 
@@ -221,10 +222,16 @@ in [CUSTOM_SCENES.md](CUSTOM_SCENES.md).
 2. Open or import
    [Sphere Fold (Sample)](Threshold/Examples/Formulas/SampleSphereFold.threshfx).
    It is a standalone, editable DE with three parameters.
-3. Load [Accidental Sphere Projection](Threshold/Examples/Scenes/Accidental%20Sphere%20Projection.threshscene)
+3. To exercise the external modifier path without replacing the active fractal,
+   enable **Allow custom scenes**, then choose **Shape → Transformations → Add →
+   External Modifiers → 3D Voronoi Field (.threshfx)**. The action decodes
+   [3D Voronoi Field (Space Warp)](Threshold/Examples/Formulas/Voronoi3DFieldSpaceWarp.threshfx)
+   from the app bundle and runtime-compiles it through the same `spaceWarp` slot
+   used for user-authored files. You can also open that file directly.
+4. Load [Accidental Sphere Projection](Threshold/Examples/Scenes/Accidental%20Sphere%20Projection.threshscene)
    for a complete scene whose DE is embedded, or [Polychora 24-Cell](<Threshold/Examples/Custom%20Scene%20Example/Polychora%2024-Cell.threshscene>)
    for a 4D stereographic-projection example.
-4. On macOS, open **Shape → Fractal Formula → Metal DE Studio** to create or
+5. On macOS, open **Shape → Fractal Formula → Metal DE Studio** to create or
    edit a formula. Export the active result as either a self-contained
    `.threshscene` or a reusable `.threshfx`.
 
@@ -277,6 +284,8 @@ bundled scenes:
   — a 4D polychoron DE rendered through stereographic projection.
 - [`Sphere Fold (Sample)`](Threshold/Examples/Formulas/SampleSphereFold.threshfx)
   — a standalone formula to import and edit first.
+- [`3D Voronoi Field (Space Warp)`](Threshold/Examples/Formulas/Voronoi3DFieldSpaceWarp.threshfx)
+  — a standalone domain modifier that proves the external space-warp ABI.
 
 ## Gotchas that will bite you (keep these in muscle memory)
 

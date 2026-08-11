@@ -46,9 +46,9 @@ struct TransitionTabContent: View {
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Scene Transitions")
+            Text("Move Between Scenes")
                 .font(.subheadline.bold())
-            Text("Smoothly ease parameters toward a new scene's starting point instead of jumping instantly.")
+            Text("Choose how one scene gives way to the next, then decide which scenes are in the rotation.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -60,7 +60,7 @@ struct TransitionTabContent: View {
     private var transitionTimeSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("Same Scene Transition Time", systemImage: AppIcons.timer)
+                Label("Blend Duration", systemImage: AppIcons.timer)
                     .font(.subheadline.bold())
                 Spacer()
                 Text(durationLabel)
@@ -76,7 +76,7 @@ struct TransitionTabContent: View {
 
             Text(animationManager.sceneTransitionDuration <= 0
                  ? "Off — scenes switch instantly."
-                 : "Parameters play out over time toward the new starting point.")
+                 : "The current look eases into the next scene instead of jumping.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -89,25 +89,25 @@ struct TransitionTabContent: View {
     private var sceneSetsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Scene Sets", systemImage: "square.stack.3d.up")
+                Label("Collections", systemImage: "square.stack.3d.up")
                     .font(.subheadline.bold())
                 Spacer()
                 Button {
                     let set = animationManager.createMusicCueSceneSet()
                     editingSet = EditingSet(id: set.id)
                 } label: {
-                    Label("New Set", systemImage: "plus")
+                    Label("New", systemImage: "plus")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             }
 
-            Text("Curate named subsets of scenes to switch between. The selected set feeds music cues and the canvas arrow keys. Attach a song to a set to run it hands-free.")
+            Text("A collection is a reusable rotation of animated and still scenes. Make one active to use it with arrow keys or music cues.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
             if animationManager.musicCueSceneSets.isEmpty {
-                Text("No sets yet — create one, then pick the scenes it should switch between.")
+                Text("No collections yet. Create one and choose the scenes you want to move between.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -130,9 +130,17 @@ struct TransitionTabContent: View {
             Button {
                 animationManager.activateMusicCueSceneSet(set.id)
             } label: {
+                Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(isActive ? .teal : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help(isActive ? "Active collection" : "Make this collection active")
+
+            Button {
+                editingSet = EditingSet(id: set.id)
+            } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(isActive ? .teal : .secondary)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(set.name)
                             .font(.caption.bold())
@@ -147,6 +155,7 @@ struct TransitionTabContent: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help("Edit this collection")
 
             if set.attachedSong != nil {
                 Button {
@@ -161,13 +170,13 @@ struct TransitionTabContent: View {
             }
 
             Menu {
-                Button("Edit Set", systemImage: "slider.horizontal.3") {
+                Button("Edit Collection", systemImage: "slider.horizontal.3") {
                     editingSet = EditingSet(id: set.id)
                 }
                 Button(role: .destructive) {
                     animationManager.deleteMusicCueSceneSet(set.id)
                 } label: {
-                    Label("Delete Set", systemImage: "trash")
+                    Label("Delete Collection", systemImage: "trash")
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -196,7 +205,7 @@ struct TransitionTabContent: View {
     private var musicCueSceneSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Cue Scene Switcher", systemImage: "rectangle.stack.badge.play")
+                Label("Scene Rotation", systemImage: "rectangle.stack.badge.play")
                     .font(.subheadline.bold())
                 Spacer()
                 Text(animationManager.musicCueSceneGroupSummary)
@@ -204,39 +213,11 @@ struct TransitionTabContent: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("Combine scene sources, then choose how music cues and the canvas arrow keys select the next scene.")
+            Text("Choose how the next scene is selected. Animated scenes move through keyframes; still scenes hold one saved look.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Scene Sources")
-                    .font(.caption.bold())
-
-                ForEach(MusicCueSceneSource.allCases) { source in
-                    Toggle(isOn: sceneSourceBinding(for: source)) {
-                        HStack(spacing: 8) {
-                            Image(systemName: source.systemImage)
-                                .foregroundStyle(.purple)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(source.displayName)
-                                    .font(.caption)
-                                Text(source.detail)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .tint(.purple)
-                }
-
-                Text("Active: \(animationManager.musicCueSceneSourceSummary). Sources can be combined; duplicate scenes are used once.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.035)))
-
-            Picker("Selection", selection: $animationManager.musicCueSceneTraversalMode) {
+            Picker("Play Order", selection: $animationManager.musicCueSceneTraversalMode) {
                 ForEach(MusicCueSceneTraversalMode.allCases) { mode in
                     Label(mode.displayName, systemImage: mode.systemImage).tag(mode)
                 }
@@ -248,12 +229,12 @@ struct TransitionTabContent: View {
                 .foregroundStyle(.secondary)
 
             Toggle(isOn: $animationManager.musicCueSceneSwitchEnabled) {
-                Label("Advance Scene on Music Cue", systemImage: "music.note.list")
+                Label("Advance on Music Cues", systemImage: "music.note.list")
                     .font(.subheadline.bold())
             }
             .tint(.purple)
 
-            Text("A qualifying Drop cue uses this selection setup. Use ← or → while the canvas has focus to step the same pool manually.")
+            Text("Use ← or → while the canvas has focus to move through this same rotation manually.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
@@ -266,7 +247,7 @@ struct TransitionTabContent: View {
             if animationManager.musicCueSceneSwitchEnabled {
                 VStack(spacing: 8) {
                     HStack {
-                        Text("Required Drop")
+                        Text("Cue Strength")
                             .font(.caption)
                         Spacer()
                         Text(cueThresholdLabel)
@@ -285,7 +266,7 @@ struct TransitionTabContent: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     HStack {
-                        Text("Minimum Gap")
+                        Text("Time Between Changes")
                             .font(.caption)
                         Spacer()
                         Text(cueMinimumIntervalLabel)
@@ -337,13 +318,6 @@ struct TransitionTabContent: View {
     private var cueMinimumIntervalLabel: String {
         String(format: "%.1f s", animationManager.musicCueMinimumInterval)
     }
-
-    private func sceneSourceBinding(for source: MusicCueSceneSource) -> Binding<Bool> {
-        Binding(
-            get: { animationManager.isMusicCueSceneSourceEnabled(source) },
-            set: { animationManager.setMusicCueSceneSource(source, isEnabled: $0) }
-        )
-    }
 }
 
 // MARK: - Set editor
@@ -364,13 +338,13 @@ private struct MusicCueSceneSetEditor: View {
 
                 if targets.isEmpty {
                     ContentUnavailableView(
-                        "No Switchable Scenes",
+                        "No Scenes Available",
                         systemImage: "rectangle.stack.badge.play",
-                        description: Text("Add keyframes to an animation or save a static scene before adding it to a set.")
+                        description: Text("Create an animated scene with at least two keyframes, or save a still scene, then return here.")
                     )
                 } else {
                     Section {
-                        Text("Use tags to find a collection quickly, then select the visible scenes together. Enable Active Scene Set in the Transition menu to use this curated set alone or combine it with either library.")
+                        Text("Choose the scenes in this collection. Animated scenes play their keyframes; still scenes keep one saved look.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -387,16 +361,16 @@ private struct MusicCueSceneSetEditor: View {
                         }
                     } else {
                         if !visibleAnimationTargets.isEmpty {
-                            targetSection("Animation Sequences", targets: visibleAnimationTargets)
+                            targetSection("Animated Scenes", targets: visibleAnimationTargets)
                         }
 
                         if !visibleStaticSceneTargets.isEmpty {
-                            targetSection("Static Scenes", targets: visibleStaticSceneTargets)
+                            targetSection("Still Scenes", targets: visibleStaticSceneTargets)
                         }
                     }
                 }
             }
-            .navigationTitle("Scene Set")
+            .navigationTitle("Edit Collection")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Clear") {

@@ -24,9 +24,47 @@ struct EmbeddedFormulaContainer: Codable, Equatable {
 
     static let currentVersion: Int = 1
 
+    /// Hard ceiling for a standalone `.threshfx` document. The embedded Metal
+    /// body is capped at 64 KiB below; this larger envelope leaves ample room
+    /// for JSON escaping and metadata while bounding reads before JSONDecoder
+    /// materializes attacker-controlled strings and arrays.
+    static let maxContainerBytes: Int = 512 * 1024
+
+    enum ValidationError: Error, Equatable, CustomStringConvertible, LocalizedError {
+        case nonFileURL
+        case symbolicLinkNotAllowed
+        case notRegularFile
+        case fileTooLarge(Int)
+        case unsupportedVersion(Int)
+
+        var description: String {
+            switch self {
+            case .nonFileURL:
+                return "A .threshfx document must be a local file."
+            case .symbolicLinkNotAllowed:
+                return "Symbolic links are not accepted as .threshfx documents."
+            case .notRegularFile:
+                return "A .threshfx document must be a regular file."
+            case .fileTooLarge(let byteCount):
+                return "The .threshfx document is too large (\(byteCount) bytes; max \(EmbeddedFormulaContainer.maxContainerBytes))."
+            case .unsupportedVersion(let version):
+                return "The .threshfx container version \(version) is not supported by this build."
+            }
+        }
+
+        var errorDescription: String? { description }
+    }
+
     init(formula: EmbeddedFormula, version: Int = EmbeddedFormulaContainer.currentVersion) {
         self.version = version
         self.formula = formula
+    }
+
+    func validate() throws {
+        guard version == Self.currentVersion else {
+            throw ValidationError.unsupportedVersion(version)
+        }
+        try formula.validate()
     }
 }
 
@@ -134,10 +172,11 @@ struct EmbeddedFormula: Codable, Equatable {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    /// First 12 hex chars of `sourceHash` — used in cache keys for readability.
+    /// First 32 hex chars of `sourceHash` — compact enough for diagnostics while
+    /// retaining 128 bits for runtime identity and pipeline-cache isolation.
     var shortHash: String {
         let h = sourceHash
-        return String(h.prefix(12))
+        return String(h.prefix(32))
     }
 
     /// Built-in construction primitives are shipped as embedded formulas so a
@@ -709,10 +748,16 @@ enum FractalPrimitiveKind: String, CaseIterable, Identifiable {
 extension EmbeddedFormula {
 
     /// Reasons an embedded formula payload may be rejected before compilation.
-    enum ValidationError: Error, Equatable, CustomStringConvertible {
+    enum ValidationError: Error, Equatable, CustomStringConvertible, LocalizedError {
         case unsupportedSchemaVersion(Int)
         case emptyId
+        case emptyName
+        case metadataFieldTooLong(String, Int, Int)
+        case metadataContainsControlCharacters(String)
+        case tooManyEffectTags(Int)
+        case tooManyParameters(Int)
         case invalidFunctionStem(String)
+        case functionStemTooLong(Int)
         case emptyMetalSource
         case metalSourceTooLong(Int)
         case forbiddenToken(String)
@@ -727,8 +772,20 @@ extension EmbeddedFormula {
                 return "Embedded formula schema version \(v) is not supported by this build."
             case .emptyId:
                 return "Embedded formula is missing an id."
+            case .emptyName:
+                return "Embedded formula is missing a display name."
+            case .metadataFieldTooLong(let field, let byteCount, let maximum):
+                return "Embedded formula \(field) is too long (\(byteCount) bytes; max \(maximum))."
+            case .metadataContainsControlCharacters(let field):
+                return "Embedded formula \(field) contains control characters."
+            case .tooManyEffectTags(let count):
+                return "Embedded formula declares too many effect tags (\(count); max \(EmbeddedFormula.maxEffectTags))."
+            case .tooManyParameters(let count):
+                return "Embedded formula declares too many parameters (\(count); max 16)."
             case .invalidFunctionStem(let stem):
                 return "Embedded formula function stem '\(stem)' is invalid (must match [A-Za-z_][A-Za-z0-9_]*)."
+            case .functionStemTooLong(let byteCount):
+                return "Embedded formula function stem is too long (\(byteCount) bytes; max \(EmbeddedFormula.maxFunctionStemBytes))."
             case .emptyMetalSource:
                 return "Embedded formula has empty Metal source."
             case .metalSourceTooLong(let n):
@@ -745,28 +802,68 @@ extension EmbeddedFormula {
                 return "Embedded formula parameter \(index) is invalid: \(reason)."
             }
         }
+
+        var errorDescription: String? { description }
     }
 
     /// Maximum permitted size of `metalSource` in bytes (UTF-8). Keeps scene files
     /// reasonable and bounds compile time.
     static let maxSourceBytes: Int = 64 * 1024
 
-    /// Tokens that must not appear anywhere in `metalSource`. These would let the
-    /// embedded payload pull in arbitrary headers or files at compile time, which
-    /// defeats the validation we do up-front.
+    static let maxIDBytes: Int = 256
+    static let maxNameBytes: Int = 256
+    static let maxCategoryBytes: Int = 128
+    static let maxAuthorBytes: Int = 256
+    static let maxDescriptionBytes: Int = 8 * 1024
+    static let maxFunctionStemBytes: Int = 128
+    static let maxParameterNameBytes: Int = 128
+    static let maxEffectTags: Int = 64
+    static let maxEffectTagBytes: Int = 128
+
+    /// Tokens that must not appear anywhere in `metalSource`. `#` rejects the
+    /// complete C-family preprocessor surface, including whitespace-obfuscated
+    /// includes and macros that could rewrite the host source after injection.
     static let forbiddenTokens: [String] = [
-        "#import",
-        "#include",
-        "@import"
+        "#"
     ]
 
     /// Validates the payload. Throws on first failure.
     func validate() throws {
-        guard schemaVersion <= EmbeddedFormulaContainer.currentVersion else {
+        guard schemaVersion >= 1,
+              schemaVersion <= EmbeddedFormulaContainer.currentVersion else {
             throw ValidationError.unsupportedSchemaVersion(schemaVersion)
         }
-        guard !id.trimmingCharacters(in: .whitespaces).isEmpty else {
+        guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ValidationError.emptyId
+        }
+        try Self.validateInlineMetadata(id, field: "id", maximumBytes: Self.maxIDBytes)
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ValidationError.emptyName
+        }
+        try Self.validateInlineMetadata(name, field: "name", maximumBytes: Self.maxNameBytes)
+        if let category {
+            try Self.validateInlineMetadata(category, field: "category", maximumBytes: Self.maxCategoryBytes)
+        }
+        if let author {
+            try Self.validateInlineMetadata(author, field: "author", maximumBytes: Self.maxAuthorBytes)
+        }
+        if let formulaDescription {
+            let bytes = formulaDescription.utf8.count
+            guard bytes <= Self.maxDescriptionBytes else {
+                throw ValidationError.metadataFieldTooLong(
+                    "description", bytes, Self.maxDescriptionBytes
+                )
+            }
+        }
+        if let supportedEffectTagsRaw {
+            guard supportedEffectTagsRaw.count <= Self.maxEffectTags else {
+                throw ValidationError.tooManyEffectTags(supportedEffectTagsRaw.count)
+            }
+            for tag in supportedEffectTagsRaw {
+                try Self.validateInlineMetadata(
+                    tag, field: "supportedEffectTags entry", maximumBytes: Self.maxEffectTagBytes
+                )
+            }
         }
         try Self.validateFunctionStem(functionStem)
 
@@ -780,6 +877,9 @@ extension EmbeddedFormula {
         }
         for token in Self.forbiddenTokens where metalSource.contains(token) {
             throw ValidationError.forbiddenToken(token)
+        }
+        if Self.containsObjectiveCImport(in: metalSource) {
+            throw ValidationError.forbiddenToken("@import")
         }
 
         // Cheap text check — confirm the kind's required functions appear by name.
@@ -801,6 +901,9 @@ extension EmbeddedFormula {
         // Parameter metadata drives generated controls for fractal and lighting
         // effects alike. Validate external JSON as strictly as source pragmas so
         // malformed ranges can never reach SwiftUI Slider or the GPU.
+        guard params.count <= 16 else {
+            throw ValidationError.tooManyParameters(params.count)
+        }
         var seen = Set<Int>()
         for p in params {
             guard p.index >= 0 && p.index < 16 else {
@@ -811,6 +914,16 @@ extension EmbeddedFormula {
             }
             guard !p.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw ValidationError.invalidParamDescriptor(p.index, "the display name is empty")
+            }
+            guard p.name.utf8.count <= Self.maxParameterNameBytes else {
+                throw ValidationError.invalidParamDescriptor(
+                    p.index, "the display name exceeds \(Self.maxParameterNameBytes) bytes"
+                )
+            }
+            guard p.name.rangeOfCharacter(from: Self.inlineMetadataControlCharacters) == nil else {
+                throw ValidationError.invalidParamDescriptor(
+                    p.index, "the display name contains control characters"
+                )
             }
             guard p.default.isFinite, p.min.isFinite, p.max.isFinite, p.step.isFinite else {
                 throw ValidationError.invalidParamDescriptor(p.index, "all numeric fields must be finite")
@@ -823,6 +936,13 @@ extension EmbeddedFormula {
             }
             guard p.step > 0 else {
                 throw ValidationError.invalidParamDescriptor(p.index, "step must be positive")
+            }
+            let span = p.max - p.min
+            guard span.isFinite else {
+                throw ValidationError.invalidParamDescriptor(p.index, "max - min must be finite")
+            }
+            guard p.step <= span else {
+                throw ValidationError.invalidParamDescriptor(p.index, "step must not exceed max - min")
             }
             if p.isBool == true, p.min > 0 || p.max < 1 {
                 throw ValidationError.invalidParamDescriptor(
@@ -864,6 +984,9 @@ extension EmbeddedFormula {
     }
 
     private static func validateFunctionStem(_ stem: String) throws {
+        guard stem.utf8.count <= maxFunctionStemBytes else {
+            throw ValidationError.functionStemTooLong(stem.utf8.count)
+        }
         guard !stem.isEmpty else {
             throw ValidationError.invalidFunctionStem(stem)
         }
@@ -880,6 +1003,31 @@ extension EmbeddedFormula {
                 throw ValidationError.invalidFunctionStem(stem)
             }
         }
+    }
+
+    private static let inlineMetadataControlCharacters =
+        CharacterSet.controlCharacters.union(.newlines)
+
+    private static func validateInlineMetadata(
+        _ value: String,
+        field: String,
+        maximumBytes: Int
+    ) throws {
+        let byteCount = value.utf8.count
+        guard byteCount <= maximumBytes else {
+            throw ValidationError.metadataFieldTooLong(field, byteCount, maximumBytes)
+        }
+        guard value.rangeOfCharacter(from: inlineMetadataControlCharacters) == nil else {
+            throw ValidationError.metadataContainsControlCharacters(field)
+        }
+    }
+
+    private static func containsObjectiveCImport(in source: String) -> Bool {
+        guard let regex = try? NSRegularExpression(
+            pattern: "(?i)@\\s*import\\b"
+        ) else { return source.localizedCaseInsensitiveContains("@import") }
+        let range = NSRange(source.startIndex..<source.endIndex, in: source)
+        return regex.firstMatch(in: source, range: range) != nil
     }
 
     private static func containsFunctionDefinition(in source: String, named name: String) -> Bool {
@@ -899,23 +1047,53 @@ extension EmbeddedFormulaContainer {
 
     /// Decodes a `.threshfx` container from disk, validating the formula payload.
     static func decode(fromContainerAt url: URL) throws -> EmbeddedFormulaContainer {
-        let data = try Data(contentsOf: url)
+        let data = try boundedFileData(at: url)
+        try StrictJSONDuplicateKeyValidator.validate(data: data)
         let decoder = JSONDecoder()
         // Defensive: matches PresetManager.decodePreset / AnimationManager so a
         // future Date field on the formula wouldn't silently break .threshfx
         // imports. Harmless today (the container has no Date fields).
         decoder.dateDecodingStrategy = .iso8601
         let container = try decoder.decode(EmbeddedFormulaContainer.self, from: data)
-        try container.formula.validate()
+        try container.validate()
         return container
     }
 
     /// Encodes this container to JSON data with stable, sorted keys for diff-friendly output.
     func encode() throws -> Data {
-        try formula.validate()
+        try validate()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         return try encoder.encode(self)
+    }
+
+    private static func boundedFileData(at url: URL) throws -> Data {
+        guard url.isFileURL else {
+            throw ValidationError.nonFileURL
+        }
+
+        let values = try url.resourceValues(forKeys: [
+            .isRegularFileKey,
+            .isSymbolicLinkKey,
+            .fileSizeKey
+        ])
+        guard values.isSymbolicLink != true else {
+            throw ValidationError.symbolicLinkNotAllowed
+        }
+        guard values.isRegularFile == true else {
+            throw ValidationError.notRegularFile
+        }
+        if let fileSize = values.fileSize, fileSize > maxContainerBytes {
+            throw ValidationError.fileTooLarge(fileSize)
+        }
+
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: maxContainerBytes + 1) ?? Data()
+        guard data.count <= maxContainerBytes else {
+            throw ValidationError.fileTooLarge(data.count)
+        }
+        return data
     }
 
     /// Writes this container to a shareable `.threshfx` file in the temp

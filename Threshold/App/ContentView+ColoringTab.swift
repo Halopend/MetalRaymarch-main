@@ -15,6 +15,11 @@ extension ContentView {
     
     var coloringTabContent: some View {
         VStack(spacing: 0) {
+            if currentRoute == .look(.grading) {
+                postProcessingSectionPicker
+                Divider()
+            }
+
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 12) {
                     switch currentRoute {
@@ -30,6 +35,19 @@ extension ContentView {
                 .padding(.horizontal, 16).padding(.vertical, 8)
             }
         }
+    }
+
+    private var postProcessingSectionPicker: some View {
+        Picker("Post Processing section", selection: $postProcessingSection) {
+            ForEach(PostProcessingSection.allCases) { section in
+                Label(section.rawValue, systemImage: section.icon).tag(section)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .accessibilityLabel("Post Processing section")
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
     
     private var coloringGradientContent: some View {
@@ -306,9 +324,7 @@ extension ContentView {
 
     private var coloringGradingContent: some View {
         VStack(spacing: 12) {
-            Label("Post Processing", systemImage: AppIcons.cameraFilters).font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
+            if postProcessingSection == .color {
             // Tone controls
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "circle.lefthalf.filled", label: "Contrast",
@@ -361,7 +377,9 @@ extension ContentView {
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.yellow.opacity(0.06)))
+            }
 
+            if postProcessingSection == .style {
             // Lighting finish and stylization. Zero-valued scalar effects are
             // true bypasses; Cell Shading retains its explicit toggle because
             // its useful band-count range starts at two.
@@ -401,91 +419,378 @@ extension ContentView {
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
+            }
 
-            // Output-space edge enhancement. This is scene-authored post
-            // processing, not a geometry/scale control; MetalFX frames apply it
-            // after reconstruction so the contour width is measured in output
-            // pixels rather than enlarged low-resolution pixels.
-            VStack(spacing: 4) {
-                HStack {
-                    Label("Edge Detection", systemImage: "circle.lefthalf.filled")
-                        .font(.subheadline.weight(.medium))
-                    Spacer()
-                    Button {
-                        cache.lighting.edgeDetectionEffect = .outline
-                        cache.lighting.lightingPreset = .custom
-                        cache.commitEdgeDetectionEffect()
-                    } label: {
-                        Label("Outline Preset", systemImage: "lines.measurement.horizontal")
+            if postProcessingSection == .filters {
+                postProcessingFiltersContent
+            }
+        }
+    }
+
+    private var postProcessingFiltersContent: some View {
+        let filters = cache.postFilterStack
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Filter Stack", systemImage: "square.stack.3d.up")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(filters.count)/\(PostFilterInstance.maximumCount)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Menu {
+                    ForEach(PostProcessingFilterKind.allCases) { kind in
+                        Button {
+                            addPostFilter(kind)
+                        } label: {
+                            Label(
+                                kind == .edgeDetection
+                                    && filters.contains(where: { $0.kind == .edgeDetection })
+                                    ? "\(kind.displayName) (Already Added)"
+                                    : kind.displayName,
+                                systemImage: kind.icon
+                            )
+                        }
+                        .disabled(!canAddPostFilter(kind))
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .tint(cache.lighting.edgeDetectionEffect == .outline ? .indigo : .secondary)
+                } label: {
+                    Label("Add Filter", systemImage: "plus")
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(filters.count >= PostFilterInstance.maximumCount)
+                .help(filters.count >= PostFilterInstance.maximumCount
+                      ? "A scene can contain up to \(PostFilterInstance.maximumCount) filters"
+                      : "Add an output filter")
+            }
 
-                EffectSliderRow(
-                    icon: "circle.lefthalf.filled",
-                    label: "Edge Strength",
-                    value: Binding(
-                        get: { cache.lighting.edgeDetectionEffect.strength },
-                        set: { cache.lighting.edgeDetectionEffect.setStrength($0) }
-                    ),
-                    range: ControlCatalog.edgeStrength.range,
-                    enabled: .constant(true),
-                    onChanged: { cache.commitEdgeDetectionEffect() },
-                    showToggle: false,
-                    valueFormat: { $0 <= EdgeDetectionEffect.activationEpsilon ? "Off" : String(format: "%.2f", $0) }
-                )
+            Text("Filters run from top to bottom. Reorder them to change how each treatment feeds the next one. Add up to eight filters; Edge Detection can appear once.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
+            if filters.isEmpty {
+                VStack(spacing: 6) {
+                    Image(systemName: "camera.filters")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                    Text("No Filters")
+                        .font(.subheadline.weight(.medium))
+                    Text("Add a filter to build an ordered final-image treatment.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 18)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.04)))
+            } else {
+                ForEach(Array(filters.enumerated()), id: \.element.id) { index, filter in
+                    postFilterCard(
+                        filter,
+                        index: index,
+                        isFirst: index == filters.startIndex,
+                        isLast: index == filters.index(before: filters.endIndex)
+                    )
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: cache.postFilterStructureRevision)
+    }
+
+    @ViewBuilder
+    private func postFilterCard(
+        _ filter: PostFilterInstance,
+        index: Int,
+        isFirst: Bool,
+        isLast: Bool
+    ) -> some View {
+        let selected = postProcessingFilter == filter.kind
+        VStack(alignment: .leading, spacing: 7) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    postFilterIdentity(filter, index: index)
+                    Spacer(minLength: 4)
+                    postFilterActions(filter, isFirst: isFirst, isLast: isLast)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    postFilterIdentity(filter, index: index)
+                    HStack(spacing: 8) {
+                        Spacer()
+                        postFilterActions(filter, isFirst: isFirst, isLast: isLast)
+                    }
+                }
+            }
+
+            Divider()
+            postFilterControls(filter)
+
+            Text(filter.kind.summary)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(
+            selected ? Color.indigo.opacity(0.11) : Color.primary.opacity(0.05)
+        ))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(
+            selected ? Color.indigo.opacity(0.65) : Color.clear,
+            lineWidth: 1
+        ))
+        .animation(.easeInOut(duration: 0.15), value: postFilterControlRevision)
+    }
+
+    private func postFilterIdentity(_ filter: PostFilterInstance, index: Int) -> some View {
+        Button {
+            postProcessingFilter = filter.kind
+        } label: {
+            HStack(spacing: 8) {
+                Text("\(index + 1)")
+                    .font(.caption2.monospacedDigit().weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                Label(filter.kind.displayName, systemImage: filter.kind.icon)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Filter \(index + 1), \(filter.kind.displayName)")
+        .accessibilityHint("Selects this filter card")
+    }
+
+    private func postFilterActions(
+        _ filter: PostFilterInstance,
+        isFirst: Bool,
+        isLast: Bool
+    ) -> some View {
+        HStack(spacing: 8) {
+            Toggle("Enable \(filter.kind.displayName)", isOn: postFilterBoolBinding(filter, \.isEnabled))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .accessibilityLabel("\(filter.kind.displayName) enabled")
+            Button {
+                movePostFilter(filter.id, by: -1)
+            } label: {
+                Image(systemName: "chevron.up")
+            }
+            .buttonStyle(.borderless)
+            .disabled(isFirst)
+            .help("Move \(filter.kind.displayName) up")
+            .accessibilityLabel("Move \(filter.kind.displayName) up")
+            Button {
+                movePostFilter(filter.id, by: 1)
+            } label: {
+                Image(systemName: "chevron.down")
+            }
+            .buttonStyle(.borderless)
+            .disabled(isLast)
+            .help("Move \(filter.kind.displayName) down")
+            .accessibilityLabel("Move \(filter.kind.displayName) down")
+            Button(role: .destructive) {
+                deletePostFilter(filter.id)
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .help("Remove \(filter.kind.displayName)")
+            .accessibilityLabel("Remove \(filter.kind.displayName)")
+        }
+    }
+
+    @ViewBuilder
+    private func postFilterControls(_ filter: PostFilterInstance) -> some View {
+        // Keep this live rather than using `Binding.constant`: toggling a card
+        // must immediately enable/disable every slider without waiting for an
+        // unrelated view refresh.
+        let enabled = postFilterBoolBinding(filter, \.isEnabled)
+        VStack(spacing: 4) {
+            EffectSliderRow(
+                icon: filter.kind.icon,
+                label: "Amount",
+                value: postFilterFloatBinding(filter, \.amount),
+                range: 0...1,
+                enabled: enabled,
+                onChanged: {},
+                showToggle: false,
+                valueFormat: { $0 <= PostFilterInstance.activationEpsilon ? "Off" : String(format: "%.2f", $0) },
+                pairedColor: filter.kind == .edgeDetection
+                    ? postFilterColorBinding(filter)
+                    : nil
+            )
+
+            switch filter.kind {
+            case .edgeDetection:
                 Divider().padding(.leading, 159)
                 EffectSliderRow(
                     icon: ControlCatalog.edgeThreshold.icon,
                     label: "Threshold",
-                    value: Binding(
-                        get: { cache.lighting.edgeDetectionEffect.threshold },
-                        set: { cache.lighting.edgeDetectionEffect.threshold = $0 }
-                    ),
+                    value: postFilterFloatBinding(filter, \.params.x),
                     range: ControlCatalog.edgeThreshold.range,
-                    enabled: .constant(cache.lighting.edgeDetectionEffect.isActive),
-                    onChanged: { cache.commitEdgeDetectionEffect() },
+                    enabled: enabled,
+                    onChanged: {},
                     showToggle: false
                 )
                 Divider().padding(.leading, 159)
                 EffectSliderRow(
                     icon: ControlCatalog.edgeSoftness.icon,
                     label: "Softness",
-                    value: Binding(
-                        get: { cache.lighting.edgeDetectionEffect.softness },
-                        set: { cache.lighting.edgeDetectionEffect.softness = $0 }
-                    ),
+                    value: postFilterFloatBinding(filter, \.params.y),
                     range: ControlCatalog.edgeSoftness.range,
-                    enabled: .constant(cache.lighting.edgeDetectionEffect.isActive),
-                    onChanged: { cache.commitEdgeDetectionEffect() },
+                    enabled: enabled,
+                    onChanged: {},
                     showToggle: false
                 )
                 Divider().padding(.leading, 159)
                 EffectSliderRow(
                     icon: ControlCatalog.edgeWindowRadius.icon,
                     label: "Window Size",
-                    value: Binding(
-                        get: { Float(cache.lighting.edgeDetectionEffect.windowRadius) },
-                        set: { cache.lighting.edgeDetectionEffect.windowRadius = Int($0.rounded()) }
-                    ),
+                    value: postFilterFloatBinding(filter, \.params.z),
                     range: ControlCatalog.edgeWindowRadius.range,
-                    enabled: .constant(cache.lighting.edgeDetectionEffect.isActive),
-                    onChanged: { cache.commitEdgeDetectionEffect() },
+                    enabled: enabled,
+                    onChanged: {},
                     showToggle: false,
                     valueFormat: { String(Int($0.rounded())) }
                 )
 
-                Text("Outlines luminance transitions in the final scene. Strength 0 turns the pass off; lower the threshold for more contours and raise softness for a gentler result.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            case .posterize:
+                Divider().padding(.leading, 159)
+                EffectSliderRow(
+                    icon: "square.stack.3d.up.fill",
+                    label: "Color Levels",
+                    value: postFilterFloatBinding(filter, \.params.x),
+                    range: 2...32,
+                    enabled: enabled,
+                    onChanged: {},
+                    showToggle: false,
+                    valueFormat: { String(Int($0.rounded())) }
+                )
+
+            case .grain:
+                Divider().padding(.leading, 159)
+                EffectSliderRow(
+                    icon: "aqi.medium",
+                    label: "Frequency",
+                    value: postFilterFloatBinding(filter, \.params.x),
+                    range: 1...2048,
+                    enabled: enabled,
+                    onChanged: {},
+                    showToggle: false,
+                    valueFormat: { String(Int($0.rounded())) }
+                )
+
+            case .scanlines:
+                Divider().padding(.leading, 159)
+                EffectSliderRow(
+                    icon: "line.3.horizontal",
+                    label: "Line Density",
+                    value: postFilterFloatBinding(filter, \.params.x),
+                    range: 1...2048,
+                    enabled: enabled,
+                    onChanged: {},
+                    showToggle: false,
+                    valueFormat: { String(Int($0.rounded())) }
+                )
+                Divider().padding(.leading, 159)
+                EffectSliderRow(
+                    icon: "circle.lefthalf.filled",
+                    label: "Darkening",
+                    value: postFilterFloatBinding(filter, \.params.y),
+                    range: 0...1,
+                    enabled: enabled,
+                    onChanged: {},
+                    showToggle: false
+                )
+
+            case .monochrome, .sepia, .invert:
+                EmptyView()
             }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.06)))
         }
+        .opacity((livePostFilter(filter)?.isEnabled ?? filter.isEnabled) ? 1 : 0.48)
+    }
+
+    private func livePostFilter(_ fallback: PostFilterInstance) -> PostFilterInstance? {
+        cache.postFilterStack.first { $0.id == fallback.id }
+    }
+
+    private func postFilterFloatBinding(
+        _ filter: PostFilterInstance,
+        _ keyPath: WritableKeyPath<PostFilterInstance, Float>
+    ) -> Binding<Float> {
+        Binding(
+            get: { livePostFilter(filter)?[keyPath: keyPath] ?? filter[keyPath: keyPath] },
+            set: { value in
+                cache.updatePostFilter(id: filter.id) { $0[keyPath: keyPath] = value }
+            }
+        )
+    }
+
+    private func postFilterBoolBinding(
+        _ filter: PostFilterInstance,
+        _ keyPath: WritableKeyPath<PostFilterInstance, Bool>
+    ) -> Binding<Bool> {
+        Binding(
+            get: { livePostFilter(filter)?[keyPath: keyPath] ?? filter[keyPath: keyPath] },
+            set: { value in
+                cache.updatePostFilter(id: filter.id) { $0[keyPath: keyPath] = value }
+                postFilterControlRevision &+= 1
+            }
+        )
+    }
+
+    private func postFilterColorBinding(_ filter: PostFilterInstance) -> Binding<SIMD3<Float>> {
+        Binding(
+            get: { livePostFilter(filter)?.color ?? filter.color },
+            set: { color in
+                cache.updatePostFilter(id: filter.id) { $0.color = color }
+            }
+        )
+    }
+
+    private func canAddPostFilter(_ kind: PostProcessingFilterKind) -> Bool {
+        let filters = cache.postFilterStack
+        guard filters.count < PostFilterInstance.maximumCount else { return false }
+        return kind != .edgeDetection || !filters.contains { $0.kind == .edgeDetection }
+    }
+
+    private func addPostFilter(_ kind: PostProcessingFilterKind) {
+        guard canAddPostFilter(kind) else { return }
+        postProcessingFilter = kind
+        cache.replacePostFilterStack(cache.postFilterStack + [kind.defaultInstance])
+    }
+
+    private func movePostFilter(_ id: UUID, by offset: Int) {
+        var filters = cache.postFilterStack
+        guard let source = filters.firstIndex(where: { $0.id == id }) else { return }
+        let destination = source + offset
+        guard filters.indices.contains(destination) else { return }
+        filters.swapAt(source, destination)
+        cache.replacePostFilterStack(filters)
+    }
+
+    private func deletePostFilter(_ id: UUID) {
+        var filters = cache.postFilterStack
+        guard let index = filters.firstIndex(where: { $0.id == id }) else { return }
+        let removedKind = filters[index].kind
+        filters.remove(at: index)
+        cache.replacePostFilterStack(filters)
+        if postProcessingFilter == removedKind,
+           !filters.contains(where: { $0.kind == removedKind }),
+           !filters.isEmpty {
+            postProcessingFilter = filters[min(index, filters.count - 1)].kind
+        }
+    }
+
+    /// Control Finder can target a filter kind that is not authored in the
+    /// current scene. Add a disabled card so navigation has a concrete target,
+    /// while leaving the rendered image unchanged until the user enables it.
+    func ensurePostProcessingFilterCard(for kind: PostProcessingFilterKind) {
+        guard !cache.postFilterStack.contains(where: { $0.kind == kind }),
+              cache.postFilterStack.count < PostFilterInstance.maximumCount else { return }
+        var instance = kind.defaultInstance
+        instance.isEnabled = false
+        cache.replacePostFilterStack(cache.postFilterStack + [instance])
     }
 }

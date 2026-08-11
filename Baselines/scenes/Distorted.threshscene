@@ -49,7 +49,7 @@
   "id" : "00000000-0022-0000-0000-000000000001",
   "maxRaySteps" : 300,
   "minDistance" : 0.8,
-  "name" : "Bulatov Limit Set",
+  "name" : "Distorted",
   "position" : [
     0,
     0,

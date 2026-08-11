@@ -70,11 +70,27 @@ extension Renderer {
                 targetWidth: metalFXBundle.inputWidth,
                 targetHeight: metalFXBundle.inputHeight
             )
+            let colorTexture = drawable.colorTextures.first
+            let supportsViewRouting = drawable.views.count <= 1
+                || (colorTexture?.textureType == .type2DArray
+                    && (colorTexture?.arrayLength ?? 0) > 1)
+            // Match resolveMetalFXOutputToDrawable's non-recoverable guards.
+            // If any fail, keep filters in the low-resolution raymarch so its
+            // raw-blit fallback cannot silently drop them.
+            let defersPostFilters = layerRenderer.configuration.layout == .layered
+                && drawable.colorTextures.count == 1
+                && drawable.depthTextures.count == 1
+                && metalFXColorResolvePipeline != nil
+                && metalFXDepthResolvePipeline != nil
+                && metalFXBundle.manager.outputTexture != nil
+                && metalFXBundle.manager.depthTexture != nil
+                && supportsViewRouting
             return RendererFragmentPassPlan(
                 renderPassDescriptor: renderPassDescriptor,
                 viewports: viewports,
                 resolutionScale: effectiveResolutionScale(settingsSnapshot),
-                metalFXBundle: metalFXBundle
+                metalFXBundle: metalFXBundle,
+                defersPostFilters: defersPostFilters
             )
         }
 #endif
@@ -85,7 +101,8 @@ extension Renderer {
             renderPassDescriptor: renderPassDescriptor,
             viewports: directViewports,
             resolutionScale: settingsSnapshot.resolutionScale,
-            metalFXBundle: nil
+            metalFXBundle: nil,
+            defersPostFilters: false
         )
 #else
         return RendererFragmentPassPlan(
@@ -101,7 +118,9 @@ extension Renderer {
         drawable: LayerRenderer.Drawable,
         fragmentPassPlan: RendererFragmentPassPlan,
         framePreparation: RendererFramePreparation,
-        settingsSnapshot: RenderSettingsSnapshot
+        settingsSnapshot: RenderSettingsSnapshot,
+        deferredPostFilterStack: PostFilterStack,
+        postFilterTime: Float
     ) {
 #if canImport(MetalFX)
         guard let bundle = fragmentPassPlan.metalFXBundle else {
@@ -126,7 +145,9 @@ extension Renderer {
                 commandBuffer: commandBuffer,
                 metalFX: bundle.manager,
                 drawable: drawable,
-                resolutionScale: fragmentPassPlan.resolutionScale
+                resolutionScale: fragmentPassPlan.resolutionScale,
+                postFilterStack: deferredPostFilterStack,
+                postFilterTime: postFilterTime
             )
 
             // This frame's depth becomes next frame's warm-start history.
@@ -141,7 +162,8 @@ extension Renderer {
             warmStartGate.invalidate()
         }
 #else
-        _ = (commandBuffer, drawable, fragmentPassPlan, framePreparation, settingsSnapshot)
+        _ = (commandBuffer, drawable, fragmentPassPlan, framePreparation, settingsSnapshot,
+             deferredPostFilterStack, postFilterTime)
 #endif
     }
 
@@ -581,8 +603,9 @@ private struct MetalFXResolveParams {
     /// Default 0.85 recovers most of the softness from the spatial upscale
     /// without producing visible haloing or ringing artifacts.
     var rcasStrength: Float = 0.85
+    var time: Float = 0.0
     var pad0: Float = 0.0
-    var pad1: Float = 0.0
+    var postFilterStack = PostFilterStack()
 }
 
 extension Renderer {
@@ -779,8 +802,27 @@ extension Renderer {
         commandBuffer: MTLCommandBuffer,
         metalFX: MetalFXManager,
         drawable: LayerRenderer.Drawable,
-        resolutionScale: Float
+        resolutionScale: Float,
+        postFilterStack: PostFilterStack,
+        postFilterTime: Float
     ) {
+        func blitUnfilteredOutputIfSafe() {
+            // A non-empty stack means the low-resolution raymarch deliberately
+            // deferred filters. A raw copy would silently publish the wrong
+            // image, so only use it when filters were already baked upstream.
+            guard postFilterStack.count <= 0 else {
+                if RENDERER_DEBUG {
+                    print("⚠️ MetalFX raw-blit fallback suppressed: post filters were deferred")
+                }
+                return
+            }
+            blitMetalFXOutputToDrawable(
+                commandBuffer: commandBuffer,
+                metalFX: metalFX,
+                drawable: drawable
+            )
+        }
+
         guard layerRenderer.configuration.layout == .layered,
               drawable.colorTextures.count == 1,
               drawable.depthTextures.count == 1,
@@ -788,7 +830,7 @@ extension Renderer {
               let depthPipeline = metalFXDepthResolvePipeline,
               let outputTexture = metalFX.outputTexture,
               let depthTexture = metalFX.depthTexture else {
-            blitMetalFXOutputToDrawable(commandBuffer: commandBuffer, metalFX: metalFX, drawable: drawable)
+            blitUnfilteredOutputIfSafe()
             return
         }
 
@@ -803,7 +845,7 @@ extension Renderer {
         // If we need multi-view routing but the drawable isn't a proper 2D array texture,
         // the resolve pass will sample incorrectly → fall back to blit to avoid distortion.
         if wantsArrayRouting && !canUseArrayRouting {
-            blitMetalFXOutputToDrawable(commandBuffer: commandBuffer, metalFX: metalFX, drawable: drawable)
+            blitUnfilteredOutputIfSafe()
             return
         }
 
@@ -827,6 +869,8 @@ extension Renderer {
         let upscaleAmount = ((1.0 - resolutionScale) / 0.67).clamped(to: 0.0...1.0)
         var params = MetalFXResolveParams()
         params.rcasStrength = upscaleAmount * 0.95
+        params.time = postFilterTime
+        params.postFilterStack = postFilterStack
 
         // Preserve compositor foveation mapping in resolve passes; without this,
         // viewport-space sampling can appear zoomed/cropped per eye.
@@ -858,25 +902,25 @@ extension Renderer {
             colorPassDescriptor.depthAttachment.storeAction = .store
             colorPassDescriptor.depthAttachment.clearDepth = 1.0
 
-            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: colorPassDescriptor) else {
-                blitMetalFXOutputToDrawable(commandBuffer: commandBuffer, metalFX: metalFX, drawable: drawable)
+            if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: colorPassDescriptor) {
+                encoder.label = "Resolve MetalFX (Color+Depth merged)"
+                encoder.setRenderPipelineState(mergedPipeline)
+                encoder.setDepthStencilState(depthState)
+                encoder.setViewports(viewports)
+                applyVertexAmplificationIfNeeded(to: encoder, viewCount: drawable.views.count)
+                encoder.setFragmentTexture(outputTexture, index: 0)
+                encoder.setFragmentTexture(depthTexture, index: 1)
+                encoder.setFragmentBytes(&params, length: MemoryLayout<MetalFXResolveParams>.stride, index: 0)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+                encoder.endEncoding()
                 return
             }
-            encoder.label = "Resolve MetalFX (Color+Depth merged)"
-            encoder.setRenderPipelineState(mergedPipeline)
-            encoder.setDepthStencilState(depthState)
-            encoder.setViewports(viewports)
-            applyVertexAmplificationIfNeeded(to: encoder, viewCount: drawable.views.count)
-            encoder.setFragmentTexture(outputTexture, index: 0)
-            encoder.setFragmentTexture(depthTexture, index: 1)
-            encoder.setFragmentBytes(&params, length: MemoryLayout<MetalFXResolveParams>.stride, index: 0)
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-            encoder.endEncoding()
-            return
+            // A transient merged-encoder failure still has a color-only route.
+            colorPassDescriptor.depthAttachment.texture = nil
         }
 
         guard let colorEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: colorPassDescriptor) else {
-            blitMetalFXOutputToDrawable(commandBuffer: commandBuffer, metalFX: metalFX, drawable: drawable)
+            blitUnfilteredOutputIfSafe()
             return
         }
 

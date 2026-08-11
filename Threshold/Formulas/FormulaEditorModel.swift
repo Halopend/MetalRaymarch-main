@@ -328,6 +328,8 @@ final class FormulaEditorModel {
             status = .disabled
         case .rendererUnavailable:
             status = .rendererUnavailable
+        case .superseded:
+            status = .idle
         case .invalid(let error):
             compileDiagnostics = [MetalCompileDiagnostic(
                 userLine: nil, column: nil, severity: .error,

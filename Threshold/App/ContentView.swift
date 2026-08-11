@@ -150,6 +150,8 @@ struct ContentView: View {
 #endif
     @AppStorage("ContentView.showPerformanceInMenu") var showPerformanceInMenu: Bool = false
     @AppStorage("ContentView.showFPSInHUD") var showFPSInHUD: Bool = true
+    @AppStorage(SceneNavigationFeedbackSettings.defaultsKey)
+    var showSceneNavigationFeedback: Bool = SceneNavigationFeedbackSettings.defaultValue
     @State var showStopsPopover = false
     @State private var showSaveDestinationSheet = false
     @State private var saveConfirmationMessage: String?
@@ -171,6 +173,12 @@ struct ContentView: View {
     // the per-tab `extension ContentView` files).
     @State var renamingGradientIndex: Int? = nil
     @State var renamingGradientName: String = ""
+    @State var postProcessingSection: PostProcessingSection = .color
+    @State var postProcessingFilter: PostProcessingFilterKind = .edgeDetection
+    /// Filter values intentionally bypass Observation during live slider edits.
+    /// Toggle changes are infrequent and need one explicit UI invalidation so
+    /// every control in the card immediately reflects its enabled state.
+    @State var postFilterControlRevision: UInt = 0
     @State var isImportingCustomEffect = false
     @AppStorage("allowCustomScenes") var allowCustomScenes: Bool = false
     /// Menu text size (Dynamic Type). Index into `DS.textSizeSteps`; the "Text
@@ -425,8 +433,11 @@ struct ContentView: View {
                 CustomLightingStatusChip(
                     state: appModel.customLightingRuntimeState,
                     onDetach: {
-                            appModel.uninstallEmbeddedLighting()
-                            appModel.saveLastState()
+                        Task { @MainActor in
+                            if await appModel.uninstallEmbeddedLightingAndWait() {
+                                appModel.saveLastState()
+                            }
+                        }
                     }
                 )
                 #endif
@@ -1504,6 +1515,13 @@ struct ContentView: View {
 
     private func navigateFromControlFinder(_ destination: ControlFinderDestination) {
         withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) {
+            if let section = destination.postProcessingSection {
+                postProcessingSection = section
+            }
+            if let filter = destination.postProcessingFilter {
+                postProcessingFilter = filter
+                ensurePostProcessingFilterCard(for: filter)
+            }
             switch appModel.navigationStore.activate(destination.target) {
             case .openAnimationEditor: openAnimationEditor()
             case nil, .toggleRadialMenu, .dismissRadialMenu, .resetViewport,
