@@ -1,15 +1,19 @@
-# Threshold
+# Threshold:
+A curiosity rooted in one of mathematics’ oldest instruments: make geometry something to sense, not just calculate.
+Explore a conceptual exploration at the intersection of art, math, chaos and order.
 
-Threshold is a real-time Metal ray marcher for **making, sharing, and
-performing custom fractal scenes** on macOS, iPadOS, and visionOS. A scene can
-carry its own Metal distance-estimation (DE) function alongside its camera,
-lighting, color, and other portable render state—so the geometry travels with
-the look.
+Where simple rules produce complex objects whose boundaries are sometimes defined by the infinite.
+Threshold is a continuous sensory space for exploring higher-dimensional objects through light, motion, sound, and interaction.
 
-A curiosity that has been brewing since Archimedes reached for his compass: make geometry something to sense, not just calculate. Threshold is a continuous, sensory space for exploring higher-dimensional objects through light, motion, sound, and interaction.
+With a focus on control, expanding toolsets, realtime visualizations and standardization, the hope is to reduce the barrier to entry
+for people to be able to supply their own contributions while being able to cross pollinate their efforts with others in a community output,
+both self organizing through shared files and internally through code contributions. 
 
-## Custom scenes are the core workflow
+Under the hood threshold is a real-time Metal ray marcher for **macOS, iPadOS, and visionOS. 
+Other platforms not planned at this time, though a library is in development. DE written in metal may 
+have webgpu compatibility but that has not yet been explored and would likely be subject to limitations.
 
+## Custom scenes are the core workflow, but still in beta
 Write or import a portable DE, tune it live, then export a self-contained scene.
 
 ```mermaid
@@ -21,7 +25,6 @@ flowchart LR
     compile --> render["Render, preview, and edit live"]
     render --> export["Export a portable .threshscene or .threshfx"]
 ```
-
 - **Custom scenes that travel:** A `.threshscene` can embed its distance
   estimator, so a recipient gets the scene's geometry and its authored
   presentation together.
