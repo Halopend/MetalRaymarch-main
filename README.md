@@ -2,7 +2,6 @@
 A curiosity rooted in one of mathematics’ oldest instruments: make geometry something to sense, not just calculate.
 Explore a conceptual exploration at the intersection of art, math, chaos and order.
 
-Where simple rules produce complex objects whose boundaries are sometimes defined by the infinite.
 Threshold is a continuous sensory space for exploring higher-dimensional objects through light, motion, sound, and interaction.
 
 With a focus on control, expanding toolsets, realtime visualizations and standardization, the hope is to reduce the barrier to entry
@@ -10,7 +9,7 @@ for people to be able to supply their own contributions while being able to cros
 both self organizing through shared files and internally through code contributions. 
 
 Under the hood threshold is a real-time Metal ray marcher for **macOS, iPadOS, and visionOS. 
-Other platforms not planned at this time, though a library is in development. DE written in metal may 
+Other platform support not planned at this time, though a library is in development. DE written in metal may 
 have webgpu compatibility but that has not yet been explored and would likely be subject to limitations.
 
 ## Custom scenes are the core workflow, but still in beta
@@ -46,7 +45,6 @@ or [Polychora 24-Cell](<Threshold/Examples/Custom%20Scene%20Example/Polychora%20
 > **Experimental feature:** Enable **Settings → Display → Experimental Display → Allow custom scenes** before importing a user-authored DE. Runtime compilation is intentionally opt-in; malformed or expensive formulas can fail to compile or render poorly.
 
 ## What Threshold does around the scene
-
 - **Performance:** Threshold is built for responsive, real-time fractal rendering. Rendering quality and performance work are measured on the target device rather than inferred from a simulator.
 - **Scene data that travels:** Manage scenes, animations, music presets, and formulas on-device or in **iCloud Drive**. Exported files use the native share sheet, including **AirDrop** wherever it is available.
 - **Assignable spatial interaction:** On visionOS, assign scalar controls or linked **X/Y/Z** parameter triplets to individual fingers for direct, multi-axis scene interaction.
