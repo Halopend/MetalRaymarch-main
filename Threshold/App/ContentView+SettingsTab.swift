@@ -490,11 +490,8 @@ extension ContentView {
 
     // MARK: - Sharing sub-view
 
-    /// Sharing sub-view: Community Sharing (analytics + username) and
-    /// iCloud Drive backup. Sharing is **on by default** — the user must
-    /// opt out by turning the toggle off. The username is independent
-    /// and is always shown so the user can set an attribution handle
-    /// without enabling sharing.
+    /// Sharing sub-view: aggregate usage, authored DE/scene sharing, and
+    /// iCloud Drive backup. Every sharing category is optional and separate.
     private var settingsSharingContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             storageLocationSection
@@ -566,8 +563,7 @@ extension ContentView {
                           : "Sharing is off")
             }
 
-            // Flipped copy: "on by default" is the headline.
-            Text("On by default. Disable below to opt out. No account is created and no Apple ID, email, or location is required.")
+            Text("All sharing is optional. No account, Apple ID, email, or location is required.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -577,11 +573,47 @@ extension ContentView {
                 set: { UsageAnalytics.shared.analyticsEnabled = $0 }
             )) {
                 Label(
-                    UsageAnalytics.shared.analyticsEnabled ? "Sharing with the community" : "Sharing is off",
+                    UsageAnalytics.shared.analyticsEnabled ? "Share aggregate usage signals" : "Aggregate usage sharing is off",
                     systemImage: UsageAnalytics.shared.analyticsEnabled ? AppIcons.person3Fill : AppIcons.personSlash
                 )
             }
             .tint(.blue)
+
+            Text("This covers anonymous aggregate signals only — such as time spent in an area or on a platform — viewed in aggregate to help refine the app for everyone. It does not share your scenes, distance estimators, names, or personal files.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
+            Divider()
+
+            Text("Share authored work with the creators (optional)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Toggle("Distance estimators (DEs)", isOn: Binding(
+                get: { UsageAnalytics.shared.distanceEstimatorSharingEnabled },
+                set: { UsageAnalytics.shared.distanceEstimatorSharingEnabled = $0 }
+            ))
+            .disabled(!UsageAnalytics.shared.analyticsEnabled)
+            Toggle("Scenes", isOn: Binding(
+                get: { UsageAnalytics.shared.sceneSharingEnabled },
+                set: { UsageAnalytics.shared.sceneSharingEnabled = $0 }
+            ))
+            .disabled(!UsageAnalytics.shared.analyticsEnabled)
+
+            Picker("Specificity", selection: Binding(
+                get: { UsageAnalytics.shared.sharingSpecificity },
+                set: { UsageAnalytics.shared.sharingSpecificity = $0 }
+            )) {
+                ForEach(CommunitySharingSpecificity.allCases) { level in
+                    Text(level.title).tag(level)
+                }
+            }
+            .disabled(!UsageAnalytics.shared.analyticsEnabled ||
+                      (!UsageAnalytics.shared.distanceEstimatorSharingEnabled && !UsageAnalytics.shared.sceneSharingEnabled))
+
+            Text(UsageAnalytics.shared.sharingSpecificity.detail)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Display Name (optional)")
@@ -593,7 +625,7 @@ extension ContentView {
                 ))
                 .textFieldStyle(.roundedBorder)
                 .autocorrectionDisabled(true)
-                Text("Used only for community credits. Stays on this device — never leaves your Mac. Leave blank to share anonymously.")
+                Text("Used only for attribution if you allow featuring. Leave blank to share anonymously. It stays on this device until you explicitly share work.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -602,7 +634,7 @@ extension ContentView {
                 Label("What you're opting into:", systemImage: AppIcons.checkmarkCircle)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Text("• Your settings can be reviewed for future community features\n• Shared setups may appear later in original or altered form\n• If you add a user name, it can be used for attribution\n• Aggregated usage stats help us improve performance and features")
+                Text("• Aggregate usage is separate from authored work\n• DE and scene sharing are separate choices\n• Creator review does not automatically mean featuring\n• Featuring may include attribution when you provide a display name")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

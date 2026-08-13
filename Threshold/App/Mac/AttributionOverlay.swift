@@ -1,8 +1,63 @@
 #if os(macOS)
 import SwiftUI
 
+struct BaseDistanceEstimatorInfo: Equatable {
+    let name: String
+    let author: String?
+
+    static func resolve(
+        fractalType: FractalModelType,
+        formulaParams: FormulaParams,
+        embeddedFormula: EmbeddedFormula?
+    ) -> Self {
+        if fractalType == .custom,
+           let embeddedFormula,
+           embeddedFormula.effectKind == .fractal {
+            return Self(
+                name: normalizedName(embeddedFormula.name, fallback: fractalType.displayName),
+                author: normalizedAuthor(embeddedFormula.author)
+            )
+        }
+
+        if fractalType == .constructionPrimitive,
+           let primitive = FractalPrimitiveKind(
+               rawSelector: FormulaCatalog.getParam(formulaParams, index: 0)
+           ) {
+            return Self(
+                name: primitive.name,
+                author: normalizedAuthor(primitive.formula.author)
+            )
+        }
+
+        let descriptor = FormulaCatalog.shared.descriptor(for: fractalType)
+        return Self(
+            name: normalizedName(descriptor?.name, fallback: fractalType.displayName),
+            author: normalizedAuthor(descriptor?.author)
+        )
+    }
+
+    var accessibilityDescription: String {
+        if let author {
+            return "Base fractal distance estimator: \(name), by \(author)."
+        }
+        return "Base fractal distance estimator: \(name)."
+    }
+
+    private static func normalizedName(_ name: String?, fallback: String) -> String {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? fallback : trimmed
+    }
+
+    private static func normalizedAuthor(_ author: String?) -> String? {
+        let trimmed = author?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
 /// A non-modal acknowledgement card shown while the Mac viewport's I key is held.
 struct AttributionOverlay: View {
+    let baseDistanceEstimator: BaseDistanceEstimatorInfo
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -29,6 +84,28 @@ struct AttributionOverlay: View {
                 .font(.subheadline)
                 .foregroundStyle(.primary.opacity(0.92))
                 .fixedSize(horizontal: false, vertical: true)
+
+            HStack(alignment: .center, spacing: 12) {
+                Label("Base DE", systemImage: "function")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 12)
+
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(baseDistanceEstimator.name)
+                        .font(.subheadline.weight(.semibold))
+                    if let author = baseDistanceEstimator.author {
+                        Text("by \(author)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .multilineTextAlignment(.trailing)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
 
             Divider()
                 .overlay(Color.white.opacity(0.12))
@@ -70,7 +147,9 @@ struct AttributionOverlay: View {
         }
         .shadow(color: .black.opacity(0.36), radius: 20, y: 10)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Threshold acknowledgements. Release I to dismiss.")
+        .accessibilityLabel(
+            "Threshold acknowledgements. \(baseDistanceEstimator.accessibilityDescription) Release I to dismiss."
+        )
     }
 }
 #endif

@@ -77,6 +77,30 @@ import UIKit
 #endif
 import Observation
 
+/// Controls how much user-authored work may be shared with Threshold's
+/// creators. Aggregate usage is controlled separately by `analyticsEnabled`.
+enum CommunitySharingSpecificity: Int, CaseIterable, Identifiable, Sendable {
+    case aggregateOnly = 0
+    case creatorReview = 1
+    case featureWithAttribution = 2
+
+    var id: Int { rawValue }
+    var title: String {
+        switch self {
+        case .aggregateOnly: "Aggregate signals only"
+        case .creatorReview: "Share work with the creators"
+        case .featureWithAttribution: "Allow featuring and attribution"
+        }
+    }
+    var detail: String {
+        switch self {
+        case .aggregateOnly: "No work is sent to the creators. Only anonymous aggregate usage signals may be used."
+        case .creatorReview: "Creators may review selected work to improve the app. It is not automatically featured."
+        case .featureWithAttribution: "Selected work may appear in the app or community materials, with your display name when provided."
+        }
+    }
+}
+
 /// Anonymous usage statistics collected during a session
 struct UsageSnapshot: Codable {
     let timestamp: Date
@@ -135,14 +159,14 @@ final class UsageAnalytics {
     static let shared = UsageAnalytics()
     private static let analyticsEnabledKey = "AnalyticsEnabled"
     private static let communityDisplayNameKey = "CommunityDisplayName"
+    private static let distanceEstimatorSharingEnabledKey = "DistanceEstimatorSharingEnabled"
+    private static let sceneSharingEnabledKey = "SceneSharingEnabled"
+    private static let sharingSpecificityKey = "CommunitySharingSpecificity"
     
     static var persistedAnalyticsEnabled: Bool {
-        // Sharing is opt-out: first-launch users get sharing enabled by
-        // default. The `object(forKey:) == nil` check is what distinguishes
-        // "never set" (first launch) from "explicitly turned off" (an
-        // existing user who later set it to false). Returning `true` for
-        // the first-launch case is the entire default-flip.
-        UserDefaults.standard.object(forKey: analyticsEnabledKey) as? Bool ?? true
+        // New users make an explicit choice; existing users retain the
+        // preference already persisted by an earlier build.
+        UserDefaults.standard.object(forKey: analyticsEnabledKey) as? Bool ?? false
     }
 
     // CloudKit is initialized on first use so analytics-disabled launches
@@ -207,6 +231,37 @@ final class UsageAnalytics {
         }
     }
 
+    /// Anonymous aggregate signals only: for example time spent in an area
+    /// or on a platform. This never implies consent to share authored work.
+    var aggregateUsageSharingEnabled: Bool {
+        get { analyticsEnabled }
+        set { analyticsEnabled = newValue }
+    }
+
+    var distanceEstimatorSharingEnabled: Bool {
+        didSet { UserDefaults.standard.set(distanceEstimatorSharingEnabled, forKey: Self.distanceEstimatorSharingEnabledKey) }
+    }
+
+    var sceneSharingEnabled: Bool {
+        didSet { UserDefaults.standard.set(sceneSharingEnabled, forKey: Self.sceneSharingEnabledKey) }
+    }
+
+    var sharingSpecificity: CommunitySharingSpecificity {
+        didSet { UserDefaults.standard.set(sharingSpecificity.rawValue, forKey: Self.sharingSpecificityKey) }
+    }
+
+    var canShareDistanceEstimator: Bool {
+        analyticsEnabled && distanceEstimatorSharingEnabled && sharingSpecificity != .aggregateOnly
+    }
+
+    var canShareScene: Bool {
+        analyticsEnabled && sceneSharingEnabled && sharingSpecificity != .aggregateOnly
+    }
+
+    var canFeatureSharedWork: Bool {
+        (canShareDistanceEstimator || canShareScene) && sharingSpecificity == .featureWithAttribution
+    }
+
     var communityDisplayName: String {
         get { storedCommunityDisplayName }
         set {
@@ -223,12 +278,10 @@ final class UsageAnalytics {
     }
     
     private init() {
-        // Default to enabled — user can opt out via Settings > Sharing or
-        // by toggling it on the welcome screen. `persistedAnalyticsEnabled`
-        // returns `true` for users who have never set the key (first
-        // launch); users who explicitly turned it off in a previous build
-        // will see it stay off.
         self.analyticsEnabled = Self.persistedAnalyticsEnabled
+        self.distanceEstimatorSharingEnabled = UserDefaults.standard.object(forKey: Self.distanceEstimatorSharingEnabledKey) as? Bool ?? false
+        self.sceneSharingEnabled = UserDefaults.standard.object(forKey: Self.sceneSharingEnabledKey) as? Bool ?? false
+        self.sharingSpecificity = CommunitySharingSpecificity(rawValue: UserDefaults.standard.integer(forKey: Self.sharingSpecificityKey)) ?? .aggregateOnly
         self.storedCommunityDisplayName = Self.normalizedCommunityDisplayName(
             UserDefaults.standard.string(forKey: Self.communityDisplayNameKey) ?? ""
         )
@@ -501,7 +554,9 @@ final class UsageAnalytics {
     
     /// Upload a saved preset to CloudKit for analysis
     private func uploadPresetSnapshot(_ preset: FractalPreset) async {
-        guard analyticsEnabled else { return }
+        // This method contains authored scene content. Aggregate analytics
+        // consent is not enough to authorize it.
+        guard canShareScene else { return }
         let record = CKRecord(recordType: "PresetSnapshot")
         
         // Metadata
