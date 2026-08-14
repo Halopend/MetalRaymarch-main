@@ -10,6 +10,18 @@
 	<string>Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Threshold uses the microphone for real-time audio-reactive fractal visualization.</string>
+	<key>NSUbiquitousContainers</key>
+	<dict>
+		<key>iCloud.com.puppypower.Threshold</key>
+		<dict>
+			<key>NSUbiquitousContainerIsDocumentScopePublic</key>
+			<true/>
+			<key>NSUbiquitousContainerName</key>
+			<string>Threshold</string>
+			<key>NSUbiquitousContainerSupportedFolderLevels</key>
+			<string>Any</string>
+		</dict>
+	</dict>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

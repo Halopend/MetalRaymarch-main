@@ -1,15 +1,18 @@
-# Threshold
+# Threshold:
+A curiosity rooted in one of mathematics’ oldest instruments: make geometry something to sense, not just calculate.
+Explore a conceptual exploration at the intersection of art, math, chaos and order.
 
-Threshold is a real-time Metal ray marcher for **making, sharing, and
-performing custom fractal scenes** on macOS, iPadOS, and visionOS. A scene can
-carry its own Metal distance-estimation (DE) function alongside its camera,
-lighting, color, and other portable render state—so the geometry travels with
-the look.
+Threshold is a continuous sensory space for exploring higher-dimensional objects through light, motion, sound, and interaction.
 
-A curiosity that has been brewing since Archimedes reached for his compass: make geometry something to sense, not just calculate. Threshold is a continuous, sensory space for exploring higher-dimensional objects through light, motion, sound, and interaction.
+With a focus on control, expanding toolsets, realtime visualizations and standardization, the hope is to reduce the barrier to entry
+for people to be able to supply their own contributions while being able to cross pollinate their efforts with others in a community output,
+both self organizing through shared files and internally through code contributions. 
 
-## Custom scenes are the core workflow
+Under the hood threshold is a real-time Metal ray marcher for **macOS, iPadOS, and visionOS. 
+Other platform support not planned at this time, though a library is in development. DE written in metal may 
+have webgpu compatibility but that has not yet been explored and would likely be subject to limitations.
 
+## Custom scenes are the core workflow, but still in beta
 Write or import a portable DE, tune it live, then export a self-contained scene.
 
 ```mermaid
@@ -21,7 +24,6 @@ flowchart LR
     compile --> render["Render, preview, and edit live"]
     render --> export["Export a portable .threshscene or .threshfx"]
 ```
-
 - **Custom scenes that travel:** A `.threshscene` can embed its distance
   estimator, so a recipient gets the scene's geometry and its authored
   presentation together.
@@ -44,7 +46,6 @@ or [Polychora 24-Cell](<Threshold/Examples/Custom%20Scene%20Example/Polychora%20
 > **Experimental feature:** Enable **Settings → Display → Experimental Display → Allow custom scenes** before importing a user-authored DE. Runtime compilation is intentionally opt-in; malformed or expensive formulas can fail to compile or render poorly.
 
 ## What Threshold does around the scene
-
 - **Performance:** Threshold is built for responsive, real-time fractal rendering. Rendering quality and performance work are measured on the target device rather than inferred from a simulator.
 - **Scene data that travels:** Manage scenes, animations, music presets, and formulas on-device or in **iCloud Drive**. Exported files use the native share sheet, including **AirDrop** wherever it is available.
 - **Assignable spatial interaction:** On visionOS, assign scalar controls or linked **X/Y/Z** parameter triplets to individual fingers for direct, multi-axis scene interaction.
@@ -105,32 +106,39 @@ best, most expressive, and most enjoyable thing we can build together.
 ## Acknowledgements
 
 Threshold has been shaped by many generous communities. Thank you to the
-fractal-art community for the images, experiments, and continuing curiosity;
-to the signed-distance-field, ray-marching, shader, and real-time graphics
-communities for the techniques and conversations that make this work possible;
-to the Metal and Apple-platform developer communities for sharing practical
-knowledge; and to open-source contributors everywhere who make it normal to
-learn in public and build on one another's work.
+fractal-art community for the images, experiments, and continued investment in 
+the space of inspiring math and expression. Maintainers of these projects have
+ensured the awe the inspiring works with built with patience and dedication purely 
+for the enjoyment of the math. Their imaginations and explorations spark many an 
+interest and provide an example of the dedication many artist have to their craft in
+the creation of art to explore. Human expression where sweating the details on combining 
+the intensity of 3 channels over a grid has led to, in some capacity, all you see in the 
+digital world. 
 
-The ideas in this codebase are informed by published techniques, community
-experiments, discussions, examples, and inspirations shared by others. We are
-grateful for every contribution, including the ones that helped shape a
-direction even when they do not appear as a line of code. Specific formula,
-shader, artwork, and third-party attributions remain in their source files and
-asset notices. If we have missed a credit or if your work has helped inspire
-Threshold, please let us know at
-[jean.fradet@me.com](mailto:jean.fradet@me.com) so we can correct or expand this
-acknowledgement.
+To the educators, I thank you for contributions to my knowledge with deeply back research 
+underpinning the collective mindsets we agree to share in service to a process of independent 
+evaluated perfection. 
+
+The ideas in this codebase are guided by published techniques, listening to the thoughts of 
+people I respect, my own desires, the ability to see something that doesn't exists before it exist
+and the drive to get there. If you're works was in some capacity feaured in the project and you 
+wish to remove them, please reach out and we would be happy to exclude them from wider release. 
+For all licensing considerations, the provenance of the original source was either attempted to be 
+logged to the best of abilities or judged under a prior works framework, as is the case from the mandlebox
+and mandlebulb family appearing in several films.
+
+If you feel we have missed a credit or you would like to add your own work to this project, please let us know at
+[jean.fradet@me.com](mailto:jean.fradet@me.com) so we can evaluate. 
 
 This file is the fast orientation for a fresh clone. Deeper docs:
 [`CUSTOM_SCENES.md`](CUSTOM_SCENES.md) (custom-scene and embedded-DE guide) ·
+[`PRIVACY_POLICY.md`](PRIVACY_POLICY.md) (current data practices) ·
 [`CONTRIBUTING.md`](CONTRIBUTING.md) (full build/test guide) ·
 [`ROADMAP.md`](ROADMAP.md) (ordered active work) ·
 [`TECH_DEBT.md`](TECH_DEBT.md) + [`Context/TECH_DEBT_AUDIT_2026-07-07.md`](Context/TECH_DEBT_AUDIT_2026-07-07.md) (debt register) ·
 [`PERF_PUSH.md`](PERF_PUSH.md) (perf backlog) · [`Context/`](Context/) (architecture).
 
 ## Requirements
-
 - **Xcode 26 or newer with the macOS/iOS/visionOS 26 SDKs** (Swift 6). All three targets set `*_DEPLOYMENT_TARGET = 26.0`.
 - The build scripts prefer `/Applications/Xcode-beta.app`, then use the active full Xcode selected by `xcode-select`. Override explicitly when needed:
   ```sh
@@ -148,7 +156,7 @@ Scripts/build.sh embeds    # generate an inspection copy of the embedded Metal s
 ```
 Local builds run with `CODE_SIGNING_ALLOWED=NO` (no provisioning needed).
 
-## Experimental focus and current boundaries
+# Experimental focus and current boundaries
 
 Threshold is very experimental and intentionally still in motion. The project
 is exploring how fractal rendering can keep following the medium's visual
@@ -163,13 +171,13 @@ upscaling path does not provide temporal support. It should therefore not be
 read as a finished temporal-reconstruction solution; it is one of the practical
 experiments helping us learn where the real-time tradeoffs are.
 
-Ideas under consideration include domain transfers, manual input-function
+Ideas under consideration include domain transfers, manual input-function driven
 scaling, and other ways to spend the per-frame compute budget more intelligently.
-These are areas for exploration, not promises about the current release. If you
-have a rendering idea, an example scene, or a measurement that could help, we
-would be glad to hear about it.
 
-## Portable scenes and formulas
+That is to say: ways to customize how user input maps to fractal input.
+These are areas for exploration, not promises about the current release. 
+
+# Portable scenes and formulas
 
 Threshold is built around exchangeable files. The formats below are the current
 supported surface:
@@ -309,13 +317,14 @@ visionOS app targets. Threshold receives both Apple's daily aggregate metrics an
 diagnostic reports, including crash, hang, CPU-exception, and disk-write
 diagnostics when the operating system provides them.
 
-Only a local, aggregate summary is retained: payload counts, diagnostic counts,
-the covered time range, and the app version. Raw MetricKit payloads and call
-stacks are not uploaded to CloudKit. This system diagnostic path is separate from
-the existing optional usage-sharing analytics. MetricKit delivery is scheduled
-by the operating system, so a local run cannot force an immediate report; use a
-TestFlight/device build and inspect the app's MetricKit log category when
-validating delivery.
+Threshold retains a bounded local set of the payloads so that a performance
+report can include them when the user explicitly submits that report through
+the existing sharing control. Background usage snapshots contain only counts
+and aggregate settings; they do not include raw MetricKit payloads or call
+stacks. This system diagnostic path is separate from the existing optional
+usage-sharing analytics. MetricKit delivery is scheduled by the operating
+system, so a local run cannot force an immediate report; use a TestFlight/device
+build and inspect the app's MetricKit log category when validating delivery.
 
 ## What to test before opening a pull request
 
@@ -345,10 +354,10 @@ Add the following checks when the change touches the corresponding area:
   on-device evidence, and record the device, scene, settings, and before/after
   measurements. Do not infer a performance claim from a simulator.
 - **MetricKit changes:** verify that the app starts without delay, that the
-  reporter is registered once, that existing report summaries remain local, and
-  that no raw payload or call stack is sent through CloudKit. Because delivery is
-  OS-scheduled, record whether this was validated with a device/TestFlight build
-  or with the unit-level summary tests.
+  reporter is registered once, that background snapshots remain aggregate, and
+  that raw payload inclusion is limited to an explicit performance-report
+  submission. Because delivery is OS-scheduled, record whether this was
+  validated with a device/TestFlight build or with the unit-level summary tests.
 
 For interface adjustments, attach before-and-after images to the pull request.
 Label each image with the platform, window size or device, and the relevant
