@@ -143,6 +143,7 @@ If you feel we have missed a credit or you would like to add your own work to th
 
 This file is the fast orientation for a fresh clone. Deeper docs:
 [`CUSTOM_SCENES.md`](CUSTOM_SCENES.md) (custom-scene and embedded-DE guide) ·
+[`PRIVACY_POLICY.md`](PRIVACY_POLICY.md) (current data practices) ·
 [`CONTRIBUTING.md`](CONTRIBUTING.md) (full build/test guide) ·
 [`ROADMAP.md`](ROADMAP.md) (ordered active work) ·
 [`TECH_DEBT.md`](TECH_DEBT.md) + [`Context/TECH_DEBT_AUDIT_2026-07-07.md`](Context/TECH_DEBT_AUDIT_2026-07-07.md) (debt register) ·
@@ -319,13 +320,14 @@ visionOS app targets. Threshold receives both Apple's daily aggregate metrics an
 diagnostic reports, including crash, hang, CPU-exception, and disk-write
 diagnostics when the operating system provides them.
 
-Only a local, aggregate summary is retained: payload counts, diagnostic counts,
-the covered time range, and the app version. Raw MetricKit payloads and call
-stacks are not uploaded to CloudKit. This system diagnostic path is separate from
-the existing optional usage-sharing analytics. MetricKit delivery is scheduled
-by the operating system, so a local run cannot force an immediate report; use a
-TestFlight/device build and inspect the app's MetricKit log category when
-validating delivery.
+Threshold retains a bounded local set of the payloads so that a performance
+report can include them when the user explicitly submits that report through
+the existing sharing control. Background usage snapshots contain only counts
+and aggregate settings; they do not include raw MetricKit payloads or call
+stacks. This system diagnostic path is separate from the existing optional
+usage-sharing analytics. MetricKit delivery is scheduled by the operating
+system, so a local run cannot force an immediate report; use a TestFlight/device
+build and inspect the app's MetricKit log category when validating delivery.
 
 ## What to test before opening a pull request
 
@@ -355,10 +357,10 @@ Add the following checks when the change touches the corresponding area:
   on-device evidence, and record the device, scene, settings, and before/after
   measurements. Do not infer a performance claim from a simulator.
 - **MetricKit changes:** verify that the app starts without delay, that the
-  reporter is registered once, that existing report summaries remain local, and
-  that no raw payload or call stack is sent through CloudKit. Because delivery is
-  OS-scheduled, record whether this was validated with a device/TestFlight build
-  or with the unit-level summary tests.
+  reporter is registered once, that background snapshots remain aggregate, and
+  that raw payload inclusion is limited to an explicit performance-report
+  submission. Because delivery is OS-scheduled, record whether this was
+  validated with a device/TestFlight build or with the unit-level summary tests.
 
 For interface adjustments, attach before-and-after images to the pull request.
 Label each image with the platform, window size or device, and the relevant

@@ -11,6 +11,7 @@ Traces
 .agent
 .windsurf
 .claude/
+.firecrawl/
 build/*
 .build/*
 Sources/*
