@@ -280,7 +280,13 @@ private struct ThresholdMacRootView: View {
                 }
 
                 if appModel.isAttributionShortcutHeld {
-                    AttributionOverlay()
+                    AttributionOverlay(
+                        baseDistanceEstimator: BaseDistanceEstimatorInfo.resolve(
+                            fractalType: appModel.renderSettings.fractalType,
+                            formulaParams: appModel.renderSettings.formulaParams,
+                            embeddedFormula: appModel.activeEmbeddedFormula
+                        )
+                    )
                         .padding(24)
                         .frame(
                             maxWidth: .infinity,

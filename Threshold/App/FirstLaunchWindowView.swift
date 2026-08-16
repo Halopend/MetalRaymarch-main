@@ -6,7 +6,7 @@ import AVKit
 ///   1. Welcome (what Threshold is, what the app does)
 ///   2. Hand controls (movement video + handedness)
 ///   3. Menu gesture + compact shortcut summary
-///   4. Sharing (analytics on by default; user can opt out + username)
+///   4. Sharing (explicit optional aggregate usage choice + username)
 ///
 /// Each page scrolls independently; a shared footer pins Back/Next and
 /// the page indicator to the bottom so they stay reachable at any
@@ -266,8 +266,8 @@ struct FirstLaunchWindowView: View {
                 )
                 IntroTipRow(
                     icon: "person.2.wave.2",
-                    title: "Sharing is on by default",
-                    detail: "Threshold can share your settings with the community so they can become future collections. You can opt out anytime in Settings > Sharing."
+                    title: "Sharing is optional",
+                    detail: "Threshold can use anonymous aggregate signals to refine the app. You choose separately in Settings > Sharing whether any DEs or scenes may be shared with the creators."
                 )
             }
         } detail: {
@@ -573,13 +573,13 @@ struct FirstLaunchWindowView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    // MARK: - Page 4: Sharing (opt-out)
+    // MARK: - Page 4: Sharing (optional)
 
     private var sharingPage: some View {
         OnboardingPageShell(
             icon: shareAnalytics ? AppIcons.person3Fill : AppIcons.personSlash,
-            title: "Community sharing",
-            subtitle: "Threshold can share settings snapshots for future community collections. No account, email, or location.",
+            title: "Optional sharing",
+            subtitle: "Choose whether anonymous aggregate signals can help refine Threshold. Authored DEs and scenes are separate choices in Settings.",
             accent: .blue
         ) {
             VStack(alignment: .leading, spacing: 12) {
@@ -588,18 +588,18 @@ struct FirstLaunchWindowView: View {
                         .font(.title3)
                         .foregroundStyle(shareAnalytics ? .blue : .secondary)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(shareAnalytics ? "Sharing with the community" : "Sharing is off")
+                        Text(shareAnalytics ? "Aggregate sharing is on" : "Sharing is off")
                             .font(.headline)
                         Text(shareAnalytics
-                             ? "Your settings can be reviewed for future community features."
-                             : "Tap below to turn sharing back on.")
+                             ? "Only anonymous aggregate signals are enabled here."
+                             : "Nothing is shared unless you choose it.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
 
                 Toggle(isOn: $shareAnalytics) {
-                    Text(shareAnalytics ? "Sharing is on (turn off)" : "Sharing is off (turn on)")
+                    Text(shareAnalytics ? "Share aggregate usage signals" : "Aggregate usage sharing is off")
                 }
                 .tint(.blue)
 
@@ -610,7 +610,7 @@ struct FirstLaunchWindowView: View {
                     TextField("Leave blank to share anonymously", text: $communityDisplayName)
                         .textFieldStyle(.roundedBorder)
                         .autocorrectionDisabled(true)
-                    Text("Used only for community credits when settings are shared. Leave it blank to share anonymously.")
+                    Text("Used only for attribution if you later allow featuring. Leave it blank to share anonymously.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -622,7 +622,7 @@ struct FirstLaunchWindowView: View {
                     Label("What you're sharing:", systemImage: AppIcons.checkmarkCircle)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text("• Settings snapshots that can become community collections\n• Aggregated usage stats (e.g. which fractals are popular)\n• Your display name, if you add one, for attribution")
+                    Text("• Anonymous aggregate signals, such as time spent in an area or on a platform\n• DEs and scenes only if you separately enable them in Settings > Sharing\n• Your display name only if you allow featuring and attribution")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                     Label("What we don't collect:", systemImage: AppIcons.xmarkCircle)

@@ -238,9 +238,10 @@ struct MetalProjectTestApp: App {
             }
         }
         // The selection follows the effective Immersive / Window / Mixed preference.
-        // Immersive = progressive style starting fully immersed; the Digital
-        // Crown dials the portal continuously between full and window size (the compositor's
-        // portal mask is encoded by Renderer.encodeDrawableRenderContextPass).
+        // Immersive uses the compositor's full style so it remains launchable on
+        // devices that do not expose a standalone stencil8 render-context
+        // attachment. Window uses progressive style and therefore requires the
+        // portal render-context capability configured above.
         // Mixed has no portal — the scene composites over passthrough (miss
         // rays write alpha 0). The picker is authoritative: compositor writes
         // must not silently replace the mode the user selected.
@@ -249,7 +250,7 @@ struct MetalProjectTestApp: App {
                 get: {
                     switch appModel.immersionStylePreference {
                     case .immersive:
-                        return .progressive(MetalProjectTestApp.immersionCrownRange, initialAmount: 1.0)
+                        return .full
                     case .window:
                         return .progressive(MetalProjectTestApp.immersionCrownRange, initialAmount: MetalProjectTestApp.windowInitialAmount)
                     case .mixed:
@@ -263,7 +264,7 @@ struct MetalProjectTestApp: App {
                 // `immersionStylePreference` directly.
                 set: { _ in }
             ),
-            in: .progressive, .mixed
+            in: .full, .progressive, .mixed
         )
         .upperLimbVisibility(.visible)
         .persistentSystemOverlays(.hidden)

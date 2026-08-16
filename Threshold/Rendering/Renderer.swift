@@ -14,7 +14,7 @@ import QuartzCore
 import Synchronization
 
 // Debug logging toggle - set to false for release builds
-let RENDERER_DEBUG = false
+let RENDERER_DEBUG = true
 
 actor Renderer {
     let device: MTLDevice
