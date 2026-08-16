@@ -1,6 +1,7 @@
 # Threshold:
 ![pink-blue-fractal](metal-raymarch-demo.gif)
 
+
 A curiosity rooted in one of mathematics’ oldest instruments: make geometry something to sense, not just calculate.
 Explore a conceptual exploration at the intersection of art, math, chaos and order.
 
