@@ -1,3 +1,9 @@
+## TestFlight beta
+Try Threshold on Apple platforms through TestFlight:
+[Join the Threshold beta](https://testflight.apple.com/join/M2h3z8JU)
+Threshold is experimental. Performance varies by device and scene. Please stop using the visionOS version if you experience discomfort.
+
+
 # Threshold:
 ![pink-blue-fractal](metal-raymarch-demo.gif)
 A curiosity rooted in one of mathematics’ oldest instruments: make geometry something to sense, not just calculate.
@@ -37,12 +43,6 @@ flowchart LR
 - **Designed for the rest of the app:** Custom geometry works at runtime with
   Threshold's camera, lighting, color, animation, music-reactive controls, and
   spatial interaction.
-
-## TestFlight beta
-Try Threshold on Apple platforms through TestFlight:
-[Join the Threshold beta](https://testflight.apple.com/join/M2h3z8JU)
-Threshold is experimental. Performance varies by device and scene. Please stop using the visionOS version if you experience discomfort.
-
 
 
 Start with the [custom-scene authoring guide](CUSTOM_SCENES.md), then open
