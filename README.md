@@ -1,9 +1,3 @@
-## TestFlight beta
-Try Threshold on Apple platforms through TestFlight:
-[Join the Threshold beta](https://testflight.apple.com/join/M2h3z8JU)
-Threshold is experimental. Performance varies by device and scene. Please stop using the visionOS version if you experience discomfort.
-
-
 # Threshold:
 ![pink-blue-fractal](metal-raymarch-demo.gif)
 A curiosity rooted in one of mathematics’ oldest instruments: make geometry something to sense, not just calculate.
@@ -18,6 +12,11 @@ both self organizing through shared files and internally through code contributi
 Under the hood threshold is a real-time Metal ray marcher for **macOS, iPadOS, and visionOS. 
 Other platform support not planned at this time, though a library is in development. DE written in metal may 
 have webgpu compatibility but that has not yet been explored and would likely be subject to limitations.
+
+## TestFlight
+Try Threshold on Apple platforms through TestFlight:
+[Join the Threshold beta](https://testflight.apple.com/join/M2h3z8JU)
+
 
 ## Custom scenes are the core workflow, but still in beta
 Write or import a portable DE, tune it live, then export a self-contained scene.
