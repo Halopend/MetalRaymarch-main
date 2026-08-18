@@ -22,26 +22,23 @@ Exported or shared files are sent only when you use the platform share or file
 export controls. Treat any custom formula, scene, preset, or animation you
 share as public to the recipients you choose.
 
-### Community sharing and performance information
+### Anonymous analytics and performance information
 
-Threshold includes a Community Sharing setting. In the current release, it is
+Threshold includes an anonymous analytics setting. In the current release, it is
 enabled by default on first launch and can be disabled in Settings. When it is
 enabled, Threshold may send aggregate usage and performance information to the
 Apple CloudKit public database, including session duration, feature-use flags,
-render and quality settings, preset and formula categories, frame-rate
+render and quality settings, built-in fractal categories, frame-rate
 statistics, app version, operating-system version, and device model. The app
 does not create a separate Threshold account.
 
-The app does not currently upload the full contents of a saved preset through
-the background usage-sharing path. An optional performance report is submitted
-only when you explicitly press the report submission control while Community
-Sharing is enabled. That report can include render metrics, a formula hash, app
-and device information, and bounded operating-system MetricKit performance or
-diagnostic payloads. It is designed not to include formula source, but reports
-may contain information supplied by Apple in diagnostic payloads.
-
-The optional Display Name is stored locally on the device and is not currently
-sent by Threshold.
+The app does not upload saved-preset contents or names, scene position, or the
+source, name, or hash of a user-created distance estimator. An optional
+performance report is submitted only when you explicitly press the report
+submission control while anonymous analytics are enabled. That report can
+include render metrics, app and device information, and bounded
+operating-system MetricKit performance or diagnostic payloads. Reports may
+contain information supplied by Apple in diagnostic payloads.
 
 Apple operates CloudKit and may process information under Apple's terms and
 privacy policy. Threshold does not control Apple's retention, security, or

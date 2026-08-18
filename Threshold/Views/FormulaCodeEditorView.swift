@@ -423,8 +423,8 @@ private struct FormulaEditorContent: View {
                 .disabled(!UsageAnalytics.shared.analyticsEnabled)
 
                 Text(UsageAnalytics.shared.analyticsEnabled
-                     ? "Submission uses the existing Community Sharing preference and includes only structured performance data."
-                     : "Enable Community Sharing in Settings to submit. MetricKit collection remains local while sharing is off.")
+                     ? "Submission uses the anonymous analytics preference and includes only structured performance data."
+                     : "Enable anonymous analytics in Settings to submit. MetricKit collection remains local while sharing is off.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
 
@@ -458,7 +458,7 @@ private struct FormulaEditorContent: View {
             let result = await UsageAnalytics.shared.submitPerformanceReport(report)
             reportSubmissionStatus = switch result {
             case .submitted: "Report submitted. Thanks — the findings are ready to parse."
-            case .sharingDisabled: "Submission is off in Community Sharing."
+            case .sharingDisabled: "Anonymous analytics are off in Settings."
             case .unavailable: "CloudKit is unavailable right now."
             case .failed: "Submission failed; please try again later."
             }

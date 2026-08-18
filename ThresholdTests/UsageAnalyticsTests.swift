@@ -10,4 +10,11 @@ struct UsageAnalyticsTests {
         #expect(UsageAnalytics.canUseCloudKit(hasEntitlement: true, ubiquityIdentityToken: nil) == false)
         #expect(UsageAnalytics.canUseCloudKit(hasEntitlement: true, ubiquityIdentityToken: "token") == true)
     }
+
+    @Test("Custom distance estimators use a generic analytics category")
+    @MainActor
+    func customFormulaNamesAreNotCollected() {
+        #expect(UsageAnalytics.fractalCategory(for: .custom) == "Custom Formula")
+        #expect(UsageAnalytics.fractalCategory(for: .mandelbulb) == "Mandelbulb")
+    }
 }

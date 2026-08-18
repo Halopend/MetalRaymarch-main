@@ -39,33 +39,14 @@
 //       * usedAnimation (Int64)
 //       * presetsLoaded (Int64)
 //       * presetsSaved (Int64)
-//       * favoritePresets (List of Strings)
 //       * avgFPS (Double)
 //       * deviceModel (String)
 //       * osVersion (String)
 //       * appVersion (String)
-//
-//     - Create another Record Type: "PresetSnapshot"
-//     - Add fields:
-//       * timestamp (Date/Time)
-//       * presetName (String)
-//       * presetJSON (String) - full preset as JSON for easy parsing
-//       * deviceModel (String)
-//       * appVersion (String)
-//       --- Individual fields for easy CloudKit querying/filtering ---
-//       * colorScheme (String)
-//       * fractalScale (Double)
-//       * foldingLimit (Double)
-//       * sphereRadius (Double)
-//       * minDistance (Double)
-//       * fractalIterations (Int64)
-//       * glowIntensity (Double)
-//       * fogIntensity (Double)
-//       * colorSchemeVibrance (Double)
 //     - Deploy to Production environment before TestFlight
 //
 //  VIEW DATA:
-//  - CloudKit Console → Data → Public Database → UsageSnapshot / PresetSnapshot
+//  - CloudKit Console → Data → Public Database → UsageSnapshot
 //  - Export to CSV/JSON for analysis
 //
 
@@ -117,8 +98,6 @@ struct UsageSnapshot: Codable {
     // Preset interactions
     var presetsLoaded: Int
     var presetsSaved: Int
-    var favoritePresetNames: [String]  // Top 3 most loaded
-    
     // Performance context
     var avgFPS: Float
     
@@ -134,7 +113,6 @@ struct UsageSnapshot: Codable {
 final class UsageAnalytics {
     static let shared = UsageAnalytics()
     private static let analyticsEnabledKey = "AnalyticsEnabled"
-    private static let communityDisplayNameKey = "CommunityDisplayName"
     
     static var persistedAnalyticsEnabled: Bool {
         // Sharing is opt-out: first-launch users get sharing enabled by
@@ -185,7 +163,6 @@ final class UsageAnalytics {
     // Preset tracking
     private var presetsLoaded = 0
     private var presetsSaved = 0
-    private var presetLoadCounts: [String: Int] = [:]
     
     // Upload interval (upload every 5 minutes of active use)
     private let uploadInterval: TimeInterval = 300
@@ -194,8 +171,6 @@ final class UsageAnalytics {
     // Persistence key
     private let pendingUploadsKey = "PendingUsageSnapshots"
 
-    private var storedCommunityDisplayName: String
-    
     var analyticsEnabled: Bool {
         didSet {
             UserDefaults.standard.set(analyticsEnabled, forKey: Self.analyticsEnabledKey)
@@ -207,21 +182,6 @@ final class UsageAnalytics {
         }
     }
 
-    var communityDisplayName: String {
-        get { storedCommunityDisplayName }
-        set {
-            let normalized = Self.normalizedCommunityDisplayName(newValue)
-            guard storedCommunityDisplayName != normalized else { return }
-            storedCommunityDisplayName = normalized
-
-            if normalized.isEmpty {
-                UserDefaults.standard.removeObject(forKey: Self.communityDisplayNameKey)
-            } else {
-                UserDefaults.standard.set(normalized, forKey: Self.communityDisplayNameKey)
-            }
-        }
-    }
-    
     private init() {
         // Default to enabled — user can opt out via Settings > Sharing or
         // by toggling it on the welcome screen. `persistedAnalyticsEnabled`
@@ -229,9 +189,9 @@ final class UsageAnalytics {
         // launch); users who explicitly turned it off in a previous build
         // will see it stay off.
         self.analyticsEnabled = Self.persistedAnalyticsEnabled
-        self.storedCommunityDisplayName = Self.normalizedCommunityDisplayName(
-            UserDefaults.standard.string(forKey: Self.communityDisplayNameKey) ?? ""
-        )
+        // Display names are no longer part of sharing. Remove a value saved by
+        // an older release instead of retaining an unused user identifier.
+        UserDefaults.standard.removeObject(forKey: "CommunityDisplayName")
         
         // Try to upload any pending snapshots from previous sessions when opted in.
         if analyticsEnabled {
@@ -241,20 +201,15 @@ final class UsageAnalytics {
         }
     }
 
-    private static func normalizedCommunityDisplayName(_ name: String) -> String {
-        name.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
     private func distributionPercentages(_ source: [String: TimeInterval], duration: TimeInterval) -> [String: Float] {
         let safeDuration = max(duration, 1.0)
         return source.mapValues { Float($0 / safeDuration) }
     }
 
-    private func topFavoritePresets(limit: Int = 3) -> [String] {
-        presetLoadCounts
-            .sorted { $0.value > $1.value }
-            .prefix(limit)
-            .map { $0.key }
+    /// Custom descriptors use the author's formula name in the UI. Analytics
+    /// collapses every one of them into a generic bucket.
+    static func fractalCategory(for type: FractalModelType) -> String {
+        type == .custom ? "Custom Formula" : type.displayName
     }
 
     private func currentDeviceModel() -> String {
@@ -376,7 +331,6 @@ final class UsageAnalytics {
             avgFogIntensity: fogIntensityAccum / durationF,
             presetsLoaded: presetsLoaded,
             presetsSaved: presetsSaved,
-            favoritePresetNames: topFavoritePresets(),
             avgFPS: fpsAccum / durationF,
             deviceModel: currentDeviceModel(),
             osVersion: currentOSVersion(),
@@ -428,7 +382,7 @@ final class UsageAnalytics {
         fpsAccum += Float(fps) * dtf
 
         // Accumulate fractal type distribution
-        fractalTypeTimeAccum[geo.fractalType.displayName, default: 0] += dt
+        fractalTypeTimeAccum[Self.fractalCategory(for: geo.fractalType), default: 0] += dt
         
         // Accumulate gradient preset distribution
         usedGradientColoring = true
@@ -477,87 +431,18 @@ final class UsageAnalytics {
     }
     
     /// Track preset load
-    func trackPresetLoaded(name: String) {
+    func trackPresetLoaded(name _: String) {
         guard analyticsEnabled else { return }
         presetsLoaded += 1
-        presetLoadCounts[name, default: 0] += 1
     }
     
     /// Track that a preset was saved (local aggregate count only).
     ///
-    /// Historically this ALSO uploaded the preset's name + full JSON to the PUBLIC
-    /// CloudKit database on every save — user-authored content, world-readable,
-    /// opt-out. That upload is DISABLED pending a real accounts-based community /
-    /// sharing feature: publishing user content to a public DB needs actual identity
-    /// and explicit per-preset consent, not a silent opt-out telemetry push.
-    /// `uploadPresetSnapshot` is retained (unused) so it can be re-wired behind that
-    /// feature once accounts exist.
-    func trackPresetSaved(preset: FractalPreset) {
+    /// Only the aggregate count is retained. Preset names, contents, custom
+    /// distance estimators, and positions are never recorded or uploaded.
+    func trackPresetSaved(preset _: FractalPreset) {
         guard analyticsEnabled else { return }
         presetsSaved += 1
-    }
-    
-    // MARK: - Preset Snapshot Upload
-    
-    /// Upload a saved preset to CloudKit for analysis
-    private func uploadPresetSnapshot(_ preset: FractalPreset) async {
-        guard analyticsEnabled else { return }
-        let record = CKRecord(recordType: "PresetSnapshot")
-        
-        // Metadata
-        record["timestamp"] = Date() as NSDate
-        record["presetName"] = preset.name
-        
-        // Encode full preset as JSON for complete data access
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = .prettyPrinted
-        if let jsonData = try? encoder.encode(preset),
-           let jsonString = String(data: jsonData, encoding: .utf8) {
-            record["presetJSON"] = jsonString
-        }
-        
-        // Device info
-        record["deviceModel"] = currentDeviceModel()
-        record["appVersion"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
-        
-        // === Key fields for easy CloudKit querying/filtering ===
-        // These let you filter/sort in CloudKit Console without parsing JSON
-        
-        // Color & style
-        record["gradientPreset"] = preset.gradientState?.gradientPreset?.rawValue ?? "custom"
-        record["colorSchemeVibrance"] = (preset.colorSchemeVibrance ?? 0.0) as NSNumber
-        record["colorSchemeSaturation"] = preset.colorSchemeSaturation as NSNumber
-        record["colorSchemeContrast"] = preset.colorSchemeContrast as NSNumber
-        
-        // Fractal geometry
-        record["fractalScale"] = preset.fractalScale as NSNumber
-        record["foldingLimit"] = preset.foldingLimit as NSNumber
-        record["sphereRadius"] = preset.sphereRadius as NSNumber
-        record["minDistance"] = preset.minDistance as NSNumber
-        record["fractalIterations"] = preset.fractalIterations as NSNumber
-        
-        // Effects
-        record["glowIntensity"] = (preset.glowEffect?.intensity ?? 0.0) as NSNumber
-        record["fogIntensity"] = (preset.fogEffect?.intensity ?? 0.5) as NSNumber
-        record["bloomStrength"] = (preset.bloomEffect?.strength ?? 0.0) as NSNumber
-        
-        // Lighting
-        record["lightingMode"] = preset.lightingMode?.displayName ?? "Animated"
-        record["hueCycleSpeed"] = (preset.hueRotationEffect?.speed ?? 0.0) as NSNumber
-        record["pulseSpeed"] = (preset.pulseEffect?.speed ?? 0.0) as NSNumber
-        
-        // Position (useful to see if people explore far from origin)
-        record["positionX"] = preset.position.x as NSNumber
-        record["positionY"] = preset.position.y as NSNumber
-        record["positionZ"] = preset.position.z as NSNumber
-        
-        guard let database = database() else { return }  // CloudKit unavailable — skip
-        do {
-            _ = try await database.save(record)
-        } catch {
-            // Could save for retry, but presets are less critical than session data
-        }
     }
     
     // MARK: - CloudKit Upload
@@ -575,27 +460,28 @@ final class UsageAnalytics {
 
     /// Submit a structured, compressed performance report. This is separate
     /// from the background usage snapshot: it only runs after the user presses
-    /// “Submit report”, and it is gated by the existing Community Sharing
-    /// preference. The archive contains no formula source.
+    /// “Submit report”, and it is gated by the anonymous analytics
+    /// preference. Reports contain no formula source, formula identifier, user
+    /// preset name, or scene position.
     func submitPerformanceReport(_ report: PerformanceReport) async -> PerformanceReportSubmissionResult {
         guard analyticsEnabled else { return .sharingDisabled }
         guard let database = database() else { return .unavailable }
-        guard let archive = try? PerformanceReportArchive.encode(report) else { return .failed }
+        let sharedReport = report.redactedForSharing()
+        guard let archive = try? PerformanceReportArchive.encode(sharedReport) else { return .failed }
 
         let record = CKRecord(recordType: "PerformanceReport")
-        record["timestamp"] = report.capturedAt as NSDate
-        record["schemaVersion"] = report.schemaVersion as NSNumber
-        record["appVersion"] = report.appVersion
-        record["buildNumber"] = report.buildNumber
-        record["deviceModel"] = report.deviceModel
-        record["osVersion"] = report.osVersion
-        record["formulaHash"] = report.activeFormulaHash ?? "built-in"
-        record["fps"] = report.render.fps as NSNumber
-        record["gpuFrameMs"] = report.render.gpuFrameMs as NSNumber
-        record["avgStepsPerPixel"] = report.render.avgStepsPerPixel as NSNumber
-        record["metricKitPayloadCount"] = report.metricKit.payloadCount as NSNumber
-        record["metricKitDiagnosticCount"] = report.metricKit.diagnosticCount as NSNumber
-        record["findingAreas"] = report.findings.map { $0.area.rawValue }.joined(separator: ",")
+        record["timestamp"] = sharedReport.capturedAt as NSDate
+        record["schemaVersion"] = sharedReport.schemaVersion as NSNumber
+        record["appVersion"] = sharedReport.appVersion
+        record["buildNumber"] = sharedReport.buildNumber
+        record["deviceModel"] = sharedReport.deviceModel
+        record["osVersion"] = sharedReport.osVersion
+        record["fps"] = sharedReport.render.fps as NSNumber
+        record["gpuFrameMs"] = sharedReport.render.gpuFrameMs as NSNumber
+        record["avgStepsPerPixel"] = sharedReport.render.avgStepsPerPixel as NSNumber
+        record["metricKitPayloadCount"] = sharedReport.metricKit.payloadCount as NSNumber
+        record["metricKitDiagnosticCount"] = sharedReport.metricKit.diagnosticCount as NSNumber
+        record["findingAreas"] = sharedReport.findings.map { $0.area.rawValue }.joined(separator: ",")
         // CloudKit stores the compressed archive as a string so the record is
         // self-contained and can be copied into the parser without a file
         // attachment. The bounded MetricKit retention keeps this well below a
@@ -663,10 +549,6 @@ final class UsageAnalytics {
         // Presets
         record["presetsLoaded"] = snapshot.presetsLoaded as NSNumber
         record["presetsSaved"] = snapshot.presetsSaved as NSNumber
-        if !snapshot.favoritePresetNames.isEmpty {
-            record["favoritePresets"] = snapshot.favoritePresetNames
-        }
-        
         // Performance
         record["avgFPS"] = snapshot.avgFPS as NSNumber
         

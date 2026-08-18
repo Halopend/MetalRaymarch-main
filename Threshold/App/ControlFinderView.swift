@@ -250,8 +250,8 @@ struct ControlFinderDestination: Identifiable {
         ),
         settingsDestination(
             .sharing,
-            description: "Choose local or iCloud storage and control community data sharing.",
-            keywords: ["storage", "icloud", "sync", "privacy", "analytics", "community", "display name"]
+            description: "Choose local or iCloud storage and control anonymous analytics.",
+            keywords: ["storage", "icloud", "sync", "privacy", "analytics", "files"]
         ),
         settingsDestination(
             .export,

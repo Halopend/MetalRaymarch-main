@@ -9,7 +9,6 @@ import Foundation
 extension AppModel {
     func makePerformanceReport(capturedAt: Date = Date()) -> PerformanceReport {
         let metrics = renderMetrics
-        let activeFormula = activeEmbeddedFormula
         let render = RenderPerformanceSnapshot(
             capturedAt: capturedAt,
             fps: metrics.fps,
@@ -33,8 +32,10 @@ extension AppModel {
             buildNumber: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
             deviceModel: Self.currentDeviceModel(),
             osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
-            activeFormulaName: activeFormula?.name,
-            activeFormulaHash: activeFormula?.shortHash,
+            // Formula identity is intentionally excluded: a user-created
+            // distance estimator is not part of performance sharing.
+            activeFormulaName: nil,
+            activeFormulaHash: nil,
             render: render,
             metricKit: metricKitPerformanceReporter.snapshot()
         )
@@ -50,4 +51,3 @@ extension AppModel {
         }
     }
 }
-

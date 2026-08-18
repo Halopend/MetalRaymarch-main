@@ -490,11 +490,7 @@ extension ContentView {
 
     // MARK: - Sharing sub-view
 
-    /// Sharing sub-view: Community Sharing (analytics + username) and
-    /// iCloud Drive backup. Sharing is **on by default** — the user must
-    /// opt out by turning the toggle off. The username is independent
-    /// and is always shown so the user can set an attribution handle
-    /// without enabling sharing.
+    /// Sharing sub-view: anonymous aggregate analytics and iCloud Drive.
     private var settingsSharingContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             storageLocationSection
@@ -554,7 +550,7 @@ extension ContentView {
     private var communitySharingSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Community Sharing", systemImage: AppIcons.person3Fill)
+                Label("Help Improve Threshold", systemImage: AppIcons.person3Fill)
                     .font(.headline)
                 Spacer()
                 Image(systemName: UsageAnalytics.shared.analyticsEnabled
@@ -562,12 +558,12 @@ extension ContentView {
                       : "minus.circle")
                     .foregroundStyle(UsageAnalytics.shared.analyticsEnabled ? .green : .secondary)
                     .help(UsageAnalytics.shared.analyticsEnabled
-                          ? "Sharing is on"
-                          : "Sharing is off")
+                          ? "Anonymous analytics are on"
+                          : "Anonymous analytics are off")
             }
 
             // Flipped copy: "on by default" is the headline.
-            Text("On by default. Disable below to opt out. No account is created and no Apple ID, email, or location is required.")
+            Text("Share anonymous feature, quality, and performance totals. On by default; turn it off below at any time.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -577,32 +573,17 @@ extension ContentView {
                 set: { UsageAnalytics.shared.analyticsEnabled = $0 }
             )) {
                 Label(
-                    UsageAnalytics.shared.analyticsEnabled ? "Sharing with the community" : "Sharing is off",
+                    UsageAnalytics.shared.analyticsEnabled ? "Share anonymous analytics" : "Anonymous analytics are off",
                     systemImage: UsageAnalytics.shared.analyticsEnabled ? AppIcons.person3Fill : AppIcons.personSlash
                 )
             }
             .tint(.blue)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Display Name (optional)")
+                Label("What is shared:", systemImage: AppIcons.checkmarkCircle)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                TextField("Leave blank to share anonymously", text: Binding(
-                    get: { UsageAnalytics.shared.communityDisplayName },
-                    set: { UsageAnalytics.shared.communityDisplayName = $0 }
-                ))
-                .textFieldStyle(.roundedBorder)
-                .autocorrectionDisabled(true)
-                Text("Used only for community credits. Stays on this device — never leaves your Mac. Leave blank to share anonymously.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Label("What you're opting into:", systemImage: AppIcons.checkmarkCircle)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text("• Your settings can be reviewed for future community features\n• Shared setups may appear later in original or altered form\n• If you add a user name, it can be used for attribution\n• Aggregated usage stats help us improve performance and features")
+                Text("• Aggregate feature use, render quality, and performance\n• App, operating-system, and device model\n• Never your user name, preset names, files, scene position, or custom distance estimator")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

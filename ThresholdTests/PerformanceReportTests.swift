@@ -67,6 +67,15 @@ struct PerformanceReportTests {
         #expect(try PerformanceReportAnalyzer.parse(json) == report)
     }
 
+    @Test("Shared reports remove user-created distance-estimator identity")
+    func sharingRedactsCustomFormulaIdentity() {
+        let shared = makeReport().redactedForSharing()
+
+        #expect(shared.activeFormulaName == nil)
+        #expect(shared.activeFormulaHash == nil)
+        #expect(shared.render == render)
+    }
+
     @Test("Analysis identifies GPU, DE, presentation, quality, and MetricKit focus areas")
     func findingsIdentifyFocusAreas() {
         let report = makeReport()

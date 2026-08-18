@@ -1210,7 +1210,7 @@ extension ContentView {
                     .foregroundStyle(.green)
             }
 
-            Text("MetricKit quietly collects OS-level performance diagnostics in the background. Submit the current structured sample using the existing Community Sharing preference when you want to share it.")
+            Text("MetricKit quietly collects OS-level performance diagnostics in the background. Submit the current structured sample using the anonymous analytics preference when you want to share it.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -1226,7 +1226,7 @@ extension ContentView {
                         let result = await UsageAnalytics.shared.submitPerformanceReport(report)
                         performanceReportStatus = switch result {
                         case .submitted: "Report submitted."
-                        case .sharingDisabled: "Enable Community Sharing to submit."
+                        case .sharingDisabled: "Enable anonymous analytics to submit."
                         case .unavailable: "CloudKit is unavailable right now."
                         case .failed: "Submission failed; please try again later."
                         }

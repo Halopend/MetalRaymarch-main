@@ -6,7 +6,7 @@ import AVKit
 ///   1. Welcome (what Threshold is, what the app does)
 ///   2. Hand controls (movement video + handedness)
 ///   3. Menu gesture + compact shortcut summary
-///   4. Sharing (analytics on by default; user can opt out + username)
+///   4. Anonymous analytics (on by default; user can opt out)
 ///
 /// Each page scrolls independently; a shared footer pins Back/Next and
 /// the page indicator to the bottom so they stay reachable at any
@@ -28,7 +28,6 @@ struct FirstLaunchWindowView: View {
     @State private var leftHanded = false
     @State private var menuGestureStyle: MenuGestureStarterStyle = .palmer
     @State private var shareAnalytics = UsageAnalytics.shared.analyticsEnabled
-    @State private var communityDisplayName = UsageAnalytics.shared.communityDisplayName
 
     private let pageCount = 5
 
@@ -67,7 +66,6 @@ struct FirstLaunchWindowView: View {
 #endif
         .onAppear {
             shareAnalytics = UsageAnalytics.shared.analyticsEnabled
-            communityDisplayName = UsageAnalytics.shared.communityDisplayName
             leftHanded = appModel.renderSettings.leftHandedMode
             menuGestureStyle = MenuGestureStarterStyle.style(for: appModel.renderSettings.menuToggleGestureMode) ?? .palmer
         }
@@ -141,7 +139,7 @@ struct FirstLaunchWindowView: View {
         case 1: "Overview"
         case 2: "Movement"
         case 3: "Gestures"
-        default: "Sharing"
+        default: "Analytics"
         }
     }
 
@@ -266,8 +264,8 @@ struct FirstLaunchWindowView: View {
                 )
                 IntroTipRow(
                     icon: "person.2.wave.2",
-                    title: "Sharing is on by default",
-                    detail: "Threshold can share your settings with the community so they can become future collections. You can opt out anytime in Settings > Sharing."
+                    title: "Help improve Threshold",
+                    detail: "Anonymous feature, quality, and performance totals are shared by default. Your files, custom distance estimators, and position are never included. You can opt out anytime in Settings > Sharing."
                 )
             }
         } detail: {
@@ -573,13 +571,13 @@ struct FirstLaunchWindowView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    // MARK: - Page 4: Sharing (opt-out)
+    // MARK: - Page 4: Anonymous analytics (opt-out)
 
     private var sharingPage: some View {
         OnboardingPageShell(
             icon: shareAnalytics ? AppIcons.person3Fill : AppIcons.personSlash,
-            title: "Community sharing",
-            subtitle: "Threshold can share settings snapshots for future community collections. No account, email, or location.",
+            title: "Help improve Threshold",
+            subtitle: "Share anonymous feature, quality, and performance totals. No account or user name.",
             accent: .blue
         ) {
             VStack(alignment: .leading, spacing: 12) {
@@ -588,48 +586,36 @@ struct FirstLaunchWindowView: View {
                         .font(.title3)
                         .foregroundStyle(shareAnalytics ? .blue : .secondary)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(shareAnalytics ? "Sharing with the community" : "Sharing is off")
+                        Text(shareAnalytics ? "Anonymous analytics are on" : "Anonymous analytics are off")
                             .font(.headline)
                         Text(shareAnalytics
-                             ? "Your settings can be reviewed for future community features."
-                             : "Tap below to turn sharing back on.")
+                             ? "Aggregate measurements help guide compatibility and performance work."
+                             : "No analytics will be uploaded.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
 
                 Toggle(isOn: $shareAnalytics) {
-                    Text(shareAnalytics ? "Sharing is on (turn off)" : "Sharing is off (turn on)")
+                    Text(shareAnalytics ? "Share anonymous analytics" : "Anonymous analytics are off")
                 }
                 .tint(.blue)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Display Name (optional)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    TextField("Leave blank to share anonymously", text: $communityDisplayName)
-                        .textFieldStyle(.roundedBorder)
-                        .autocorrectionDisabled(true)
-                    Text("Used only for community credits when settings are shared. Leave it blank to share anonymously.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
 
             }
         } detail: {
             VStack(alignment: .leading, spacing: 8) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Label("What you're sharing:", systemImage: AppIcons.checkmarkCircle)
+                    Label("Included:", systemImage: AppIcons.checkmarkCircle)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text("• Settings snapshots that can become community collections\n• Aggregated usage stats (e.g. which fractals are popular)\n• Your display name, if you add one, for attribution")
+                    Text("• Session duration and aggregate feature use\n• Render quality and performance measurements\n• App, operating-system, and device model")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
-                    Label("What we don't collect:", systemImage: AppIcons.xmarkCircle)
+                    Label("Never included:", systemImage: AppIcons.xmarkCircle)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .padding(.top, 4)
-                    Text("• No account is created\n• No Apple ID, email, or location\n• No photos, recordings, or personal files")
+                    Text("• No user name, account, Apple ID, email, or location\n• No scene position, preset names, or personal files\n• No custom distance-estimator source, name, or hash")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -650,12 +636,11 @@ struct FirstLaunchWindowView: View {
     // MARK: - Completion
 
     private func completeOnboarding() {
-        // Persist the state the user just configured: sharing toggle,
-        // username, handedness, and menu-open gesture. (Handedness and the
+        // Persist the state the user just configured: analytics toggle,
+        // handedness, and menu-open gesture. (Handedness and the
         // gesture are also written live on change, so this is belt-and-braces.)
         // The acknowledgement checkbox is intentionally not persisted — it's a
         // one-time consent, not a setting.
-        UsageAnalytics.shared.communityDisplayName = communityDisplayName
         UsageAnalytics.shared.analyticsEnabled = shareAnalytics
         appModel.renderSettings.leftHandedMode = leftHanded
         appModel.renderSettings.menuToggleGestureMode = menuGestureStyle.mode

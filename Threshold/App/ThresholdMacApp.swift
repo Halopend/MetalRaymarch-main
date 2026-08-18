@@ -84,7 +84,7 @@ struct ThresholdMacApp: App {
             FirstLaunchWindowView()
                 .environment(appModel)
         }
-        .defaultSize(width: 980, height: 760)
+        .defaultSize(width: 880, height: 660)
         .windowResizability(.contentMinSize)
 
         // Live formula editor: its own window so the fractal viewport stays
@@ -144,6 +144,7 @@ private struct ThresholdMacRootView: View {
     @AppStorage("MacTabLauncher.style") private var launcherStyle: NavigationPresentationStyle = .radial
     @AppStorage("MacTabLauncher.curvature") private var launcherCurvature: Double = 0.82
     @AppStorage("allowCustomScenes") private var allowCustomScenes = false
+    @AppStorage("hasCompletedIntroOnboarding") private var hasCompletedIntroOnboarding = false
 
     private var radialActiveWorkspaceRoute: AppRoute {
         if appModel.navigationStore.currentRoute.workspaceRoot != nil {
@@ -363,6 +364,14 @@ private struct ThresholdMacRootView: View {
                 onSelect: navigateFromControlFinder,
                 onDismiss: { isControlFinderPresented = false }
             )
+        }
+        .sheet(isPresented: Binding(
+            get: { !hasCompletedIntroOnboarding },
+            set: { _ in }
+        )) {
+            FirstLaunchWindowView()
+                .environment(appModel)
+                .interactiveDismissDisabled()
         }
         .onAppear {
             migrateLegacyNavigationPreferenceIfNeeded()

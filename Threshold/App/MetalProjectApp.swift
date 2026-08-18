@@ -194,7 +194,7 @@ struct MetalProjectTestApp: App {
             FirstLaunchWindowView()
                 .environment(appModel)
         }
-        .defaultSize(width: 980, height: 760)
+        .defaultSize(width: 880, height: 660)
         .windowResizability(.contentMinSize)
 
         // Music Library pop-out window

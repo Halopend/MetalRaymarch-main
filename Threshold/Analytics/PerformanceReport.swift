@@ -112,6 +112,22 @@ struct PerformanceReport: Codable, Equatable, Sendable {
             metricKit: metricKit
         )
     }
+
+    /// Removes identifiers for a user-created distance estimator before a
+    /// report leaves the app. Render measurements remain useful without them.
+    func redactedForSharing() -> PerformanceReport {
+        PerformanceReport(
+            capturedAt: capturedAt,
+            appVersion: appVersion,
+            buildNumber: buildNumber,
+            deviceModel: deviceModel,
+            osVersion: osVersion,
+            activeFormulaName: nil,
+            activeFormulaHash: nil,
+            render: render,
+            metricKit: metricKit
+        )
+    }
 }
 
 enum PerformanceReportSubmissionResult: Equatable, Sendable {
