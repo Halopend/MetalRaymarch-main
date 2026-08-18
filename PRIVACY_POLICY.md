@@ -2,7 +2,7 @@
 
 **Effective date: August 13, 2026**
 
-Threshold is an experimental real-time fractal art application for macOS,
+Threshold is a real-time fractal art application for macOS,
 iPadOS, and visionOS. This policy explains what Threshold processes and when
 it is shared. It describes the current app implementation and is not legal
 advice.
@@ -24,8 +24,8 @@ share as public to the recipients you choose.
 
 ### Anonymous analytics and performance information
 
-Threshold includes an anonymous analytics setting. In the current release, it is
-enabled by default on first launch and can be disabled in Settings. When it is
+Threshold includes an optional anonymous analytics setting. It is disabled by
+default and can be enabled or disabled during setup or in Settings. When it is
 enabled, Threshold may send aggregate usage and performance information to the
 Apple CloudKit public database, including session duration, feature-use flags,
 render and quality settings, built-in fractal categories, frame-rate
@@ -51,10 +51,11 @@ that request.
 
 ### Audio and Apple Music
 
-If you enable audio-reactive features, Threshold processes live microphone or
-system audio locally to drive visual parameters. The app does not record or
-save the audio as part of this feature. Microphone access is requested only
-where the selected feature requires it.
+If you enable audio-reactive features, Threshold processes live microphone
+input locally to drive visual parameters. The app does not record or save the
+audio as part of this feature. Microphone access is requested only where the
+selected feature requires it. The current release does not capture the screen
+or system output audio.
 
 If you use Apple Music integration, Threshold requests access to the media
 library so you can browse and play selected songs, playlists, and related

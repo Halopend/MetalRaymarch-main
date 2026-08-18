@@ -241,6 +241,7 @@ extension ContentView {
 
 #if os(macOS)
             macLauncherSection
+            sceneNavigationFeedbackSection
             macPerformanceDisplaySection
 #endif
 
@@ -253,6 +254,25 @@ extension ContentView {
     }
 
 #if os(macOS)
+    private var sceneNavigationFeedbackSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(isOn: $showSceneNavigationFeedback) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Scene Switcher Panel", systemImage: "rectangle.stack.badge.play")
+                        .font(.headline)
+                    Text("Shows the current scene with previous and next controls after you switch scenes.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .tint(.orange)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.07)))
+    }
+
     private var macPerformanceDisplaySection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Performance Display", systemImage: AppIcons.chartBarFill)
@@ -432,20 +452,14 @@ extension ContentView {
     }
 #endif
 
-    /// Display-flavored experimental toggles. The custom-shenes enable is
+    /// Advanced display toggles. The custom-scenes enable is
     /// a display-runtime knob (it gates whether the renderer tries to
     /// compile user-supplied shaders), so it lives here.
     private var experimentalDisplaySection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Label("Experimental Display", systemImage: AppIcons.flaskFill)
+                Label("Advanced Display", systemImage: AppIcons.flaskFill)
                     .font(.headline)
-                Text("BETA")
-                    .font(.caption2.weight(.bold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.orange.opacity(0.25)))
-                    .foregroundStyle(.orange)
                 Spacer()
             }
 
@@ -453,7 +467,7 @@ extension ContentView {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Allow custom scenes")
                         .font(.subheadline.weight(.semibold))
-                    Text("Enables loading .threshfx files and custom shader formulas. Default parameters may not be ideal and some scenes may not render correctly yet.")
+                    Text("Enables loading local .threshfx files and writing custom shader formulas. Custom scenes are validated and compiled on this Mac.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -562,8 +576,7 @@ extension ContentView {
                           : "Anonymous analytics are off")
             }
 
-            // Flipped copy: "on by default" is the headline.
-            Text("Share anonymous feature, quality, and performance totals. On by default; turn it off below at any time.")
+            Text("Optionally share anonymous feature, quality, and performance totals. Sharing stays off until you enable it.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -587,6 +600,9 @@ extension ContentView {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
+
+            Link("Privacy Policy", destination: URL(string: "https://github.com/Halopend/MetalRaymarch-main/blob/main/PRIVACY_POLICY.md")!)
+                .font(.caption)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(DS.Spacing.md)
@@ -872,10 +888,10 @@ extension ContentView {
         }
     }
     
-    /// Reusable "EXPERIMENTAL" pill. Single source of truth for the badge that
+    /// Reusable advanced-feature pill. Single source of truth for the badge that
     /// previously appeared copy-pasted on each Advanced raymarcher card.
     private var experimentalBadge: some View {
-        Text("EXPERIMENTAL")
+        Text("ADVANCED")
             .font(.caption2.bold())
             .foregroundStyle(.orange)
             .padding(.horizontal, 6)
