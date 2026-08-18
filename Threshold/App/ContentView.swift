@@ -19,9 +19,13 @@ struct ContentView: View {
     /// persistent actions; standalone and conventional panel presentations keep
     /// the complete top dock and section rail.
     let showsOuterNavigation: Bool
+    /// macOS's persistent root owns the first-run storage sheet so an
+    /// auto-hidden slide-over panel cannot tear down its presentation host.
+    let handlesStorageChoice: Bool
 
-    init(showsOuterNavigation: Bool = true) {
+    init(showsOuterNavigation: Bool = true, handlesStorageChoice: Bool = true) {
         self.showsOuterNavigation = showsOuterNavigation
+        self.handlesStorageChoice = handlesStorageChoice
     }
 
     @Environment(AppModel.self) var appModel
@@ -51,6 +55,8 @@ struct ContentView: View {
 #endif
     @AppStorage("ContentView.showPerformanceInMenu") var showPerformanceInMenu: Bool = false
     @AppStorage("ContentView.showFPSInHUD") var showFPSInHUD: Bool = true
+    @AppStorage(SceneNavigationFeedbackSettings.defaultsKey)
+    var showSceneNavigationFeedback: Bool = SceneNavigationFeedbackSettings.defaultValue
     @State var showStopsPopover = false
     @State private var showSaveDestinationSheet = false
     @State private var saveConfirmationMessage: String?
@@ -387,7 +393,7 @@ struct ContentView: View {
         }
         .onAppear {
             // First-run: prompt once for the storage location (local vs iCloud).
-            if !StorageLocation.shared.hasChosenMode {
+            if handlesStorageChoice && !StorageLocation.shared.hasChosenMode {
                 showStorageChoice = true
             }
             appModel.openShapeMenuHandler = {

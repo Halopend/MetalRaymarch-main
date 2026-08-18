@@ -21,8 +21,12 @@ extension AppModel {
     @MainActor
     func loadStaticScene(
         _ preset: FractalPreset,
-        options: StaticSceneLoadOptions = []
+        options: StaticSceneLoadOptions = [],
+        manualSceneNavigationRequest: ManualSceneNavigationRequest? = nil
     ) {
+        if manualSceneNavigationRequest == nil {
+            manualStaticSceneNavigationCursor = nil
+        }
         // Exit keyframe-animation mode before loading a static scene. While an
         // animation is playing, `RenderSettings.isAnimationPlaying` makes the
         // effective-target getters return the per-frame `animationBase` and the
@@ -64,7 +68,11 @@ extension AppModel {
                     // handler), so we just queue the preset-apply behind the
                     // handler and return immediately. The user can enter the
                     // scene at their own pace and the scene will load.
-                    queuePresetApplyAfterFormulaActivation(preset, options: options)
+                    queuePresetApplyAfterFormulaActivation(
+                        preset,
+                        options: options,
+                        manualSceneNavigationRequest: manualSceneNavigationRequest
+                    )
                     return
                 }
             } else {
@@ -74,9 +82,14 @@ extension AppModel {
             // scene from a previous deferred import, so a stale queued apply
             // can't fire on the next handler binding.
             pendingPresetForActivation = nil
+            pendingPresetSceneNavigationRequest = nil
             pendingSceneApplyAfterActivation = nil
             guard !Task.isCancelled, staticSceneLoadGeneration == generation else { return }
-            await applyLoadedScene(preset, options: options)
+            await applyLoadedScene(
+                preset,
+                options: options,
+                manualSceneNavigationRequest: manualSceneNavigationRequest
+            )
         }
     }
 
@@ -89,6 +102,7 @@ extension AppModel {
     func queuePresetApplyAfterFormulaActivation(
         _ preset: FractalPreset,
         options: StaticSceneLoadOptions,
+        manualSceneNavigationRequest: ManualSceneNavigationRequest? = nil,
         timeout: TimeInterval = 10
     ) {
         // Persist + close the import sheet immediately so the user gets
@@ -113,6 +127,7 @@ extension AppModel {
         // 10s timeout has expired: the renderer's startup picks up
         // `activeEmbeddedFormula` and the didSet consumes the queued preset.
         pendingPresetForActivation = preset
+        pendingPresetSceneNavigationRequest = manualSceneNavigationRequest
         // Auto-open the immersive space if the user is on the menu (or in
         // any state other than already-open). The view that owns
         // @Environment(\.openImmersiveSpace) observes the notification and
@@ -151,6 +166,7 @@ extension AppModel {
                     )))
                     uninstallEmbeddedFormula()
                     pendingPresetForActivation = nil
+                    pendingPresetSceneNavigationRequest = nil
                     return
                 }
             }
@@ -159,7 +175,12 @@ extension AppModel {
             // apply the preset now and clear the slot.
             if pendingPresetForActivation != nil {
                 pendingPresetForActivation = nil
-                await applyLoadedScene(preset, options: [])
+                pendingPresetSceneNavigationRequest = nil
+                await applyLoadedScene(
+                    preset,
+                    options: [],
+                    manualSceneNavigationRequest: manualSceneNavigationRequest
+                )
             }
         }
     }
@@ -172,7 +193,8 @@ extension AppModel {
     @MainActor
     func applyLoadedScene(
         _ preset: FractalPreset,
-        options: StaticSceneLoadOptions
+        options: StaticSceneLoadOptions,
+        manualSceneNavigationRequest: ManualSceneNavigationRequest? = nil
     ) async {
         // Custom and built-in scenes wait here alike: a custom formula has no
         // usable pipeline until its specialized one is compiled, and a built-in
@@ -216,6 +238,12 @@ extension AppModel {
             clearExternalPreview(restorePreviewedState: false)
             pendingExternalImport = nil
             ensureWindowContentVisible()
+        }
+        if let manualSceneNavigationRequest {
+            completeManualSceneNavigation(
+                manualSceneNavigationRequest,
+                sceneName: preset.name
+            )
         }
     }
 

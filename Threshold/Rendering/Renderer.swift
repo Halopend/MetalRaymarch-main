@@ -171,6 +171,9 @@ actor Renderer {
     // to compile can't hot-loop the compiler.
     var customLibrarySelfHealInFlight = false
     var lastCustomLibrarySelfHealAttempt: TimeInterval = 0
+    /// Invalidates an older async formula compile when a newer scene/formula
+    /// activation starts before it finishes.
+    var customShaderActivationGeneration: UInt64 = 0
 
     // MRU list of custom-formula hashes whose specialized pipelines stay
     // cached (see retainCustomShaderPipelines). Front = most recent.
@@ -854,12 +857,26 @@ actor Renderer {
             // `scheduleCustomLibrarySelfHeal` swaps the custom DE in once the
             // library is ready). The compile itself is also off-thread now
             // (CustomShaderCompiler.library uses the async makeLibrary API).
-            let pendingFormula = await MainActor.run { appModel.activeEmbeddedFormula }
+            let (pendingFormula, pendingWarpStackSource, pendingWarpStackSignature) = await MainActor.run {
+                (
+                    appModel.activeEmbeddedFormula,
+                    appModel.renderSettings.warpStackCodegenSource,
+                    appModel.renderSettings.warpStackCodegenSignature
+                )
+            }
             if let pending = pendingFormula, !pending.isBundledConstructionPrimitive {
                 customSceneDiagnostic("🔬 [CSDiag] Handler ready — scheduling deferred activation for '\(pending.name)' hash=\(pending.shortHash) (concurrent; does NOT block first frame)")
                 Task {
                     do {
-                        try await renderer.activateEmbeddedFormula(pending)
+                        // Keep cold-start activation aligned with the normal
+                        // scene-load handler. Omitting the live transform-stack
+                        // source/signature can overwrite the correct library
+                        // with an s0/default-stack variant.
+                        try await renderer.activateEmbeddedFormula(
+                            pending,
+                            warpStackSource: pendingWarpStackSource,
+                            warpStackSignature: pendingWarpStackSignature
+                        )
                     } catch {
                         customSceneDiagnostic("🔬 [CSDiag] ❌ Deferred activation failed: \(error)")
                     }
