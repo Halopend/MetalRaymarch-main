@@ -3,8 +3,8 @@
 //  Threshold
 //
 //  Editor for the composable domain-transform STACK (`RenderSettings.spaceWarpStack`).
-//  Learn transforms by mapping Metal equations or open the direct-use catalog,
-//  then group a contiguous series into an iterated loop, reorder them (order =
+//  Open the direct-use catalog, then group a contiguous series into an iterated
+//  loop, reorder them (order =
 //  order of application), enable/disable,
 //  and tune each instance's own parameters. Multiple of the SAME kind can be stacked. EVERY edit — structural
 //  or slider —
@@ -77,19 +77,9 @@ struct TransformationsSection: View {
     }
     private var hasStackCapacity: Bool { ops.count < Int(kMaxSpaceWarpOps) }
     private var experienceMode: TransformationExperienceMode {
-        TransformationExperienceMode.decode(experienceModeRaw)
-    }
-    private var experienceModeBinding: Binding<TransformationExperienceMode> {
-        Binding(
-            get: { experienceMode },
-            set: { newMode in
-                experienceModeRaw = newMode.rawValue
-                synchronizeRuntimeInteractionAccess(
-                    mode: newMode,
-                    mappedIDs: mappedTransformationIDs
-                )
-            }
-        )
+        // The Transformations screen is direct-edit only. Keep the persisted
+        // lesson state below for compatibility with existing scenes/settings.
+        .justUse
     }
     private var mappedLessonIDs: Set<TransformationLessonID> {
         TransformationUnlockProgress.decode(
@@ -232,20 +222,12 @@ struct TransformationsSection: View {
         LazyVStack(alignment: .leading, spacing: 10) {
             transformationsHeader
 
-            experienceModePicker
-
-            Text(experienceMode == .education
-                 ? "Optional equation lessons. Your mapped transforms and editing stack remain separate."
-                 : "Direct editing. Transformations run from top to bottom; open a card only when you want to tune it.")
+            Text("Direct editing. Transformations run from top to bottom; open a card only when you want to tune it.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if experienceMode == .education {
-                equationWorkbench
-            } else {
-                justUseSummary
-            }
+            justUseSummary
 
             if isCreatingGroup {
                 Label("Select two or more adjacent transformations, then choose Create Group.",
@@ -379,19 +361,6 @@ struct TransformationsSection: View {
         }
     }
 
-    private var experienceModePicker: some View {
-        Picker("Transformation experience", selection: experienceModeBinding) {
-            ForEach([TransformationExperienceMode.justUse, .education]) { mode in
-                Text(mode.displayName).tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .accessibilityLabel("Transformation experience mode")
-        .accessibilityValue(experienceMode.displayName)
-        .accessibilityHint("Edit opens the full catalog. Learn maps equations without changing your editing progress.")
-    }
-
     private var justUseSummary: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "slider.horizontal.3")
@@ -399,24 +368,16 @@ struct TransformationsSection: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Full Catalog")
                     .font(.caption.weight(.semibold))
-                Text("Add a transformation, then open only the card you want to tune. Switch to Learn whenever you want the optional equation lessons.")
+                Text("Add a transformation, then open only the card you want to tune.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(educationProgressSummary)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.mint)
             }
         }
         .padding(9)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 9).fill(Color.mint.opacity(0.08)))
         .accessibilityElement(children: .combine)
-    }
-
-    private var educationProgressSummary: String {
-        let count = mappedLessons.count
-        return "Learn: Level \(currentEducationLevel.numeral) open · \(count) \(count == 1 ? "lesson" : "lessons") mapped."
     }
 
     private var emptyStackMessage: String {
