@@ -114,6 +114,8 @@ extension Renderer {
     func activateEmbeddedFormula(_ formula: EmbeddedFormula?,
                                  warpStackSource: String? = nil,
                                  warpStackSignature: String = "s0") async throws {
+        customShaderActivationGeneration &+= 1
+        let activationGeneration = customShaderActivationGeneration
         customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula ENTRY formula=\(formula?.name ?? "nil") stackSig=\(warpStackSignature) currentHash=\(customShaderHash ?? "nil") libraryPresent=\(customShaderLibrary != nil)")
 
         let isWarp = (formula?.effectKind == .spaceWarp)
@@ -154,6 +156,13 @@ extension Renderer {
         let compiler = ensureCompiler()
         let library = try await compiler.library(forFractal: fractalEffect, spaceWarp: warpEffect,
                                                  warpStackSource: warpStackSource, warpStackSignature: warpStackSignature)
+
+        // Actor methods are re-entrant across the compiler await. A previous
+        // activation may finish after a newer scene was selected; never let
+        // that stale library replace the current scene's shader.
+        guard activationGeneration == customShaderActivationGeneration else {
+            return
+        }
 
         customShaderLibrary = library
         customShaderHash = newHash

@@ -225,15 +225,17 @@ struct EmbeddedFormulaCompileTests {
         #expect(!formulas.isEmpty, "no embedded-formula example assets found under \(Self.examplesDir.path)")
     }
 
-    @Test("Every embedded formula compiles through the production CustomShaderCompiler")
+    @Test(
+        "Every embedded formula compiles through the production CustomShaderCompiler",
+        // No Metal device on this host (e.g. headless CI without a GPU) —
+        // can't exercise the compiler. Decode coverage still runs in
+        // ExampleSceneDecodeTests; skip rather than false-fail (Issue.record
+        // counts as a failure in Swift Testing).
+        .enabled(if: MTLCreateSystemDefaultDevice() != nil,
+                 "No Metal device available; skipping embedded-DE compile coverage")
+    )
     func embeddedFormulasCompile() async throws {
-        guard let device = MTLCreateSystemDefaultDevice() else {
-            // No Metal device on this host (e.g. headless CI without a GPU) —
-            // can't exercise the compiler. Decode coverage still runs in
-            // ExampleSceneDecodeTests; skip rather than false-fail.
-            Issue.record("No Metal device available; skipping embedded-DE compile coverage")
-            return
-        }
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
 
         let formulas = try Self.collectEmbeddedFormulas()
         let compiler = CustomShaderCompiler(device: device)

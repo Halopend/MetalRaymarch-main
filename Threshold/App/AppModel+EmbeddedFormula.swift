@@ -57,8 +57,8 @@ enum EmbeddedFormulaInstallResult: Equatable {
 
 @MainActor
 extension AppModel {
-    /// Experimental custom-scenes feature flag. Default off; user opts in via
-    /// Settings → General → "Allow custom scenes (experimental)".
+    /// Custom-scenes feature flag. Default off; user opts in via
+    /// Settings → Display → "Allow custom scenes".
     static let allowCustomScenesUserDefaultsKey = "allowCustomScenes"
     static var allowCustomScenes: Bool {
         UserDefaults.standard.bool(forKey: allowCustomScenesUserDefaultsKey)
@@ -76,7 +76,7 @@ extension AppModel {
         guard AppModel.allowCustomScenes || formula.isBundledConstructionPrimitive else {
             customSceneDiagnostic("🔬 [CSDiag] installEmbeddedFormula REFUSED — custom scenes feature disabled")
             errorReporter.report(.preset(.importFailed(
-                "Custom scenes are experimental. Enable “Allow custom scenes” in Settings → General to load this scene."
+                "Custom scenes are disabled. Enable “Allow custom scenes” in Settings → Display to load this scene."
             )))
             return .failed
         }
