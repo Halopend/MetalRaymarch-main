@@ -1,12 +1,11 @@
 import SwiftUI
 import AVKit
 
-/// Five-page welcome flow:
+/// Four-page welcome flow:
 ///   0. Safety (photosensitive-epilepsy warning, must acknowledge)
 ///   1. Welcome (what Threshold is, what the app does)
-///   2. Hand controls (movement video + handedness)
-///   3. Menu gesture + compact shortcut summary
-///   4. Anonymous analytics (on by default; user can opt out)
+///   2. Controls (movement + gestures on visionOS; navigation + creation elsewhere)
+///   3. Setup (storage, microphone-at-launch, and anonymous analytics)
 ///
 /// Each page scrolls independently; a shared footer pins Back/Next and
 /// the page indicator to the bottom so they stay reachable at any
@@ -28,8 +27,10 @@ struct FirstLaunchWindowView: View {
     @State private var leftHanded = false
     @State private var menuGestureStyle: MenuGestureStarterStyle = .palmer
     @State private var shareAnalytics = UsageAnalytics.shared.analyticsEnabled
+    @State private var storageMode = StorageLocation.shared.mode
+    @State private var microphoneStartsAtLaunch = AudioInputLaunchPreference.microphoneStartsAtLaunch()
 
-    private let pageCount = 5
+    private let pageCount = 4
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,8 +40,7 @@ struct FirstLaunchWindowView: View {
                     case 0: safetyPage
                     case 1: welcomePage
                     case 2: controlsPage
-                    case 3: fingersPage
-                    default: sharingPage
+                    default: storagePage
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -66,6 +66,8 @@ struct FirstLaunchWindowView: View {
 #endif
         .onAppear {
             shareAnalytics = UsageAnalytics.shared.analyticsEnabled
+            storageMode = StorageLocation.shared.mode
+            microphoneStartsAtLaunch = AudioInputLaunchPreference.microphoneStartsAtLaunch()
             leftHanded = appModel.renderSettings.leftHandedMode
             menuGestureStyle = MenuGestureStarterStyle.style(for: appModel.renderSettings.menuToggleGestureMode) ?? .palmer
         }
@@ -137,9 +139,8 @@ struct FirstLaunchWindowView: View {
         switch currentPage {
         case 0: "Safety"
         case 1: "Overview"
-        case 2: "Movement"
-        case 3: "Gestures"
-        default: "Analytics"
+        case 2: "Controls"
+        default: "Setup"
         }
     }
 
@@ -262,11 +263,6 @@ struct FirstLaunchWindowView: View {
                     title: "Reset + Create",
                     detail: "Tap Reset to jump back to your saved baseline. Use Save to create a named preset or deliberately update that reset point."
                 )
-                IntroTipRow(
-                    icon: "person.2.wave.2",
-                    title: "Help improve Threshold",
-                    detail: "Anonymous feature, quality, and performance totals are shared by default. Your files, custom distance estimators, and position are never included. You can opt out anytime in Settings > Sharing."
-                )
             }
         } detail: {
             VStack(alignment: .leading, spacing: 14) {
@@ -289,26 +285,153 @@ struct FirstLaunchWindowView: View {
         }
     }
 
-    // MARK: - Page 2: Hand Controls + Handedness
+    // MARK: - Page 3: Storage + Audio + Analytics
+
+    private var storagePage: some View {
+        OnboardingPageShell(
+            icon: "externaldrive.badge.icloud",
+            title: "Finish setup",
+            subtitle: "Choose storage, live audio, and anonymous analytics preferences in one place.",
+            accent: .cyan
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(StorageMode.allCases, id: \.self) { mode in
+                    storageModeCard(mode)
+                }
+            }
+        } detail: {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Launch preferences", systemImage: "switch.2")
+                    .font(.headline)
+
+                Text("Storage can be changed later and both locations are merged. A local safety backup is always kept.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        Image(systemName: microphoneStartsAtLaunch ? "mic.fill" : "mic")
+                            .font(.title3)
+                            .foregroundStyle(microphoneStartsAtLaunch ? .cyan : .secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Live audio input")
+                                .font(.headline)
+                            Text("Use microphone levels to drive audio-reactive scenes.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Toggle("Start microphone at launch", isOn: $microphoneStartsAtLaunch)
+                        .tint(.cyan)
+                        .help("Automatically start microphone input when Threshold opens.")
+
+                    Text("Threshold will request microphone access when you finish setup. You can change this anytime in the Music controls.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        Image(systemName: shareAnalytics ? AppIcons.person3Fill : AppIcons.personSlash)
+                            .font(.title3)
+                            .foregroundStyle(shareAnalytics ? .blue : .secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Help improve Threshold")
+                                .font(.headline)
+                            Text("Share anonymous feature, quality, and performance totals.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Toggle("Share anonymous analytics", isOn: $shareAnalytics)
+                        .tint(.blue)
+
+                    Text("Never includes your name, account, files, scene position, preset names, or custom distance-estimator details.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func storageModeCard(_ mode: StorageMode) -> some View {
+        let isSelected = storageMode == mode
+        return Button {
+            storageMode = mode
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: mode.iconName)
+                    .font(.title2)
+                    .frame(width: 32)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(mode.displayName)
+                        .font(.headline)
+                    Text(mode == .local
+                         ? "Stored privately on this device."
+                         : "Synced across your devices and available in the Files app.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isSelected ? .cyan : .secondary)
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isSelected ? Color.cyan.opacity(0.14) : Color.secondary.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(isSelected ? Color.cyan.opacity(0.6) : Color.secondary.opacity(0.12), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    // MARK: - Page 2: Controls + Creation
 
     private var controlsPage: some View {
         #if os(visionOS)
         OnboardingPageShell(
             icon: "move.3d",
-            title: "Movement and scale",
-            subtitle: "Use both hands to translate, scale, and orbit through fractal space.",
+            title: "Move and open controls",
+            subtitle: "Learn the core movement gestures and choose how to summon the floating controls.",
             accent: .green
         ) {
-            movementTutorialVideoPlayer
-                .frame(maxWidth: .infinity)
-                .frame(height: 220)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
-                )
+            VStack(alignment: .leading, spacing: 12) {
+                movementTutorialVideoPlayer
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 200)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+                    )
+
+                Picker("Dominant hand", selection: $leftHanded) {
+                    Label("Left", systemImage: AppIcons.handRaisedFingersSpread).tag(true)
+                    Label("Right", systemImage: AppIcons.handRaisedFingersSpreadFill).tag(false)
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: leftHanded) { _, newValue in
+                    appModel.renderSettings.leftHandedMode = newValue
+                }
+            }
         } detail: {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 IntroTipRow(
                     icon: "move.3d",
                     title: "Translate",
@@ -319,33 +442,21 @@ struct FirstLaunchWindowView: View {
                     title: "Scale + Rotate",
                     detail: "Move hands apart to scale up, together to scale down, and rotate your hands to orbit."
                 )
-                IntroTipRow(
-                    icon: "hand.point.up.left.fill",
-                    title: "Choose your dominant hand",
-                    detail: "Some per-finger tap defaults are mirrored for left-handed users. You can change this anytime in Settings > Display."
-                )
-            }
 
-            HStack(spacing: 12) {
-                Image(systemName: leftHanded ? AppIcons.handRaisedFingersSpread : AppIcons.handRaisedFingersSpreadFill)
-                    .font(.title3)
-                    .foregroundStyle(leftHanded ? .indigo : .blue)
-                Picker("Dominant hand", selection: $leftHanded) {
-                    Label("Left",  systemImage: AppIcons.handRaisedFingersSpread).tag(true)
-                    Label("Right", systemImage: AppIcons.handRaisedFingersSpreadFill).tag(false)
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 320)
-                .onChange(of: leftHanded) { _, newValue in
-                    appModel.renderSettings.leftHandedMode = newValue
+                Divider()
+
+                Text("Open the controls")
+                    .font(.headline)
+                ForEach(MenuGestureStarterStyle.allCases) { style in
+                    menuGestureStyleCard(style)
                 }
             }
         }
         #else
         OnboardingPageShell(
             icon: AppIcons.sliderHorizontal3,
-            title: "Find your controls",
-            subtitle: "Open the control surface, then jump straight to any feature.",
+            title: "Navigate and create",
+            subtitle: "Find any control, experiment freely, and keep reliable return points.",
             accent: .green
         ) {
             VStack(alignment: .leading, spacing: 10) {
@@ -366,65 +477,6 @@ struct FirstLaunchWindowView: View {
                 )
             }
         } detail: {
-            Text("Threshold organizes controls into Explore, Shape, Visualizations, Music, and Performance. Each workspace has a shorter section list, and Find can bypass the hierarchy entirely.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        #endif
-    }
-
-    // MARK: - Page 3: Menu Gesture
-
-    /// Makes the menu open/close gesture the main choice on this page. Finger
-    /// shortcuts are shown only as compact supporting context so the user does
-    /// not see two different "open menu" systems.
-    private var fingersPage: some View {
-        #if os(visionOS)
-        OnboardingPageShell(
-            icon: "hand.tap.fill",
-            title: "Menu gesture",
-            subtitle: "Pick the gesture that opens and closes the floating controls.",
-            accent: .purple
-        ) {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(MenuGestureStarterStyle.allCases) { style in
-                    menuGestureStyleCard(style)
-                }
-            }
-        } detail: {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: "hand.raised.fill")
-                        .font(.headline)
-                        .foregroundStyle(.purple)
-                    Text("What this controls")
-                        .font(.headline)
-                    Spacer()
-                }
-                Text(menuGestureStyle.mode.guidance)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Divider().padding(.vertical, 2)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Other finger shortcuts")
-                        .font(.subheadline.weight(.semibold))
-                    ForEach(activeFingerShortcutRows) { shortcut in
-                        fingerShortcutRow(shortcut)
-                    }
-                }
-            }
-        }
-        #else
-        OnboardingPageShell(
-            icon: AppIcons.pencilAndListClipboard,
-            title: "Create and recover",
-            subtitle: "Experiment freely while keeping reliable return points.",
-            accent: .purple
-        ) {
             VStack(alignment: .leading, spacing: 10) {
                 IntroTipRow(
                     icon: AppIcons.arrowCounterclockwise,
@@ -439,83 +491,15 @@ struct FirstLaunchWindowView: View {
                 IntroTipRow(
                     icon: AppIcons.filmStack,
                     title: "Animation Editor",
-                    detail: "Create a scene, capture parameter states as keyframes, and preview the result."
+                    detail: "Capture parameter states as keyframes and preview the result."
                 )
             }
-        } detail: {
-            Text("Saving a preset is the safe default. Replacing the Reset point is a separate confirmed action, so pressing Save cannot silently change your recovery baseline.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
         #endif
     }
 
-    private var activeFingerShortcutRows: [FingerShortcutSummary] {
-        let names = ["Thumb", "Index", "Middle", "Ring", "Pinky"]
-        let icons = ["hand.thumbsup.fill", "1.circle.fill", "2.circle.fill", "3.circle.fill", "4.circle.fill"]
-        func rows(for hand: String, actions: [PerFingerTapAction]) -> [FingerShortcutSummary] {
-            actions.indices.compactMap { finger in
-                let action = actions[finger]
-                guard action != .none, action != .toggleMenu, finger < names.count else { return nil }
-                return FingerShortcutSummary(
-                    hand: hand,
-                    finger: names[finger],
-                    icon: icons[finger],
-                    action: action
-                )
-            }
-        }
-
-        let left = rows(for: "Left", actions: appModel.renderSettings.perFingerTapLeftActions)
-        let right = rows(for: "Right", actions: appModel.renderSettings.perFingerTapRightActions)
-        let ordered = left + right
-        if ordered.isEmpty {
-            return [
-                FingerShortcutSummary(
-                    hand: "",
-                    finger: "No shortcuts",
-                    icon: "hand.raised",
-                    action: .none
-                )
-            ]
-        }
-        return ordered
-    }
-
-    private func fingerShortcutRow(_ shortcut: FingerShortcutSummary) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: shortcut.icon)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.purple)
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(shortcut.finger)
-                    .font(.caption.weight(.semibold))
-                if !shortcut.hand.isEmpty {
-                    Text(shortcut.hand)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            Spacer()
-            HStack(spacing: 4) {
-                Image(systemName: shortcut.action.icon)
-                Text(shortcut.action.displayName)
-            }
-            .font(.caption.weight(.medium))
-            .foregroundStyle(shortcut.action == .none ? .secondary : .primary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                Capsule().fill(shortcut.action == .none
-                               ? Color.secondary.opacity(0.10)
-                               : Color.purple.opacity(0.18))
-            )
-        }
-    }
-
-    /// One selectable menu-gesture style card on Page 3. Tapping it updates both
+    /// One selectable menu-gesture style card on the combined controls page.
+    /// Tapping it updates both
     /// the local highlight and `RenderSettings.menuToggleGestureMode`, which
     /// persists and is read live by the gesture engine.
     private func menuGestureStyleCard(_ style: MenuGestureStarterStyle) -> some View {
@@ -571,58 +555,6 @@ struct FirstLaunchWindowView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    // MARK: - Page 4: Anonymous analytics (opt-out)
-
-    private var sharingPage: some View {
-        OnboardingPageShell(
-            icon: shareAnalytics ? AppIcons.person3Fill : AppIcons.personSlash,
-            title: "Help improve Threshold",
-            subtitle: "Share anonymous feature, quality, and performance totals. No account or user name.",
-            accent: .blue
-        ) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 10) {
-                    Image(systemName: shareAnalytics ? AppIcons.person3Fill : AppIcons.personSlash)
-                        .font(.title3)
-                        .foregroundStyle(shareAnalytics ? .blue : .secondary)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(shareAnalytics ? "Anonymous analytics are on" : "Anonymous analytics are off")
-                            .font(.headline)
-                        Text(shareAnalytics
-                             ? "Aggregate measurements help guide compatibility and performance work."
-                             : "No analytics will be uploaded.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Toggle(isOn: $shareAnalytics) {
-                    Text(shareAnalytics ? "Share anonymous analytics" : "Anonymous analytics are off")
-                }
-                .tint(.blue)
-
-            }
-        } detail: {
-            VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("Included:", systemImage: AppIcons.checkmarkCircle)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("• Session duration and aggregate feature use\n• Render quality and performance measurements\n• App, operating-system, and device model")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    Label("Never included:", systemImage: AppIcons.xmarkCircle)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 4)
-                    Text("• No user name, account, Apple ID, email, or location\n• No scene position, preset names, or personal files\n• No custom distance-estimator source, name, or hash")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-        }
-    }
-
     // MARK: - Tutorial Video Player
 
     private var movementTutorialVideoPlayer: some View {
@@ -636,11 +568,28 @@ struct FirstLaunchWindowView: View {
     // MARK: - Completion
 
     private func completeOnboarding() {
-        // Persist the state the user just configured: analytics toggle,
-        // handedness, and menu-open gesture. (Handedness and the
+        // Persist the state the user just configured: storage, microphone launch,
+        // analytics toggle, handedness, and menu-open gesture. (Handedness and the
         // gesture are also written live on change, so this is belt-and-braces.)
         // The acknowledgement checkbox is intentionally not persisted — it's a
         // one-time consent, not a setting.
+        if storageMode == StorageLocation.shared.mode {
+            StorageLocation.shared.markModeChosen()
+        } else {
+            appModel.switchStorageMode(to: storageMode)
+        }
+        UserDefaults.standard.set(
+            microphoneStartsAtLaunch,
+            forKey: AudioInputLaunchPreference.microphoneStartsAtLaunchDefaultsKey
+        )
+        if microphoneStartsAtLaunch {
+            // The normal launch hook has already run by the time first-launch
+            // onboarding completes, so begin capture now as well as persisting
+            // the preference for subsequent launches.
+            Task { @MainActor in
+                _ = await appModel.audioHub.start(.microphone)
+            }
+        }
         UsageAnalytics.shared.analyticsEnabled = shareAnalytics
         appModel.renderSettings.leftHandedMode = leftHanded
         appModel.renderSettings.menuToggleGestureMode = menuGestureStyle.mode
@@ -699,14 +648,6 @@ private struct OnboardingPageShell<Primary: View, Detail: View>: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(24)
     }
-}
-
-private struct FingerShortcutSummary: Identifiable {
-    var id: String { "\(hand)-\(finger)-\(action.rawValue)" }
-    let hand: String
-    let finger: String
-    let icon: String
-    let action: PerFingerTapAction
 }
 
 private struct IntroTipRow: View {
