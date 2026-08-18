@@ -5,6 +5,8 @@ Explore a conceptual exploration at the intersection of art, math, chaos and ord
 
 Threshold is a continuous sensory space for exploring higher-dimensional objects through light, motion, sound, and interaction.
 
+![Threshold real-time Metal ray marching demo](metal-raymarch-demo.gif)
+
 With a focus on control, expanding toolsets, realtime visualizations and standardization, the hope is to reduce the barrier to entry
 for people to be able to supply their own contributions while being able to cross pollinate their efforts with others in a community output,
 both self organizing through shared files and internally through code contributions. 

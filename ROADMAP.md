@@ -34,27 +34,47 @@ Performance remains a device gate: shared hosted runners are suitable for
 correctness and compilation, not stable GPU timing. Run `Scripts/perf-gate.sh`
 and record Vision Pro measurements for performance-sensitive changes.
 
-## Next — highest regression leverage
+## Next — highest regression leverage (reordered 2026-08-17 with the register refresh)
 
-1. Add parameter-layering composition tests for base × gesture × music ×
-   animation behavior ([tech debt #3](TECH_DEBT.md#register--scored)).
-2. Pin the default-on `WarmStartGate` tolerance behavior (#20).
-3. Remove silent Swift/Metal lockstep seams: function-constant indices (#21) and
-   `boxFoldMandelbulb` identity/family behavior (#22).
-4. Unify the triplicated trace-horizon derivation (#23).
-5. Finish tolerant empty-object decoding coverage for all domain configs (#8b).
+1. Kill the Swift/Metal identity seams — the function-constant map drift is now a
+   **realized bug** (the benchmark harness specializes index 17 as the hand field;
+   [tech debt #21](TECH_DEBT.md#register--scored)), plus its new siblings: the
+   comment-mirrored Mac motion/blit structs (#27) and the hand-enumerated distance
+   cache seed-file identity (#29).
+2. Land the in-flight recording-mode tree clean: test the window state machine
+   (#37), fix its five comment/constant seams (#38), and decide the four untracked
+   presets that local tests already read but CI does not (#39).
+3. Pin the default-on `WarmStartGate` tolerance behavior (#20), finish the
+   parameter-layering coverage — recenter + the now-duplicated composition
+   invariant (#3) — and unify the tripled band-sensitivity mapping (#26).
+4. One-liner safety batch: enforce the analytics record cap and surface failures
+   (#33), assert the audio scratch-buffer queue confinement (#34), wire the
+   formula-editor library eviction that already exists (#25), env-gate the audio
+   micro-benchmark (#36).
+5. Fix the docs that lie or omit the operating envelope: the `CONTRIBUTING.md`
+   test-action row that yields a zero-test green, the undocumented DerivedData
+   serial-build lock, and the hosted-GUI test cost with its `testfast` escape
+   (#43).
 
 ## Later — bounded cleanup
 
 - Audit concurrency escape hatches alongside the proposed `@Locked` cleanup
-  (#6 and #24.2.7).
+  (#6 and #24.2.7) — fix the unguarded `handTrackingEnabledForRenderer`
+  cross-thread var ahead of the full pass.
 - Pull small, verified items from the cleanup/consolidation audits only when the
   owning file is already being changed (#7 and #24).
-- Continue the `ControlCatalog` migration without expanding the literal-spec tail
-  (#8).
+- Finish the `ControlCatalog` migration — 16 literal `range:` sites remain (#8) —
+  and the six missing `{}` decode pins (#8b).
+- Unify the triplicated trace-horizon derivation before the next horizon change
+  (#23); `boxFoldMandelbulb` family/identity seam (#22).
+- Hygiene decisions: reclaim ~600 MB of unreachable `.git` packs, resolve the
+  `Sources/` tracked-vs-ignored half-state, delete the empty
+  `MetalRaymarch.xcodeproj` husk, probe `/Applications/Xcode.app` in `build.sh`
+  (#40–#42, #44).
 - Keep rebuild-dependent architecture work parked until the recorded go/no-go
   inputs in [`Context/REBUILD_ARCHITECTURE.md`](Context/REBUILD_ARCHITECTURE.md)
-  are available.
+  are available — and record that call: its inputs are aging while in-place work
+  (formula editor, `ControlCatalog` convergence) executes rebuild seeds anyway.
 
 ## Completed progression log
 
