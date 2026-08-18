@@ -103,16 +103,16 @@
 	<true/>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.</string>
-	<key>NSAudioCaptureUsageDescription</key>
-	<string>Threshold listens to audio from a music app you choose so it can drive audio-reactive visuals. Nothing is recorded or saved.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Threshold uses the microphone for real-time audio-reactive fractal visualization.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
-	<key>NSSupportsAutomaticTermination</key>
-	<true/>
-	<key>NSSupportsSuddenTermination</key>
-	<true/>
+	<!-- Automatic/sudden termination must stay off: they let macOS silently
+	     exit the app (clean exit 0) whenever it looks idle or backgrounded,
+	     which killed long unattended sessions (recording, audio-reactive
+	     visuals behind other windows) and the unit-test host mid-run. Nothing
+	     in the app manages the NSProcessInfo termination counters, so opting
+	     in is unsafe with unsaved scene state. -->
 	<key>NSUbiquitousContainers</key>
 	<dict>
 		<key>iCloud.com.puppypower.Threshold</key>

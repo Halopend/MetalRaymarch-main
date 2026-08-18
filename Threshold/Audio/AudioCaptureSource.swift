@@ -4,8 +4,7 @@
 //
 //  Platform adapters that translate a capture backend into normalized feature
 //  contributions. `AudioHub` owns these adapters; views and renderers never
-//  need to know whether the underlying backend is AVAudioEngine or
-//  ScreenCaptureKit.
+//  need to know the platform-specific capture implementation.
 //
 
 import AVFoundation
@@ -134,92 +133,6 @@ final class MicrophoneCaptureSource: AudioCaptureSource {
         #endif
     }
 }
-
-#if os(macOS)
-@MainActor
-final class SystemOutputCaptureSource: AudioCaptureSource {
-    let sourceID: AudioSourceID = .systemOutput
-    private let analyzer: AudioAnalyzer
-    private let capture: SystemAudioTapCapture
-    private let policy: SystemOutputCapturePolicy
-
-    init(policy: SystemOutputCapturePolicy) {
-        let analyzer = AudioAnalyzer()
-        self.analyzer = analyzer
-        self.policy = policy
-        self.capture = SystemAudioTapCapture(
-            analyzer: analyzer,
-            approvedApplicationBundleIDs: policy.approvedApplicationBundleIDs
-        )
-    }
-
-    var isActive: Bool { capture.isCapturing }
-
-    var descriptor: AudioSourceDescriptor {
-        let availability: AudioSourceAvailability
-        if let reason = policy.blockReason {
-            availability = .policyBlocked(reason)
-        } else if capture.isCapturing {
-            availability = .active
-        } else if capture.permissionDenied {
-            availability = .unavailable(capture.errorMessage ?? "Screen & System Audio Recording permission is denied.")
-        } else if let errorMessage = capture.errorMessage {
-            availability = .failed(errorMessage)
-        } else {
-            availability = .permissionRequired("Screen & System Audio Recording permission is requested when capture starts.")
-        }
-
-        return AudioSourceDescriptor(
-            id: sourceID,
-            kind: .capture,
-            displayName: "Approved App Audio",
-            systemImage: capture.isCapturing ? "speaker.wave.2.fill" : "speaker.wave.2",
-            capabilities: [.pcmFrames, .captureLifecycle, .systemOutput],
-            availability: availability,
-            provenance: .pcm
-        )
-    }
-
-    func refreshAvailability() async {
-        guard policy.blockReason == nil else { return }
-        await capture.refreshAvailability()
-    }
-
-    func startCapture() async -> Bool {
-        guard policy.blockReason == nil else { return false }
-        return await capture.startCaptureIfNeeded()
-    }
-
-    func stopCapture() async {
-        await capture.stop()
-    }
-
-    func advanceFrame(at timestamp: TimeInterval) {
-        analyzer.tickEnvelopes(at: timestamp)
-    }
-
-    func featureContribution(at _: TimeInterval) -> AudioSourceContribution? {
-        let sampleTime = analyzer.lastSampleTime
-        guard capture.isCapturing, sampleTime > 0 else { return nil }
-        return AudioSourceContribution(
-            sourceID: sourceID,
-            features: AudioFeatures(
-                bass: analyzer.bassLevel,
-                mid: analyzer.midLevel,
-                treble: analyzer.trebleLevel,
-                onset: analyzer.onsetLevel,
-                overall: analyzer.level
-            ),
-            provenance: .pcm,
-            timestamp: sampleTime
-        )
-    }
-
-    func openSettings() {
-        capture.openScreenRecordingSettings()
-    }
-}
-#endif
 
 /// Apple Music's current implementation publishes timing/BPM-derived levels,
 /// not decoded PCM. It is intentionally a separate feature origin so the UI,

@@ -308,11 +308,6 @@ struct MusicTabContent: View {
                 }
             }
 
-            Divider()
-
-            if let systemOutput = descriptor(for: .systemOutput) {
-                audioCaptureSourceRow(systemOutput)
-            }
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.08)))
@@ -866,13 +861,6 @@ struct MusicTabContent: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
-            } else if source.id == .systemOutput {
-                Text(source.isActive
-                     ? "Capturing a policy-approved application's audio."
-                     : "Uses ScreenCaptureKit with a policy-approved application allowlist.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text("Uses microphone permission. Select a system or virtual audio input in device settings when needed.")
                     .font(.caption2)
