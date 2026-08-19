@@ -57,11 +57,14 @@ enum EmbeddedFormulaInstallResult: Equatable {
 
 @MainActor
 extension AppModel {
-    /// Custom-scenes feature flag. Default off; user opts in via
-    /// Settings → Display → "Allow custom scenes".
+    /// Custom-scenes feature flag. Enabled by default; users can still opt out
+    /// in Settings → Display if they do not want runtime Metal compilation.
     static let allowCustomScenesUserDefaultsKey = "allowCustomScenes"
     static var allowCustomScenes: Bool {
-        UserDefaults.standard.bool(forKey: allowCustomScenesUserDefaultsKey)
+        guard UserDefaults.standard.object(forKey: allowCustomScenesUserDefaultsKey) != nil else {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: allowCustomScenesUserDefaultsKey)
     }
 
     /// Install a custom formula and wait for renderer activation to complete.

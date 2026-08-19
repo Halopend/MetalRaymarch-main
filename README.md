@@ -20,7 +20,7 @@ Try Threshold on Apple platforms through TestFlight:
 [Join the Threshold beta](https://testflight.apple.com/join/M2h3z8JU)
 
 
-## Custom scenes are the core workflow, but still in beta
+## Custom scenes are the core workflow
 Write or import a portable DE, tune it live, then export a self-contained scene.
 
 ```mermaid
@@ -51,7 +51,7 @@ Start with the [custom-scene authoring guide](CUSTOM_SCENES.md), then open
 [Accidental Sphere Projection](Threshold/Examples/Scenes/Accidental%20Sphere%20Projection.threshscene),
 or [Polychora 24-Cell](<Threshold/Examples/Custom%20Scene%20Example/Polychora%2024-Cell.threshscene>).
 
-> **Experimental feature:** Enable **Settings → Display → Experimental Display → Allow custom scenes** before importing a user-authored DE. Runtime compilation is intentionally opt-in; malformed or expensive formulas can fail to compile or render poorly.
+> **Runtime safety:** Custom scenes are enabled by default. You can turn them off in **Settings → Display → Allow custom scenes** if you do not want user-authored Metal source compiled locally. Malformed or expensive formulas can still fail to compile or render poorly.
 
 ## What Threshold does around the scene
 - **Performance:** Threshold is built for responsive, real-time fractal rendering. Rendering quality and performance work are measured on the target device rather than inferred from a simulator.
@@ -239,14 +239,14 @@ The lean `_Dist` form drives ray marching; the second form returns the matching
 field and supplies orbit data for coloring.
 
 This is deliberately **not** arbitrary `.metal` loading: the source must obey
-the embedded-DE contract and runtime compilation remains experimental. The full
+the embedded-DE contract. The full
 function signatures, JSON shape, parameter pragmas, and validation limits are
 in [CUSTOM_SCENES.md](CUSTOM_SCENES.md).
 
 ### Try a custom scene
 
-1. Build and launch Threshold, then enable **Allow custom scenes** under
-   **Settings → Display → Experimental Display**.
+1. Build and launch Threshold. Custom scenes are enabled by default; use
+   **Settings → Display → Allow custom scenes** to opt out if needed.
 2. Open or import
    [Sphere Fold (Sample)](Threshold/Examples/Formulas/SampleSphereFold.threshfx).
    It is a standalone, editable DE with three parameters.

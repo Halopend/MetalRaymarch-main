@@ -402,8 +402,17 @@ class PresetManager {
         return Self.filterSceneCatalogPresets(
             Array(catalogByID.values).sorted { $0.createdAt > $1.createdAt },
             bundledPresets: Self.bundledPresets(),
-            supportsEnvironmentReconstruction: Self.supportsEnvironmentReconstructionInSceneCatalog
+            supportsEnvironmentReconstruction: Self.supportsEnvironmentReconstructionInSceneCatalog,
+            includesScreenOnlyScenes: Self.includesScreenOnlyScenesInSceneCatalog
         )
+    }
+
+    private static var includesScreenOnlyScenesInSceneCatalog: Bool {
+#if os(visionOS)
+        false
+#else
+        true
+#endif
     }
 
     private static var supportsEnvironmentReconstructionInSceneCatalog: Bool {
@@ -417,9 +426,14 @@ class PresetManager {
     nonisolated static func filterSceneCatalogPresets(
         _ presets: [FractalPreset],
         bundledPresets: [FractalPreset],
-        supportsEnvironmentReconstruction: Bool
+        supportsEnvironmentReconstruction: Bool,
+        includesScreenOnlyScenes: Bool = true
     ) -> [FractalPreset] {
-        guard !supportsEnvironmentReconstruction else { return presets }
+        let platformVisiblePresets = presets.filter {
+            SceneTagging.isVisible($0.tags, includesScreenOnlyScenes: includesScreenOnlyScenes)
+        }
+
+        guard !supportsEnvironmentReconstruction else { return platformVisiblePresets }
 
         let environmentBundledIDs = Set(bundledPresets.compactMap { preset -> UUID? in
             let requiresEnvironment = preset.envScrunchEnabled == true
@@ -427,8 +441,8 @@ class PresetManager {
             return requiresEnvironment ? preset.id : nil
         })
 
-        guard !environmentBundledIDs.isEmpty else { return presets }
-        return presets.filter { !environmentBundledIDs.contains($0.id) }
+        guard !environmentBundledIDs.isEmpty else { return platformVisiblePresets }
+        return platformVisiblePresets.filter { !environmentBundledIDs.contains($0.id) }
     }
 
     // MARK: - Folder store: scan / migrate / seed

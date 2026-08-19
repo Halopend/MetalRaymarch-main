@@ -203,7 +203,7 @@ extension ContentView {
                 }
                 .controlSize(.small)
             } else {
-                Text("Metal DE Studio unlocks with “Allow custom scenes” in Settings → General.")
+                Text("Metal DE Studio is available by default; disable it with “Allow custom scenes” in Settings → Display.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)

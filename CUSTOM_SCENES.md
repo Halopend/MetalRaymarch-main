@@ -47,9 +47,8 @@ it in Threshold to render and edit it.
 ## Try the supplied examples
 
 1. Build and run Threshold.
-2. In **Settings → Display → Experimental Display**, enable **Allow custom
-   scenes**. This is off by default because a user-supplied Metal source must be
-   compiled at runtime.
+2. Custom scenes are enabled by default. The **Allow custom scenes** switch under
+   **Settings → Display** can be used to opt out of runtime Metal compilation.
 3. Open or import
    [`SampleSphereFold.threshfx`](Threshold/Examples/Formulas/SampleSphereFold.threshfx).
    It is the most approachable standalone example.
@@ -189,7 +188,7 @@ production runtime compiler. For Metal or Quick Look changes, also run
 
 | Symptom | Check |
 | --- | --- |
-| The scene refuses to load. | Enable **Allow custom scenes** and make sure the payload is a fractal DE (`kind: "fractal"` or legacy omitted `kind`), not `kind: "spaceWarp"`. |
+| The scene refuses to load. | Make sure **Allow custom scenes** is enabled and that the payload is a fractal DE (`kind: "fractal"` or legacy omitted `kind`), not `kind: "spaceWarp"`. |
 | The compiler says a DE is missing. | The function stem and both required names must match exactly. |
 | The formula compiles but coloring looks wrong. | Ensure the full DE writes every `OrbitData` field and uses the same geometry as the `_Dist` variant. |
 | A file works locally but not after sharing. | Export the `.threshscene` with its active formula embedded, or share the `.threshfx` alongside the scene. |

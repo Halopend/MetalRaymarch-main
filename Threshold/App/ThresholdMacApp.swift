@@ -1,6 +1,7 @@
 #if os(macOS)
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 @main
 struct ThresholdMacApp: App {
@@ -85,6 +86,13 @@ struct ThresholdMacApp: App {
         .windowResizability(.contentMinSize)
 
         .commands {
+            CommandGroup(after: .newItem) {
+                Button("Open Scene…") {
+                    openScene()
+                }
+                .keyboardShortcut("o", modifiers: .command)
+            }
+
             CommandGroup(replacing: .saveItem) {
                 Button("Save Preset…") {
                     appModel.openSavePresetMenuHandler?()
@@ -101,6 +109,20 @@ struct ThresholdMacApp: App {
                 .disabled(appModel.openControlFinderHandler == nil)
             }
         }
+    }
+
+    private func openScene() {
+        let panel = NSOpenPanel()
+        panel.title = "Open Scene"
+        panel.message = "Choose a Threshold scene file."
+        panel.prompt = "Open"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [UTType(exportedAs: "com.puppypower.threshold.scene")]
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        appModel.openExternalFile(url)
     }
 }
 
@@ -257,7 +279,7 @@ private struct ThresholdMacRootView: View {
     @AppStorage("MacTabLauncher.navigationModeMigrated.v1") private var didMigrateNavigationMode = false
     @AppStorage("MacTabLauncher.style") private var launcherStyle: NavigationPresentationStyle = .radial
     @AppStorage("MacTabLauncher.curvature") private var launcherCurvature: Double = 0.82
-    @AppStorage("allowCustomScenes") private var allowCustomScenes = false
+    @AppStorage("allowCustomScenes") private var allowCustomScenes = true
     @AppStorage("hasCompletedIntroOnboarding") private var hasCompletedIntroOnboarding = false
     @State private var showStorageChoice = false
 

@@ -806,6 +806,12 @@ private struct StaticSceneSettingsView: View {
         NavigationStack {
             Form {
                 Section("Presentation") {
+                    ScreenOnlySceneToggle(tags: $preset.tags)
+
+                    Text("Screen-only scenes are best viewed on a flat display and are hidden from the Vision Pro scene library.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
                     Toggle("Open in Mixed Immersion", isOn: Binding(
                         get: { preset.mixedModeScene == true },
                         set: { enabled in

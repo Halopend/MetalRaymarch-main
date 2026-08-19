@@ -511,7 +511,17 @@ final class AnimationManager {
             }
         }
         result.append(contentsOf: userScenes)
-        scenes = result
+        scenes = result.filter {
+            SceneTagging.isVisible($0.tags, includesScreenOnlyScenes: Self.includesScreenOnlyScenes)
+        }
+    }
+
+    private static var includesScreenOnlyScenes: Bool {
+#if os(visionOS)
+        false
+#else
+        true
+#endif
     }
     
     /// Check whether a scene is a built-in default (original or edited overlay)

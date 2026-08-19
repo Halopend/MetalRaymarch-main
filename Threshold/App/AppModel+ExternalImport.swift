@@ -2,8 +2,9 @@
 //  AppModel+ExternalImport.swift
 //  Threshold
 //
-//  External-file import flow (.threshscene / .threshmp / .threshanim / .threshfx):
-//  open -> background decode -> preview (with restore-on-cancel) -> commit.
+//  Open-file flow (.threshscene / .threshmp / .threshanim / .threshfx):
+//  open -> background decode -> direct load when already in the active store,
+//  otherwise preview (with restore-on-cancel) -> import commit.
 //  Kept outside AppModel so the app coordinator remains focused.
 //
 
@@ -96,12 +97,37 @@ extension AppModel {
             guard !Task.isCancelled,
                   externalImportDecodeGeneration == generation else { return }
 
+            let isInActiveStore = await isOpenURLInActiveStore(url)
+            guard !Task.isCancelled,
+                  externalImportDecodeGeneration == generation else { return }
+
             finishOpeningExternalFile(
                 result,
                 fileName: url.lastPathComponent,
-                format: format
+                format: format,
+                isInActiveStore: isInActiveStore
             )
         }
+    }
+
+    /// iCloud root discovery is asynchronous at launch. Give it a short chance
+    /// to resolve before classifying an opened iCloud document as external, so a
+    /// Finder open during app startup cannot produce a redundant import prompt.
+    private func isOpenURLInActiveStore(_ url: URL) async -> Bool {
+        let storage = StorageLocation.shared
+        if storage.containsInActiveStore(url) { return true }
+        guard storage.mode == .iCloud, storage.activeRoot == nil else { return false }
+
+        for _ in 0..<40 {
+            do {
+                try await Task.sleep(for: .milliseconds(50))
+            } catch {
+                return false
+            }
+            if storage.containsInActiveStore(url) { return true }
+            if storage.activeRoot != nil { return false }
+        }
+        return false
     }
 
     private nonisolated static func decodeExternalFile(
@@ -133,7 +159,8 @@ extension AppModel {
     private func finishOpeningExternalFile(
         _ result: ExternalFileDecodeResult,
         fileName: String,
-        format: ThresholdExportFormat
+        format: ThresholdExportFormat,
+        isInActiveStore: Bool
     ) {
         guard let payload = result.payload else {
             let detail = result.failureDescription.map { ": \($0)" } ?? ""
@@ -143,6 +170,11 @@ extension AppModel {
             case .preset, .formula:
                 errorReporter.report(.preset(.importFailed("Could not read \(fileName)\(detail)")))
             }
+            return
+        }
+
+        if isInActiveStore {
+            openManagedStoreFile(payload)
             return
         }
 
@@ -183,6 +215,68 @@ extension AppModel {
                 fileExtension: format.ext,
                 payload: .preset(preset)
             )
+            ensureWindowContentVisible()
+        }
+    }
+
+    /// Open a document that already belongs to the active local/iCloud library.
+    /// Nothing is persisted here: the folder is already the source of truth.
+    private func openManagedStoreFile(_ payload: ExternalFileDecodeResult.Payload) {
+        switch payload {
+        case .preset(let preset):
+            loadStaticScene(preset)
+
+        case .animation(let scene):
+            guard animationManager != nil else {
+                errorReporter.report(.animation(.importFailed("Animation manager is unavailable.")))
+                return
+            }
+            openManagedAnimationScene(scene)
+
+        case .formula(let container):
+            if container.formula.effectKind == .spaceWarp {
+                installSpaceWarp(container.formula)
+                saveLastState()
+            } else {
+                loadStaticScene(AppModel.makeCustomPreset(from: container.formula))
+            }
+        }
+
+        ensureWindowContentVisible()
+    }
+
+    private func openManagedAnimationScene(_ scene: AnimationScene) {
+        guard let formula = scene.embeddedFormula else {
+            uninstallEmbeddedFormula()
+            animationManager?.currentScene = scene
+            return
+        }
+        if formula.effectKind == .spaceWarp {
+            installSpaceWarp(formula)
+            animationManager?.currentScene = scene
+            return
+        }
+
+        Task { @MainActor [self] in
+            let installResult = await activateEmbeddedFormulaForSceneLoad(formula)
+            let ready: Bool
+            switch installResult {
+            case .ready:
+                ready = true
+            case .deferred:
+                ready = await waitForRendererAndActivate(formula)
+                if !ready {
+                    queueSceneApplyAfterFormulaActivation(formulaHash: formula.shortHash) { [self] in
+                        animationManager?.currentScene = scene
+                        ensureWindowContentVisible()
+                    }
+                    return
+                }
+            case .failed:
+                ready = false
+            }
+            guard ready else { return }
+            animationManager?.currentScene = scene
             ensureWindowContentVisible()
         }
     }

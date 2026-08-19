@@ -6,6 +6,13 @@ import SwiftUI
 enum SceneTagging {
     static let maximumTagCount = 12
     static let maximumTagLength = 28
+    /// A reserved, portable tag for scenes designed for a flat display rather
+    /// than an immersive view surrounding the viewer. Keeping this in `tags`
+    /// means old app versions and exported scene files remain fully compatible.
+    static let screenOnlyTag = "Screen only"
+    /// Recognized only to migrate scenes saved while this feature was briefly
+    /// labeled "Mac only" during development.
+    private static let legacyMacOnlyTag = "Mac only"
 
     static func normalized(_ tags: [String]) -> [String] {
         var result: [String] = []
@@ -31,6 +38,39 @@ enum SceneTagging {
 
     static func contains(_ tags: [String], tag: String) -> Bool {
         tags.contains { $0.caseInsensitiveCompare(tag) == .orderedSame }
+    }
+
+    static func isScreenOnly(_ tags: [String]) -> Bool {
+        contains(tags, tag: screenOnlyTag) || contains(tags, tag: legacyMacOnlyTag)
+    }
+
+    static func settingScreenOnly(_ enabled: Bool, in tags: [String]) -> [String] {
+        let withoutReservedTag = tags.filter {
+            $0.caseInsensitiveCompare(screenOnlyTag) != .orderedSame
+                && $0.caseInsensitiveCompare(legacyMacOnlyTag) != .orderedSame
+        }
+        guard enabled else { return normalized(withoutReservedTag) }
+
+        // Put the semantic tag first so it cannot be dropped when a scene is
+        // already at the user-tag limit.
+        return normalized([screenOnlyTag] + withoutReservedTag)
+    }
+
+    static func isVisible(_ tags: [String], includesScreenOnlyScenes: Bool) -> Bool {
+        includesScreenOnlyScenes || !isScreenOnly(tags)
+    }
+}
+
+struct ScreenOnlySceneToggle: View {
+    @Binding var tags: [String]
+
+    var body: some View {
+        Toggle("Screen only", isOn: Binding(
+            get: { SceneTagging.isScreenOnly(tags) },
+            set: { tags = SceneTagging.settingScreenOnly($0, in: tags) }
+        ))
+        .help("Best viewed on a screen; hide this scene from the Vision Pro library.")
+        .accessibilityHint("When enabled, this scene is excluded from Vision Pro because it is intended for a flat display.")
     }
 }
 

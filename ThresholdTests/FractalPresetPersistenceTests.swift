@@ -41,6 +41,17 @@ struct FractalPresetPersistenceTests {
         #expect(legacyDecoded.tags.isEmpty)
     }
 
+    @Test("Screen-only scene tag is canonical and controls immersive visibility")
+    func screenOnlySceneTag() {
+        let tagged = SceneTagging.settingScreenOnly(true, in: ["Favorites", "mac ONLY"])
+
+        #expect(tagged == [SceneTagging.screenOnlyTag, "Favorites"])
+        #expect(SceneTagging.isScreenOnly(tagged))
+        #expect(SceneTagging.isVisible(tagged, includesScreenOnlyScenes: true))
+        #expect(!SceneTagging.isVisible(tagged, includesScreenOnlyScenes: false))
+        #expect(SceneTagging.settingScreenOnly(false, in: tagged) == ["Favorites"])
+    }
+
     @Test("Platform / cell-shading / light-rate / extra effects / bubble-fade survive fromSettings → encode → decode → apply")
     func droppedFieldsRoundTrip() throws {
         let settings = RenderSettings()
