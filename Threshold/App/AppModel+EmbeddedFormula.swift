@@ -27,7 +27,7 @@ func customSceneDiagnostic(_ message: @autoclosure () -> String) {
 enum LiveEditCompileOutcome {
     /// Draft compiled and is rendering.
     case ready
-    /// Custom scenes are disabled in Settings; the editor shows the gate hint.
+    /// Reserved for compatibility with older editor state; custom scenes are now always available.
     case disabled
     /// The renderer's activation handler isn't bound yet; retry on next edit.
     case rendererUnavailable
@@ -57,14 +57,10 @@ enum EmbeddedFormulaInstallResult: Equatable {
 
 @MainActor
 extension AppModel {
-    /// Custom-scenes feature flag. Enabled by default; users can still opt out
-    /// in Settings → Display if they do not want runtime Metal compilation.
+    /// Custom-scenes support is part of the core app workflow.
     static let allowCustomScenesUserDefaultsKey = "allowCustomScenes"
     static var allowCustomScenes: Bool {
-        guard UserDefaults.standard.object(forKey: allowCustomScenesUserDefaultsKey) != nil else {
-            return true
-        }
-        return UserDefaults.standard.bool(forKey: allowCustomScenesUserDefaultsKey)
+        true
     }
 
     /// Install a custom formula and wait for renderer activation to complete.
@@ -75,14 +71,6 @@ extension AppModel {
     func installEmbeddedFormulaIfNeededAndWait(_ formula: EmbeddedFormula?) async -> EmbeddedFormulaInstallResult {
         customSceneDiagnostic("🔬 [CSDiag] installEmbeddedFormulaIfNeededAndWait ENTRY formula=\(formula?.name ?? "nil") hash=\(formula?.shortHash ?? "nil") activeHash=\(activeEmbeddedFormulaHash ?? "nil") handlerReady=\(activateEmbeddedFormulaHandler != nil)")
         guard let formula else { return .ready }
-
-        guard AppModel.allowCustomScenes || formula.isBundledConstructionPrimitive else {
-            customSceneDiagnostic("🔬 [CSDiag] installEmbeddedFormula REFUSED — custom scenes feature disabled")
-            errorReporter.report(.preset(.importFailed(
-                "Custom scenes are disabled. Enable “Allow custom scenes” in Settings → Display to load this scene."
-            )))
-            return .failed
-        }
 
         do {
             try formula.validate()
@@ -163,7 +151,6 @@ extension AppModel {
     ///  - no catalog registration — the editor already registered the draft
     ///    on the instant (pragma-parse) path.
     func installEmbeddedFormulaForLiveEdit(_ draft: EmbeddedFormula) async -> LiveEditCompileOutcome {
-        guard AppModel.allowCustomScenes else { return .disabled }
         do {
             try draft.validate()
         } catch {

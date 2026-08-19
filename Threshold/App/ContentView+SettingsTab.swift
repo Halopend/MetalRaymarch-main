@@ -452,9 +452,7 @@ extension ContentView {
     }
 #endif
 
-    /// Advanced display toggles. The custom-scenes enable is
-    /// a display-runtime knob (it gates whether the renderer tries to
-    /// compile user-supplied shaders), so it lives here.
+    /// Advanced display tuning controls.
     private var experimentalDisplaySection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
@@ -462,18 +460,6 @@ extension ContentView {
                     .font(.headline)
                 Spacer()
             }
-
-            Toggle(isOn: $allowCustomScenes) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Allow custom scenes")
-                        .font(.subheadline.weight(.semibold))
-                    Text("Enables loading local .threshfx files and writing custom shader formulas. Custom scenes are validated and compiled on this Mac.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .tint(.orange)
 
             VStack(alignment: .leading, spacing: 4) {
                 CompactValueSlider(

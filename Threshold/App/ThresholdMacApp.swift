@@ -279,7 +279,6 @@ private struct ThresholdMacRootView: View {
     @AppStorage("MacTabLauncher.navigationModeMigrated.v1") private var didMigrateNavigationMode = false
     @AppStorage("MacTabLauncher.style") private var launcherStyle: NavigationPresentationStyle = .radial
     @AppStorage("MacTabLauncher.curvature") private var launcherCurvature: Double = 0.82
-    @AppStorage("allowCustomScenes") private var allowCustomScenes = true
     @AppStorage("hasCompletedIntroOnboarding") private var hasCompletedIntroOnboarding = false
     @State private var showStorageChoice = false
 
@@ -901,7 +900,7 @@ private struct ThresholdMacRootView: View {
     private var radialProjection: RadialNavigationProjection {
         RadialMenuProjectionFactory.make(
             appModel: appModel,
-            allowsCustomScenes: allowCustomScenes,
+            allowsCustomScenes: true,
             onActivate: activateRadialTarget
         )
     }

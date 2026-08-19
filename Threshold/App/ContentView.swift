@@ -78,7 +78,6 @@ struct ContentView: View {
     // the per-tab `extension ContentView` files).
     @State var renamingGradientIndex: Int? = nil
     @State var renamingGradientName: String = ""
-    @AppStorage("allowCustomScenes") var allowCustomScenes: Bool = true
     /// Menu text size (Dynamic Type). Index into `DS.textSizeSteps`; the "Text
     /// Size" slider in Settings ▸ Display writes it and the menu body applies it
     /// via `.dynamicTypeSize`. Default is platform-aware (one step up on
@@ -205,7 +204,7 @@ struct ContentView: View {
     private var navigationHierarchy: NavigationHierarchy {
         NavigationHierarchy.application(availability: .resolve(
             profile: appModel.platformProfile,
-            allowsCustomScenes: allowCustomScenes,
+            allowsCustomScenes: true,
             includesGestureEditing: supportsGestureEditing
         ))
     }

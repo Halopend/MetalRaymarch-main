@@ -28,8 +28,8 @@ database. The in-app setup and Settings screens link to the privacy policy.
 
 ## Custom scene formulas
 
-The “Allow custom scenes” switch is on by default (and can be turned off by the
-user). When enabled, it allows the user to create or import a local `.threshfx` scene formula. Formula
+Custom scenes are always available. The feature allows the user to create or
+import a local `.threshfx` scene formula. Formula
 source is always visible and editable in the app. Threshold validates the
 formula and compiles it locally with Apple's public Metal API
 `MTLDevice.makeLibrary(source:)` solely to render the user's scene.

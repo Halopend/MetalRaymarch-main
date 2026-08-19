@@ -19,16 +19,14 @@ struct FormulaEditorWindowView: View {
 
     var body: some View {
         Group {
-            if !AppModel.allowCustomScenes {
-                gateExplainer
-            } else if let model {
+            if let model {
                 FormulaEditorContent(model: model, appModel: appModel)
             } else {
                 ProgressView()
             }
         }
         .onAppear {
-            guard AppModel.allowCustomScenes, model == nil else { return }
+            guard model == nil else { return }
             let editor = FormulaEditorModel(
                 library: appModel.formulaLibrary,
                 compileHandler: { [weak appModel] draft in
@@ -58,21 +56,6 @@ struct FormulaEditorWindowView: View {
         }
     }
 
-    private var gateExplainer: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "lock.circle")
-                .font(.system(size: 36))
-                .foregroundStyle(.secondary)
-            Text("Metal DE Studio is disabled")
-                .font(.headline)
-            Text("Enable “Allow custom scenes” in Settings → Display to write a Metal distance estimator on your Mac.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding(40)
-        .frame(minWidth: 420, minHeight: 260)
-    }
 }
 
 private struct FormulaEditorContent: View {

@@ -1066,13 +1066,9 @@ class AppModel {
 
     /// Load a space-warp `.threshfx` into the single active custom slot WITHOUT
     /// changing the fractal type — the warp applies to whatever fractal is active.
-    /// Gated by `allowCustomScenes`; nudges `spaceWarpStrength` up so it's visible.
+    /// Nudge `spaceWarpStrength` up so the loaded warp is visible.
     @MainActor
     func installSpaceWarp(_ warp: EmbeddedFormula) {
-        guard Self.allowCustomScenes else {
-            errorReporter.report(.preset(.importFailed("Enable “Allow custom scenes” in Settings to load space warps.")))
-            return
-        }
         do { try warp.validate() } catch {
             errorReporter.report(.preset(.importFailed("Invalid space warp: \(error.localizedDescription)")))
             return

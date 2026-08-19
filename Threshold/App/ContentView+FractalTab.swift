@@ -183,8 +183,7 @@ extension ContentView {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             #if os(macOS)
-            if AppModel.allowCustomScenes {
-                HStack(spacing: 8) {
+            HStack(spacing: 8) {
                     Button {
                         appModel.formulaEditorSeed = nil
                         openWindow(id: AppModel.formulaEditorWindowID)
@@ -200,14 +199,8 @@ extension ContentView {
                     }
                     }
                     Spacer()
-                }
-                .controlSize(.small)
-            } else {
-                Text("Metal DE Studio is available by default; disable it with “Allow custom scenes” in Settings → Display.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+                .controlSize(.small)
             #endif
 
             FractalFormulaGrid(cache: cache, presetManager: appModel.presetManager)

@@ -51,7 +51,7 @@ Start with the [custom-scene authoring guide](CUSTOM_SCENES.md), then open
 [Accidental Sphere Projection](Threshold/Examples/Scenes/Accidental%20Sphere%20Projection.threshscene),
 or [Polychora 24-Cell](<Threshold/Examples/Custom%20Scene%20Example/Polychora%2024-Cell.threshscene>).
 
-> **Runtime safety:** Custom scenes are enabled by default. You can turn them off in **Settings → Display → Allow custom scenes** if you do not want user-authored Metal source compiled locally. Malformed or expensive formulas can still fail to compile or render poorly.
+> **Runtime safety:** Custom scenes are available by default. User-authored Metal source is validated before local compilation; malformed or expensive formulas can still fail to compile or render poorly.
 
 ## What Threshold does around the scene
 - **Performance:** Threshold is built for responsive, real-time fractal rendering. Rendering quality and performance work are measured on the target device rather than inferred from a simulator.
@@ -245,8 +245,7 @@ in [CUSTOM_SCENES.md](CUSTOM_SCENES.md).
 
 ### Try a custom scene
 
-1. Build and launch Threshold. Custom scenes are enabled by default; use
-   **Settings → Display → Allow custom scenes** to opt out if needed.
+1. Build and launch Threshold. Custom scenes are available immediately.
 2. Open or import
    [Sphere Fold (Sample)](Threshold/Examples/Formulas/SampleSphereFold.threshfx).
    It is a standalone, editable DE with three parameters.
