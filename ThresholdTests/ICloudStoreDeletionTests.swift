@@ -101,9 +101,9 @@ struct ICloudStoreDeletionTests {
     /// Simulate a store seeded by the release immediately before the targeted
     /// `w` edge-contour correction.
     private func markPresetStoreAsSeededBeforeWSceneEdgeDetectionFix(_ root: URL) throws {
-        try Data("[]".utf8).write(to: root.appendingPathComponent(".seeded-bundled.json"))
-        try Data("[]".utf8).write(
-            to: root.appendingPathComponent(PresetManager.officialSceneCatalogUpdateMarkerFileName)
+        let seenIDs = PresetManager.bundledPresetsForBenchmark().map(\.id)
+        try isoEncoder.encode(seenIDs).write(
+            to: root.appendingPathComponent(PresetManager.bundledCatalogMarkerFileName)
         )
     }
 
@@ -300,44 +300,40 @@ struct ICloudStoreDeletionTests {
         #expect(presetFileExists(id: foreign.id, in: root), "an unknown store file is never removed by replaceAll")
     }
 
-    @Test("Official scene catalog update seeds an existing store once without resurrection")
-    func officialSceneCatalogUpdateSeedsOnce() async throws {
+    @Test("New bundled presets are discovered automatically and seed only once")
+    func automaticBundledCatalogUpdateSeedsOnce() async throws {
         let root = makeStoreRoot()
-        // Simulate a store seeded by an older app release: it has the baseline
-        // marker, but not this explicitly approved catalog-update marker.
-        try Data("[]".utf8).write(to: root.appendingPathComponent(".seeded-bundled.json"))
+        let bundled = PresetManager.bundledPresetsForBenchmark()
+        let mountain = try #require(bundled.first { $0.name == "Mountain" })
+        let previouslySeenIDs = bundled.lazy.map(\.id).filter { $0 != mountain.id }
+        try isoEncoder.encode(Array(previouslySeenIDs)).write(
+            to: root.appendingPathComponent(PresetManager.bundledCatalogMarkerFileName)
+        )
         defer { teardown(root) }
 
         let manager = PresetManager()
         await manager.loadPresetsNow()
 
-        let updateIDs = PresetManager.officialSceneCatalogUpdateIDs
-        #expect(updateIDs.count == 15)
-        for id in updateIDs {
-            #expect(presetFileExists(id: id, in: root), "missing official catalog scene \(id)")
-        }
+        #expect(presetFileExists(id: mountain.id, in: root))
+        let marker = root.appendingPathComponent(PresetManager.bundledCatalogMarkerFileName)
+        let recordedIDs = try isoDecoder.decode([UUID].self, from: Data(contentsOf: marker))
+        #expect(Set(recordedIDs) == Set(bundled.map(\.id)))
 
-        let updateMarker = root.appendingPathComponent(
-            PresetManager.officialSceneCatalogUpdateMarkerFileName
-        )
-        #expect(FileManager.default.fileExists(atPath: updateMarker.path))
-
-        let deletedID = try #require(updateIDs.first)
-        let sceneDir = StorageLocation.scenesDir(root)
+        let musicDir = StorageLocation.musicPresetsDir(root)
         let deletedURL = try #require(
-            FileManager.default.contentsOfDirectory(at: sceneDir, includingPropertiesForKeys: nil)
+            FileManager.default.contentsOfDirectory(at: musicDir, includingPropertiesForKeys: nil)
                 .first { url in
                     guard let data = try? Data(contentsOf: url),
                           let preset = try? isoDecoder.decode(FractalPreset.self, from: data)
                     else { return false }
-                    return preset.id == deletedID
+                    return preset.id == mountain.id
                 }
         )
         try FileManager.default.removeItem(at: deletedURL)
 
         await manager.loadPresetsNow()
-        #expect(!presetFileExists(id: deletedID, in: root),
-                "a catalog update must not resurrect a user-deleted scene")
+        #expect(!presetFileExists(id: mountain.id, in: root),
+                "an automatically discovered preset must not resurrect after deletion")
     }
 
     @Test("Legacy w scene disables only its shipped synthetic edge contour")

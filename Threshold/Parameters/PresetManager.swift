@@ -160,32 +160,16 @@ enum StorePlaceholderReadPolicy {
 class PresetManager {
     private(set) var presets: [FractalPreset] = []
     private static var bundledPresetsCache: [FractalPreset]?
-    /// The baseline bundle marker intentionally never re-seeds an existing
-    /// store. This separate, versioned marker lets a deliberate catalog update
-    /// arrive once without resurrecting defaults a user has since deleted.
-    static let officialSceneCatalogUpdateMarkerFileName = ".seeded-official-scenes-v1.json"
+    static let bundledCatalogMarkerFileName = ".seeded-bundled.json"
+    /// Older releases wrote incremental catalog snapshots to separate markers.
+    /// Discover those files by prefix so their recorded IDs can be folded into
+    /// the automatic manifest without carrying a hard-coded catalog ledger.
+    private static let legacyBundledCatalogMarkerPrefix = ".seeded-official-scenes-"
     /// Existing installs seeded the original `w` asset with a near-max edge
     /// detector. Keep this correction independent from catalog seeding: it must
     /// update that exact bad payload without recreating a scene the user deleted.
     static let wSceneEdgeDetectionFixMarkerFileName = ".migrated-w-edge-detection-v1.json"
     static let wSceneID = UUID(uuidString: "35AB0B54-3FCB-4CB0-A7D2-D6F7FFDAD1D1")!
-    static let officialSceneCatalogUpdateIDs = Set([
-        "00000000-0022-0000-0000-000000000001", // Bulatov Limit Set
-        "3F4AF708-7B41-4A60-B1A5-9D965E807C9A", // Embedded Mandelbulb
-        "F7A845E9-53F1-4E48-BFB0-7A07650C8E45", // Fractal Cartoon
-        "66E632EF-0C14-414C-9057-7ED1D49A74A5", // Goop again
-        "AC36AB1F-22BE-43C5-82AA-37D4C53BF055", // Great sphere
-        "D9799129-E303-4BB5-84CE-04C047257B59", // Hold
-        "B1D7E3A2-6C44-4F18-9E70-2A91C5D0F3A4", // Hyperbolic Tessellation
-        "2B1C086E-B352-5940-BDF1-F184D7AA6269", // Polychora (4D Solids)
-        "880ABBF6-13C5-554A-B393-E679FF46151D", // Pseudo Kleinian
-        "D3B14883-7F39-542C-BE66-DC7DB104D952", // Pseudo Kleinian Quaternion Julia
-        "F2F53E77-7DDA-51D7-82CD-A640A7E4B965", // Pseudo Knightyan
-        "95B889CF-3C8E-5F65-B5D6-DA1AC9A14725", // Pseudo MandalayBox
-        "48AC358B-764A-44E6-ADEB-96F3073295FE", // Stress test
-        "B4234FA7-8F8B-4700-A0EA-9C4321E635C0", // Wave Rail
-        "35AB0B54-3FCB-4CB0-A7D2-D6F7FFDAD1D1"  // w
-    ].compactMap(UUID.init(uuidString:)))
     private static let legacyWSceneEdgeDetection = EdgeDetectionEffect(
         enabled: true,
         strength: 0.98378974,
@@ -607,19 +591,13 @@ class PresetManager {
         return arr
     }
 
-    /// One-time-per-store setup: migrate the legacy blob into per-file layout, and
-    /// seed bundled defaults exactly once per store.
-    ///
-    /// Seeding is gated on the marker file's EXISTENCE, not its contents. The store
-    /// lives in iCloud, where the marker can be an un-downloaded placeholder whose
-    /// read fails; if we treated a failed read as "never seeded" we'd re-write every
-    /// bundled default and RESURRECT any default the user deleted (the store's files
-    /// are the source of truth). Existence survives the placeholder, so once seeded
-    /// we never seed again and a deleted default stays deleted.
+    /// Migrate the legacy blob and merge newly bundled presets into this store.
+    /// The seed marker is a monotonic, automatically generated manifest of bundle
+    /// IDs the store has already seen. A set difference discovers new assets while
+    /// preserving deletions of older bundled presets.
     @discardableResult
     private func migrateAndSeedIfNeeded(root: URL, presentPresetIDs: Set<UUID>) -> Bool {
-        let marker = root.appendingPathComponent(".seeded-bundled.json")
-        let alreadySeeded = FileManager.default.fileExists(atPath: marker.path)
+        let marker = root.appendingPathComponent(Self.bundledCatalogMarkerFileName)
 
         // The off-main scan supplies the IDs actually present in this root. Do not
         // use the currently displayed array here: during a storage-mode switch it
@@ -652,66 +630,19 @@ class PresetManager {
             }
         }
 
-        // Seed bundled defaults ONCE per store. `!present` keeps any migrated/edited
-        // copy; the marker then locks seeding off forever for this store. A later,
-        // explicitly curated catalog update is handled below with its own marker.
-        if !alreadySeeded {
-            let bundled = Self.bundledPresets()
-            var seedSucceeded = true
-            for preset in bundled where !present.contains(preset.id) {
-                if writeNewPresetFile(preset, root: root) != nil {
-                    present.insert(preset.id)
-                    wroteFiles = true
-                } else {
-                    seedSucceeded = false
-                }
+        let bundled = Self.bundledPresets()
+        let catalogMarkerURLs = bundledCatalogMarkerURLs(root: root, primary: marker)
+        guard let seenIDs = readSeenBundledPresetIDs(from: catalogMarkerURLs) else {
+            // A dataless iCloud marker must never be mistaken for an empty
+            // manifest: that would resurrect every bundled preset the user deleted.
+            for url in catalogMarkerURLs {
+                try? FileManager.default.startDownloadingUbiquitousItem(at: url)
             }
-            let seededIDs = bundled.map(\.id)
-            if seedSucceeded, let data = try? presetEncoder.encode(seededIDs) {
-                do {
-                    try data.write(to: marker, options: .atomic)
-                } catch {
-                    seedSucceeded = false
-                    print("❌ Failed to write bundled-preset seed marker: \(error)")
-                }
-            }
-            if seedSucceeded {
-                print("🌱 Seeded \(seededIDs.count) bundled preset(s) into store")
-                _ = markOfficialSceneCatalogUpdateApplied(
-                    root: root,
-                    ids: Array(Self.officialSceneCatalogUpdateIDs)
-                )
-            }
+            print("☁️ Bundled preset manifest is not readable yet; deferring catalog update")
             return wroteFiles
         }
 
-        if seedOfficialSceneCatalogUpdateIfNeeded(root: root, presentPresetIDs: present) {
-            wroteFiles = true
-        }
-        return wroteFiles
-    }
-
-    /// Adds a deliberately curated bundle update exactly once. The independent
-    /// marker is checked by existence rather than contents for the same File
-    /// Provider reason as the baseline marker: an unhydrated marker must not
-    /// cause a deleted default to reappear.
-    private func seedOfficialSceneCatalogUpdateIfNeeded(
-        root: URL,
-        presentPresetIDs: Set<UUID>
-    ) -> Bool {
-        let marker = root.appendingPathComponent(Self.officialSceneCatalogUpdateMarkerFileName)
-        guard !FileManager.default.fileExists(atPath: marker.path) else { return false }
-
-        let additions = Self.bundledPresets().filter {
-            Self.officialSceneCatalogUpdateIDs.contains($0.id)
-        }
-        guard additions.count == Self.officialSceneCatalogUpdateIDs.count else {
-            print("❌ Official scene catalog update is incomplete in this bundle; deferring seed")
-            return false
-        }
-
-        var present = presentPresetIDs
-        var wroteFiles = false
+        let additions = bundled.filter { !seenIDs.contains($0.id) }
         var seedSucceeded = true
         for preset in additions where !present.contains(preset.id) {
             if writeNewPresetFile(preset, root: root) != nil {
@@ -723,21 +654,50 @@ class PresetManager {
         }
 
         guard seedSucceeded else { return wroteFiles }
-        guard markOfficialSceneCatalogUpdateApplied(root: root, ids: additions.map(\.id)) else {
+        let updatedSeenIDs = seenIDs.union(bundled.map(\.id))
+        guard writeSeenBundledPresetIDs(updatedSeenIDs, to: marker) else {
             return wroteFiles
         }
-        print("🌱 Seeded \(additions.count) official scene catalog update(s) into store")
+        if !additions.isEmpty {
+            print("🌱 Discovered \(additions.count) new bundled preset(s)")
+        }
         return wroteFiles
     }
 
-    private func markOfficialSceneCatalogUpdateApplied(root: URL, ids: [UUID]) -> Bool {
-        let marker = root.appendingPathComponent(Self.officialSceneCatalogUpdateMarkerFileName)
+    private func bundledCatalogMarkerURLs(root: URL, primary: URL) -> [URL] {
+        var urls: [URL] = []
+        if FileManager.default.fileExists(atPath: primary.path) {
+            urls.append(primary)
+        }
+        let legacyURLs = (try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil
+        ))?.filter {
+            $0.lastPathComponent.hasPrefix(Self.legacyBundledCatalogMarkerPrefix)
+        } ?? []
+        urls.append(contentsOf: legacyURLs)
+        return Array(Set(urls))
+    }
+
+    private func readSeenBundledPresetIDs(from markerURLs: [URL]) -> Set<UUID>? {
+        var result = Set<UUID>()
+        for url in markerURLs {
+            guard let data = try? Data(contentsOf: url),
+                  let ids = try? presetDecoder.decode([UUID].self, from: data)
+            else { return nil }
+            result.formUnion(ids)
+        }
+        return result
+    }
+
+    private func writeSeenBundledPresetIDs(_ seenIDs: Set<UUID>, to marker: URL) -> Bool {
+        let ids = seenIDs.sorted { $0.uuidString < $1.uuidString }
         guard let data = try? presetEncoder.encode(ids) else { return false }
         do {
             try data.write(to: marker, options: .atomic)
             return true
         } catch {
-            print("❌ Failed to write official scene catalog update marker: \(error)")
+            print("❌ Failed to write bundled-preset manifest: \(error)")
             return false
         }
     }
@@ -1341,6 +1301,7 @@ extension PresetManager {
         for ext in musicExts {
             musicPresetURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Scenes") ?? []
             musicPresetURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Mixed") ?? []
+            musicPresetURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Music Presets") ?? []
             musicPresetURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: nil) ?? []
         }
         // Filter the .json hits down to ones that are actually our preset files.

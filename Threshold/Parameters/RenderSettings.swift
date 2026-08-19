@@ -439,6 +439,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _glowEffect: GlowEffect = .off
     private var _bloomEffect: BloomEffect = .off
     private var _edgeDetectionEffect: EdgeDetectionEffect = .off
+    private var _convolutionEffect: ConvolutionEffect = .off
     private var _fogEffect: FogEffect = .off
     /// Eased mixed-immersion fog attenuation applied at pack time (1.0 = full
     /// authored fog). Fog reads heavy against passthrough, so in .mixed the
@@ -2625,6 +2626,7 @@ final class RenderSettings: @unchecked Sendable {
                     _glowEffect = effects.glow
                     _bloomEffect = effects.bloom
                     _edgeDetectionEffect = effects.edge
+                    _convolutionEffect = .off
                     _fogEffect = effects.fog
                     _gradientCycleEffect = effects.gradientCycle
                     _linearRailEffect = effects.linearRail
@@ -2704,6 +2706,21 @@ final class RenderSettings: @unchecked Sendable {
             normalized.normalize()
             withLock {
                 _edgeDetectionEffect = normalized
+                _lightingPreset = .custom
+            }
+            persistLighting()
+        }
+    }
+
+    /// Output-resolution, scene-owned convolution filter. Invalid or incomplete
+    /// kernel text stays editable but is never sent to the GPU.
+    var convolutionEffect: ConvolutionEffect {
+        get { withLock { _convolutionEffect } }
+        set {
+            var normalized = newValue
+            normalized.normalize()
+            withLock {
+                _convolutionEffect = normalized
                 _lightingPreset = .custom
             }
             persistLighting()
@@ -3784,11 +3801,9 @@ final class RenderSettings: @unchecked Sendable {
 
     // ═══════════════════════════════════════════════════════════════════════════
     // SCENE TRANSITION ("Same Scene Transition Time")
-    // One-shot eased blend of the displayed parameters toward a newly loaded
-    // scene/preset's values. A preset normally snaps the displayed values to the
-    // new target instantly; arming a transition restores the pre-switch values
-    // and eases them toward the new target over `_sceneTransitionDuration`,
-    // overriding the default smoothing time and speed caps for that window.
+    // One-shot eased blend of compatible shape parameters toward a newly loaded
+    // scene/preset's values. Authored camera and scale framing load immediately;
+    // the blend overrides the default smoothing time and speed caps for its window.
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// Configured transition time in seconds (slider-driven). `0` = instant.
@@ -3801,10 +3816,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _stMinDistance: Float = 0
     private var _stFoldingLimit: Float = 0
     private var _stSphereRadius: Float = 0
-    private var _stFractalScale: Float = 0
-    private var _stPosition = SIMD3<Float>(repeating: 0)
-    private var _stWorldRotation = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
-    private var _stDetailScale: Float = 1
+    private var _stFractalType: FractalModelType = .mandelbox
     private var _sceneLoadGeneration: UInt64 = 0
     /// Targets whose music "center of variation" the user just reset manually
     /// (slider/gesture). Drained by the music-reactive engine each frame. Only
@@ -3845,24 +3857,21 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    /// Snapshot the currently displayed transform/shape parameters before a new
-    /// scene/preset is applied. Pair with `commitSceneTransition()`.
+    /// Snapshot compatible shape parameters before a new scene/preset is applied.
+    /// Pair with `commitSceneTransition()`.
     func beginSceneTransitionSnapshot() {
         withLock {
             _stMinDistance = _minDistance
             _stFoldingLimit = _foldingLimit
             _stSphereRadius = _sphereRadius
-            _stFractalScale = _fractalScale
-            _stPosition = _position
-            _stWorldRotation = _worldRotation
-            _stDetailScale = _detailScale
+            _stFractalType = _fractalType
             _sceneTransitionArmed = true
         }
     }
 
-    /// Begin easing from the snapshot toward the freshly applied targets. The
-    /// preset load already set both current and target to the new values, so we
-    /// restore current to the snapshot and let `interpolateToTargets` ease back.
+    /// Begin easing compatible shape parameters from the snapshot toward the
+    /// freshly applied targets. Camera and scale framing remain at the preset's
+    /// authored values so switching scenes cannot temporarily frame empty space.
     func commitSceneTransition() {
         withLock {
             guard _sceneTransitionArmed else { return }
@@ -3877,14 +3886,19 @@ final class RenderSettings: @unchecked Sendable {
                 return
             }
 
+            // The snapshot's shape values belong to the outgoing distance
+            // estimator. Restoring them after a formula switch can leave the
+            // viewport empty until smoothing catches up. Custom formulas share
+            // one enum case despite having unrelated estimators, so treat every
+            // custom-formula load as a cross-formula switch as well.
+            guard _stFractalType == _fractalType, _fractalType != .custom else {
+                _sceneTransitionActive = false
+                return
+            }
+
             _minDistance = _stMinDistance
             _foldingLimit = _stFoldingLimit
             _sphereRadius = _stSphereRadius
-            _fractalScale = _stFractalScale
-            _position = _stPosition
-            _worldRotation = _stWorldRotation
-            _detailScale = _stDetailScale
-
             _velocityMinDistance = 0
             _velocityFoldingLimit = 0
             _velocitySphereRadius = 0
@@ -4901,6 +4915,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.glowEffect = _glowEffect
                 c.bloomEffect = _bloomEffect
                 c.edgeDetectionEffect = _edgeDetectionEffect
+                c.convolutionEffect = _convolutionEffect
                 c.fogEffect = _fogEffect
                 c.gradientCycleEffect = _gradientCycleEffect
                 c.linearRailEffect = _linearRailEffect
@@ -4921,6 +4936,7 @@ final class RenderSettings: @unchecked Sendable {
                 _glowEffect = normalized.glowEffect
                 _bloomEffect = normalized.bloomEffect
                 _edgeDetectionEffect = normalized.edgeDetectionEffect
+                _convolutionEffect = normalized.convolutionEffect
                 _fogEffect = normalized.fogEffect
                 _gradientCycleEffect = normalized.gradientCycleEffect
                 _linearRailEffect = normalized.linearRailEffect

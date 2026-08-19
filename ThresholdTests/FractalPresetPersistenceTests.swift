@@ -180,6 +180,40 @@ struct FractalPresetPersistenceTests {
         #expect(settings.snapshot().colorSchemeParams.edgeDetectionEnabled == 0)
     }
 
+    @Test("Convolution validates explicit kernel sizes and survives scene persistence")
+    func convolutionRoundTripAndValidation() throws {
+        var convolution = ConvolutionEffect.sharpen
+        convolution.kernelSize = 5
+        convolution.kernelText = Array(repeating: "1", count: 25).joined(separator: " ")
+        #expect(convolution.parsedKernel.isValid)
+        #expect(convolution.parsedKernel.values.count == 25)
+
+        convolution.kernelText = Array(repeating: "1", count: 24).joined(separator: " ")
+        #expect(!convolution.parsedKernel.isValid)
+        #expect(convolution.parsedKernel.error?.contains("25 values") == true)
+        #expect(!convolution.isActive)
+
+        convolution.kernelText = "0 -1 0\n-1 5 -1\n0 -1 0"
+        convolution.kernelSize = 3
+        convolution.setStrength(0.65)
+
+        let settings = RenderSettings()
+        settings.convolutionEffect = convolution
+        let encoded = try JSONEncoder().encode(
+            FractalPreset.fromSettings(settings, name: "Convolution")
+        )
+        let decoded = try JSONDecoder().decode(FractalPreset.self, from: encoded)
+
+        #expect(decoded.convolutionEffect?.kernelSize == 3)
+        #expect(decoded.convolutionEffect?.kernelText == convolution.kernelText)
+        #expect(abs((decoded.convolutionEffect?.strength ?? -1) - 0.65) < 1e-5)
+
+        let fresh = RenderSettings()
+        decoded.apply(to: fresh)
+        #expect(fresh.convolutionEffect.isActive)
+        #expect(fresh.convolutionEffect.parsedKernel.values == [0, -1, 0, -1, 5, -1, 0, -1, 0])
+    }
+
     @Test("Bound to Space survives scene encode/decode/apply")
     func boundToSpaceRoundTrips() throws {
         let settings = RenderSettings()

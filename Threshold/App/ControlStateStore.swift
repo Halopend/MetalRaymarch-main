@@ -573,6 +573,12 @@ final class ControlStateStore {
         settings.edgeDetectionEffect = lighting.edgeDetectionEffect
     }
 
+    func commitConvolutionEffect() {
+        guard let settings else { return }
+        lighting.convolutionEffect.normalize()
+        settings.convolutionEffect = lighting.convolutionEffect
+    }
+
     func commitFogEffect() {
         guard let settings else { return }
         if settings.isAnimationPlaying {

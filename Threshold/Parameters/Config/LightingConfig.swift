@@ -19,6 +19,7 @@ struct LightingConfig: Codable, Equatable, Sendable {
     var glowEffect: GlowEffect = GlowEffect()
     var bloomEffect: BloomEffect = BloomEffect()
     var edgeDetectionEffect: EdgeDetectionEffect = EdgeDetectionEffect()
+    var convolutionEffect: ConvolutionEffect = ConvolutionEffect()
     var fogEffect: FogEffect = FogEffect()
     var gradientCycleEffect: GradientCycleEffect = GradientCycleEffect()
     var linearRailEffect: LinearRailEffect = LinearRailEffect()
@@ -29,7 +30,7 @@ struct LightingConfig: Codable, Equatable, Sendable {
     init() {}
 
     enum CodingKeys: String, CodingKey {
-        case lightingPreset, lightVariationRate, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, edgeDetectionEffect, fogEffect
+        case lightingPreset, lightVariationRate, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, edgeDetectionEffect, convolutionEffect, fogEffect
         case gradientCycleEffect, linearRailEffect, beatFlashEffect, polarRotationEffect, juliaDriftEffect
     }
 
@@ -42,6 +43,7 @@ struct LightingConfig: Codable, Equatable, Sendable {
         glowEffect = try container.decodeIfPresent(GlowEffect.self, forKey: .glowEffect) ?? GlowEffect()
         bloomEffect = try container.decodeIfPresent(BloomEffect.self, forKey: .bloomEffect) ?? BloomEffect()
         edgeDetectionEffect = try container.decodeIfPresent(EdgeDetectionEffect.self, forKey: .edgeDetectionEffect) ?? EdgeDetectionEffect()
+        convolutionEffect = try container.decodeIfPresent(ConvolutionEffect.self, forKey: .convolutionEffect) ?? ConvolutionEffect()
         fogEffect = try container.decodeIfPresent(FogEffect.self, forKey: .fogEffect) ?? FogEffect()
         gradientCycleEffect = try container.decodeIfPresent(GradientCycleEffect.self, forKey: .gradientCycleEffect) ?? GradientCycleEffect()
         linearRailEffect = try container.decodeIfPresent(LinearRailEffect.self, forKey: .linearRailEffect) ?? LinearRailEffect()
@@ -85,6 +87,7 @@ struct LightingConfig: Codable, Equatable, Sendable {
             to: ControlCatalog.linearRailOrbitSpeed
         )
         edgeDetectionEffect.normalize()
+        convolutionEffect.normalize()
     }
 
 }

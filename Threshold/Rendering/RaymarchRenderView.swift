@@ -314,6 +314,26 @@ final class ViewportRenderer {
         /// x = enabled window radius (0 means off), y = strength,
         /// z = threshold, w = softness.
         var edge: SIMD4<Float> = .zero
+        /// x = enabled, y = blend amount, z = kernel dimension, w = reserved.
+        var convolution: SIMD4<Float> = .zero
+        var kernel0: SIMD4<Float> = .zero
+        var kernel1: SIMD4<Float> = .zero
+        var kernel2: SIMD4<Float> = .zero
+        var kernel3: SIMD4<Float> = .zero
+        var kernel4: SIMD4<Float> = .zero
+        var kernel5: SIMD4<Float> = .zero
+        var kernel6: SIMD4<Float> = .zero
+
+        mutating func setKernel(_ values: [Float]) {
+            let padded = Array(values.prefix(25)) + Array(repeating: 0, count: max(0, 25 - values.count))
+            kernel0 = SIMD4(padded[0], padded[1], padded[2], padded[3])
+            kernel1 = SIMD4(padded[4], padded[5], padded[6], padded[7])
+            kernel2 = SIMD4(padded[8], padded[9], padded[10], padded[11])
+            kernel3 = SIMD4(padded[12], padded[13], padded[14], padded[15])
+            kernel4 = SIMD4(padded[16], padded[17], padded[18], padded[19])
+            kernel5 = SIMD4(padded[20], padded[21], padded[22], padded[23])
+            kernel6 = SIMD4(padded[24], 0, 0, 0)
+        }
     }
 
     private struct TemporalInvalidationKey: Equatable {
@@ -521,6 +541,7 @@ final class ViewportRenderer {
     private var smoothedMaxViewDistance: Float = RenderSettings.maxViewDistance
     private var drawableSize: CGSize = .zero
     private var depthTexture: MTLTexture?
+    private var nativePostProcessTexture: MTLTexture?
 
     /// Counts down after a GPU command buffer error. While non-zero, draws are
     /// skipped to let the GPU recover before new submissions are attempted.
@@ -931,10 +952,15 @@ final class ViewportRenderer {
         // up firing.
         RenderTrace.traceGPU("GPU Frame", commandBuffer: commandBuffer)
 
+        // Convolution needs a readable source texture. Preserve the zero-cost
+        // native path unless a valid convolution is actually enabled.
+        let needsOutputFilter = appModel.renderSettings.convolutionEffect.isActive &&
+            blitPipelineState != nil
+
         // The direct (native-resolution) path renders straight into the drawable
         // and needs the drawable-sized depth target.
         let directPassDescriptor: MTLRenderPassDescriptor?
-        if temporalPass == nil, spatialPass == nil {
+        if temporalPass == nil, spatialPass == nil, !needsOutputFilter {
             guard let descriptor = makeRenderPassDescriptor(drawable: drawable) else {
                 inFlightSemaphore.signal()
                 return
@@ -1120,6 +1146,36 @@ final class ViewportRenderer {
             }
             blitEncoder.setRenderPipelineState(blitPipelineState)
             blitEncoder.setFragmentTexture(spatialPass.output, index: 0)
+            blitEncoder.setFragmentBytes(
+                &blitParams,
+                length: MemoryLayout<ViewportBlitParams>.stride,
+                index: 0
+            )
+            blitEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            blitEncoder.endEncoding()
+
+            wasTemporalActive = false
+        } else if needsOutputFilter, let blitPipelineState,
+                  let sourceTexture = ensureNativePostProcessTexture(for: drawable),
+                  let depth = depthTexture(width: drawable.texture.width, height: drawable.texture.height) {
+            let offscreenDescriptor = makeOffscreenRenderPassDescriptor(color: sourceTexture, depth: depth)
+            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: offscreenDescriptor) else {
+                commandBuffer.commit()
+                return
+            }
+            encodeRaymarch(into: encoder, pipeline: activePipeline, uniformBuffer: uniformBuffer, benchBuffer: benchBuffer)
+            encoder.endEncoding()
+
+            let blitDescriptor = MTLRenderPassDescriptor()
+            blitDescriptor.colorAttachments[0].texture = drawable.texture
+            blitDescriptor.colorAttachments[0].loadAction = .dontCare
+            blitDescriptor.colorAttachments[0].storeAction = .store
+            guard let blitEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: blitDescriptor) else {
+                commandBuffer.commit()
+                return
+            }
+            blitEncoder.setRenderPipelineState(blitPipelineState)
+            blitEncoder.setFragmentTexture(sourceTexture, index: 0)
             blitEncoder.setFragmentBytes(
                 &blitParams,
                 length: MemoryLayout<ViewportBlitParams>.stride,
@@ -1403,6 +1459,29 @@ final class ViewportRenderer {
         return depthTexture
     }
 
+    private func ensureNativePostProcessTexture(for drawable: CAMetalDrawable) -> MTLTexture? {
+        let width = max(1, drawable.texture.width)
+        let height = max(1, drawable.texture.height)
+        if let nativePostProcessTexture,
+           nativePostProcessTexture.width == width,
+           nativePostProcessTexture.height == height,
+           nativePostProcessTexture.pixelFormat == drawable.texture.pixelFormat {
+            return nativePostProcessTexture
+        }
+
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: drawable.texture.pixelFormat,
+            width: width,
+            height: height,
+            mipmapped: false
+        )
+        descriptor.usage = [.renderTarget, .shaderRead]
+        descriptor.storageMode = .private
+        nativePostProcessTexture = device.makeTexture(descriptor: descriptor)
+        nativePostProcessTexture?.label = "Threshold Native Convolution Source"
+        return nativePostProcessTexture
+    }
+
     @discardableResult
     private func writeUniforms(to buffer: MTLBuffer,
                                appModel: AppModel,
@@ -1462,12 +1541,24 @@ final class ViewportRenderer {
         let edgeRadius = edgeEnabled
             ? Float(max(1, min(3, uniforms.colorScheme.edgeDetectionWindowRadius)))
             : 0.0
-        let blitParams = ViewportBlitParams(edge: SIMD4<Float>(
+        var blitParams = ViewportBlitParams()
+        blitParams.edge = SIMD4<Float>(
             edgeRadius,
             uniforms.colorScheme.edgeDetectionStrength,
             uniforms.colorScheme.edgeDetectionThreshold,
             uniforms.colorScheme.edgeDetectionSoftness
-        ))
+        )
+        let convolution = settings.convolutionEffect
+        let parsedKernel = convolution.parsedKernel
+        if convolution.isActive {
+            blitParams.convolution = SIMD4<Float>(
+                1.0,
+                convolution.strength,
+                Float(parsedKernel.size),
+                0.0
+            )
+            blitParams.setKernel(parsedKernel.values)
+        }
         if edgeEnabled {
             // Do not burn the synthetic outline into MetalFX color/history.
             // The existing full-resolution blit pass applies it after upscale.

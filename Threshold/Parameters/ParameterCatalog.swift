@@ -1165,7 +1165,7 @@ enum ParameterCatalog {
         ),
         staticDescriptor(
             ControlCatalog.edgeStrength,
-            route: .look(.grading), section: "Edge Detection", order: 0,
+            route: .look(.grading), section: "Edge Detection (Canny-style)", order: 0,
             uiRead: { $0.lighting.edgeDetectionEffect.strength },
             uiWrite: { cache, value in cache.lighting.edgeDetectionEffect.setStrength(value); cache.commitEdgeDetectionEffect() },
             settingsRead: { $0.edgeDetectionEffect.strength },
@@ -1173,7 +1173,7 @@ enum ParameterCatalog {
         ),
         staticDescriptor(
             ControlCatalog.edgeThreshold,
-            route: .look(.grading), section: "Edge Detection", order: 1,
+            route: .look(.grading), section: "Edge Detection (Canny-style)", order: 1,
             uiRead: { $0.lighting.edgeDetectionEffect.threshold },
             uiWrite: { cache, value in cache.lighting.edgeDetectionEffect.threshold = value; cache.commitEdgeDetectionEffect() },
             settingsRead: { $0.edgeDetectionEffect.threshold },
@@ -1181,7 +1181,7 @@ enum ParameterCatalog {
         ),
         staticDescriptor(
             ControlCatalog.edgeSoftness,
-            route: .look(.grading), section: "Edge Detection", order: 2,
+            route: .look(.grading), section: "Edge Detection (Canny-style)", order: 2,
             uiRead: { $0.lighting.edgeDetectionEffect.softness },
             uiWrite: { cache, value in cache.lighting.edgeDetectionEffect.softness = value; cache.commitEdgeDetectionEffect() },
             settingsRead: { $0.edgeDetectionEffect.softness },
@@ -1189,7 +1189,7 @@ enum ParameterCatalog {
         ),
         staticDescriptor(
             ControlCatalog.edgeWindowRadius,
-            route: .look(.grading), section: "Edge Detection", order: 3,
+            route: .look(.grading), section: "Edge Detection (Canny-style)", order: 3,
             uiRead: { Float($0.lighting.edgeDetectionEffect.windowRadius) },
             uiWrite: { cache, value in cache.lighting.edgeDetectionEffect.windowRadius = Int(value.rounded()); cache.commitEdgeDetectionEffect() },
             settingsRead: { Float($0.edgeDetectionEffect.windowRadius) },

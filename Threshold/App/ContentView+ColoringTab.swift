@@ -9,6 +9,14 @@
 import SwiftUI
 
 extension ContentView {
+    private enum OutputFilter: String, CaseIterable, Identifiable {
+        case none = "None"
+        case edgeDetection = "Edge Detection (Canny-style)"
+        case convolution = "Convolution"
+
+        var id: Self { self }
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // MARK: - Coloring Tab
     // ═══════════════════════════════════════════════════════════════════════════
@@ -399,90 +407,178 @@ extension ContentView {
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
 
-            // Output-space edge enhancement. This is scene-authored post
-            // processing, not a geometry/scale control; MetalFX frames apply it
-            // after reconstruction so the contour width is measured in output
-            // pixels rather than enlarged low-resolution pixels.
-            VStack(spacing: 4) {
+            // Output-space filters are scene-authored and mutually exclusive.
+            // MetalFX frames apply them after reconstruction so their footprint
+            // is measured in output pixels.
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Label("Edge Detection", systemImage: "circle.lefthalf.filled")
+                    Label("Filter", systemImage: AppIcons.cameraFilters)
                         .font(.subheadline.weight(.medium))
                     Spacer()
-                    Button {
-                        cache.lighting.edgeDetectionEffect = .outline
-                        cache.lighting.lightingPreset = .custom
-                        cache.commitEdgeDetectionEffect()
-                    } label: {
-                        Label("Outline Preset", systemImage: "lines.measurement.horizontal")
+                    Picker("Filter", selection: outputFilterBinding) {
+                        ForEach(OutputFilter.allCases) { filter in
+                            Text(filter.rawValue).tag(filter)
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .tint(cache.lighting.edgeDetectionEffect == .outline ? .indigo : .secondary)
+                    .labelsHidden()
+                    .pickerStyle(.menu)
                 }
 
-                EffectSliderRow(
-                    icon: "circle.lefthalf.filled",
-                    label: "Edge Strength",
-                    value: Binding(
-                        get: { cache.lighting.edgeDetectionEffect.strength },
-                        set: { cache.lighting.edgeDetectionEffect.setStrength($0) }
-                    ),
-                    range: ControlCatalog.edgeStrength.range,
-                    enabled: .constant(true),
-                    onChanged: { cache.commitEdgeDetectionEffect() },
-                    showToggle: false,
-                    valueFormat: { $0 <= EdgeDetectionEffect.activationEpsilon ? "Off" : String(format: "%.2f", $0) }
-                )
-
-                Divider().padding(.leading, 159)
-                EffectSliderRow(
-                    icon: ControlCatalog.edgeThreshold.icon,
-                    label: "Threshold",
-                    value: Binding(
-                        get: { cache.lighting.edgeDetectionEffect.threshold },
-                        set: { cache.lighting.edgeDetectionEffect.threshold = $0 }
-                    ),
-                    range: ControlCatalog.edgeThreshold.range,
-                    enabled: .constant(cache.lighting.edgeDetectionEffect.isActive),
-                    onChanged: { cache.commitEdgeDetectionEffect() },
-                    showToggle: false
-                )
-                Divider().padding(.leading, 159)
-                EffectSliderRow(
-                    icon: ControlCatalog.edgeSoftness.icon,
-                    label: "Softness",
-                    value: Binding(
-                        get: { cache.lighting.edgeDetectionEffect.softness },
-                        set: { cache.lighting.edgeDetectionEffect.softness = $0 }
-                    ),
-                    range: ControlCatalog.edgeSoftness.range,
-                    enabled: .constant(cache.lighting.edgeDetectionEffect.isActive),
-                    onChanged: { cache.commitEdgeDetectionEffect() },
-                    showToggle: false
-                )
-                Divider().padding(.leading, 159)
-                EffectSliderRow(
-                    icon: ControlCatalog.edgeWindowRadius.icon,
-                    label: "Window Size",
-                    value: Binding(
-                        get: { Float(cache.lighting.edgeDetectionEffect.windowRadius) },
-                        set: { cache.lighting.edgeDetectionEffect.windowRadius = Int($0.rounded()) }
-                    ),
-                    range: ControlCatalog.edgeWindowRadius.range,
-                    enabled: .constant(cache.lighting.edgeDetectionEffect.isActive),
-                    onChanged: { cache.commitEdgeDetectionEffect() },
-                    showToggle: false,
-                    valueFormat: { String(Int($0.rounded())) }
-                )
-
-                Text("Outlines luminance transitions in the final scene. Strength 0 turns the pass off; lower the threshold for more contours and raise softness for a gentler result.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                switch selectedOutputFilter {
+                case .none:
+                    Text("No output-space image filter is applied.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                case .edgeDetection:
+                    edgeDetectionFilterControls
+                case .convolution:
+                    convolutionFilterControls
+                }
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.06)))
+        }
+    }
+
+    private var selectedOutputFilter: OutputFilter {
+        if cache.lighting.convolutionEffect.enabled { return .convolution }
+        if cache.lighting.edgeDetectionEffect.enabled { return .edgeDetection }
+        return .none
+    }
+
+    private var outputFilterBinding: Binding<OutputFilter> {
+        Binding(get: { selectedOutputFilter }, set: { filter in
+            switch filter {
+            case .none:
+                cache.lighting.edgeDetectionEffect.setStrength(0)
+                cache.lighting.convolutionEffect.setStrength(0)
+            case .edgeDetection:
+                cache.lighting.convolutionEffect.setStrength(0)
+                if !cache.lighting.edgeDetectionEffect.isActive {
+                    cache.lighting.edgeDetectionEffect.setStrength(0.8)
+                }
+            case .convolution:
+                cache.lighting.edgeDetectionEffect.setStrength(0)
+                if !cache.lighting.convolutionEffect.isActive {
+                    cache.lighting.convolutionEffect.setStrength(0.8)
+                }
+            }
+            cache.lighting.lightingPreset = .custom
+            cache.commitEdgeDetectionEffect()
+            cache.commitConvolutionEffect()
+        })
+    }
+
+    @ViewBuilder
+    private var edgeDetectionFilterControls: some View {
+        EffectSliderRow(
+            icon: "circle.lefthalf.filled", label: "Strength",
+            value: Binding(
+                get: { cache.lighting.edgeDetectionEffect.strength },
+                set: { cache.lighting.edgeDetectionEffect.setStrength($0) }
+            ),
+            range: ControlCatalog.edgeStrength.range,
+            enabled: .constant(true),
+            onChanged: { cache.commitEdgeDetectionEffect() },
+            showToggle: false
+        )
+        Divider().padding(.leading, 159)
+        EffectSliderRow(
+            icon: ControlCatalog.edgeThreshold.icon, label: "Threshold",
+            value: Binding(
+                get: { cache.lighting.edgeDetectionEffect.threshold },
+                set: { cache.lighting.edgeDetectionEffect.threshold = $0 }
+            ),
+            range: ControlCatalog.edgeThreshold.range,
+            enabled: .constant(true),
+            onChanged: { cache.commitEdgeDetectionEffect() },
+            showToggle: false
+        )
+        Divider().padding(.leading, 159)
+        EffectSliderRow(
+            icon: ControlCatalog.edgeSoftness.icon, label: "Softness",
+            value: Binding(
+                get: { cache.lighting.edgeDetectionEffect.softness },
+                set: { cache.lighting.edgeDetectionEffect.softness = $0 }
+            ),
+            range: ControlCatalog.edgeSoftness.range,
+            enabled: .constant(true),
+            onChanged: { cache.commitEdgeDetectionEffect() },
+            showToggle: false
+        )
+        Divider().padding(.leading, 159)
+        EffectSliderRow(
+            icon: ControlCatalog.edgeWindowRadius.icon, label: "Window Size",
+            value: Binding(
+                get: { Float(cache.lighting.edgeDetectionEffect.windowRadius) },
+                set: { cache.lighting.edgeDetectionEffect.windowRadius = Int($0.rounded()) }
+            ),
+            range: ControlCatalog.edgeWindowRadius.range,
+            enabled: .constant(true),
+            onChanged: { cache.commitEdgeDetectionEffect() },
+            showToggle: false,
+            valueFormat: { String(Int($0.rounded())) }
+        )
+    }
+
+    @ViewBuilder
+    private var convolutionFilterControls: some View {
+        EffectSliderRow(
+            icon: "circle.lefthalf.filled", label: "Amount",
+            value: Binding(
+                get: { cache.lighting.convolutionEffect.strength },
+                set: { cache.lighting.convolutionEffect.setStrength($0) }
+            ),
+            range: 0...1,
+            enabled: .constant(true),
+            onChanged: { cache.commitConvolutionEffect() },
+            showToggle: false
+        )
+
+        HStack {
+            Text("Kernel Size")
+                .font(.subheadline)
+            Spacer()
+            Picker("Kernel Size", selection: Binding(
+                get: { cache.lighting.convolutionEffect.kernelSize },
+                set: {
+                    cache.lighting.convolutionEffect.kernelSize = $0
+                    cache.commitConvolutionEffect()
+                }
+            )) {
+                ForEach(ConvolutionEffect.supportedKernelSizes, id: \.self) { size in
+                    Text("\(size)×\(size)").tag(size)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 190)
+        }
+
+        TextEditor(text: Binding(
+            get: { cache.lighting.convolutionEffect.kernelText },
+            set: {
+                cache.lighting.convolutionEffect.kernelText = $0
+                cache.commitConvolutionEffect()
+            }
+        ))
+        .font(.system(.callout, design: .monospaced))
+        .autocorrectionDisabled()
+        .scrollContentBackground(.hidden)
+        .padding(8)
+        .frame(minHeight: 84, maxHeight: 130)
+        .background(Color.black.opacity(0.18))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+
+        let kernel = cache.lighting.convolutionEffect.parsedKernel
+        if let error = kernel.error {
+            Label(error, systemImage: "exclamationmark.triangle")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+        } else {
+            Text("Coefficients are read left-to-right, top-to-bottom. Spaces, commas, semicolons, and new lines are accepted.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 }

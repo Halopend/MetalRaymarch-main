@@ -13,6 +13,46 @@ struct SceneStatePersistenceTests {
         let sceneState: SceneState
     }
 
+    @Test("Scene transitions never restore geometry from another formula")
+    func crossFormulaSceneTransitionUsesAuthoredFraming() {
+        let settings = RenderSettings()
+        settings.sceneTransitionDuration = 1
+        settings.fractalType = .mandelbox
+        settings.position = SIMD3<Float>(1, 2, 3)
+        settings.targetPosition = settings.position
+
+        settings.beginSceneTransitionSnapshot()
+        settings.fractalType = .mandelbulb
+        settings.position = SIMD3<Float>(9, 8, 7)
+        settings.targetPosition = settings.position
+        settings.commitSceneTransition()
+
+        #expect(settings.position == SIMD3<Float>(9, 8, 7))
+    }
+
+    @Test("Same-formula transitions retain authored framing while easing shape")
+    func sameFormulaSceneTransitionKeepsAuthoredFraming() {
+        let settings = RenderSettings()
+        settings.sceneTransitionDuration = 1
+        settings.fractalType = .mandelbox
+        settings.position = SIMD3<Float>(1, 2, 3)
+        settings.targetPosition = settings.position
+        settings.minDistance = 0.5
+        settings.targetMinDistance = 0.5
+
+        settings.beginSceneTransitionSnapshot()
+        settings.position = SIMD3<Float>(9, 8, 7)
+        settings.targetPosition = settings.position
+        settings.minDistance = 1.5
+        settings.targetMinDistance = 1.5
+        settings.commitSceneTransition()
+
+        #expect(settings.position == SIMD3<Float>(9, 8, 7))
+        #expect(settings.targetPosition == SIMD3<Float>(9, 8, 7))
+        #expect(settings.minDistance == 0.5)
+        #expect(settings.targetMinDistance == 1.5)
+    }
+
     @Test("v3 captures omitted scene lanes and preserves device preferences")
     func capturesCompleteSceneOwnedState() throws {
         let source = RenderSettings()

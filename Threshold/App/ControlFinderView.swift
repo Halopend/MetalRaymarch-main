@@ -173,7 +173,7 @@ struct ControlFinderDestination: Identifiable {
         ),
         destination(
             VisualizationsRailSection.grading,
-            description: "Apply scene-level grading, tonemapping, shading, and output-space edge detection.",
+            description: "Apply scene-level grading, tonemapping, shading, and Canny-style output-space edge detection.",
             keywords: ["post processing", "grade", "contrast", "saturation", "gamma", "vibrance", "shadows", "highlights", "toon", "cell shading", "ambient occlusion", "filmic", "tonemap", "vignette", "edge", "outline", "contour"]
         ),
         destination(

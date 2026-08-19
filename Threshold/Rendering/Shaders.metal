@@ -5350,13 +5350,37 @@ struct MacBlitParams {
     // x = enabled window radius (0 means off), y = strength,
     // z = threshold, w = softness.
     float4 edge;
+    // x = enabled, y = blend amount, z = kernel dimension, w = reserved.
+    float4 convolution;
+    // Row-major coefficients, padded to 28 values for a stable ABI.
+    float4 convolutionWeights[7];
 };
+
+inline float macConvolutionWeight(constant MacBlitParams& params, int index) {
+    return params.convolutionWeights[index / 4][index % 4];
+}
 
 fragment float4 macBlitFragment(MacBlitVertexOut in [[stage_in]],
                                 texture2d<float> source [[texture(0)]],
                                 constant MacBlitParams& params [[buffer(0)]]) {
     constexpr sampler s(mag_filter::nearest, min_filter::nearest, address::clamp_to_edge);
     float3 color = source.sample(s, in.texCoord).rgb;
+
+    if (params.convolution.x > 0.0f) {
+        int size = clamp(int(params.convolution.z), 1, 5);
+        int radius = (size - 1) / 2;
+        float2 texel = 1.0f / float2(source.get_width(), source.get_height());
+        float3 filtered = float3(0.0f);
+        for (int y = -2; y <= 2; ++y) {
+            for (int x = -2; x <= 2; ++x) {
+                if (abs(x) > radius || abs(y) > radius) continue;
+                int index = (y + radius) * size + (x + radius);
+                filtered += source.sample(s, in.texCoord + float2(x, y) * texel).rgb
+                    * macConvolutionWeight(params, index);
+            }
+        }
+        color = mix(color, max(filtered, float3(0.0f)), params.convolution.y);
+    }
 
     if (params.edge.x > 0.0f) {
         const float3 lumaWeights = float3(0.2126f, 0.7152f, 0.0722f);

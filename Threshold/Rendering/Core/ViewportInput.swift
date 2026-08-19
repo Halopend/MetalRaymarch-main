@@ -1,4 +1,3 @@
-#if os(macOS) || os(iOS)
 import simd
 
 /// Shared distance-and-direction policy for direct scene browsing gestures.
@@ -19,6 +18,8 @@ enum SceneSwipeGesturePolicy {
         return translation.x < 0 ? 1 : -1
     }
 }
+
+#if os(macOS) || os(iOS)
 import Synchronization
 #if os(macOS)
 import AppKit
