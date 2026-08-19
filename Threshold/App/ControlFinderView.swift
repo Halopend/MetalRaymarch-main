@@ -45,6 +45,8 @@ struct ControlFinderDestination: Identifiable {
     let searchKeywords: [String]
     let requiredCapabilities: PlatformCapability
     let target: AppNavigationTarget
+    let postProcessingSection: PostProcessingSection?
+    let postProcessingFilter: PostProcessingFilterKind?
 
     var path: String { pathComponents.joined(separator: " › ") }
 
@@ -57,7 +59,9 @@ struct ControlFinderDestination: Identifiable {
         icon: String,
         searchKeywords: [String] = [],
         requiredCapabilities: PlatformCapability = [],
-        target: AppNavigationTarget
+        target: AppNavigationTarget,
+        postProcessingSection: PostProcessingSection? = nil,
+        postProcessingFilter: PostProcessingFilterKind? = nil
     ) {
         self.id = id ?? target.stableID
         self.title = title
@@ -68,6 +72,8 @@ struct ControlFinderDestination: Identifiable {
         self.searchKeywords = searchKeywords
         self.requiredCapabilities = requiredCapabilities
         self.target = target
+        self.postProcessingSection = postProcessingSection
+        self.postProcessingFilter = postProcessingFilter
     }
 
     func isAvailable(on profile: PlatformProfile) -> Bool {
@@ -139,7 +145,7 @@ struct ControlFinderDestination: Identifiable {
         ),
         destination(
             ShapeRailSection.transformations,
-            description: "Edit the full transformation catalog directly, or switch to Learn for optional equation lessons.",
+            description: "Browse the full transformation catalog, build a stack, and tune each operation directly.",
             keywords: ["transform", "warp", "sphere projection", "inversion", "twist", "fold stack", "space cut", "icosahedral", "coxeter"]
         ),
         destination(
@@ -163,18 +169,18 @@ struct ControlFinderDestination: Identifiable {
         // Visualizations
         destination(
             VisualizationsRailSection.color,
-            description: "Choose, save, and edit gradient colors.",
-            keywords: ["gradient", "palette", "colour", "color stops", "preset"]
+            description: "Choose gradient colors and control how fractal distance and orbit data map into them.",
+            keywords: ["gradient", "palette", "colour", "color stops", "preset", "mapping mode", "orbit trap", "distance", "color mix", "offset"]
         ),
-        destination(
-            VisualizationsRailSection.mapping,
-            description: "Choose how fractal distance and orbit data map into the gradient.",
-            keywords: ["mapping mode", "orbit trap", "distance", "color mix", "offset"]
+        postProcessingDestination(
+            .color,
+            description: "Adjust contrast, gamma, midtones, saturation, vibrance, shadows, and highlights.",
+            keywords: ["post processing", "grade", "contrast", "saturation", "gamma", "vibrance", "shadows", "highlights"]
         ),
-        destination(
-            VisualizationsRailSection.grading,
-            description: "Apply scene-level grading, tonemapping, shading, and output-space edge detection.",
-            keywords: ["post processing", "grade", "contrast", "saturation", "gamma", "vibrance", "shadows", "highlights", "toon", "cell shading", "ambient occlusion", "filmic", "tonemap", "vignette", "edge", "outline", "contour"]
+        postProcessingDestination(
+            .style,
+            description: "Shape the final lighting response, shading style, tonemap, and vignette.",
+            keywords: ["post processing", "toon", "cell shading", "ambient occlusion", "filmic", "tonemap", "vignette", "lighting softness"]
         ),
         destination(
             VisualizationsRailSection.motion,
@@ -188,8 +194,8 @@ struct ControlFinderDestination: Identifiable {
         ),
         destination(
             VisualizationsRailSection.transition,
-            description: "Set scene-change timing and interpolation behavior.",
-            keywords: ["transition", "duration", "crossfade", "interpolation", "scene change"]
+            description: "Set scene-change timing, interpolation, and scene sets for cue-driven switching.",
+            keywords: ["transition", "duration", "crossfade", "interpolation", "scene change", "scene set", "playlist", "music cue", "attached song"]
         ),
         // Performance
         destination(
@@ -298,7 +304,28 @@ struct ControlFinderDestination: Identifiable {
     /// Individual control metadata is projected from the semantic catalog; the
     /// authored list above contains destinations/workflows only.
     static let catalog: [ControlFinderDestination] = routeCatalog +
+        postProcessingFilterDestinations +
         ParameterCatalog.semanticDescriptors.compactMap(controlDestination)
+
+    private static let postProcessingFilterDestinations: [ControlFinderDestination] =
+        PostProcessingFilterKind.allCases.map { filter in
+            ControlFinderDestination(
+                id: "look.postProcessing.filters.\(filter.id)",
+                title: filter.displayName,
+                category: .look,
+                pathComponents: [
+                    WorkspaceRoot.look.displayName,
+                    VisualizationsRailSection.grading.title,
+                    PostProcessingSection.filters.rawValue
+                ],
+                description: filter.summary,
+                icon: filter.icon,
+                searchKeywords: ["post processing", "filter"] + filter.searchKeywords,
+                target: .route(.look(.grading)),
+                postProcessingSection: .filters,
+                postProcessingFilter: filter
+            )
+        }
 
     private static func controlDestination(
         _ semantic: SemanticControlDescriptor
@@ -421,6 +448,27 @@ struct ControlFinderDestination: Identifiable {
             searchKeywords: keywords,
             requiredCapabilities: requiredCapabilities,
             target: .route(.explore(section))
+        )
+    }
+
+    private static func postProcessingDestination(
+        _ section: PostProcessingSection,
+        description: String,
+        keywords: [String]
+    ) -> ControlFinderDestination {
+        ControlFinderDestination(
+            id: "look.postProcessing.\(section.id)",
+            title: section.rawValue,
+            category: .look,
+            pathComponents: [
+                WorkspaceRoot.look.displayName,
+                VisualizationsRailSection.grading.title
+            ],
+            description: description,
+            icon: section.icon,
+            searchKeywords: keywords,
+            target: .route(.look(.grading)),
+            postProcessingSection: section
         )
     }
 

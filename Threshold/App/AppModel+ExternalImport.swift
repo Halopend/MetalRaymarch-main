@@ -96,7 +96,7 @@ extension AppModel {
             guard !Task.isCancelled,
                   externalImportDecodeGeneration == generation else { return }
 
-            finishOpeningExternalFile(
+            await finishOpeningExternalFile(
                 result,
                 fileName: url.lastPathComponent,
                 format: format
@@ -134,7 +134,7 @@ extension AppModel {
         _ result: ExternalFileDecodeResult,
         fileName: String,
         format: ThresholdExportFormat
-    ) {
+    ) async {
         guard let payload = result.payload else {
             let detail = result.failureDescription.map { ": \($0)" } ?? ""
             switch format.category {
@@ -168,22 +168,42 @@ extension AppModel {
             ensureWindowContentVisible()
 
         case .formula(let container):
-            if container.formula.effectKind == .spaceWarp {
+            // Keep this exhaustive: adding a new external effect kind must also
+            // add an explicit activation path instead of silently falling back
+            // to the custom-fractal preview flow.
+            switch container.formula.effectKind {
+            case .spaceWarp:
                 // A space-warp effect applies to the current fractal — install
                 // it directly rather than routing through the custom-fractal
                 // preset/preview path.
-                installSpaceWarp(container.formula)
-                saveLastState()
+                let installResult = await installEmbeddedSpaceWarp(container.formula)
+                persistCustomSpaceWarpInstall(
+                    installResult,
+                    expectedHash: container.formula.shortHash
+                )
                 ensureWindowContentVisible()
                 return
+            case .lighting:
+                // Lighting is an additive sidecar: compile it against whatever
+                // fractal/warp is active, without opening a custom-fractal preview
+                // or changing geometry. Await here so the existing external-file
+                // progress overlay remains visible through runtime Metal compile;
+                // previously it vanished after JSON decoding and looked inert.
+                _ = await installEmbeddedLighting(
+                    container.formula,
+                    persistOnPublication: true
+                )
+                ensureWindowContentVisible()
+                return
+            case .fractal:
+                let preset = AppModel.makeCustomPreset(from: container.formula)
+                pendingExternalImport = ExternalFileImportRequest(
+                    fileName: fileName,
+                    fileExtension: format.ext,
+                    payload: .preset(preset)
+                )
+                ensureWindowContentVisible()
             }
-            let preset = AppModel.makeCustomPreset(from: container.formula)
-            pendingExternalImport = ExternalFileImportRequest(
-                fileName: fileName,
-                fileExtension: format.ext,
-                payload: .preset(preset)
-            )
-            ensureWindowContentVisible()
         }
     }
 
@@ -201,7 +221,8 @@ extension AppModel {
                 externalPreviewRestorePreset = FractalPreset.fromSettings(
                     renderSettings,
                     name: "__externalPreviewRestore__",
-                    embeddedFormula: activeEmbeddedFormula
+                    embeddedFormula: activeEmbeddedFormula,
+                    embeddedLighting: activeEmbeddedLighting
                 )
             }
             if !externalPreviewCapturedEmbeddedFormula {
@@ -222,6 +243,19 @@ extension AppModel {
                 externalPreviewRestoreScene = animationManager?.currentScene
                 externalPreviewCapturedScene = true
             }
+            // Capture the full primary+lighting effect set (like the preset
+            // branch above): a previewed scene whose formula is lighting-kind
+            // installs via installEmbeddedLighting, and cancellation must be
+            // able to put the prior lighting sidecar back, not just the
+            // primary formula.
+            if externalPreviewRestorePreset == nil {
+                externalPreviewRestorePreset = FractalPreset.fromSettings(
+                    renderSettings,
+                    name: "__externalPreviewRestore__",
+                    embeddedFormula: activeEmbeddedFormula,
+                    embeddedLighting: activeEmbeddedLighting
+                )
+            }
             if !externalPreviewCapturedEmbeddedFormula {
                 externalPreviewRestoreEmbeddedFormula = activeEmbeddedFormula
                 externalPreviewCapturedEmbeddedFormula = true
@@ -239,33 +273,44 @@ extension AppModel {
                 // force fractalType = .custom and bind the wrong Metal entry
                 // points). installSpaceWarp handles the renderer-not-up case
                 // itself (re-activates on handler bind), so no deferred queue.
-                installSpaceWarp(formula)
-                animationManager?.currentScene = scene
+                Task { @MainActor [self] in
+                    guard activeExternalPreviewID == request.id else { return }
+                    let installResult = await installEmbeddedSpaceWarp(formula)
+                    guard activeExternalPreviewID == request.id else { return }
+                    switch installResult {
+                    case .ready:
+                        animationManager?.currentScene = scene
+                    case .deferred:
+                        queueSceneApplyAfterFormulaActivation(
+                            formula: formula
+                        ) { [self] in
+                            guard activeExternalPreviewID == request.id else { return }
+                            animationManager?.currentScene = scene
+                        }
+                    case .failed:
+                        break
+                    }
+                }
                 return
             }
             Task { @MainActor in
                 let installResult = await activateEmbeddedFormulaForSceneLoad(formula)
-                let ready: Bool
                 switch installResult {
                 case .ready:
-                    ready = true
+                    guard activeExternalPreviewID == request.id else { return }
+                    animationManager?.currentScene = scene
                 case .deferred:
-                    ready = await waitForRendererAndActivate(formula)
-                    if !ready {
-                        // Renderer never came up within the wait: queue the
-                        // apply behind the activation handler instead of
-                        // silently dropping the preview.
-                        queueSceneApplyAfterFormulaActivation(formulaHash: formula.shortHash) { [self] in
-                            guard activeExternalPreviewID == request.id else { return }
-                            animationManager?.currentScene = scene
-                        }
-                        return
+                    // Queue before renderer startup instead of launching a
+                    // second activation when its handler appears. The handler's
+                    // publication boundary drains this only after the exact
+                    // formula is confirmed live.
+                    queueSceneApplyAfterFormulaActivation(formula: formula) { [self] in
+                        guard activeExternalPreviewID == request.id else { return }
+                        animationManager?.currentScene = scene
                     }
                 case .failed:
-                    ready = false
+                    break
                 }
-                guard ready, activeExternalPreviewID == request.id else { return }
-                animationManager?.currentScene = scene
             }
         }
     }
@@ -296,46 +341,54 @@ extension AppModel {
             if formula.effectKind == .spaceWarp {
                 // Space warp: install directly (see the preview branch + the
                 // .threshfx path) rather than registering a .custom fractal.
-                installSpaceWarp(formula)
-                let importedScene = animationManager?.importScene(scene)
-                animationManager?.currentScene = importedScene
-                clearExternalPreview(restorePreviewedState: false)
-                pendingExternalImport = nil
-                ensureWindowContentVisible()
+                Task { @MainActor [self] in
+                    let installResult = await installEmbeddedSpaceWarp(formula)
+                    guard pendingExternalImport?.id == request.id else { return }
+                    switch installResult {
+                    case .ready:
+                        let importedScene = animationManager?.importScene(scene)
+                        animationManager?.currentScene = importedScene
+                        clearExternalPreview(restorePreviewedState: false)
+                        pendingExternalImport = nil
+                        ensureWindowContentVisible()
+                    case .deferred:
+                        let importedScene = animationManager?.importScene(scene)
+                        clearExternalPreview(restorePreviewedState: false)
+                        pendingExternalImport = nil
+                        ensureWindowContentVisible()
+                        queueSceneApplyAfterFormulaActivation(
+                            formula: formula
+                        ) { [self] in
+                            animationManager?.currentScene = importedScene
+                        }
+                    case .failed:
+                        break
+                    }
+                }
                 return
             }
             Task { @MainActor [self] in
                 let installResult = await activateEmbeddedFormulaForSceneLoad(formula)
-                let ready: Bool
                 switch installResult {
                 case .ready:
-                    ready = true
+                    let importedScene = animationManager?.importScene(scene)
+                    animationManager?.currentScene = importedScene
+                    clearExternalPreview(restorePreviewedState: false)
+                    pendingExternalImport = nil
+                    ensureWindowContentVisible()
                 case .deferred:
-                    ready = await waitForRendererAndActivate(formula)
-                    if !ready {
-                        // Renderer never came up within the wait. Persist the
-                        // import + close the sheet now (the user's intent is
-                        // committed), and queue the scene apply behind the
-                        // activation handler so it loads when they enter the
-                        // immersive space instead of being silently dropped.
-                        let importedScene = self.animationManager?.importScene(scene)
-                        self.clearExternalPreview(restorePreviewedState: false)
-                        self.pendingExternalImport = nil
-                        self.ensureWindowContentVisible()
-                        queueSceneApplyAfterFormulaActivation(formulaHash: formula.shortHash) { [self] in
-                            animationManager?.currentScene = importedScene
-                        }
-                        return
+                    // Commit the import now, but let renderer publication—not
+                    // mere handler presence—decide when its scene may apply.
+                    let importedScene = self.animationManager?.importScene(scene)
+                    self.clearExternalPreview(restorePreviewedState: false)
+                    self.pendingExternalImport = nil
+                    self.ensureWindowContentVisible()
+                    queueSceneApplyAfterFormulaActivation(formula: formula) { [self] in
+                        animationManager?.currentScene = importedScene
                     }
                 case .failed:
-                    ready = false
+                    break
                 }
-                guard ready else { return }
-                let importedScene = animationManager?.importScene(scene)
-                animationManager?.currentScene = importedScene
-                clearExternalPreview(restorePreviewedState: false)
-                pendingExternalImport = nil
-                ensureWindowContentVisible()
             }
             return
         }
@@ -352,24 +405,64 @@ extension AppModel {
 
     func clearExternalPreview(restorePreviewedState: Bool) {
         if restorePreviewedState {
-            if externalPreviewCapturedEmbeddedFormula {
+            // Runtime Metal compilation is not instant. Invalidate the active
+            // scene-load generation before restoring the preview snapshot so a
+            // cancelled/superseded preview cannot resume and overwrite it.
+            staticSceneLoadGeneration &+= 1
+            staticSceneLoadTask?.cancel()
+            staticSceneLoadTask = nil
+            pendingPresetForActivation = nil
+            pendingPresetSceneNavigationRequest = nil
+            pendingPresetLoadGeneration = nil
+            pendingPresetApplyOptions = []
+            let restorePrimaryHash = externalPreviewRestorePreset?.embeddedFormula?.shortHash
+                ?? externalPreviewRestoreEmbeddedFormula?.shortHash
+            let restoreLightingHash = externalPreviewRestorePreset?.embeddedLighting?.shortHash
+            let rollbackAlreadyTargetsRestore = pendingEmbeddedEffectSetRollback.map {
+                $0.primaryHash == restorePrimaryHash
+                    && $0.lightingHash == restoreLightingHash
+            } ?? false
+            if !rollbackAlreadyTargetsRestore {
+                pendingEmbeddedEffectSetRollback = nil
+            }
+        }
+        if restorePreviewedState {
+            if let preset = externalPreviewRestorePreset {
+                let restoreGeneration = staticSceneLoadGeneration
+                Task { @MainActor [self] in
+                    let result = await activateEmbeddedEffectSetForSceneLoad(
+                        primary: preset.embeddedFormula,
+                        lighting: preset.embeddedLighting,
+                        lightingParameterValues: preset.embeddedLightingParamValues
+                    )
+                    guard result != .failed,
+                          staticSceneLoadGeneration == restoreGeneration else { return }
+                    preset.apply(
+                        to: renderSettings,
+                        resetEnvironment: true,
+                        scope: .session
+                    )
+                    // Preset.apply updates the packed renderer copy; keep the
+                    // observable sliders on the same resolved values as well.
+                    configureCustomLightingParameters(
+                        for: preset.embeddedLighting,
+                        overrides: preset.embeddedLightingParamValues
+                    )
+                    syncGestureProcessor()
+                    NotificationCenter.default.post(
+                        name: AppModel.fractalSettingsDidChangeNotification,
+                        object: nil
+                    )
+                }
+            } else if externalPreviewCapturedEmbeddedFormula {
                 if let formula = externalPreviewRestoreEmbeddedFormula {
                     installEmbeddedFormulaIfNeeded(formula)
                 } else {
                     uninstallEmbeddedFormula()
                 }
             }
-            if let preset = externalPreviewRestorePreset {
-                preset.apply(
-                    to: renderSettings,
-                    resetEnvironment: true,
-                    scope: .session
-                )
-                syncGestureProcessor()
-                NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
-            }
             if externalPreviewCapturedScene {
-                animationManager?.currentScene = externalPreviewRestoreScene
+                animationManager?.restoreCurrentSceneSelection(externalPreviewRestoreScene)
             }
         }
 

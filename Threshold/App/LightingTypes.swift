@@ -255,6 +255,272 @@ struct BloomEffect: LightingEffect {
     }
 }
 
+// MARK: - Ordered output-filter stack
+
+/// Stable catalog identity shared by scene persistence and the Metal ABI.
+///
+/// Raw values are deliberately numeric and append-only: saved scenes and the GPU
+/// `PostFilterOp.type` switch both depend on them. Display strings are kept out of
+/// the wire format so labels can evolve without changing scene identity.
+enum PostProcessingFilterKind: Int32, CaseIterable, Identifiable, Codable, Hashable, Sendable {
+    case edgeDetection = 1
+    case monochrome = 2
+    case sepia = 3
+    case invert = 4
+    case posterize = 5
+    case grain = 6
+    case scanlines = 7
+
+    var id: Int32 { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .edgeDetection: return "Edge Detection"
+        case .monochrome: return "Monochrome"
+        case .sepia: return "Sepia"
+        case .invert: return "Invert"
+        case .posterize: return "Posterize"
+        case .grain: return "Grain"
+        case .scanlines: return "Scanlines"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .edgeDetection: return "circle.lefthalf.filled"
+        case .monochrome: return "circle.lefthalf.striped.horizontal"
+        case .sepia: return "camera.filters"
+        case .invert: return "circle.righthalf.filled.inverse"
+        case .posterize: return "square.stack.3d.up.fill"
+        case .grain: return "aqi.medium"
+        case .scanlines: return "line.3.horizontal"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .edgeDetection:
+            return "Outline luminance transitions in the final rendered scene."
+        case .monochrome:
+            return "Blend the final image toward perceptual grayscale."
+        case .sepia:
+            return "Apply a warm photographic sepia treatment."
+        case .invert:
+            return "Invert the final scene colors."
+        case .posterize:
+            return "Reduce each color channel to a smaller number of levels."
+        case .grain:
+            return "Add animated fine-grained texture to the final image."
+        case .scanlines:
+            return "Darken repeating horizontal lines for a display-like texture."
+        }
+    }
+
+    var searchKeywords: [String] {
+        switch self {
+        case .edgeDetection: return ["edge", "outline", "contour", "threshold", "softness", "window size"]
+        case .monochrome: return ["black and white", "grayscale", "desaturate"]
+        case .sepia: return ["warm", "vintage", "photographic"]
+        case .invert: return ["negative", "inverse", "opposite colors"]
+        case .posterize: return ["levels", "quantize", "bands"]
+        case .grain: return ["noise", "film", "texture", "scale"]
+        case .scanlines: return ["lines", "crt", "display", "density", "darkening"]
+        }
+    }
+
+    /// A fresh, visibly useful instance for an Add Filter action.
+    var defaultInstance: PostFilterInstance { PostFilterInstance(kind: self) }
+}
+
+/// One authored occurrence in the ordered output-filter stack.
+///
+/// Parameter slots have a stable, compact meaning shared with Metal:
+/// - Edge Detection: x threshold, y softness, z integer window radius (1...3)
+/// - Posterize: x color levels (2...32)
+/// - Grain: x spatial frequency/scale (1...2048)
+/// - Scanlines: x line density (1...2048), y line darkening (0...1)
+/// - Monochrome, Sepia, and Invert use only `amount`.
+struct PostFilterInstance: Codable, Identifiable, Equatable, Sendable {
+    static let maximumCount = 8
+    static let activationEpsilon: Float = 0.001
+
+    var id: UUID
+    var kind: PostProcessingFilterKind
+    var isEnabled: Bool
+    var amount: Float
+    var params: SIMD4<Float>
+    var color: SIMD3<Float>
+
+    /// Seed a newly-added filter with a useful visible treatment.
+    init(kind: PostProcessingFilterKind) {
+        self.id = UUID()
+        self.kind = kind
+        self.isEnabled = true
+        switch kind {
+        case .edgeDetection:
+            self.amount = 0.8
+            self.params = SIMD4<Float>(0.10, 0.06, 1, 0)
+            self.color = .zero
+        case .monochrome, .sepia, .invert:
+            self.amount = 1
+            self.params = .zero
+            self.color = SIMD3<Float>(repeating: 1)
+        case .posterize:
+            self.amount = 1
+            self.params = SIMD4<Float>(6, 0, 0, 0)
+            self.color = SIMD3<Float>(repeating: 1)
+        case .grain:
+            self.amount = 0.25
+            self.params = SIMD4<Float>(240, 0, 0, 0)
+            self.color = SIMD3<Float>(repeating: 1)
+        case .scanlines:
+            self.amount = 0.5
+            self.params = SIMD4<Float>(480, 0.35, 0, 0)
+            self.color = SIMD3<Float>(repeating: 1)
+        }
+    }
+
+    init(
+        id: UUID = UUID(),
+        kind: PostProcessingFilterKind,
+        isEnabled: Bool,
+        amount: Float,
+        params: SIMD4<Float>,
+        color: SIMD3<Float>
+    ) {
+        self.id = id
+        self.kind = kind
+        self.isEnabled = isEnabled
+        self.amount = amount
+        self.params = params
+        self.color = color
+        normalize()
+    }
+
+    var isActive: Bool { isEnabled && amount > Self.activationEpsilon }
+
+    /// Clamp authored/imported values without coupling enable state to amount.
+    /// Keeping the remembered amount while disabled lets a toggle restore the
+    /// exact treatment; GPU packing independently drops disabled/zero instances.
+    mutating func normalize() {
+        let defaults = PostFilterInstance(kind: kind)
+        amount = amount.isFinite ? min(max(amount, 0), 1) : 0
+
+        for index in 0..<4 where !params[index].isFinite {
+            params[index] = defaults.params[index]
+        }
+        switch kind {
+        case .edgeDetection:
+            params.x = ControlCatalog.edgeThreshold.clamp(params.x)
+            params.y = ControlCatalog.edgeSoftness.clamp(params.y)
+            params.z = ControlCatalog.edgeWindowRadius.clamp(params.z).rounded()
+            params.w = 0
+        case .posterize:
+            params = SIMD4<Float>(min(max(params.x.rounded(), 2), 32), 0, 0, 0)
+        case .grain:
+            params = SIMD4<Float>(min(max(params.x, 1), 2048), 0, 0, 0)
+        case .scanlines:
+            params = SIMD4<Float>(min(max(params.x, 1), 2048), min(max(params.y, 0), 1), 0, 0)
+        case .monochrome, .sepia, .invert:
+            params = .zero
+        }
+
+        color = SIMD3<Float>(
+            color.x.isFinite ? min(max(color.x, 0), 1) : defaults.color.x,
+            color.y.isFinite ? min(max(color.y, 0), 1) : defaults.color.y,
+            color.z.isFinite ? min(max(color.z, 0), 1) : defaults.color.z
+        )
+    }
+
+    /// Compatibility projection from the legacy one-off edge model.
+    init(edgeEffect: EdgeDetectionEffect, id: UUID = UUID()) {
+        var edge = edgeEffect
+        edge.normalize()
+        self.init(
+            id: id,
+            kind: .edgeDetection,
+            isEnabled: edge.enabled,
+            amount: edge.strength,
+            params: SIMD4<Float>(edge.threshold, edge.softness, Float(edge.windowRadius), 0),
+            color: edge.color
+        )
+    }
+
+    /// Compatibility projection back to the legacy render/persistence fields.
+    var edgeDetectionEffect: EdgeDetectionEffect? {
+        guard kind == .edgeDetection else { return nil }
+        var edge = EdgeDetectionEffect(
+            enabled: isEnabled,
+            strength: amount,
+            threshold: params.x,
+            softness: params.y,
+            windowRadius: Int(params.z.rounded()),
+            color: color
+        )
+        edge.normalize()
+        return edge
+    }
+}
+
+extension Array where Element == PostFilterInstance {
+    /// Normalize imported values, preserve authored order, enforce the one-edge
+    /// invariant, and cap the bounded GPU/editor stack at eight instances.
+    func normalizedPostFilterStack() -> [PostFilterInstance] {
+        var result: [PostFilterInstance] = []
+        result.reserveCapacity(Swift.min(count, PostFilterInstance.maximumCount))
+        var hasEdge = false
+
+        for var instance in self {
+            instance.normalize()
+            if instance.kind == .edgeDetection {
+                guard !hasEdge else { continue }
+                hasEdge = true
+            }
+            result.append(instance)
+            if result.count == PostFilterInstance.maximumCount { break }
+        }
+        return result
+    }
+}
+
+@inline(__always)
+private func packPostFilterRGB10(_ color: SIMD3<Float>) -> UInt32 {
+    @inline(__always)
+    func channel(_ value: Float) -> UInt32 {
+        let safeValue = value.isFinite ? min(max(value, 0), 1) : 0
+        return UInt32((safeValue * 1023).rounded())
+    }
+    return channel(color.x) | (channel(color.y) << 10) | (channel(color.z) << 20)
+}
+
+/// Pack only active filters into the fixed Swift↔Metal ABI. Disabled and
+/// amount-zero instances are true bypasses and consume no shader loop slot.
+func cPostFilterStack(from filters: [PostFilterInstance]) -> PostFilterStack {
+    var stack = PostFilterStack()
+    let active = filters.normalizedPostFilterStack().filter(\.isActive)
+    withUnsafeMutablePointer(to: &stack.ops) { tuplePtr in
+        tuplePtr.withMemoryRebound(
+            to: PostFilterOp.self,
+            capacity: PostFilterInstance.maximumCount
+        ) { base in
+            for (index, filter) in active.enumerated() {
+                base[index] = PostFilterOp(
+                    type: filter.kind.rawValue,
+                    amount: filter.amount,
+                    param1: filter.params.x,
+                    param2: filter.params.y,
+                    param3: filter.params.z,
+                    colorRGB10: packPostFilterRGB10(filter.color),
+                    _pad0: 0,
+                    _pad1: 0
+                )
+            }
+        }
+    }
+    stack.count = Int32(active.count)
+    return stack
+}
+
 /// Screen-space edge detector. The fragment path uses a local luminance
 /// gradient, so this is a lightweight convolution-style outline pass.
 struct EdgeDetectionEffect: LightingEffect {
@@ -268,6 +534,56 @@ struct EdgeDetectionEffect: LightingEffect {
     var threshold: Float = 0.12
     var softness: Float = 0.08
     var windowRadius: Int = 1
+    var color: SIMD3<Float> = Self.defaultColor
+
+    /// Existing scenes used black outlines before edge tinting was exposed.
+    /// Keeping black as the decode fallback preserves their rendered look.
+    static let defaultColor = SIMD3<Float>(repeating: 0.0)
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, strength, threshold, softness, windowRadius
+        case colorRed, colorGreen, colorBlue
+    }
+
+    init(enabled: Bool = false,
+         strength: Float = 0.0,
+         threshold: Float = 0.12,
+         softness: Float = 0.08,
+         windowRadius: Int = 1,
+         color: SIMD3<Float> = EdgeDetectionEffect.defaultColor) {
+        self.enabled = enabled
+        self.strength = strength
+        self.threshold = threshold
+        self.softness = softness
+        self.windowRadius = windowRadius
+        self.color = color
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        strength = try container.decodeIfPresent(Float.self, forKey: .strength) ?? 0.0
+        threshold = try container.decodeIfPresent(Float.self, forKey: .threshold) ?? 0.12
+        softness = try container.decodeIfPresent(Float.self, forKey: .softness) ?? 0.08
+        windowRadius = try container.decodeIfPresent(Int.self, forKey: .windowRadius) ?? 1
+        color = SIMD3<Float>(
+            try container.decodeIfPresent(Float.self, forKey: .colorRed) ?? Self.defaultColor.x,
+            try container.decodeIfPresent(Float.self, forKey: .colorGreen) ?? Self.defaultColor.y,
+            try container.decodeIfPresent(Float.self, forKey: .colorBlue) ?? Self.defaultColor.z
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(enabled, forKey: .enabled)
+        try container.encode(strength, forKey: .strength)
+        try container.encode(threshold, forKey: .threshold)
+        try container.encode(softness, forKey: .softness)
+        try container.encode(windowRadius, forKey: .windowRadius)
+        try container.encode(color.x, forKey: .colorRed)
+        try container.encode(color.y, forKey: .colorGreen)
+        try container.encode(color.z, forKey: .colorBlue)
+    }
 
     var isActive: Bool {
         enabled && strength > Self.activationEpsilon
@@ -297,6 +613,11 @@ struct EdgeDetectionEffect: LightingEffect {
         softness = ControlCatalog.edgeSoftness.clamp(softness)
         let radius = ControlCatalog.edgeWindowRadius.clamp(Float(windowRadius))
         windowRadius = Int(radius.rounded())
+        color = SIMD3<Float>(
+            color.x.isFinite ? min(max(color.x, 0), 1) : Self.defaultColor.x,
+            color.y.isFinite ? min(max(color.y, 0), 1) : Self.defaultColor.y,
+            color.z.isFinite ? min(max(color.z, 0), 1) : Self.defaultColor.z
+        )
         if !enabled || strength <= Self.activationEpsilon {
             enabled = false
             strength = 0

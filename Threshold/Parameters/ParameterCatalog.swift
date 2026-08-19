@@ -238,7 +238,7 @@ enum ParameterCatalog {
 
         ParameterDescriptor(
             spec: ControlCatalog.colorMix,
-            placement: .presented(route: .look(.mapping), section: "Gradient Mapping", order: 0, presentations: .all),
+            placement: .presented(route: .look(.color), section: "Gradient Mapping", order: 0, presentations: .all),
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, tripletGroupKey: nil),
@@ -383,7 +383,7 @@ enum ParameterCatalog {
         // the animation-playback offset path (no writeAudioOffset), matching colorMix.
         ParameterDescriptor(
             spec: ControlCatalog.gradientOffset,
-            placement: .presented(route: .look(.mapping), section: "Gradient Mapping", order: 1, presentations: .all),
+            placement: .presented(route: .look(.color), section: "Gradient Mapping", order: 1, presentations: .all),
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
@@ -559,7 +559,7 @@ enum ParameterCatalog {
         ),
         staticDescriptor(
             ControlCatalog.colorIterations,
-            route: .look(.mapping), section: "Color Detail", order: 0,
+            route: .look(.color), section: "Color Detail", order: 0,
             uiRead: { $0.color.colorIterations },
             uiWrite: { cache, value in cache.color.colorIterations = value; cache.push(\.colorIterations, value: value) },
             settingsRead: { $0.colorIterations },
@@ -575,7 +575,7 @@ enum ParameterCatalog {
         ),
         staticDescriptor(
             ControlCatalog.gradientRepeat,
-            route: .look(.mapping), section: "Gradient Mapping", order: 1,
+            route: .look(.color), section: "Gradient Mapping", order: 1,
             uiRead: { $0.color.gradientState.gradient.repeatCount },
             uiWrite: { cache, value in
                 cache.color.gradientState.gradient.repeatCount = value
@@ -586,7 +586,7 @@ enum ParameterCatalog {
         ),
         staticDescriptor(
             ControlCatalog.gradientSmoothing,
-            route: .look(.mapping), section: "Gradient Mapping", order: 2,
+            route: .look(.color), section: "Gradient Mapping", order: 2,
             uiRead: { $0.color.gradientState.gradient.smoothing },
             uiWrite: { cache, value in
                 cache.color.gradientState.gradient.smoothing = value

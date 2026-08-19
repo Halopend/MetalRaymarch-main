@@ -102,9 +102,11 @@ struct ICloudStoreDeletionTests {
     /// `w` edge-contour correction.
     private func markPresetStoreAsSeededBeforeWSceneEdgeDetectionFix(_ root: URL) throws {
         try Data("[]".utf8).write(to: root.appendingPathComponent(".seeded-bundled.json"))
-        try Data("[]".utf8).write(
-            to: root.appendingPathComponent(PresetManager.officialSceneCatalogUpdateMarkerFileName)
-        )
+        for update in PresetManager.officialCatalogUpdates {
+            try Data("[]".utf8).write(
+                to: root.appendingPathComponent(update.markerFileName)
+            )
+        }
     }
 
     private var isoEncoder: JSONEncoder {
@@ -311,18 +313,18 @@ struct ICloudStoreDeletionTests {
         let manager = PresetManager()
         await manager.loadPresetsNow()
 
-        let updateIDs = PresetManager.officialSceneCatalogUpdateIDs
-        #expect(updateIDs.count == 15)
-        for id in updateIDs {
-            #expect(presetFileExists(id: id, in: root), "missing official catalog scene \(id)")
+        #expect(PresetManager.officialSceneCatalogUpdateIDs.count == 15)
+        #expect(PresetManager.officialMusicPresetCatalogUpdateIDs.count == 30)
+        for update in PresetManager.officialCatalogUpdates {
+            for id in update.ids {
+                #expect(presetFileExists(id: id, in: root),
+                        "missing official catalog preset \(id) from \(update.markerFileName)")
+            }
+            let updateMarker = root.appendingPathComponent(update.markerFileName)
+            #expect(FileManager.default.fileExists(atPath: updateMarker.path))
         }
 
-        let updateMarker = root.appendingPathComponent(
-            PresetManager.officialSceneCatalogUpdateMarkerFileName
-        )
-        #expect(FileManager.default.fileExists(atPath: updateMarker.path))
-
-        let deletedID = try #require(updateIDs.first)
+        let deletedID = try #require(PresetManager.officialSceneCatalogUpdateIDs.first)
         let sceneDir = StorageLocation.scenesDir(root)
         let deletedURL = try #require(
             FileManager.default.contentsOfDirectory(at: sceneDir, includingPropertiesForKeys: nil)
@@ -335,9 +337,24 @@ struct ICloudStoreDeletionTests {
         )
         try FileManager.default.removeItem(at: deletedURL)
 
+        let deletedMusicID = try #require(PresetManager.officialMusicPresetCatalogUpdateIDs.first)
+        let musicDir = StorageLocation.musicPresetsDir(root)
+        let deletedMusicURL = try #require(
+            FileManager.default.contentsOfDirectory(at: musicDir, includingPropertiesForKeys: nil)
+                .first { url in
+                    guard let data = try? Data(contentsOf: url),
+                          let preset = try? isoDecoder.decode(FractalPreset.self, from: data)
+                    else { return false }
+                    return preset.id == deletedMusicID
+                }
+        )
+        try FileManager.default.removeItem(at: deletedMusicURL)
+
         await manager.loadPresetsNow()
         #expect(!presetFileExists(id: deletedID, in: root),
                 "a catalog update must not resurrect a user-deleted scene")
+        #expect(!presetFileExists(id: deletedMusicID, in: root),
+                "a catalog update must not resurrect a user-deleted music preset")
     }
 
     @Test("Legacy w scene disables only its shipped synthetic edge contour")

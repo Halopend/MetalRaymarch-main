@@ -1,21 +1,228 @@
 #if os(iOS)
 import SwiftUI
+import UIKit
 
 @main
 struct ThresholdiOSApp: App {
-    @State private var appModel = AppModel()
-    @Environment(\.scenePhase) private var scenePhase
-
     var body: some Scene {
         WindowGroup {
-            ThresholdiOSRootView()
-                .environment(appModel)
-                .onOpenURL { url in
-                    appModel.openExternalFile(url)
-                }
+            ThresholdiOSBootstrapView()
+        }
+    }
+}
+
+private enum ThresholdiOSStartupPhase {
+    case preparing
+    case sceneLibrary
+    case renderer
+    case finishing
+
+    var title: String {
+        switch self {
+        case .preparing: "Preparing Threshold"
+        case .sceneLibrary: "Loading scene library"
+        case .renderer: "Preparing the renderer"
+        case .finishing: "Opening your scene"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .preparing:
+            "Getting the workspace ready."
+        case .sceneLibrary:
+            "Restoring your settings and installing included scenes. First launch can take a moment."
+        case .renderer:
+            "Compiling the Metal pipeline for this iPad."
+        case .finishing:
+            "The first frame is ready."
+        }
+    }
+}
+
+/// Presents a real frame before constructing the heavyweight app model. Cold
+/// launch setup decodes and seeds the scene catalog, then creates several Metal
+/// pipelines; doing that from `ThresholdiOSApp`'s stored-property initializer
+/// left the launch window looking frozen until all of it completed.
+private struct ThresholdiOSBootstrapView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var appModel: AppModel? = nil
+    @State private var pendingOpenURL: URL? = nil
+    @State private var isCreatingAppModel = false
+    @State private var isStartupComplete = false
+
+    private var startupPrerequisitesReady: Bool {
+        guard let appModel else { return false }
+        return appModel.presetManager.isInitialLoadComplete
+            && appModel.rendererStartupWarmupComplete
+    }
+
+    private var phase: ThresholdiOSStartupPhase {
+        guard let appModel else {
+            return isCreatingAppModel ? .sceneLibrary : .preparing
+        }
+        if !appModel.presetManager.isInitialLoadComplete { return .sceneLibrary }
+        if !appModel.rendererStartupWarmupComplete { return .renderer }
+        return .finishing
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            if let appModel {
+                ThresholdiOSRootView(startupComplete: isStartupComplete)
+                    .environment(appModel)
+            }
+
+            if !isStartupComplete {
+                ThresholdiOSLoadingView(phase: phase)
+                    .transition(.opacity)
+                    .zIndex(100)
+            }
+        }
+        .task {
+            guard appModel == nil, !isCreatingAppModel else { return }
+            isCreatingAppModel = true
+
+            // Let SwiftUI commit the branded loading surface before any scene
+            // catalog decoding, first-run seeding, or Metal setup begins.
+            do {
+                try await Task.sleep(for: .milliseconds(100))
+            } catch {
+                return
+            }
+
+            let model = AppModel()
+            appModel = model
+            isCreatingAppModel = false
+
+            if let pendingOpenURL {
+                self.pendingOpenURL = nil
+                model.openExternalFile(pendingOpenURL)
+            }
+        }
+        .task(id: startupPrerequisitesReady) {
+            guard startupPrerequisitesReady, !isStartupComplete else { return }
+
+            // Keep the loader through at least one composited frame after the
+            // renderer signals readiness; this avoids revealing a transient
+            // black MTKView while the first drawable reaches the display.
+            do {
+                try await Task.sleep(for: .milliseconds(350))
+            } catch {
+                return
+            }
+            guard startupPrerequisitesReady else { return }
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.24)) {
+                isStartupComplete = true
+            }
+        }
+        .onOpenURL { url in
+            if let appModel {
+                appModel.openExternalFile(url)
+            } else {
+                pendingOpenURL = url
+            }
         }
         .onChange(of: scenePhase) { _, newPhase in
+            guard let appModel else { return }
             AppLifecycle.transition(to: newPhase, appModel: appModel)
+        }
+    }
+}
+
+private struct ThresholdiOSLoadingView: View {
+    let phase: ThresholdiOSStartupPhase
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isPulsing = false
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.005, green: 0.008, blue: 0.014),
+                    Color(red: 0.018, green: 0.008, blue: 0.035),
+                    Color.black,
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            Circle()
+                .fill(Color.purple.opacity(0.15))
+                .frame(width: 430, height: 430)
+                .blur(radius: 90)
+                .scaleEffect(isPulsing ? 1.08 : 0.92)
+                .accessibilityHidden(true)
+
+            VStack(spacing: 0) {
+                Spacer(minLength: 32)
+
+                Image("LaunchWindowIcon")
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: 156, height: 156)
+                    .shadow(color: Color.pink.opacity(0.24), radius: 32)
+                    .accessibilityHidden(true)
+
+                Text("THRESHOLD")
+                    .font(.system(size: 32, weight: .semibold, design: .rounded))
+                    .tracking(7)
+                    .foregroundStyle(.white)
+                    .padding(.top, 14)
+
+                Text("REAL-TIME FRACTAL EXPLORATION")
+                    .font(.caption2.weight(.semibold))
+                    .tracking(2.2)
+                    .foregroundStyle(.white.opacity(0.48))
+                    .padding(.top, 8)
+
+                VStack(spacing: 12) {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+
+                    Text(phase.title)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+
+                    Text(phase.detail)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.62))
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 420)
+                        .contentTransition(.opacity)
+                }
+                .padding(.top, 42)
+
+                Spacer(minLength: 32)
+
+                Label("Swipe with three fingers to change scenes", systemImage: "hand.draw")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color.white.opacity(0.06), in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+                    .padding(.bottom, 30)
+            }
+            .padding(.horizontal, 32)
+        }
+        .contentShape(Rectangle())
+        .allowsHitTesting(true)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Threshold is loading")
+        .accessibilityValue(phase.title)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
+                isPulsing = true
+            }
         }
     }
 }
@@ -23,6 +230,7 @@ struct ThresholdiOSApp: App {
 private struct ThresholdiOSRootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let startupComplete: Bool
     @State private var isShowingControls = true
     @State private var radialMenu = RadialMenuModel(interactionProfile: .touch)
     @State private var radialCurvature = 0.72
@@ -39,13 +247,27 @@ private struct ThresholdiOSRootView: View {
                 .ignoresSafeArea()
                 .background(Color.black)
                 .overlay(alignment: .topTrailing) {
-                    controlsToggle
-                        // The Metal surface stays edge-to-edge, but the control must
-                        // clear the status bar and Stage Manager window chrome.
-                        .padding(.top, max(16, safeAreaInsets.top + 8))
-                        .padding(.trailing, max(16, safeAreaInsets.trailing + 8))
+                    if startupComplete {
+                        controlsToggle
+                            // The Metal surface stays edge-to-edge, but the control must
+                            // clear the status bar and Stage Manager window chrome.
+                            .padding(.top, max(16, safeAreaInsets.top + 8))
+                            .padding(.trailing, max(16, safeAreaInsets.trailing + 8))
+                    }
                 }
-                .inspector(isPresented: $isShowingControls) {
+                .sceneNavigationFeedbackOverlay(
+                    isActive: startupComplete,
+                    isObscured: radialMenu.isPresented,
+                    instruction: "Swipe card · 3-finger swipe on canvas",
+                    bottomPadding: max(22, safeAreaInsets.bottom + 12),
+                    navigationFeedback: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                )
+                .inspector(isPresented: Binding(
+                    get: { startupComplete && isShowingControls },
+                    set: { if startupComplete { isShowingControls = $0 } }
+                )) {
                     ThresholdiOSInspectorContent(isShowingControls: $isShowingControls)
                         .environment(appModel)
                         .inspectorColumnWidth(min: widths.min, ideal: widths.ideal, max: widths.max)
@@ -55,6 +277,14 @@ private struct ThresholdiOSRootView: View {
                         at: CGPoint(x: proxy.size.width * 0.5, y: proxy.size.height * 0.5),
                         viewportSize: proxy.size
                     )
+                }
+                .accessibilityAction(named: Text("Previous scene")) {
+                    guard startupComplete else { return }
+                    navigateToAdjacentScene(forward: false)
+                }
+                .accessibilityAction(named: Text("Next scene")) {
+                    guard startupComplete else { return }
+                    navigateToAdjacentScene(forward: true)
                 }
                 // The radial menu is a modal interaction surface. Keep the
                 // covered Metal view, inspector, and controls button out of
@@ -104,6 +334,12 @@ private struct ThresholdiOSRootView: View {
                 await appModel.startMicrophoneAtLaunchIfEnabled()
             }
         }
+    }
+
+    private func navigateToAdjacentScene(forward: Bool) {
+        guard startupComplete else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        appModel.cycleConfiguredSceneGroupOrStaticScene(forward: forward)
     }
 
     private var radialProjection: RadialNavigationProjection {

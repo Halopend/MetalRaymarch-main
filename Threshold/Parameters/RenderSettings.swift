@@ -2,6 +2,29 @@
 import os
 import simd
 
+extension CustomLightingParams {
+    /// Build the compact GPU bank from user-authored values. Non-finite input is
+    /// never allowed across the shader boundary; descriptor-aware clamping lives
+    /// in EmbeddedFormula and this is the final defensive packing layer.
+    init(values: [Float]) {
+        self.init()
+        Swift.withUnsafeMutableBytes(of: &self) { raw in
+            let floats = raw.bindMemory(to: Float.self)
+            for index in 0..<min(16, floats.count) {
+                let value = index < values.count ? values[index] : 0
+                floats[index] = value.isFinite ? value : 0
+            }
+        }
+    }
+
+    func valuesArray() -> [Float] {
+        Swift.withUnsafeBytes(of: self) { raw in
+            let floats = raw.bindMemory(to: Float.self)
+            return (0..<min(16, floats.count)).map { floats[$0] }
+        }
+    }
+}
+
 struct GestureConfigurationSnapshot: Sendable {
     let version: UInt64
     let menuToggleEnabled: Bool
@@ -253,6 +276,10 @@ final class RenderSettings: @unchecked Sendable {
 
     private var _fractalType: FractalModelType = .mandelbox  // Current fractal type
     private var _formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()  // Generic formula params
+    // Imported lighting owns a distinct scalar bank. It must never share the
+    // geometry FormulaParams slots because lighting index 0 can coexist with,
+    // for example, Mandelbulb Power at geometry index 0.
+    private var _customLightingParams = CustomLightingParams()
     private var _tileSize: Int = 0                   // 0=disabled (fragment), 8=8x8 adaptive hierarchical compute
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
     private var _coherentPacketEnabled: Bool = loadBool("coherentPacketEnabled", default: false)  // Experimental predict-validate raymarch (Stages 0-3)
@@ -416,6 +443,12 @@ final class RenderSettings: @unchecked Sendable {
     private var _aoStrength: Float = 0.0                     // Ambient-occlusion blend (0 = old flat ambient, default)
     private var _tonemapStrength: Float = 0.0                // Filmic (ACES) tonemap blend (0 = old plain clamp, default)
     private var _vignetteStrength: Float = 1.0               // 1 = historical vignette, 0 = off
+    // `nil` preserves the legacy wire meaning: the one-off edge setting in
+    // LightingConfig is authoritative. Once the ordered editor writes a stack,
+    // even an empty array is explicit and becomes the canonical source.
+    private var _postFilterStack: [PostFilterInstance]? = nil
+    private var _cachedPackedPostFilterStack: PostFilterStack?
+    private let _legacyEdgePostFilterID = UUID()
     
     // === MODULAR LIGHTING EFFECTS ===
     // Card-based lighting system with presets and individual effect toggles
@@ -870,6 +903,52 @@ final class RenderSettings: @unchecked Sendable {
         let packed = cSpaceWarpStack(from: spaceWarpStackWithAudioOffsetsLocked())
         _cachedPackedSpaceWarpStack = packed
         return packed
+    }
+
+    /// Resolved editor/render stack. Legacy scenes synthesize at most one edge
+    /// instance while retaining `nil` in ColorConfig for backwards compatibility.
+    private func resolvedPostFilterStackLocked() -> [PostFilterInstance] {
+        if let explicit = _postFilterStack { return explicit }
+        guard _edgeDetectionEffect.isActive else { return [] }
+        return [PostFilterInstance(edgeEffect: _edgeDetectionEffect, id: _legacyEdgePostFilterID)]
+    }
+
+    private func packedPostFilterStackLocked() -> PostFilterStack {
+        if let cached = _cachedPackedPostFilterStack { return cached }
+        let packed = cPostFilterStack(from: resolvedPostFilterStackLocked())
+        _cachedPackedPostFilterStack = packed
+        return packed
+    }
+
+    /// Project an explicit stack back into the legacy edge slot. This keeps old
+    /// render paths and dual-written scene fields in lockstep with the new model.
+    private func synchronizeLegacyEdgeFromPostFilterStackLocked() {
+        guard let explicit = _postFilterStack else { return }
+        _edgeDetectionEffect = explicit.first(where: { $0.kind == .edgeDetection })?
+            .edgeDetectionEffect ?? .off
+    }
+
+    /// Apply a legacy edge mutation to an already-explicit stack without
+    /// disturbing authored order. A previously absent edge is appended only when
+    /// active; an existing edge remains in place while disabled so its tuning is
+    /// preserved. A full eight-filter stack remains bounded and therefore wins.
+    private func synchronizePostFilterStackFromLegacyEdgeLocked() {
+        guard var explicit = _postFilterStack else {
+            _cachedPackedPostFilterStack = nil
+            return
+        }
+
+        if let index = explicit.firstIndex(where: { $0.kind == .edgeDetection }) {
+            explicit[index] = PostFilterInstance(
+                edgeEffect: _edgeDetectionEffect,
+                id: explicit[index].id
+            )
+        } else if _edgeDetectionEffect.isActive {
+            explicit.append(PostFilterInstance(edgeEffect: _edgeDetectionEffect))
+        }
+        _postFilterStack = explicit.normalizedPostFilterStack()
+        synchronizeLegacyEdgeFromPostFilterStackLocked()
+        _cachedPackedPostFilterStack = nil
     }
 
     /// RETIRED warp-stack codegen hooks. The transform stack now renders via the
@@ -1412,6 +1491,19 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
+    var customLightingParams: CustomLightingParams {
+        get { withLock { _customLightingParams } }
+        set { withLock { _customLightingParams = newValue } }
+    }
+
+    var customLightingParameterValues: [Float] {
+        withLock { _customLightingParams.valuesArray() }
+    }
+
+    func setCustomLightingParameterValues(_ values: [Float]) {
+        withLock { _customLightingParams = CustomLightingParams(values: values) }
+    }
+
     // 0 = disabled (standard per-pixel raymarch)
     // 2 = 2x2 tiles (4x overhead reduction, high quality)
     // 4 = 4x4 tiles (16x overhead reduction, performance mode)
@@ -1522,6 +1614,12 @@ final class RenderSettings: @unchecked Sendable {
             }
             persistQuality()
         }
+    }
+
+    /// Starts a newly selected scene with Cone Marching off without scheduling
+    /// a preference write. The user can opt back in for the active scene.
+    func resetConeMarchingForSceneSwitch() {
+        withLock { _coneMarchStrength = 0 }
     }
 
     /// Per-scene cone-marching compatibility gate (set on scene load). `false`
@@ -2625,12 +2723,14 @@ final class RenderSettings: @unchecked Sendable {
                     _glowEffect = effects.glow
                     _bloomEffect = effects.bloom
                     _edgeDetectionEffect = effects.edge
+                    synchronizePostFilterStackFromLegacyEdgeLocked()
                     _fogEffect = effects.fog
                     _gradientCycleEffect = effects.gradientCycle
                     _linearRailEffect = effects.linearRail
                 }
             }
             persistLighting()
+            persistColor()
         }
     }
 
@@ -2696,6 +2796,24 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
+    /// Canonical ordered output-filter stack exposed to editors and renderers.
+    /// Legacy state is resolved to a synthetic edge instance without forcing an
+    /// eager migration into `ColorConfig.postFilterStack`.
+    var postFilterStack: [PostFilterInstance] {
+        get { withLock { resolvedPostFilterStackLocked() } }
+        set {
+            withLock {
+                _postFilterStack = newValue.normalizedPostFilterStack()
+                synchronizeLegacyEdgeFromPostFilterStackLocked()
+                _cachedPackedPostFilterStack = nil
+            }
+            // Color owns the new canonical array; lighting keeps the compatibility
+            // edge projection for older Threshold builds and render paths.
+            persistColor()
+            persistLighting()
+        }
+    }
+
     /// Screen-space convolution-style edge detector.
     var edgeDetectionEffect: EdgeDetectionEffect {
         get { withLock { _edgeDetectionEffect } }
@@ -2704,9 +2822,12 @@ final class RenderSettings: @unchecked Sendable {
             normalized.normalize()
             withLock {
                 _edgeDetectionEffect = normalized
+                synchronizePostFilterStackFromLegacyEdgeLocked()
                 _lightingPreset = .custom
             }
             persistLighting()
+            // Once an explicit stack exists, the legacy edit updated it too.
+            persistColor()
         }
     }
     
@@ -3104,7 +3225,7 @@ final class RenderSettings: @unchecked Sendable {
             gradientOffset: gradState.gradient.offset + (_gradientCycleEffect.enabled ? _gradientPhase : 0),
             gradientSmoothing: gradState.gradient.smoothing,
             gradientLoopSmooth: _gradientCycleEffect.mirrorLoop ? 1 : 0,
-            _gradPad: (0.0),
+            edgeColorRGB10: packRGB10(_edgeDetectionEffect.color),
             // === MODULAR LIGHTING EFFECTS ===
             animTime: _lightAnimTime,
             hueRotationEnabled: _hueRotationEffect.enabled ? 1 : 0,
@@ -3209,6 +3330,7 @@ final class RenderSettings: @unchecked Sendable {
                 resolutionScale: _resolutionScale,
                 fractalType: _fractalType,
                 formulaParams: fp,
+                customLightingParams: _customLightingParams,
                 tileSize: _tileSize,
                 debugHierarchical: _debugHierarchical,
                 coherentPacketEnabled: _coherentPacketEnabled,
@@ -3261,6 +3383,7 @@ final class RenderSettings: @unchecked Sendable {
                 handAttractionForearmEnabled: _handAttractionForearmEnabled,
                 handAttractionForearmRadius: _handAttractionForearmRadius,
                 colorSchemeParams: makeColorSchemeParamsLocked(),
+                postFilterStack: packedPostFilterStackLocked(),
                 lightingSoftness: _lightingSoftness,
                 fogEnabled: _fogEffect.enabled,
                 fogIntensity: _fogEffect.intensity * _mixedFogMultiplier,
@@ -4851,6 +4974,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.aoStrength = _aoStrength
                 c.tonemapStrength = _tonemapStrength
                 c.vignetteStrength = _vignetteStrength
+                c.postFilterStack = _postFilterStack
                 c.colorSchemeAutoTransition = _colorSchemeAutoTransition
                 c.colorSchemeAutoInterval = _colorSchemeAutoInterval
                 c.colorSchemeTransitionDuration = _colorSchemeTransitionDuration
@@ -4883,6 +5007,11 @@ final class RenderSettings: @unchecked Sendable {
                 _aoStrength = ControlCatalog.aoStrength.clamp(newValue.aoStrength)
                 _tonemapStrength = ControlCatalog.tonemapStrength.clamp(newValue.tonemapStrength)
                 _vignetteStrength = ControlCatalog.vignetteStrength.clamp(newValue.vignetteStrength)
+                _postFilterStack = newValue.postFilterStack
+                if _postFilterStack != nil {
+                    synchronizeLegacyEdgeFromPostFilterStackLocked()
+                }
+                _cachedPackedPostFilterStack = nil
                 _colorSchemeAutoTransition = newValue.colorSchemeAutoTransition
                 _colorSchemeAutoInterval = newValue.colorSchemeAutoInterval
                 _colorSchemeTransitionDuration = newValue.colorSchemeTransitionDuration
@@ -4920,7 +5049,15 @@ final class RenderSettings: @unchecked Sendable {
                 _pulseEffect = normalized.pulseEffect
                 _glowEffect = normalized.glowEffect
                 _bloomEffect = normalized.bloomEffect
-                _edgeDetectionEffect = normalized.edgeDetectionEffect
+                if _postFilterStack == nil {
+                    _edgeDetectionEffect = normalized.edgeDetectionEffect
+                    _cachedPackedPostFilterStack = nil
+                } else {
+                    // The ordered color-domain stack is authoritative when
+                    // present; keep this legacy projection synchronized even
+                    // when a dual-written older field disagrees.
+                    synchronizeLegacyEdgeFromPostFilterStackLocked()
+                }
                 _fogEffect = normalized.fogEffect
                 _gradientCycleEffect = normalized.gradientCycleEffect
                 _linearRailEffect = normalized.linearRailEffect

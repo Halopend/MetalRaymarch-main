@@ -87,15 +87,15 @@ actor Renderer {
     
     // Tile-based compute pipelines (adaptive 8x8 hierarchical cascade)
     var adaptiveHierarchicalPipeline8x8: MTLComputePipelineState?  // Adaptive 3-level cascade
-    var edgeDetectionPipeline: MTLComputePipelineState?
+    var postFilterPipeline: MTLComputePipelineState?
     var tileUniformBuffer: MTLBuffer?
 
     // Per-frame/per-eye foveation rate-map parameter buffers for the adaptive
     // compute path. CPU copies are not covered by Metal hazard tracking, so the
     // buffers must follow the same in-flight ring as the uniform buffers.
-    // The kernel decodes physical→screen coordinates from these so it stops
+    // The kernels decode physical→screen coordinates from these so they stop
     // distorting under foveation / renderQuality. `rateMapDummyBuffer` keeps the
-    // kernel's buffer(1) argument bound when no usable rate map exists.
+    // opaque argument bound when no usable rate map exists.
     private var rateMapParamBuffers: [MTLBuffer?] = Array(
         repeating: nil,
         count: maxBuffersInFlight * 2
@@ -105,7 +105,7 @@ actor Renderer {
 
     // Dedicated compute output texture (has .shaderWrite flag that drawable textures lack)
     var computeOutputTexture: MTLTexture?
-    var edgeOutputTexture: MTLTexture?
+    var postFilterOutputTexture: MTLTexture?
     private var hasLoggedComputeMemoryFallback = false
     /// A recoverable command-buffer failure on the adaptive kernel disables that
     /// path for the rest of this renderer session. Repeating a known GPU fault on
@@ -189,6 +189,9 @@ actor Renderer {
     /// slot. Screenshot capture copies those uniforms and must retain this
     /// exact resource rather than whichever grid has since been published.
     var lastSubmittedEnvironmentGrid: EnvironmentSDFGrid?
+    /// Packed output filters paired with the most recently submitted uniforms.
+    /// Screenshot capture binds this dedicated bank alongside its uniform copy.
+    var lastSubmittedPostFilterStack = PostFilterStack()
     var pendingScreenshotContinuation: CheckedContinuation<Data?, Never>?
     var shouldCaptureScreenshot: Bool = false
     
@@ -605,16 +608,16 @@ actor Renderer {
                 if RENDERER_DEBUG { print("✓ Cone coarse-prepass pipeline ready: \(coneCoarsePrepassPipeline != nil)") }
             }
 
-            if let edgeKernel = try? library.makeFunction(name: "edgeDetectSlidingWindow", constantValues: emptyConstants) {
-                let edgeDesc = MTLComputePipelineDescriptor()
-                edgeDesc.computeFunction = edgeKernel
-                edgeDesc.label = "Compute_edgeDetectSlidingWindow"
+            if let postFilterKernel = try? library.makeFunction(name: "postFilterStackKernel", constantValues: emptyConstants) {
+                let postFilterDesc = MTLComputePipelineDescriptor()
+                postFilterDesc.computeFunction = postFilterKernel
+                postFilterDesc.label = "Compute_postFilterStack"
                 if let archive = self.pipelineArchive {
-                    edgeDetectionPipeline = try? archive.makeComputePipeline(device: device, descriptor: edgeDesc)
+                    postFilterPipeline = try? archive.makeComputePipeline(device: device, descriptor: postFilterDesc)
                 } else {
-                    edgeDetectionPipeline = try? device.makeComputePipelineState(descriptor: edgeDesc, options: [], reflection: nil)
+                    postFilterPipeline = try? device.makeComputePipelineState(descriptor: postFilterDesc, options: [], reflection: nil)
                 }
-                if RENDERER_DEBUG { print("✓ Sliding-window edge detector pipeline ready: \(edgeDetectionPipeline != nil)") }
+                if RENDERER_DEBUG { print("✓ Ordered post-filter pipeline ready: \(postFilterPipeline != nil)") }
             }
 
             // Uniform buffer for tile compute (one per eye, per in-flight
@@ -777,9 +780,10 @@ actor Renderer {
                 // Setup custom-shader (.threshfx) activation handler. Also carries
                 // the composable transform-stack codegen (read from RenderSettings)
                 // so a built-in fractal + stack compiles a specialized library.
-                appModel.activateEmbeddedFormulaHandler = { [renderSettings = appModel.renderSettings] formula in
+                appModel.activateEmbeddedFormulaHandler = { [renderSettings = appModel.renderSettings] formula, lighting in
                     try await renderer.activateEmbeddedFormula(
                         formula,
+                        lighting: lighting,
                         warpStackSource: renderSettings.warpStackCodegenSource,
                         warpStackSignature: renderSettings.warpStackCodegenSignature)
                 }
@@ -836,35 +840,10 @@ actor Renderer {
             }
             guard installedHandlers, !Task.isCancelled else { return }
 
-            // If an embedded formula was already registered (e.g. opening a
-            // custom .threshscene/.threshfx from Finder, which opens the
-            // immersive space with `activeEmbeddedFormula` already set), activate
-            // it so the renderer compiles the custom MTLLibrary instead of
-            // rendering fog/sky only.
-            //
-            // CRITICAL: this must NOT be awaited before `renderLoop()`. A fresh
-            // custom-shader compile takes ~0.5-5s, and on visionOS the compositor
-            // kills the app (no Swift trace) if the first frame doesn't arrive
-            // shortly after the immersive space opens. Awaiting the compile here
-            // delayed first-frame past that deadline — which is exactly why every
-            // custom scene opened externally crashed EXCEPT the active/default one
-            // (a `libraryCache` hit that returns instantly). Activate
-            // concurrently instead: the render loop starts immediately and
-            // submits frames (the frame path renders a safe fallback and
-            // `scheduleCustomLibrarySelfHeal` swaps the custom DE in once the
-            // library is ready). The compile itself is also off-thread now
-            // (CustomShaderCompiler.library uses the async makeLibrary API).
-            let pendingFormula = await MainActor.run { appModel.activeEmbeddedFormula }
-            if let pending = pendingFormula, !pending.isBundledConstructionPrimitive {
-                customSceneDiagnostic("🔬 [CSDiag] Handler ready — scheduling deferred activation for '\(pending.name)' hash=\(pending.shortHash) (concurrent; does NOT block first frame)")
-                Task {
-                    do {
-                        try await renderer.activateEmbeddedFormula(pending)
-                    } catch {
-                        customSceneDiagnostic("🔬 [CSDiag] ❌ Deferred activation failed: \(error)")
-                    }
-                }
-            }
+            // Assigning `activateEmbeddedFormulaHandler` above launches its
+            // didSet activation concurrently. Keep that as the single owner of
+            // cold-start compilation so the first compositor frame is never
+            // blocked and duplicate activation generations cannot race.
 
             guard !Task.isCancelled else {
                 await MainActor.run {
@@ -1278,6 +1257,7 @@ actor Renderer {
         let updateGameStateTraceState = RenderTrace.begin("Update Game State")
         let framePreparation = self.updateGameState(drawable: drawable, settingsSnapshot: settingsSnapshot)
         lastSubmittedEnvironmentGrid = framePreparation.environmentGrid
+        lastSubmittedPostFilterStack = settingsSnapshot.postFilterStack
         // `EnvScrunchParams.gridAddress` is a bindless pointer, so Metal cannot
         // infer its owner from an ordinary buffer binding. Hold the frame's exact
         // grid snapshot until GPU completion in addition to declaring it on each
@@ -1381,6 +1361,11 @@ actor Renderer {
             settingsSnapshot: settingsSnapshot,
             framePath: framePath
         )
+        let deferredPostFilterStack = settingsSnapshot.postFilterStack
+        let postFilterTime = uniforms[0].uniforms.0.time
+        var raymarchPostFilterStack = fragmentPassPlan.defersPostFilters
+            ? PostFilterStack()
+            : deferredPostFilterStack
 
         // === TEMPORAL DEPTH WARM-START: patch per-frame uniforms ===
         // The MetalFX input size is only known once the pass plan exists, so the
@@ -1544,6 +1529,11 @@ actor Renderer {
         
         // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
+        renderEncoder.setFragmentBytes(
+            &raymarchPostFilterStack,
+            length: MemoryLayout<PostFilterStack>.stride,
+            index: BufferIndex.postFilters.rawValue
+        )
 
         // Benchmark iteration counter (BufferIndexBenchCounters). Always bound —
         // the fragmentShader pipeline declares the buffer; it's only zeroed (and
@@ -1625,7 +1615,11 @@ actor Renderer {
             drawable: drawable,
             fragmentPassPlan: fragmentPassPlan,
             framePreparation: framePreparation,
-            settingsSnapshot: settingsSnapshot
+            settingsSnapshot: settingsSnapshot,
+            deferredPostFilterStack: fragmentPassPlan.defersPostFilters
+                ? deferredPostFilterStack
+                : PostFilterStack(),
+            postFilterTime: postFilterTime
         )
         encodeSpatialRadialMenuPass(
             commandBuffer: commandBuffer,
@@ -1916,6 +1910,7 @@ actor Renderer {
             floorPlane: framePreparation.perEye[viewIndex].floorPlane,
             floorCenterRadius: framePreparation.perEye[viewIndex].floorCenterRadius,
             formulaParams: settingsSnapshot.formulaParams,
+            customLightingParams: settingsSnapshot.customLightingParams,
             currentViewProjMatrix: currentViewProj,
             previousViewProjMatrix: previousViewProjMatrices[viewIndex],
             currentInvViewProjMatrix: currentViewProj.inverse,
@@ -2030,10 +2025,10 @@ actor Renderer {
         return texture
     }
 
-    private func ensureEdgeOutputTexture(for drawable: LayerRenderer.Drawable) -> MTLTexture? {
+    private func ensurePostFilterOutputTexture(for drawable: LayerRenderer.Drawable) -> MTLTexture? {
         let source = drawable.colorTextures[0]
         let viewCount = drawable.views.count
-        if let existing = edgeOutputTexture,
+        if let existing = postFilterOutputTexture,
            existing.width == source.width,
            existing.height == source.height,
            existing.arrayLength == viewCount { return existing }
@@ -2047,14 +2042,14 @@ actor Renderer {
         descriptor.storageMode = .private
         descriptor.usage = [.shaderRead, .shaderWrite]
         guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
-        texture.label = "Sliding Window Edge Output"
-        edgeOutputTexture = texture
+        texture.label = "Ordered Post-Filter Output"
+        postFilterOutputTexture = texture
         return texture
     }
 
     private func estimatedAdaptiveComputeAuxiliaryBytes(
         for drawable: LayerRenderer.Drawable,
-        edgeEnabled: Bool
+        postFiltersEnabled: Bool
     ) -> Int {
         let width = drawable.colorTextures[0].width
         let height = drawable.colorTextures[0].height
@@ -2062,20 +2057,20 @@ actor Renderer {
         let pixelCount = width * height * viewCount
 
         // Adaptive compute needs one shader-writable color target plus two r32Float
-        // depth-history textures. Edge treatment adds a second color target. At
+        // depth-history textures. Post filtering adds a second color target. At
         // high compositor renderQuality these auxiliary textures can push the
         // process over the headset's working set. Common drawable color and r32
         // depth formats here are 4 bytes/pixel.
-        return pixelCount * (4 + 4 + 4 + (edgeEnabled ? 4 : 0))
+        return pixelCount * (4 + 4 + 4 + (postFiltersEnabled ? 4 : 0))
     }
 
     private func canAllocateAdaptiveComputeAuxiliaryTextures(
         for drawable: LayerRenderer.Drawable,
-        edgeEnabled: Bool
+        postFiltersEnabled: Bool
     ) -> Bool {
         let estimatedBytes = estimatedAdaptiveComputeAuxiliaryBytes(
             for: drawable,
-            edgeEnabled: edgeEnabled
+            postFiltersEnabled: postFiltersEnabled
         )
         let budgetBytes = 160 * 1024 * 1024
         if estimatedBytes <= budgetBytes { return true }
@@ -2093,12 +2088,12 @@ actor Renderer {
     /// Metal command buffers retain resources they reference, so an older in-flight
     /// frame remains valid while the renderer stops retaining the inactive pool.
     private func releaseAdaptiveComputeAuxiliaryTextures() {
-        guard computeOutputTexture != nil || edgeOutputTexture != nil ||
+        guard computeOutputTexture != nil || postFilterOutputTexture != nil ||
               temporalDepthTextures[0] != nil || temporalDepthTextures[1] != nil else {
             return
         }
         computeOutputTexture = nil
-        edgeOutputTexture = nil
+        postFilterOutputTexture = nil
         temporalDepthTextures = [nil, nil]
         temporalDepthIndex = 0
         temporalFrameCount = 0
@@ -2246,10 +2241,10 @@ actor Renderer {
     private func blitComputeOutputToDrawable(
         commandBuffer: MTLCommandBuffer,
         drawable: LayerRenderer.Drawable,
-        useEdgeOutput: Bool
+        usePostFilterOutput: Bool
     ) {
-        let sourceTexture = (useEdgeOutput && edgeDetectionPipeline != nil && edgeOutputTexture != nil)
-            ? edgeOutputTexture : computeOutputTexture
+        let sourceTexture = (usePostFilterOutput && postFilterPipeline != nil && postFilterOutputTexture != nil)
+            ? postFilterOutputTexture : computeOutputTexture
         guard let sourceTexture else { return }
         guard let blitEncoder = commandBuffer.makeBlitCommandEncoder() else { return }
         blitEncoder.label = "Copy Compute Output to Drawable"
@@ -2302,22 +2297,31 @@ actor Renderer {
         blitEncoder.endEncoding()
     }
 
-    private func encodeEdgeDetection(
+    private func encodePostFilterStack(
         commandBuffer: MTLCommandBuffer,
         sourceTexture: MTLTexture,
         destinationTexture: MTLTexture,
         viewIndex: Int,
         renderWidth: Int,
         renderHeight: Int,
-        uniformBuffer: MTLBuffer
+        uniformBuffer: MTLBuffer,
+        postFilterStack: PostFilterStack
     ) -> Bool {
-        guard let pipeline = edgeDetectionPipeline,
+        let rateMapBufferIndex = uniformBufferIndex * 2 + viewIndex
+        guard rateMapBufferIndex < rateMapParamBuffers.count,
+              let rateMapBuffer = rateMapParamBuffers[rateMapBufferIndex]
+                ?? rateMapDummyBuffer,
+              let pipeline = postFilterPipeline,
               let encoder = commandBuffer.makeComputeCommandEncoder() else { return false }
-        encoder.label = "Sliding Window Edge Detector Eye \(viewIndex)"
+        encoder.label = "Ordered Post Filters Eye \(viewIndex)"
         encoder.setComputePipelineState(pipeline)
         let uniformOffset = MemoryLayout<TileUniforms>.stride
             * (uniformBufferIndex * 2 + viewIndex)
         encoder.setBuffer(uniformBuffer, offset: uniformOffset, index: 0)
+        var stack = postFilterStack
+        encoder.setBytes(&stack, length: MemoryLayout<PostFilterStack>.stride, index: 1)
+        encoder.setBuffer(rateMapBuffer, offset: 0, index: 2)
+        encoder.useResource(rateMapBuffer, usage: .read)
         encoder.setTexture(sourceTexture, index: 0)
         encoder.setTexture(destinationTexture, index: 1)
         let w = max(1, min(renderWidth, sourceTexture.width))
@@ -2531,6 +2535,7 @@ actor Renderer {
                 floorPlane: framePreparation.perEye[viewIndex].floorPlane,
                 floorCenterRadius: framePreparation.perEye[viewIndex].floorCenterRadius,
                 formulaParams: settingsSnapshot.formulaParams,
+                customLightingParams: settingsSnapshot.customLightingParams,
                 currentViewProjMatrix: projection * modelView,
                 previousViewProjMatrix: previousViewProjMatrices[viewIndex],
                 currentInvViewProjMatrix: (projection * modelView).inverse,
@@ -2603,15 +2608,15 @@ actor Renderer {
         }
         let bufferContents = uniformBuffer.contents()
 
-        let edgeEnabled = settingsSnapshot.colorSchemeParams.edgeDetectionEnabled != 0
-        if !edgeEnabled {
-            // Edge output is another full-size stereo color target. Do not keep it
-            // resident after the effect is turned off.
-            edgeOutputTexture = nil
+        let postFiltersEnabled = settingsSnapshot.postFilterStack.count > 0
+        if !postFiltersEnabled {
+            // Post-filter output is another full-size stereo color target. Do not
+            // keep it resident after the stack becomes empty.
+            postFilterOutputTexture = nil
         }
         guard canAllocateAdaptiveComputeAuxiliaryTextures(
             for: drawable,
-            edgeEnabled: edgeEnabled
+            postFiltersEnabled: postFiltersEnabled
         ) else {
             releaseAdaptiveComputeAuxiliaryTextures()
             return false
@@ -2622,7 +2627,11 @@ actor Renderer {
             return false
         }
 
-        let edgeTexture = edgeEnabled ? ensureEdgeOutputTexture(for: drawable) : nil
+        let postFilterTexture = postFiltersEnabled ? ensurePostFilterOutputTexture(for: drawable) : nil
+        if postFiltersEnabled && postFilterTexture == nil {
+            releaseAdaptiveComputeAuxiliaryTextures()
+            return false
+        }
         
         // Set up temporal reprojection depth textures (ping-pong)
         guard let depthPair = ensureTemporalDepthTextures(for: drawable) else {
@@ -2633,7 +2642,6 @@ actor Renderer {
         
         // Render each eye. Propagate encoder creation failures so the caller can
         // use the fragment path instead of presenting stale intermediate data.
-        var edgeAppliedToEveryView = edgeEnabled && edgeTexture != nil
         for viewIndex in 0..<drawable.views.count {
             guard let renderExtent = encodeAdaptiveCompute(
                 commandBuffer: commandBuffer,
@@ -2651,20 +2659,26 @@ actor Renderer {
                 releaseAdaptiveComputeAuxiliaryTextures()
                 return false
             }
-            if edgeAppliedToEveryView, let edgeTexture {
-                let encoded = encodeEdgeDetection(
+            if postFiltersEnabled, let postFilterTexture {
+                let encoded = encodePostFilterStack(
                     commandBuffer: commandBuffer,
                     sourceTexture: outputTexture,
-                    destinationTexture: edgeTexture,
+                    destinationTexture: postFilterTexture,
                     viewIndex: viewIndex,
                     // Only process the foveated physical region written by the
                     // raymarch kernel. Running this at the backing texture's native
                     // extent erased much of the governor's low-quality GPU saving.
                     renderWidth: renderExtent.x,
                     renderHeight: renderExtent.y,
-                    uniformBuffer: uniformBuffer
+                    uniformBuffer: uniformBuffer,
+                    postFilterStack: settingsSnapshot.postFilterStack
                 )
-                edgeAppliedToEveryView = edgeAppliedToEveryView && encoded
+                guard encoded else {
+                    // Never present the unfiltered compute target when a stack
+                    // was authored. Let the caller fall back to the fragment path.
+                    releaseAdaptiveComputeAuxiliaryTextures()
+                    return false
+                }
             }
         }
         
@@ -2677,7 +2691,7 @@ actor Renderer {
         blitComputeOutputToDrawable(
             commandBuffer: commandBuffer,
             drawable: drawable,
-            useEdgeOutput: edgeAppliedToEveryView
+            usePostFilterOutput: postFiltersEnabled
         )
         
         return true

@@ -19,17 +19,17 @@ enum MusicCueSceneSource: String, CaseIterable, Identifiable, Hashable, Sendable
 
     var displayName: String {
         switch self {
-        case .configuredGroup: return "Configured Group"
-        case .animationLibrary: return "Animation Library"
-        case .staticSceneLibrary: return "Static Scene Library"
+        case .configuredGroup: return "Active Collection"
+        case .animationLibrary: return "All Animated Scenes"
+        case .staticSceneLibrary: return "All Still Scenes"
         }
     }
 
     var shortDisplayName: String {
         switch self {
-        case .configuredGroup: return "Group"
-        case .animationLibrary: return "Animations"
-        case .staticSceneLibrary: return "Static Scenes"
+        case .configuredGroup: return "Collection"
+        case .animationLibrary: return "Animated"
+        case .staticSceneLibrary: return "Still"
         }
     }
 
@@ -43,9 +43,9 @@ enum MusicCueSceneSource: String, CaseIterable, Identifiable, Hashable, Sendable
 
     var detail: String {
         switch self {
-        case .configuredGroup: return "Only the scenes you select below"
-        case .animationLibrary: return "Every keyframed animation"
-        case .staticSceneLibrary: return "Every saved static scene"
+        case .configuredGroup: return "The scenes selected in the active collection"
+        case .animationLibrary: return "Every scene with a playable keyframe sequence"
+        case .staticSceneLibrary: return "Every saved scene with no animation"
         }
     }
 }
@@ -97,8 +97,8 @@ struct MusicCueSceneTarget: Identifiable, Equatable {
 
         var displayName: String {
             switch self {
-            case .animation: return "Animation"
-            case .staticScene: return "Static Scene"
+            case .animation: return "Animated Scene"
+            case .staticScene: return "Still Scene"
             }
         }
 

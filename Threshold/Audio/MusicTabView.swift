@@ -134,6 +134,8 @@ struct MusicTabContent: View {
                     #else
                     ScrollView(.vertical, showsIndicators: true) {
                         VStack(spacing: 10) {
+                            directPlaybackSupportNotice
+
                             serviceToggle
 
                             nowPlayingCard
@@ -250,7 +252,7 @@ struct MusicTabContent: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Audio Input Visualizer")
                         .font(.headline)
-                    Text("Use the Mac microphone or a policy-approved application source for reactive visuals.")
+                    Text("Play music in Apple Music, Spotify, or another service, then use the Mac microphone for reactive visuals. Direct music-service playback isn't available in this Mac build.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -315,6 +317,30 @@ struct MusicTabContent: View {
             }
         }
         .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.08)))
+    }
+    #endif
+
+    #if !os(macOS)
+    private var directPlaybackSupportNotice: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: AppIcons.infoCircle)
+                .foregroundStyle(.blue)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Direct playback: Apple Music only")
+                    .font(.subheadline.weight(.semibold))
+                Text("For Spotify or any other music service, play the music outside Threshold and use Microphone input for reactive visuals.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.08)))
     }
     #endif
@@ -723,9 +749,11 @@ struct MusicTabContent: View {
                     Text("Nothing Playing")
                         .font(.headline)
                         .foregroundStyle(.secondary)
-                    Text("Connect a music service below")
+                    Text("Connect Apple Music for direct playback, or use Microphone input for another music service.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)

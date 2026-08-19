@@ -110,6 +110,7 @@ extension Renderer {
             byteCount: MemoryLayout<UniformsArray>.size
         )
         let screenshotEnvironmentGrid = lastSubmittedEnvironmentGrid
+        var screenshotPostFilterStack = lastSubmittedPostFilterStack
 
         let renderPassDescriptor = MTLRenderPassDescriptor()
         renderPassDescriptor.colorAttachments[0].texture = screenshotTexture
@@ -136,6 +137,11 @@ extension Renderer {
 
         renderEncoder.setVertexBuffer(screenshotUniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
         renderEncoder.setFragmentBuffer(screenshotUniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
+        renderEncoder.setFragmentBytes(
+            &screenshotPostFilterStack,
+            length: MemoryLayout<PostFilterStack>.stride,
+            index: BufferIndex.postFilters.rawValue
+        )
         if let screenshotEnvironmentGrid {
             // EnvScrunchParams carries a GPU address, so Metal needs both an
             // explicit residency declaration and a strong lifetime through

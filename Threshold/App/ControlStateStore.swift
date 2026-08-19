@@ -72,6 +72,10 @@ final class ControlStateStore {
     /// bindings read this mirror directly and keep their own native interaction state.
     @ObservationIgnored private(set) var spaceWarpStack: [SpaceWarpOpValue] = []
     private(set) var spaceWarpStructureRevision = 0
+    /// Main-actor mirror of the ordered output-filter stack. Parameter edits are
+    /// ignored by Observation; add/remove/reorder operations bump the revision.
+    @ObservationIgnored private(set) var postFilterStack: [PostFilterInstance] = []
+    private(set) var postFilterStructureRevision = 0
 
     // === SAVED CUSTOM GRADIENTS (isolated in GradientLibrary to avoid observation cross-talk) ===
     let gradientLibrary = GradientLibrary()
@@ -237,6 +241,17 @@ final class ControlStateStore {
                 spaceWarpStructureRevision &+= 1
             }
         }
+        let newPostFilterStack = settings.postFilterStack
+        if postFilterStack != newPostFilterStack {
+            let structureChanged = !Self.hasSamePostFilterStructure(
+                postFilterStack,
+                newPostFilterStack
+            )
+            postFilterStack = newPostFilterStack
+            if structureChanged {
+                postFilterStructureRevision &+= 1
+            }
+        }
 
     }
     
@@ -296,6 +311,45 @@ final class ControlStateStore {
         }
     }
 
+    /// Mutates one output filter by stable identity while preserving authored
+    /// ordering. RenderSettings performs the final normalization and legacy-edge
+    /// synchronization, so the mirror always reflects the committed value.
+    @discardableResult
+    func updatePostFilter(
+        id: UUID,
+        _ mutate: (inout PostFilterInstance) -> Void
+    ) -> Bool {
+        guard let settings else { return false }
+        var updated = settings.postFilterStack
+        guard let index = updated.firstIndex(where: { $0.id == id }) else { return false }
+        let previous = updated[index]
+        mutate(&updated[index])
+        updated[index].normalize()
+        guard updated[index] != previous else { return true }
+
+        settings.postFilterStack = updated
+        let committed = settings.postFilterStack
+        let structureChanged = !Self.hasSamePostFilterStructure(postFilterStack, committed)
+        postFilterStack = committed
+        if structureChanged {
+            postFilterStructureRevision &+= 1
+        }
+        return true
+    }
+
+    /// Commits an add/remove/reorder edit. The bounded/unique normalized result
+    /// is read back because RenderSettings is authoritative for stack invariants.
+    func replacePostFilterStack(_ updated: [PostFilterInstance]) {
+        guard let settings else { return }
+        settings.postFilterStack = updated
+        let committed = settings.postFilterStack
+        let structureChanged = !Self.hasSamePostFilterStructure(postFilterStack, committed)
+        postFilterStack = committed
+        if structureChanged {
+            postFilterStructureRevision &+= 1
+        }
+    }
+
     func addScenePrimitive(_ kind: ScenePrimitiveKind) {
         guard scenePrimitives.count < ScenePrimitive.maximumCount else { return }
         var primitive = ScenePrimitive(kind: kind)
@@ -346,6 +400,15 @@ final class ControlStateStore {
                 && left.groupID == right.groupID
                 && left.groupIterations == right.groupIterations
                 && left.groupMode == right.groupMode
+        }
+    }
+
+    private static func hasSamePostFilterStructure(
+        _ lhs: [PostFilterInstance],
+        _ rhs: [PostFilterInstance]
+    ) -> Bool {
+        lhs.count == rhs.count && zip(lhs, rhs).allSatisfy { left, right in
+            left.id == right.id && left.kind == right.kind
         }
     }
 
@@ -570,7 +633,15 @@ final class ControlStateStore {
     func commitEdgeDetectionEffect() {
         guard let settings else { return }
         lighting.edgeDetectionEffect.normalize()
+        let previousStack = postFilterStack
         settings.edgeDetectionEffect = lighting.edgeDetectionEffect
+        let committed = settings.postFilterStack
+        postFilterStack = committed
+        color = settings.colorConfig
+        lighting = settings.lightingConfig
+        if !Self.hasSamePostFilterStructure(previousStack, committed) {
+            postFilterStructureRevision &+= 1
+        }
     }
 
     func commitFogEffect() {

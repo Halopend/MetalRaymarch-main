@@ -46,6 +46,7 @@ struct TransformationLessonID: RawRepresentable, Hashable, Codable, Comparable {
         case .mandelboxStep: slug = "mandelbox-step"
         case .icosahedralCut: slug = "icosahedral-cut"
         case .compressionShells: slug = "compression-shells"
+        case .voronoi3D: slug = "voronoi-3d"
         }
         return TransformationLessonID(rawValue: "core.\(slug)")
     }
@@ -441,6 +442,48 @@ enum TransformationEquationCatalog {
             """,
             hint: "The three constants are fixed {5,3} unit mirror normals from golden-ratio geometry; only `op.strength` is read to blend the converged chamber point."
         ),
+        lesson(
+            .voronoi3D,
+            math: "q = ρp + o,  g = F₂(q) − F₁(q)\nV(p) = p + (s/ρ) smoothstep(0,1,g)(site₁(q) − fract(q))",
+            spokenMath: "Find the nearest and second-nearest jittered sites around scaled point q, then pull p toward the nearest site by their distance gap, fading the pull to zero at shared cell boundaries.",
+            metal: """
+            if (op.strength > 0.0f) {
+                float density = op.p1;
+                float jitter = op.p2;
+                float3 offset = float3(op.axisX, op.axisY, op.axisZ);
+                float3 q = p * density + offset;
+                float3 cell = floor(q);
+                float3 local = fract(q);
+                float nearest = 1.0e10f;
+                float secondNearest = 1.0e10f;
+                float3 nearestDelta = float3(0.0f);
+                for (int z = -2; z <= 2; ++z) {
+                    for (int y = -2; y <= 2; ++y) {
+                        for (int x = -2; x <= 2; ++x) {
+                            float3 neighbour = float3(x, y, z);
+                            float3 hash = fract((cell + neighbour) * float3(0.1031f, 0.1030f, 0.0973f));
+                            hash += dot(hash, hash.yxz + 33.33f);
+                            hash = fract((hash.xxy + hash.yxx) * hash.zyx);
+                            float3 site = neighbour + mix(float3(0.5f), hash, jitter);
+                            float3 delta = site - local;
+                            float distanceSquared = dot(delta, delta);
+                            if (distanceSquared < nearest) {
+                                secondNearest = nearest;
+                                nearest = distanceSquared;
+                                nearestDelta = delta;
+                            } else if (distanceSquared < secondNearest) {
+                                secondNearest = distanceSquared;
+                            }
+                        }
+                    }
+                }
+                float gap = max(sqrt(secondNearest) - sqrt(nearest), 0.0f);
+                float interior = smoothstep(0.0f, 1.0f, gap);
+                p = p + nearestDelta * (op.strength * interior / density);
+            }
+            """,
+            hint: "`op.p1` is cell density, `op.p2` jitters each deterministic site, and `op.axisX/Y/Z` slides the lattice. The five-cell envelope makes F1/F2 exact; production Metal prunes its outer cells before building the boundary-safe mask."
+        ),
     ]
 
     /// Builds a compact toolbox from the actual Metal used by a lesson, so the
@@ -746,7 +789,7 @@ enum TransformationEducationPath {
             numeral: "IV",
             title: "Composition & Motion",
             subtitle: "Combine coordinate ordering with axis-driven motion.",
-            kinds: [.mengerFold, .twist, .bend],
+            kinds: [.mengerFold, .twist, .bend, .voronoi3D],
             requiredToAdvance: 2
         ),
         .init(

@@ -29,7 +29,7 @@ Top dock (`TopDockTab`): **Explore · Shape · Visualizations · Music · Perfor
 Rail sections per dock tab:
 - Explore → Jumping Off · Music Reactive · Animated · Mixed · Custom Scenes
 - Shape → Parameters · Formula · Hands · Space · Transform · Bounding
-- Visualizations → Color · Mapping · Grading · Cycling · Atmosphere · Transition · Audio Reactive
+- Visualizations → Color & Mapping · Grading · Cycling · Atmosphere · Transition · Audio Reactive
 - Music → Playback(/Music App) · Songs · Playlists · Albums  (macOS: Playback only)
 - Performance → Overview · Tuning
 

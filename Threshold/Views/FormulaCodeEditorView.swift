@@ -65,7 +65,7 @@ struct FormulaEditorWindowView: View {
                 .foregroundStyle(.secondary)
             Text("Metal DE Studio is experimental")
                 .font(.headline)
-            Text("Enable “Allow custom scenes” in Settings → General to write a Metal distance estimator on your Mac.")
+            Text("Enable “Allow custom scenes” in Settings → Display → Experimental Display to write a Metal distance estimator on your Mac.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -84,7 +84,6 @@ private struct FormulaEditorContent: View {
 
     private enum InspectorTab: String, CaseIterable, Identifiable {
         case parameters = "Params"
-        case learn = "Learn"
         case performance = "Perf"
 
         var id: String { rawValue }
@@ -165,14 +164,6 @@ private struct FormulaEditorContent: View {
 
                 statusPill
                 Spacer()
-
-                Button {
-                    inspectorTab = .learn
-                } label: {
-                    Label("Metal / GLSL guide", systemImage: "book.pages")
-                }
-                .buttonStyle(.borderless)
-                .help("Read the differences that matter when porting a GLSL DE to Metal")
 
                 Button("Compile Now") { model.compileNow() }
                     .keyboardShortcut("b", modifiers: .command)
@@ -273,8 +264,6 @@ private struct FormulaEditorContent: View {
             switch inspectorTab {
             case .parameters:
                 parameterSidebar
-            case .learn:
-                metalGuide
             case .performance:
                 performanceSidebar
             }
@@ -294,79 +283,6 @@ private struct FormulaEditorContent: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-    }
-
-    private var metalGuide: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Label("Metal, with GLSL instincts", systemImage: "book.pages")
-                    .font(.headline)
-
-                Text("The distance-estimator math transfers directly. Metal is a little stricter about types, function signatures, and memory address spaces, so the editor gives your DE a stable contract to plug into the renderer.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("The useful mental model transfers", systemImage: "arrow.triangle.2.circlepath")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.green)
-                    Text("Folds, rotations, orbit traps, derivative tracking, distance bounds, and optimization reasoning are the same ideas. If you know how to write a GLSL DE, you already know most of the hard part.")
-                        .font(.caption)
-                }
-                .padding(10)
-                .background(Color.green.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
-
-                metalDifferenceRow("GLSL", "Metal", "vec3 / mat3", "float3 / float3x3")
-                metalDifferenceRow("uniforms", "Metal buffers", "uniform float radius", "fp.params[0]")
-                metalDifferenceRow("inout", "thread reference", "inout Orbit orbit", "thread OrbitData& orbit")
-                metalDifferenceRow("shader entry points", "DE contract", "main-style entry", "DE_Name_Dist + DE_Name")
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("Keep the DE strict", systemImage: "checkmark.seal")
-                        .font(.subheadline.weight(.semibold))
-                    Text("Use the exact signatures from the starter source. Keep parameters in FormulaParams, use float/float2/float3 consistently, and keep the distance-only and orbit-tracking variants mathematically aligned. The renderer can then specialize and optimize the hot loop safely.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Fast porting checklist")
-                        .font(.subheadline.weight(.semibold))
-                    Text("• rename vecN → floatN and matN → floatNxN\n• move uniforms into fp.params[]\n• replace inout with thread T&\n• preserve a conservative distance bound\n• compile often; the last good shader stays live")
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                }
-                .padding(10)
-                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func metalDifferenceRow(_ left: String, _ right: String, _ leftDetail: String, _ rightDetail: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(left)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text(leftDetail)
-                    .font(.caption2.monospaced())
-            }
-            Image(systemName: "arrow.right")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .padding(.top, 2)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(right)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.cyan)
-                Text(rightDetail)
-                    .font(.caption2.monospaced())
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(8)
-        .background(Color.cyan.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var performanceSidebar: some View {

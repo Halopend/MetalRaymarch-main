@@ -206,6 +206,87 @@ struct AnimationSceneStateTests {
         manager.stop()
     }
 
+    @MainActor
+    @Test("Animated scene switches default Cone Marching off, but resume preserves an opt-in")
+    func animatedSceneSwitchDefaultsConeMarchingOff() {
+        let destination = RenderSettings()
+        destination.withPersistenceSuppressed {
+            destination.coneMarchStrength = 0.8
+        }
+
+        let manager = AnimationManager(renderSettings: destination)
+        manager.currentScene = scene()
+        #expect(abs(destination.coneMarchStrength - 0.8) < 1e-6)
+        manager.play()
+        #expect(destination.coneMarchStrength == 0)
+
+        destination.withPersistenceSuppressed {
+            destination.coneMarchStrength = 0.6
+        }
+        manager.pause()
+        manager.play()
+        #expect(abs(destination.coneMarchStrength - 0.6) < 1e-6)
+
+        manager.stop()
+        destination.withPersistenceSuppressed {
+            destination.coneMarchStrength = 0.65
+        }
+        manager.play()
+        #expect(abs(destination.coneMarchStrength - 0.65) < 1e-6)
+
+        destination.withPersistenceSuppressed {
+            destination.coneMarchStrength = 0.7
+        }
+        manager.currentScene = scene()
+        #expect(destination.coneMarchStrength == 0)
+
+        manager.stop()
+    }
+
+    @MainActor
+    @Test("Applying a selected single-keyframe scene defaults Cone Marching off")
+    func singleKeyframeSceneSwitchDefaultsConeMarchingOff() {
+        let destination = RenderSettings()
+        destination.withPersistenceSuppressed {
+            destination.coneMarchStrength = 0.8
+        }
+
+        let manager = AnimationManager(renderSettings: destination)
+        manager.currentScene = AnimationScene(
+            name: "Still animation",
+            initialKeyframe: keyframe(name: "Only", scale: 2, duration: 0),
+            fractalType: .mandelbox
+        )
+        #expect(abs(destination.coneMarchStrength - 0.8) < 1e-6)
+        manager.jumpToKeyframe(0)
+
+        #expect(destination.coneMarchStrength == 0)
+    }
+
+    @MainActor
+    @Test("Animation preview rollback preserves Cone Marching on resume")
+    func animationPreviewRollbackPreservesConeMarching() {
+        let destination = RenderSettings()
+        let manager = AnimationManager(renderSettings: destination)
+        let original = scene()
+
+        manager.currentScene = original
+        manager.play()
+        manager.pause()
+        destination.withPersistenceSuppressed {
+            destination.coneMarchStrength = 0.6
+        }
+
+        manager.currentScene = scene()
+        #expect(abs(destination.coneMarchStrength - 0.6) < 1e-6)
+
+        manager.restoreCurrentSceneSelection(original)
+        manager.play()
+
+        #expect(abs(destination.coneMarchStrength - 0.6) < 1e-6)
+        manager.stop()
+    }
+
     @Test("Embedded space warp preserves fractal type; fractal payload selects custom")
     func embeddedEffectKindControlsFractalType() throws {
         var warpScene = scene(fractalType: .mandelbox)

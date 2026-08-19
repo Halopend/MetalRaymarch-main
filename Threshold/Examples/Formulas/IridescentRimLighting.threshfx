@@ -1,0 +1,101 @@
+{
+  "formula": {
+    "author": "Threshold material-hook example",
+    "category": "Lighting",
+    "description": "Deliberately vivid cross-fractal material demo: cyan-to-magenta base tint, broad coloured highlights, and a bright animated rim. It is intentionally unmistakable so authors can verify that external lighting loaded while Threshold keeps geometry, lights, shadows, AO, fog, glow, and post-processing host-owned.",
+    "functionStem": "IridescentRimLighting",
+    "id": "com.puppypower.threshold.example.iridescentRimLighting",
+    "kind": "lighting",
+    "metalSource": "// Iridescent Rim — deliberately vivid, live-parameter material test\n// @param 0 \"Tint Strength\" default=0.72 min=0 max=1 step=0.01\n// @param 1 \"Rim Emission\" default=0.9 min=0 max=3 step=0.05\n// @param 2 \"Rim Tightness\" default=2 min=0.25 max=8 step=0.05\n// @param 3 \"Specular Strength\" default=6 min=0 max=16 step=0.1\n// @param 4 \"Highlight Tightness\" default=32 min=1 max=256 step=1\n// @param 5 \"Animation Speed\" default=1.4 min=0 max=5 step=0.05\n// @param 6 \"Diffuse Response\" default=0.9 min=0 max=2 step=0.01\n// @param 7 \"Ambient Response\" default=0.65 min=0 max=2 step=0.01\n// @param 8 \"Base Emission\" default=0.12 min=0 max=2 step=0.01\n// @param 9 \"Animate Colors\" default=1 min=0 max=1 step=1 bool\nFORCE_INLINE ThresholdMaterial Lighting_IridescentRimLighting(\n    ThresholdLightingContext context,\n    ThresholdMaterial material)\n{\n    float tintStrength = thresholdLightingParam(context, 0u);\n    float rimStrength = thresholdLightingParam(context, 1u);\n    float rimPower = thresholdLightingParam(context, 2u);\n    float specularStrength = thresholdLightingParam(context, 3u);\n    float highlightTightness = thresholdLightingParam(context, 4u);\n    float animationSpeed = thresholdLightingParam(context, 5u);\n    float diffuseResponse = thresholdLightingParam(context, 6u);\n    float ambientResponse = thresholdLightingParam(context, 7u);\n    float baseEmission = thresholdLightingParam(context, 8u);\n    float animateColors = thresholdLightingParam(context, 9u);\n\n    float NoV = saturate(dot(context.normal, context.viewDirection));\n    float rim = powr(max(1.0f - NoV, 0.0f), rimPower);\n\n    // Normal-based phase behaves consistently across differently scaled fractals.\n    float phase = context.animationTime * animationSpeed * animateColors\n        + dot(context.normal, float3(2.1f, 3.7f, 5.3f));\n    float blend = 0.5f + 0.5f * sin(phase);\n    float3 cyan = float3(0.05f, 0.90f, 1.00f);\n    float3 magenta = float3(1.00f, 0.08f, 0.65f);\n    float3 tint = mix(cyan, magenta, blend);\n\n    // Strong base tint proves activation even when Cell Shading skips specular.\n    float3 hostBase = float3(material.baseColor);\n    material.baseColor = half3(mix(hostBase * 0.35f, tint, tintStrength));\n\n    // Broad, bright colour in Threshold's existing single specular pass.\n    material.specularTint = half3(tint);\n    material.specularScale = specularStrength;\n    material.specularPower = highlightTightness;\n    material.diffuseScale = diffuseResponse;\n    material.ambientScale = ambientResponse;\n\n    // Visible on every hit, brightest at silhouettes; host fog/glow/post follow.\n    material.emission += half3(tint * (baseEmission + rimStrength * rim));\n    return material;\n}\n",
+    "name": "Iridescent Rim Lighting",
+    "params": [
+      {
+        "default": 0.72,
+        "index": 0,
+        "max": 1.0,
+        "min": 0.0,
+        "name": "Tint Strength",
+        "step": 0.01
+      },
+      {
+        "default": 0.9,
+        "index": 1,
+        "max": 3.0,
+        "min": 0.0,
+        "name": "Rim Emission",
+        "step": 0.05
+      },
+      {
+        "default": 2.0,
+        "index": 2,
+        "max": 8.0,
+        "min": 0.25,
+        "name": "Rim Tightness",
+        "step": 0.05
+      },
+      {
+        "default": 6.0,
+        "index": 3,
+        "max": 16.0,
+        "min": 0.0,
+        "name": "Specular Strength",
+        "step": 0.1
+      },
+      {
+        "default": 32.0,
+        "index": 4,
+        "max": 256.0,
+        "min": 1.0,
+        "name": "Highlight Tightness",
+        "step": 1.0
+      },
+      {
+        "default": 1.4,
+        "index": 5,
+        "max": 5.0,
+        "min": 0.0,
+        "name": "Animation Speed",
+        "step": 0.05
+      },
+      {
+        "default": 0.9,
+        "index": 6,
+        "max": 2.0,
+        "min": 0.0,
+        "name": "Diffuse Response",
+        "step": 0.01
+      },
+      {
+        "default": 0.65,
+        "index": 7,
+        "max": 2.0,
+        "min": 0.0,
+        "name": "Ambient Response",
+        "step": 0.01
+      },
+      {
+        "default": 0.12,
+        "index": 8,
+        "max": 2.0,
+        "min": 0.0,
+        "name": "Base Emission",
+        "step": 0.01
+      },
+      {
+        "default": 1.0,
+        "index": 9,
+        "isBool": true,
+        "max": 1.0,
+        "min": 0.0,
+        "name": "Animate Colors",
+        "step": 1.0
+      }
+    ],
+    "schemaVersion": 1,
+    "supportedEffectTags": [
+      "lighting",
+      "color"
+    ]
+  },
+  "version": 1
+}

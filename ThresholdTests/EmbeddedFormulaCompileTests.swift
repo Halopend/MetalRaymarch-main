@@ -22,7 +22,7 @@ import Foundation
 import Metal
 @testable import Threshold
 
-@Suite("External loading — embedded distance-estimator formulas compile to an MTLLibrary")
+@Suite("External loading — embedded GPU effects compile to an MTLLibrary")
 struct EmbeddedFormulaCompileTests {
 
     /// Repo `Threshold/Examples` directory, located relative to this source file.
@@ -65,6 +65,9 @@ struct EmbeddedFormulaCompileTests {
             let preset = try decoder.decode(FractalPreset.self, from: Data(contentsOf: url))
             if let formula = preset.embeddedFormula {
                 result.append((url.lastPathComponent, formula))
+            }
+            if let lighting = preset.embeddedLighting {
+                result.append(("\(url.lastPathComponent) [lighting]", lighting))
             }
         }
 
@@ -222,7 +225,110 @@ struct EmbeddedFormulaCompileTests {
     @Test("At least one embedded-formula example exists to exercise the compiler")
     func haveEmbeddedFormulas() throws {
         let formulas = try Self.collectEmbeddedFormulas()
+        func hasStandaloneFile(_ kind: EffectKind) -> Bool {
+            formulas.contains {
+                $0.source.hasSuffix(".threshfx") && $0.formula.effectKind == kind
+            }
+        }
         #expect(!formulas.isEmpty, "no embedded-formula example assets found under \(Self.examplesDir.path)")
+        #expect(hasStandaloneFile(.fractal),
+                "no custom-fractal .threshfx example found under \(Self.examplesDir.path)")
+        #expect(hasStandaloneFile(.spaceWarp),
+                "no custom-space-warp .threshfx example found under \(Self.examplesDir.path)")
+        #expect(hasStandaloneFile(.lighting),
+                "no custom-lighting .threshfx example found under \(Self.examplesDir.path)")
+    }
+
+    @MainActor
+    @Test("Bundled Voronoi menu modifier loads from the packaged .threshfx resource")
+    func bundledVoronoiMenuResourceLoads() throws {
+        let hash = try #require(
+            AppModel.bundledVoronoiSpaceWarpSourceHash,
+            "the app bundle could not decode the Voronoi space-warp .threshfx"
+        )
+        #expect(hash == "586ec7bc5db26d4029d8b0ff003e3ddbf1ca845262c87f95d51f51b9d5974218")
+        #expect(AppModel.bundledVoronoiSpaceWarpControlProfileSourceHashes.contains(hash))
+
+        let lookalike = EmbeddedFormula(
+            kind: .spaceWarp,
+            id: AppModel.bundledVoronoiSpaceWarpID,
+            name: "Unrecognized Voronoi revision",
+            functionStem: "DifferentSource",
+            metalSource: """
+            FORCE_INLINE float3 customSpaceWarp(float3 p, float s, float a, float b, float c) {
+                return p + float3(a, b, c) * s;
+            }
+            FORCE_INLINE float customSpaceWarpDEScale(float3 p, float s, float a, float b, float c) {
+                return 1.0f + abs(s);
+            }
+            """,
+            params: []
+        )
+        #expect(AppModel.customSpaceWarpControlProfile(for: lookalike) == .generic)
+    }
+
+    @Test("A space-warp .threshfx file validates and compiles in the production warp slot")
+    func diskSpaceWarpContainerCompiles() async throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            Issue.record("No Metal device available; skipping space-warp .threshfx compile coverage")
+            return
+        }
+
+        // Keep this fixture test-owned: it must cross the real file decoder without
+        // adding a synthetic effect to the app's shipped Examples catalog.
+        let fixture = EmbeddedFormula(
+            kind: .spaceWarp,
+            id: "test.disk-space-warp",
+            name: "Disk Space Warp",
+            functionStem: "DiskSpaceWarp",
+            metalSource: """
+            FORCE_INLINE float3 customSpaceWarp(
+                float3 p, float strength, float param1, float param2, float param3
+            ) {
+                if (strength <= 0.0f) { return p; }
+                float frequency = max(abs(param1), 0.01f);
+                float phase = frequency * p.y + param3;
+                float3 offset = float3(sin(phase), 0.0f, cos(phase));
+                return p + offset * (strength * param2);
+            }
+
+            FORCE_INLINE float customSpaceWarpDEScale(
+                float3 p, float strength, float param1, float param2, float param3
+            ) {
+                (void)p;
+                (void)param3;
+                if (strength <= 0.0f) { return 1.0f; }
+                return 1.0f + abs(strength * param1 * param2);
+            }
+            """,
+            params: []
+        )
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ThresholdTests-SpaceWarp-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let file = directory.appendingPathComponent("DiskSpaceWarp.threshfx")
+        try EmbeddedFormulaContainer(formula: fixture).encode().write(to: file, options: .atomic)
+        #expect(file.pathExtension == "threshfx")
+
+        // This is the same validating disk boundary used by AppModel.openExternalFile.
+        let decoded = try EmbeddedFormulaContainer.decode(fromContainerAt: file)
+        #expect(decoded.version == EmbeddedFormulaContainer.currentVersion)
+        #expect(decoded.formula.effectKind == .spaceWarp)
+        #expect(decoded.formula == fixture)
+
+        let compiler = CustomShaderCompiler(device: device)
+        let cacheKey = CustomShaderCompiler.combinedHash(
+            fractal: nil,
+            spaceWarp: decoded.formula
+        )
+        let library = try await compiler.library(
+            forFractal: nil,
+            spaceWarp: decoded.formula
+        )
+        #expect(library.makeFunction(name: "vertexShader") != nil)
+        await compiler.evict(combinedHash: cacheKey)
     }
 
     @Test("Every embedded formula compiles through the production CustomShaderCompiler")
@@ -237,17 +343,34 @@ struct EmbeddedFormulaCompileTests {
 
         let formulas = try Self.collectEmbeddedFormulas()
         let compiler = CustomShaderCompiler(device: device)
+        var compiledKeys = Set<String>()
 
         for (source, formula) in formulas {
-            let isWarp = formula.effectKind == .spaceWarp
-            let kind = isWarp ? "space-warp" : "DE"
+            let fractal: EmbeddedFormula?
+            let spaceWarp: EmbeddedFormula?
+            let lighting: EmbeddedFormula?
+            let kind: String
+            switch formula.effectKind {
+            case .fractal:
+                (fractal, spaceWarp, lighting, kind) = (formula, nil, nil, "DE")
+            case .spaceWarp:
+                (fractal, spaceWarp, lighting, kind) = (nil, formula, nil, "space-warp")
+            case .lighting:
+                (fractal, spaceWarp, lighting, kind) = (nil, nil, formula, "lighting")
+            }
+            let cacheKey = CustomShaderCompiler.combinedHash(
+                fractal: fractal,
+                spaceWarp: spaceWarp,
+                lighting: lighting
+            )
+            guard compiledKeys.insert(cacheKey).inserted else { continue }
             do {
-                // Route exactly as Renderer.activateEmbeddedFormula does: a warp
-                // rides the built-in DEs (spaceWarp slot), a fractal supplies its
-                // own DE (fractal slot).
+                // Route exactly as Renderer.activateEmbeddedFormula does: each
+                // effect occupies its independent compiler slot.
                 _ = try await compiler.library(
-                    forFractal: isWarp ? nil : formula,
-                    spaceWarp: isWarp ? formula : nil
+                    forFractal: fractal,
+                    spaceWarp: spaceWarp,
+                    lighting: lighting
                 )
             } catch {
                 // The error carries the exact Metal compiler diagnostic (file:line +
@@ -255,6 +378,267 @@ struct EmbeddedFormulaCompileTests {
                 // MSL does not provide. Surfaced in the test failure / .xcresult.
                 Issue.record("Embedded \(kind) '\(formula.name)' from \(source) FAILED to compile: \(error)")
             }
+
+            // This test validates every payload in one process, unlike normal app
+            // usage. Do not retain one full MTLLibrary per catalog entry: the
+            // production cache API itself is covered elsewhere, and holding the
+            // entire catalog needlessly raises peak memory while this test runs.
+            await compiler.evict(combinedHash: cacheKey)
         }
     }
+
+    #if os(macOS)
+    @Test("macOS viewport installs and detaches a lighting-only library")
+    func macViewportLightingActivation() async throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            Issue.record("No Metal device available; skipping macOS viewport activation coverage")
+            return
+        }
+        guard let lighting = try Self.collectEmbeddedFormulas()
+            .map(\.formula)
+            .first(where: { $0.effectKind == .lighting }) else {
+            Issue.record("No bundled lighting fixture found")
+            return
+        }
+
+        let box = ViewportCustomShaderBox()
+        let vertexDescriptor = MTLVertexDescriptor()
+        vertexDescriptor.attributes[VertexAttribute.position.rawValue].format = .float3
+        vertexDescriptor.attributes[VertexAttribute.position.rawValue].bufferIndex = BufferIndex.meshPositions.rawValue
+        vertexDescriptor.attributes[VertexAttribute.texcoord.rawValue].format = .float2
+        vertexDescriptor.attributes[VertexAttribute.texcoord.rawValue].bufferIndex = BufferIndex.meshGenerics.rawValue
+        vertexDescriptor.layouts[BufferIndex.meshPositions.rawValue].stride = 12
+        vertexDescriptor.layouts[BufferIndex.meshGenerics.rawValue].stride = 8
+        box.configureGenericPipelineFactory(
+            ViewportCustomGenericPipelineFactory(
+                device: device,
+                colorPixelFormat: .rgba16Float,
+                depthPixelFormat: .depth32Float,
+                vertexDescriptor: vertexDescriptor
+            )
+        )
+        let cache = ViewportSpecializedPipelineCache()
+        do {
+            try await box.activate(nil, lighting: lighting, device: device, cache: cache)
+        } catch {
+            // GitHub's macOS runners expose an "Apple Paravirtual device" that
+            // compiles Metal libraries but cannot build the custom render
+            // pipeline — the same limitation that blanks every custom scene in
+            // the Quick Look render gate. Treat that as missing GPU coverage
+            // rather than a regression; real hardware still fails loudly.
+            if device.name.contains("Paravirtual")
+                || ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true" {
+                print("Skipping macOS viewport activation coverage on virtualized GPU: \(error)")
+                return
+            }
+            throw error
+        }
+
+        let active = box.snapshot()
+        #expect(active.library != nil)
+        #expect(active.genericPipeline != nil)
+        #expect(active.hash == CustomShaderCompiler.combinedHash(
+            fractal: nil,
+            spaceWarp: nil,
+            lighting: lighting
+        ))
+
+        try await box.activate(nil, device: device, cache: cache)
+        let detached = box.snapshot()
+        #expect(detached.library == nil)
+        #expect(detached.hash == nil)
+    }
+
+    @Test("Bundled lighting demo materially changes the public material ABI")
+    func bundledLightingDemoChangesMaterialOutputs() async throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            Issue.record("No Metal device available; skipping lighting behavior probe")
+            return
+        }
+
+        let url = Self.examplesDir
+            .appendingPathComponent("Formulas")
+            .appendingPathComponent("IridescentRimLighting.threshfx")
+        let lighting = try EmbeddedFormulaContainer
+            .decode(fromContainerAt: url)
+            .formula
+        #expect(lighting.effectKind == .lighting)
+        let defaultParameterValues = lighting.resolvedParameterValues()
+        var authoredParameterValues = defaultParameterValues
+        authoredParameterValues[0] = 0.0  // no tint
+        authoredParameterValues[1] = 0.0  // no rim emission
+        authoredParameterValues[3] = 0.0  // no specular response
+        authoredParameterValues[4] = 256.0
+        authoredParameterValues[6] = 2.0
+        authoredParameterValues[7] = 2.0
+        authoredParameterValues[8] = 0.0  // no base emission
+        let parameterBanks = defaultParameterValues + authoredParameterValues
+
+        // Execute the external author's real Metal entry point with a tiny
+        // one-thread harness. This proves numerical behavior, not merely that
+        // the full renderer accepted the source and built a pipeline.
+        let source = """
+        #include <metal_stdlib>
+        using namespace metal;
+        #define FORCE_INLINE __attribute__((always_inline)) inline
+
+        struct ThresholdMaterial {
+            half3 baseColor;
+            half3 specularTint;
+            half3 emission;
+            float diffuseScale;
+            float ambientScale;
+            float specularScale;
+            float specularPower;
+        };
+
+        struct CustomLightingParams {
+            float values[16];
+        };
+
+        struct ThresholdLightingContext {
+            float3 position;
+            float3 normal;
+            float3 viewDirection;
+            float3 spotDirection;
+            float3 sunDirection;
+            float spotAttenuation;
+            float sunDiffuseScale;
+            float lightIntensity;
+            float hostSpecularPower;
+            float animationTime;
+            half shadowSpot;
+            half shadowSun;
+            CustomLightingParams params;
+        };
+
+        inline float thresholdLightingParam(ThresholdLightingContext context, uint index)
+        {
+            return context.params.values[min(index, 15u)];
+        }
+
+        \(lighting.metalSource)
+
+        kernel void probeLighting(device float4 *output [[buffer(0)]],
+                                  device const CustomLightingParams *parameterBanks [[buffer(1)]],
+                                  uint tid [[thread_position_in_grid]])
+        {
+            if (tid >= 2) return;
+
+            ThresholdLightingContext context;
+            context.position = float3(0.0f);
+            context.normal = normalize(float3(3.7f, -2.1f, 0.0f));
+            context.viewDirection = float3(0.0f, 0.0f, 1.0f);
+            context.spotDirection = float3(0.0f, 1.0f, 0.0f);
+            context.sunDirection = float3(1.0f, 0.0f, 0.0f);
+            context.spotAttenuation = 1.0f;
+            context.sunDiffuseScale = 1.0f;
+            context.lightIntensity = 1.0f;
+            context.hostSpecularPower = 128.0f;
+            context.animationTime = 0.0f;
+            context.shadowSpot = 1.0h;
+            context.shadowSun = 1.0h;
+            for (uint i = 0; i < 16; ++i) {
+                context.params.values[i] = parameterBanks[tid].values[i];
+            }
+
+            ThresholdMaterial host;
+            host.baseColor = half3(0.8h, 0.7h, 0.6h);
+            host.specularTint = half3(1.0h);
+            host.emission = half3(0.0h);
+            host.diffuseScale = 1.0f;
+            host.ambientScale = 1.0f;
+            host.specularScale = 1.0f;
+            host.specularPower = context.hostSpecularPower;
+
+            ThresholdMaterial result = Lighting_IridescentRimLighting(context, host);
+            uint outputIndex = tid * 4u;
+            output[outputIndex + 0u] = float4(float3(result.baseColor), result.diffuseScale);
+            output[outputIndex + 1u] = float4(float3(result.specularTint), result.specularScale);
+            output[outputIndex + 2u] = float4(float3(result.emission), result.specularPower);
+            output[outputIndex + 3u] = float4(result.ambientScale, 0.0f, 0.0f, 0.0f);
+        }
+        """
+
+        let library = try await device.makeLibrary(source: source, options: nil)
+        guard let function = library.makeFunction(name: "probeLighting"),
+              let queue = device.makeCommandQueue(),
+              let output = device.makeBuffer(
+                length: MemoryLayout<SIMD4<Float>>.stride * 8,
+                options: .storageModeShared
+              ),
+              let parameters = device.makeBuffer(
+                length: MemoryLayout<Float>.stride * parameterBanks.count,
+                options: .storageModeShared
+              ),
+              let commandBuffer = queue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            Issue.record("Could not create the lighting behavior probe")
+            return
+        }
+
+        let parameterPointer = parameters.contents().bindMemory(
+            to: Float.self,
+            capacity: parameterBanks.count
+        )
+        for (index, value) in parameterBanks.enumerated() {
+            parameterPointer[index] = value
+        }
+
+        let pipeline = try await device.makeComputePipelineState(function: function)
+        encoder.setComputePipelineState(pipeline)
+        encoder.setBuffer(output, offset: 0, index: 0)
+        encoder.setBuffer(parameters, offset: 0, index: 1)
+        encoder.dispatchThreads(
+            MTLSize(width: 2, height: 1, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: 1, height: 1, depth: 1)
+        )
+        encoder.endEncoding()
+        commandBuffer.commit()
+        await commandBuffer.completed()
+        guard commandBuffer.status == .completed else {
+            Issue.record("Lighting behavior probe failed: \(commandBuffer.error?.localizedDescription ?? "unknown GPU error")")
+            return
+        }
+
+        let pointer = output.contents().assumingMemoryBound(to: SIMD4<Float>.self)
+        let values = Array(UnsafeBufferPointer(start: pointer, count: 8))
+        let base = values[0]
+        let specular = values[1]
+        let emission = values[2]
+        let ambient = values[3]
+        let authoredBase = values[4]
+        let authoredSpecular = values[5]
+        let authoredEmission = values[6]
+        let authoredAmbient = values[7]
+
+        let baseDistance = sqrt(
+            pow(base.x - 0.8, 2) + pow(base.y - 0.7, 2) + pow(base.z - 0.6, 2)
+        )
+        let specularDistanceFromWhite = sqrt(
+            pow(specular.x - 1.0, 2) + pow(specular.y - 1.0, 2) + pow(specular.z - 1.0, 2)
+        )
+        #expect(baseDistance > 0.25, "demo must visibly replace the host base colour")
+        #expect(max(emission.x, max(emission.y, emission.z)) > 0.5,
+                "demo must emit a bright, unmistakable rim")
+        #expect(specularDistanceFromWhite > 0.25, "demo must visibly tint host specular")
+        #expect(specular.w >= 4.0, "demo specular scale must be obviously stronger")
+        #expect(emission.w < 128.0, "demo must broaden the host's specular highlight")
+        #expect(base.w < 1.0, "demo must modify diffuse scale")
+        #expect(ambient.x < 1.0, "demo must modify ambient scale")
+
+        // Both invocations ran in one dispatch through one compiled pipeline.
+        // Their output difference can therefore only come from the live bank.
+        #expect(abs(authoredBase.w - 2.0) < 0.01,
+                "authored diffuse response must reach the material hook")
+        #expect(abs(authoredAmbient.x - 2.0) < 0.01,
+                "authored ambient response must reach the material hook")
+        #expect(abs(authoredSpecular.w) < 0.01,
+                "authored specular strength must reach the material hook")
+        #expect(abs(authoredEmission.w - 256.0) < 0.01,
+                "authored highlight tightness must reach the material hook")
+        #expect(max(authoredEmission.x, max(authoredEmission.y, authoredEmission.z)) < 0.01,
+                "zero authored emission must remove the demo glow")
+    }
+    #endif
 }

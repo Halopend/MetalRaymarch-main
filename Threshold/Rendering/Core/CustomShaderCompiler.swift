@@ -24,8 +24,10 @@ import Foundation
 @preconcurrency import Metal
 
 /// Errors that can occur while compiling an embedded formula.
-enum CustomShaderCompilerError: Error, CustomStringConvertible {
+enum CustomShaderCompilerError: Error, CustomStringConvertible, LocalizedError {
     case missingDispatchMarker(String)
+    case effectKindMismatch(slot: String, actual: EffectKind)
+    case compilerBusy
     case metalCompileFailed(formula: String, detail: String)
     case libraryUnavailable
 
@@ -33,12 +35,18 @@ enum CustomShaderCompilerError: Error, CustomStringConvertible {
         switch self {
         case .missingDispatchMarker(let m):
             return "Embedded shader template is missing dispatch marker '\(m)'. Verify the Generate Metal Embeds build phase."
+        case .effectKindMismatch(let slot, let actual):
+            return "A \(actual.rawValue) effect cannot be installed in the \(slot) shader slot."
+        case .compilerBusy:
+            return "The custom-shader compiler is busy. Wait for the current imports to finish and try again."
         case .metalCompileFailed(let name, let detail):
             return "Custom shader '\(name)' failed to compile: \(detail)"
         case .libraryUnavailable:
             return "Custom shader library is unavailable (compiler not initialised)."
         }
     }
+
+    var errorDescription: String? { description }
 }
 
 /// Compiles `EmbeddedFormula` payloads into runnable `MTLLibrary` instances.
@@ -108,9 +116,14 @@ actor CustomShaderCompiler {
 
     private static let strippedDispatchTemplate = stripLocalIncludes(EmbeddedMetalSources.fractalFormulasH)
     private static let synthesizedSourceSuffix = shaderSections.body
+    private static let maxCachedLibraries = 8
+    private static let maxPendingCompiles = 4
 
     private let device: MTLDevice
     private var libraryCache: [String: MTLLibrary] = [:]
+    private var libraryCacheLRU: [String] = []
+    private var inFlightCompiles: [String: Task<MTLLibrary, Error>] = [:]
+    private var compilationTail: Task<Void, Never>?
 
     init(device: MTLDevice) {
         self.device = device
@@ -122,14 +135,18 @@ actor CustomShaderCompiler {
     /// The library exposes the same fragment/compute/vertex entry points as the
     /// bundled `default.metallib` — function-constant specialization for `FI`/`RS`/etc.
     /// continues to work via `library.makeFunction(name:constantValues:)`.
-    /// Stable cache key for an effect set (fractal + space warp). Distinct from a
+    /// Stable cache key for an effect set (fractal + space warp + lighting). Distinct from a
     /// single formula's `sourceHash`, so old and combined entries never collide.
     /// `warpStackSignature` is RETIRED (warp codegen was removed; the stack renders
     /// via the bundled count-driven runtime loop). It is now always "s0", kept only
     /// so the cache key shape is unchanged for the custom-FORMULA path.
     static func combinedHash(fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?,
+                             lighting: EmbeddedFormula? = nil,
                              warpStackSignature: String = "s0") -> String {
-        "f\(fractal?.shortHash ?? "0")w\(spaceWarp?.shortHash ?? "0")\(warpStackSignature)"
+        // `m3` is the host material/cache-identity revision. Bump it whenever the public
+        // ThresholdMaterial / ThresholdLightingContext contract changes so a
+        // stale in-memory library can never be reused against a new adapter.
+        "m3f\(fractal?.sourceHash ?? "0")w\(spaceWarp?.sourceHash ?? "0")l\(lighting?.sourceHash ?? "0")\(warpStackSignature)"
     }
 
     /// Compile (or return cached) the combined library for an effect set.
@@ -149,12 +166,27 @@ actor CustomShaderCompiler {
     /// hands the work to Metal's own compile queue and suspends the actor,
     /// freeing the cooperative thread so frames keep flowing.
     func library(forFractal fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?,
+                 lighting: EmbeddedFormula? = nil,
                  warpStackSource: String? = nil, warpStackSignature: String = "s0") async throws -> MTLLibrary {
-        let key = Self.combinedHash(fractal: fractal, spaceWarp: spaceWarp, warpStackSignature: warpStackSignature)
+        // Validate at the final trust boundary, before even consulting the
+        // library cache. Callers normally validate during import, but the
+        // compiler is also used by live editing and tests and must not let an
+        // invalid payload alias a previously cached valid shader.
+        try Self.validateEffectInputs(fractal: fractal, spaceWarp: spaceWarp, lighting: lighting)
+        let key = Self.combinedHash(fractal: fractal, spaceWarp: spaceWarp,
+                                    lighting: lighting, warpStackSignature: warpStackSignature)
         if let cached = libraryCache[key] {
+            touchCachedLibrary(key)
             return cached
         }
-        let source = try Self.synthesizeSource(fractal: fractal, spaceWarp: spaceWarp, warpStackSource: warpStackSource)
+        if let existing = inFlightCompiles[key] {
+            return try await existing.value
+        }
+        guard inFlightCompiles.count < Self.maxPendingCompiles else {
+            throw CustomShaderCompilerError.compilerBusy
+        }
+        let source = try Self.synthesizeSource(fractal: fractal, spaceWarp: spaceWarp,
+                                               lighting: lighting, warpStackSource: warpStackSource)
         let options = MTLCompileOptions()
         if #available(visionOS 2.0, *) {
             options.mathMode = .fast
@@ -163,32 +195,54 @@ actor CustomShaderCompiler {
         }
 
         let device = self.device
-        let formulaName = fractal?.name ?? spaceWarp?.name ?? "effect"
-        do {
-            let lib: MTLLibrary = try await withCheckedThrowingContinuation { continuation in
-                // The completion handler runs on a Metal-owned thread, not this
-                // actor's executor; it only resumes the continuation, so it
-                // touches no actor-isolated state.
-                device.makeLibrary(source: source, options: options) { library, error in
-                    if let library {
-                        continuation.resume(returning: library)
-                    } else {
-                        continuation.resume(throwing: error ?? CustomShaderCompilerError.metalCompileFailed(
-                            formula: formulaName,
-                            detail: "Metal returned no library and no error."
-                        ))
+        let effectNames = [fractal?.name, spaceWarp?.name, lighting?.name]
+            .compactMap { $0 }
+            .joined(separator: " + ")
+        let formulaName = effectNames.isEmpty ? "effect set" : effectNames
+
+        // Metal compilation itself is not cancellable. Serialize distinct
+        // sources, deduplicate identical requests, and cap the pending queue so
+        // rapid hostile imports cannot fan out unbounded compiler work.
+        let predecessor = compilationTail
+        let compileTask = Task<MTLLibrary, Error> {
+            if let predecessor { await predecessor.value }
+            do {
+                return try await withCheckedThrowingContinuation { continuation in
+                    // The completion handler runs on a Metal-owned thread; it
+                    // only resumes the continuation and touches no actor state.
+                    device.makeLibrary(source: source, options: options) { library, error in
+                        if let library {
+                            continuation.resume(returning: library)
+                        } else {
+                            continuation.resume(throwing: error ?? CustomShaderCompilerError.metalCompileFailed(
+                                formula: formulaName,
+                                detail: "Metal returned no library and no error."
+                            ))
+                        }
                     }
                 }
+            } catch let error as CustomShaderCompilerError {
+                throw error
+            } catch {
+                throw CustomShaderCompilerError.metalCompileFailed(
+                    formula: formulaName,
+                    detail: (error as NSError).localizedDescription
+                )
             }
-            libraryCache[key] = lib
+        }
+        inFlightCompiles[key] = compileTask
+        compilationTail = Task<Void, Never> {
+            _ = try? await compileTask.value
+        }
+
+        do {
+            let lib = try await compileTask.value
+            inFlightCompiles.removeValue(forKey: key)
+            cacheLibrary(lib, forKey: key)
             return lib
-        } catch let error as CustomShaderCompilerError {
-            throw error
         } catch {
-            throw CustomShaderCompilerError.metalCompileFailed(
-                formula: formulaName,
-                detail: (error as NSError).localizedDescription
-            )
+            inFlightCompiles.removeValue(forKey: key)
+            throw error
         }
     }
 
@@ -198,6 +252,7 @@ actor CustomShaderCompiler {
     /// Metal compiler.
     func evictAll() {
         libraryCache.removeAll()
+        libraryCacheLRU.removeAll()
     }
 
     /// Drop one cached library by its `combinedHash` key. The live formula
@@ -206,6 +261,21 @@ actor CustomShaderCompiler {
     /// otherwise accumulate in the cache for the whole session.
     func evict(combinedHash key: String) {
         libraryCache.removeValue(forKey: key)
+        libraryCacheLRU.removeAll { $0 == key }
+    }
+
+    private func touchCachedLibrary(_ key: String) {
+        libraryCacheLRU.removeAll { $0 == key }
+        libraryCacheLRU.append(key)
+    }
+
+    private func cacheLibrary(_ library: MTLLibrary, forKey key: String) {
+        libraryCache[key] = library
+        touchCachedLibrary(key)
+        while libraryCacheLRU.count > Self.maxCachedLibraries {
+            let evicted = libraryCacheLRU.removeFirst()
+            libraryCache.removeValue(forKey: evicted)
+        }
     }
 
     // MARK: - Source synthesis
@@ -214,10 +284,13 @@ actor CustomShaderCompiler {
     /// self-contained string suitable for `device.makeLibrary(source:)`.
     /// Stitch the active effect SET into one self-contained Metal source. A custom
     /// fractal DE is injected at the dispatch markers; a custom space warp is
-    /// injected at `// __CUSTOM_SPACE_WARP__`. Either may be nil (the corresponding
+    /// injected at `// __CUSTOM_SPACE_WARP__`; custom lighting is adapted at
+    /// `// __CUSTOM_LIGHTING__`. Any may be nil (the corresponding
     /// markers keep their built-in defaults).
     static func synthesizeSource(fractal: EmbeddedFormula?, spaceWarp: EmbeddedFormula?,
+                                 lighting: EmbeddedFormula? = nil,
                                  warpStackSource: String? = nil) throws -> String {
+        try validateEffectInputs(fractal: fractal, spaceWarp: spaceWarp, lighting: lighting)
         // The pieces preceding the user's DE source come from ONE helper shared
         // with `fractalUserSourceStartLine`, so compile-log line mapping can
         // never drift from the actual layout.
@@ -246,6 +319,9 @@ actor CustomShaderCompiler {
         if let spaceWarp {
             suffix = try injectCustomSpaceWarp(suffix, warpSource: spaceWarp.metalSource)
         }
+        if let lighting {
+            suffix = try injectCustomLighting(suffix, lighting: lighting)
+        }
         // Composable transform stack codegen — unrolled, type-dispatched
         // spaceWarpStackApply/DEScale. A custom .threshfx warp (above) takes
         // precedence (it #defines THRESHOLD_CUSTOM_SPACE_WARP so applySpaceWarp
@@ -266,11 +342,45 @@ actor CustomShaderCompiler {
         var pieces: [String] = []
         pieces.reserveCapacity(5)
         pieces.append("// === Custom effect shader (auto-synthesized at runtime) ===")
-        if let fractal { pieces.append("// Fractal: \(fractal.id) — \(fractal.name) [\(fractal.shortHash)]") }
-        if let spaceWarp { pieces.append("// Space warp: \(spaceWarp.id) — \(spaceWarp.name) [\(spaceWarp.shortHash)]") }
+        // Only hash-derived ASCII is emitted into generated comments. Human
+        // metadata is untrusted and must never gain source-code semantics via
+        // an embedded newline or control scalar.
+        if let fractal { pieces.append("// Fractal source [\(fractal.sourceHash)]") }
+        if let spaceWarp { pieces.append("// Space-warp source [\(spaceWarp.sourceHash)]") }
         pieces.append(Self.synthesizedSourcePrefix)
-        if let fractal { pieces.append("// === Embedded fractal source — '\(fractal.id)' ===") }
+        if let fractal { pieces.append("// === Embedded fractal source [\(fractal.sourceHash)] ===") }
         return pieces
+    }
+
+    private static func validateEffectInputs(
+        fractal: EmbeddedFormula?,
+        spaceWarp: EmbeddedFormula?,
+        lighting: EmbeddedFormula?
+    ) throws {
+        if let fractal {
+            try fractal.validate()
+            guard fractal.effectKind == .fractal else {
+                throw CustomShaderCompilerError.effectKindMismatch(
+                    slot: EffectKind.fractal.rawValue, actual: fractal.effectKind
+                )
+            }
+        }
+        if let spaceWarp {
+            try spaceWarp.validate()
+            guard spaceWarp.effectKind == .spaceWarp else {
+                throw CustomShaderCompilerError.effectKindMismatch(
+                    slot: EffectKind.spaceWarp.rawValue, actual: spaceWarp.effectKind
+                )
+            }
+        }
+        if let lighting {
+            try lighting.validate()
+            guard lighting.effectKind == .lighting else {
+                throw CustomShaderCompilerError.effectKindMismatch(
+                    slot: EffectKind.lighting.rawValue, actual: lighting.effectKind
+                )
+            }
+        }
     }
 
     /// The 1-based line in the synthesized source where `fractal.metalSource`
@@ -322,6 +432,27 @@ actor CustomShaderCompiler {
         // === Embedded space-warp source ===
         \(warpSource)
         // === End embedded space-warp source ===
+        """
+        return src.replacingOccurrences(of: marker, with: replacement)
+    }
+
+    /// Replace the material-hook marker with the external source and a generated,
+    /// typed adapter. The adapter makes Metal validate the exact public ABI rather
+    /// than relying only on the lightweight function-name check in `validate()`.
+    static func injectCustomLighting(_ src: String, lighting: EmbeddedFormula) throws -> String {
+        let marker = "// __CUSTOM_LIGHTING__"
+        guard src.contains(marker) else { throw CustomShaderCompilerError.missingDispatchMarker(marker) }
+        let replacement = """
+        // __CUSTOM_LIGHTING__ (custom material modifier injected)
+        #define THRESHOLD_CUSTOM_LIGHTING
+        // === Embedded lighting source [\(lighting.sourceHash)] ===
+        \(lighting.metalSource)
+        // === End embedded lighting source ===
+        FORCE_INLINE ThresholdMaterial applyCustomLightingMaterial(ThresholdLightingContext context,
+                                                                    ThresholdMaterial material)
+        {
+            return Lighting_\(lighting.functionStem)(context, material);
+        }
         """
         return src.replacingOccurrences(of: marker, with: replacement)
     }

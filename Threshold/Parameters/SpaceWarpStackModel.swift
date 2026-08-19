@@ -6,12 +6,9 @@
 //  OF TRUTH. Every transform is declared exactly once in `WarpCatalog` as a
 //  `WarpDescriptor`; the UI, parameter seeding, and the CPU↔GPU bridge (Metal
 //  function names) all derive from that one table. To add a transform you
-//  touch four obvious spots and nothing else:
-//    1. add a `SpaceWarpKind` case (raw value MUST match the GPU),
-//    2. add its `WarpDescriptor` to `WarpCatalog.all`,
-//    3. add the Metal `warp<Name>` (+ optional `warp<Name>DEScale`) function,
-//    4. add the matching `applyWarpOp` / `warpOpDEScale` switch case in Shaders.metal.
-//  Steps 3–4 are the only GPU-side edits; everything CPU-side flows from step 2.
+//  extend the persisted kind, its descriptor/curriculum entry, and the matching
+//  GPU kernel + dispatch. Parameter seeding, editors, audio fields, and radial
+//  controls then derive automatically from the descriptor.
 //
 
 import Foundation
@@ -44,6 +41,7 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable, Sendable {
     case mandelboxStep = 17 // one exact box-fold → sphere-fold → scale → +original-p recurrence
     case icosahedralCut = 18 // fixed {5,3} reflection chamber — named icosahedral space cut
     case compressionShells = 19 // alternating signed radial regions at proportional scales
+    case voronoi3D = 20     // continuous cellular domain distortion from jittered 3-D sites
 
     var id: Int32 { rawValue }
 
@@ -171,6 +169,8 @@ enum SpaceWarpKind: Int32, CaseIterable, Identifiable, Codable, Sendable {
         case .icosahedralCut:return "reflect p into the fixed {5,3} icosahedral chamber across 3 mirror normals"
         case .compressionShells:
             return "cᵢ = R·{1−1/√2, φ⁻², φ⁻¹, 1};  bᵢ = 1−smoothstep(½,1,|r−cᵢ|/(wcᵢ));  r′ = r + (s/3)Σ(−1)ⁱwcᵢbᵢ"
+        case .voronoi3D:
+            return "q = density·p + offset;  p ↦ p + (strength/density)·smoothstep(0, 1, F₂−F₁)·(site₁−q)"
         }
     }
 }
@@ -421,6 +421,17 @@ enum WarpCatalog {
                        params: [WarpParamSpec(slot: 1, label: "Frequency", icon: "waveform.path", range: 0.1...8.0, defaultValue: 2.0)],
                        gpuApplyFn: "warpRipple",
                        blurb: "Displaces space back and forth along an axis in a sine wave — a corrugated / accordion ripple at the given Frequency."),
+        WarpDescriptor(.voronoi3D, "3D Voronoi Field", icon: "cube",
+                       family: .distortion, tagline: "Warp space through jittered cellular regions",
+                       amountLabel: "Distortion",
+                       usesAxis: true, axisLabel: "Offset", defaultAxis: SIMD3<Float>(repeating: 0),
+                       defaultStrength: 0.45, strengthRange: 0.0...1.0,
+                       params: [
+                           WarpParamSpec(slot: 1, label: "Cell Density", icon: "circle.grid.3x3.fill", range: 0.25...8.0, defaultValue: 1.5),
+                           WarpParamSpec(slot: 2, label: "Jitter", icon: "dice", range: 0.0...1.0, defaultValue: 1.0),
+                       ],
+                       gpuApplyFn: "warpVoronoi3D", gpuDEScaleFn: "warpVoronoi3DDEScale",
+                       blurb: "Builds a true 3-D Voronoi field from the nearest two jittered feature sites. It searches the nearest 3×3×3 cells first, then prunes an outer safety shell by distance for exact cell boundaries. Each cell pulls space toward its site while the displacement fades to zero where cells meet, keeping adjacent regions continuous instead of tearing. Cell Density sets the world scale, Jitter moves sites off the regular lattice, and Offset slides the field through XYZ space. This procedural transform is more expensive than the analytic bends and folds."),
     ]
 
     private static let byKind: [SpaceWarpKind: WarpDescriptor] =
@@ -477,7 +488,8 @@ enum WarpCatalog {
 
     /// A random "Surprise Me" stack (2–4 ops) drawn from a palette weighted toward the
     /// structure-forming folds/repeats so the result reliably looks like *something*.
-    /// Params and axes are randomized within each op's valid ranges.
+    /// Params and axes are randomized within each op's valid ranges. Voronoi stays
+    /// opt-in because its exact 3-D nearest-site search is intentionally expensive.
     static let randomPalette: [SpaceWarpKind] = [
             .mirror, .boxFold, .sphereFold, .inversion, .kaleidoscope, .mengerFold,
             .tiling, .scaleRepeat, .shells, .compressionShells, .coxeter, .twist,
@@ -812,6 +824,13 @@ private func precomputedGPUOp(from v: SpaceWarpOpValue) -> SpaceWarpOp {
         p2 = minR * minR                                        // min radius squared; fixed radius² = 1
     case .ripple:
         p1 = max(v.p1, 0.01)                                     // freq
+    case .voronoi3D:
+        // Voronoi Offset is a phase in cell coordinates, not a direction. Preserve
+        // the raw vector instead of the normalized axis prepared above.
+        return SpaceWarpOp(type: v.type, strength: v.strength,
+                           p1: max(v.p1, 0.01), p2: min(max(v.p2, 0), 1),
+                           axisX: v.axis.x, axisY: v.axis.y, axisZ: v.axis.z,
+                           groupControl: 0)
     case .boxFold:
         p1 = max(v.p1, 0.01)                                     // fold limit L
     case .sphereFold:

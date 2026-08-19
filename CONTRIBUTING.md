@@ -4,6 +4,26 @@ This project builds for **macOS, iPadOS, and visionOS** (not iPhone). Most local
 iteration happens against the **macOS** target — it compiles all of the Swift and
 Metal in seconds and is the fastest way to catch breakage.
 
+## Contribution licensing and provenance
+
+Unless the maintainers agree in writing to different terms for clearly
+identified material before it is submitted, an intentional contribution to
+Threshold's covered project code is submitted under **GPL-3.0-or-later**, the
+same license used for the project. Contributors keep the copyright in their
+work; this policy does not require copyright assignment.
+
+By submitting a contribution, you represent that you have the authority to
+license it on those terms. Do not submit copied or adapted code, formulas,
+shaders, models, music, images, sample scenes, or other material unless its
+provenance and license are documented and compatible with the destination.
+Attribution or a link to a source is not a license. If a contribution changes
+the starter source copied into user exports, generated scaffolding, bundled
+samples, documentation, or non-code assets, state the intended license for that
+material explicitly in the pull request.
+
+See [`LICENSE`](LICENSE), [`NOTICE.md`](NOTICE.md), and
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) before contributing.
+
 ## TL;DR
 
 ```sh

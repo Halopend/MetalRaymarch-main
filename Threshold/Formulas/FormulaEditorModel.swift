@@ -45,7 +45,7 @@ final class FormulaEditorModel {
         case live
         /// The last compile failed; see `compileDiagnostics`.
         case compileFailed
-        /// Custom scenes are disabled in Settings → General.
+        /// Custom scenes are disabled in Settings → Display → Experimental Display.
         case disabled
         /// The renderer hasn't bound its activation handler yet.
         case rendererUnavailable
@@ -328,6 +328,8 @@ final class FormulaEditorModel {
             status = .disabled
         case .rendererUnavailable:
             status = .rendererUnavailable
+        case .superseded:
+            status = .idle
         case .invalid(let error):
             compileDiagnostics = [MetalCompileDiagnostic(
                 userLine: nil, column: nil, severity: .error,

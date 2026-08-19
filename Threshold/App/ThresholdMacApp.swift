@@ -280,8 +280,42 @@ private struct ThresholdMacRootView: View {
                         .allowsHitTesting(false)
                 }
 
+                // This host is always mounted with the Metal viewport. Keep
+                // import errors and custom-lighting truth here rather than in
+                // the auto-hiding controls panel, so "compiling" and "active"
+                // cannot disappear merely because the pointer leaves the menu.
+                VStack(spacing: 8) {
+                    ErrorBannerView(errorReporter: appModel.errorReporter)
+                    CustomLightingStatusChip(
+                        state: appModel.customLightingRuntimeState,
+                        onDetach: {
+                            Task { @MainActor in
+                                if await appModel.uninstallEmbeddedLightingAndWait() {
+                                    appModel.saveLastState()
+                                }
+                            }
+                        }
+                    )
+                }
+                .frame(width: min(max(proxy.size.width - 32, 1), 760))
+                .fixedSize(horizontal: false, vertical: true)
+                .position(x: proxy.size.width / 2, y: panelPadding + 52)
+                .animation(.easeInOut(duration: 0.16), value: appModel.customLightingRuntimeState)
+                .zIndex(20)
+
+                if let fileName = appModel.externalImportLoadingFileName {
+                    ExternalFileLoadingOverlay(fileName: fileName)
+                        .zIndex(30)
+                }
+
                 if appModel.isAttributionShortcutHeld {
-                    AttributionOverlay()
+                    AttributionOverlay(
+                        baseDistanceEstimator: BaseDistanceEstimatorInfo.resolve(
+                            fractalType: appModel.renderSettings.fractalType,
+                            formulaParams: appModel.renderSettings.formulaParams,
+                            embeddedFormula: appModel.activeEmbeddedFormula
+                        )
+                    )
                         .padding(24)
                         .frame(
                             maxWidth: .infinity,
@@ -335,6 +369,11 @@ private struct ThresholdMacRootView: View {
                     .frame(width: 0, height: 0)
                     .allowsHitTesting(false)
             }
+            .sceneNavigationFeedbackOverlay(
+                isObscured: radialMenu.isPresented,
+                instruction: "Arrow keys · Swipe card",
+                bottomPadding: panelPadding
+            )
             .frame(minWidth: minimumWindowSize.width, minHeight: minimumWindowSize.height)
             .animation(
                 reduceMotion ? nil : .easeOut(duration: 0.16),

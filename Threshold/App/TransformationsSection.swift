@@ -3,8 +3,8 @@
 //  Threshold
 //
 //  Editor for the composable domain-transform STACK (`RenderSettings.spaceWarpStack`).
-//  Learn transforms by mapping Metal equations or open the direct-use catalog,
-//  then group a contiguous series into an iterated loop, reorder them (order =
+//  Browse the transformation catalog, then group a contiguous series into an
+//  iterated loop, reorder them (order =
 //  order of application), enable/disable,
 //  and tune each instance's own parameters. Multiple of the SAME kind can be stacked. EVERY edit — structural
 //  or slider —
@@ -31,6 +31,11 @@ struct TransformationsSection: View {
     /// flags in `body` auto-subscribes this view — the system cards below track the
     /// same state the Space tab / quick toggles drive (DisplayConfig, scene-persisted).
     let cache: ControlStateStore
+    let customSpaceWarpRuntimeState: CustomSpaceWarpRuntimeState
+    let customSpaceWarpControlProfile: CustomSpaceWarpControlProfile
+    let loadBundledVoronoiSpaceWarp: () -> Void
+    let detachCustomSpaceWarp: () -> Void
+    let persistCustomSpaceWarpSettings: () -> Void
 
     // Local redraw token for presentation-only changes such as enable switches and
     // discrete steppers. Stack structure has its own revision in ControlStateStore;
@@ -39,7 +44,6 @@ struct TransformationsSection: View {
     @State private var isCreatingGroup = false
     @State private var groupSelection: Set<UUID> = []
     @State private var expandedGroups: Set<UUID> = []
-    @State private var expandedOperationIDs: Set<UUID> = []
     @State private var expandedTechnicalDetailIDs: Set<UUID> = []
     @SceneStorage("Transformations.educationEquationDraft.v1")
     private var legacyEquationDraft = ""
@@ -60,14 +64,14 @@ struct TransformationsSection: View {
     @State private var assistanceStages: [TransformationLessonID: TransformationAssistanceStage] = [:]
     @FocusState private var isEquationEditorFocused: Bool
     @AccessibilityFocusState private var equationAccessibilityTarget: EquationAccessibilityTarget?
-    @AppStorage(TransformationExperienceMode.defaultsKey)
-    private var experienceModeRaw = TransformationExperienceMode.justUse.rawValue
     @AppStorage(TransformationUnlockProgress.defaultsKey)
     private var mappedLessonIDsRaw = ""
     @AppStorage(TransformationUnlockProgress.legacyDefaultsKey)
     private var legacyMappedTransformationIDsRaw = ""
     @AppStorage(TransformationEquationCheckHistoryStore.defaultsKey)
     private var equationCheckHistoryRaw = ""
+    @AppStorage(AppModel.allowCustomScenesUserDefaultsKey)
+    private var allowCustomScenes = false
 
     private var ops: [SpaceWarpOpValue] {
         // Observe structure only. Slider samples mutate the ignored value mirror and
@@ -76,21 +80,10 @@ struct TransformationsSection: View {
         return cache.spaceWarpStack
     }
     private var hasStackCapacity: Bool { ops.count < Int(kMaxSpaceWarpOps) }
-    private var experienceMode: TransformationExperienceMode {
-        TransformationExperienceMode.decode(experienceModeRaw)
-    }
-    private var experienceModeBinding: Binding<TransformationExperienceMode> {
-        Binding(
-            get: { experienceMode },
-            set: { newMode in
-                experienceModeRaw = newMode.rawValue
-                synchronizeRuntimeInteractionAccess(
-                    mode: newMode,
-                    mappedIDs: mappedTransformationIDs
-                )
-            }
-        )
-    }
+    /// The editor now exposes a single direct-manipulation experience. Keep the
+    /// access policy's direct mode explicit while legacy lesson progress remains
+    /// readable for backwards-compatible scene and preference migration.
+    private let experienceMode = TransformationExperienceMode.justUse
     private var mappedLessonIDs: Set<TransformationLessonID> {
         TransformationUnlockProgress.decode(
             mappedLessonIDsRaw,
@@ -225,27 +218,17 @@ struct TransformationsSection: View {
 
     var body: some View {
         // LazyVStack, NOT VStack: users can stack many transforms, and a plain VStack
-        // builds/hosts every op card (DisclosureGroup + sliders + toggles) synchronously
+        // builds/hosts every op card (sliders + toggles) synchronously
         // when the tab opens — which HANGS on a long stack. Lazy hosts only visible cards.
         // Per-card cost is kept low by the WarpSource.metalFunction cache: the 247 KB
         // shader-source scan that used to run per card, per scroll, is now memoized.
         LazyVStack(alignment: .leading, spacing: 10) {
             transformationsHeader
 
-            experienceModePicker
-
-            Text(experienceMode == .education
-                 ? "Optional equation lessons. Your mapped transforms and editing stack remain separate."
-                 : "Direct editing. Transformations run from top to bottom; open a card only when you want to tune it.")
+            Text("Transformations run from top to bottom; tune each one directly in its card.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
-
-            if experienceMode == .education {
-                equationWorkbench
-            } else {
-                justUseSummary
-            }
 
             if isCreatingGroup {
                 Label("Select two or more adjacent transformations, then choose Create Group.",
@@ -258,6 +241,15 @@ struct TransformationsSection: View {
             // Active space systems first (they aren't part of the reorderable stack).
             if sphericalInversionActive { sphericalInversionCard }
             if sphereProjectionActive { sphereProjectionCard }
+            if customSpaceWarpRuntimeState.isPresent { customSpaceWarpCard }
+
+            if customSpaceWarpRuntimeState.overridesBuiltInStack {
+                Label("The ordered stack is preserved but paused while the external .threshfx modifier is active.",
+                      systemImage: "pause.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             HStack {
                 Label("Transformation Stack", systemImage: "square.stack.3d.up")
@@ -301,9 +293,6 @@ struct TransformationsSection: View {
                 mode: experienceMode,
                 mappedIDs: mappedTransformationIDs
             )
-            if ops.count == 1, let onlyOperation = ops.first {
-                expandedOperationIDs.insert(onlyOperation.id)
-            }
             guard !didInitializeEducationExpansion else { return }
             expandedEducationLevelIDs = [focusedEducationLevel.id]
             didInitializeEducationExpansion = true
@@ -329,24 +318,6 @@ struct TransformationsSection: View {
                 mode: experienceMode,
                 mappedIDs: mappedTransformationIDs
             )
-        }
-        .onChange(of: experienceModeRaw) { _, currentRaw in
-            let mode = TransformationExperienceMode.decode(currentRaw)
-            synchronizeRuntimeInteractionAccess(
-                mode: mode,
-                mappedIDs: mappedTransformationIDs
-            )
-            let progress = mappedLessons.count
-            switch mode {
-            case .education:
-                postAccessibilityAnnouncement(
-                    "Learn mode. \(progress) \(progress == 1 ? "lesson" : "lessons") mapped."
-                )
-            case .justUse:
-                postAccessibilityAnnouncement(
-                    "Edit mode. The full catalog is available and \(progress) Learn \(progress == 1 ? "mapping is" : "mappings are") preserved."
-                )
-            }
         }
     }
 
@@ -379,55 +350,8 @@ struct TransformationsSection: View {
         }
     }
 
-    private var experienceModePicker: some View {
-        Picker("Transformation experience", selection: experienceModeBinding) {
-            ForEach([TransformationExperienceMode.justUse, .education]) { mode in
-                Text(mode.displayName).tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .accessibilityLabel("Transformation experience mode")
-        .accessibilityValue(experienceMode.displayName)
-        .accessibilityHint("Edit opens the full catalog. Learn maps equations without changing your editing progress.")
-    }
-
-    private var justUseSummary: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "slider.horizontal.3")
-                .foregroundStyle(.mint)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Full Catalog")
-                    .font(.caption.weight(.semibold))
-                Text("Add a transformation, then open only the card you want to tune. Switch to Learn whenever you want the optional equation lessons.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(educationProgressSummary)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.mint)
-            }
-        }
-        .padding(9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 9).fill(Color.mint.opacity(0.08)))
-        .accessibilityElement(children: .combine)
-    }
-
-    private var educationProgressSummary: String {
-        let count = mappedLessons.count
-        return "Learn: Level \(currentEducationLevel.numeral) open · \(count) \(count == 1 ? "lesson" : "lessons") mapped."
-    }
-
     private var emptyStackMessage: String {
-        switch experienceMode {
-        case .justUse:
-            return "No transformations yet. Choose Add to browse the full catalog."
-        case .education where mappedLessons.isEmpty:
-            return "No transformations yet. Map an equation to discover the first one."
-        case .education:
-            return "No transformations yet. Use Add to reuse a mapped transformation."
-        }
+        "No transformations yet. Choose Add to browse the full catalog."
     }
 
     @ViewBuilder
@@ -458,14 +382,24 @@ struct TransformationsSection: View {
 
     private var addMenu: some View {
         Menu {
-            if experienceMode == .education && mappedLessons.isEmpty {
-                Section("Transformations") {
-                    Text("Map an equation below to complete a lesson")
-                }
-            }
             if !hasStackCapacity {
                 Section("Stack Capacity") {
                     Text("Remove a transformation before adding another")
+                }
+            }
+            Section("External Modifiers") {
+                Button(action: loadBundledVoronoiSpaceWarp) {
+                    Label("3D Voronoi Field (.threshfx)", systemImage: "shippingbox.and.arrow.backward")
+                }
+                .disabled(
+                    !allowCustomScenes
+                        || customSpaceWarpRuntimeState.isPresent
+                        || cache.fractalType == .custom
+                )
+                if !allowCustomScenes {
+                    Text("Enable Allow custom scenes in Settings")
+                } else if cache.fractalType == .custom {
+                    Text("Select a built-in fractal first")
                 }
             }
             // Standalone space systems (Spherical Inversion + Sphere Projection) —
@@ -480,7 +414,7 @@ struct TransformationsSection: View {
                 }
                 .disabled(sphereProjectionActive || !cache.fractalType.supports(.sphereProjection))
             }
-            // Education lists mapped lessons; Just Use lists the whole catalog.
+            // Direct editing lists the whole catalog.
             ForEach(WarpFamily.allCases, id: \.self) { family in
                 let familyLessons = addableLessons.filter { $0.kind.family == family }
                 if !familyLessons.isEmpty {
@@ -501,6 +435,132 @@ struct TransformationsSection: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .transformationActionHitTarget()
+    }
+
+    // MARK: - External .threshfx modifier
+
+    private var customSpaceWarpCard: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Label(customSpaceWarpRuntimeState.name ?? "External Space Warp",
+                              systemImage: "shippingbox.and.arrow.backward")
+                            .font(.subheadline.weight(.semibold))
+                        Text(".threshfx")
+                            .font(.caption2.monospaced().weight(.bold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.orange.opacity(0.16)))
+                            .foregroundStyle(.orange)
+                    }
+                    Text("Decoded from an external modifier container and sent through the production runtime compiler.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if customSpaceWarpControlProfile == .bundledVoronoi {
+                        Text("Density 1.5 · Jitter 1.0 (fixed). The three v1 parameters drive phase offset in cell coordinates.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text("This effect defines its own Param 1–3 meanings; v1 files do not yet carry a safe host control range for them.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 8)
+                customSpaceWarpStatus
+            }
+
+            if customSpaceWarpRuntimeState.isActive {
+                EffectSliderRow(
+                    icon: "cube.transparent",
+                    label: customSpaceWarpControlProfile == .bundledVoronoi
+                        ? "Distortion" : "Strength",
+                    value: Binding(
+                        get: { renderSettings.spaceWarpStrength },
+                        set: { renderSettings.spaceWarpStrength = $0 }
+                    ),
+                    range: 0...2,
+                    enabled: .constant(true),
+                    onChanged: persistCustomSpaceWarpSettings,
+                    showToggle: false,
+                    valueFormat: { String(format: "%.2f", $0) }
+                )
+                if customSpaceWarpControlProfile == .bundledVoronoi {
+                    externalSpaceWarpOffsetRow("Phase Offset X", icon: "arrow.left.and.right", keyPath: \.spaceWarpParam1)
+                    externalSpaceWarpOffsetRow("Phase Offset Y", icon: "arrow.up.and.down", keyPath: \.spaceWarpParam2)
+                    externalSpaceWarpOffsetRow("Phase Offset Z", icon: "arrow.up.left.and.arrow.down.right", keyPath: \.spaceWarpParam3)
+                }
+            }
+
+            HStack {
+                Text("The built-in stack resumes unchanged after detach.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Button("Detach Modifier", role: .destructive, action: detachCustomSpaceWarp)
+                    .buttonStyle(.borderless)
+                    .font(.caption.weight(.semibold))
+                    .disabled(!customSpaceWarpRuntimeState.canDetach)
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.orange.opacity(0.25)))
+        .accessibilityIdentifier("transformations.externalSpaceWarp")
+    }
+
+    @ViewBuilder
+    private var customSpaceWarpStatus: some View {
+        switch customSpaceWarpRuntimeState {
+        case .inactive:
+            EmptyView()
+        case .waitingForRenderer:
+            Label("Queued", systemImage: "clock")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.orange)
+        case .compiling:
+            HStack(spacing: 4) {
+                ProgressView().controlSize(.mini)
+                Text("Compiling")
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.orange)
+        case .detaching:
+            HStack(spacing: 4) {
+                ProgressView().controlSize(.mini)
+                Text("Detaching")
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.orange)
+        case .active:
+            Label("Active", systemImage: "checkmark.circle.fill")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.green)
+        }
+    }
+
+    private func externalSpaceWarpOffsetRow(
+        _ label: String,
+        icon: String,
+        keyPath: ReferenceWritableKeyPath<RenderSettings, Float>
+    ) -> some View {
+        EffectSliderRow(
+            icon: icon,
+            label: label,
+            value: Binding(
+                get: { renderSettings[keyPath: keyPath] },
+                set: { renderSettings[keyPath: keyPath] = $0 }
+            ),
+            range: -4...4,
+            enabled: .constant(true),
+            onChanged: persistCustomSpaceWarpSettings,
+            showToggle: false,
+            valueFormat: { String(format: "%+.2f", $0) }
+        )
     }
 
     // MARK: - Equation mapping
@@ -1443,22 +1503,7 @@ struct TransformationsSection: View {
             .font(.caption)
 
             if isOpRevealed(op) {
-                if insideGroup {
-                    operationEditor(op)
-                } else {
-                    DisclosureGroup(isExpanded: operationExpandedBinding(op.id)) {
-                        // DisclosureGroup may evaluate its content builder while
-                        // closed. Keep slider rows and technical source genuinely lazy.
-                        if expandedOperationIDs.contains(op.id) {
-                            operationEditor(op)
-                                .padding(.top, 6)
-                        }
-                    } label: {
-                        Label("Edit parameters", systemImage: "slider.horizontal.3")
-                            .font(.caption.weight(.semibold))
-                            .transformationActionHitTarget()
-                    }
-                }
+                operationEditor(op)
             } else {
                 Label("Complete the \(op.kind.displayName) lesson to edit its controls and add another",
                       systemImage: "lock")
@@ -1555,16 +1600,6 @@ struct TransformationsSection: View {
         .disabled(!enabled)
 
         underTheHood(op)
-    }
-
-    private func operationExpandedBinding(_ id: UUID) -> Binding<Bool> {
-        Binding(
-            get: { expandedOperationIDs.contains(id) },
-            set: { isExpanded in
-                if isExpanded { expandedOperationIDs.insert(id) }
-                else { expandedOperationIDs.remove(id) }
-            }
-        )
     }
 
     @ViewBuilder
@@ -2228,7 +2263,6 @@ struct TransformationsSection: View {
         let operation = SpaceWarpOpValue(kind: kind)
         arr.append(operation)
         cache.replaceSpaceWarpStack(arr)
-        expandedOperationIDs = [operation.id]
         refresh &+= 1
     }
 
@@ -2237,7 +2271,6 @@ struct TransformationsSection: View {
         arr.removeAll { $0.id == id }
         cache.replaceSpaceWarpStack(arr)
         groupSelection.remove(id)
-        expandedOperationIDs.remove(id)
         expandedTechnicalDetailIDs.remove(id)
         refresh &+= 1
     }
@@ -2247,7 +2280,6 @@ struct TransformationsSection: View {
         let removedIDs = Set(arr.lazy.filter { $0.groupID == groupID }.map(\.id))
         arr.removeAll { $0.groupID == groupID }
         cache.replaceSpaceWarpStack(arr)
-        expandedOperationIDs.subtract(removedIDs)
         expandedTechnicalDetailIDs.subtract(removedIDs)
         expandedGroups.remove(groupID)
         refresh &+= 1

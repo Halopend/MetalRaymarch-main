@@ -87,20 +87,24 @@ enum SpaceTransform: String, Codable, CaseIterable, Sendable {
 /// The `.custom` overlay shares a single instance across threads, so post-init
 /// immutability is load-bearing (see `CustomFractalDescriptor`).
 class FractalTypeDescriptor: @unchecked Sendable {
-    let rawValue: Int32
+    /// Strongly typed identity for this descriptor. Deriving the renderer raw
+    /// value from the enum makes it impossible for a subclass to register the
+    /// right metadata under the wrong numeric shader ID.
+    let type: FractalModelType
+    var rawValue: Int32 { type.rawValue }
     let displayName: String
     let icon: String
     let category: String
     let codableString: String
     let isSelectableInUI: Bool
 
-    init(rawValue: Int32,
+    init(type: FractalModelType,
          displayName: String,
          icon: String,
          category: String,
          codableString: String,
          isSelectableInUI: Bool) {
-        self.rawValue = rawValue
+        self.type = type
         self.displayName = displayName
         self.icon = icon
         self.category = category
@@ -227,8 +231,8 @@ enum FractalTypeRegistry {
 
     #if DEBUG
     /// Startup tripwire for registry integrity. Catches a fat-fingered
-    /// `super.init(rawValue:)` or a missing/duplicate descriptor BEFORE it can
-    /// silently shift the Int32-fallback decode of an old `.threshscene`.
+    /// missing/duplicate descriptor before it can silently shift the
+    /// Int32-fallback decode of an old `.threshscene`.
     /// NOTE: this validates the SWIFT side only — it does NOT bind the Metal
     /// dispatch switches / relaxedOmegaCap (those stay hand-synced until the
     /// shader-codegen step lands).
@@ -291,7 +295,7 @@ enum FractalTypeRegistry {
 
 private final class MandelboxDescriptor: FractalTypeDescriptor, @unchecked Sendable {
     init() {
-        super.init(rawValue: 0, displayName: "Mandelbox", icon: "cube.transparent",
+        super.init(type: .mandelbox, displayName: "Mandelbox", icon: "cube.transparent",
                    category: "Box Folds", codableString: "mandelbox", isSelectableInUI: true)
     }
     override func primaryEquation() -> String? { "p_{n+1} = scale * sphereFold(boxFold(p_n)) + c" }
@@ -309,7 +313,7 @@ private final class MandelboxDescriptor: FractalTypeDescriptor, @unchecked Senda
 
 private final class ConstructionPrimitiveDescriptor: FractalTypeDescriptor, @unchecked Sendable {
     init() {
-        super.init(rawValue: 23, displayName: "Construction Primitive", icon: "cube.fill",
+        super.init(type: .constructionPrimitive, displayName: "Construction Primitive", icon: "cube.fill",
                    category: "Primitives", codableString: "constructionPrimitive",
                    isSelectableInUI: false)
     }
@@ -324,18 +328,19 @@ private final class ConstructionPrimitiveDescriptor: FractalTypeDescriptor, @unc
     }
 }
 
-private final class MandelbulbDescriptor: FractalTypeDescriptor, @unchecked Sendable {
-    init() {
-        super.init(rawValue: 1, displayName: "Mandelbulb", icon: "globe",
-                   category: "Power / Quaternion", codableString: "mandelbulb", isSelectableInUI: true)
-    }
-    override func primaryEquation() -> String? { "z_{n+1} = z_n^p + c" }
+/// Shared policy for the Mandelbulb distance-estimator family. The concrete
+/// descriptors supply only their metadata, formula defaults, and genuinely
+/// distinct capabilities; quality, polar rotation, scale, and gesture behavior
+/// are inherited from this template.
+class MandelbulbFamilyDescriptor: FractalTypeDescriptor, @unchecked Sendable {
     override func applyPolarRotation(into fp: inout FormulaParams, accum: Float) {
-        // params[4] = PolarRotation — add the accumulated offset to the user's static value.
         let base = FormulaCatalog.getParam(fp, index: 4)
         FormulaCatalog.setParam(&fp, index: 4, value: base + accum)
     }
-    override func qualityValues(for preset: QualityPreset) -> (fractalIterations: Int, raySteps: Int)? {
+
+    override func qualityValues(
+        for preset: QualityPreset
+    ) -> (fractalIterations: Int, raySteps: Int)? {
         switch preset {
         case .low:    return (4, 68)
         case .medium: return (6, 88)
@@ -343,17 +348,13 @@ private final class MandelbulbDescriptor: FractalTypeDescriptor, @unchecked Send
         case .ultra:  return (10, 102)
         }
     }
-    override var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags.union([.polarRotation]) }
-    override func defaultFormulaParams() -> FormulaParams {
-        var fp = Self.baseFormulaParams()
-        fp.params.0 = 8.0; fp.params.1 = 4.0; fp.params.2 = 1.0
-        FormulaCatalog.normalizeRotationFlags(&fp)
-        return fp
+
+    override var supportedEffectTags: Set<EffectTag> {
+        Self.universalEffectTags.union([.polarRotation])
     }
+
     override var grabScaleClamp: ClosedRange<Float> { 0.0005...2000.0 }
-    override var defaultViewState: FractalViewDefaults {
-        Self.juliaLikeView(position: SIMD3<Float>(0.1, 0.1, -0.9))
-    }
+
     override var defaultScalarBindings: [(slot: GestureSlot, paramName: String)] {
         [
             (GestureSlot(hand: .left, finger: .middle), "PolarRotation"),
@@ -362,9 +363,32 @@ private final class MandelbulbDescriptor: FractalTypeDescriptor, @unchecked Send
     }
 }
 
+private final class MandelbulbDescriptor: MandelbulbFamilyDescriptor, @unchecked Sendable {
+    init() {
+        super.init(
+            type: .mandelbulb,
+            displayName: "Mandelbulb",
+            icon: "globe",
+            category: "Power / Quaternion",
+            codableString: "mandelbulb",
+            isSelectableInUI: true
+        )
+    }
+    override func primaryEquation() -> String? { "z_{n+1} = z_n^p + c" }
+    override func defaultFormulaParams() -> FormulaParams {
+        var fp = Self.baseFormulaParams()
+        fp.params.0 = 8.0; fp.params.1 = 4.0; fp.params.2 = 1.0
+        FormulaCatalog.normalizeRotationFlags(&fp)
+        return fp
+    }
+    override var defaultViewState: FractalViewDefaults {
+        Self.juliaLikeView(position: SIMD3<Float>(0.1, 0.1, -0.9))
+    }
+}
+
 private final class MengerDescriptor: FractalTypeDescriptor, @unchecked Sendable {
     init() {
-        super.init(rawValue: 2, displayName: "Menger Sponge", icon: "square.grid.3x3",
+        super.init(type: .menger, displayName: "Menger Sponge", icon: "square.grid.3x3",
                    category: "Kaleidoscopic IFS", codableString: "menger", isSelectableInUI: true)
     }
     override func primaryEquation() -> String? { "p_{n+1} = scale * fold_menger(p_n) + c" }
@@ -376,26 +400,18 @@ private final class MengerDescriptor: FractalTypeDescriptor, @unchecked Sendable
     }
 }
 
-private final class MandelbulbJuliaDescriptor: FractalTypeDescriptor, @unchecked Sendable {
+private final class MandelbulbJuliaDescriptor: MandelbulbFamilyDescriptor, @unchecked Sendable {
     init() {
-        super.init(rawValue: 5, displayName: "Mandelbulb Julia", icon: "globe.badge.chevron.backward",
-                   category: "Power / Quaternion", codableString: "mandelbulbJulia", isSelectableInUI: true)
+        super.init(
+            type: .mandelbulbJulia,
+            displayName: "Mandelbulb Julia",
+            icon: "globe.badge.chevron.backward",
+            category: "Power / Quaternion",
+            codableString: "mandelbulbJulia",
+            isSelectableInUI: true
+        )
     }
     override func primaryEquation() -> String? { "z_{n+1} = z_n^p + c_{julia}" }
-    override func applyPolarRotation(into fp: inout FormulaParams, accum: Float) {
-        // params[4] = PolarRotation — same as Mandelbulb.
-        let base = FormulaCatalog.getParam(fp, index: 4)
-        FormulaCatalog.setParam(&fp, index: 4, value: base + accum)
-    }
-    override func qualityValues(for preset: QualityPreset) -> (fractalIterations: Int, raySteps: Int)? {
-        switch preset {
-        case .low:    return (4, 68)
-        case .medium: return (6, 88)
-        case .high:   return (8, 97)
-        case .ultra:  return (10, 102)
-        }
-    }
-    override var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags.union([.polarRotation, .juliaDrift]) }
     override func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = 8.0   // Power
@@ -408,7 +424,9 @@ private final class MandelbulbJuliaDescriptor: FractalTypeDescriptor, @unchecked
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
     }
-    override var grabScaleClamp: ClosedRange<Float> { 0.0005...2000.0 }
+    override var supportedEffectTags: Set<EffectTag> {
+        super.supportedEffectTags.union([.juliaDrift])
+    }
     override var defaultViewState: FractalViewDefaults {
         Self.juliaLikeView(position: SIMD3<Float>(0.1, 0.1, -1.45))
     }
@@ -417,17 +435,11 @@ private final class MandelbulbJuliaDescriptor: FractalTypeDescriptor, @unchecked
             (GestureSlot(hand: .right, finger: .middle), "JuliaC"),
         ]
     }
-    override var defaultScalarBindings: [(slot: GestureSlot, paramName: String)] {
-        [
-            (GestureSlot(hand: .left, finger: .middle), "PolarRotation"),
-            (GestureSlot(hand: .left, finger: .index), "Power"),
-        ]
-    }
 }
 
 private final class QuaternionJuliaDescriptor: FractalTypeDescriptor, @unchecked Sendable {
     init() {
-        super.init(rawValue: 6, displayName: "Quaternion Julia", icon: "atom",
+        super.init(type: .quaternionJulia, displayName: "Quaternion Julia", icon: "atom",
                    category: "Power / Quaternion", codableString: "quaternionJulia", isSelectableInUI: true)
     }
     override func primaryEquation() -> String? { "q_{n+1} = q_n^2 + c" }
@@ -459,7 +471,7 @@ private final class QuaternionJuliaDescriptor: FractalTypeDescriptor, @unchecked
 
 private final class OctahedronDescriptor: FractalTypeDescriptor, @unchecked Sendable {
     init() {
-        super.init(rawValue: 11, displayName: "Octahedron", icon: "diamond",
+        super.init(type: .octahedron, displayName: "Octahedron", icon: "diamond",
                    category: "Kaleidoscopic IFS", codableString: "octahedron", isSelectableInUI: true)
     }
     override func primaryEquation() -> String? { "p_{n+1} = scale * fold_octahedral(p_n) + c" }
@@ -473,7 +485,7 @@ private final class OctahedronDescriptor: FractalTypeDescriptor, @unchecked Send
 
 private final class MengerSphereDescriptor: FractalTypeDescriptor, @unchecked Sendable {
     init() {
-        super.init(rawValue: 14, displayName: "Menger Sphere", icon: "circle.grid.cross",
+        super.init(type: .mengerSphere, displayName: "Menger Sphere", icon: "circle.grid.cross",
                    category: "Kaleidoscopic IFS", codableString: "mengerSphere", isSelectableInUI: true)
     }
     override func primaryEquation() -> String? { "p_{n+1} = scale * blend_menger_sphere(p_n) + c" }
@@ -487,7 +499,7 @@ private final class MengerSphereDescriptor: FractalTypeDescriptor, @unchecked Se
 
 private final class TheliPseudoKleinianDescriptor: FractalTypeDescriptor, @unchecked Sendable {
     init() {
-        super.init(rawValue: 15, displayName: "Theli Pseudo Kleinian", icon: "cube",
+        super.init(type: .theliPseudoKleinian, displayName: "Theli Pseudo Kleinian", icon: "cube",
                    category: "Hybrid Folds", codableString: "theliPseudoKleinian", isSelectableInUI: true)
     }
     override func primaryEquation() -> String? { "p_{n+1} = fold(p_n) + c" }
@@ -506,7 +518,7 @@ private final class TheliPseudoKleinianDescriptor: FractalTypeDescriptor, @unche
 
 private final class KleinianDescriptor: FractalTypeDescriptor, @unchecked Sendable {
     init() {
-        super.init(rawValue: 17, displayName: "Kleinian", icon: "wand.and.stars",
+        super.init(type: .kleinian, displayName: "Kleinian", icon: "wand.and.stars",
                    category: "Hybrid Folds", codableString: "kleinian", isSelectableInUI: true)
     }
     override func primaryEquation() -> String? { "z_{n+1} = fold(z_n) + c" }
@@ -527,25 +539,18 @@ private final class KleinianDescriptor: FractalTypeDescriptor, @unchecked Sendab
     }
 }
 
-private final class BoxFoldMandelbulbDescriptor: FractalTypeDescriptor, @unchecked Sendable {
+private final class BoxFoldMandelbulbDescriptor: MandelbulbFamilyDescriptor, @unchecked Sendable {
     init() {
-        super.init(rawValue: 18, displayName: "Box-Fold Mandelbulb", icon: "shippingbox.and.arrow.backward",
-                   category: "Hybrid Folds", codableString: "boxFoldMandelbulb", isSelectableInUI: true)
+        super.init(
+            type: .boxFoldMandelbulb,
+            displayName: "Box-Fold Mandelbulb",
+            icon: "shippingbox.and.arrow.backward",
+            category: "Hybrid Folds",
+            codableString: "boxFoldMandelbulb",
+            isSelectableInUI: true
+        )
     }
     override func primaryEquation() -> String? { "d(p) = DE_bulb(boxFold(p))" }
-    override func applyPolarRotation(into fp: inout FormulaParams, accum: Float) {
-        let base = FormulaCatalog.getParam(fp, index: 4)
-        FormulaCatalog.setParam(&fp, index: 4, value: base + accum)
-    }
-    override func qualityValues(for preset: QualityPreset) -> (fractalIterations: Int, raySteps: Int)? {
-        switch preset {
-        case .low:    return (4, 68)
-        case .medium: return (6, 88)
-        case .high:   return (8, 97)
-        case .ultra:  return (10, 102)
-        }
-    }
-    override var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags.union([.polarRotation]) }
     override func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = 8.0   // Mandelbulb power
@@ -555,15 +560,8 @@ private final class BoxFoldMandelbulbDescriptor: FractalTypeDescriptor, @uncheck
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
     }
-    override var grabScaleClamp: ClosedRange<Float> { 0.0005...2000.0 }
     override var defaultViewState: FractalViewDefaults {
         Self.juliaLikeView(position: SIMD3<Float>(0.1, 0.1, -0.9))
-    }
-    override var defaultScalarBindings: [(slot: GestureSlot, paramName: String)] {
-        [
-            (GestureSlot(hand: .left, finger: .middle), "PolarRotation"),
-            (GestureSlot(hand: .left, finger: .index), "Power"),
-        ]
     }
 }
 
@@ -585,13 +583,13 @@ final class CustomFractalDescriptor: FractalTypeDescriptor, @unchecked Sendable 
 
     init(formula: EmbeddedFormula) {
         self.formula = formula
-        super.init(rawValue: 1000, displayName: formula.name, icon: "scroll",
+        super.init(type: .custom, displayName: formula.name, icon: "scroll",
                    category: formula.category ?? "Custom", codableString: "custom", isSelectableInUI: true)
     }
 
     private init() {
         self.formula = nil
-        super.init(rawValue: 1000, displayName: "Custom Formula", icon: "scroll",
+        super.init(type: .custom, displayName: "Custom Formula", icon: "scroll",
                    category: "Custom", codableString: "custom", isSelectableInUI: false)
     }
 

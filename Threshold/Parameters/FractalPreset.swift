@@ -360,7 +360,7 @@ struct SceneState: Codable, Equatable {
 
 /// Represents a saved preset with all render settings and a preview image
 struct FractalPreset: Codable, Identifiable {
-    static let currentSchemaVersion = 4
+    static let currentSchemaVersion = 6
 
     let id: UUID
     var name: String
@@ -492,6 +492,16 @@ struct FractalPreset: Codable, Identifiable {
     /// a built-in formula. Older app versions ignore this field.
     var embeddedFormula: EmbeddedFormula?
 
+    /// Optional cross-fractal lighting material modifier. Kept separate from
+    /// `embeddedFormula` so a scene can carry custom geometry/warp and custom
+    /// lighting at the same time without either effect replacing the other.
+    var embeddedLighting: EmbeddedFormula?
+
+    /// Live values for `embeddedLighting.params`, independent from geometry's
+    /// `formulaParamValues`. Absent values mean descriptor defaults so scenes
+    /// written by the first parameterless lighting ABI remain compatible.
+    var embeddedLightingParamValues: [Float]?
+
     // === MODULE LAYER (additive, backward-compatible) ===
     /// Scene schema version. Purely diagnostic — decoding never depends on it.
     var schemaVersion: Int?
@@ -575,7 +585,9 @@ struct FractalPreset: Codable, Identifiable {
         case gradientState, lightingSoftness
         case musicReactiveMappings  // legacy — mappings only
         case audioReactiveConfig    // canonical — full config
-        case embeddedFormula        // optional self-contained DE shader payload
+        case embeddedFormula        // optional self-contained DE/warp shader payload
+        case embeddedLighting       // optional cross-fractal material modifier
+        case embeddedLightingParamValues // independent 16-float lighting sidecar
         case schemaVersion, modules, sceneState, canonicalStateOnly // canonical state + legacy module layer
         // Additional scene state (previously dropped on save)
         case platformEnabled, platformRadius
@@ -793,6 +805,13 @@ struct FractalPreset: Codable, Identifiable {
 
         if let formula = try container.decodeIfPresent(EmbeddedFormula.self, forKey: .embeddedFormula) {
             try formula.validate()
+            guard formula.effectKind != .lighting else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .embeddedFormula,
+                    in: container,
+                    debugDescription: "Lighting effects belong in embeddedLighting"
+                )
+            }
             // Only a fractal DE drives FractalModelType.custom; a space-warp
             // effect rides whatever fractalType was decoded.
             if let primitive = formula.bundledConstructionPrimitiveKind {
@@ -813,6 +832,28 @@ struct FractalPreset: Codable, Identifiable {
             embeddedFormula = formula
         } else {
             embeddedFormula = nil
+        }
+        if let lighting = try container.decodeIfPresent(EmbeddedFormula.self, forKey: .embeddedLighting) {
+            try lighting.validate()
+            guard lighting.effectKind == .lighting else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .embeddedLighting,
+                    in: container,
+                    debugDescription: "embeddedLighting must contain a lighting effect"
+                )
+            }
+            embeddedLighting = lighting
+            if let saved = try container.decodeIfPresent(
+                [Float].self,
+                forKey: .embeddedLightingParamValues
+            ) {
+                embeddedLightingParamValues = lighting.resolvedParameterValues(overrides: saved)
+            } else {
+                embeddedLightingParamValues = nil
+            }
+        } else {
+            embeddedLighting = nil
+            embeddedLightingParamValues = nil
         }
 
         // Module layer (typed/keyed params). Optional — older scenes have none.
@@ -933,6 +974,13 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(audioReactiveConfig?.musicReactiveMappings ?? musicReactiveMappings,
                                       forKey: .musicReactiveMappings)
         try container.encodeIfPresent(embeddedFormula, forKey: .embeddedFormula)
+        try container.encodeIfPresent(embeddedLighting, forKey: .embeddedLighting)
+        if embeddedLighting != nil {
+            try container.encodeIfPresent(
+                embeddedLightingParamValues,
+                forKey: .embeddedLightingParamValues
+            )
+        }
 
         // Module layer (typed/keyed params)
         try container.encodeIfPresent(schemaVersion, forKey: .schemaVersion)
@@ -1097,7 +1145,7 @@ struct FractalPreset: Codable, Identifiable {
     }
     
     /// Create a preset from current render settings
-    static func fromSettings(_ settings: RenderSettings, name: String, id: UUID = UUID(), createdAt: Date = Date(), thumbnailData: Data? = nil, embeddedFormula: EmbeddedFormula? = nil) -> FractalPreset {
+    static func fromSettings(_ settings: RenderSettings, name: String, id: UUID = UUID(), createdAt: Date = Date(), thumbnailData: Data? = nil, embeddedFormula: EmbeddedFormula? = nil, embeddedLighting: EmbeddedFormula? = nil) -> FractalPreset {
         var preset = FractalPreset(id: id, name: name, createdAt: createdAt, thumbnailData: thumbnailData)
         // Capture each authored lane once, then derive the legacy projection from
         // this exact canonical value. This prevents canonical and compatibility
@@ -1238,6 +1286,12 @@ struct FractalPreset: Codable, Identifiable {
         // only forces fractalType = .custom for a `.fractal` kind, so a warp
         // round-trips on top of whatever built-in fractal is active.
         preset.embeddedFormula = embeddedFormula
+        preset.embeddedLighting = embeddedLighting
+        if let embeddedLighting {
+            preset.embeddedLightingParamValues = embeddedLighting.resolvedParameterValues(
+                overrides: settings.customLightingParameterValues
+            )
+        }
 
         // Canonical v3 envelope. Keep every legacy field above populated so the
         // same file remains useful to older app builds; current builds restore
@@ -1271,6 +1325,9 @@ struct FractalPreset: Codable, Identifiable {
                                          includePerformance: Bool,
                                          resetEnvironment: Bool,
                                          scope: SceneRestoreScope) {
+        if scope == .scene {
+            settings.resetConeMarchingForSceneSwitch()
+        }
         if resetEnvironment {
             settings.audioReactiveConfig = AudioReactiveConfig()
         }
@@ -1305,6 +1362,19 @@ struct FractalPreset: Codable, Identifiable {
         settings.clearAnimationManualOffsets()
         settings.clearAudioPlaybackOffsets()
         settings.setSpaceWarpAudioOffsets([:])
+
+        // Lighting values are a scene-owned sidecar, not geometry formula
+        // parameters. Apply before the canonical-only early return so both
+        // legacy and v3+ scene envelopes resolve the bank authoritatively.
+        if let embeddedLighting {
+            settings.setCustomLightingParameterValues(
+                embeddedLighting.resolvedParameterValues(
+                    overrides: embeddedLightingParamValues
+                )
+            )
+        } else {
+            settings.setCustomLightingParameterValues(Array(repeating: 0, count: 16))
+        }
 
         // A canonical-only schema-3 document has no legacy compatibility
         // projection to layer. Applying synthesized/default flat values here
@@ -1654,7 +1724,7 @@ struct FractalPreset: Codable, Identifiable {
 
 extension FractalPreset {
     var isCustomScenePreset: Bool {
-        embeddedFormula != nil
+        embeddedFormula != nil || embeddedLighting != nil
     }
 
     var hasMusicReactiveMappings: Bool {

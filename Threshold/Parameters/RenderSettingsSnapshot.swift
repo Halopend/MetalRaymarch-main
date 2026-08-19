@@ -45,6 +45,7 @@ struct RenderSettingsSnapshot {
     let resolutionScale: Float
     let fractalType: FractalModelType
     let formulaParams: FormulaParams
+    let customLightingParams: CustomLightingParams
     let tileSize: Int
     let debugHierarchical: Bool
     let coherentPacketEnabled: Bool
@@ -94,6 +95,9 @@ struct RenderSettingsSnapshot {
     let handAttractionForearmEnabled: Bool
     let handAttractionForearmRadius: Float
     let colorSchemeParams: ColorSchemeParams
+    /// Ordered output filters use a dedicated shader buffer so the compact
+    /// ColorSchemeParams lane and enclosing uniform structs stay bounded.
+    let postFilterStack: PostFilterStack
     let lightingSoftness: Float
     
     // Fog for CPU precomputation (not sent to GPU in ColorSchemeParams)

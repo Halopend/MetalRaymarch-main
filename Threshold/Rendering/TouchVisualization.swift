@@ -5,7 +5,8 @@
 //  On-screen feedback for finger touches on the iOS render view. Each active
 //  finger gets a glowing dot + ring that tracks it; lifting a finger emits an
 //  expanding ripple that fades out. The tint encodes the gesture the renderer
-//  is interpreting: one finger (orbit) vs. two fingers (pan/zoom).
+//  is interpreting: one finger (orbit), two fingers (pan/zoom), or three
+//  fingers (scene navigation).
 //
 //  Pure CALayer overlay — no Metal pipeline or uniform changes, so it cannot
 //  perturb the raymarch/upscale paths. The overlay never intercepts touches.
@@ -37,9 +38,10 @@ final class TouchVisualizationOverlay: UIView {
         static let rippleEndRadius: CGFloat = 64
         static let rippleDuration: CFTimeInterval = 0.45
         static let appearDuration: CFTimeInterval = 0.18
-        /// One finger: orbit. Two fingers: pan/zoom.
+        /// One finger: orbit. Two fingers: pan/zoom. Three: scene navigation.
         static let orbitColor = UIColor(red: 0.35, green: 0.85, blue: 1.0, alpha: 1.0)
         static let panZoomColor = UIColor(red: 0.85, green: 0.55, blue: 1.0, alpha: 1.0)
+        static let sceneNavigationColor = UIColor(red: 1.0, green: 0.68, blue: 0.20, alpha: 1.0)
     }
 
     private final class Indicator {
@@ -213,10 +215,13 @@ final class TouchVisualizationOverlay: UIView {
 
     // MARK: - Internals
 
-    /// Tint reflects how the renderer interprets the touch set:
-    /// one finger orbits, two (or more) pan/zoom.
+    /// Tint reflects how the renderer interprets the touch set: cyan for one-
+    /// finger orbit, violet for two-finger pan/zoom, and amber for three-finger
+    /// scene navigation.
     private func color(forTouchCount count: Int) -> UIColor {
-        count >= 2 ? Style.panZoomColor : Style.orbitColor
+        if count >= 3 { return Style.sceneNavigationColor }
+        if count == 2 { return Style.panZoomColor }
+        return Style.orbitColor
     }
 
     private func retintAll() {

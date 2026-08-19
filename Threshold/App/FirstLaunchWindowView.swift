@@ -475,6 +475,11 @@ struct FirstLaunchWindowView: View {
                     title: "Quick Access",
                     detail: "Pin the sections you revisit so they remain one click away in the rail."
                 )
+                IntroTipRow(
+                    icon: "hand.draw",
+                    title: "Canvas gestures",
+                    detail: "One finger orbits, two fingers pan or zoom, and a three-finger horizontal swipe changes scenes. The scene name appears after every successful switch."
+                )
             }
         } detail: {
             VStack(alignment: .leading, spacing: 10) {

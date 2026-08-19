@@ -50,6 +50,17 @@ extension AppModel {
         // Invalidate completions from presentation tasks owned by the renderer
         // whose handlers are about to be removed.
         spatialMenuPresentationGeneration &+= 1
+        if let lighting = activeEmbeddedLighting {
+            customLightingRuntimeState = .waitingForRenderer(name: lighting.name)
+        } else {
+            customLightingRuntimeState = .inactive
+        }
+        if let warp = activeEmbeddedFormula, warp.effectKind == .spaceWarp {
+            customSpaceWarpRuntimeState = .waitingForRenderer(name: warp.name)
+        } else {
+            customSpaceWarpRuntimeState = .inactive
+            customSpaceWarpControlProfile = .generic
+        }
         captureScreenshotHandler = nil
         preparePipelineHandler = nil
         preparePipelineForValuesHandler = nil
