@@ -7,9 +7,9 @@ import AVKit
 ///   2. Controls (movement + gestures on visionOS; navigation + creation elsewhere)
 ///   3. Setup (storage, microphone-at-launch, and anonymous analytics)
 ///
-/// Each page scrolls independently; a shared footer pins Back/Next and
-/// the page indicator to the bottom so they stay reachable at any
-/// window size. Deliberately NOT a TabView — on visionOS a TabView
+/// Each page uses one centered reading column and scrolls independently;
+/// a shared footer pins Back/Next and the page indicator to the bottom so
+/// they stay reachable at any window size. Deliberately NOT a TabView — on visionOS a TabView
 /// grows a left tab-bar ornament with blank icons.
 struct FirstLaunchWindowView: View {
     @Environment(AppModel.self) private var appModel
@@ -54,7 +54,7 @@ struct FirstLaunchWindowView: View {
         #if os(iOS)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         #else
-        .frame(minWidth: 720, idealWidth: 940, maxWidth: .infinity, minHeight: 540, idealHeight: 660, maxHeight: .infinity)
+        .frame(minWidth: 680, idealWidth: 780, maxWidth: .infinity, minHeight: 500, idealHeight: 600, maxHeight: .infinity)
         #endif
         .background(windowSurfaceFill, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
@@ -161,6 +161,24 @@ struct FirstLaunchWindowView: View {
             subtitle: "Some scenes contain rapidly changing colors, gradients, and audio-driven flashes.",
             accent: .orange
         ) {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 12) {
+                    FlashingLightIndicator()
+                        .font(.system(size: 36))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Photosensitive-epilepsy warning")
+                            .font(.headline)
+                        Text("A small fraction of users may experience seizures or loss of consciousness when exposed to flashing lights or patterns, even without a prior history. Symptoms include dizziness, nausea, vision changes, twitching, and disorientation. If you experience any of these, stop using Threshold and consult a doctor.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(14)
+                .background(RoundedRectangle(cornerRadius: 14).fill(Color.orange.opacity(0.12)))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.orange.opacity(0.35), lineWidth: 1))
+            }
+        } detail: {
             VStack(alignment: .leading, spacing: 14) {
                 IntroTipRow(
                     icon: "waveform.path.ecg",
@@ -177,38 +195,18 @@ struct FirstLaunchWindowView: View {
                     title: "Stop immediately",
                     detail: "Stop using Threshold if you feel dizziness, nausea, vision changes, twitching, or disorientation."
                 )
-            }
-        } detail: {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .top, spacing: 12) {
-                FlashingLightIndicator()
-                    .font(.system(size: 36))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Photosensitive-epilepsy warning")
-                        .font(.headline)
-                    Text("A small fraction of users may experience seizures or loss of consciousness when exposed to flashing lights or patterns, even without a prior history. Symptoms include dizziness, nausea, vision changes, twitching, and disorientation. If you experience any of these, stop using Threshold and consult a doctor.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .padding(14)
-            .background(RoundedRectangle(cornerRadius: 14).fill(Color.orange.opacity(0.12)))
-            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.orange.opacity(0.35), lineWidth: 1))
 
 #if os(macOS)
-            Toggle(isOn: $acknowledgedFlash) {
-                Text("I understand that some scenes may contain flashing lights and audio-driven flashes.")
-                    .font(.subheadline.weight(.medium))
-            }
-            .toggleStyle(.checkbox)
-            .tint(.orange)
+                Toggle(isOn: $acknowledgedFlash) {
+                    Text("I understand that some scenes may contain flashing lights and audio-driven flashes.")
+                        .font(.subheadline.weight(.medium))
+                }
+                .toggleStyle(.checkbox)
 #else
-            Toggle(isOn: $acknowledgedFlash) {
-                Text("I understand that some scenes may contain flashing lights and audio-driven flashes.")
-                    .font(.subheadline.weight(.medium))
-            }
-            .tint(.orange)
+                Toggle(isOn: $acknowledgedFlash) {
+                    Text("I understand that some scenes may contain flashing lights and audio-driven flashes.")
+                        .font(.subheadline.weight(.medium))
+                }
 #endif
             }
         }
@@ -239,6 +237,21 @@ struct FirstLaunchWindowView: View {
             subtitle: welcomeSubtitle,
             accent: .blue
         ) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(welcomeWorkflowSummary)
+                    .font(.title3.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    IntroPill(icon: "square.grid.2x2.fill", title: "Scenes")
+                    #if os(visionOS)
+                    IntroPill(icon: "hand.raised.fingers.spread", title: "Hands")
+                    #else
+                    IntroPill(icon: AppIcons.magnifyingglass, title: "Find")
+                    #endif
+                    IntroPill(icon: "waveform", title: "Music")
+                }
+            }
+        } detail: {
             VStack(alignment: .leading, spacing: 12) {
                 IntroTipRow(
                     icon: "cube.transparent.fill",
@@ -263,24 +276,9 @@ struct FirstLaunchWindowView: View {
                     title: "Reset + Create",
                     detail: "Tap Reset to jump back to your saved baseline. Use Save to create a named preset or deliberately update that reset point."
                 )
-            }
-        } detail: {
-            VStack(alignment: .leading, spacing: 14) {
-                Text(welcomeWorkflowSummary)
-                    .font(.title3.weight(.semibold))
-                    .fixedSize(horizontal: false, vertical: true)
                 Text("You can always return to this window from Settings.")
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                HStack(spacing: 8) {
-                    IntroPill(icon: "square.grid.2x2.fill", title: "Scenes")
-                    #if os(visionOS)
-                    IntroPill(icon: "hand.raised.fingers.spread", title: "Hands")
-                    #else
-                    IntroPill(icon: AppIcons.magnifyingglass, title: "Find")
-                    #endif
-                    IntroPill(icon: "waveform", title: "Music")
-                }
             }
         }
     }
@@ -341,7 +339,7 @@ struct FirstLaunchWindowView: View {
                     HStack(spacing: 10) {
                         Image(systemName: shareAnalytics ? AppIcons.person3Fill : AppIcons.personSlash)
                             .font(.title3)
-                            .foregroundStyle(shareAnalytics ? .blue : .secondary)
+                            .foregroundStyle(shareAnalytics ? .cyan : .secondary)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Help improve Threshold")
                                 .font(.headline)
@@ -352,12 +350,15 @@ struct FirstLaunchWindowView: View {
                     }
 
                     Toggle("Share anonymous analytics", isOn: $shareAnalytics)
-                        .tint(.blue)
+                        .tint(.cyan)
 
                     Text("Never includes your name, account, files, scene position, preset names, or custom distance-estimator details.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
+
+                    Link("Privacy Policy", destination: URL(string: "https://github.com/Halopend/MetalRaymarch-main/blob/main/PRIVACY_POLICY.md")!)
+                        .font(.caption)
                 }
             }
         }
@@ -612,7 +613,7 @@ private struct OnboardingPageShell<Primary: View, Detail: View>: View {
     @ViewBuilder var detail: Detail
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 22) {
             HStack(alignment: .top, spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -633,20 +634,17 @@ private struct OnboardingPageShell<Primary: View, Detail: View>: View {
                 }
             }
 
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 12) {
-                    primary
-                }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-
-                VStack(alignment: .leading, spacing: 12) {
-                    detail
-                }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+            VStack(alignment: .leading, spacing: 18) {
+                primary
+                detail
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .padding(24)
+        .padding(.horizontal, 28)
+        .padding(.vertical, 24)
+        .frame(maxWidth: 760, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .top)
+        .tint(accent)
     }
 }
 

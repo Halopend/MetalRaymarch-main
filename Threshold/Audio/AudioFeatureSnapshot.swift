@@ -216,9 +216,9 @@ enum AudioCapabilityRegistry {
             case .granted:
                 availability = .available
             case .undetermined:
-                availability = .permissionRequired("Screen & System Audio Recording permission is requested when capture starts.")
+                availability = .permissionRequired("System-output capture is not included in this release.")
             case .denied:
-                availability = .unavailable("Screen & System Audio Recording permission is denied in system settings.")
+                availability = .unavailable("System-output capture is not included in this release.")
             }
         }
 

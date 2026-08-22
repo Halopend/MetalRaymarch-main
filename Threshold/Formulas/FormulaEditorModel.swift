@@ -65,6 +65,9 @@ final class FormulaEditorModel {
     /// The library file backing this draft, when it was loaded from (or has
     /// been saved to) the library.
     private(set) var savedEntry: FormulaLibraryEntry?
+    /// Human-readable reason the last `saveReportingErrors()` failed; nil once a
+    /// save succeeds or the draft changes.
+    private(set) var saveErrorMessage: String?
 
     // MARK: - Dependencies
 
@@ -81,8 +84,12 @@ final class FormulaEditorModel {
     // MARK: - Compile-loop state
 
     private var debounceTask: Task<Void, Never>?
+    private var compileTask: Task<Void, Never>?
     private var compileInFlight = false
     private var pendingCompile = false
+    /// Set by `invalidate()`; no further compiles start and in-flight results
+    /// are dropped.
+    private(set) var isInvalidated = false
     /// Monotonic edit generation; results for stale generations are discarded.
     private var generation: UInt64 = 0
 
@@ -277,7 +284,24 @@ final class FormulaEditorModel {
         }
     }
 
+    /// Stop the compile loop for good: the editor is being dismissed. Cancels
+    /// the debounce and any in-flight compile so a slow Metal compile cannot
+    /// land after the user has moved on (e.g. opened another custom scene).
+    /// The renderer's activation path honours the cancellation and skips
+    /// publishing the compiled library.
+    func invalidate() {
+        isInvalidated = true
+        debounceTask?.cancel()
+        debounceTask = nil
+        compileTask?.cancel()
+        compileTask = nil
+        pendingCompile = false
+        generation &+= 1
+        if status == .compiling { status = .idle }
+    }
+
     private func startCompileIfPossible() {
+        guard !isInvalidated else { return }
         // Free pre-flight: pragma errors or an unresolved stem block the
         // 0.5–5 s compile before it starts.
         let hasPragmaErrors = pragmaDiagnostics.contains { $0.severity == .error }
@@ -296,9 +320,10 @@ final class FormulaEditorModel {
         let draft = currentDraft()
         let startedGeneration = generation
 
-        Task { [weak self] in
+        compileTask = Task { [weak self] in
             guard let self else { return }
             let outcome = await self.compileHandler(draft)
+            guard !Task.isCancelled, !self.isInvalidated else { return }
             self.finishCompile(outcome: outcome, startedGeneration: startedGeneration, draft: draft)
         }
     }
@@ -361,6 +386,21 @@ final class FormulaEditorModel {
         let entry = try library.save(currentDraft())
         savedEntry = entry
         isDirty = false
+        saveErrorMessage = nil
         return entry
+    }
+
+    /// UI entry point for Save: never throws, records the failure in
+    /// `saveErrorMessage` so the editor can show it instead of silently
+    /// leaving the draft unsaved. Returns true on success.
+    @discardableResult
+    func saveReportingErrors() -> Bool {
+        do {
+            try save()
+            return true
+        } catch {
+            saveErrorMessage = "Couldn't save formula: \(error.localizedDescription)"
+            return false
+        }
     }
 }

@@ -19,9 +19,13 @@ struct ContentView: View {
     /// persistent actions; standalone and conventional panel presentations keep
     /// the complete top dock and section rail.
     let showsOuterNavigation: Bool
+    /// macOS's persistent root owns the first-run storage sheet so an
+    /// auto-hidden slide-over panel cannot tear down its presentation host.
+    let handlesStorageChoice: Bool
 
-    init(showsOuterNavigation: Bool = true) {
+    init(showsOuterNavigation: Bool = true, handlesStorageChoice: Bool = true) {
         self.showsOuterNavigation = showsOuterNavigation
+        self.handlesStorageChoice = handlesStorageChoice
     }
 
     @Environment(AppModel.self) var appModel
@@ -51,13 +55,15 @@ struct ContentView: View {
 #endif
     @AppStorage("ContentView.showPerformanceInMenu") var showPerformanceInMenu: Bool = false
     @AppStorage("ContentView.showFPSInHUD") var showFPSInHUD: Bool = true
+    @AppStorage(SceneNavigationFeedbackSettings.defaultsKey)
+    var showSceneNavigationFeedback: Bool = SceneNavigationFeedbackSettings.defaultValue
     @State var showStopsPopover = false
     @State private var showSaveDestinationSheet = false
     @State private var saveConfirmationMessage: String?
     @State private var isControlFinderPresented = false
     @State private var workspaceSize: CGSize = .zero
+    @AppStorage("hasCompletedIntroOnboarding") var hasCompletedIntroOnboarding = false
     #if os(iOS)
-    @State var isAnimationEditorPresented = false
     @State var isWelcomePresented = false
     #endif
     /// One-time first-run prompt to choose local vs iCloud storage.
@@ -72,7 +78,6 @@ struct ContentView: View {
     // the per-tab `extension ContentView` files).
     @State var renamingGradientIndex: Int? = nil
     @State var renamingGradientName: String = ""
-    @AppStorage("allowCustomScenes") var allowCustomScenes: Bool = false
     /// Menu text size (Dynamic Type). Index into `DS.textSizeSteps`; the "Text
     /// Size" slider in Settings ▸ Display writes it and the menu body applies it
     /// via `.dynamicTypeSize`. Default is platform-aware (one step up on
@@ -199,7 +204,7 @@ struct ContentView: View {
     private var navigationHierarchy: NavigationHierarchy {
         NavigationHierarchy.application(availability: .resolve(
             profile: appModel.platformProfile,
-            allowsCustomScenes: allowCustomScenes,
+            allowsCustomScenes: true,
             includesGestureEditing: supportsGestureEditing
         ))
     }
@@ -387,7 +392,10 @@ struct ContentView: View {
         }
         .onAppear {
             // First-run: prompt once for the storage location (local vs iCloud).
-            if !StorageLocation.shared.hasChosenMode {
+            // On iPad the welcome/safety flow is presented first by the app
+            // root; the storage prompt follows once it completes (see
+            // `onChange(of: hasCompletedIntroOnboarding)` below).
+            if handlesStorageChoice && hasCompletedIntroOnboarding && !StorageLocation.shared.hasChosenMode {
                 showStorageChoice = true
             }
             appModel.openShapeMenuHandler = {
@@ -419,7 +427,9 @@ struct ContentView: View {
             appModel.openSavePresetMenuHandler = {
                 showSaveDestinationSheet = true
             }
-            #if !os(visionOS)
+            // iPadOS: the always-mounted renderer root owns this handler so the
+            // radial menu can open the editor after the inspector collapses.
+            #if os(macOS)
             appModel.openAnimationEditorHandler = {
                 openAnimationEditor()
             }
@@ -438,7 +448,7 @@ struct ContentView: View {
         .onDisappear {
             cache.stopSync()
             appModel.openSavePresetMenuHandler = nil
-            #if !os(visionOS)
+            #if os(macOS)
             appModel.openAnimationEditorHandler = nil
             #endif
             #if os(visionOS)
@@ -467,6 +477,13 @@ struct ContentView: View {
             // Returning to the app: re-mirror the store folder so any files added
             // or deleted while away (e.g. in the Files app) reflect immediately.
             if phase == .active { appModel.reloadStoresFromDisk() }
+        }
+        .onChange(of: hasCompletedIntroOnboarding) { _, completed in
+            guard completed, handlesStorageChoice, !StorageLocation.shared.hasChosenMode else { return }
+            Task { @MainActor in
+                await Task.yield()
+                showStorageChoice = true
+            }
         }
         .sheet(isPresented: $showStorageChoice) {
             StorageModeChoiceSheet { chosen in
@@ -507,10 +524,6 @@ struct ContentView: View {
             )
         }
         #if os(iOS)
-        .fullScreenCover(isPresented: $isAnimationEditorPresented) {
-            AnimationEditorWindowView()
-                .environment(appModel)
-        }
         .fullScreenCover(isPresented: $isWelcomePresented) {
             FirstLaunchWindowView()
                 .environment(appModel)

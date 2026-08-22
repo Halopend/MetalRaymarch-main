@@ -171,6 +171,9 @@ actor Renderer {
     // to compile can't hot-loop the compiler.
     var customLibrarySelfHealInFlight = false
     var lastCustomLibrarySelfHealAttempt: TimeInterval = 0
+    /// Invalidates an older async formula compile when a newer scene/formula
+    /// activation starts before it finishes.
+    var customShaderActivationGeneration: UInt64 = 0
 
     // MRU list of custom-formula hashes whose specialized pipelines stay
     // cached (see retainCustomShaderPipelines). Front = most recent.
@@ -854,12 +857,26 @@ actor Renderer {
             // `scheduleCustomLibrarySelfHeal` swaps the custom DE in once the
             // library is ready). The compile itself is also off-thread now
             // (CustomShaderCompiler.library uses the async makeLibrary API).
-            let pendingFormula = await MainActor.run { appModel.activeEmbeddedFormula }
+            let (pendingFormula, pendingWarpStackSource, pendingWarpStackSignature) = await MainActor.run {
+                (
+                    appModel.activeEmbeddedFormula,
+                    appModel.renderSettings.warpStackCodegenSource,
+                    appModel.renderSettings.warpStackCodegenSignature
+                )
+            }
             if let pending = pendingFormula, !pending.isBundledConstructionPrimitive {
                 customSceneDiagnostic("🔬 [CSDiag] Handler ready — scheduling deferred activation for '\(pending.name)' hash=\(pending.shortHash) (concurrent; does NOT block first frame)")
                 Task {
                     do {
-                        try await renderer.activateEmbeddedFormula(pending)
+                        // Keep cold-start activation aligned with the normal
+                        // scene-load handler. Omitting the live transform-stack
+                        // source/signature can overwrite the correct library
+                        // with an s0/default-stack variant.
+                        try await renderer.activateEmbeddedFormula(
+                            pending,
+                            warpStackSource: pendingWarpStackSource,
+                            warpStackSignature: pendingWarpStackSignature
+                        )
                     } catch {
                         customSceneDiagnostic("🔬 [CSDiag] ❌ Deferred activation failed: \(error)")
                     }
@@ -1116,9 +1133,11 @@ actor Renderer {
             drawable.deviceAnchor = deviceAnchor
             frame.startSubmission()
             defer { frame.endSubmission() }
-            if drawableRenderContextRequired {
-                encodeDrawableRenderContextPass(commandBuffer: commandBuffer, drawable: drawable)
-            }
+            // Render context first (after the anchor, before any drawable
+            // encoding), then the portal pass, then present — see
+            // beginDrawableRenderContext.
+            let stallRenderContext = beginDrawableRenderContext(commandBuffer: commandBuffer, drawable: drawable)
+            encodeDrawableRenderContextPass(stallRenderContext, commandBuffer: commandBuffer, drawable: drawable)
             drawable.encodePresent(commandBuffer: commandBuffer)
             commandBuffer.commit()
             startPostFirstFrameSetupIfNeeded()
@@ -1296,20 +1315,25 @@ actor Renderer {
         frame.startSubmission()
         defer { frame.endSubmission() }
 
+        // Once the layer is configured with a render-context stencil format
+        // (visionOS 26+), the compositor REQUIRES the drawable render context
+        // on EVERY presented command buffer, in every immersion style —
+        // presenting without it aborts with "cannot present drawable: need to
+        // use drawable render context when supporting progressive style".
+        // Apple's reference loop adds the context FIRST (deviceAnchor is
+        // already set above; CompositorServices requires that ordering) and
+        // before any encoder touches the drawable; the portal pass then
+        // consumes it right before each encodePresent below. Doing it here,
+        // once, means no present path can reach the compositor without it.
+        let drawableRenderContext = beginDrawableRenderContext(commandBuffer: commandBuffer, drawable: drawable)
+
         let renderEncodeStart = CACurrentMediaTime()
         let renderEncodeTraceState = RenderTrace.begin("Render Encode")
         defer { RenderTrace.end("Render Encode", renderEncodeTraceState) }
 
-        // Once the layer is configured with a render-context stencil format
-        // (visionOS 26+), the compositor REQUIRES the drawable render-context
-        // pass before EVERY present, in every immersion style — presenting
-        // without it aborts with "need to use drawable render context when
-        // supporting progressive style". So the pass runs per-frame whenever
-        // configured (see the encodeDrawableRenderContextPass calls before
-        // each encodePresent below). The transparent background additionally
-        // needs fragmentMain's miss-alpha, which the compute path doesn't
-        // have — force the fragment path while it's active.
-        let renderContextRequired = drawableRenderContextRequired
+        // The transparent background additionally needs fragmentMain's
+        // miss-alpha, which the compute path doesn't have — force the
+        // fragment path while it's active.
         var framePath = selectFramePath(settingsSnapshot: settingsSnapshot)
         if passthroughBackgroundActive { framePath = .fragment }
 
@@ -1347,9 +1371,7 @@ actor Renderer {
                     drawable: drawable,
                     preserveSceneDepth: false
                 )
-                if renderContextRequired {
-                    encodeDrawableRenderContextPass(commandBuffer: commandBuffer, drawable: drawable)
-                }
+                encodeDrawableRenderContextPass(drawableRenderContext, commandBuffer: commandBuffer, drawable: drawable)
                 drawable.encodePresent(commandBuffer: commandBuffer)
                 observeAdaptiveComputeCompletion(commandBuffer)
                 shouldSignalInFlightSemaphore = false
@@ -1471,9 +1493,7 @@ actor Renderer {
                 drawable: drawable,
                 preserveSceneDepth: false
             )
-            if renderContextRequired {
-                encodeDrawableRenderContextPass(commandBuffer: commandBuffer, drawable: drawable)
-            }
+            encodeDrawableRenderContextPass(drawableRenderContext, commandBuffer: commandBuffer, drawable: drawable)
             drawable.encodePresent(commandBuffer: commandBuffer)
             shouldSignalInFlightSemaphore = false
             commandBuffer.commit()
@@ -1674,9 +1694,7 @@ actor Renderer {
             }
         }
 
-        if renderContextRequired {
-            encodeDrawableRenderContextPass(commandBuffer: commandBuffer, drawable: drawable)
-        }
+        encodeDrawableRenderContextPass(drawableRenderContext, commandBuffer: commandBuffer, drawable: drawable)
 
         drawable.encodePresent(commandBuffer: commandBuffer)
 

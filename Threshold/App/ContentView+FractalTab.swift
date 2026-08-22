@@ -111,6 +111,18 @@ extension ContentView {
                 Label(cache.fractalType.displayName, systemImage: cache.fractalType.icon)
                     .font(.headline)
                 Spacer()
+                #if os(macOS) || os(iOS)
+                Button {
+                    openDistanceEstimatorStudio(
+                        editing: cache.fractalType == .custom ? appModel.activeEmbeddedFormula : nil
+                    )
+                } label: {
+                    Label("DE Studio", systemImage: "hammer.fill")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Open Distance Estimator Studio")
+                #endif
             }
 
             Divider()
@@ -182,36 +194,34 @@ extension ContentView {
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            #if os(macOS)
-            if AppModel.allowCustomScenes {
-                HStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Button {
+                    openDistanceEstimatorStudio()
+                } label: {
+                    Label("Open Metal DE Studio", systemImage: "hammer.fill")
+                }
+                if cache.fractalType == .custom, let active = appModel.activeEmbeddedFormula {
                     Button {
-                        appModel.formulaEditorSeed = nil
-                        openWindow(id: AppModel.formulaEditorWindowID)
-                    } label: {
-                        Label("Open Metal DE Studio", systemImage: "hammer.fill")
-                    }
-                    if cache.fractalType == .custom, let active = appModel.activeEmbeddedFormula {
-                        Button {
-                            appModel.formulaEditorSeed = active
-                            openWindow(id: AppModel.formulaEditorWindowID)
+                        openDistanceEstimatorStudio(editing: active)
                     } label: {
                         Label("Edit Metal DE: \(active.name)", systemImage: "pencil.and.outline")
                     }
-                    }
-                    Spacer()
                 }
-                .controlSize(.small)
-            } else {
-                Text("Metal DE Studio unlocks with “Allow custom scenes” in Settings → General.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer()
             }
-            #endif
+            .controlSize(.small)
 
             FractalFormulaGrid(cache: cache, presetManager: appModel.presetManager)
         }
+    }
+
+    private func openDistanceEstimatorStudio(editing formula: EmbeddedFormula? = nil) {
+        appModel.formulaEditorSeed = formula
+        #if os(iOS)
+        appModel.openFormulaEditorHandler?()
+        #elseif os(macOS)
+        openWindow(id: AppModel.formulaEditorWindowID)
+        #endif
     }
 
     // ── Hands ────────────────────────────────────────────────────────────────

@@ -41,6 +41,17 @@ struct FractalPresetPersistenceTests {
         #expect(legacyDecoded.tags.isEmpty)
     }
 
+    @Test("Screen-only scene tag is canonical and controls immersive visibility")
+    func screenOnlySceneTag() {
+        let tagged = SceneTagging.settingScreenOnly(true, in: ["Favorites", "mac ONLY"])
+
+        #expect(tagged == [SceneTagging.screenOnlyTag, "Favorites"])
+        #expect(SceneTagging.isScreenOnly(tagged))
+        #expect(SceneTagging.isVisible(tagged, includesScreenOnlyScenes: true))
+        #expect(!SceneTagging.isVisible(tagged, includesScreenOnlyScenes: false))
+        #expect(SceneTagging.settingScreenOnly(false, in: tagged) == ["Favorites"])
+    }
+
     @Test("Platform / cell-shading / light-rate / extra effects / bubble-fade survive fromSettings → encode → decode → apply")
     func droppedFieldsRoundTrip() throws {
         let settings = RenderSettings()
@@ -167,6 +178,40 @@ struct FractalPresetPersistenceTests {
         settings.edgeDetectionEffect = edge
         #expect(settings.edgeDetectionEffect.enabled == false)
         #expect(settings.snapshot().colorSchemeParams.edgeDetectionEnabled == 0)
+    }
+
+    @Test("Convolution validates explicit kernel sizes and survives scene persistence")
+    func convolutionRoundTripAndValidation() throws {
+        var convolution = ConvolutionEffect.sharpen
+        convolution.kernelSize = 5
+        convolution.kernelText = Array(repeating: "1", count: 25).joined(separator: " ")
+        #expect(convolution.parsedKernel.isValid)
+        #expect(convolution.parsedKernel.values.count == 25)
+
+        convolution.kernelText = Array(repeating: "1", count: 24).joined(separator: " ")
+        #expect(!convolution.parsedKernel.isValid)
+        #expect(convolution.parsedKernel.error?.contains("25 values") == true)
+        #expect(!convolution.isActive)
+
+        convolution.kernelText = "0 -1 0\n-1 5 -1\n0 -1 0"
+        convolution.kernelSize = 3
+        convolution.setStrength(0.65)
+
+        let settings = RenderSettings()
+        settings.convolutionEffect = convolution
+        let encoded = try JSONEncoder().encode(
+            FractalPreset.fromSettings(settings, name: "Convolution")
+        )
+        let decoded = try JSONDecoder().decode(FractalPreset.self, from: encoded)
+
+        #expect(decoded.convolutionEffect?.kernelSize == 3)
+        #expect(decoded.convolutionEffect?.kernelText == convolution.kernelText)
+        #expect(abs((decoded.convolutionEffect?.strength ?? -1) - 0.65) < 1e-5)
+
+        let fresh = RenderSettings()
+        decoded.apply(to: fresh)
+        #expect(fresh.convolutionEffect.isActive)
+        #expect(fresh.convolutionEffect.parsedKernel.values == [0, -1, 0, -1, 5, -1, 0, -1, 0])
     }
 
     @Test("Bound to Space survives scene encode/decode/apply")

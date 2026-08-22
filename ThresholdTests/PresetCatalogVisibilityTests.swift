@@ -59,6 +59,29 @@ struct PresetCatalogVisibilityTests {
         #expect(result.isEmpty)
     }
 
+    @Test("Vision Pro catalogs exclude screen-only tagged scenes")
+    func screenOnlyScenesAreExcludedFromVisionCatalog() {
+        var screenOnly = makePreset(id: environmentID, name: "Overwhelming")
+        screenOnly.tags = [SceneTagging.screenOnlyTag]
+        let ordinary = makePreset(id: ordinaryID, name: "Ordinary")
+
+        let visionResult = PresetManager.filterSceneCatalogPresets(
+            [screenOnly, ordinary],
+            bundledPresets: [],
+            supportsEnvironmentReconstruction: true,
+            includesScreenOnlyScenes: false
+        )
+        let screenResult = PresetManager.filterSceneCatalogPresets(
+            [screenOnly, ordinary],
+            bundledPresets: [],
+            supportsEnvironmentReconstruction: true,
+            includesScreenOnlyScenes: true
+        )
+
+        #expect(visionResult.map(\.id) == [ordinaryID])
+        #expect(screenResult.map(\.id) == [environmentID, ordinaryID])
+    }
+
     private func makePreset(
         id: UUID,
         name: String,

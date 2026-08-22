@@ -1,6 +1,7 @@
 #if os(macOS)
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 @main
 struct ThresholdMacApp: App {
@@ -50,21 +51,8 @@ struct ThresholdMacApp: App {
         // the render view, hosted in its own window so it can live on another
         // screen (or beside the render window) without covering the fractal.
         Window("Threshold Controls", id: AppModel.controlsWindowID) {
-            ZStack(alignment: .topLeading) {
-                ContentView()
-                    .environment(appModel)
-
-                // Keep the live performance HUD with the controls when they are
-                // broken out instead of leaving it behind over the render view.
-                FPSIndicatorView()
-                    .environment(appModel)
-                    .padding(14)
-                    .allowsHitTesting(false)
-            }
-            .frame(minWidth: 980, minHeight: 576)
-            .background(Color(white: 0.09))
-            .onAppear { appModel.isControlsWindowOpen = true }
-            .onDisappear { appModel.isControlsWindowOpen = false }
+            ThresholdControlsWindowView()
+                .environment(appModel)
         }
         .defaultSize(width: 1040, height: 820)
         .windowResizability(.contentMinSize)
@@ -98,6 +86,13 @@ struct ThresholdMacApp: App {
         .windowResizability(.contentMinSize)
 
         .commands {
+            CommandGroup(after: .newItem) {
+                Button("Open Scene…") {
+                    openScene()
+                }
+                .keyboardShortcut("o", modifiers: .command)
+            }
+
             CommandGroup(replacing: .saveItem) {
                 Button("Save Preset…") {
                     appModel.openSavePresetMenuHandler?()
@@ -113,6 +108,233 @@ struct ThresholdMacApp: App {
                 .keyboardShortcut("k", modifiers: .command)
                 .disabled(appModel.openControlFinderHandler == nil)
             }
+        }
+    }
+
+    private func openScene() {
+        let panel = NSOpenPanel()
+        panel.title = "Open Scene"
+        panel.message = "Choose a Threshold scene file."
+        panel.prompt = "Open"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [UTType(exportedAs: "com.puppypower.threshold.scene")]
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        appModel.openExternalFile(url)
+    }
+}
+
+private struct ThresholdControlsWindowView: View {
+    @Environment(AppModel.self) private var appModel
+    @Environment(\.dismissWindow) private var dismissWindow
+    @State private var appearanceGeneration: UInt?
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ContentView(handlesStorageChoice: false)
+
+            // Keep the live performance HUD with the controls when they are
+            // broken out instead of leaving it behind over the render view.
+            if !appModel.isViewportChromeHidden {
+                FPSIndicatorView()
+                    .padding(14)
+                    .allowsHitTesting(false)
+            }
+
+            ViewportChromeShortcutMonitor {
+                // Recording mode is owned by the render window's root view;
+                // with no viewport mounted there is nothing to record and no
+                // monitor left anywhere to toggle back out.
+                guard appModel.isRootRenderViewMounted else { return }
+                appModel.toggleViewportChromeVisibility()
+            }
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+        }
+        .frame(minWidth: 980, minHeight: 576)
+        .background(Color(white: 0.09))
+        .onAppear {
+            // A Window-menu request (or an in-flight open request) must not
+            // punch through recording mode after its hide transition has won.
+            guard !appModel.isViewportChromeHidden else {
+                guard appModel.isRootRenderViewMounted else {
+                    // Recording mode outlived the render window (its owner).
+                    // Self-heal instead of flash-dismissing every reopen of
+                    // the only window the user can still summon.
+                    appModel.isViewportChromeHidden = false
+                    appearanceGeneration = appModel.controlsWindowDidAppear()
+                    return
+                }
+                appModel.requestControlsWindowDismissal()
+                dismissWindow(id: AppModel.controlsWindowID)
+                return
+            }
+            appearanceGeneration = appModel.controlsWindowDidAppear()
+        }
+        .onDisappear {
+            appModel.controlsWindowDidDisappear(generation: appearanceGeneration)
+            appearanceGeneration = nil
+        }
+        .onChange(of: appModel.isViewportChromeHidden) { _, isHidden in
+            if isHidden {
+                appModel.requestControlsWindowDismissal()
+                dismissWindow(id: AppModel.controlsWindowID)
+            }
+        }
+    }
+}
+
+/// Window-local, single-key shortcut for recording mode. A local event monitor
+/// reaches both the Metal viewport and the radial controls without registering
+/// a menu command that would steal H from editors elsewhere in the app.
+private struct ViewportChromeShortcutMonitor: NSViewRepresentable {
+    let onToggle: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onToggle: onToggle)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.hostView = view
+        context.coordinator.start()
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.hostView = nsView
+        context.coordinator.onToggle = onToggle
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+
+    @MainActor
+    final class Coordinator {
+        weak var hostView: NSView?
+        var onToggle: () -> Void
+        private var monitor: Any?
+
+        init(onToggle: @escaping () -> Void) {
+            self.onToggle = onToggle
+        }
+
+        func start() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self,
+                      let hostWindow = hostView?.window,
+                      event.window === hostWindow,
+                      event.charactersIgnoringModifiers?.lowercased() == "h",
+                      event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty
+                else { return event }
+
+                // Text fields and source editors must receive literal H input.
+                if hostWindow.firstResponder is NSTextView || hostWindow.firstResponder is NSTextField {
+                    return event
+                }
+
+                // Consume repeat events without retriggering the toggle.
+                guard !event.isARepeat else { return nil }
+                onToggle()
+                return nil
+            }
+        }
+
+        func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+    }
+}
+
+/// Window-local, unmodified shortcuts for the three most-used control
+/// destinations. Keeping these in a local monitor (instead of app menu key
+/// equivalents) lets text fields and the formula source editor type P/F/R
+/// normally.
+private struct ImportantSceneShortcutMonitor: NSViewRepresentable {
+    let onParameters: () -> Void
+    let onFormula: () -> Void
+    let onRadialMenu: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            onParameters: onParameters,
+            onFormula: onFormula,
+            onRadialMenu: onRadialMenu
+        )
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.hostView = view
+        context.coordinator.start()
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.hostView = nsView
+        context.coordinator.onParameters = onParameters
+        context.coordinator.onFormula = onFormula
+        context.coordinator.onRadialMenu = onRadialMenu
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+
+    @MainActor
+    final class Coordinator {
+        weak var hostView: NSView?
+        var onParameters: () -> Void
+        var onFormula: () -> Void
+        var onRadialMenu: () -> Void
+        private var monitor: Any?
+
+        init(
+            onParameters: @escaping () -> Void,
+            onFormula: @escaping () -> Void,
+            onRadialMenu: @escaping () -> Void
+        ) {
+            self.onParameters = onParameters
+            self.onFormula = onFormula
+            self.onRadialMenu = onRadialMenu
+        }
+
+        func start() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self,
+                      let hostWindow = hostView?.window,
+                      event.window === hostWindow,
+                      event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
+                      let key = event.charactersIgnoringModifiers?.lowercased()
+                else { return event }
+
+                if hostWindow.firstResponder is NSTextView || hostWindow.firstResponder is NSTextField {
+                    return event
+                }
+
+                guard !event.isARepeat else {
+                    return ["p", "f", "r"].contains(key) ? nil : event
+                }
+
+                switch key {
+                case "p": onParameters()
+                case "f": onFormula()
+                case "r": onRadialMenu()
+                default: return event
+                }
+                return nil
+            }
+        }
+
+        func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
         }
     }
 }
@@ -137,14 +359,16 @@ private struct ThresholdMacRootView: View {
     @State private var pendingAutoHide: DispatchWorkItem?
     @State private var pendingRadialReveal: DispatchWorkItem?
     @State private var isControlFinderPresented = false
+    @State private var radialRestoreAnchor: CGPoint?
+    @State private var radialRestorePath: [String] = []
     /// Retained only to migrate the previous on/off launcher preference into the
     /// three explicit navigation modes.
     @AppStorage("MacTabLauncher.enabled") private var legacyLauncherEnabled = true
     @AppStorage("MacTabLauncher.navigationModeMigrated.v1") private var didMigrateNavigationMode = false
     @AppStorage("MacTabLauncher.style") private var launcherStyle: NavigationPresentationStyle = .radial
     @AppStorage("MacTabLauncher.curvature") private var launcherCurvature: Double = 0.82
-    @AppStorage("allowCustomScenes") private var allowCustomScenes = false
     @AppStorage("hasCompletedIntroOnboarding") private var hasCompletedIntroOnboarding = false
+    @State private var showStorageChoice = false
 
     private var radialActiveWorkspaceRoute: AppRoute {
         if appModel.navigationStore.currentRoute.workspaceRoot != nil {
@@ -168,19 +392,25 @@ private struct ThresholdMacRootView: View {
     private let autoHideDelay: TimeInterval = 0.22
     private let panelAnimation = MenuChrome.panelSpring
 
+    private var hasDetachedControls: Bool {
+        appModel.isControlsWindowOpen || appModel.isControlsWindowRequested
+    }
+
     private var shouldShowControls: Bool {
+        guard !appModel.isViewportChromeHidden else { return false }
+        // An import confirmation must stay reachable. If a
+        // detached controls window is already hosting it, avoid mounting a
+        // duplicate panel in the viewport.
+        if appModel.pendingExternalImport != nil && !hasDetachedControls {
+            return true
+        }
         // Separate Window mode never mounts a second copy over the viewport,
         // even during menu tracking or a stale pin state.
         guard launcherStyle != .separateWindow else { return false }
         // While the controls are broken out into their own window, never show
         // the slide-over sidebar — otherwise the panel appears twice. (The breakout
         // window hosts its own ContentView, so the import sheet below shows there.)
-        guard !appModel.isControlsWindowOpen else { return false }
-        // Force the panel open while an external-file import is pending. The import
-        // confirmation sheet is hosted by ContentView *inside* this panel, so if the
-        // panel auto-hides — or was never revealed when a file was opened from Finder —
-        // ContentView unmounts and the sheet auto-dismisses before the user can act.
-        if appModel.pendingExternalImport != nil { return true }
+        guard !hasDetachedControls else { return false }
         // While the launcher is up the slide-over panel stays put: quick-input
         // drags mark menu interaction active, which must not summon the panel
         // over the rings mid-adjustment. An explicit pin still wins.
@@ -201,12 +431,16 @@ private struct ThresholdMacRootView: View {
             let controlsWidth = controlsPanelWidth(for: proxy.size)
 
             ZStack(alignment: .topTrailing) {
-                ThresholdMacRenderView(appModel: appModel)
+                ThresholdMacRenderView(
+                    appModel: appModel,
+                    allowsPointerRadialPassthrough: isShiftPressed
+                )
                     .frame(minWidth: minimumWindowSize.width, minHeight: minimumWindowSize.height)
                     .background(Color.black)
                     .ignoresSafeArea()
 
-                if launcherStyle == .radial && radialMenu.isPresented && !appModel.isControlsWindowOpen {
+                if launcherStyle == .radial && radialMenu.isPresented && !hasDetachedControls
+                    && !appModel.isViewportChromeHidden {
                     RadialMenu(
                         size: proxy.size,
                         pointerAnchor: radialMenu.anchor,
@@ -259,10 +493,9 @@ private struct ThresholdMacRootView: View {
                 .animation(motionSensitivePanelAnimation, value: shouldShowControls)
                 .allowsHitTesting(shouldShowControls)
 
-                // The pin toggles the slide-over sidebar, which doesn't exist while the
-                // controls are broken out — so hide the pin then. Its absence also reads
-                // as "there's nothing to pin here; use Merge Into Window to bring it back."
-                if !appModel.isControlsWindowOpen {
+                // The pin toggles the slide-over sidebar, which doesn't exist while
+                // the controls are broken out or recording mode is active.
+                if !hasDetachedControls && !appModel.isViewportChromeHidden {
                     floatingToggle(windowSize: proxy.size)
                         .padding(.top, panelPadding)
                         .padding(.trailing, panelPadding)
@@ -271,7 +504,7 @@ private struct ThresholdMacRootView: View {
                 // Always-on perf HUD (top-leading, opposite the pin button). Shows
                 // FPS plus the continuous GPU-ms cost so acceleration tuning is
                 // visible even when the frame rate is pinned by the display refresh.
-                if !appModel.isControlsWindowOpen {
+                if !hasDetachedControls && !appModel.isViewportChromeHidden {
                     FPSIndicatorView()
                         .environment(appModel)
                         .padding(.top, panelPadding)
@@ -280,7 +513,7 @@ private struct ThresholdMacRootView: View {
                         .allowsHitTesting(false)
                 }
 
-                if appModel.isAttributionShortcutHeld {
+                if appModel.isAttributionShortcutHeld && !appModel.isViewportChromeHidden {
                     AttributionOverlay()
                         .padding(24)
                         .frame(
@@ -334,7 +567,32 @@ private struct ThresholdMacRootView: View {
                 )
                     .frame(width: 0, height: 0)
                     .allowsHitTesting(false)
+
+                ViewportChromeShortcutMonitor {
+                    appModel.toggleViewportChromeVisibility()
+                }
+                .frame(width: 0, height: 0)
+                .allowsHitTesting(false)
+
+                ImportantSceneShortcutMonitor(
+                    onParameters: {
+                        openImportantScene(.input(.parameters))
+                    },
+                    onFormula: {
+                        openImportantScene(.shape(.formula))
+                    },
+                    onRadialMenu: {
+                        toggleRadialShortcut(windowSize: proxy.size)
+                    }
+                )
+                .frame(width: 0, height: 0)
+                .allowsHitTesting(false)
             }
+            .sceneNavigationFeedbackOverlay(
+                isObscured: radialMenu.isPresented,
+                instruction: "Arrow keys · Swipe card",
+                bottomPadding: panelPadding
+            )
             .frame(minWidth: minimumWindowSize.width, minHeight: minimumWindowSize.height)
             .animation(
                 reduceMotion ? nil : .easeOut(duration: 0.16),
@@ -356,6 +614,12 @@ private struct ThresholdMacRootView: View {
                     windowSize: proxy.size
                 )
             }
+            .onChange(of: appModel.isViewportChromeHidden) { _, isHidden in
+                // Inside the GeometryReader so the exit path can re-clamp the
+                // stashed radial anchor against the size the window has NOW —
+                // it may have been resized while the chrome was hidden.
+                applyViewportChromeVisibility(isHidden: isHidden, windowSize: proxy.size)
+            }
         }
         .frame(minWidth: minimumWindowSize.width, minHeight: minimumWindowSize.height)
         .sheet(isPresented: $isControlFinderPresented) {
@@ -374,6 +638,10 @@ private struct ThresholdMacRootView: View {
                 .interactiveDismissDisabled()
         }
         .onAppear {
+            appModel.isRootRenderViewMounted = true
+            if hasCompletedIntroOnboarding && !StorageLocation.shared.hasChosenMode {
+                showStorageChoice = true
+            }
             migrateLegacyNavigationPreferenceIfNeeded()
             Task { @MainActor in
                 await appModel.startMicrophoneAtLaunchIfEnabled()
@@ -381,8 +649,8 @@ private struct ThresholdMacRootView: View {
             appModel.openControlFinderHandler = {
                 isControlFinderPresented = true
             }
-            if launcherStyle == .separateWindow {
-                openWindow(id: AppModel.controlsWindowID)
+            if launcherStyle == .separateWindow && !appModel.isViewportChromeHidden {
+                presentControlsWindow()
             }
         }
         .onChange(of: appModel.isMenuInteractionActive) { _, _ in
@@ -411,10 +679,46 @@ private struct ThresholdMacRootView: View {
             updateAutoHideState(animated: true)
         }
         .onChange(of: appModel.isControlsWindowOpen) { _, isOpen in
+            if !isOpen,
+               appModel.isControlsWindowRequested,
+               !appModel.isViewportChromeHidden {
+                // A late disappearance from an older hide transition must not
+                // cancel a newer show request for this singleton Window scene.
+                DispatchQueue.main.async {
+                    guard appModel.isControlsWindowRequested,
+                          !appModel.isViewportChromeHidden else { return }
+                    openWindow(id: AppModel.controlsWindowID)
+                }
+            }
             // The breakout window unmounts the launcher; without this the
             // session (cache sync timer, scroll-consuming monitor state, stale
             // browse path) would silently outlive it and ghost-remount later.
             if isOpen { hideRadialTabs(animated: false) }
+        }
+        .onChange(of: appModel.pendingExternalImport != nil) { _, isPending in
+            // Opening a file is an explicit interruption to recording. Leave
+            // the clean view so its confirmation sheet has a mounted host.
+            if isPending && appModel.isViewportChromeHidden {
+                appModel.isViewportChromeHidden = false
+            }
+        }
+        .onChange(of: hasCompletedIntroOnboarding) { _, completed in
+            guard completed, !StorageLocation.shared.hasChosenMode else { return }
+            Task { @MainActor in
+                await Task.yield()
+                showStorageChoice = true
+            }
+        }
+        .sheet(isPresented: $showStorageChoice) {
+            StorageModeChoiceSheet { chosen in
+                if chosen != StorageLocation.shared.mode {
+                    appModel.switchStorageMode(to: chosen)
+                } else {
+                    StorageLocation.shared.markModeChosen()
+                }
+                showStorageChoice = false
+            }
+            .interactiveDismissDisabled(true)
         }
         .onReceive(NotificationCenter.default.publisher(for: AppModel.fractalSettingsDidChangeNotification)) { _ in
             // Scene/preset loads replace RenderSettings values wholesale; the
@@ -422,6 +726,11 @@ private struct ThresholdMacRootView: View {
             if radialMenu.isPresented { radialCache.loadFromSettings() }
         }
         .onDisappear {
+            appModel.isRootRenderViewMounted = false
+            // Recording mode must not outlive the viewport it records: with
+            // this view unmounted there is no H monitor, restore logic, or
+            // exit affordance left to leave it.
+            appModel.isViewportChromeHidden = false
             appModel.openControlFinderHandler = nil
             pendingAutoHide?.cancel()
             pendingAutoHide = nil
@@ -432,7 +741,10 @@ private struct ThresholdMacRootView: View {
     }
 
     private var slideOverPanel: some View {
-        ContentView(showsOuterNavigation: launcherStyle != .radial)
+        ContentView(
+            showsOuterNavigation: launcherStyle != .radial,
+            handlesStorageChoice: false
+        )
             .environment(appModel)
             .frame(maxHeight: .infinity)
             .background(
@@ -542,6 +854,18 @@ private struct ThresholdMacRootView: View {
     }
 
     private func navigateFromControlFinder(_ destination: ControlFinderDestination) {
+        // Choosing a destination is an explicit interruption to recording,
+        // like an external import: otherwise the activation is invisible
+        // (shouldShowControls stays false) and the pin latched below pops the
+        // panel open only much later, on the next H press. Cancelling the
+        // finder instead (Esc) keeps the clean recording view. The stashed
+        // radial state is dropped so exiting recording here doesn't also
+        // re-present the launcher over the destination panel.
+        if appModel.isViewportChromeHidden {
+            radialRestoreAnchor = nil
+            radialRestorePath = []
+            appModel.isViewportChromeHidden = false
+        }
         hideRadialTabs(animated: false)
         withAnimation(motionSensitivePanelAnimation) {
             isControlsPinnedOpen = true
@@ -567,6 +891,7 @@ private struct ThresholdMacRootView: View {
     }
 
     private func handleWindowMouseMoved(_ location: CGPoint, windowSize: CGSize) {
+        guard !appModel.isViewportChromeHidden else { return }
         let isInsideRevealEdge = location.x >= windowSize.width - edgeRevealWidth
             && location.x <= windowSize.width + 2
 
@@ -638,7 +963,12 @@ private struct ThresholdMacRootView: View {
     private func hideRadialTabs(animated: Bool) {
         pendingRadialReveal?.cancel()
         pendingRadialReveal = nil
-        guard radialMenu.isPresented else { return }
+        guard radialMenu.isPresented else {
+            // Also repair an interrupted presentation that claimed ownership
+            // before its visible state was committed.
+            endRadialSession()
+            return
+        }
 
         endRadialSession()
         if animated && !reduceMotion {
@@ -655,12 +985,17 @@ private struct ThresholdMacRootView: View {
     /// to call once per session, so both reveal paths route through here while
     /// the launcher is still hidden.
     private func beginRadialSession() -> Bool {
+        // Presentation requests can converge in the same run-loop turn (edge,
+        // keyboard, and button). Treat an existing claim as the same session
+        // instead of incrementing the ownership store's re-entrant count.
+        if appModel.inputOwnershipStore.owner == .radialMenu { return true }
         guard appModel.inputOwnershipStore.claim(.radialMenu) else { return false }
         radialCache.startSync(with: appModel.renderSettings, appModel: appModel)
         return true
     }
 
     private func endRadialSession() {
+        guard appModel.inputOwnershipStore.owner == .radialMenu else { return }
         appModel.inputOwnershipStore.release(.radialMenu)
         radialCache.stopSync()
     }
@@ -680,7 +1015,7 @@ private struct ThresholdMacRootView: View {
     private var radialProjection: RadialNavigationProjection {
         RadialMenuProjectionFactory.make(
             appModel: appModel,
-            allowsCustomScenes: allowCustomScenes,
+            allowsCustomScenes: true,
             onActivate: activateRadialTarget
         )
     }
@@ -729,10 +1064,10 @@ private struct ThresholdMacRootView: View {
     private func toggleSelectedNavigation(windowSize: CGSize) {
         switch launcherStyle {
         case .separateWindow:
-            openWindow(id: AppModel.controlsWindowID)
+            presentControlsWindow()
 
         case .controlPanel:
-            guard !appModel.isControlsWindowOpen else { return }
+            guard !hasDetachedControls else { return }
             if shouldShowControls {
                 isControlsPinnedOpen = false
                 setHoverVisible(false, animated: true)
@@ -741,7 +1076,7 @@ private struct ThresholdMacRootView: View {
             }
 
         case .radial:
-            guard !appModel.isControlsWindowOpen else { return }
+            guard !hasDetachedControls else { return }
             if radialMenu.isPresented {
                 hideRadialTabs(animated: true)
                 return
@@ -754,13 +1089,46 @@ private struct ThresholdMacRootView: View {
         }
     }
 
+    private func openImportantScene(_ route: AppRoute) {
+        guard !appModel.isViewportChromeHidden else { return }
+        hideRadialTabs(animated: false)
+        appModel.navigationStore.select(route)
+
+        switch launcherStyle {
+        case .separateWindow:
+            presentControlsWindow()
+        case .radial, .controlPanel:
+            showControls(animated: true)
+        }
+    }
+
+    private func toggleRadialShortcut(windowSize: CGSize) {
+        guard !appModel.isViewportChromeHidden, !hasDetachedControls else { return }
+
+        let toggle = {
+            toggleSelectedNavigation(windowSize: windowSize)
+        }
+        guard launcherStyle != .radial else {
+            toggle()
+            return
+        }
+
+        // applyNavigationStyle runs from onChange and clears the previous
+        // presentation. Reveal on the next turn so that cleanup happens first.
+        launcherStyle = .radial
+        DispatchQueue.main.async {
+            toggleSelectedNavigation(windowSize: windowSize)
+        }
+    }
+
     /// Viewport clicks are toggles. In particular, a click outside an already
     /// open radial menu dismisses it instead of moving its anchor and resetting
     /// the current path.
     private func handleViewportClick(anchor: CGPoint, windowSize: CGSize) {
+        guard !appModel.isViewportChromeHidden else { return }
         switch launcherStyle {
         case .separateWindow:
-            openWindow(id: AppModel.controlsWindowID)
+            presentControlsWindow()
 
         case .controlPanel:
             if shouldShowControls {
@@ -788,6 +1156,64 @@ private struct ThresholdMacRootView: View {
         didMigrateNavigationMode = true
     }
 
+    /// Applies the recording-mode state toggled by H. The persisted FPS
+    /// preference and panel pin/hover state stay untouched, so leaving recording
+    /// mode restores exactly the chrome that was visible beforehand.
+    private func applyViewportChromeVisibility(isHidden: Bool, windowSize: CGSize) {
+        if !isHidden {
+            if appModel.shouldRestoreControlsWindowAfterRecording {
+                presentControlsWindow()
+            }
+
+            if let anchor = radialRestoreAnchor {
+                let path = radialRestorePath
+                radialRestoreAnchor = nil
+                radialRestorePath = []
+                if beginRadialSession() {
+                    // The window may have been resized while the chrome was
+                    // hidden, leaving the stashed anchor out of bounds.
+                    let clamped = clampedLauncherAnchor(anchor, windowSize: windowSize)
+                    if reduceMotion {
+                        radialMenu.present(at: clamped, initialPath: path)
+                    } else {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                            radialMenu.present(at: clamped, initialPath: path)
+                        }
+                    }
+                }
+            }
+            return
+        }
+
+        if radialMenu.isPresented {
+            radialRestoreAnchor = radialMenu.anchor
+            radialRestorePath = radialMenu.path
+            hideRadialTabs(animated: true)
+        } else {
+            radialRestoreAnchor = nil
+            radialRestorePath = []
+        }
+
+        pendingAutoHide?.cancel()
+        pendingAutoHide = nil
+        pendingRadialReveal?.cancel()
+        pendingRadialReveal = nil
+
+        if appModel.isControlsWindowRequested || appModel.isControlsWindowOpen {
+            dismissControlsWindow()
+        }
+    }
+
+    private func presentControlsWindow() {
+        appModel.requestControlsWindowPresentation()
+        openWindow(id: AppModel.controlsWindowID)
+    }
+
+    private func dismissControlsWindow() {
+        appModel.requestControlsWindowDismissal()
+        dismissWindow(id: AppModel.controlsWindowID)
+    }
+
     private func applyNavigationStyle(_ style: NavigationPresentationStyle) {
         pendingRadialReveal?.cancel()
         pendingRadialReveal = nil
@@ -798,27 +1224,27 @@ private struct ThresholdMacRootView: View {
             hideRadialTabs(animated: false)
             isControlsPinnedOpen = false
             setHoverVisible(false, animated: false)
-            openWindow(id: AppModel.controlsWindowID)
+            presentControlsWindow()
 
         case .radial:
             hideRadialTabs(animated: false)
             isControlsPinnedOpen = false
             setHoverVisible(false, animated: false)
-            if appModel.isControlsWindowOpen {
-                dismissWindow(id: AppModel.controlsWindowID)
+            if appModel.isControlsWindowRequested || appModel.isControlsWindowOpen {
+                dismissControlsWindow()
             }
 
         case .controlPanel:
             hideRadialTabs(animated: true)
-            if appModel.isControlsWindowOpen {
-                dismissWindow(id: AppModel.controlsWindowID)
+            if appModel.isControlsWindowRequested || appModel.isControlsWindowOpen {
+                dismissControlsWindow()
             }
             showControls(animated: true)
         }
     }
 
     private func showRadialLauncher(anchor: CGPoint, windowSize: CGSize) {
-        guard launcherStyle == .radial, !appModel.isControlsWindowOpen else { return }
+        guard launcherStyle == .radial, !hasDetachedControls else { return }
 
         pendingAutoHide?.cancel()
         pendingAutoHide = nil

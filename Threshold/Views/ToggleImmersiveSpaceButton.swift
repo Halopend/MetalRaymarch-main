@@ -69,16 +69,18 @@ struct ToggleImmersiveSpaceButton: View {
         .fontWeight(.semibold)
 #elseif os(macOS)
         // Toggles the controls between the slide-over sidebar and their own window.
-        // The label + action flip with `isControlsWindowOpen` so the same button
-        // sends the controls out and brings them back.
+        // The label and action follow both the requested and materialized Window
+        // state so rapid detach/merge taps cannot race SwiftUI's scene lifecycle.
         Button {
-            if appModel.isControlsWindowOpen {
+            if appModel.isControlsWindowOpen || appModel.isControlsWindowRequested {
+                appModel.requestControlsWindowDismissal()
                 dismissWindow(id: AppModel.controlsWindowID)
             } else {
+                appModel.requestControlsWindowPresentation()
                 openWindow(id: AppModel.controlsWindowID)
             }
         } label: {
-            Text(appModel.isControlsWindowOpen ? "Merge" : "Detach")
+            Text(appModel.isControlsWindowOpen || appModel.isControlsWindowRequested ? "Merge" : "Detach")
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
                 .frame(maxWidth: .infinity, alignment: .center)

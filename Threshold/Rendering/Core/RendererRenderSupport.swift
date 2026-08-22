@@ -175,6 +175,29 @@ extension Renderer {
         }
     }
 
+    /// Type-erased handle for `LayerRenderer.Drawable.RenderContext` (a
+    /// visionOS 26-only type) so the render loop can thread it through without
+    /// availability plumbing. Created by `beginDrawableRenderContext` right
+    /// after `frame.startSubmission()`, consumed by
+    /// `encodeDrawableRenderContextPass` immediately before `encodePresent`.
+    struct DrawableRenderContextHandle {
+        fileprivate let context: Any
+    }
+
+    /// Adds the compositor's render context to the drawable for this frame's
+    /// command buffer. Call it as the FIRST thing after `frame.startSubmission()`:
+    /// CompositorServices requires `drawable.deviceAnchor` to be set before
+    /// `addRenderContext`, and Apple's reference loop adds the context before
+    /// any encoder touches the drawable. Returns nil only when the layer was
+    /// not configured with a render-context stencil format, in which case the
+    /// compositor requires nothing.
+    func beginDrawableRenderContext(commandBuffer: MTLCommandBuffer,
+                                    drawable: LayerRenderer.Drawable) -> DrawableRenderContextHandle? {
+        guard drawableRenderContextRequired else { return nil }
+        guard #available(visionOS 26.0, *) else { return nil }
+        return DrawableRenderContextHandle(context: drawable.addRenderContext(commandBuffer: commandBuffer))
+    }
+
     /// Encodes the compositor's drawable render-context pass — REQUIRED before
     /// every present once the layer declares a render-context stencil format,
     /// in every immersion style. The context stamps the visible-pixel mask
@@ -188,13 +211,22 @@ extension Renderer {
     ///
     /// Must be the last encoding before `drawable.encodePresent` — the render
     /// context takes ownership of the encoder and calls `endEncoding` itself.
-    func encodeDrawableRenderContextPass(commandBuffer: MTLCommandBuffer, drawable: LayerRenderer.Drawable) {
-        guard #available(visionOS 26.0, *) else { return }
+    /// A nil handle means the layer has no render context configured.
+    func encodeDrawableRenderContextPass(_ handle: DrawableRenderContextHandle?,
+                                         commandBuffer: MTLCommandBuffer,
+                                         drawable: LayerRenderer.Drawable) {
+        guard let handle else { return }
+        guard #available(visionOS 26.0, *),
+              let renderContext = handle.context as? LayerRenderer.Drawable.RenderContext else { return }
         let stencilFormat = layerRenderer.configuration.drawableRenderContextStencilFormat
         guard stencilFormat != .invalid,
-              let stencil = ensurePortalStencilTexture(matching: drawable, format: stencilFormat) else { return }
-
-        let renderContext = drawable.addRenderContext(commandBuffer: commandBuffer)
+              let stencil = ensurePortalStencilTexture(matching: drawable, format: stencilFormat) else {
+            // The context was already added to the drawable; nothing can end
+            // it without an encoder. Never fail silently — the compositor will
+            // reject the present and this line is the only clue why.
+            print("❌ Progressive immersion portal pass skipped: no stencil texture (format \(stencilFormat.rawValue)) — present will be rejected")
+            return
+        }
 
         let descriptor = MTLRenderPassDescriptor()
         descriptor.colorAttachments[0].texture = drawable.colorTextures[0]
@@ -210,7 +242,10 @@ extension Renderer {
         descriptor.rasterizationRateMap = drawable.rasterizationRateMaps.first
         descriptor.renderTargetArrayLength = drawable.views.count
 
-        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return }
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+            print("❌ Progressive immersion portal pass skipped: could not create render encoder — present will be rejected")
+            return
+        }
         encoder.label = "Progressive Immersion Portal"
         renderContext.drawMaskOnStencilAttachment(commandEncoder: encoder, value: 0xFF)
         renderContext.endEncoding(commandEncoder: encoder)
@@ -241,7 +276,15 @@ extension Renderer {
         descriptor.arrayLength = arrayLength
         descriptor.usage = .renderTarget
         descriptor.storageMode = .memoryless
-        portalStencilTexture = device.makeTexture(descriptor: descriptor)
+        var texture = device.makeTexture(descriptor: descriptor)
+        if texture == nil {
+            // Memoryless is an optimisation, not a requirement: a missing
+            // stencil target would leave the frame without the render-context
+            // pass the compositor insists on. Fall back to a private texture.
+            descriptor.storageMode = .private
+            texture = device.makeTexture(descriptor: descriptor)
+        }
+        portalStencilTexture = texture
         return portalStencilTexture
     }
 

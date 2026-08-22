@@ -312,6 +312,96 @@ struct EdgeDetectionEffect: LightingEffect {
     }
 }
 
+/// A bounded output-space convolution filter. The selected size is explicit so
+/// editing an incomplete kernel never silently changes its shape. Kernels are
+/// limited to 5×5 to keep the renderer ABI fixed and the per-pixel cost bounded.
+struct ConvolutionEffect: LightingEffect {
+    static let supportedKernelSizes = [1, 3, 5]
+    static let maxKernelDimension = 5
+    static let activationEpsilon: Float = 0.001
+    static let defaultKernelText = "0 -1 0\n-1 5 -1\n0 -1 0"
+
+    var enabled: Bool = false
+    var strength: Float = 0.0
+    var kernelSize: Int = 3
+    var kernelText: String = ConvolutionEffect.defaultKernelText
+
+    var primaryValue: Float {
+        get { strength }
+        set { setStrength(newValue) }
+    }
+    static let primaryLabel = "Amount"
+
+    var parsedKernel: ParsedKernel {
+        Self.parse(kernelText, size: kernelSize)
+    }
+
+    var isActive: Bool {
+        enabled && strength > Self.activationEpsilon && parsedKernel.isValid
+    }
+
+    mutating func setStrength(_ value: Float) {
+        strength = min(1.0, max(0.0, value.isFinite ? value : 0.0))
+        enabled = strength > Self.activationEpsilon
+    }
+
+    mutating func normalize() {
+        strength = min(1.0, max(0.0, strength.isFinite ? strength : 0.0))
+        if !Self.supportedKernelSizes.contains(kernelSize) { kernelSize = 3 }
+        if kernelText.count > 2_048 {
+            kernelText = String(kernelText.prefix(2_048))
+        }
+        if !enabled || strength <= Self.activationEpsilon {
+            enabled = false
+            strength = 0
+        }
+    }
+
+    static var off: ConvolutionEffect { ConvolutionEffect() }
+
+    static var sharpen: ConvolutionEffect {
+        ConvolutionEffect(
+            enabled: true,
+            strength: 0.8,
+            kernelSize: 3,
+            kernelText: defaultKernelText
+        )
+    }
+
+    struct ParsedKernel: Equatable, Sendable {
+        var size: Int = 0
+        var values: [Float] = []
+        var error: String?
+
+        var isValid: Bool { error == nil && size > 0 && values.count == size * size }
+    }
+
+    private static func parse(_ text: String, size: Int) -> ParsedKernel {
+        guard supportedKernelSizes.contains(size) else {
+            return ParsedKernel(error: "Choose a 1×1, 3×3, or 5×5 kernel size.")
+        }
+
+        let tokens = text.split { character in
+            character.isWhitespace || character == "," || character == ";"
+        }
+        let values = tokens.compactMap { Float($0) }
+        guard values.count == tokens.count else {
+            return ParsedKernel(error: "Use numbers separated by spaces, commas, or new lines.")
+        }
+
+        let expectedCount = size * size
+        guard values.count == expectedCount else {
+            return ParsedKernel(
+                error: "A \(size)×\(size) kernel needs exactly \(expectedCount) values (found \(values.count))."
+            )
+        }
+        guard values.allSatisfy(\.isFinite) else {
+            return ParsedKernel(error: "Kernel values must be finite numbers.")
+        }
+        return ParsedKernel(size: size, values: values, error: nil)
+    }
+}
+
 /// Fog effect - distance-based atmospheric fog
 struct FogEffect: LightingEffect {
     var enabled: Bool = true
@@ -695,7 +785,12 @@ enum LightingPreset: String, CaseIterable, Codable {
     case edgeDetection = "Edge Detection"
     case custom = "Custom"
     
-    var displayName: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .edgeDetection: return "Edge Detection (Canny-style)"
+        default: return rawValue
+        }
+    }
     
     var icon: String {
         switch self {
@@ -716,7 +811,7 @@ enum LightingPreset: String, CaseIterable, Codable {
         case .dynamic: return "Moderate animation"
         case .psychedelic: return "Maximum visual intensity"
         case .atmospheric: return "Moody fog and glow"
-        case .edgeDetection: return "Outline surfaces with a manual luminance edge detector"
+        case .edgeDetection: return "Outline surfaces with a Canny-inspired luminance edge detector"
         case .custom: return "Manual control"
         }
     }

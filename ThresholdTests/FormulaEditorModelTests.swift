@@ -207,4 +207,39 @@ struct FormulaEditorModelTests {
         #expect(model.parsedParams.first?.name == "Size")
         #expect(!model.isDirty)
     }
+
+    @Test("Invalidating the editor drops an in-flight compile and stops new ones")
+    func invalidateDropsInFlightCompile() async {
+        let recorder = CompileRecorder()
+        recorder.gated = true
+        let model = makeModel(recorder: recorder)
+
+        model.setSource(validSource)
+        model.compileNow()
+        await waitUntil { recorder.suspendedCount == 1 }
+        #expect(model.status == .compiling)
+
+        // Editor dismissed while the Metal compile is still running.
+        model.invalidate()
+        #expect(model.isInvalidated)
+        #expect(model.status != .compiling)
+
+        // The stale result must not flip the editor live, and edits after
+        // dismissal must not start further compiles.
+        recorder.release()
+        model.setSource(validSource.replacingOccurrences(of: "Radius", with: "RadiusZ"))
+        model.compileNow()
+        try? await Task.sleep(for: .milliseconds(120))
+        #expect(model.status != .live)
+        #expect(recorder.compiledSources.count == 1)
+    }
+
+    @Test("Save failures are reported instead of swallowed")
+    func saveFailureIsReported() {
+        // No library backing the model: save() returns nil without throwing,
+        // so the no-error path must clear any stale message.
+        let model = makeModel(recorder: CompileRecorder())
+        #expect(model.saveReportingErrors())
+        #expect(model.saveErrorMessage == nil)
+    }
 }

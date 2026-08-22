@@ -44,9 +44,6 @@ final class AudioHub {
     private let microphone: MicrophoneCaptureSource
     private let appleMusic: AppleMusicMetadataFeatureSource
     private let configuration: AudioHubConfiguration
-    #if os(macOS)
-    private let systemOutput: SystemOutputCaptureSource
-    #endif
 
     /// An explicit capture source wins over automatic fallback selection. When
     /// nil, a live PCM capture wins, then Apple Music's labelled metadata signal.
@@ -76,13 +73,7 @@ final class AudioHub {
         let microphone = MicrophoneCaptureSource(analyzer: microphoneAnalyzer)
         self.microphone = microphone
         self.appleMusic = AppleMusicMetadataFeatureSource(manager: appleMusicManager)
-        #if os(macOS)
-        let systemOutput = SystemOutputCaptureSource(policy: configuration.systemOutputCapturePolicy)
-        self.systemOutput = systemOutput
-        self.captureSources = [microphone, systemOutput]
-        #else
         self.captureSources = [microphone]
-        #endif
         self.featureStore = AudioFeatureStore(initialValue: .empty(at: ProcessInfo.processInfo.systemUptime))
     }
 
@@ -113,9 +104,6 @@ final class AudioHub {
 
     var sourceDescriptors: [AudioSourceDescriptor] {
         var descriptors: [AudioSourceDescriptor] = [microphone.descriptor]
-        #if os(macOS)
-        descriptors.append(systemOutput.descriptor)
-        #endif
         descriptors.append(appleMusic.descriptor)
         descriptors.append(spotifyDescriptor)
         return descriptors
@@ -200,18 +188,8 @@ final class AudioHub {
         refreshFeatureSnapshot()
     }
 
-    /// ScreenCaptureKit capture must stop when the app becomes inactive. The
-    /// method lives here instead of in a specific SwiftUI tab so it stays true
-    /// when audio controls move to another surface.
+    /// Stops capture sources that must not survive an inactive app lifecycle.
     func stopTransientSources() async {
-        #if os(macOS)
-        if systemOutput.isActive {
-            await systemOutput.stopCapture()
-            if selectedSourceID == .systemOutput {
-                selectedSourceID = nil
-            }
-        }
-        #endif
         refreshFeatureSnapshot()
     }
 
@@ -221,20 +199,11 @@ final class AudioHub {
             return
         }
 
-        #if os(macOS)
-        if sourceID == .systemOutput {
-            systemOutput.openSettings()
-        }
-        #endif
     }
 
     func canOpenSettings(for sourceID: AudioSourceID) -> Bool {
         if sourceID == .microphone { return true }
-        #if os(macOS)
-        return sourceID == .systemOutput
-        #else
         return false
-        #endif
     }
 
     // MARK: - Fallback refresh

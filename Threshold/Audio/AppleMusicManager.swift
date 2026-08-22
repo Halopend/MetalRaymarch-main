@@ -68,7 +68,13 @@ final class AppleMusicManager {
     var currentTimeString: String { formatTime(playbackTimeSeconds) }
     var totalTimeString: String { formatTime(durationSeconds) }
 
-    private let player = MPMusicPlayerController.systemMusicPlayer
+    /// Resolved lazily: on iOS, the first touch of `systemMusicPlayer` state
+    /// (now-playing item, playback time) presents the Media & Apple Music
+    /// permission alert. `AppleMusicManager` is built during app launch, so
+    /// the player must not be consulted until the user has authorized access
+    /// from the Music UI.
+    private var player: MPMusicPlayerController { MPMusicPlayerController.systemMusicPlayer }
+    private var isObservingPlayer = false
     private var lastUpdateTime: CFTimeInterval = 0
     private var monitorTask: Task<Void, Never>?
     private var notificationObservers: [NSObjectProtocol] = []
@@ -79,17 +85,28 @@ final class AppleMusicManager {
 
     init() {
         authorizationStatus = MPMediaLibrary.authorizationStatus()
+        // Only an already-authorized library may attach to the system player at
+        // launch; otherwise wait for an explicit `requestAuthorization()` so the
+        // permission prompt appears in the context of the Music tab.
+        guard isAuthorized else { return }
+        attachToPlayerIfNeeded()
+        startMonitoring()
+        refreshLibrary()
+        updateMetadata()
+    }
+
+    /// Begins observing the system music player. Idempotent; must only be
+    /// called once the media library is authorized.
+    private func attachToPlayerIfNeeded() {
+        guard !isObservingPlayer else { return }
+        isObservingPlayer = true
         player.beginGeneratingPlaybackNotifications()
         observePlayerNotifications()
-        if isAuthorized {
-            startMonitoring()
-            refreshLibrary()
-        }
-        updateMetadata()
     }
 
     func requestAuthorization() {
         if authorizationStatus == .authorized {
+            attachToPlayerIfNeeded()
             startMonitoring()
             refreshLibrary()
             updateFrame()
@@ -100,6 +117,7 @@ final class AppleMusicManager {
             Task { @MainActor in
                 self?.authorizationStatus = status
                 if status == .authorized {
+                    self?.attachToPlayerIfNeeded()
                     self?.startMonitoring()
                     self?.refreshLibrary()
                     self?.updateFrame()
@@ -279,6 +297,9 @@ final class AppleMusicManager {
     }
 
     func updateFrame() {
+        // Reading player state before authorization triggers the system
+        // permission alert; stay inert until the user has granted access.
+        guard isAuthorized, isObservingPlayer else { return }
         let wasPlaying = isPlaying
         let previousPlaybackTime = playbackTimeSeconds
         let previousDuration = durationSeconds

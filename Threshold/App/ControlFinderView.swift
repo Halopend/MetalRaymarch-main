@@ -139,7 +139,7 @@ struct ControlFinderDestination: Identifiable {
         ),
         destination(
             ShapeRailSection.transformations,
-            description: "Edit the full transformation catalog directly, or switch to Learn for optional equation lessons.",
+            description: "Edit the full transformation catalog directly.",
             keywords: ["transform", "warp", "sphere projection", "inversion", "twist", "fold stack", "space cut", "icosahedral", "coxeter"]
         ),
         destination(
@@ -173,7 +173,7 @@ struct ControlFinderDestination: Identifiable {
         ),
         destination(
             VisualizationsRailSection.grading,
-            description: "Apply scene-level grading, tonemapping, shading, and output-space edge detection.",
+            description: "Apply scene-level grading, tonemapping, shading, and Canny-style output-space edge detection.",
             keywords: ["post processing", "grade", "contrast", "saturation", "gamma", "vibrance", "shadows", "highlights", "toon", "cell shading", "ambient occlusion", "filmic", "tonemap", "vignette", "edge", "outline", "contour"]
         ),
         destination(
@@ -245,7 +245,7 @@ struct ControlFinderDestination: Identifiable {
         // Settings
         settingsDestination(
             .display,
-            description: "Configure handedness, text, touch feedback, the platform, and display experiments.",
+            description: "Configure handedness, text, touch feedback, the platform, and advanced display options.",
             keywords: ["appearance", "handedness", "text size", "touch indicators", "launcher", "custom scenes"]
         ),
         settingsDestination(
@@ -260,7 +260,7 @@ struct ControlFinderDestination: Identifiable {
         ),
         settingsDestination(
             .advanced,
-            description: "Open render diagnostics, experimental acceleration, and benchmark tools.",
+            description: "Open render diagnostics, advanced acceleration, and benchmark tools.",
             keywords: ["developer", "diagnostics", "raymarcher", "benchmark", "foveation", "smart advance", "advanced"]
         ),
         ControlFinderDestination(

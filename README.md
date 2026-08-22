@@ -5,6 +5,8 @@ Explore a conceptual exploration at the intersection of art, math, chaos and ord
 
 Threshold is a continuous sensory space for exploring higher-dimensional objects through light, motion, sound, and interaction.
 
+![Threshold real-time Metal ray marching demo](metal-raymarch-demo.gif)
+
 With a focus on control, expanding toolsets, realtime visualizations and standardization, the hope is to reduce the barrier to entry
 for people to be able to supply their own contributions while being able to cross pollinate their efforts with others in a community output,
 both self organizing through shared files and internally through code contributions. 
@@ -18,7 +20,7 @@ Try Threshold on Apple platforms through TestFlight:
 [Join the Threshold beta](https://testflight.apple.com/join/M2h3z8JU)
 
 
-## Custom scenes are the core workflow, but still in beta
+## Custom scenes are the core workflow
 Write or import a portable DE, tune it live, then export a self-contained scene.
 
 ```mermaid
@@ -36,7 +38,7 @@ flowchart LR
 - **A real Metal DE contract:** Threshold injects a validated formula body into
   its renderer and calls a distance-only function for marching plus an
   orbit-aware function for coloring.
-- **Live authoring:** On macOS, **Metal DE Studio** provides a source-first
+- **Live authoring:** On macOS and iPadOS, **Metal DE Studio** provides a source-first
   edit/compile loop. On every platform, `.threshfx` and `.threshscene` files can
   be previewed, imported, shared, and reopened.
 - **Designed for the rest of the app:** Custom geometry works at runtime with
@@ -49,7 +51,7 @@ Start with the [custom-scene authoring guide](CUSTOM_SCENES.md), then open
 [Accidental Sphere Projection](Threshold/Examples/Scenes/Accidental%20Sphere%20Projection.threshscene),
 or [Polychora 24-Cell](<Threshold/Examples/Custom%20Scene%20Example/Polychora%2024-Cell.threshscene>).
 
-> **Experimental feature:** Enable **Settings → Display → Experimental Display → Allow custom scenes** before importing a user-authored DE. Runtime compilation is intentionally opt-in; malformed or expensive formulas can fail to compile or render poorly.
+> **Runtime safety:** Custom scenes are available by default. User-authored Metal source is validated before local compilation; malformed or expensive formulas can still fail to compile or render poorly.
 
 ## What Threshold does around the scene
 - **Performance:** Threshold is built for responsive, real-time fractal rendering. Rendering quality and performance work are measured on the target device rather than inferred from a simulator.
@@ -237,21 +239,20 @@ The lean `_Dist` form drives ray marching; the second form returns the matching
 field and supplies orbit data for coloring.
 
 This is deliberately **not** arbitrary `.metal` loading: the source must obey
-the embedded-DE contract and runtime compilation remains experimental. The full
+the embedded-DE contract. The full
 function signatures, JSON shape, parameter pragmas, and validation limits are
 in [CUSTOM_SCENES.md](CUSTOM_SCENES.md).
 
 ### Try a custom scene
 
-1. Build and launch Threshold, then enable **Allow custom scenes** under
-   **Settings → Display → Experimental Display**.
+1. Build and launch Threshold. Custom scenes are available immediately.
 2. Open or import
    [Sphere Fold (Sample)](Threshold/Examples/Formulas/SampleSphereFold.threshfx).
    It is a standalone, editable DE with three parameters.
 3. Load [Accidental Sphere Projection](Threshold/Examples/Scenes/Accidental%20Sphere%20Projection.threshscene)
    for a complete scene whose DE is embedded, or [Polychora 24-Cell](<Threshold/Examples/Custom%20Scene%20Example/Polychora%2024-Cell.threshscene>)
    for a 4D stereographic-projection example.
-4. On macOS, open **Shape → Fractal Formula → Metal DE Studio** to create or
+4. On macOS or iPadOS, open **Shape → Fractal Formula → Metal DE Studio** to create or
    edit a formula. Export the active result as either a self-contained
    `.threshscene` or a reusable `.threshfx`.
 

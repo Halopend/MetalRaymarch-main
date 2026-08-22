@@ -36,7 +36,7 @@ extension ContentView {
                     }
                     if newValue == 0 {
                         #if os(iOS)
-                        isAnimationEditorPresented = false
+                        appModel.dismissAnimationEditorHandler?()
                         #else
                         dismissWindow(id: AppModel.animationEditorWindowID)
                         #endif
@@ -172,7 +172,7 @@ extension ContentView {
             animationManager.currentScene = animationManager.scenes.first
         }
         #if os(iOS)
-        isAnimationEditorPresented = true
+        appModel.openAnimationEditorHandler?()
         #else
         openWindow(id: AppModel.animationEditorWindowID)
         #endif

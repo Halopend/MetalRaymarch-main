@@ -26,6 +26,12 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
     private var _library: MTLLibrary?
     private var _hash: String?
     private var _compiler: CustomShaderCompiler?
+    /// Bumped on every `activate` entry. A compile that finishes after a newer
+    /// activation started must not publish: without this, two overlapping
+    /// compiles (a dismissed editor's draft vs. a freshly selected scene) race
+    /// and the one that finishes LAST wins regardless of which was requested
+    /// last.
+    private var _activationGeneration: UInt64 = 0
 
     /// The active custom library, or nil when no custom formula is installed.
     var library: MTLLibrary? { lock.lock(); defer { lock.unlock() }; return _library }
@@ -52,6 +58,17 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
         lock.lock(); _library = library; _hash = hash; lock.unlock()
     }
 
+    private func nextActivationGeneration() -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        _activationGeneration &+= 1
+        return _activationGeneration
+    }
+
+    private func isCurrentActivation(_ generation: UInt64) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return _activationGeneration == generation
+    }
+
     /// Compile + install a custom embedded formula (or pass nil to deactivate).
     /// The ~0.5–5 s compile runs on the `CustomShaderCompiler` actor — off the
     /// render and main threads. Library + hash are published together under one
@@ -65,6 +82,7 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
         // transform-stack codegen. Key the library + pipelines by the combined hash so
         // distinct effect sets never alias. A built-in fractal + non-empty stack rides
         // a custom library exactly as a .threshfx warp on a built-in does.
+        let activation = nextActivationGeneration()
         let isWarp = (formula?.effectKind == .spaceWarp)
         let fractalEffect = isWarp ? nil : formula
         let warpEffect = isWarp ? formula : nil
@@ -78,6 +96,10 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
         if hash == newHash, library != nil { return }   // unchanged → no-op
         let compiled = try await sharedCompiler(device: device).library(forFractal: fractalEffect, spaceWarp: warpEffect,
                                                                         warpStackSource: warpStackSource, warpStackSignature: warpStackSignature)
+        // The caller was cancelled (e.g. the formula editor was dismissed) or a
+        // newer activation has since started: leave whatever is current alone.
+        try Task.checkCancellation()
+        guard isCurrentActivation(activation) else { throw CancellationError() }
         if let old = hash, old != newHash {
             cache.evict(prefix: "CX\(old)_")   // retire the previous effect's pipelines
         }
@@ -113,6 +135,7 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
 
 struct ThresholdMacRenderView: NSViewRepresentable {
     let appModel: AppModel
+    let allowsPointerRadialPassthrough: Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator(appModel: appModel)
@@ -137,7 +160,9 @@ struct ThresholdMacRenderView: NSViewRepresentable {
         view.autoResizeDrawable = true
         view.inputSink = context.coordinator.inputAccumulator
         view.shouldAcceptViewportInput = { [weak appModel] in
-            appModel?.inputOwnershipStore.canConsume(.viewport) ?? false
+            appModel?.inputOwnershipStore.canConsumeViewportInput(
+                allowsPointerRadialPassthrough: allowsPointerRadialPassthrough
+            ) ?? false
         }
         view.delegate = context.coordinator
         context.coordinator.configure(view)
@@ -148,7 +173,9 @@ struct ThresholdMacRenderView: NSViewRepresentable {
         context.coordinator.appModel = appModel
         (nsView as? ThresholdMacInteractiveView)?.inputSink = context.coordinator.inputAccumulator
         (nsView as? ThresholdMacInteractiveView)?.shouldAcceptViewportInput = { [weak appModel] in
-            appModel?.inputOwnershipStore.canConsume(.viewport) ?? false
+            appModel?.inputOwnershipStore.canConsumeViewportInput(
+                allowsPointerRadialPassthrough: allowsPointerRadialPassthrough
+            ) ?? false
         }
     }
 
@@ -190,7 +217,12 @@ struct ThresholdMacRenderView: NSViewRepresentable {
                                             depthPixelFormat: view.depthStencilPixelFormat,
                                             clearColor: view.clearColor)
             renderer?.drawableSizeDidChange(view.drawableSize)
-            appModel.rendererStartupWarmupComplete = renderer != nil
+            // Warmup completes when the generic pipeline has compiled (off the
+            // main thread). Until then the root shows a "compiling shaders"
+            // state instead of a frozen app.
+            renderer?.genericPipelineSlot.setOnReady { [appModel] in
+                appModel.rendererStartupWarmupComplete = true
+            }
             // Compile + activate runtime `.threshfx` formulas on Mac/iPad (was
             // visionOS-only). Binding here triggers the handler's didSet, which
             // re-activates any formula loaded before the view existed.
@@ -286,6 +318,54 @@ private final class NonBlockingDrawableProvider: @unchecked Sendable {
 }
 #endif
 
+/// Owns the asynchronously compiled generic (unspecialized) `fragmentShaderMono`
+/// pipeline. On a cold GPU shader cache that single compile takes several
+/// seconds on iPad; building it inside `ViewportRenderer.init` — which runs on
+/// the main thread from `makeUIView`/`makeNSView` — froze the entire UI on first
+/// launch with no feedback. The slot is `@unchecked Sendable` (all state behind
+/// `lock`) so the background build closure can capture it without dragging the
+/// non-Sendable renderer along. `current` is `nil` until the build lands; the
+/// renderer skips frames until then and `onReady` flips the app's warmup flag.
+final class ViewportGenericPipelineSlot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pipeline: MTLRenderPipelineState?
+    private var onReady: (@MainActor () -> Void)?
+
+    var current: MTLRenderPipelineState? {
+        lock.lock(); defer { lock.unlock() }
+        return pipeline
+    }
+
+    /// Install the readiness callback. Fires immediately (on the main actor)
+    /// when the pipeline already exists, so there is no set-after-publish race.
+    func setOnReady(_ handler: (@MainActor () -> Void)?) {
+        lock.lock()
+        onReady = handler
+        let ready = pipeline != nil
+        lock.unlock()
+        if ready, let handler { Task { @MainActor in handler() } }
+    }
+
+    func publish(_ built: MTLRenderPipelineState) {
+        lock.lock()
+        pipeline = built
+        let handler = onReady
+        lock.unlock()
+        if let handler { Task { @MainActor in handler() } }
+    }
+
+    /// Blocking wait for headless/benchmark callers that render synchronously
+    /// right after construction. Never used on the interactive draw path.
+    func waitForPipeline(timeout: TimeInterval) -> MTLRenderPipelineState? {
+        let deadline = CACurrentMediaTime() + timeout
+        while CACurrentMediaTime() < deadline {
+            if let ready = current { return ready }
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        return current
+    }
+}
+
 final class ViewportRenderer {
     private enum SetupError: Error {
         case badVertexDescriptor
@@ -314,6 +394,26 @@ final class ViewportRenderer {
         /// x = enabled window radius (0 means off), y = strength,
         /// z = threshold, w = softness.
         var edge: SIMD4<Float> = .zero
+        /// x = enabled, y = blend amount, z = kernel dimension, w = reserved.
+        var convolution: SIMD4<Float> = .zero
+        var kernel0: SIMD4<Float> = .zero
+        var kernel1: SIMD4<Float> = .zero
+        var kernel2: SIMD4<Float> = .zero
+        var kernel3: SIMD4<Float> = .zero
+        var kernel4: SIMD4<Float> = .zero
+        var kernel5: SIMD4<Float> = .zero
+        var kernel6: SIMD4<Float> = .zero
+
+        mutating func setKernel(_ values: [Float]) {
+            let padded = Array(values.prefix(25)) + Array(repeating: 0, count: max(0, 25 - values.count))
+            kernel0 = SIMD4(padded[0], padded[1], padded[2], padded[3])
+            kernel1 = SIMD4(padded[4], padded[5], padded[6], padded[7])
+            kernel2 = SIMD4(padded[8], padded[9], padded[10], padded[11])
+            kernel3 = SIMD4(padded[12], padded[13], padded[14], padded[15])
+            kernel4 = SIMD4(padded[16], padded[17], padded[18], padded[19])
+            kernel5 = SIMD4(padded[20], padded[21], padded[22], padded[23])
+            kernel6 = SIMD4(padded[24], 0, 0, 0)
+        }
     }
 
     private struct TemporalInvalidationKey: Equatable {
@@ -464,7 +564,14 @@ final class ViewportRenderer {
     private let drawableProvider: NonBlockingDrawableProvider
     #endif
     private let commandQueue: MTLCommandQueue
-    private let pipelineState: MTLRenderPipelineState
+    /// Generic pipeline, compiled off the main thread after init (see
+    /// `ViewportGenericPipelineSlot`). Specialized variants layer on top once
+    /// this exists; until then `draw` skips frames.
+    let genericPipelineSlot = ViewportGenericPipelineSlot()
+    private static let genericPipelineQueue = DispatchQueue(
+        label: "com.puppypower.Threshold.viewport-generic-pipeline",
+        qos: .userInitiated
+    )
     private let depthState: MTLDepthStencilState
     private let depthPixelFormat: MTLPixelFormat
     private let colorPixelFormat: MTLPixelFormat
@@ -521,6 +628,7 @@ final class ViewportRenderer {
     private var smoothedMaxViewDistance: Float = RenderSettings.maxViewDistance
     private var drawableSize: CGSize = .zero
     private var depthTexture: MTLTexture?
+    private var nativePostProcessTexture: MTLTexture?
 
     /// Counts down after a GPU command buffer error. While non-zero, draws are
     /// skipped to let the GPU recover before new submissions are attempted.
@@ -584,18 +692,33 @@ final class ViewportRenderer {
         guard let commandQueue = device.makeCommandQueue() else { return nil }
         self.commandQueue = commandQueue
 
-        let builtPipeline: MTLRenderPipelineState
         let builtMesh: MTKMesh
         let builtVertexDescriptor = Self.buildMetalVertexDescriptor()
         do {
-            builtPipeline = try Self.buildRenderPipeline(device: device, colorPixelFormat: colorPixelFormat, depthPixelFormat: depthPixelFormat, vertexDescriptor: builtVertexDescriptor)
             builtMesh = try Self.buildMesh(device: device, vertexDescriptor: builtVertexDescriptor)
         } catch {
             print("ThresholdMac renderer setup failed: \(error)")
             return nil
         }
-        pipelineState = builtPipeline
         vertexDescriptor = builtVertexDescriptor
+
+        // The generic raymarch pipeline is the one unavoidable cold-cache compile
+        // at launch. Build it off the main thread; `draw` renders nothing until
+        // it is published and the UI stays responsive (onboarding, controls).
+        let slot = genericPipelineSlot
+        Self.genericPipelineQueue.async { [device, colorPixelFormat, depthPixelFormat] in
+            do {
+                let pipeline = try Self.buildRenderPipeline(
+                    device: device,
+                    colorPixelFormat: colorPixelFormat,
+                    depthPixelFormat: depthPixelFormat,
+                    vertexDescriptor: Self.buildMetalVertexDescriptor()
+                )
+                slot.publish(pipeline)
+            } catch {
+                print("Threshold viewport generic pipeline build failed: \(error)")
+            }
+        }
         specializedPipelineBuilder = ViewportSpecializedPipelineBuilder(
             device: device,
             colorPixelFormat: colorPixelFormat,
@@ -689,6 +812,9 @@ final class ViewportRenderer {
         let collectSteps = BenchmarkManager.shared.shouldCollectSteps
         if collectSteps { memset(benchBuffer.contents(), 0, MemoryLayout<UInt32>.stride * 11) }
 
+        // Benchmarks render synchronously right after construction; give the
+        // background generic-pipeline build a chance to land first.
+        guard genericPipelineSlot.waitForPipeline(timeout: 60) != nil else { return nil }
         guard let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
         // Fractal distance cache: bake in the measured command buffer so the
         // harness sees the cache's true amortized cost (rebake only on change).
@@ -698,7 +824,7 @@ final class ViewportRenderer {
                 uniformBuffer: uniformBuffer,
                 frame: frame)
         }
-        let pipeline = resolveActivePipeline(appModel: appModel)
+        guard let pipeline = resolveActivePipeline(appModel: appModel) else { return nil }
         let descriptor = makeOffscreenRenderPassDescriptor(color: color, depth: depth)
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return nil }
         encodeRaymarch(into: encoder, pipeline: pipeline, uniformBuffer: uniformBuffer, benchBuffer: benchBuffer)
@@ -793,7 +919,10 @@ final class ViewportRenderer {
     func draw(appModel: AppModel) {
         guard appModel.isAppActive,
               drawableSize.width > 1,
-              drawableSize.height > 1 else {
+              drawableSize.height > 1,
+              // Generic pipeline still compiling (first launch): nothing to
+              // draw with yet, and acquiring drawables would only add pressure.
+              genericPipelineSlot.current != nil else {
             return
         }
 
@@ -931,10 +1060,15 @@ final class ViewportRenderer {
         // up firing.
         RenderTrace.traceGPU("GPU Frame", commandBuffer: commandBuffer)
 
+        // Convolution needs a readable source texture. Preserve the zero-cost
+        // native path unless a valid convolution is actually enabled.
+        let needsOutputFilter = appModel.renderSettings.convolutionEffect.isActive &&
+            blitPipelineState != nil
+
         // The direct (native-resolution) path renders straight into the drawable
         // and needs the drawable-sized depth target.
         let directPassDescriptor: MTLRenderPassDescriptor?
-        if temporalPass == nil, spatialPass == nil {
+        if temporalPass == nil, spatialPass == nil, !needsOutputFilter {
             guard let descriptor = makeRenderPassDescriptor(drawable: drawable) else {
                 inFlightSemaphore.signal()
                 return
@@ -1033,7 +1167,12 @@ final class ViewportRenderer {
         }
         #endif
 
-        let activePipeline = resolveActivePipeline(appModel: appModel)
+        guard let activePipeline = resolveActivePipeline(appModel: appModel) else {
+            // Cannot happen after the top-of-frame guard, but keep the in-flight
+            // gate balanced: the completed handler above signals on commit.
+            commandBuffer.commit()
+            return
+        }
 
         if let temporalPass, let blitPipelineState, let motionPipelineState {
             // 1. Raymarch into the low-resolution offscreen target. Depth is
@@ -1120,6 +1259,36 @@ final class ViewportRenderer {
             }
             blitEncoder.setRenderPipelineState(blitPipelineState)
             blitEncoder.setFragmentTexture(spatialPass.output, index: 0)
+            blitEncoder.setFragmentBytes(
+                &blitParams,
+                length: MemoryLayout<ViewportBlitParams>.stride,
+                index: 0
+            )
+            blitEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            blitEncoder.endEncoding()
+
+            wasTemporalActive = false
+        } else if needsOutputFilter, let blitPipelineState,
+                  let sourceTexture = ensureNativePostProcessTexture(for: drawable),
+                  let depth = depthTexture(width: drawable.texture.width, height: drawable.texture.height) {
+            let offscreenDescriptor = makeOffscreenRenderPassDescriptor(color: sourceTexture, depth: depth)
+            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: offscreenDescriptor) else {
+                commandBuffer.commit()
+                return
+            }
+            encodeRaymarch(into: encoder, pipeline: activePipeline, uniformBuffer: uniformBuffer, benchBuffer: benchBuffer)
+            encoder.endEncoding()
+
+            let blitDescriptor = MTLRenderPassDescriptor()
+            blitDescriptor.colorAttachments[0].texture = drawable.texture
+            blitDescriptor.colorAttachments[0].loadAction = .dontCare
+            blitDescriptor.colorAttachments[0].storeAction = .store
+            guard let blitEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: blitDescriptor) else {
+                commandBuffer.commit()
+                return
+            }
+            blitEncoder.setRenderPipelineState(blitPipelineState)
+            blitEncoder.setFragmentTexture(sourceTexture, index: 0)
             blitEncoder.setFragmentBytes(
                 &blitParams,
                 length: MemoryLayout<ViewportBlitParams>.stride,
@@ -1216,7 +1385,10 @@ final class ViewportRenderer {
     /// Kicks off an async build the first time a configuration is seen so future
     /// frames get the fully-unrolled fast path without hitching the render thread.
     /// Updates `appModel.isUsingSpecializedPipeline` (drives the bolt indicator).
-    private func resolveActivePipeline(appModel: AppModel) -> MTLRenderPipelineState {
+    private func resolveActivePipeline(appModel: AppModel) -> MTLRenderPipelineState? {
+        // No generic pipeline yet: don't queue specialized builds either, so the
+        // first-launch compile isn't competing with itself for the GPU compiler.
+        guard let genericPipeline = genericPipelineSlot.current else { return nil }
         let settings = appModel.renderSettings
         // deIterationMismatch biases the baked FC_FRACTAL_ITERATIONS (geometry fold count)
         // while the DE stays normalized to the unbiased count (RenderPrecompute) — reproduces
@@ -1294,7 +1466,7 @@ final class ViewportRenderer {
             )
         }
         appModel.isUsingSpecializedPipeline = false
-        return pipelineState
+        return genericPipeline
     }
 
     /// Asynchronously compiles a specialized `fragmentShaderMono` pipeline and
@@ -1403,6 +1575,29 @@ final class ViewportRenderer {
         return depthTexture
     }
 
+    private func ensureNativePostProcessTexture(for drawable: CAMetalDrawable) -> MTLTexture? {
+        let width = max(1, drawable.texture.width)
+        let height = max(1, drawable.texture.height)
+        if let nativePostProcessTexture,
+           nativePostProcessTexture.width == width,
+           nativePostProcessTexture.height == height,
+           nativePostProcessTexture.pixelFormat == drawable.texture.pixelFormat {
+            return nativePostProcessTexture
+        }
+
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: drawable.texture.pixelFormat,
+            width: width,
+            height: height,
+            mipmapped: false
+        )
+        descriptor.usage = [.renderTarget, .shaderRead]
+        descriptor.storageMode = .private
+        nativePostProcessTexture = device.makeTexture(descriptor: descriptor)
+        nativePostProcessTexture?.label = "Threshold Native Convolution Source"
+        return nativePostProcessTexture
+    }
+
     @discardableResult
     private func writeUniforms(to buffer: MTLBuffer,
                                appModel: AppModel,
@@ -1462,12 +1657,24 @@ final class ViewportRenderer {
         let edgeRadius = edgeEnabled
             ? Float(max(1, min(3, uniforms.colorScheme.edgeDetectionWindowRadius)))
             : 0.0
-        let blitParams = ViewportBlitParams(edge: SIMD4<Float>(
+        var blitParams = ViewportBlitParams()
+        blitParams.edge = SIMD4<Float>(
             edgeRadius,
             uniforms.colorScheme.edgeDetectionStrength,
             uniforms.colorScheme.edgeDetectionThreshold,
             uniforms.colorScheme.edgeDetectionSoftness
-        ))
+        )
+        let convolution = settings.convolutionEffect
+        let parsedKernel = convolution.parsedKernel
+        if convolution.isActive {
+            blitParams.convolution = SIMD4<Float>(
+                1.0,
+                convolution.strength,
+                Float(parsedKernel.size),
+                0.0
+            )
+            blitParams.setKernel(parsedKernel.values)
+        }
         if edgeEnabled {
             // Do not burn the synthetic outline into MetalFX color/history.
             // The existing full-resolution blit pass applies it after upscale.
@@ -2229,7 +2436,12 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                                             depthPixelFormat: view.depthStencilPixelFormat,
                                             clearColor: view.clearColor)
             renderer?.drawableSizeDidChange(view.drawableSize)
-            appModel.rendererStartupWarmupComplete = renderer != nil
+            // Warmup completes when the generic pipeline has compiled (off the
+            // main thread). Until then the root shows a "compiling shaders"
+            // state instead of a frozen app.
+            renderer?.genericPipelineSlot.setOnReady { [appModel] in
+                appModel.rendererStartupWarmupComplete = true
+            }
             // Compile + activate runtime `.threshfx` formulas on Mac/iPad (was
             // visionOS-only). Binding here triggers the handler's didSet, which
             // re-activates any formula loaded before the view existed.

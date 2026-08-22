@@ -1,5 +1,6 @@
 #if os(iOS)
 import SwiftUI
+import UIKit
 
 @main
 struct ThresholdiOSApp: App {
@@ -23,7 +24,13 @@ struct ThresholdiOSApp: App {
 private struct ThresholdiOSRootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isShowingControls = true
+    @AppStorage("hasCompletedIntroOnboarding") private var hasCompletedIntroOnboarding = false
+    // Start phone users on the artwork. Controls remain one tap away and use
+    // the system's compact inspector sheet; iPad keeps its visible side panel.
+    @State private var isShowingControls = UIDevice.current.userInterfaceIdiom != .phone
+    @State private var isAnimationEditorPresented = false
+    @State private var isFormulaEditorPresented = false
+    @State private var restoreControlsAfterFormulaEditor = false
     @State private var radialMenu = RadialMenuModel(interactionProfile: .touch)
     @State private var radialCurvature = 0.72
     private let controlsAnimation = MenuChrome.panelSpring
@@ -39,12 +46,22 @@ private struct ThresholdiOSRootView: View {
                 .ignoresSafeArea()
                 .background(Color.black)
                 .overlay(alignment: .topTrailing) {
-                    controlsToggle
-                        // The Metal surface stays edge-to-edge, but the control must
-                        // clear the status bar and Stage Manager window chrome.
-                        .padding(.top, max(16, safeAreaInsets.top + 8))
-                        .padding(.trailing, max(16, safeAreaInsets.trailing + 8))
+                    if !isFormulaEditorPresented {
+                        controlsToggle
+                            // The Metal surface stays edge-to-edge, but the control must
+                            // clear the status bar and Stage Manager window chrome.
+                            .padding(.top, max(16, safeAreaInsets.top + 8))
+                            .padding(.trailing, max(16, safeAreaInsets.trailing + 8))
+                    }
                 }
+                .overlay(alignment: .bottom) {
+                    if !appModel.rendererStartupWarmupComplete {
+                        shaderCompileBanner
+                            .padding(.bottom, max(24, safeAreaInsets.bottom + 12))
+                            .transition(.opacity)
+                    }
+                }
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: appModel.rendererStartupWarmupComplete)
                 .inspector(isPresented: $isShowingControls) {
                     ThresholdiOSInspectorContent(isShowingControls: $isShowingControls)
                         .environment(appModel)
@@ -94,16 +111,75 @@ private struct ThresholdiOSRootView: View {
                 }
                 .onSceneLoadAutoHide {
                     // Auto-hide the controls inspector when a scene is selected.
-                    // (iPad has no pin concept, so it always collapses.)
+                    // iOS has no pin concept, so it always collapses.
                     setControlsVisible(false)
                 }
                 .onDisappear(perform: dismissRadialMenu)
         }
+        .overlay {
+            if isFormulaEditorPresented {
+                FormulaEditorWindowView(onClose: dismissFormulaEditor)
+                    .environment(appModel)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        // Safety and privacy setup (photosensitivity acknowledgement, microphone,
+        // analytics, storage). Mirrors the macOS/visionOS gate; the cover cannot
+        // be swiped away and only `FirstLaunchWindowView` completes it.
+        .fullScreenCover(isPresented: Binding(
+            get: { !hasCompletedIntroOnboarding },
+            set: { _ in }
+        )) {
+            FirstLaunchWindowView()
+                .environment(appModel)
+                .interactiveDismissDisabled()
+        }
+        .fullScreenCover(isPresented: $isAnimationEditorPresented) {
+            AnimationEditorWindowView()
+                .environment(appModel)
+        }
         .onAppear {
+            appModel.openFormulaEditorHandler = presentFormulaEditor
+            appModel.openAnimationEditorHandler = presentAnimationEditor
+            appModel.dismissAnimationEditorHandler = { isAnimationEditorPresented = false }
+            // External-file imports (Files app, Share sheet) surface their
+            // sheet, progress, and errors inside the inspector's ContentView.
+            // Let AppModel.ensureWindowContentVisible() reveal it on iOS.
+            appModel.openMenuWindowHandler = { setControlsVisible(true) }
+            syncMenuWindowVisibility(isShowingControls)
             Task { @MainActor in
                 await appModel.startMicrophoneAtLaunchIfEnabled()
             }
         }
+        .onChange(of: isShowingControls) { _, isVisible in
+            syncMenuWindowVisibility(isVisible)
+        }
+        .onDisappear {
+            appModel.openFormulaEditorHandler = nil
+            appModel.openAnimationEditorHandler = nil
+            appModel.dismissAnimationEditorHandler = nil
+            appModel.openMenuWindowHandler = nil
+        }
+    }
+
+    /// Keep AppModel's window-visibility model truthful on iOS so
+    /// `ensureWindowContentVisible()` re-presents the inspector instead of
+    /// assuming its content is already on screen.
+    private func syncMenuWindowVisibility(_ isVisible: Bool) {
+        if isVisible {
+            if !appModel.isMenuWindowVisible { appModel.markMenuWindowPresented() }
+        } else if appModel.isMenuWindowVisible {
+            appModel.markMenuWindowDismissed()
+        }
+    }
+
+    private func presentAnimationEditor() {
+        guard let animationManager = appModel.animationManager else { return }
+        if animationManager.currentScene == nil {
+            animationManager.currentScene = animationManager.scenes.first
+        }
+        dismissRadialMenu()
+        isAnimationEditorPresented = true
     }
 
     private var radialProjection: RadialNavigationProjection {
@@ -149,12 +225,29 @@ private struct ThresholdiOSRootView: View {
         appModel.inputOwnershipStore.release(.radialMenu)
     }
 
+    private func presentFormulaEditor() {
+        guard !isFormulaEditorPresented else { return }
+        restoreControlsAfterFormulaEditor = isShowingControls
+        dismissRadialMenu()
+        // This must happen without animation: the transparent presentation
+        // should reveal only the Metal viewport on its very first frame.
+        isShowingControls = false
+        isFormulaEditorPresented = true
+    }
+
+    private func dismissFormulaEditor() {
+        isFormulaEditorPresented = false
+        if restoreControlsAfterFormulaEditor {
+            setControlsVisible(true)
+        }
+        restoreControlsAfterFormulaEditor = false
+    }
+
     private func activateRadialTarget(_ target: AppNavigationTarget) {
         let command = appModel.navigationStore.activate(target)
         switch command {
         case .openAnimationEditor:
-            dismissRadialMenu()
-            appModel.openAnimationEditorHandler?()
+            presentAnimationEditor()
         case .resetViewport:
             appModel.viewportCommandHandler?(.resetViewport)
             dismissRadialMenu()
@@ -186,6 +279,23 @@ private struct ThresholdiOSRootView: View {
         withAnimation(reduceMotion ? nil : controlsAnimation) {
             isShowingControls = isVisible
         }
+    }
+
+    /// Shown while the renderer's generic pipeline is still compiling. On a
+    /// cold GPU shader cache (first launch, OS update) this takes several
+    /// seconds on iPad; without feedback the black viewport reads as a hang.
+    private var shaderCompileBanner: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+            Text("Compiling shaders — first launch may take a moment…")
+                .font(.footnote.weight(.medium))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+        .foregroundStyle(.primary)
+        .accessibilityElement(children: .combine)
     }
 
     private var controlsToggle: some View {
@@ -225,6 +335,11 @@ private struct ThresholdiOSInspectorContent: View {
             // compact so ContentView selects its rail-free responsive shell.
             .environment(\.horizontalSizeClass, .compact)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // `inspector` adapts to a sheet on iPhone. Medium is useful for
+            // quick adjustments while preserving the live canvas; large gives
+            // dense editors the full available workspace.
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
             .overlay(alignment: .leading) {
                 swipeDismissHandle
             }

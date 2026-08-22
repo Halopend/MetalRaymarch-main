@@ -86,6 +86,27 @@ struct ExternalFileImportRequest: Identifiable {
     let payload: ExternalFileImportPayload
 }
 
+enum SceneNavigationDirection: Equatable {
+    case previous
+    case next
+}
+
+struct SceneNavigationFeedback: Identifiable, Equatable {
+    let id: UUID
+    let direction: SceneNavigationDirection
+    let sceneName: String
+}
+
+struct ManualSceneNavigationRequest: Equatable {
+    let id: UUID
+    let direction: SceneNavigationDirection
+}
+
+struct ManualStaticSceneNavigationCursor: Equatable {
+    let requestID: UUID
+    let sceneID: UUID
+}
+
 @MainActor
 @Observable
 class AppModel {
@@ -154,6 +175,22 @@ class AppModel {
     /// slide-over sidebar suppresses itself while this is set so the controls
     /// don't appear twice.
     var isControlsWindowOpen = false
+    #if os(macOS)
+    /// Transient presentation state for the macOS recording-view shortcut. This is
+    /// deliberately separate from the persisted FPS preference so showing the
+    /// interface again restores the user's previous HUD choice.
+    var isViewportChromeHidden = false
+    /// Desired controls-window state, updated synchronously before SwiftUI's
+    /// asynchronous Window open/dismiss lifecycle begins.
+    var isControlsWindowRequested = false
+    private(set) var controlsWindowRequestGeneration: UInt = 0
+    var shouldRestoreControlsWindowAfterRecording = false
+    /// True while the main render window's root view is mounted. Recording mode
+    /// is owned by that view (its H monitor, restore logic, and exit path all
+    /// live there), so the detached controls window must not enter it — and
+    /// must self-heal out of it — while no render viewport exists.
+    var isRootRenderViewMounted = false
+    #endif
     var rendererStartupWarmupComplete = false
     var runtimeViewMode: RuntimeViewMode =
         RuntimeViewMode(rawValue: UserDefaults.standard.string(forKey: runtimeViewModeDefaultsKey) ?? "")
@@ -456,8 +493,14 @@ class AppModel {
                     // and we can apply the preset.
                     if let queued = queuedPreset,
                        queued.embeddedFormula?.shortHash == formula?.shortHash {
+                        let navigationRequest = pendingPresetSceneNavigationRequest
                         pendingPresetForActivation = nil
-                        await applyLoadedScene(queued, options: [])
+                        pendingPresetSceneNavigationRequest = nil
+                        await applyLoadedScene(
+                            queued,
+                            options: [],
+                            manualSceneNavigationRequest: navigationRequest
+                        )
                     }
                     // Same late-binding drain for a queued animation scene.
                     if let queuedScene = pendingSceneApplyAfterActivation,
@@ -471,6 +514,7 @@ class AppModel {
                     )))
                     self.uninstallEmbeddedFormula()
                     self.pendingPresetForActivation = nil
+                    self.pendingPresetSceneNavigationRequest = nil
                 }
             }
         }
@@ -493,6 +537,7 @@ class AppModel {
     /// renderer has compiled the formula. Cleared on success, on failure,
     /// and on every successful direct (non-deferred) load.
     @ObservationIgnored var pendingPresetForActivation: FractalPreset?
+    @ObservationIgnored var pendingPresetSceneNavigationRequest: ManualSceneNavigationRequest?
 
     /// Animation-scene counterpart of `pendingPresetForActivation`: an external
     /// `.threshanim`/`.threshanimv` whose embedded formula couldn't activate in
@@ -506,6 +551,12 @@ class AppModel {
     /// selection, which is especially easy to trigger in the iPad scene list.
     @ObservationIgnored var staticSceneLoadTask: Task<Void, Never>?
     @ObservationIgnored var staticSceneLoadGeneration: UInt64 = 0
+
+    /// Latest successfully applied manual scene step, observed by the desktop
+    /// scene-information overlay.
+    var sceneNavigationFeedback: SceneNavigationFeedback?
+    @ObservationIgnored var activeManualSceneNavigationRequest: ManualSceneNavigationRequest?
+    @ObservationIgnored var manualStaticSceneNavigationCursor: ManualStaticSceneNavigationCursor?
 
     /// Queue an animation-scene apply behind formula activation and nudge the
     /// immersive space open (same UX as the queued-preset path).
@@ -605,7 +656,10 @@ class AppModel {
             self?.presetManager.sceneCatalogPresets ?? []
         }
         animationManager?.musicCueStaticSceneLoadHandler = { [weak self] preset in
-            self?.loadStaticScene(preset)
+            self?.loadStaticScene(
+                preset,
+                manualSceneNavigationRequest: self?.activeManualSceneNavigationRequest
+            )
         }
         animationManager?.musicCueCurrentStaticSceneIDProvider = { [weak self] in
             self?.activeResetPreset?.id
@@ -878,6 +932,14 @@ class AppModel {
     /// Native presentation edge for the typed animation-editor command.
     var openAnimationEditorHandler: (() -> Void)?
 
+    /// iPadOS counterpart: the renderer root owns the full-screen cover, so
+    /// controls inside the inspector dismiss it through this seam.
+    var dismissAnimationEditorHandler: (() -> Void)?
+
+    /// Native presentation edge for Metal DE Studio. On iPad this is owned by
+    /// the renderer root so the underlying controls can be removed first.
+    var openFormulaEditorHandler: (() -> Void)?
+
     /// Installed by the active viewport adapter. Semantic UI surfaces dispatch
     /// renderer commands without retaining a platform view or input controller.
     var viewportCommandHandler: ((AppCommand) -> Void)?
@@ -885,6 +947,50 @@ class AppModel {
     /// Callback to present the global control finder. The macOS root installs
     /// this so Command-K works even while the slide-over control panel is hidden.
     var openControlFinderHandler: (() -> Void)?
+
+    #if os(macOS)
+    func toggleViewportChromeVisibility() {
+        if !isViewportChromeHidden {
+            shouldRestoreControlsWindowAfterRecording = isControlsWindowRequested || isControlsWindowOpen
+        }
+        isViewportChromeHidden.toggle()
+    }
+
+    /// Records intent before `openWindow` returns asynchronously. Repeated open
+    /// requests share one generation so a later ordinary close is still
+    /// recognized as belonging to the visible window.
+    func requestControlsWindowPresentation() {
+        guard !isControlsWindowRequested else { return }
+        controlsWindowRequestGeneration &+= 1
+        isControlsWindowRequested = true
+    }
+
+    /// Invalidates the visible window generation before requesting dismissal.
+    /// This keeps a late `onDisappear` from cancelling a newer reopen request.
+    func requestControlsWindowDismissal() {
+        guard isControlsWindowRequested || isControlsWindowOpen else { return }
+        controlsWindowRequestGeneration &+= 1
+        isControlsWindowRequested = false
+        isControlsWindowOpen = false
+    }
+
+    /// Returns the generation represented by this concrete Window instance.
+    func controlsWindowDidAppear() -> UInt {
+        if !isControlsWindowRequested {
+            controlsWindowRequestGeneration &+= 1
+            isControlsWindowRequested = true
+        }
+        isControlsWindowOpen = true
+        return controlsWindowRequestGeneration
+    }
+
+    func controlsWindowDidDisappear(generation: UInt?) {
+        guard generation == controlsWindowRequestGeneration else { return }
+        isControlsWindowOpen = false
+        guard !isViewportChromeHidden else { return }
+        isControlsWindowRequested = false
+    }
+    #endif
     
     /// Toggle menu window visibility.
     /// Closing dismisses the actual window; opening reuses the system-restored placement.
@@ -912,7 +1018,10 @@ class AppModel {
 
     func openShapeMenuFromGesture() {
         if immersiveSpaceState == .open, let presentSpatialMenuHandler {
-            presentSpatialMenuHandler(NavigationHierarchy.rootID(for: .input))
+            // Shape is its own workspace in the shared navigation hierarchy.
+            // Routing this to Input made the gesture open the wrong branch only
+            // while immersive mode was active.
+            presentSpatialMenuHandler(NavigationHierarchy.rootID(for: .shape))
             return
         }
         toggleFractalMenuFromGesture(
@@ -965,13 +1074,9 @@ class AppModel {
 
     /// Load a space-warp `.threshfx` into the single active custom slot WITHOUT
     /// changing the fractal type — the warp applies to whatever fractal is active.
-    /// Gated by `allowCustomScenes`; nudges `spaceWarpStrength` up so it's visible.
+    /// Nudge `spaceWarpStrength` up so the loaded warp is visible.
     @MainActor
     func installSpaceWarp(_ warp: EmbeddedFormula) {
-        guard Self.allowCustomScenes else {
-            errorReporter.report(.preset(.importFailed("Enable “Allow custom scenes” in Settings to load space warps.")))
-            return
-        }
         do { try warp.validate() } catch {
             errorReporter.report(.preset(.importFailed("Invalid space warp: \(error.localizedDescription)")))
             return
@@ -1298,26 +1403,47 @@ class AppModel {
     /// instantly; without one, preserve the existing static-scene shortcut.
     @MainActor
     func cycleConfiguredSceneGroupOrStaticScene(forward: Bool) {
+        let request = ManualSceneNavigationRequest(
+            id: UUID(),
+            direction: forward ? .next : .previous
+        )
+
         if let animationManager,
            animationManager.canStepMusicCueSceneGroup {
-            _ = animationManager.stepMusicCueSceneGroup(by: forward ? 1 : -1)
+            manualStaticSceneNavigationCursor = nil
+            activeManualSceneNavigationRequest = request
+            defer { activeManualSceneNavigationRequest = nil }
+
+            guard let target = animationManager.stepMusicCueSceneGroup(by: forward ? 1 : -1) else {
+                return
+            }
+            if target.kind == .animation {
+                completeManualSceneNavigation(request, sceneName: target.name)
+            }
             return
         }
-        cycleJumpingOffScene(forward: forward)
+        cycleJumpingOffScene(forward: forward, manualSceneNavigationRequest: request)
     }
 
     /// Loads the previous or next built-in static scene (Jumping Off or Music
     /// Reactive), wrapping around at the ends. Used by the canvas left/right
     /// shortcut when no playable cue group has been configured.
     @MainActor
-    func cycleJumpingOffScene(forward: Bool) {
+    func cycleJumpingOffScene(
+        forward: Bool,
+        manualSceneNavigationRequest: ManualSceneNavigationRequest? = nil
+    ) {
         let scenes = presetManager.sceneCatalogPresets
             .filter { $0.name != "__lastState__" && $0.isKeyboardSwitchableStaticPreset }
         guard !scenes.isEmpty else { return }
 
-        let currentIndex = activeResetPreset.flatMap { active in
+        let cursorIndex = manualStaticSceneNavigationCursor.flatMap { cursor in
+            scenes.firstIndex(where: { $0.id == cursor.sceneID })
+        }
+        let appliedIndex = activeResetPreset.flatMap { active in
             scenes.firstIndex(where: { $0.id == active.id })
         }
+        let currentIndex = cursorIndex ?? appliedIndex
 
         let nextIndex: Int
         if let currentIndex {
@@ -1327,7 +1453,35 @@ class AppModel {
             nextIndex = forward ? 0 : scenes.count - 1
         }
 
-        loadStaticScene(scenes[nextIndex])
+        let nextScene = scenes[nextIndex]
+        if let manualSceneNavigationRequest {
+            manualStaticSceneNavigationCursor = ManualStaticSceneNavigationCursor(
+                requestID: manualSceneNavigationRequest.id,
+                sceneID: nextScene.id
+            )
+        } else {
+            manualStaticSceneNavigationCursor = nil
+        }
+        loadStaticScene(
+            nextScene,
+            manualSceneNavigationRequest: manualSceneNavigationRequest
+        )
+    }
+
+    @MainActor
+    func completeManualSceneNavigation(
+        _ request: ManualSceneNavigationRequest,
+        sceneName: String
+    ) {
+        if manualStaticSceneNavigationCursor?.requestID == request.id {
+            manualStaticSceneNavigationCursor = nil
+        }
+        let trimmedName = sceneName.trimmingCharacters(in: .whitespacesAndNewlines)
+        sceneNavigationFeedback = SceneNavigationFeedback(
+            id: request.id,
+            direction: request.direction,
+            sceneName: trimmedName.isEmpty ? "Untitled Scene" : trimmedName
+        )
     }
 
 

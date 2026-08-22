@@ -3,7 +3,7 @@
 //  Threshold
 //
 //  Created on January 31, 2026.
-//  Automatic anonymous usage analytics for TestFlight beta.
+//  Optional anonymous usage analytics.
 //  Uses CloudKit public database - no server required.
 //
 //  SETUP INSTRUCTIONS:
@@ -59,7 +59,7 @@ import UIKit
 import Observation
 
 /// Anonymous usage statistics collected during a session
-struct UsageSnapshot: Codable {
+struct UsageSnapshot: Codable, Sendable {
     let timestamp: Date
     let sessionDuration: TimeInterval
     
@@ -107,6 +107,97 @@ struct UsageSnapshot: Codable {
     var appVersion: String
 }
 
+/// Owns every potentially blocking CloudKit operation away from MainActor.
+/// CloudKit's first account/container lookup can synchronously initialize iCloud
+/// services, so doing it here prevents a first background upload from stalling UI.
+private actor UsageCloudKitUploader {
+    private var cachedDatabase: CKDatabase?
+
+    private func database() -> CKDatabase? {
+        if let cachedDatabase { return cachedDatabase }
+        guard UsageAnalytics.canUseCloudKit(
+            hasEntitlement: UsageAnalytics.hasCloudKitEntitlement,
+            ubiquityIdentityToken: FileManager.default.ubiquityIdentityToken
+        ) else { return nil }
+
+        let database = CKContainer.default().publicCloudDatabase
+        cachedDatabase = database
+        return database
+    }
+
+    func upload(_ snapshot: UsageSnapshot) async -> Bool {
+        let record = CKRecord(recordType: "UsageSnapshot")
+        record["timestamp"] = snapshot.timestamp as NSDate
+        record["sessionDuration"] = snapshot.sessionDuration as NSNumber
+        if let value = jsonString(snapshot.qualityDistribution) { record["qualityDistribution"] = value }
+        record["avgFractalScale"] = snapshot.avgFractalScale as NSNumber
+        record["avgFoldingLimit"] = snapshot.avgFoldingLimit as NSNumber
+        record["avgSphereRadius"] = snapshot.avgSphereRadius as NSNumber
+        record["avgMinDistance"] = snapshot.avgMinDistance as NSNumber
+        record["avgColorMix"] = snapshot.avgColorMix as NSNumber
+        record["avgGlowIntensity"] = snapshot.avgGlowIntensity as NSNumber
+        record["avgSafetyBubbleRadius"] = snapshot.avgSafetyBubbleRadius as NSNumber
+        record["avgBloomStrength"] = snapshot.avgBloomStrength as NSNumber
+        record["avgFogIntensity"] = snapshot.avgFogIntensity as NSNumber
+        record["usedAudioReactive"] = snapshot.usedAudioReactive ? 1 : 0
+        record["usedHandGestures"] = snapshot.usedHandGestures ? 1 : 0
+        record["usedRecording"] = snapshot.usedRecording ? 1 : 0
+        record["usedSharePlay"] = snapshot.usedSharePlay ? 1 : 0
+        record["usedGradientColoring"] = snapshot.usedGradientColoring ? 1 : 0
+        record["usedAnimation"] = snapshot.usedAnimation ? 1 : 0
+        if let value = jsonString(snapshot.fractalTypeDistribution) { record["fractalTypeDistribution"] = value }
+        if let value = jsonString(snapshot.gradientPresetDistribution) { record["gradientPresetDistribution"] = value }
+        if let value = jsonString(snapshot.lightingPresetDistribution) { record["lightingPresetDistribution"] = value }
+        record["presetsLoaded"] = snapshot.presetsLoaded as NSNumber
+        record["presetsSaved"] = snapshot.presetsSaved as NSNumber
+        record["avgFPS"] = snapshot.avgFPS as NSNumber
+        record["deviceModel"] = snapshot.deviceModel
+        record["osVersion"] = snapshot.osVersion
+        record["appVersion"] = snapshot.appVersion
+
+        guard let database = database() else { return true }
+        do {
+            _ = try await database.save(record)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func submit(_ report: PerformanceReport) async -> PerformanceReportSubmissionResult {
+        guard let database = database() else { return .unavailable }
+        let sharedReport = report.redactedForSharing()
+        guard let archive = try? PerformanceReportArchive.encode(sharedReport) else { return .failed }
+
+        let record = CKRecord(recordType: "PerformanceReport")
+        record["timestamp"] = sharedReport.capturedAt as NSDate
+        record["schemaVersion"] = sharedReport.schemaVersion as NSNumber
+        record["appVersion"] = sharedReport.appVersion
+        record["buildNumber"] = sharedReport.buildNumber
+        record["deviceModel"] = sharedReport.deviceModel
+        record["osVersion"] = sharedReport.osVersion
+        record["fps"] = sharedReport.render.fps as NSNumber
+        record["gpuFrameMs"] = sharedReport.render.gpuFrameMs as NSNumber
+        record["avgStepsPerPixel"] = sharedReport.render.avgStepsPerPixel as NSNumber
+        record["metricKitPayloadCount"] = sharedReport.metricKit.payloadCount as NSNumber
+        record["metricKitDiagnosticCount"] = sharedReport.metricKit.diagnosticCount as NSNumber
+        record["findingAreas"] = sharedReport.findings.map { $0.area.rawValue }.joined(separator: ",")
+        record["reportArchiveBase64"] = archive.base64EncodedString()
+
+        do {
+            _ = try await database.save(record)
+            return .submitted
+        } catch {
+            return .failed
+        }
+    }
+
+    private func jsonString<T: Encodable>(_ value: T) -> String? {
+        guard let data = try? JSONEncoder().encode(value) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+}
+
 /// Tracks usage patterns and uploads anonymously to CloudKit
 @MainActor
 @Observable
@@ -115,17 +206,14 @@ final class UsageAnalytics {
     private static let analyticsEnabledKey = "AnalyticsEnabled"
     
     static var persistedAnalyticsEnabled: Bool {
-        // Sharing is opt-out: first-launch users get sharing enabled by
-        // default. The `object(forKey:) == nil` check is what distinguishes
-        // "never set" (first launch) from "explicitly turned off" (an
-        // existing user who later set it to false). Returning `true` for
-        // the first-launch case is the entire default-flip.
-        UserDefaults.standard.object(forKey: analyticsEnabledKey) as? Bool ?? true
+        // Sharing is opt-in. A missing preference is treated as disabled;
+        // setup and Settings persist the user's explicit choice.
+        UserDefaults.standard.object(forKey: analyticsEnabledKey) as? Bool ?? false
     }
 
-    // CloudKit is initialized on first use so analytics-disabled launches
-    // don't touch CloudKit during startup or permission-triggered relaunches.
-    @ObservationIgnored private var cachedDatabase: CKDatabase?
+    // CloudKit is initialized on first use, on its own actor, so an
+    // analytics-disabled launch never touches it and first use cannot block UI.
+    @ObservationIgnored private let cloudKitUploader = UsageCloudKitUploader()
     
     // Local tracking state
     private var lastSampleTime: Date = Date()
@@ -183,11 +271,7 @@ final class UsageAnalytics {
     }
 
     private init() {
-        // Default to enabled — user can opt out via Settings > Sharing or
-        // by toggling it on the welcome screen. `persistedAnalyticsEnabled`
-        // returns `true` for users who have never set the key (first
-        // launch); users who explicitly turned it off in a previous build
-        // will see it stay off.
+        // Default to disabled; setup and Settings can explicitly enable it.
         self.analyticsEnabled = Self.persistedAnalyticsEnabled
         // Display names are no longer part of sharing. Remove a value saved by
         // an older release instead of retaining an unused user identifier.
@@ -230,50 +314,11 @@ final class UsageAnalytics {
         #endif
     }
 
-    private func jsonString<T: Encodable>(from value: T) -> String? {
-        guard let data = try? JSONEncoder().encode(value) else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    /// The CloudKit public database, or `nil` when CloudKit isn't usable.
-    ///
-    /// `CKContainer.default()` throws an *uncaught Objective-C exception* (→ abort)
-    /// when the iCloud entitlement is absent — which happens for local builds
-    /// signed without the team's provisioning (empty team ID). Swift `do/catch`
-    /// can't catch that, so we must avoid the call. `ubiquityIdentityToken` is a
-    /// non-throwing probe that is non-nil only when the iCloud entitlement is
-    /// present AND a user is signed in — both prerequisites for a usable default
-    /// container here (this target's entitlements set the ubiquity + CloudKit
-    /// containers together). When it's nil we degrade analytics to a silent no-op.
-    private func database() -> CKDatabase? {
-        if let cachedDatabase {
-            return cachedDatabase
-        }
-
-        // Two independent prerequisites, BOTH required before touching CloudKit:
-        //  1. This binary actually carries the iCloud-container entitlement. Local builds
-        //     signed without provisioning (CODE_SIGNING_ALLOWED=NO) have NO entitlements,
-        //     yet if the developer is signed into iCloud the token probe below still passes
-        //     — so `CKContainer.default()` throws an UNCAUGHT ObjC exception (Swift can't
-        //     catch it) and the app freezes in the crash-reporter modal. That freeze reads
-        //     as "the whole app hangs / is completely laggy". Reading our own signed
-        //     entitlements is the only reliable, non-throwing way to detect this.
-        //  2. A user is signed into iCloud (token non-nil).
-        guard Self.canUseCloudKit(hasEntitlement: Self.hasCloudKitEntitlement,
-                                  ubiquityIdentityToken: FileManager.default.ubiquityIdentityToken) else {
-            return nil
-        }
-
-        let database = CKContainer.default().publicCloudDatabase
-        cachedDatabase = database
-        return database
-    }
-
     /// Whether THIS binary was signed with the iCloud-container entitlement, read once
     /// from the running process's own entitlements via the Security framework. Unlike
     /// `CKContainer.default()` (which aborts with an uncaught ObjC exception when the
     /// entitlement is absent), this probe is non-throwing, so it's safe on unsigned builds.
-    private static let hasCloudKitEntitlement: Bool = {
+    nonisolated fileprivate static let hasCloudKitEntitlement: Bool = {
         #if os(macOS)
         // The unsigned-build CloudKit freeze this guards against only happens on the
         // macOS local-build workflow (CODE_SIGNING_ALLOWED=NO). SecTask entitlement
@@ -465,102 +510,12 @@ final class UsageAnalytics {
     /// preset name, or scene position.
     func submitPerformanceReport(_ report: PerformanceReport) async -> PerformanceReportSubmissionResult {
         guard analyticsEnabled else { return .sharingDisabled }
-        guard let database = database() else { return .unavailable }
-        let sharedReport = report.redactedForSharing()
-        guard let archive = try? PerformanceReportArchive.encode(sharedReport) else { return .failed }
-
-        let record = CKRecord(recordType: "PerformanceReport")
-        record["timestamp"] = sharedReport.capturedAt as NSDate
-        record["schemaVersion"] = sharedReport.schemaVersion as NSNumber
-        record["appVersion"] = sharedReport.appVersion
-        record["buildNumber"] = sharedReport.buildNumber
-        record["deviceModel"] = sharedReport.deviceModel
-        record["osVersion"] = sharedReport.osVersion
-        record["fps"] = sharedReport.render.fps as NSNumber
-        record["gpuFrameMs"] = sharedReport.render.gpuFrameMs as NSNumber
-        record["avgStepsPerPixel"] = sharedReport.render.avgStepsPerPixel as NSNumber
-        record["metricKitPayloadCount"] = sharedReport.metricKit.payloadCount as NSNumber
-        record["metricKitDiagnosticCount"] = sharedReport.metricKit.diagnosticCount as NSNumber
-        record["findingAreas"] = sharedReport.findings.map { $0.area.rawValue }.joined(separator: ",")
-        // CloudKit stores the compressed archive as a string so the record is
-        // self-contained and can be copied into the parser without a file
-        // attachment. The bounded MetricKit retention keeps this well below a
-        // normal public-record limit.
-        record["reportArchiveBase64"] = archive.base64EncodedString()
-
-        do {
-            _ = try await database.save(record)
-            return .submitted
-        } catch {
-            return .failed
-        }
+        return await cloudKitUploader.submit(report)
     }
 
     private func uploadToCloudKit(_ snapshot: UsageSnapshot) async {
         guard analyticsEnabled else { return }
-        let record = CKRecord(recordType: "UsageSnapshot")
-        
-        // Session info
-        record["timestamp"] = snapshot.timestamp as NSDate
-        record["sessionDuration"] = snapshot.sessionDuration as NSNumber
-        
-        // Encode distributions as JSON strings (CloudKit doesn't support nested dicts)
-        if let qualityString = jsonString(from: snapshot.qualityDistribution) {
-            record["qualityDistribution"] = qualityString
-        }
-        
-        // NOTE: gradientPresetUsageDistribution is intentionally NOT uploaded — it
-        // duplicates gradientPresetDistribution (same dt-per-preset accumulation,
-        // differing only by a "custom"/"Custom" default) and previously collided on
-        // the same "gradientPresetDistribution" record key, silently overwriting it.
-        // The authoritative upload is below (snapshot.gradientPresetDistribution).
-        // TECH_DEBT #5 — see dedupe #7 to collapse the two accumulators.
-
-        // Parameter averages
-        record["avgFractalScale"] = snapshot.avgFractalScale as NSNumber
-        record["avgFoldingLimit"] = snapshot.avgFoldingLimit as NSNumber
-        record["avgSphereRadius"] = snapshot.avgSphereRadius as NSNumber
-        record["avgMinDistance"] = snapshot.avgMinDistance as NSNumber
-        record["avgColorMix"] = snapshot.avgColorMix as NSNumber
-        record["avgGlowIntensity"] = snapshot.avgGlowIntensity as NSNumber
-        record["avgSafetyBubbleRadius"] = snapshot.avgSafetyBubbleRadius as NSNumber
-        record["avgBloomStrength"] = snapshot.avgBloomStrength as NSNumber
-        record["avgFogIntensity"] = snapshot.avgFogIntensity as NSNumber
-        
-        // Feature flags
-        record["usedAudioReactive"] = snapshot.usedAudioReactive ? 1 : 0
-        record["usedHandGestures"] = snapshot.usedHandGestures ? 1 : 0
-        record["usedRecording"] = snapshot.usedRecording ? 1 : 0
-        record["usedSharePlay"] = snapshot.usedSharePlay ? 1 : 0
-        record["usedGradientColoring"] = snapshot.usedGradientColoring ? 1 : 0
-        record["usedAnimation"] = snapshot.usedAnimation ? 1 : 0
-        
-        // Distributions (encoded as JSON strings)
-        if let fractalTypeString = jsonString(from: snapshot.fractalTypeDistribution) {
-            record["fractalTypeDistribution"] = fractalTypeString
-        }
-        if let gradientString = jsonString(from: snapshot.gradientPresetDistribution) {
-            record["gradientPresetDistribution"] = gradientString
-        }
-        if let lightingString = jsonString(from: snapshot.lightingPresetDistribution) {
-            record["lightingPresetDistribution"] = lightingString
-        }
-        
-        // Presets
-        record["presetsLoaded"] = snapshot.presetsLoaded as NSNumber
-        record["presetsSaved"] = snapshot.presetsSaved as NSNumber
-        // Performance
-        record["avgFPS"] = snapshot.avgFPS as NSNumber
-        
-        // Device (anonymous)
-        record["deviceModel"] = snapshot.deviceModel
-        record["osVersion"] = snapshot.osVersion
-        record["appVersion"] = snapshot.appVersion
-        
-        guard let database = database() else { return }  // CloudKit unavailable — skip
-        do {
-            _ = try await database.save(record)
-        } catch {
+        if !(await cloudKitUploader.upload(snapshot)) {
             // Save for retry later
             savePendingSnapshot(snapshot)
         }

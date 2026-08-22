@@ -5,7 +5,7 @@ import Testing
 @MainActor
 @Suite("Input ownership and radial profiles")
 struct InputOwnershipTests {
-    @Test("Only one semantic surface consumes an input stream")
+    @Test("Ownership stays exclusive except for viewport navigation beneath the pointer radial")
     func exclusiveOwnership() {
         let store = InputOwnershipStore()
         #expect(store.claim(.viewport))
@@ -18,6 +18,10 @@ struct InputOwnershipTests {
         store.release(.viewport)
         #expect(store.owner == nil)
         #expect(store.claim(.radialMenu))
+        #expect(!store.canConsume(.viewport))
+        #expect(store.canConsumeViewportInput(allowsPointerRadialPassthrough: true))
+        #expect(!store.canConsumeViewportInput(allowsPointerRadialPassthrough: false))
+        #expect(!store.canConsume(.inspector))
     }
 
     @Test("Touch radial controls meet minimum target geometry")

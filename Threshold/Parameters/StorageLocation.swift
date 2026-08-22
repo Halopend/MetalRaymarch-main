@@ -122,6 +122,30 @@ final class StorageLocation {
         return docs.appendingPathComponent("Backups", isDirectory: true)
     }
 
+    /// Whether `url` is a file inside the currently selected library root.
+    /// Opening one of these files should load it in place rather than offering
+    /// to import a second copy into the folder that already owns it.
+    func containsInActiveStore(_ url: URL) -> Bool {
+        guard let activeRoot else { return false }
+        return Self.contains(url, in: activeRoot)
+    }
+
+    /// Canonical component-based containment used by open-file routing. Resolving
+    /// symlinks prevents a link under the store root from making an outside file
+    /// look managed, while path components avoid `/Threshold Copy` matching
+    /// `/Threshold` by string prefix alone.
+    nonisolated static func contains(_ url: URL, in root: URL) -> Bool {
+        guard url.isFileURL, root.isFileURL else { return false }
+
+        let candidate = url.standardizedFileURL.resolvingSymlinksInPath()
+        let canonicalRoot = root.standardizedFileURL.resolvingSymlinksInPath()
+        let candidateComponents = candidate.pathComponents
+        let rootComponents = canonicalRoot.pathComponents
+
+        guard candidateComponents.count > rootComponents.count else { return false }
+        return candidateComponents.prefix(rootComponents.count).elementsEqual(rootComponents)
+    }
+
     // MARK: - Subfolder accessors (relative to a given root)
 
     nonisolated static func scenesDir(_ root: URL) -> URL { root.appendingPathComponent(scenesSubdir, isDirectory: true) }

@@ -271,7 +271,7 @@ final class NavigationStore {
     ) {
         self.defaults = defaults
         self.profile = profile
-        self.allowsCustomScenes = allowsCustomScenes ?? defaults.bool(forKey: "allowCustomScenes")
+        self.allowsCustomScenes = allowsCustomScenes ?? true
 
         if let data = defaults.data(forKey: Self.snapshotKey),
            let decoded = try? decoder.decode(NavigationState.self, from: data),
