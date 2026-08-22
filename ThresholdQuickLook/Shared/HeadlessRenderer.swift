@@ -360,14 +360,36 @@ final class HeadlessRenderer: @unchecked Sendable {
     /// callers cache the result.
     private func compileCustomPipeline(_ formula: EmbeddedFormula) -> MTLRenderPipelineState? {
         let isWarp = formula.effectKind == .spaceWarp
-        guard let source = try? CustomShaderCompiler.synthesizeSource(
-            fractal: isWarp ? nil : formula, spaceWarp: isWarp ? formula : nil) else { return nil }
+        let source: String
+        do {
+            source = try CustomShaderCompiler.synthesizeSource(
+                fractal: isWarp ? nil : formula, spaceWarp: isWarp ? formula : nil)
+        } catch {
+            Self.reportCustomCompileFailure(formula, stage: "synthesize", error)
+            return nil
+        }
         let options = MTLCompileOptions()
         if #available(macOS 15.0, *) { options.mathMode = .fast } else { options.fastMathEnabled = true }
-        guard let lib = try? device.makeLibrary(source: source, options: options),
-              let vfn = lib.makeFunction(name: "screenshotVertexShader"),
-              let ffn = try? lib.makeFunction(name: "fragmentShaderMono", constantValues: MTLFunctionConstantValues())
-        else { return nil }
+        // Every failure below is reported to stderr: the Quick Look render gate
+        // (and anyone debugging a blank preview) otherwise only sees "nil".
+        let lib: MTLLibrary
+        do {
+            lib = try device.makeLibrary(source: source, options: options)
+        } catch {
+            Self.reportCustomCompileFailure(formula, stage: "makeLibrary", error)
+            return nil
+        }
+        guard let vfn = lib.makeFunction(name: "screenshotVertexShader") else {
+            Self.reportCustomCompileFailure(formula, stage: "vertex function", nil)
+            return nil
+        }
+        let ffn: MTLFunction
+        do {
+            ffn = try lib.makeFunction(name: "fragmentShaderMono", constantValues: MTLFunctionConstantValues())
+        } catch {
+            Self.reportCustomCompileFailure(formula, stage: "fragment function", error)
+            return nil
+        }
         let pd = MTLRenderPipelineDescriptor()
         pd.label = "Threshold QL Custom DE"
         pd.vertexFunction = vfn
@@ -376,7 +398,18 @@ final class HeadlessRenderer: @unchecked Sendable {
         pd.colorAttachments[0].pixelFormat = .bgra8Unorm
         pd.depthAttachmentPixelFormat = .depth32Float
         pd.rasterSampleCount = 1
-        return try? device.makeRenderPipelineState(descriptor: pd)
+        do {
+            return try device.makeRenderPipelineState(descriptor: pd)
+        } catch {
+            Self.reportCustomCompileFailure(formula, stage: "pipeline", error)
+            return nil
+        }
+    }
+
+    private static func reportCustomCompileFailure(_ formula: EmbeddedFormula, stage: String, _ error: Error?) {
+        let detail = error.map { String(describing: $0) } ?? "no error object"
+        let message = "⚠️ QL custom DE '\(formula.name)' (\(formula.shortHash)) failed at \(stage): \(detail)\n"
+        FileHandle.standardError.write(Data(message.utf8))
     }
 
     // MARK: Core render
