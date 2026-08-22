@@ -176,5 +176,6 @@
   "worldRotationW" : 0.99683434,
   "worldRotationX" : -0.05079634,
   "worldRotationY" : 0.033526927,
-  "worldRotationZ" : -0.05115731
+  "worldRotationZ" : -0.05115731,
+  "coneMarchCompatible" : false
 }
