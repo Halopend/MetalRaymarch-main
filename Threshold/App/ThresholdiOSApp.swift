@@ -1,5 +1,6 @@
 #if os(iOS)
 import SwiftUI
+import UIKit
 
 @main
 struct ThresholdiOSApp: App {
@@ -24,7 +25,9 @@ private struct ThresholdiOSRootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("hasCompletedIntroOnboarding") private var hasCompletedIntroOnboarding = false
-    @State private var isShowingControls = true
+    // Start phone users on the artwork. Controls remain one tap away and use
+    // the system's compact inspector sheet; iPad keeps its visible side panel.
+    @State private var isShowingControls = UIDevice.current.userInterfaceIdiom != .phone
     @State private var isAnimationEditorPresented = false
     @State private var isFormulaEditorPresented = false
     @State private var restoreControlsAfterFormulaEditor = false
@@ -51,6 +54,14 @@ private struct ThresholdiOSRootView: View {
                             .padding(.trailing, max(16, safeAreaInsets.trailing + 8))
                     }
                 }
+                .overlay(alignment: .bottom) {
+                    if !appModel.rendererStartupWarmupComplete {
+                        shaderCompileBanner
+                            .padding(.bottom, max(24, safeAreaInsets.bottom + 12))
+                            .transition(.opacity)
+                    }
+                }
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: appModel.rendererStartupWarmupComplete)
                 .inspector(isPresented: $isShowingControls) {
                     ThresholdiOSInspectorContent(isShowingControls: $isShowingControls)
                         .environment(appModel)
@@ -100,7 +111,7 @@ private struct ThresholdiOSRootView: View {
                 }
                 .onSceneLoadAutoHide {
                     // Auto-hide the controls inspector when a scene is selected.
-                    // (iPad has no pin concept, so it always collapses.)
+                    // iOS has no pin concept, so it always collapses.
                     setControlsVisible(false)
                 }
                 .onDisappear(perform: dismissRadialMenu)
@@ -133,7 +144,7 @@ private struct ThresholdiOSRootView: View {
             appModel.dismissAnimationEditorHandler = { isAnimationEditorPresented = false }
             // External-file imports (Files app, Share sheet) surface their
             // sheet, progress, and errors inside the inspector's ContentView.
-            // Let AppModel.ensureWindowContentVisible() reveal it on iPad.
+            // Let AppModel.ensureWindowContentVisible() reveal it on iOS.
             appModel.openMenuWindowHandler = { setControlsVisible(true) }
             syncMenuWindowVisibility(isShowingControls)
             Task { @MainActor in
@@ -151,7 +162,7 @@ private struct ThresholdiOSRootView: View {
         }
     }
 
-    /// Keep AppModel's window-visibility model truthful on iPad so
+    /// Keep AppModel's window-visibility model truthful on iOS so
     /// `ensureWindowContentVisible()` re-presents the inspector instead of
     /// assuming its content is already on screen.
     private func syncMenuWindowVisibility(_ isVisible: Bool) {
@@ -270,6 +281,23 @@ private struct ThresholdiOSRootView: View {
         }
     }
 
+    /// Shown while the renderer's generic pipeline is still compiling. On a
+    /// cold GPU shader cache (first launch, OS update) this takes several
+    /// seconds on iPad; without feedback the black viewport reads as a hang.
+    private var shaderCompileBanner: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+            Text("Compiling shaders — first launch may take a moment…")
+                .font(.footnote.weight(.medium))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+        .foregroundStyle(.primary)
+        .accessibilityElement(children: .combine)
+    }
+
     private var controlsToggle: some View {
         Button {
             setControlsVisible(!isShowingControls)
@@ -307,6 +335,11 @@ private struct ThresholdiOSInspectorContent: View {
             // compact so ContentView selects its rail-free responsive shell.
             .environment(\.horizontalSizeClass, .compact)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // `inspector` adapts to a sheet on iPhone. Medium is useful for
+            // quick adjustments while preserving the live canvas; large gives
+            // dense editors the full available workspace.
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
             .overlay(alignment: .leading) {
                 swipeDismissHandle
             }

@@ -217,7 +217,12 @@ struct ThresholdMacRenderView: NSViewRepresentable {
                                             depthPixelFormat: view.depthStencilPixelFormat,
                                             clearColor: view.clearColor)
             renderer?.drawableSizeDidChange(view.drawableSize)
-            appModel.rendererStartupWarmupComplete = renderer != nil
+            // Warmup completes when the generic pipeline has compiled (off the
+            // main thread). Until then the root shows a "compiling shaders"
+            // state instead of a frozen app.
+            renderer?.genericPipelineSlot.setOnReady { [appModel] in
+                appModel.rendererStartupWarmupComplete = true
+            }
             // Compile + activate runtime `.threshfx` formulas on Mac/iPad (was
             // visionOS-only). Binding here triggers the handler's didSet, which
             // re-activates any formula loaded before the view existed.
@@ -312,6 +317,54 @@ private final class NonBlockingDrawableProvider: @unchecked Sendable {
     }
 }
 #endif
+
+/// Owns the asynchronously compiled generic (unspecialized) `fragmentShaderMono`
+/// pipeline. On a cold GPU shader cache that single compile takes several
+/// seconds on iPad; building it inside `ViewportRenderer.init` — which runs on
+/// the main thread from `makeUIView`/`makeNSView` — froze the entire UI on first
+/// launch with no feedback. The slot is `@unchecked Sendable` (all state behind
+/// `lock`) so the background build closure can capture it without dragging the
+/// non-Sendable renderer along. `current` is `nil` until the build lands; the
+/// renderer skips frames until then and `onReady` flips the app's warmup flag.
+final class ViewportGenericPipelineSlot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pipeline: MTLRenderPipelineState?
+    private var onReady: (@MainActor () -> Void)?
+
+    var current: MTLRenderPipelineState? {
+        lock.lock(); defer { lock.unlock() }
+        return pipeline
+    }
+
+    /// Install the readiness callback. Fires immediately (on the main actor)
+    /// when the pipeline already exists, so there is no set-after-publish race.
+    func setOnReady(_ handler: (@MainActor () -> Void)?) {
+        lock.lock()
+        onReady = handler
+        let ready = pipeline != nil
+        lock.unlock()
+        if ready, let handler { Task { @MainActor in handler() } }
+    }
+
+    func publish(_ built: MTLRenderPipelineState) {
+        lock.lock()
+        pipeline = built
+        let handler = onReady
+        lock.unlock()
+        if let handler { Task { @MainActor in handler() } }
+    }
+
+    /// Blocking wait for headless/benchmark callers that render synchronously
+    /// right after construction. Never used on the interactive draw path.
+    func waitForPipeline(timeout: TimeInterval) -> MTLRenderPipelineState? {
+        let deadline = CACurrentMediaTime() + timeout
+        while CACurrentMediaTime() < deadline {
+            if let ready = current { return ready }
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        return current
+    }
+}
 
 final class ViewportRenderer {
     private enum SetupError: Error {
@@ -511,7 +564,14 @@ final class ViewportRenderer {
     private let drawableProvider: NonBlockingDrawableProvider
     #endif
     private let commandQueue: MTLCommandQueue
-    private let pipelineState: MTLRenderPipelineState
+    /// Generic pipeline, compiled off the main thread after init (see
+    /// `ViewportGenericPipelineSlot`). Specialized variants layer on top once
+    /// this exists; until then `draw` skips frames.
+    let genericPipelineSlot = ViewportGenericPipelineSlot()
+    private static let genericPipelineQueue = DispatchQueue(
+        label: "com.puppypower.Threshold.viewport-generic-pipeline",
+        qos: .userInitiated
+    )
     private let depthState: MTLDepthStencilState
     private let depthPixelFormat: MTLPixelFormat
     private let colorPixelFormat: MTLPixelFormat
@@ -632,18 +692,33 @@ final class ViewportRenderer {
         guard let commandQueue = device.makeCommandQueue() else { return nil }
         self.commandQueue = commandQueue
 
-        let builtPipeline: MTLRenderPipelineState
         let builtMesh: MTKMesh
         let builtVertexDescriptor = Self.buildMetalVertexDescriptor()
         do {
-            builtPipeline = try Self.buildRenderPipeline(device: device, colorPixelFormat: colorPixelFormat, depthPixelFormat: depthPixelFormat, vertexDescriptor: builtVertexDescriptor)
             builtMesh = try Self.buildMesh(device: device, vertexDescriptor: builtVertexDescriptor)
         } catch {
             print("ThresholdMac renderer setup failed: \(error)")
             return nil
         }
-        pipelineState = builtPipeline
         vertexDescriptor = builtVertexDescriptor
+
+        // The generic raymarch pipeline is the one unavoidable cold-cache compile
+        // at launch. Build it off the main thread; `draw` renders nothing until
+        // it is published and the UI stays responsive (onboarding, controls).
+        let slot = genericPipelineSlot
+        Self.genericPipelineQueue.async { [device, colorPixelFormat, depthPixelFormat] in
+            do {
+                let pipeline = try Self.buildRenderPipeline(
+                    device: device,
+                    colorPixelFormat: colorPixelFormat,
+                    depthPixelFormat: depthPixelFormat,
+                    vertexDescriptor: Self.buildMetalVertexDescriptor()
+                )
+                slot.publish(pipeline)
+            } catch {
+                print("Threshold viewport generic pipeline build failed: \(error)")
+            }
+        }
         specializedPipelineBuilder = ViewportSpecializedPipelineBuilder(
             device: device,
             colorPixelFormat: colorPixelFormat,
@@ -737,6 +812,9 @@ final class ViewportRenderer {
         let collectSteps = BenchmarkManager.shared.shouldCollectSteps
         if collectSteps { memset(benchBuffer.contents(), 0, MemoryLayout<UInt32>.stride * 11) }
 
+        // Benchmarks render synchronously right after construction; give the
+        // background generic-pipeline build a chance to land first.
+        guard genericPipelineSlot.waitForPipeline(timeout: 60) != nil else { return nil }
         guard let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
         // Fractal distance cache: bake in the measured command buffer so the
         // harness sees the cache's true amortized cost (rebake only on change).
@@ -746,7 +824,7 @@ final class ViewportRenderer {
                 uniformBuffer: uniformBuffer,
                 frame: frame)
         }
-        let pipeline = resolveActivePipeline(appModel: appModel)
+        guard let pipeline = resolveActivePipeline(appModel: appModel) else { return nil }
         let descriptor = makeOffscreenRenderPassDescriptor(color: color, depth: depth)
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return nil }
         encodeRaymarch(into: encoder, pipeline: pipeline, uniformBuffer: uniformBuffer, benchBuffer: benchBuffer)
@@ -841,7 +919,10 @@ final class ViewportRenderer {
     func draw(appModel: AppModel) {
         guard appModel.isAppActive,
               drawableSize.width > 1,
-              drawableSize.height > 1 else {
+              drawableSize.height > 1,
+              // Generic pipeline still compiling (first launch): nothing to
+              // draw with yet, and acquiring drawables would only add pressure.
+              genericPipelineSlot.current != nil else {
             return
         }
 
@@ -1086,7 +1167,12 @@ final class ViewportRenderer {
         }
         #endif
 
-        let activePipeline = resolveActivePipeline(appModel: appModel)
+        guard let activePipeline = resolveActivePipeline(appModel: appModel) else {
+            // Cannot happen after the top-of-frame guard, but keep the in-flight
+            // gate balanced: the completed handler above signals on commit.
+            commandBuffer.commit()
+            return
+        }
 
         if let temporalPass, let blitPipelineState, let motionPipelineState {
             // 1. Raymarch into the low-resolution offscreen target. Depth is
@@ -1299,7 +1385,10 @@ final class ViewportRenderer {
     /// Kicks off an async build the first time a configuration is seen so future
     /// frames get the fully-unrolled fast path without hitching the render thread.
     /// Updates `appModel.isUsingSpecializedPipeline` (drives the bolt indicator).
-    private func resolveActivePipeline(appModel: AppModel) -> MTLRenderPipelineState {
+    private func resolveActivePipeline(appModel: AppModel) -> MTLRenderPipelineState? {
+        // No generic pipeline yet: don't queue specialized builds either, so the
+        // first-launch compile isn't competing with itself for the GPU compiler.
+        guard let genericPipeline = genericPipelineSlot.current else { return nil }
         let settings = appModel.renderSettings
         // deIterationMismatch biases the baked FC_FRACTAL_ITERATIONS (geometry fold count)
         // while the DE stays normalized to the unbiased count (RenderPrecompute) — reproduces
@@ -1377,7 +1466,7 @@ final class ViewportRenderer {
             )
         }
         appModel.isUsingSpecializedPipeline = false
-        return pipelineState
+        return genericPipeline
     }
 
     /// Asynchronously compiles a specialized `fragmentShaderMono` pipeline and
@@ -2347,7 +2436,12 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                                             depthPixelFormat: view.depthStencilPixelFormat,
                                             clearColor: view.clearColor)
             renderer?.drawableSizeDidChange(view.drawableSize)
-            appModel.rendererStartupWarmupComplete = renderer != nil
+            // Warmup completes when the generic pipeline has compiled (off the
+            // main thread). Until then the root shows a "compiling shaders"
+            // state instead of a frozen app.
+            renderer?.genericPipelineSlot.setOnReady { [appModel] in
+                appModel.rendererStartupWarmupComplete = true
+            }
             // Compile + activate runtime `.threshfx` formulas on Mac/iPad (was
             // visionOS-only). Binding here triggers the handler's didSet, which
             // re-activates any formula loaded before the view existed.
