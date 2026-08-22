@@ -113,6 +113,7 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
 
 struct ThresholdMacRenderView: NSViewRepresentable {
     let appModel: AppModel
+    let allowsPointerRadialPassthrough: Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator(appModel: appModel)
@@ -137,7 +138,9 @@ struct ThresholdMacRenderView: NSViewRepresentable {
         view.autoResizeDrawable = true
         view.inputSink = context.coordinator.inputAccumulator
         view.shouldAcceptViewportInput = { [weak appModel] in
-            appModel?.inputOwnershipStore.canConsume(.viewport) ?? false
+            appModel?.inputOwnershipStore.canConsumeViewportInput(
+                allowsPointerRadialPassthrough: allowsPointerRadialPassthrough
+            ) ?? false
         }
         view.delegate = context.coordinator
         context.coordinator.configure(view)
@@ -148,7 +151,9 @@ struct ThresholdMacRenderView: NSViewRepresentable {
         context.coordinator.appModel = appModel
         (nsView as? ThresholdMacInteractiveView)?.inputSink = context.coordinator.inputAccumulator
         (nsView as? ThresholdMacInteractiveView)?.shouldAcceptViewportInput = { [weak appModel] in
-            appModel?.inputOwnershipStore.canConsume(.viewport) ?? false
+            appModel?.inputOwnershipStore.canConsumeViewportInput(
+                allowsPointerRadialPassthrough: allowsPointerRadialPassthrough
+            ) ?? false
         }
     }
 

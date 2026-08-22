@@ -1133,9 +1133,11 @@ actor Renderer {
             drawable.deviceAnchor = deviceAnchor
             frame.startSubmission()
             defer { frame.endSubmission() }
-            if drawableRenderContextRequired {
-                encodeDrawableRenderContextPass(commandBuffer: commandBuffer, drawable: drawable)
-            }
+            // Render context first (after the anchor, before any drawable
+            // encoding), then the portal pass, then present — see
+            // beginDrawableRenderContext.
+            let stallRenderContext = beginDrawableRenderContext(commandBuffer: commandBuffer, drawable: drawable)
+            encodeDrawableRenderContextPass(stallRenderContext, commandBuffer: commandBuffer, drawable: drawable)
             drawable.encodePresent(commandBuffer: commandBuffer)
             commandBuffer.commit()
             startPostFirstFrameSetupIfNeeded()
@@ -1313,20 +1315,25 @@ actor Renderer {
         frame.startSubmission()
         defer { frame.endSubmission() }
 
+        // Once the layer is configured with a render-context stencil format
+        // (visionOS 26+), the compositor REQUIRES the drawable render context
+        // on EVERY presented command buffer, in every immersion style —
+        // presenting without it aborts with "cannot present drawable: need to
+        // use drawable render context when supporting progressive style".
+        // Apple's reference loop adds the context FIRST (deviceAnchor is
+        // already set above; CompositorServices requires that ordering) and
+        // before any encoder touches the drawable; the portal pass then
+        // consumes it right before each encodePresent below. Doing it here,
+        // once, means no present path can reach the compositor without it.
+        let drawableRenderContext = beginDrawableRenderContext(commandBuffer: commandBuffer, drawable: drawable)
+
         let renderEncodeStart = CACurrentMediaTime()
         let renderEncodeTraceState = RenderTrace.begin("Render Encode")
         defer { RenderTrace.end("Render Encode", renderEncodeTraceState) }
 
-        // Once the layer is configured with a render-context stencil format
-        // (visionOS 26+), the compositor REQUIRES the drawable render-context
-        // pass before EVERY present, in every immersion style — presenting
-        // without it aborts with "need to use drawable render context when
-        // supporting progressive style". So the pass runs per-frame whenever
-        // configured (see the encodeDrawableRenderContextPass calls before
-        // each encodePresent below). The transparent background additionally
-        // needs fragmentMain's miss-alpha, which the compute path doesn't
-        // have — force the fragment path while it's active.
-        let renderContextRequired = drawableRenderContextRequired
+        // The transparent background additionally needs fragmentMain's
+        // miss-alpha, which the compute path doesn't have — force the
+        // fragment path while it's active.
         var framePath = selectFramePath(settingsSnapshot: settingsSnapshot)
         if passthroughBackgroundActive { framePath = .fragment }
 
@@ -1364,9 +1371,7 @@ actor Renderer {
                     drawable: drawable,
                     preserveSceneDepth: false
                 )
-                if renderContextRequired {
-                    encodeDrawableRenderContextPass(commandBuffer: commandBuffer, drawable: drawable)
-                }
+                encodeDrawableRenderContextPass(drawableRenderContext, commandBuffer: commandBuffer, drawable: drawable)
                 drawable.encodePresent(commandBuffer: commandBuffer)
                 observeAdaptiveComputeCompletion(commandBuffer)
                 shouldSignalInFlightSemaphore = false
@@ -1488,9 +1493,7 @@ actor Renderer {
                 drawable: drawable,
                 preserveSceneDepth: false
             )
-            if renderContextRequired {
-                encodeDrawableRenderContextPass(commandBuffer: commandBuffer, drawable: drawable)
-            }
+            encodeDrawableRenderContextPass(drawableRenderContext, commandBuffer: commandBuffer, drawable: drawable)
             drawable.encodePresent(commandBuffer: commandBuffer)
             shouldSignalInFlightSemaphore = false
             commandBuffer.commit()
@@ -1691,9 +1694,7 @@ actor Renderer {
             }
         }
 
-        if renderContextRequired {
-            encodeDrawableRenderContextPass(commandBuffer: commandBuffer, drawable: drawable)
-        }
+        encodeDrawableRenderContextPass(drawableRenderContext, commandBuffer: commandBuffer, drawable: drawable)
 
         drawable.encodePresent(commandBuffer: commandBuffer)
 

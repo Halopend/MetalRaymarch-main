@@ -31,4 +31,12 @@ final class InputOwnershipStore {
     func canConsume(_ requester: InteractionOwner) -> Bool {
         owner == nil || owner == requester
     }
+
+    /// macOS Shift-peek makes the pointer radial visually and interactively
+    /// transparent. Permit the viewport during that explicit passthrough
+    /// without weakening the modal touch radial on iPadOS.
+    func canConsumeViewportInput(allowsPointerRadialPassthrough: Bool) -> Bool {
+        canConsume(.viewport)
+            || (allowsPointerRadialPassthrough && owner == .radialMenu)
+    }
 }

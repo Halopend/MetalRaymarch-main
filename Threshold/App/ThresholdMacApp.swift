@@ -251,6 +251,94 @@ private struct ViewportChromeShortcutMonitor: NSViewRepresentable {
     }
 }
 
+/// Window-local, unmodified shortcuts for the three most-used control
+/// destinations. Keeping these in a local monitor (instead of app menu key
+/// equivalents) lets text fields and the formula source editor type P/F/R
+/// normally.
+private struct ImportantSceneShortcutMonitor: NSViewRepresentable {
+    let onParameters: () -> Void
+    let onFormula: () -> Void
+    let onRadialMenu: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            onParameters: onParameters,
+            onFormula: onFormula,
+            onRadialMenu: onRadialMenu
+        )
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.hostView = view
+        context.coordinator.start()
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.hostView = nsView
+        context.coordinator.onParameters = onParameters
+        context.coordinator.onFormula = onFormula
+        context.coordinator.onRadialMenu = onRadialMenu
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+
+    @MainActor
+    final class Coordinator {
+        weak var hostView: NSView?
+        var onParameters: () -> Void
+        var onFormula: () -> Void
+        var onRadialMenu: () -> Void
+        private var monitor: Any?
+
+        init(
+            onParameters: @escaping () -> Void,
+            onFormula: @escaping () -> Void,
+            onRadialMenu: @escaping () -> Void
+        ) {
+            self.onParameters = onParameters
+            self.onFormula = onFormula
+            self.onRadialMenu = onRadialMenu
+        }
+
+        func start() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self,
+                      let hostWindow = hostView?.window,
+                      event.window === hostWindow,
+                      event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
+                      let key = event.charactersIgnoringModifiers?.lowercased()
+                else { return event }
+
+                if hostWindow.firstResponder is NSTextView || hostWindow.firstResponder is NSTextField {
+                    return event
+                }
+
+                guard !event.isARepeat else {
+                    return ["p", "f", "r"].contains(key) ? nil : event
+                }
+
+                switch key {
+                case "p": onParameters()
+                case "f": onFormula()
+                case "r": onRadialMenu()
+                default: return event
+                }
+                return nil
+            }
+        }
+
+        func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+    }
+}
+
 private struct ThresholdMacRootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -343,7 +431,10 @@ private struct ThresholdMacRootView: View {
             let controlsWidth = controlsPanelWidth(for: proxy.size)
 
             ZStack(alignment: .topTrailing) {
-                ThresholdMacRenderView(appModel: appModel)
+                ThresholdMacRenderView(
+                    appModel: appModel,
+                    allowsPointerRadialPassthrough: isShiftPressed
+                )
                     .frame(minWidth: minimumWindowSize.width, minHeight: minimumWindowSize.height)
                     .background(Color.black)
                     .ignoresSafeArea()
@@ -480,6 +571,20 @@ private struct ThresholdMacRootView: View {
                 ViewportChromeShortcutMonitor {
                     appModel.toggleViewportChromeVisibility()
                 }
+                .frame(width: 0, height: 0)
+                .allowsHitTesting(false)
+
+                ImportantSceneShortcutMonitor(
+                    onParameters: {
+                        openImportantScene(.input(.parameters))
+                    },
+                    onFormula: {
+                        openImportantScene(.shape(.formula))
+                    },
+                    onRadialMenu: {
+                        toggleRadialShortcut(windowSize: proxy.size)
+                    }
+                )
                 .frame(width: 0, height: 0)
                 .allowsHitTesting(false)
             }
@@ -858,7 +963,12 @@ private struct ThresholdMacRootView: View {
     private func hideRadialTabs(animated: Bool) {
         pendingRadialReveal?.cancel()
         pendingRadialReveal = nil
-        guard radialMenu.isPresented else { return }
+        guard radialMenu.isPresented else {
+            // Also repair an interrupted presentation that claimed ownership
+            // before its visible state was committed.
+            endRadialSession()
+            return
+        }
 
         endRadialSession()
         if animated && !reduceMotion {
@@ -875,12 +985,17 @@ private struct ThresholdMacRootView: View {
     /// to call once per session, so both reveal paths route through here while
     /// the launcher is still hidden.
     private func beginRadialSession() -> Bool {
+        // Presentation requests can converge in the same run-loop turn (edge,
+        // keyboard, and button). Treat an existing claim as the same session
+        // instead of incrementing the ownership store's re-entrant count.
+        if appModel.inputOwnershipStore.owner == .radialMenu { return true }
         guard appModel.inputOwnershipStore.claim(.radialMenu) else { return false }
         radialCache.startSync(with: appModel.renderSettings, appModel: appModel)
         return true
     }
 
     private func endRadialSession() {
+        guard appModel.inputOwnershipStore.owner == .radialMenu else { return }
         appModel.inputOwnershipStore.release(.radialMenu)
         radialCache.stopSync()
     }
@@ -971,6 +1086,38 @@ private struct ThresholdMacRootView: View {
                 anchor: CGPoint(x: windowSize.width - 18, y: windowSize.height * 0.48),
                 windowSize: windowSize
             )
+        }
+    }
+
+    private func openImportantScene(_ route: AppRoute) {
+        guard !appModel.isViewportChromeHidden else { return }
+        hideRadialTabs(animated: false)
+        appModel.navigationStore.select(route)
+
+        switch launcherStyle {
+        case .separateWindow:
+            presentControlsWindow()
+        case .radial, .controlPanel:
+            showControls(animated: true)
+        }
+    }
+
+    private func toggleRadialShortcut(windowSize: CGSize) {
+        guard !appModel.isViewportChromeHidden, !hasDetachedControls else { return }
+
+        let toggle = {
+            toggleSelectedNavigation(windowSize: windowSize)
+        }
+        guard launcherStyle != .radial else {
+            toggle()
+            return
+        }
+
+        // applyNavigationStyle runs from onChange and clears the previous
+        // presentation. Reveal on the next turn so that cleanup happens first.
+        launcherStyle = .radial
+        DispatchQueue.main.async {
+            toggleSelectedNavigation(windowSize: windowSize)
         }
     }
 

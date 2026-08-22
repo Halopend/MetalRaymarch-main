@@ -33,7 +33,7 @@ struct RenderCheck {
         "The lovely bones", "Pulsing", "Inverted Kleinian", "Orbit Density", "ave",
         "Kettle", "Pseudo Knightyan", "Box", "Metallic Pink", "Pseudo Kleinian",
         "Vampire", "Pool", "Spiky", "Bright Preset", "Wave Rail",
-        "Fractal Cartoon", "Blooming blue", "Apollonian Corner",
+        "Fractal Cartoon", "Blooming blue", "Twilight Mandelbox",
     ]
     static let blackThreshold = 12.0   // mean luminance (0-255)
 

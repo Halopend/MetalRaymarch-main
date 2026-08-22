@@ -60,8 +60,8 @@ it in Threshold to render and edit it.
    - [`Newton Heightfield.threshscene`](Threshold/Examples/Scenes/Newton%20Heightfield.threshscene)
      — a different, terrain-like distance field.
 
-On macOS, enable the feature and open **Shape → Fractal Formula → Metal DE
-Studio** to create a formula or edit the active one. The editor parses parameter
+On macOS or iPadOS, open **Shape → Fractal Formula → Metal DE Studio** to create
+a formula or edit the active one. The editor parses parameter
 comments immediately and compiles on a short debounce; if a new compile fails,
 the last good shader remains rendered.
 

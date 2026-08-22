@@ -24,6 +24,8 @@ private struct ThresholdiOSRootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isShowingControls = true
+    @State private var isFormulaEditorPresented = false
+    @State private var restoreControlsAfterFormulaEditor = false
     @State private var radialMenu = RadialMenuModel(interactionProfile: .touch)
     @State private var radialCurvature = 0.72
     private let controlsAnimation = MenuChrome.panelSpring
@@ -39,11 +41,13 @@ private struct ThresholdiOSRootView: View {
                 .ignoresSafeArea()
                 .background(Color.black)
                 .overlay(alignment: .topTrailing) {
-                    controlsToggle
-                        // The Metal surface stays edge-to-edge, but the control must
-                        // clear the status bar and Stage Manager window chrome.
-                        .padding(.top, max(16, safeAreaInsets.top + 8))
-                        .padding(.trailing, max(16, safeAreaInsets.trailing + 8))
+                    if !isFormulaEditorPresented {
+                        controlsToggle
+                            // The Metal surface stays edge-to-edge, but the control must
+                            // clear the status bar and Stage Manager window chrome.
+                            .padding(.top, max(16, safeAreaInsets.top + 8))
+                            .padding(.trailing, max(16, safeAreaInsets.trailing + 8))
+                    }
                 }
                 .inspector(isPresented: $isShowingControls) {
                     ThresholdiOSInspectorContent(isShowingControls: $isShowingControls)
@@ -99,10 +103,21 @@ private struct ThresholdiOSRootView: View {
                 }
                 .onDisappear(perform: dismissRadialMenu)
         }
+        .overlay {
+            if isFormulaEditorPresented {
+                FormulaEditorWindowView(onClose: dismissFormulaEditor)
+                    .environment(appModel)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
         .onAppear {
+            appModel.openFormulaEditorHandler = presentFormulaEditor
             Task { @MainActor in
                 await appModel.startMicrophoneAtLaunchIfEnabled()
             }
+        }
+        .onDisappear {
+            appModel.openFormulaEditorHandler = nil
         }
     }
 
@@ -147,6 +162,24 @@ private struct ThresholdiOSRootView: View {
         }
         appModel.controlStateStore.stopSync()
         appModel.inputOwnershipStore.release(.radialMenu)
+    }
+
+    private func presentFormulaEditor() {
+        guard !isFormulaEditorPresented else { return }
+        restoreControlsAfterFormulaEditor = isShowingControls
+        dismissRadialMenu()
+        // This must happen without animation: the transparent presentation
+        // should reveal only the Metal viewport on its very first frame.
+        isShowingControls = false
+        isFormulaEditorPresented = true
+    }
+
+    private func dismissFormulaEditor() {
+        isFormulaEditorPresented = false
+        if restoreControlsAfterFormulaEditor {
+            setControlsVisible(true)
+        }
+        restoreControlsAfterFormulaEditor = false
     }
 
     private func activateRadialTarget(_ target: AppNavigationTarget) {

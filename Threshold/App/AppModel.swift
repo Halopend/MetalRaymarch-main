@@ -932,6 +932,10 @@ class AppModel {
     /// Native presentation edge for the typed animation-editor command.
     var openAnimationEditorHandler: (() -> Void)?
 
+    /// Native presentation edge for Metal DE Studio. On iPad this is owned by
+    /// the renderer root so the underlying controls can be removed first.
+    var openFormulaEditorHandler: (() -> Void)?
+
     /// Installed by the active viewport adapter. Semantic UI surfaces dispatch
     /// renderer commands without retaining a platform view or input controller.
     var viewportCommandHandler: ((AppCommand) -> Void)?

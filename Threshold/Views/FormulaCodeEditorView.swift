@@ -2,22 +2,58 @@
 //  FormulaCodeEditorView.swift
 //  Threshold
 //
-//  Mac live-code window: edit a fractal formula's Metal source, watch the
+//  Cross-platform live-code workspace: edit a fractal formula's Metal source, watch the
 //  parameter sliders regenerate on every keystroke (pragma parse — instant),
 //  and see the viewport swap shaders a debounce later (background compile,
-//  keep-last-good, errors mapped to source lines inline). Lives in its own
-//  window so the fractal viewport stays visible while typing.
+//  keep-last-good, errors mapped to source lines inline). It uses a separate
+//  window on macOS and a full-screen workspace on iPadOS.
 //
 
-#if os(macOS)
+#if os(macOS) || os(iOS)
 
 import SwiftUI
 
 struct FormulaEditorWindowView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.dismiss) private var dismiss
     @State private var model: FormulaEditorModel?
+    var onClose: (() -> Void)? = nil
+    #if os(iOS)
+    @State private var isPreviewingRender = false
+    #endif
 
     var body: some View {
+        #if os(iOS)
+        ZStack(alignment: .bottomTrailing) {
+            NavigationStack {
+                editorBody
+                    .navigationTitle("Metal DE Studio")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") {
+                                if let onClose {
+                                    onClose()
+                                } else {
+                                    dismiss()
+                                }
+                            }
+                        }
+                    }
+            }
+            .opacity(isPreviewingRender ? 0 : 1)
+            .allowsHitTesting(!isPreviewingRender)
+
+            renderPreviewControl
+                .padding(20)
+        }
+        .onDisappear { isPreviewingRender = false }
+        #else
+        editorBody
+        #endif
+    }
+
+    private var editorBody: some View {
         Group {
             if let model {
                 FormulaEditorContent(model: model, appModel: appModel)
@@ -56,6 +92,36 @@ struct FormulaEditorWindowView: View {
         }
     }
 
+    #if os(iOS)
+    private var renderPreviewControl: some View {
+        HStack(spacing: 7) {
+            Image(systemName: isPreviewingRender ? "eye.fill" : "eye")
+            if !isPreviewingRender {
+                Text("Hold to Preview")
+            }
+        }
+        .font(.callout.weight(.semibold))
+        .foregroundStyle(.primary)
+        .padding(.horizontal, isPreviewingRender ? 14 : 16)
+        .padding(.vertical, 11)
+        .background(.thinMaterial, in: Capsule())
+        .contentShape(Capsule())
+        .shadow(radius: 6, y: 2)
+        .onLongPressGesture(
+            minimumDuration: 0,
+            maximumDistance: .infinity,
+            pressing: { isPressed in
+                // The pressing edge is delivered on touch-down/touch-up. Do not
+                // animate or debounce it: preview must track the finger exactly.
+                isPreviewingRender = isPressed
+            },
+            perform: {}
+        )
+        .accessibilityLabel("Preview fractal rendering")
+        .accessibilityHint("Touch and hold to hide Metal DE Studio; release to return")
+    }
+    #endif
+
 }
 
 private struct FormulaEditorContent: View {
@@ -64,6 +130,9 @@ private struct FormulaEditorContent: View {
 
     @State private var inspectorTab: InspectorTab = .parameters
     @State private var reportSubmissionStatus: String?
+    #if os(iOS)
+    @State private var isLibraryPresented = false
+    #endif
 
     private enum InspectorTab: String, CaseIterable, Identifiable {
         case parameters = "Params"
@@ -74,6 +143,7 @@ private struct FormulaEditorContent: View {
     }
 
     var body: some View {
+        #if os(macOS)
         HSplitView {
             librarySidebar
                 .frame(minWidth: 180, idealWidth: 220, maxWidth: 300)
@@ -83,6 +153,34 @@ private struct FormulaEditorContent: View {
                 .frame(minWidth: 240, idealWidth: 280, maxWidth: 360)
         }
         .frame(minWidth: 960, minHeight: 560)
+        #else
+        GeometryReader { geometry in
+            let inspectorWidth = min(400, max(260, geometry.size.width * 0.38))
+
+            HStack(spacing: 0) {
+                editorColumn
+                    .frame(width: max(0, geometry.size.width - inspectorWidth - 1))
+                    .background(.ultraThinMaterial)
+                Divider()
+                inspectorSidebar
+                    .frame(width: inspectorWidth)
+                    .background(.thinMaterial)
+            }
+        }
+        .sheet(isPresented: $isLibraryPresented) {
+            NavigationStack {
+                librarySidebar
+                    .navigationTitle("Formula Library")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { isLibraryPresented = false }
+                        }
+                    }
+            }
+            .presentationDetents([.medium, .large])
+        }
+        #endif
     }
 
     // MARK: - Library
@@ -126,11 +224,12 @@ private struct FormulaEditorContent: View {
 
     private var editorColumn: some View {
         VStack(spacing: 8) {
+            #if os(macOS)
             HStack(spacing: 10) {
                 Label("Metal DE Studio", systemImage: "hammer.fill")
                     .font(.headline)
                     .foregroundStyle(.cyan)
-                    .help("Write a Metal distance estimator on macOS")
+                    .help("Write a Metal distance estimator")
 
                 Text("macOS")
                     .font(.caption2.weight(.semibold))
@@ -163,6 +262,33 @@ private struct FormulaEditorContent: View {
                     .keyboardShortcut("s", modifiers: .command)
                     .disabled(!model.isDirty)
             }
+            #else
+            VStack(spacing: 8) {
+                HStack(spacing: 10) {
+                    Button {
+                        isLibraryPresented = true
+                    } label: {
+                        Image(systemName: "books.vertical")
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("Formula Library")
+
+                    statusPill
+                    Spacer()
+                    Button("Compile") { model.compileNow() }
+                        .buttonStyle(.borderedProminent)
+                    Button("Save") { try? model.save() }
+                        .buttonStyle(.bordered)
+                        .disabled(!model.isDirty)
+                }
+
+                TextField("Formula name", text: Binding(
+                    get: { model.name },
+                    set: { model.setName($0) }
+                ))
+                .textFieldStyle(.roundedBorder)
+            }
+            #endif
 
             TextEditor(text: Binding(
                 get: { model.source },
@@ -170,9 +296,21 @@ private struct FormulaEditorContent: View {
             ))
             .font(.system(.callout, design: .monospaced))
             .autocorrectionDisabled()
+            // The editor surface is deliberately dark in every app appearance.
+            // Keep AppKit/UIKit's text, insertion point, and selection colors in
+            // the matching appearance as well (especially in macOS Light Mode).
+            .colorScheme(.dark)
             .scrollContentBackground(.hidden)
+            #if os(iOS)
+            .background(Color.black.opacity(0.52))
+            #else
             .background(Color(white: 0.08))
+            #endif
             .cornerRadius(6)
+            #if os(iOS)
+            .textInputAutocapitalization(.never)
+            .keyboardType(.asciiCapable)
+            #endif
 
             if !diagnostics.isEmpty {
                 diagnosticsList

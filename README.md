@@ -38,7 +38,7 @@ flowchart LR
 - **A real Metal DE contract:** Threshold injects a validated formula body into
   its renderer and calls a distance-only function for marching plus an
   orbit-aware function for coloring.
-- **Live authoring:** On macOS, **Metal DE Studio** provides a source-first
+- **Live authoring:** On macOS and iPadOS, **Metal DE Studio** provides a source-first
   edit/compile loop. On every platform, `.threshfx` and `.threshscene` files can
   be previewed, imported, shared, and reopened.
 - **Designed for the rest of the app:** Custom geometry works at runtime with
@@ -252,7 +252,7 @@ in [CUSTOM_SCENES.md](CUSTOM_SCENES.md).
 3. Load [Accidental Sphere Projection](Threshold/Examples/Scenes/Accidental%20Sphere%20Projection.threshscene)
    for a complete scene whose DE is embedded, or [Polychora 24-Cell](<Threshold/Examples/Custom%20Scene%20Example/Polychora%2024-Cell.threshscene>)
    for a 4D stereographic-projection example.
-4. On macOS, open **Shape → Fractal Formula → Metal DE Studio** to create or
+4. On macOS or iPadOS, open **Shape → Fractal Formula → Metal DE Studio** to create or
    edit a formula. Export the active result as either a self-contained
    `.threshscene` or a reusable `.threshfx`.
 
