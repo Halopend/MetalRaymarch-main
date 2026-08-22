@@ -26,6 +26,12 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
     private var _library: MTLLibrary?
     private var _hash: String?
     private var _compiler: CustomShaderCompiler?
+    /// Bumped on every `activate` entry. A compile that finishes after a newer
+    /// activation started must not publish: without this, two overlapping
+    /// compiles (a dismissed editor's draft vs. a freshly selected scene) race
+    /// and the one that finishes LAST wins regardless of which was requested
+    /// last.
+    private var _activationGeneration: UInt64 = 0
 
     /// The active custom library, or nil when no custom formula is installed.
     var library: MTLLibrary? { lock.lock(); defer { lock.unlock() }; return _library }
@@ -52,6 +58,17 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
         lock.lock(); _library = library; _hash = hash; lock.unlock()
     }
 
+    private func nextActivationGeneration() -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        _activationGeneration &+= 1
+        return _activationGeneration
+    }
+
+    private func isCurrentActivation(_ generation: UInt64) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return _activationGeneration == generation
+    }
+
     /// Compile + install a custom embedded formula (or pass nil to deactivate).
     /// The ~0.5–5 s compile runs on the `CustomShaderCompiler` actor — off the
     /// render and main threads. Library + hash are published together under one
@@ -65,6 +82,7 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
         // transform-stack codegen. Key the library + pipelines by the combined hash so
         // distinct effect sets never alias. A built-in fractal + non-empty stack rides
         // a custom library exactly as a .threshfx warp on a built-in does.
+        let activation = nextActivationGeneration()
         let isWarp = (formula?.effectKind == .spaceWarp)
         let fractalEffect = isWarp ? nil : formula
         let warpEffect = isWarp ? formula : nil
@@ -78,6 +96,10 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
         if hash == newHash, library != nil { return }   // unchanged → no-op
         let compiled = try await sharedCompiler(device: device).library(forFractal: fractalEffect, spaceWarp: warpEffect,
                                                                         warpStackSource: warpStackSource, warpStackSignature: warpStackSignature)
+        // The caller was cancelled (e.g. the formula editor was dismissed) or a
+        // newer activation has since started: leave whatever is current alone.
+        try Task.checkCancellation()
+        guard isCurrentActivation(activation) else { throw CancellationError() }
         if let old = hash, old != newHash {
             cache.evict(prefix: "CX\(old)_")   // retire the previous effect's pipelines
         }

@@ -32,6 +32,7 @@ struct FormulaEditorWindowView: View {
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
                             Button("Done") {
+                                model?.invalidate()
                                 if let onClose {
                                     onClose()
                                 } else {
@@ -61,6 +62,9 @@ struct FormulaEditorWindowView: View {
                 ProgressView()
             }
         }
+        // Window close (macOS) or cover teardown (iPadOS): stop any compile
+        // still in flight so it cannot replace a formula chosen afterwards.
+        .onDisappear { model?.invalidate() }
         .onAppear {
             guard model == nil else { return }
             let editor = FormulaEditorModel(
@@ -130,6 +134,7 @@ private struct FormulaEditorContent: View {
 
     @State private var inspectorTab: InspectorTab = .parameters
     @State private var reportSubmissionStatus: String?
+    @State private var libraryErrorMessage: String?
     #if os(iOS)
     @State private var isLibraryPresented = false
     #endif
@@ -211,13 +216,42 @@ private struct FormulaEditorContent: View {
                 }
                 .buttonStyle(.plain)
                 .contextMenu {
-                    Button("Duplicate") { try? appModel.formulaLibrary.duplicate(entry) }
-                    Button("Delete", role: .destructive) { try? appModel.formulaLibrary.delete(entry) }
+                    Button("Duplicate") { performLibraryAction("duplicate") { try appModel.formulaLibrary.duplicate(entry) } }
+                    Button("Delete", role: .destructive) { performLibraryAction("delete") { try appModel.formulaLibrary.delete(entry) } }
                 }
             }
             .listStyle(.sidebar)
+            if let libraryErrorMessage {
+                Text(libraryErrorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Library error: \(libraryErrorMessage)")
+            }
         }
         .padding(10)
+    }
+
+    private func performLibraryAction(_ verb: String, _ action: () throws -> Void) {
+        do {
+            try action()
+            libraryErrorMessage = nil
+        } catch {
+            libraryErrorMessage = "Couldn't \(verb) formula: \(error.localizedDescription)"
+        }
+    }
+
+    /// Shown under the editor's toolbar row when the last Save failed.
+    @ViewBuilder
+    private var saveErrorBanner: some View {
+        if let message = model.saveErrorMessage {
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel("Save failed: \(message)")
+        }
     }
 
     // MARK: - Editor
@@ -258,10 +292,11 @@ private struct FormulaEditorContent: View {
 
                 Button("Compile Now") { model.compileNow() }
                     .keyboardShortcut("b", modifiers: .command)
-                Button("Save") { try? model.save() }
+                Button("Save") { model.saveReportingErrors() }
                     .keyboardShortcut("s", modifiers: .command)
                     .disabled(!model.isDirty)
             }
+            saveErrorBanner
             #else
             VStack(spacing: 8) {
                 HStack(spacing: 10) {
@@ -277,10 +312,11 @@ private struct FormulaEditorContent: View {
                     Spacer()
                     Button("Compile") { model.compileNow() }
                         .buttonStyle(.borderedProminent)
-                    Button("Save") { try? model.save() }
+                    Button("Save") { model.saveReportingErrors() }
                         .buttonStyle(.bordered)
                         .disabled(!model.isDirty)
                 }
+                saveErrorBanner
 
                 TextField("Formula name", text: Binding(
                     get: { model.name },
