@@ -227,6 +227,9 @@ final class RenderSettings: @unchecked Sendable {
     private var _fractalBeatPunch: Float                = loadFloat("fractalBeatPunch", default: 0.7)
     private var _fractalAudioDamping: Float             = loadFloat("fractalAudioDamping", default: 0.0)
     private var _musicReactiveMappings: [MusicReactiveMapping] = loadMusicReactiveMappings("musicReactiveMappings")
+    /// Runtime-only audition state. The persisted mapping array remains untouched
+    /// so ending isolation restores every prior enabled flag exactly.
+    private var _isolatedMusicReactiveMappingID: UUID?
     /// Derived from `_musicReactiveMappings`; recomputed by
     /// `_recomputeFingerMappingFlag_locked()` at every mutation site (init,
     /// setter, audio-reactive config restore).
@@ -1018,9 +1021,39 @@ final class RenderSettings: @unchecked Sendable {
         set {
             withLock {
                 _musicReactiveMappings = Self.sanitizeMusicReactiveMappings(newValue)
+                if let isolatedID = _isolatedMusicReactiveMappingID,
+                   !_musicReactiveMappings.contains(where: { $0.id == isolatedID }) {
+                    _isolatedMusicReactiveMappingID = nil
+                }
                 _recomputeFingerMappingFlag_locked()
             }
             persistAudioReactive()
+        }
+    }
+
+    /// The mapping set consumed by the reactive engine. Isolation is projected
+    /// at read time, never written into scene state or UserDefaults.
+    var effectiveMusicReactiveMappings: [MusicReactiveMapping] {
+        withLock { _effectiveMusicReactiveMappings_locked() }
+    }
+
+    var isolatedMusicReactiveMappingID: UUID? {
+        withLock { _isolatedMusicReactiveMappingID }
+    }
+
+    /// Immediately changes the shared runtime projection used by every renderer.
+    /// Passing nil returns to the persisted enabled states; passing another ID
+    /// while active switches the audition target without losing that baseline.
+    @discardableResult
+    func setMusicReactiveIsolation(_ mappingID: UUID?) -> Bool {
+        withLock {
+            if let mappingID,
+               !_musicReactiveMappings.contains(where: { $0.id == mappingID }) {
+                return false
+            }
+            _isolatedMusicReactiveMappingID = mappingID
+            _recomputeFingerMappingFlag_locked()
+            return true
         }
     }
 
@@ -1033,8 +1066,19 @@ final class RenderSettings: @unchecked Sendable {
     }
 
     private func _recomputeFingerMappingFlag_locked() {
-        _hasEnabledFingerInputMapping = _musicReactiveMappings.contains {
+        _hasEnabledFingerInputMapping = _effectiveMusicReactiveMappings_locked().contains {
             $0.isEnabled && $0.source.isFingerInput
+        }
+    }
+
+    private func _effectiveMusicReactiveMappings_locked() -> [MusicReactiveMapping] {
+        guard let isolatedID = _isolatedMusicReactiveMappingID else {
+            return _musicReactiveMappings
+        }
+        return _musicReactiveMappings.map { mapping in
+            var projected = mapping
+            projected.isEnabled = mapping.id == isolatedID
+            return projected
         }
     }
 
@@ -4978,6 +5022,9 @@ final class RenderSettings: @unchecked Sendable {
                 _trebleSensitivity = newValue.trebleSensitivity
                 _beatSensitivity = newValue.beatSensitivity
                 _musicReactiveMappings = Self.sanitizeMusicReactiveMappings(newValue.musicReactiveMappings)
+                // Scene/config restoration is an explicit context change. Do not
+                // carry a temporary audition into the newly restored state.
+                _isolatedMusicReactiveMappingID = nil
                 _recomputeFingerMappingFlag_locked()
                 _tripletMusicGains = newValue.tripletMusicGains
             }

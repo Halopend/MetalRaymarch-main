@@ -92,7 +92,8 @@ struct MusicTabContent: View {
 
     private var activeMusicPermutationCount: Int {
         guard cache.audioReactive.fractalAudioReactiveEnabled else { return 0 }
-        return cache.audioReactive.musicReactiveMappings.count
+        if cache.isolatedMusicReactiveMappingID != nil { return 1 }
+        return cache.audioReactive.musicReactiveMappings.filter(\.isEnabled).count
     }
 
     private var hasFlashingVisualMappings: Bool {
@@ -1310,8 +1311,7 @@ struct MusicTabContent: View {
                             if !cache.audioReactive.musicReactiveMappings.isEmpty {
                                 Divider()
                                 Button("Clear Mappings", role: .destructive) {
-                                    cache.audioReactive.musicReactiveMappings = []
-                                    cache.push(\.musicReactiveMappings, value: [])
+                                    cache.setMusicReactiveMappings([])
                                 }
                             }
                         } label: {
@@ -1322,6 +1322,23 @@ struct MusicTabContent: View {
                         .controlSize(.small)
 
                         Text("\(activeMusicPermutationCount) active")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let isolatedID = cache.isolatedMusicReactiveMappingID,
+                       let isolated = cache.audioReactive.musicReactiveMappings.first(where: { $0.id == isolatedID }) {
+                        HStack(spacing: 8) {
+                            Label("Isolating \(mappingDisplayName(isolated))", systemImage: "scope")
+                                .font(.caption.weight(.semibold))
+                            Spacer()
+                            Button("Done") {
+                                cache.setMusicReactiveIsolation(nil)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                        Text("Other reactive effects are temporarily muted. Their previous enabled states return when isolation ends.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -1353,6 +1370,28 @@ struct MusicTabContent: View {
                                     }
 
                                     Spacer()
+
+                                    Toggle(isOn: Binding(
+                                        get: { cache.isolatedMusicReactiveMappingID == mapping.id },
+                                        set: { shouldIsolate in
+                                            cache.setMusicReactiveIsolation(shouldIsolate ? mapping.id : nil)
+                                        }
+                                    )) {
+                                        Label("Isolate", systemImage: "scope")
+                                            .font(.caption.weight(.semibold))
+                                    }
+                                    .toggleStyle(.button)
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .help("Temporarily mute every other reactive effect and audition this one.")
+                                }
+
+                                if let isolatedID = cache.isolatedMusicReactiveMappingID,
+                                   isolatedID != mapping.id {
+                                    Label("Temporarily muted by Isolate", systemImage: "speaker.slash")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                 }
 
                                 if canEditMappingTarget(mapping.target) {
@@ -1564,8 +1603,7 @@ struct MusicTabContent: View {
             mappings.removeAll { $0.identityKey == key }
         }
 
-        cache.audioReactive.musicReactiveMappings = mappings
-        cache.push(\.musicReactiveMappings, value: mappings)
+        cache.setMusicReactiveMappings(mappings)
     }
 
     private func mappingDisplayName(_ mapping: MusicReactiveMapping) -> String {
@@ -1598,8 +1636,7 @@ struct MusicTabContent: View {
         let mappings = preset.defaultMappings(for: cache.fractalType).filter {
             canEditMappingTarget($0.target)
         }
-        cache.audioReactive.musicReactiveMappings = mappings
-        cache.push(\.musicReactiveMappings, value: mappings)
+        cache.setMusicReactiveMappings(mappings)
     }
 
     private var availableMappingTargetsToAdd: [MusicReactiveTarget] {
@@ -1632,8 +1669,7 @@ struct MusicTabContent: View {
         guard canEditMappingTarget(mappings[index].target) else { return }
         mutate(&mappings[index])
         mappings[index].sanitizeInPlace()
-        cache.audioReactive.musicReactiveMappings = mappings
-        cache.push(\.musicReactiveMappings, value: mappings)
+        cache.setMusicReactiveMappings(mappings)
     }
 
     private func addMapping(_ target: MusicReactiveTarget,
@@ -1650,16 +1686,14 @@ struct MusicTabContent: View {
         // Newly added controls default to Follow (the calm, drift response).
         mapping.responseCurve = .drift
         mappings.append(mapping)
-        cache.audioReactive.musicReactiveMappings = mappings
-        cache.push(\.musicReactiveMappings, value: mappings)
+        cache.setMusicReactiveMappings(mappings)
     }
 
     private func removeMapping(at index: Int) {
         guard cache.audioReactive.musicReactiveMappings.indices.contains(index) else { return }
         var mappings = cache.audioReactive.musicReactiveMappings
         mappings.remove(at: index)
-        cache.audioReactive.musicReactiveMappings = mappings
-        cache.push(\.musicReactiveMappings, value: mappings)
+        cache.setMusicReactiveMappings(mappings)
     }
 
     // MARK: - Level Meters

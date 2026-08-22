@@ -9,6 +9,11 @@ import SwiftUI
 import ARKit
 import CoreGraphics
 
+struct FormulaEditorSeed {
+    let formula: EmbeddedFormula
+    let activatesImmediately: Bool
+}
+
 /// High-frequency render metrics isolated from AppModel to avoid
 /// broad observation invalidation on every FPS update.
 @MainActor
@@ -129,7 +134,11 @@ class AppModel {
     /// User-authored `.threshfx` files in the store's Formulas/ folder.
     @ObservationIgnored lazy var formulaLibrary = FormulaLibraryStore()
     /// Formula handed to the editor window on open (nil = start a new one).
-    var formulaEditorSeed: EmbeddedFormula?
+    /// One-shot payload consumed by Metal DE Studio when its window appears.
+    /// Built-in formulas are opened for inspection first; an edit or explicit
+    /// compile turns the draft into a custom formula without changing the
+    /// rendered fractal merely because the Studio window was opened.
+    var formulaEditorSeed: FormulaEditorSeed?
     static let fractalSettingsDidChangeNotification = Notification.Name("AppModel.fractalSettingsDidChange")
 
     /// Posted by AppModel when an external-file import needs the immersive

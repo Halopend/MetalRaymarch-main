@@ -94,7 +94,7 @@ enum WorkspaceRoot: String, CaseIterable, Codable, Hashable, Sendable {
         case .input: return .input(.playback)
         case .shape: return .shape(.formula)
         case .look: return .look(.color)
-        case .quality: return .quality(.overview)
+        case .quality: return .quality(.tuning)
         }
     }
 }
@@ -449,7 +449,7 @@ final class NavigationStore {
         let shape = value("ContentView.shapeRailSection", as: ShapeRailSection.self) ?? .formula
         let look = value("ContentView.visualizationsRailSection", as: VisualizationsRailSection.self) ?? .color
         let input = (value("ContentView.musicRailSection", as: MusicRailSection.self) ?? .playback).canonical
-        let quality = value("ContentView.performanceRailSection.v3", as: PerformanceRailSection.self) ?? .overview
+        let quality = value("ContentView.performanceRailSection.v3", as: PerformanceRailSection.self) ?? .tuning
 
         var state = NavigationState(lastRouteByWorkspace: [
             WorkspaceRoot.explore.rawValue: .explore(explore),

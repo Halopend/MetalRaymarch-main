@@ -79,7 +79,7 @@ struct ControlFinderDestinationTests {
         #expect(fog.contains { $0.target == .route(.look(.atmosphere)) })
 
         let metrics = ControlFinderDestination.results(matching: "fps gpu", on: .macOS)
-        #expect(metrics.first?.id == "quality.Overview")
+        #expect(metrics.first?.id == "quality.Tuning")
 
         let colour = ControlFinderDestination.results(matching: "colour", on: .iPadOS)
         #expect(colour.first?.id == "look.Color")

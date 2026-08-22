@@ -7,6 +7,9 @@
 //
 
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -111,7 +114,7 @@ struct ContentView: View {
     var performanceRailSection: PerformanceRailSection {
         get {
             guard case .quality(let section) = appModel.navigationStore.lastRoute(for: .quality) else {
-                return .overview
+                return .tuning
             }
             return section
         }
@@ -191,6 +194,19 @@ struct ContentView: View {
 
     private var usesCompactWorkspaceLayout: Bool {
         appModel.platformProfile.platform == .iPadOS && horizontalSizeClass == .compact
+    }
+
+    /// The iOS target shares its capability profile between iPad and iPhone,
+    /// so size class alone cannot distinguish a phone from a narrow iPad
+    /// inspector. Keep the phone presentation deliberately shallower: both
+    /// navigation levels scroll horizontally instead of consuming multiple
+    /// rows above the actual controls.
+    private var usesPhoneWorkspaceLayout: Bool {
+#if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone
+#else
+        false
+#endif
     }
 
     var usesPortraitIPadLayout: Bool {
@@ -791,13 +807,15 @@ struct ContentView: View {
     
     private var immersiveLayout: some View {
         Group {
-            if usesCompactWorkspaceLayout {
+            if usesPhoneWorkspaceLayout {
+                phoneStudioLayout
+            } else if usesCompactWorkspaceLayout {
                 compactWorkspaceLayout
             } else {
                 regularWorkspaceLayout
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, usesPhoneWorkspaceLayout ? 6 : 12)
         .background {
             GeometryReader { proxy in
                 Color.clear
@@ -846,7 +864,7 @@ struct ContentView: View {
         }
     }
 
-    /// Compact inspector layout used by narrow iPad windows. The persistent
+    /// Compact inspector layout used by iPhone and narrow iPad windows. The persistent
     /// 208-point rail left too little room for the editor; sections become a
     /// horizontal, keyboard/VoiceOver-addressable strip and the bottom bar only
     /// keeps actions that are meaningful on iPad.
@@ -866,9 +884,161 @@ struct ContentView: View {
         }
     }
 
+    /// iPhone presents the former sidebar hierarchy as a bottom-tab studio.
+    /// The primary workspaces stay fixed at the bottom, their contextual
+    /// destinations form a scrollable row immediately above, and infrequent
+    /// utilities/actions live under More so editor content gets the height.
+    private var phoneStudioLayout: some View {
+        VStack(spacing: 0) {
+            contentPanel
+
+            if let animationManager = appModel.animationManager,
+               animationManager.isRecording {
+                Divider()
+                HStack {
+                    LiveSessionRecordingControl(animationManager: animationManager, compact: true)
+                        .disabled(animationManager.isPlaying)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+            }
+
+            Divider()
+
+            if isPrimaryWorkspaceSelection {
+                phoneSectionTabs
+                Divider()
+            }
+
+            phoneWorkspaceTabs
+        }
+        .background(.ultraThinMaterial)
+    }
+
+    private var phoneSectionTabs: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(activeWorkspaceNavigationNodes) { node in
+                    Button {
+                        withMotionSensitiveAnimation(.easeInOut(duration: 0.16)) {
+                            activateNavigationNode(node)
+                        }
+                    } label: {
+                        Label(node.title, systemImage: node.systemImage)
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                            .padding(.horizontal, 10)
+                            .frame(minHeight: 38)
+                            .background(
+                                Capsule().fill(
+                                    isNavigationNodeSelected(node)
+                                        ? Color.accentColor.opacity(0.20)
+                                        : Color.secondary.opacity(0.08)
+                                )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(isNavigationNodeSelected(node) ? .primary : .secondary)
+                    .accessibilityAddTraits(isNavigationNodeSelected(node) ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+        }
+        .frame(minHeight: 48)
+    }
+
+    private var phoneWorkspaceTabs: some View {
+        HStack(spacing: 0) {
+            ForEach(navigationHierarchy.workspaceRoots) { node in
+                phoneWorkspaceTab(node)
+            }
+
+            phoneMoreTab
+        }
+        .padding(.horizontal, 2)
+        .padding(.top, 3)
+        .padding(.bottom, 5)
+    }
+
+    @ViewBuilder
+    private func phoneWorkspaceTab(_ node: NavigationHierarchy.Node) -> some View {
+        if case .workspace(let root) = node.target {
+            let isSelected = isPrimaryWorkspaceSelection && activeWorkspaceRoot == root
+            Button {
+                withMotionSensitiveAnimation(.easeInOut(duration: 0.16)) {
+                    activateNavigationNode(node)
+                }
+            } label: {
+                VStack(spacing: 2) {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: node.systemImage)
+                            .font(.system(size: 16, weight: .semibold))
+                        topDockBadge(for: root)
+                    }
+                    Text(node.title)
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 46)
+                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
+        }
+    }
+
+    private var phoneMoreTab: some View {
+        Menu {
+            Button(action: presentControlFinder) {
+                Label("Find Controls", systemImage: AppIcons.magnifyingglass)
+            }
+
+            Divider()
+
+            ForEach(navigationHierarchy.utilityRoots) { node in
+                Button {
+                    activateNavigationNode(node)
+                } label: {
+                    Label(node.title, systemImage: node.systemImage)
+                }
+            }
+
+            Divider()
+
+            Button(action: resetCurrentFractalSettings) {
+                Label("Reset", systemImage: AppIcons.arrowCounterclockwise)
+            }
+
+            Button {
+                showSaveDestinationSheet = true
+            } label: {
+                Label("Save", systemImage: AppIcons.plus)
+            }
+        } label: {
+            VStack(spacing: 2) {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 16, weight: .semibold))
+                Text("More")
+                    .font(.system(size: 9.5, weight: .semibold))
+            }
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 46)
+            .foregroundStyle(isPrimaryWorkspaceSelection ? Color.secondary : Color.accentColor)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("More studio tabs and actions")
+        .accessibilityAddTraits(isPrimaryWorkspaceSelection ? [] : .isSelected)
+    }
+
     private var compactSectionBar: some View {
         Group {
-            if usesPortraitIPadLayout {
+            if usesPortraitIPadLayout && !usesPhoneWorkspaceLayout {
                 VStack(spacing: 8) {
                     LazyVGrid(
                         columns: secondLevelColumns(for: activeWorkspaceNavigationNodes.count),
@@ -1084,15 +1254,15 @@ struct ContentView: View {
             .thresholdGlassBackground(cornerRadius: 18)
 #elseif os(iOS)
         Group {
-            if usesPortraitIPadLayout {
+            if usesPortraitIPadLayout && !usesPhoneWorkspaceLayout {
                 wrappedTopDockBar
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     topDockBar
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
+                        .padding(.horizontal, usesPhoneWorkspaceLayout ? 10 : 14)
+                        .padding(.vertical, usesPhoneWorkspaceLayout ? 6 : 10)
                 }
             }
         }

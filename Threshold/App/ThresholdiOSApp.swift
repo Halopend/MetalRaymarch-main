@@ -33,35 +33,51 @@ private struct ThresholdiOSRootView: View {
     @State private var restoreControlsAfterFormulaEditor = false
     @State private var radialMenu = RadialMenuModel(interactionProfile: .touch)
     @State private var radialCurvature = 0.72
+    @State private var isCanvasChromeVisible = UIDevice.current.userInterfaceIdiom != .phone
+    @State private var chromeAutoHideTask: Task<Void, Never>?
     private let controlsAnimation = MenuChrome.panelSpring
+
+    private var isPhone: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+    }
 
     var body: some View {
         GeometryReader { proxy in
             let widths = inspectorColumnWidths(for: proxy.size)
             let safeAreaInsets = proxy.safeAreaInsets
 
-            ThresholdiOSRenderView(appModel: appModel) { location in
-                toggleRadialMenu(at: location, viewportSize: proxy.size)
-            }
+            ThresholdiOSRenderView(
+                appModel: appModel,
+                prioritizesControlUpdates: isShowingControls
+                    || radialMenu.isPresented
+                    || isFormulaEditorPresented
+                    || isAnimationEditorPresented,
+                onInteraction: revealCanvasChrome,
+                onRadialMenuRequest: { location in
+                    toggleRadialMenu(at: location, viewportSize: proxy.size)
+                }
+            )
                 .ignoresSafeArea()
                 .background(Color.black)
                 .overlay(alignment: .topTrailing) {
-                    if !isFormulaEditorPresented {
+                    if !isFormulaEditorPresented && (!isPhone || isCanvasChromeVisible) {
                         controlsToggle
                             // The Metal surface stays edge-to-edge, but the control must
                             // clear the status bar and Stage Manager window chrome.
-                            .padding(.top, max(16, safeAreaInsets.top + 8))
-                            .padding(.trailing, max(16, safeAreaInsets.trailing + 8))
+                            .padding(.top, isPhone ? max(4, safeAreaInsets.top + 1) : max(16, safeAreaInsets.top + 8))
+                            .padding(.trailing, isPhone ? max(10, safeAreaInsets.trailing + 6) : max(16, safeAreaInsets.trailing + 8))
+                            .transition(.opacity)
                     }
                 }
                 .overlay(alignment: .bottom) {
-                    if !appModel.rendererStartupWarmupComplete {
+                    if !appModel.rendererStartupWarmupComplete && (!isPhone || isCanvasChromeVisible) {
                         shaderCompileBanner
                             .padding(.bottom, max(24, safeAreaInsets.bottom + 12))
                             .transition(.opacity)
                     }
                 }
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: appModel.rendererStartupWarmupComplete)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: isCanvasChromeVisible)
                 .inspector(isPresented: $isShowingControls) {
                     ThresholdiOSInspectorContent(isShowingControls: $isShowingControls)
                         .environment(appModel)
@@ -85,6 +101,7 @@ private struct ThresholdiOSRootView: View {
                             curvature: $radialCurvature,
                             projection: radialProjection,
                             interactionProfile: radialMenu.interactionProfile,
+                            layout: UIDevice.current.userInterfaceIdiom == .phone ? .straightEdge : .radial,
                             allowsPresentationSelection: false,
                             path: Binding(
                                 get: { radialMenu.path },
@@ -155,6 +172,8 @@ private struct ThresholdiOSRootView: View {
             syncMenuWindowVisibility(isVisible)
         }
         .onDisappear {
+            chromeAutoHideTask?.cancel()
+            chromeAutoHideTask = nil
             appModel.openFormulaEditorHandler = nil
             appModel.openAnimationEditorHandler = nil
             appModel.dismissAnimationEditorHandler = nil
@@ -194,6 +213,7 @@ private struct ThresholdiOSRootView: View {
             return
         }
         guard appModel.inputOwnershipStore.claim(.radialMenu) else { return }
+        hideCanvasChrome()
         setControlsVisible(false)
         appModel.controlStateStore.startSync(with: appModel.renderSettings, appModel: appModel)
         let anchor = CGPoint(
@@ -281,6 +301,31 @@ private struct ThresholdiOSRootView: View {
         }
     }
 
+    private func revealCanvasChrome() {
+        guard isPhone, !radialMenu.isPresented else { return }
+        chromeAutoHideTask?.cancel()
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+            isCanvasChromeVisible = true
+        }
+        chromeAutoHideTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) {
+                isCanvasChromeVisible = false
+            }
+            chromeAutoHideTask = nil
+        }
+    }
+
+    private func hideCanvasChrome() {
+        guard isPhone else { return }
+        chromeAutoHideTask?.cancel()
+        chromeAutoHideTask = nil
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
+            isCanvasChromeVisible = false
+        }
+    }
+
     /// Shown while the renderer's generic pipeline is still compiling. On a
     /// cold GPU shader cache (first launch, OS update) this takes several
     /// seconds on iPad; without feedback the black viewport reads as a hang.
@@ -301,6 +346,7 @@ private struct ThresholdiOSRootView: View {
     private var controlsToggle: some View {
         Button {
             setControlsVisible(!isShowingControls)
+            hideCanvasChrome()
         } label: {
             Label(
                 isShowingControls ? "Hide Controls" : "Controls",

@@ -358,6 +358,9 @@ private struct ThresholdMacRootView: View {
     @State private var activeMenuTrackingCount = 0
     @State private var pendingAutoHide: DispatchWorkItem?
     @State private var pendingRadialReveal: DispatchWorkItem?
+    @State private var isViewportHUDVisible = true
+    @State private var lastViewportHUDActivity = ProcessInfo.processInfo.systemUptime
+    @State private var pendingViewportHUDHide: DispatchWorkItem?
     @State private var isControlFinderPresented = false
     @State private var radialRestoreAnchor: CGPoint?
     @State private var radialRestorePath: [String] = []
@@ -390,6 +393,7 @@ private struct ThresholdMacRootView: View {
     private let edgeRevealWidth: CGFloat = 46
     private let edgeRevealDelay: TimeInterval = 0.10
     private let autoHideDelay: TimeInterval = 0.22
+    private let viewportHUDIdleDelay: TimeInterval = 2.5
     private let panelAnimation = MenuChrome.panelSpring
 
     private var hasDetachedControls: Bool {
@@ -447,6 +451,7 @@ private struct ThresholdMacRootView: View {
                         curvature: $launcherCurvature,
                         projection: radialProjection,
                         interactionProfile: radialMenu.interactionProfile,
+                        layout: .radial,
                         allowsPresentationSelection: true,
                         path: Binding(
                             get: { radialMenu.path },
@@ -499,6 +504,9 @@ private struct ThresholdMacRootView: View {
                     floatingToggle(windowSize: proxy.size)
                         .padding(.top, panelPadding)
                         .padding(.trailing, panelPadding)
+                        .opacity(isViewportHUDVisible ? 1 : 0)
+                        .allowsHitTesting(isViewportHUDVisible)
+                        .animation(viewportHUDAnimation, value: isViewportHUDVisible)
                 }
 
                 // Always-on perf HUD (top-leading, opposite the pin button). Shows
@@ -511,6 +519,8 @@ private struct ThresholdMacRootView: View {
                         .padding(.leading, panelPadding)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .allowsHitTesting(false)
+                        .opacity(isViewportHUDVisible ? 1 : 0)
+                        .animation(viewportHUDAnimation, value: isViewportHUDVisible)
                 }
 
                 if appModel.isAttributionShortcutHeld && !appModel.isViewportChromeHidden {
@@ -534,6 +544,7 @@ private struct ThresholdMacRootView: View {
                     isPressed: $isShiftPressed,
                     isRadialVisible: radialMenu.isPresented,
                     onMouseMoved: { location in
+                        noteViewportHUDActivity()
                         handleWindowMouseMoved(location, windowSize: proxy.size)
                     },
                     onTwoFingerSwipeUp: {
@@ -652,6 +663,7 @@ private struct ThresholdMacRootView: View {
             if launcherStyle == .separateWindow && !appModel.isViewportChromeHidden {
                 presentControlsWindow()
             }
+            noteViewportHUDActivity()
         }
         .onChange(of: appModel.isMenuInteractionActive) { _, _ in
             updateAutoHideState(animated: true)
@@ -736,8 +748,49 @@ private struct ThresholdMacRootView: View {
             pendingAutoHide = nil
             pendingRadialReveal?.cancel()
             pendingRadialReveal = nil
+            pendingViewportHUDHide?.cancel()
+            pendingViewportHUDHide = nil
             endRadialSession()
         }
+    }
+
+    private var viewportHUDAnimation: Animation? {
+        reduceMotion ? nil : .easeInOut(duration: 0.28)
+    }
+
+    /// Keeps the lightweight viewport affordances available while the pointer is
+    /// active, then gets them out of the way once the user settles on the artwork.
+    /// One pending work item re-checks the latest activity time instead of
+    /// cancelling and allocating a new item for every high-frequency mouse event.
+    private func noteViewportHUDActivity() {
+        lastViewportHUDActivity = ProcessInfo.processInfo.systemUptime
+        if !isViewportHUDVisible {
+            withAnimation(viewportHUDAnimation) {
+                isViewportHUDVisible = true
+            }
+        }
+        scheduleViewportHUDHideIfNeeded()
+    }
+
+    private func scheduleViewportHUDHideIfNeeded(after delay: TimeInterval? = nil) {
+        guard pendingViewportHUDHide == nil else { return }
+
+        let workItem = DispatchWorkItem {
+            pendingViewportHUDHide = nil
+            let idleTime = ProcessInfo.processInfo.systemUptime - lastViewportHUDActivity
+            guard idleTime >= viewportHUDIdleDelay else {
+                scheduleViewportHUDHideIfNeeded(after: viewportHUDIdleDelay - idleTime)
+                return
+            }
+            withAnimation(viewportHUDAnimation) {
+                isViewportHUDVisible = false
+            }
+        }
+        pendingViewportHUDHide = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + (delay ?? viewportHUDIdleDelay),
+            execute: workItem
+        )
     }
 
     private var slideOverPanel: some View {

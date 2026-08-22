@@ -6,7 +6,7 @@ struct NavigationHierarchyTests {
     private func makeHierarchy(
         allowCustomScenes: Bool = false,
         shapeSections: [ShapeRailSection] = [.formula, .space],
-        musicSections: [MusicRailSection] = [.parameters, .playback, .reactive],
+        musicSections: [MusicRailSection] = [.parameters, .reactive, .playback],
         includesGestureEditing: Bool = false
     ) -> NavigationHierarchy {
         NavigationHierarchy.application(availability: NavigationAvailability(
@@ -59,6 +59,24 @@ struct NavigationHierarchyTests {
             "utility.animationEditor",
             "utility.quickToggles",
             "utility.settings"
+        ])
+    }
+
+    @Test("iPad Input menu presents Parameters, Reactivity, then Sources")
+    func iPadInputOrder() {
+        let availability = NavigationAvailability.resolve(
+            profile: .iPadOS,
+            allowsCustomScenes: true,
+            includesGestureEditing: false
+        )
+        let input = NavigationHierarchy.application(availability: availability)
+            .children(ofWorkspace: .input)
+
+        #expect(input.map(\.title) == ["Parameters", "Reactivity", "Sources"])
+        #expect(input.map(\.target) == [
+            .route(.input(.parameters)),
+            .route(.input(.reactive)),
+            .route(.input(.playback))
         ])
     }
 

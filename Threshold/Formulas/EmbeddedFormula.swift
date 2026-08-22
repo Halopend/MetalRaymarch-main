@@ -213,6 +213,196 @@ struct EmbeddedFormula: Codable, Equatable {
     }
 }
 
+// MARK: - Built-in Studio drafts
+
+extension EmbeddedFormula {
+    /// Makes an editable Studio copy of a built-in distance estimator. The
+    /// runtime compiler already prepends every built-in header, so the copied
+    /// entry points (and the two headers with private helpers) are renamed to
+    /// avoid duplicate Metal symbols.
+    static func studioDraft(
+        for type: FractalModelType,
+        parameterValues: FormulaParams,
+        mandelboxScale: Float
+    ) -> EmbeddedFormula? {
+        guard type != .custom,
+              type != .constructionPrimitive,
+              let descriptor = FormulaCatalog.shared.descriptor(for: type)
+        else { return nil }
+
+        let source: String
+        let originalStem: String
+        let studioStem: String
+        var extraRenames: [(String, String)] = []
+
+        switch type {
+        case .mandelbox:
+            originalStem = "Mandelbox"
+            studioStem = "StudioMandelbox"
+            source = studioMandelboxSource
+        case .mandelbulb:
+            originalStem = "Mandelbulb"
+            studioStem = "StudioMandelbulb"
+            source = EmbeddedMetalSources.mandelbulbH
+            extraRenames = [("MB_POWER_CONST", "STUDIO_MB_POWER_CONST")]
+        case .mandelbulbJulia:
+            originalStem = "Mandelbulb"
+            studioStem = "StudioMandelbulbJulia"
+            source = EmbeddedMetalSources.mandelbulbH
+            extraRenames = [("MB_POWER_CONST", "STUDIO_MB_JULIA_POWER_CONST")]
+        case .menger:
+            originalStem = "Menger"
+            studioStem = "StudioMenger"
+            source = EmbeddedMetalSources.mengerH
+        case .quaternionJulia:
+            originalStem = "QuaternionJulia"
+            studioStem = "StudioQuaternionJulia"
+            source = EmbeddedMetalSources.quaternionJuliaH
+        case .octahedron:
+            originalStem = "Octahedron"
+            studioStem = "StudioOctahedron"
+            source = EmbeddedMetalSources.octahedronH
+        case .mengerSphere:
+            originalStem = "MengerSphere"
+            studioStem = "StudioMengerSphere"
+            source = EmbeddedMetalSources.mengerSphereH
+        case .theliPseudoKleinian:
+            originalStem = "TheliPseudoKleinian"
+            studioStem = "StudioTheliPseudoKleinian"
+            source = EmbeddedMetalSources.theliPseudoKleinianH
+            extraRenames = [("DE_TheliHybridMengerShape", "DE_StudioTheliHybridMengerShape")]
+        case .kleinian:
+            originalStem = "Kleinian"
+            studioStem = "StudioKleinian"
+            source = EmbeddedMetalSources.kleinianH
+        case .boxFoldMandelbulb:
+            originalStem = "BoxFoldMandelbulb"
+            studioStem = "StudioBoxFoldMandelbulb"
+            source = EmbeddedMetalSources.boxFoldMandelbulbH
+            extraRenames = [("BoxFoldMandelbulbDomain", "StudioBoxFoldMandelbulbDomain")]
+        case .constructionPrimitive, .custom:
+            return nil
+        }
+
+        var editableSource = stripOuterHeaderGuard(source, stem: originalStem)
+        editableSource = editableSource.replacingOccurrences(
+            of: "DE_\(originalStem)",
+            with: "DE_\(studioStem)"
+        )
+        for (old, new) in extraRenames {
+            editableSource = editableSource.replacingOccurrences(of: old, with: new)
+        }
+
+        var params = descriptor.params.map { param in
+            FormulaParamDescriptor(
+                index: param.index,
+                name: param.name,
+                default: FormulaCatalog.getParam(parameterValues, index: param.index),
+                min: param.min,
+                max: param.max,
+                step: param.step,
+                isBool: param.isBool,
+                isHidden: param.isHidden
+            )
+        }
+        if type == .mandelbox {
+            params.append(FormulaParamDescriptor(
+                index: 3, name: "Scale", default: mandelboxScale,
+                min: -3, max: 5, step: 0.01
+            ))
+        }
+
+        return EmbeddedFormula(
+            id: "studio.builtin.\(descriptor.id).\(UUID().uuidString.lowercased())",
+            name: descriptor.name,
+            category: descriptor.category,
+            author: descriptor.author,
+            formulaDescription: descriptor.description,
+            functionStem: studioStem,
+            metalSource: editableSource,
+            params: params,
+            supportedEffectTagsRaw: type.descriptor.supportedEffectTags.map(\.rawValue).sorted()
+        )
+    }
+
+    private static func stripOuterHeaderGuard(_ source: String, stem: String) -> String {
+        let guardName = "DE_\(stem)_h"
+        return source
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { line in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                return trimmed != "#ifndef \(guardName)"
+                    && trimmed != "#define \(guardName)"
+                    && trimmed != "#endif /* \(guardName) */"
+            }
+            .joined(separator: "\n")
+    }
+
+    /// Editable counterpart of the renderer's Mandelbox fast path. Its four
+    /// parameters preserve the currently visible fold values when the Studio
+    /// opens; the built-in renderer itself remains selected until compilation.
+    private static let studioMandelboxSource = """
+    FORCE_INLINE float DE_StudioMandelbox_Dist(float3 pos, FormulaParams fp,
+                                                float3x3 rot, int iterations) {
+        (void)rot;
+        float minDistance = max(abs(fp.params[0]), 1e-4f);
+        float foldingLimit = max(abs(fp.params[1]), 1e-4f);
+        float sphereRadiusSquared = max(fp.params[2] * fp.params[2], 1e-4f);
+        float fractalScale = fp.params[3];
+        float4 scale = float4(fractalScale / minDistance);
+        scale.w = abs(scale.w);
+        float4 z = float4(pos, 1.0f);
+        float4 c = z;
+        for (int i = 0; i < iterations; ++i) {
+            z.xyz = fma(clamp(z.xyz, -foldingLimit, foldingLimit), float3(2.0f), -z.xyz);
+            float radiusSquared = dot(z.xyz, z.xyz);
+            float sphereScale = clamp(1.0f / max(radiusSquared, sphereRadiusSquared),
+                                      1.0f, 1.0f / sphereRadiusSquared);
+            z *= sphereScale;
+            z = fma(z, scale, c);
+        }
+        return (length(z.xyz) - abs(fractalScale - 1.0f)) / max(z.w, 1e-6f)
+             - powr(max(abs(fractalScale), 1e-6f), float(1 - iterations));
+    }
+
+    FORCE_INLINE float DE_StudioMandelbox(float3 pos, FormulaParams fp,
+                                           float3x3 rot, int iterations,
+                                           int colorIterations,
+                                           thread OrbitData& orbit) {
+        (void)rot;
+        float minDistance = max(abs(fp.params[0]), 1e-4f);
+        float foldingLimit = max(abs(fp.params[1]), 1e-4f);
+        float sphereRadiusSquared = max(fp.params[2] * fp.params[2], 1e-4f);
+        float fractalScale = fp.params[3];
+        float4 scale = float4(fractalScale / minDistance);
+        scale.w = abs(scale.w);
+        float4 z = float4(pos, 1.0f);
+        float4 c = z;
+        float trap = 1e20f;
+        int trapIteration = 0;
+        float3 trapPosition = pos;
+        int i = 0;
+        for (; i < iterations; ++i) {
+            z.xyz = fma(clamp(z.xyz, -foldingLimit, foldingLimit), float3(2.0f), -z.xyz);
+            float radiusSquared = dot(z.xyz, z.xyz);
+            float sphereScale = clamp(1.0f / max(radiusSquared, sphereRadiusSquared),
+                                      1.0f, 1.0f / sphereRadiusSquared);
+            z *= sphereScale;
+            z = fma(z, scale, c);
+            UpdateTrapMinR2(trap, trapIteration, trapPosition,
+                            dot(z.xyz, z.xyz), i, colorIterations, z.xyz);
+        }
+        orbit.trap = trap;
+        orbit.trapIteration = trapIteration;
+        orbit.trapPosition = trapPosition;
+        orbit.finalP = z.xyz;
+        orbit.iterationsUsed = i;
+        return (length(z.xyz) - abs(fractalScale - 1.0f)) / max(z.w, 1e-6f)
+             - powr(max(abs(fractalScale), 1e-6f), float(1 - iterations));
+    }
+    """
+}
+
 // MARK: - Bundled construction primitives
 
 /// Analytic SDFs selected and sized in the dedicated Primitives workspace, then

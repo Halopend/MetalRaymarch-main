@@ -44,6 +44,9 @@ final class ControlStateStore {
     var color: ColorConfig = ColorConfig()
     var lighting: LightingConfig = LightingConfig()
     var audioReactive: AudioReactiveConfig = AudioReactiveConfig()
+    /// Runtime-only mirror of RenderSettings' shared isolation projection.
+    /// Deliberately absent from AudioReactiveConfig so it is never persisted.
+    private(set) var isolatedMusicReactiveMappingID: UUID?
     var gesture: GestureConfig = GestureConfig()
     var safetyBubble: SafetyBubbleConfig = SafetyBubbleConfig()
     var handAttraction: HandAttractionConfig = HandAttractionConfig()
@@ -139,11 +142,19 @@ final class ControlStateStore {
         loadFromSettings()
         syncReferenceCount += 1
         guard syncTimer == nil else { return }
-        syncTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        // `scheduledTimer` installs in the default run-loop mode, which pauses
+        // while UIKit tracks a touch in the iPad inspector. Renderer input keeps
+        // flowing during that pause, but observable values arrive in one burst
+        // after tracking ends, making the controls look temporarily frozen.
+        // Common modes keep the deliberately low-rate projection live without
+        // increasing RenderSettings lock traffic.
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.syncLiveStats()
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        syncTimer = timer
     }
     
     func stopSync() {
@@ -200,6 +211,10 @@ final class ControlStateStore {
         if lighting != newLighting { lighting = newLighting }
         let newAudioReactive = settings.audioReactiveConfig
         if audioReactive != newAudioReactive { audioReactive = newAudioReactive }
+        let newIsolatedMappingID = settings.isolatedMusicReactiveMappingID
+        if isolatedMusicReactiveMappingID != newIsolatedMappingID {
+            isolatedMusicReactiveMappingID = newIsolatedMappingID
+        }
         let newGesture = settings.gestureConfig
         if gesture != newGesture { gesture = newGesture }
         let newSafetyBubble = settings.safetyBubbleConfig
@@ -243,6 +258,24 @@ final class ControlStateStore {
     @inline(__always)
     func push<T>(_ keyPath: WritableKeyPath<RenderSettings, T>, value: T) {
         settings?[keyPath: keyPath] = value
+    }
+
+    /// Starts, switches, or ends a temporary reactive-effect audition through
+    /// the core RenderSettings state used by all platform renderers.
+    @discardableResult
+    func setMusicReactiveIsolation(_ mappingID: UUID?) -> Bool {
+        guard let settings,
+              settings.setMusicReactiveIsolation(mappingID) else { return false }
+        isolatedMusicReactiveMappingID = settings.isolatedMusicReactiveMappingID
+        return true
+    }
+
+    /// Commits authored mappings while keeping the transient isolation mirror
+    /// coherent if the isolated mapping was removed or a preset replaced it.
+    func setMusicReactiveMappings(_ mappings: [MusicReactiveMapping]) {
+        audioReactive.musicReactiveMappings = mappings
+        settings?.musicReactiveMappings = mappings
+        isolatedMusicReactiveMappingID = settings?.isolatedMusicReactiveMappingID
     }
 
     /// True while music-reactive modulation is enabled and driving parameters.

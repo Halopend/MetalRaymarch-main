@@ -113,9 +113,17 @@ extension ContentView {
                 Spacer()
                 #if os(macOS) || os(iOS)
                 Button {
-                    openDistanceEstimatorStudio(
-                        editing: cache.fractalType == .custom ? appModel.activeEmbeddedFormula : nil
-                    )
+                    if cache.fractalType == .custom, let active = appModel.activeEmbeddedFormula {
+                        openDistanceEstimatorStudio(editing: active)
+                    } else if let draft = EmbeddedFormula.studioDraft(
+                        for: cache.fractalType,
+                        parameterValues: cache.formulaParams,
+                        mandelboxScale: cache.fractalScale
+                    ) {
+                        openDistanceEstimatorStudio(editing: draft, activatesImmediately: false)
+                    } else {
+                        openDistanceEstimatorStudio()
+                    }
                 } label: {
                     Label("DE Studio", systemImage: "hammer.fill")
                 }
@@ -215,8 +223,13 @@ extension ContentView {
         }
     }
 
-    private func openDistanceEstimatorStudio(editing formula: EmbeddedFormula? = nil) {
-        appModel.formulaEditorSeed = formula
+    private func openDistanceEstimatorStudio(
+        editing formula: EmbeddedFormula? = nil,
+        activatesImmediately: Bool = true
+    ) {
+        appModel.formulaEditorSeed = formula.map {
+            FormulaEditorSeed(formula: $0, activatesImmediately: activatesImmediately)
+        }
         #if os(iOS)
         appModel.openFormulaEditorHandler?()
         #elseif os(macOS)
@@ -1158,21 +1171,14 @@ extension ContentView {
         cache.quality.boundingSphereSkipEnabled || cache.quality.boundToSpaceEnabled
     }
 
-    // MARK: - Performance tab (rail sub-tabs: Overview / Tuning — Overview hosts the
-    // live metrics readout with Force Recompile embedded; Tuning holds every knob)
+    // MARK: - Quality / Tuning
 
-    /// Dispatches the Performance tab's content based on the selected rail
-    /// sub-section, so each panel is short instead of one long dense scroll.
     @ViewBuilder
     var performanceTabContent: some View {
-        switch performanceRailSection {
-        case .overview: performanceOverviewContent
-        case .tuning:   performanceTuningContent
-        }
+        performanceTuningContent
     }
 
-    /// Shared header for the Performance sub-tabs. Keeps the live FPS pill visible
-    /// on every sub-tab so the headline metric is always one glance away.
+    /// Tuning header with the headline metric always one glance away.
     private func performanceSectionHeader(_ title: String, systemImage: String) -> some View {
         HStack {
             Label(title, systemImage: systemImage).font(.headline)
@@ -1191,21 +1197,6 @@ extension ContentView {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    /// Overview — the live performance dashboard (Force Recompile is embedded in the
-    /// card). Read-only readouts and a one-shot rebuild; every tunable knob lives in
-    /// the Tuning sub-tab.
-    private var performanceOverviewContent: some View {
-        VStack(spacing: 12) {
-            performanceSectionHeader("Overview", systemImage: "gauge")
-
-            PerformanceMetricsView(cache: cache)
-
-            #if os(macOS)
-            performanceReportCard
-            #endif
-        }
     }
 
     #if os(macOS)
@@ -1260,12 +1251,17 @@ extension ContentView {
     }
     #endif
 
-    /// Tuning — every performance knob in one place: the iteration/ray-step budget,
-    /// renderer mode, render quality, and the march-acceleration techniques. (The
-    /// live readout and Force Recompile moved to the Overview sub-tab.)
+    /// Every performance control and diagnostic in one place: live metrics, shader
+    /// recompilation, iteration/ray-step budget, render quality, and acceleration.
     private var performanceTuningContent: some View {
         VStack(spacing: 12) {
             performanceSectionHeader("Tuning", systemImage: "slider.horizontal.3")
+
+            PerformanceMetricsView(cache: cache)
+
+            #if os(macOS)
+            performanceReportCard
+            #endif
 
             // ── Budget card: iteration budget + detail budget, with the
             //    Simplified/Advanced goal picker in the header. ──

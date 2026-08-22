@@ -68,18 +68,27 @@ enum ShapeRailSection: String, CaseIterable, Codable, Hashable, Sendable {
 }
 
 enum PerformanceRailSection: String, CaseIterable, Codable, Hashable, Sendable {
-    // Overview first: the read-only live dashboard is the default landing section
-    // for the Performance tab (the rail renders allCases in this order, so the
-    // default-selected section also sits at the top). Tuning holds every knob —
-    // the iteration/ray-step budget plus the march-acceleration techniques.
-    case overview = "Overview"
     case tuning = "Tuning"
 
-    var icon: String {
-        switch self {
-        case .overview: return "gauge"
-        case .tuning: return "slider.horizontal.3"
+    var icon: String { "slider.horizontal.3" }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        switch value {
+        case Self.tuning.rawValue, "Overview":
+            self = .tuning
+        default:
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unknown Quality section: \(value)"
+            )
         }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
     }
 }
 
@@ -143,8 +152,14 @@ enum MusicRailSection: String, CaseIterable, Codable, Hashable, Sendable {
     case playlists = "Playlists"
     case albums = "Albums"
 
+    // Songs, playlists, and albums remain valid library subroutes launched
+    // from Sources, but they are not peer destinations in the Input menu.
     static let allCases: [MusicRailSection] = [
-        .parameters, .playback, .reactive, .songs, .playlists, .albums,
+        .parameters, .reactive, .playback, .songs, .playlists, .albums,
+    ]
+
+    static let visibleCases: [MusicRailSection] = [
+        .parameters, .reactive, .playback,
     ]
 
     var title: String {
@@ -152,7 +167,7 @@ enum MusicRailSection: String, CaseIterable, Codable, Hashable, Sendable {
         case .parameters:
             return rawValue
         case .playback:
-            return "Source"
+            return "Sources"
         case .reactive:
             return "Reactivity"
         case .mappings, .presets, .songs, .playlists, .albums:
@@ -175,8 +190,8 @@ enum MusicRailSection: String, CaseIterable, Codable, Hashable, Sendable {
         }
     }
 
-    static func availableCases(for profile: PlatformProfile) -> [MusicRailSection] {
-        profile.supports(.musicLibraryBrowsing) ? allCases : [.parameters, .playback, .reactive]
+    static func availableCases(for _: PlatformProfile) -> [MusicRailSection] {
+        visibleCases
     }
 
     /// Resolves old split-page routes to their single current destination.

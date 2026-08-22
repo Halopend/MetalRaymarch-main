@@ -84,6 +84,22 @@ struct FormulaEditorModelTests {
         #expect(model.status == .live)
     }
 
+    @Test("Manual mode never compiles an edit until Compile is pressed")
+    func manualCompilation() async {
+        let recorder = CompileRecorder()
+        let model = makeModel(recorder: recorder)
+        model.setAutomaticallyCompilesEdits(false)
+
+        model.setSource(validSource)
+        try? await Task.sleep(for: .milliseconds(120))
+        #expect(recorder.compiledSources.isEmpty)
+        #expect(model.status == .idle)
+
+        model.compileNow()
+        await waitUntil { model.status == .live }
+        #expect(recorder.compiledSources.count == 1)
+    }
+
     @Test("An edit during a compile chains exactly one follow-up (latest wins)")
     func latestWinsChaining() async {
         let recorder = CompileRecorder()

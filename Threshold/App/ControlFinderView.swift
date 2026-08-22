@@ -193,14 +193,9 @@ struct ControlFinderDestination: Identifiable {
         ),
         // Performance
         destination(
-            PerformanceRailSection.overview,
-            description: "Inspect live FPS, GPU timing, render quality, and frame pacing.",
-            keywords: ["metrics", "fps", "gpu", "hitch", "diagnostics", "resolution", "benchmark"]
-        ),
-        destination(
             PerformanceRailSection.tuning,
-            description: "Balance renderer mode, iteration budget, resolution, and acceleration.",
-            keywords: ["quality", "performance", "renderer", "iterations", "ray steps", "metalfx", "adaptive compute", "speed"]
+            description: "Inspect live metrics and balance renderer mode, iteration budget, resolution, and acceleration.",
+            keywords: ["quality", "performance", "metrics", "fps", "gpu", "hitch", "diagnostics", "benchmark", "renderer", "iterations", "ray steps", "metalfx", "adaptive compute", "speed"]
         ),
 
         // Input
@@ -210,11 +205,6 @@ struct ControlFinderDestination: Identifiable {
             keywords: ["parameter", "slider", "sculpt", "fold", "scale", "radius", "iterations"]
         ),
         destination(
-            MusicRailSection.playback,
-            description: "Choose microphone, system audio, or music playback and monitor the live signal.",
-            keywords: ["music app", "now playing", "microphone", "system audio", "transport", "visualizer"]
-        ),
-        destination(
             MusicRailSection.reactive,
             description: "Tune audio response, map bands and beats to scene controls, and manage reusable reactivity presets.",
             keywords: [
@@ -222,6 +212,11 @@ struct ControlFinderDestination: Identifiable {
                 "audio mapping", "modulation", "target", "curve", "smoothing", "intensity",
                 "audio preset", "reactivity preset", "electronic", "ambient", "hip hop"
             ]
+        ),
+        destination(
+            MusicRailSection.playback,
+            description: "Choose microphone, system audio, or music playback and monitor the live signal.",
+            keywords: ["music app", "now playing", "microphone", "system audio", "transport", "visualizer"]
         ),
         destination(
             MusicRailSection.songs,

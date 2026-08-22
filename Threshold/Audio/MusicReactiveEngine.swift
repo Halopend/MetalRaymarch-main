@@ -172,12 +172,18 @@ final class MusicReactiveEngine {
         operationsBuffer.removeAll(keepingCapacity: true)
 
         let activeFractalType = settings.fractalType
-        let mappings = settings.musicReactiveMappings
-        refreshResolvedMappingsIfNeeded(
+        let mappings = settings.effectiveMusicReactiveMappings
+        let mappingSetChanged = refreshResolvedMappingsIfNeeded(
             for: activeFractalType,
             spaceWarpStack: settings.spaceWarpStack,
             mappings: mappings
         )
+        if mappingSetChanged {
+            // Disabled targets otherwise retain their last music layer until
+            // another operation addresses them. Clear first, then publish the
+            // newly isolated mapping below in this same audio frame.
+            pipeline.clearMusicLayers(settings: settings)
+        }
 
         // Drain manual re-center requests AFTER the mapping refresh (so the
         // targetID→target map is current) and BEFORE the offset loop (so this
@@ -382,14 +388,15 @@ final class MusicReactiveEngine {
 
     /// Rebuild the per-mapping hot-path metadata only when the fractal type,
     /// transform kinds/order, or user-facing mapping array changes.
+    @discardableResult
     private func refreshResolvedMappingsIfNeeded(for activeFractalType: FractalModelType,
                                                  spaceWarpStack: [SpaceWarpOpValue],
-                                                 mappings: [MusicReactiveMapping]) {
+                                                 mappings: [MusicReactiveMapping]) -> Bool {
         let spaceWarpKinds = spaceWarpStack.map(\.type)
         guard cachedResolvedFractalType != activeFractalType ||
                 cachedResolvedSpaceWarpKinds != spaceWarpKinds ||
                 cachedResolvedMappingsSnapshot != mappings else {
-            return
+            return false
         }
 
         if cachedResolvedFractalType != activeFractalType ||
@@ -443,6 +450,7 @@ final class MusicReactiveEngine {
                 )
             )
         }
+        return true
     }
 
     /// Reset curve state for mappings that were removed, newly added, or had

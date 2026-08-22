@@ -12,6 +12,9 @@
 #if os(macOS) || os(iOS)
 
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 struct FormulaEditorWindowView: View {
     @Environment(AppModel.self) private var appModel
@@ -65,6 +68,10 @@ struct FormulaEditorWindowView: View {
         // Window close (macOS) or cover teardown (iPadOS): stop any compile
         // still in flight so it cannot replace a formula chosen afterwards.
         .onDisappear { model?.invalidate() }
+        .onChange(of: appModel.formulaEditorSeed?.formula.id) { _, seedID in
+            guard seedID != nil, let model else { return }
+            consumeSeed(into: model)
+        }
         .onAppear {
             guard model == nil else { return }
             let editor = FormulaEditorModel(
@@ -86,14 +93,27 @@ struct FormulaEditorWindowView: View {
                     appModel?.controlStateStore.noteCustomFormulaDefinitionChanged(draft)
                 }
             )
-            if let seed = appModel.formulaEditorSeed {
-                let saved = appModel.formulaLibrary.entry(withHash: seed.shortHash)
-                editor.load(seed, savedEntry: saved)
-                appModel.formulaEditorSeed = nil
-            }
             model = editor
+            if !consumeSeed(into: editor) {
+                editor.activate()
+            }
+        }
+    }
+
+    /// Returns true when a pending request was consumed. This also handles the
+    /// macOS case where `openWindow` focuses an already-open Studio instead of
+    /// constructing a new window (and therefore does not run `onAppear` again).
+    @discardableResult
+    private func consumeSeed(into editor: FormulaEditorModel) -> Bool {
+        guard let seed = appModel.formulaEditorSeed else { return false }
+        let saved = appModel.formulaLibrary.entry(withHash: seed.formula.shortHash)
+        editor.setAutomaticallyCompilesEdits(seed.activatesImmediately)
+        editor.load(seed.formula, savedEntry: saved)
+        appModel.formulaEditorSeed = nil
+        if seed.activatesImmediately {
             editor.activate()
         }
+        return true
     }
 
     #if os(iOS)
@@ -162,14 +182,26 @@ private struct FormulaEditorContent: View {
         GeometryReader { geometry in
             let inspectorWidth = min(400, max(260, geometry.size.width * 0.38))
 
-            HStack(spacing: 0) {
-                editorColumn
-                    .frame(width: max(0, geometry.size.width - inspectorWidth - 1))
-                    .background(.ultraThinMaterial)
-                Divider()
-                inspectorSidebar
-                    .frame(width: inspectorWidth)
-                    .background(.thinMaterial)
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                VStack(spacing: 0) {
+                    editorColumn
+                        .frame(height: geometry.size.height * 0.56)
+                        .background(.ultraThinMaterial)
+                    Divider()
+                    inspectorSidebar
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(.thinMaterial)
+                }
+            } else {
+                HStack(spacing: 0) {
+                    editorColumn
+                        .frame(width: max(0, geometry.size.width - inspectorWidth - 1))
+                        .background(.ultraThinMaterial)
+                    Divider()
+                    inspectorSidebar
+                        .frame(width: inspectorWidth)
+                        .background(.thinMaterial)
+                }
             }
         }
         .sheet(isPresented: $isLibraryPresented) {
@@ -196,6 +228,7 @@ private struct FormulaEditorContent: View {
                 Text("Library").font(.headline)
                 Spacer()
                 Button {
+                    model.setAutomaticallyCompilesEdits(true)
                     model.startNewDraft()
                 } label: {
                     Image(systemName: "plus")
@@ -204,6 +237,7 @@ private struct FormulaEditorContent: View {
             }
             List(appModel.formulaLibrary.entries) { entry in
                 Button {
+                    model.setAutomaticallyCompilesEdits(true)
                     model.load(entry.formula, savedEntry: entry)
                     model.activate()
                 } label: {
@@ -358,7 +392,7 @@ private struct FormulaEditorContent: View {
 
     private var statusPill: some View {
         let (text, color): (String, Color) = switch model.status {
-        case .idle: ("Idle", .secondary)
+        case .idle: (model.automaticallyCompilesEdits ? "Idle" : "Manual compile", .secondary)
         case .blockedByParseIssues: ("Fix pragmas", .orange)
         case .compiling: ("Compiling…", .yellow)
         case .live: ("Live", .green)

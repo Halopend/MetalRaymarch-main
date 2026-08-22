@@ -105,7 +105,9 @@ final class AudioHub {
     var sourceDescriptors: [AudioSourceDescriptor] {
         var descriptors: [AudioSourceDescriptor] = [microphone.descriptor]
         descriptors.append(appleMusic.descriptor)
+        #if !os(iOS)
         descriptors.append(spotifyDescriptor)
+        #endif
         return descriptors
     }
 

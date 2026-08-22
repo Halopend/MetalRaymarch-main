@@ -62,6 +62,9 @@ final class FormulaEditorModel {
     private(set) var compileDiagnostics: [MetalCompileDiagnostic] = []
     private(set) var stemDerivation: FormulaStemDerivation = .missing
     private(set) var parsedParams: [FormulaParamDescriptor] = []
+    /// Built-in equations open in manual mode because each runtime Metal build
+    /// is intentionally heavyweight. Custom/live drafts keep the debounced loop.
+    private(set) var automaticallyCompilesEdits = true
     /// The library file backing this draft, when it was loaded from (or has
     /// been saved to) the library.
     private(set) var savedEntry: FormulaLibraryEntry?
@@ -171,6 +174,7 @@ final class FormulaEditorModel {
     /// Reset to a fresh draft (New Formula) — new identity, template source,
     /// same handlers — and activate it.
     func startNewDraft() {
+        setAutomaticallyCompilesEdits(true)
         formulaID = "user.\(UUID().uuidString.lowercased())"
         name = "New Formula"
         source = Self.newFormulaTemplate
@@ -185,6 +189,21 @@ final class FormulaEditorModel {
     /// Legacy payloads without pragmas get pragma lines prepended so the
     /// source becomes the single authoring surface.
     func load(_ formula: EmbeddedFormula, savedEntry: FormulaLibraryEntry? = nil) {
+        // Loading another equation supersedes every compile/debounce belonging
+        // to the previous draft. In particular, focusing an already-open Studio
+        // must not let an old compile switch the renderer after the new source
+        // has appeared.
+        debounceTask?.cancel()
+        debounceTask = nil
+        compileTask?.cancel()
+        compileTask = nil
+        compileInFlight = false
+        pendingCompile = false
+        generation &+= 1
+        status = .idle
+        compileDiagnostics = []
+        saveErrorMessage = nil
+
         formulaID = formula.id
         name = formula.name
         let parsed = FormulaPragmaParser.parse(formula.metalSource)
@@ -228,6 +247,15 @@ final class FormulaEditorModel {
         startCompileIfPossible()
     }
 
+    func setAutomaticallyCompilesEdits(_ enabled: Bool) {
+        guard automaticallyCompilesEdits != enabled else { return }
+        automaticallyCompilesEdits = enabled
+        if !enabled {
+            debounceTask?.cancel()
+            debounceTask = nil
+        }
+    }
+
     private func applyInstantUpdate(immediateCompile: Bool = false) {
         generation &+= 1
         refreshParse()
@@ -239,7 +267,7 @@ final class FormulaEditorModel {
 
         if immediateCompile {
             compileNow()
-        } else {
+        } else if automaticallyCompilesEdits {
             scheduleDebouncedCompile()
         }
     }

@@ -4,15 +4,17 @@ import Testing
 @Suite("Input navigation taxonomy")
 struct InputNavigationTests {
 
-    @Test("Visible Input sections omit legacy split reactivity routes")
+    @Test("Visible Input sections use the requested order and keep library subroutes routable")
     func visibleSections() {
         #expect(MusicRailSection.allCases == [
-            .parameters, .playback, .reactive, .songs, .playlists, .albums
+            .parameters, .reactive, .playback, .songs, .playlists, .albums
         ])
+        #expect(MusicRailSection.visibleCases == [.parameters, .reactive, .playback])
 
-        #expect(MusicRailSection.availableCases(for: .macOS) == [.parameters, .playback, .reactive])
-        #expect(MusicRailSection.availableCases(for: .iPadOS) == MusicRailSection.allCases)
-        #expect(MusicRailSection.availableCases(for: .visionOS) == MusicRailSection.allCases)
+        #expect(MusicRailSection.availableCases(for: .macOS) == MusicRailSection.visibleCases)
+        #expect(MusicRailSection.availableCases(for: .iPadOS) == MusicRailSection.visibleCases)
+        #expect(MusicRailSection.availableCases(for: .visionOS) == MusicRailSection.visibleCases)
+        #expect(MusicRailSection.playback.title == "Sources")
 
         #expect(!MusicRailSection.allCases.contains(.mappings))
         #expect(!MusicRailSection.allCases.contains(.presets))

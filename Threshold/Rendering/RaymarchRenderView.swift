@@ -2335,6 +2335,12 @@ private final class LowMovementTapGestureRecognizer: UITapGestureRecognizer {
 /// handlers — the renderer math is unchanged.
 struct ThresholdiOSRenderView: UIViewRepresentable {
     let appModel: AppModel
+    /// MetalKit drives iPad delegate callbacks on the main run loop. While a
+    /// control surface is visible, 60 Hz leaves alternating ProMotion ticks for
+    /// SwiftUI state publication and layout instead of letting 120 Hz command
+    /// encoding monopolize the UI thread.
+    let prioritizesControlUpdates: Bool
+    let onInteraction: () -> Void
     let onRadialMenuRequest: (CGPoint) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -2353,7 +2359,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         view.depthStencilPixelFormat = .depth32Float
         view.clearColor = MTLClearColor(red: 0.005, green: 0.006, blue: 0.008, alpha: 1.0)
         view.clearDepth = 1.0
-        view.preferredFramesPerSecond = 120  // allow ProMotion; also gives finer vsync steps under load instead of the 60→30 cliff
+        updatePreferredFrameRate(of: view)
         view.enableSetNeedsDisplay = false
         view.isPaused = false
         view.framebufferOnly = true
@@ -2363,6 +2369,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         view.shouldAcceptViewportInput = { [weak appModel] in
             appModel?.inputOwnershipStore.canConsume(.viewport) ?? false
         }
+        view.onInteraction = onInteraction
         view.onRadialMenuRequest = onRadialMenuRequest
         view.delegate = context.coordinator
         context.coordinator.attachGestures(to: view)
@@ -2373,10 +2380,12 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
     func updateUIView(_ uiView: MTKView, context: Context) {
         context.coordinator.appModel = appModel
         guard let view = uiView as? TouchVisualizingMTKView else { return }
+        updatePreferredFrameRate(of: view)
         view.inputSink = context.coordinator.inputController
         view.shouldAcceptViewportInput = { [weak appModel] in
             appModel?.inputOwnershipStore.canConsume(.viewport) ?? false
         }
+        view.onInteraction = onInteraction
         view.onRadialMenuRequest = onRadialMenuRequest
     }
 
@@ -2385,9 +2394,15 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         if let view = uiView as? TouchVisualizingMTKView {
             view.clearTouchVisualizations()
             view.inputSink = nil
+            view.onInteraction = nil
             view.onRadialMenuRequest = nil
         }
         coordinator.tearDown()
+    }
+
+    private func updatePreferredFrameRate(of view: MTKView) {
+        let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        view.preferredFramesPerSecond = isIPad && prioritizesControlUpdates ? 60 : 120
     }
 
     final class Coordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDelegate {

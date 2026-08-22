@@ -28,7 +28,7 @@ enum ThresholdControlArea: String, AppEnum {
         case .input: return .input(.playback)
         case .shape: return .shape(.formula)
         case .look: return .look(.color)
-        case .quality: return .quality(.overview)
+        case .quality: return .quality(.tuning)
         case .quickToggles: return .quickToggles
         case .settings: return .settings(.display)
         }

@@ -32,6 +32,23 @@ struct NavigationStoreTests {
         #expect(store.currentRoute == .shape(.formula))
     }
 
+    @Test("Quality opens on its sole Tuning section")
+    func qualityDefaultsToTuning() {
+        let (defaults, name) = isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = NavigationStore(profile: .visionOS, defaults: defaults, allowsCustomScenes: true)
+
+        store.selectRoot(.quality)
+        #expect(store.currentRoute == .quality(.tuning))
+        #expect(PerformanceRailSection.allCases == [.tuning])
+    }
+
+    @Test("Saved Overview sections migrate to Tuning")
+    func savedOverviewMigratesToTuning() throws {
+        let data = Data(#""Overview""#.utf8)
+        #expect(try JSONDecoder().decode(PerformanceRailSection.self, from: data) == .tuning)
+    }
+
     @Test("Pinning uses canonical route IDs and stable order")
     func canonicalPinning() {
         let (defaults, name) = isolatedDefaults()

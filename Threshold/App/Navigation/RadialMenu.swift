@@ -38,6 +38,14 @@ enum NavigationPresentationStyle: String, CaseIterable {
     }
 }
 
+/// Host-selected geometry for the shared launcher. Phones use a single-level
+/// edge strip because concentric rings consume most of a narrow viewport;
+/// larger canvases retain the spatial radial presentation.
+enum RadialMenuLayout: Sendable, Equatable {
+    case radial
+    case straightEdge
+}
+
 /// Derives a bright UI accent from the active scene gradient while preserving
 /// enough contrast against the launcher's dark-purple capsule surface.
 enum RadialMenuSceneAccent {
@@ -535,6 +543,7 @@ struct RadialMenu: View {
     @Binding var curvature: Double
     let projection: RadialNavigationProjection
     let interactionProfile: RadialInteractionProfile
+    let layout: RadialMenuLayout
     let allowsPresentationSelection: Bool
     @Binding var path: [String]
     let sceneAccent: Color
@@ -604,6 +613,18 @@ struct RadialMenu: View {
     static let windowDragHandleSize: CGFloat = 44
     private let radialSliderWidth: CGFloat = 118
 
+    /// Phone controls benefit more from horizontal precision than from the
+    /// very narrow radial pill. Keep the iPad/Mac ring width unchanged.
+    private var activeSliderWidth: CGFloat {
+        guard layout == .straightEdge else { return radialSliderWidth }
+        return min(184, max(156, size.width * 0.44))
+    }
+
+    private var straightEdgeCenterX: CGFloat {
+        let inset = activeSliderWidth * 0.5 + 12
+        return opensLeft ? size.width - inset : inset
+    }
+
     static func windowDragHandleFrame(
         size: CGSize,
         pointerAnchor: CGPoint
@@ -626,8 +647,13 @@ struct RadialMenu: View {
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2, perform: onDismiss)
 
-            radialGuide(rings: rings)
-                .allowsHitTesting(false)
+            if layout == .straightEdge {
+                straightEdgeScrim
+                straightEdgeChrome(ring: rings.last)
+            } else {
+                radialGuide(rings: rings)
+                    .allowsHitTesting(false)
+            }
 
             ForEach(rings, id: \.depth) { ring in
                 ringView(ring)
@@ -637,7 +663,9 @@ struct RadialMenu: View {
                 layoutPicker(primaryPositions: rings.first?.positions ?? [])
             }
 
-            anchorMark
+            if layout == .radial {
+                anchorMark
+            }
         }
         .frame(width: size.width, height: size.height)
         .coordinateSpace(name: Self.coordinateSpaceName)
@@ -691,6 +719,10 @@ struct RadialMenu: View {
     /// Walks `path` through the current radial projection, using concentric
     /// arcs for every authored hierarchy level.
     private func ringLayouts() -> [RingLayout] {
+        if layout == .straightEdge {
+            return straightEdgeRingLayouts()
+        }
+
         var layouts: [RingLayout] = []
         var nodes = roots
         var ringBaseAngle: CGFloat = opensLeft ? .pi : 0
@@ -754,6 +786,93 @@ struct RadialMenu: View {
             depth += 1
         }
         return layouts
+    }
+
+    /// Presents only the active hierarchy level in a vertical strip beside
+    /// the edge where the user invoked the launcher. Hiding ancestor rings is
+    /// the key space saving on iPhone; the explicit Back control preserves the
+    /// complete hierarchy without covering the artwork with multiple columns.
+    private func straightEdgeRingLayouts() -> [RingLayout] {
+        var nodes = roots
+        var depth = 0
+
+        while depth < path.count,
+              let selected = nodes.first(where: { $0.id == path[depth] }),
+              selected.isBranch {
+            nodes = projection.presentedChildren(of: selected)
+            depth += 1
+        }
+
+        guard !nodes.isEmpty else { return [] }
+
+        // Reserve a compact header row above the list. On short landscape
+        // phones the visual spacing can tighten to 40pt while every control
+        // retains its 44pt touch target.
+        let minimumTop: CGFloat = 70
+        let bottomMargin: CGFloat = 22
+        let availableSpan = max(0, size.height - minimumTop - bottomMargin)
+        let fittedSpacing = nodes.count > 1
+            ? availableSpan / CGFloat(nodes.count - 1)
+            : interactionProfile.itemSpacing
+        let spacing = min(interactionProfile.itemSpacing, max(40, fittedSpacing))
+        let span = spacing * CGFloat(max(nodes.count - 1, 0))
+        let desiredTop = anchor.y - span * 0.5
+        let maximumTop = max(minimumTop, size.height - bottomMargin - span)
+        let top = min(max(desiredTop, minimumTop), maximumTop)
+        let positions = nodes.indices.map { index in
+            CGPoint(x: straightEdgeCenterX, y: top + CGFloat(index) * spacing)
+        }
+
+        return [RingLayout(
+            depth: depth,
+            nodes: nodes,
+            positions: positions,
+            anchor: CGPoint(x: opensLeft ? size.width : 0, y: anchor.y),
+            baseAngle: opensLeft ? .pi : 0,
+            radius: 0
+        )]
+    }
+
+    private var straightEdgeScrim: some View {
+        LinearGradient(
+            colors: [Color.black.opacity(0.76), Color.black.opacity(0.34), Color.clear],
+            startPoint: opensLeft ? .trailing : .leading,
+            endPoint: opensLeft ? .leading : .trailing
+        )
+        .frame(width: activeSliderWidth + 36)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: opensLeft ? .trailing : .leading)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func straightEdgeChrome(ring: RingLayout?) -> some View {
+        if let ring, let top = ring.positions.first?.y {
+            HStack(spacing: 8) {
+                if !path.isEmpty {
+                    Button(action: retreatOneLevel) {
+                        Image(systemName: "chevron.backward")
+                            .frame(width: 38, height: 38)
+                    }
+                    .accessibilityLabel("Back")
+                }
+
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .frame(width: 38, height: 38)
+                }
+                .accessibilityLabel("Close controls")
+            }
+            .font(.system(size: 13, weight: .bold))
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.white.opacity(0.92))
+            .background(Color.black.opacity(0.72), in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+            .position(
+                x: straightEdgeCenterX,
+                y: max(24, top - 46)
+            )
+        }
     }
 
     /// Rotates a concentric child arc just enough to remain on-screen and clear
@@ -869,7 +988,7 @@ struct RadialMenu: View {
 
             Group {
                 if let slider = node.slider {
-                    let width = radialSliderWidth
+                    let width = activeSliderWidth
                     // Inflated hit frame for platform pointer/indirect-input
                     // adapters, extending past the pill's hover scale.
                     let hitFrame = CGRect(
@@ -907,7 +1026,7 @@ struct RadialMenu: View {
                     RadialTogglePill(
                         node: node,
                         toggle: toggle,
-                        fixedWidth: radialSliderWidth,
+                        fixedWidth: activeSliderWidth,
                         isFocused: focusedItemID == node.id,
                         sceneAccent: sceneAccent,
                         interactionProfile: interactionProfile,

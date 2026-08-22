@@ -305,6 +305,7 @@ final class TouchVisualizingMTKView: MTKView {
     private var heldKeyboardUsages: Set<Int> = []
     weak var inputSink: (any ViewportInputSink)?
     var shouldAcceptViewportInput: () -> Bool = { true }
+    var onInteraction: (() -> Void)?
     var onRadialMenuRequest: ((CGPoint) -> Void)?
 
     override var canBecomeFirstResponder: Bool { true }
@@ -324,6 +325,10 @@ final class TouchVisualizingMTKView: MTKView {
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         becomeFirstResponder()
+        // Surface transient phone chrome without adding another gesture
+        // recognizer to the orbit/pan/pinch arbitration graph. This keeps the
+        // one-finger camera path identical on iPhone and iPad.
+        onInteraction?()
         touchOverlay.touchesBegan(touches, event: event)
         super.touchesBegan(touches, with: event)
     }

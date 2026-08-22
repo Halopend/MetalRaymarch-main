@@ -169,16 +169,22 @@ struct AudioCapabilityContext: Sendable {
 /// conditional in a view.
 enum AudioCapabilityRegistry {
     static func descriptors(for context: AudioCapabilityContext) -> [AudioSourceDescriptor] {
-        [
+        var descriptors = [
             microphoneDescriptor(permission: context.microphonePermission),
             systemOutputDescriptor(
                 platform: context.platform,
                 permission: context.systemAudioPermission,
                 policy: context.systemOutputCapturePolicy
             ),
-            appleMusicDescriptor(isAvailable: context.appleMusicAvailable),
-            spotifyDescriptor(visualSyncApproved: context.spotifyVisualSyncApproved)
+            appleMusicDescriptor(isAvailable: context.appleMusicAvailable)
         ]
+        // No Spotify provider ships on iPad/iPhone. A blocked placeholder is
+        // useful on desktop for policy visibility, but exposing it as an iPad
+        // Source row implies a connection path that does not exist.
+        if context.platform != .iPadOS && context.platform != .simulator {
+            descriptors.append(spotifyDescriptor(visualSyncApproved: context.spotifyVisualSyncApproved))
+        }
+        return descriptors
     }
 
     private static func microphoneDescriptor(permission: AudioPermissionState) -> AudioSourceDescriptor {

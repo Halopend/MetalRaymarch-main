@@ -134,7 +134,7 @@ final class MusicTabViewModel {
         cache.audioReactive.midSensitivity = preset.midSensitivity
         cache.audioReactive.trebleSensitivity = preset.trebleSensitivity
         cache.audioReactive.beatSensitivity = preset.beatSensitivity
-        cache.audioReactive.musicReactiveMappings = preset.mappings
+        cache.setMusicReactiveMappings(preset.mappings)
 
         cache.push(\.fractalAudioAmount, value: preset.audioAmount)
         cache.push(\.fractalBeatPunch, value: preset.beatPunch)
@@ -143,7 +143,6 @@ final class MusicTabViewModel {
         cache.push(\.midSensitivity, value: preset.midSensitivity)
         cache.push(\.trebleSensitivity, value: preset.trebleSensitivity)
         cache.push(\.beatSensitivity, value: preset.beatSensitivity)
-        cache.push(\.musicReactiveMappings, value: preset.mappings)
     }
 
     func deleteMusicPreset(_ id: UUID) {

@@ -224,6 +224,8 @@ struct AudioHubTests {
         #expect(iPadMicrophone.availability == .available)
         #expect(iPadMicrophone.canStart)
         #expect(iPadMicrophone.capabilities.contains(.pcmFrames))
+        #expect(iPadOS.contains { $0.id == .appleMusic })
+        #expect(!iPadOS.contains { $0.id == .spotify })
     }
 
     @Test("Source transition gate rejects a duplicate start until the first finishes")
