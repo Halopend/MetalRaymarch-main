@@ -72,10 +72,22 @@ struct AnimationEditorWindowView: View {
         }
         #if os(iOS)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
+        // The editor is a full-screen cover with no enclosing navigation
+        // container, so a `.toolbar` item has nowhere to render. Provide an
+        // explicit dismissal bar; without one the cover cannot be left.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack {
+                Text("Animation Editor")
+                    .font(.headline)
+                Spacer()
                 Button("Done") { dismiss() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityLabel("Close animation editor")
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.bar)
         }
         #else
         .frame(minWidth: 920, minHeight: 620)

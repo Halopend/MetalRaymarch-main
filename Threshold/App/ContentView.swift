@@ -62,8 +62,8 @@ struct ContentView: View {
     @State private var saveConfirmationMessage: String?
     @State private var isControlFinderPresented = false
     @State private var workspaceSize: CGSize = .zero
+    @AppStorage("hasCompletedIntroOnboarding") var hasCompletedIntroOnboarding = false
     #if os(iOS)
-    @State var isAnimationEditorPresented = false
     @State var isWelcomePresented = false
     #endif
     /// One-time first-run prompt to choose local vs iCloud storage.
@@ -392,7 +392,10 @@ struct ContentView: View {
         }
         .onAppear {
             // First-run: prompt once for the storage location (local vs iCloud).
-            if handlesStorageChoice && !StorageLocation.shared.hasChosenMode {
+            // On iPad the welcome/safety flow is presented first by the app
+            // root; the storage prompt follows once it completes (see
+            // `onChange(of: hasCompletedIntroOnboarding)` below).
+            if handlesStorageChoice && hasCompletedIntroOnboarding && !StorageLocation.shared.hasChosenMode {
                 showStorageChoice = true
             }
             appModel.openShapeMenuHandler = {
@@ -424,7 +427,9 @@ struct ContentView: View {
             appModel.openSavePresetMenuHandler = {
                 showSaveDestinationSheet = true
             }
-            #if !os(visionOS)
+            // iPadOS: the always-mounted renderer root owns this handler so the
+            // radial menu can open the editor after the inspector collapses.
+            #if os(macOS)
             appModel.openAnimationEditorHandler = {
                 openAnimationEditor()
             }
@@ -443,7 +448,7 @@ struct ContentView: View {
         .onDisappear {
             cache.stopSync()
             appModel.openSavePresetMenuHandler = nil
-            #if !os(visionOS)
+            #if os(macOS)
             appModel.openAnimationEditorHandler = nil
             #endif
             #if os(visionOS)
@@ -472,6 +477,13 @@ struct ContentView: View {
             // Returning to the app: re-mirror the store folder so any files added
             // or deleted while away (e.g. in the Files app) reflect immediately.
             if phase == .active { appModel.reloadStoresFromDisk() }
+        }
+        .onChange(of: hasCompletedIntroOnboarding) { _, completed in
+            guard completed, handlesStorageChoice, !StorageLocation.shared.hasChosenMode else { return }
+            Task { @MainActor in
+                await Task.yield()
+                showStorageChoice = true
+            }
         }
         .sheet(isPresented: $showStorageChoice) {
             StorageModeChoiceSheet { chosen in
@@ -512,10 +524,6 @@ struct ContentView: View {
             )
         }
         #if os(iOS)
-        .fullScreenCover(isPresented: $isAnimationEditorPresented) {
-            AnimationEditorWindowView()
-                .environment(appModel)
-        }
         .fullScreenCover(isPresented: $isWelcomePresented) {
             FirstLaunchWindowView()
                 .environment(appModel)

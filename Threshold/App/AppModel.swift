@@ -932,6 +932,10 @@ class AppModel {
     /// Native presentation edge for the typed animation-editor command.
     var openAnimationEditorHandler: (() -> Void)?
 
+    /// iPadOS counterpart: the renderer root owns the full-screen cover, so
+    /// controls inside the inspector dismiss it through this seam.
+    var dismissAnimationEditorHandler: (() -> Void)?
+
     /// Native presentation edge for Metal DE Studio. On iPad this is owned by
     /// the renderer root so the underlying controls can be removed first.
     var openFormulaEditorHandler: (() -> Void)?

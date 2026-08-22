@@ -23,7 +23,9 @@ struct ThresholdiOSApp: App {
 private struct ThresholdiOSRootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage("hasCompletedIntroOnboarding") private var hasCompletedIntroOnboarding = false
     @State private var isShowingControls = true
+    @State private var isAnimationEditorPresented = false
     @State private var isFormulaEditorPresented = false
     @State private var restoreControlsAfterFormulaEditor = false
     @State private var radialMenu = RadialMenuModel(interactionProfile: .touch)
@@ -110,15 +112,63 @@ private struct ThresholdiOSRootView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        // Safety and privacy setup (photosensitivity acknowledgement, microphone,
+        // analytics, storage). Mirrors the macOS/visionOS gate; the cover cannot
+        // be swiped away and only `FirstLaunchWindowView` completes it.
+        .fullScreenCover(isPresented: Binding(
+            get: { !hasCompletedIntroOnboarding },
+            set: { _ in }
+        )) {
+            FirstLaunchWindowView()
+                .environment(appModel)
+                .interactiveDismissDisabled()
+        }
+        .fullScreenCover(isPresented: $isAnimationEditorPresented) {
+            AnimationEditorWindowView()
+                .environment(appModel)
+        }
         .onAppear {
             appModel.openFormulaEditorHandler = presentFormulaEditor
+            appModel.openAnimationEditorHandler = presentAnimationEditor
+            appModel.dismissAnimationEditorHandler = { isAnimationEditorPresented = false }
+            // External-file imports (Files app, Share sheet) surface their
+            // sheet, progress, and errors inside the inspector's ContentView.
+            // Let AppModel.ensureWindowContentVisible() reveal it on iPad.
+            appModel.openMenuWindowHandler = { setControlsVisible(true) }
+            syncMenuWindowVisibility(isShowingControls)
             Task { @MainActor in
                 await appModel.startMicrophoneAtLaunchIfEnabled()
             }
         }
+        .onChange(of: isShowingControls) { _, isVisible in
+            syncMenuWindowVisibility(isVisible)
+        }
         .onDisappear {
             appModel.openFormulaEditorHandler = nil
+            appModel.openAnimationEditorHandler = nil
+            appModel.dismissAnimationEditorHandler = nil
+            appModel.openMenuWindowHandler = nil
         }
+    }
+
+    /// Keep AppModel's window-visibility model truthful on iPad so
+    /// `ensureWindowContentVisible()` re-presents the inspector instead of
+    /// assuming its content is already on screen.
+    private func syncMenuWindowVisibility(_ isVisible: Bool) {
+        if isVisible {
+            if !appModel.isMenuWindowVisible { appModel.markMenuWindowPresented() }
+        } else if appModel.isMenuWindowVisible {
+            appModel.markMenuWindowDismissed()
+        }
+    }
+
+    private func presentAnimationEditor() {
+        guard let animationManager = appModel.animationManager else { return }
+        if animationManager.currentScene == nil {
+            animationManager.currentScene = animationManager.scenes.first
+        }
+        dismissRadialMenu()
+        isAnimationEditorPresented = true
     }
 
     private var radialProjection: RadialNavigationProjection {
@@ -186,8 +236,7 @@ private struct ThresholdiOSRootView: View {
         let command = appModel.navigationStore.activate(target)
         switch command {
         case .openAnimationEditor:
-            dismissRadialMenu()
-            appModel.openAnimationEditorHandler?()
+            presentAnimationEditor()
         case .resetViewport:
             appModel.viewportCommandHandler?(.resetViewport)
             dismissRadialMenu()
