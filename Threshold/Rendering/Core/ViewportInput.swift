@@ -258,6 +258,16 @@ final class ViewportInputAccumulator: ViewportInputSink, Sendable {
         }
     }
 
+    /// Drops camera motion queued while fingers were landing for a
+    /// three-finger scene gesture. Keyboard state and discrete actions survive.
+    func clearCameraDeltas() {
+        state.withLock { current in
+            current.orbitDelta = .zero
+            current.panDelta = .zero
+            current.zoomDelta = 0
+        }
+    }
+
     func consumeFrame() -> ViewportInputFrame {
         state.withLock { current in
             let frame = ViewportInputFrame(

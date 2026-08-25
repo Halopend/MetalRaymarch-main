@@ -243,14 +243,14 @@ final class RenderSettings: @unchecked Sendable {
     // Mac renders into a full native Retina drawable; at 1.0 the MetalFX upscale
     // path is bypassed entirely (`resolutionScale < 0.985` gate in the renderer),
     // so the raymarch pays for every backing-store pixel and the GPU is pixel-bound.
-    // Default to a 0.50 input scale (25% of the pixels) and let MetalFX reconstruct
+    // Default to the Low input scale and let MetalFX reconstruct
     // to native. This value is the exact manual target; automatic resolution remains
     // a separate, explicitly labelled visionOS compositor option.
-    private var _resolutionScale: Float = 0.50      // Mac: MetalFX upscale on by default
+    private var _resolutionScale: Float = QualityConfig.defaultResolutionScale
     #elseif os(visionOS)
     private var _resolutionScale: Float = 1.0       // Vision Pro: unused; compositor Render Quality is the resolution control
     #else
-    private var _resolutionScale: Float = 1.0       // Render scale for MetalFX (1.0 = native)
+    private var _resolutionScale: Float = QualityConfig.defaultResolutionScale
     #endif
     private var _renderQuality: Float = 0.5         // visionOS compositor drawable scale (default 0.5; 1.0 = native)
 

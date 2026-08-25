@@ -463,8 +463,8 @@ struct FirstLaunchWindowView: View {
             VStack(alignment: .leading, spacing: 10) {
                 IntroTipRow(
                     icon: AppIcons.sliderHorizontal3,
-                    title: "Controls",
-                    detail: "Use the labeled Controls button over the renderer to open the creative workspace."
+                    title: controlsOnboardingTitle,
+                    detail: phoneControlsOnboardingDetail
                 )
                 IntroTipRow(
                     icon: AppIcons.magnifyingglass,
@@ -554,6 +554,22 @@ struct FirstLaunchWindowView: View {
         .accessibilityLabel(style.title)
         .accessibilityHint(style.subtitle)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var controlsOnboardingTitle: String {
+#if os(iOS)
+        "Quick controls"
+#else
+        "Controls"
+#endif
+    }
+
+    private var phoneControlsOnboardingDetail: String {
+#if os(iOS)
+        "Swipe inward from either screen edge to open quick controls. Swipe back toward that edge, or use Close, to dismiss them."
+#else
+        "Use the labeled Controls button over the renderer to open the creative workspace."
+#endif
     }
 
     // MARK: - Tutorial Video Player

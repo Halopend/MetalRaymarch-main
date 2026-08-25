@@ -135,14 +135,6 @@ private struct ThresholdControlsWindowView: View {
         ZStack(alignment: .topLeading) {
             ContentView(handlesStorageChoice: false)
 
-            // Keep the live performance HUD with the controls when they are
-            // broken out instead of leaving it behind over the render view.
-            if !appModel.isViewportChromeHidden {
-                FPSIndicatorView()
-                    .padding(14)
-                    .allowsHitTesting(false)
-            }
-
             ViewportChromeShortcutMonitor {
                 // Recording mode is owned by the render window's root view;
                 // with no viewport mounted there is nothing to record and no
@@ -458,6 +450,10 @@ private struct ThresholdMacRootView: View {
                             set: { radialMenu.path = $0 }
                         ),
                         sceneAccent: RadialMenuSceneAccent.color(from: appModel.renderSettings.gradientColorMap),
+                        quickAccessShortcuts: RadialMenuProjectionFactory.quickAccessShortcuts(
+                            pinnedRouteIDs: appModel.navigationStore.pinnedRouteIDs,
+                            selectedRoute: appModel.navigationStore.currentRoute
+                        ),
                         suspendsHoverNavigation: isShiftPressed,
                         hoveredSlider: Binding(
                             get: { radialMenu.hoveredSlider },
@@ -472,6 +468,9 @@ private struct ThresholdMacRootView: View {
                         },
                         onSelectPresentation: { style in
                             launcherStyle = style
+                        },
+                        onActivateQuickAccess: { route in
+                            activateRadialTarget(.route(route))
                         },
                         onDismiss: {
                             hideRadialTabs(animated: true)
@@ -839,6 +838,9 @@ private struct ThresholdMacRootView: View {
             )
             .shadow(color: Color.black.opacity(0.32), radius: 22, x: -6, y: 8)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            // The panel stays mounted during the press so the isolate gesture
+            // receives its release edge, while its visual chrome disappears.
+            .opacity(appModel.isAudioReactivityIsolationPreviewActive ? 0 : 1)
     }
 
     private func controlsHoverRegion(width: CGFloat) -> some View {

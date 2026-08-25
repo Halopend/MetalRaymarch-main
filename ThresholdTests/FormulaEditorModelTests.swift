@@ -100,6 +100,58 @@ struct FormulaEditorModelTests {
         #expect(recorder.compiledSources.count == 1)
     }
 
+    @Test("Compile publishes an untouched formula loaded in manual mode")
+    func manualLoadedFormulaPublishesBeforeCompile() async {
+        let recorder = CompileRecorder()
+        var published: [EmbeddedFormula] = []
+        var events: [String] = []
+        let model = FormulaEditorModel(
+            library: nil,
+            compileHandler: { draft in
+                events.append("compile")
+                return await recorder.handler(draft)
+            },
+            definitionChangedHandler: { draft in
+                events.append("publish")
+                published.append(draft)
+            }
+        )
+        model.setAutomaticallyCompilesEdits(false)
+        let loaded = EmbeddedFormula(
+            kind: .fractal,
+            id: "builtin.editor-fixture",
+            name: "Editor Fixture",
+            category: "Built-in",
+            author: nil,
+            formulaDescription: nil,
+            functionStem: "EditorFixture",
+            metalSource: validSource,
+            params: [],
+            defaultIterations: nil,
+            defaultColorIterations: nil,
+            supportedEffectTagsRaw: []
+        )
+
+        model.load(loaded)
+        #expect(published.isEmpty)
+
+        model.compileNow()
+        await waitUntil { model.status == .live }
+
+        #expect(published.map(\.id) == [loaded.id])
+        #expect(events == ["publish", "compile"])
+        #expect(recorder.compiledSources.count == 1)
+    }
+
+    @Test("Function constant indices are unique and pin the DE-tail slots")
+    func functionConstantIndices() {
+        let indices = FunctionConstantIndex.shaderSpecializationCases.map(\.rawValue)
+        #expect(Set(indices).count == indices.count)
+        #expect(indices == Array(0...18))
+        #expect(FunctionConstantIndex.sphereProjectionEnabled.rawValue == 17)
+        #expect(FunctionConstantIndex.hasHandField.rawValue == 18)
+    }
+
     @Test("An edit during a compile chains exactly one follow-up (latest wins)")
     func latestWinsChaining() async {
         let recorder = CompileRecorder()

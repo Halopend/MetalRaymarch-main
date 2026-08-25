@@ -8,6 +8,9 @@
 
 import SwiftUI
 import simd
+#if os(iOS)
+import UIKit
+#endif
 
 private struct TransformationGroupBudget: Identifiable {
     let id: UUID
@@ -1178,12 +1181,29 @@ extension ContentView {
         performanceTuningContent
     }
 
-    /// Tuning header with the headline metric always one glance away.
-    private func performanceSectionHeader(_ title: String, systemImage: String) -> some View {
+    /// On iPhone the tuning controls should lead, with live diagnostics following
+    /// them. iPad keeps the desktop-style diagnostics-first ordering.
+    private var usesPhonePerformanceOrdering: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone
+        #else
+        false
+        #endif
+    }
+
+    /// Tuning header with the headline metric always one glance away when space
+    /// and ordering permit it.
+    private func performanceSectionHeader(
+        _ title: String,
+        systemImage: String,
+        showsFPSIndicator: Bool = true
+    ) -> some View {
         HStack {
             Label(title, systemImage: systemImage).font(.headline)
             Spacer()
-            FPSIndicatorView()
+            if showsFPSIndicator {
+                FPSIndicatorView()
+            }
         }
     }
 
@@ -1255,9 +1275,19 @@ extension ContentView {
     /// recompilation, iteration/ray-step budget, render quality, and acceleration.
     private var performanceTuningContent: some View {
         VStack(spacing: 12) {
-            performanceSectionHeader("Tuning", systemImage: "slider.horizontal.3")
+            performanceSectionHeader(
+                "Tuning",
+                systemImage: "slider.horizontal.3",
+                showsFPSIndicator: !usesPhonePerformanceOrdering
+            )
 
+            #if os(iOS)
+            if !usesPhonePerformanceOrdering {
+                PerformanceMetricsView(cache: cache)
+            }
+            #else
             PerformanceMetricsView(cache: cache)
+            #endif
 
             #if os(macOS)
             performanceReportCard
@@ -1440,6 +1470,14 @@ extension ContentView {
 
             // ── Acceleration card (already carries its own card chrome) ──
             fractalAccelerationSection
+
+            #if os(iOS)
+            if usesPhonePerformanceOrdering {
+                FPSIndicatorView()
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                PerformanceMetricsView(cache: cache)
+            }
+            #endif
         }
     }
 
@@ -1525,9 +1563,9 @@ extension ContentView {
                 HStack(spacing: 8) {
                     // Shared labels (must match Iteration Budget wording): Low / Medium / High / Full.
                     // Dashed screen outline + inner grid conveys pixel density; increasing detail
-                    // left-to-right. Low is 0.34 (not 0.33) so it stays under MetalFX temporal's 3× cap.
+                    // left-to-right.
                     let presets: [(label: String, scale: Float, icon: String)] = [
-                        ("Low", 0.34, "circle.grid.2x2"),
+                        ("Low", QualityConfig.defaultResolutionScale, "circle.grid.2x2"),
                         ("Medium", 0.50, "circle.grid.3x3"),
                         ("High", 0.75, "circle.grid.3x3.fill"),
                         ("Full", 1.0, "circle.grid.3x3.circle.fill")

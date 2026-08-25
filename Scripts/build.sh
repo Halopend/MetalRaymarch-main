@@ -33,13 +33,14 @@ else
 fi
 
 # --- Toolchain selection -----------------------------------------------------
-# Prefer the local beta used during development, then fall back to the active
-# Xcode selected by xcode-select. CI uses the latter because GitHub runner app
-# names are versioned (for example, Xcode_26.5.app).
+# Prefer a local Xcode installation, then fall back to the active Xcode selected
+# by xcode-select. CI uses the latter because GitHub runner app names are
+# versioned (for example, Xcode_26.5.app).
 if [[ -z "${DEVELOPER_DIR:-}" ]]; then
     for candidate in \
         "/Applications/Xcode-beta.app/Contents/Developer" \
-        "/Applications/Xcode-beta 2.app/Contents/Developer"; do
+        "/Applications/Xcode-beta 2.app/Contents/Developer" \
+        "/Applications/Xcode.app/Contents/Developer"; do
         if [[ -d "$candidate" ]]; then
             DEVELOPER_DIR="$candidate"
             break

@@ -63,6 +63,19 @@ enum RadialActivationPolicy {
     }
 }
 
+/// Phone quick controls deliberately use screen-edge swipes instead of a
+/// hidden double-tap. An inward edge swipe opens the strip; the reverse swipe
+/// from that strip dismisses it. Neither side is assigned to a dominant hand.
+enum PhoneEdgeMenuGesturePolicy {
+    static let dismissalDistance: CGFloat = 24
+
+    static func shouldDismiss(opensLeft: Bool, horizontalTranslation: CGFloat) -> Bool {
+        opensLeft
+            ? horizontalTranslation >= dismissalDistance
+            : horizontalTranslation <= -dismissalDistance
+    }
+}
+
 /// Shared transient state for every 2-D radial host. Platform adapters provide
 /// only the interaction profile and activation location.
 @MainActor
@@ -488,6 +501,18 @@ struct RadialActiveSlider: Equatable {
     let frame: CGRect
 }
 
+/// A pinned section exposed independently of the path-driven radial rings.
+/// Its identity deliberately differs from the route node's identity: a single
+/// route can appear in both the normal hierarchy and persistent Quick Access.
+struct RadialQuickAccessShortcut: Identifiable {
+    let route: AppRoute
+    let isSelected: Bool
+
+    var id: String { "quickAccess.\(route.stableID)" }
+    var title: String { route.title }
+    var systemImage: String { route.systemImage }
+}
+
 /// Presentation-neutral radial decoration and traversal of the shared tree.
 /// Compact item budgets may substitute an explicit full-controls fallback leaf.
 struct RadialNavigationProjection {
@@ -498,6 +523,25 @@ struct RadialNavigationProjection {
     }
 
     func presentedChildren(of node: RadialNavigationNode) -> [RadialNavigationNode] {
+        var children = directPresentedChildren(of: node)
+
+        // A ring with one navigable branch adds no choice. Treat that branch
+        // as transparent so selecting its parent reveals the first meaningful
+        // set of options immediately. Keeping the skipped branch out of the
+        // visible projection also makes Back remove one visible ring instead
+        // of stopping on the redundant singleton.
+        while children.count == 1, let onlyChild = children.first, onlyChild.isBranch {
+            children = directPresentedChildren(of: onlyChild)
+        }
+        return children
+    }
+
+    /// Applies de-duplication and compact overflow to one authored edge without
+    /// collapsing a singleton branch. Path reconciliation and lookup use this
+    /// form when they need to recognize a branch omitted from presentation.
+    private func directPresentedChildren(
+        of node: RadialNavigationNode
+    ) -> [RadialNavigationNode] {
         // De-duplicate before the compact budget so a duplicate never counts
         // toward the limit or displaces a unique sibling into overflow.
         let children = Self.uniquedByID(node.children)
@@ -556,10 +600,27 @@ struct RadialNavigationProjection {
     func reconciledPath(_ path: [String]) -> [String] {
         var resolved: [String] = []
         var current = roots
-        for id in path {
+        var index = 0
+
+        while index < path.count {
+            let id = path[index]
             guard let node = current.first(where: { $0.id == id }), node.isBranch else { break }
             resolved.append(id)
-            current = presentedChildren(of: node)
+            index += 1
+
+            var children = directPresentedChildren(of: node)
+            while children.count == 1,
+                  let onlyChild = children.first,
+                  onlyChild.isBranch {
+                // Accept paths produced from the authored hierarchy as well
+                // as already-flattened radial paths, but never retain the
+                // transparent branch as a visible path component.
+                if index < path.count, path[index] == onlyChild.id {
+                    index += 1
+                }
+                children = directPresentedChildren(of: onlyChild)
+            }
+            current = children
         }
         return resolved
     }
@@ -569,7 +630,9 @@ struct RadialNavigationProjection {
         func find(in nodes: [RadialNavigationNode]) -> RadialNavigationNode? {
             for node in nodes {
                 if node.id == id { return node }
-                if let found = find(in: presentedChildren(of: node)) { return found }
+                // Lookup still recognizes a structurally-authored singleton
+                // branch even though that branch has no radial pill of its own.
+                if let found = find(in: directPresentedChildren(of: node)) { return found }
             }
             return nil
         }

@@ -9,10 +9,14 @@
 //
 
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - Music Tab Content
 
 struct MusicTabContent: View {
+    @Environment(AppModel.self) private var appModel
     /// One live transformation plus every descriptor-derived field that can be
     /// assigned to audio. The model remains slot-based for scene compatibility;
     /// `MusicReactiveMappingKey` distinguishes the individual fields.
@@ -51,6 +55,10 @@ struct MusicTabContent: View {
     private var microphoneStartsAtLaunch = false
     @State private var isShowingVisualizationAddPopover = false
     @State private var isHoldingVisualizationAddAdjustment = false
+    /// The mapping currently being pressed for a temporary isolation preview.
+    /// Keeping the identity locally prevents a cancelled or overlapping gesture
+    /// from clearing another mapping's session.
+    @State private var heldIsolationMappingID: UUID?
 
     private var transformationExperienceMode: TransformationExperienceMode {
         TransformationExperienceMode.decode(transformationExperienceModeRaw)
@@ -102,6 +110,14 @@ struct MusicTabContent: View {
 
     private var canAddVisualizationMapping: Bool {
         cache.audioReactive.fractalAudioReactiveEnabled && !availableMappingTargetsToAdd.isEmpty
+    }
+
+    private var isIPhone: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone
+        #else
+        false
+        #endif
     }
 
     init(
@@ -189,6 +205,7 @@ struct MusicTabContent: View {
         #endif
         .onDisappear {
             updateVisualizationAddPopoverAdjustment(isPresented: false)
+            endIsolationPreview()
         }
     }
 
@@ -377,15 +394,25 @@ struct MusicTabContent: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
-            HStack(alignment: .bottom, spacing: 10) {
-                // Quick Mix — only visible when reactive is on
+            if isIPhone {
+                // Keep the primary action row immediately reachable on phone,
+                // then let the mixing controls use the pane's full width.
+                visualizationControlTile
+
                 if cache.audioReactive.fractalAudioReactiveEnabled {
                     quickMixTile
                 }
+            } else {
+                HStack(alignment: .bottom, spacing: 10) {
+                    // Quick Mix — only visible when reactive is on
+                    if cache.audioReactive.fractalAudioReactiveEnabled {
+                        quickMixTile
+                    }
 
-                Spacer(minLength: 0)
+                    Spacer(minLength: 0)
 
-                visualizationControlTile
+                    visualizationControlTile
+                }
             }
 
             if !cache.audioReactive.fractalAudioReactiveEnabled {
@@ -521,47 +548,88 @@ struct MusicTabContent: View {
     }
 
     private var visualizationControlTile: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Audio Reactive")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+        Group {
+            if isIPhone {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Audio Reactive")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
 
-                    HStack(spacing: 6) {
-                        Image(systemName: cache.audioReactive.fractalAudioReactiveEnabled ? AppIcons.waveformCircleFill : AppIcons.waveformCircle)
-                            .font(.caption)
-                        Text("\(activeMusicPermutationCount)")
-                            .font(.caption.weight(.semibold).monospacedDigit())
+                        HStack(spacing: 6) {
+                            Image(systemName: cache.audioReactive.fractalAudioReactiveEnabled ? AppIcons.waveformCircleFill : AppIcons.waveformCircle)
+                                .font(.caption)
+                            Text("\(activeMusicPermutationCount)")
+                                .font(.caption.weight(.semibold).monospacedDigit())
+                        }
+                        .foregroundStyle(cache.audioReactive.fractalAudioReactiveEnabled ? .blue : .secondary)
                     }
-                    .foregroundStyle(cache.audioReactive.fractalAudioReactiveEnabled ? .blue : .secondary)
+
+                    Spacer(minLength: 0)
+
+                    Toggle("React to Audio", isOn: reactToMusicBinding)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+
+                    if cache.audioReactive.fractalAudioReactiveEnabled {
+                        visualizationAddButton
+                    }
                 }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill((cache.audioReactive.fractalAudioReactiveEnabled ? Color.blue : Color.secondary).opacity(0.10))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder((cache.audioReactive.fractalAudioReactiveEnabled ? Color.blue : Color.secondary).opacity(0.18), lineWidth: 1)
+                )
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Audio Reactive")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
 
-                Spacer(minLength: 0)
+                            HStack(spacing: 6) {
+                                Image(systemName: cache.audioReactive.fractalAudioReactiveEnabled ? AppIcons.waveformCircleFill : AppIcons.waveformCircle)
+                                    .font(.caption)
+                                Text("\(activeMusicPermutationCount)")
+                                    .font(.caption.weight(.semibold).monospacedDigit())
+                            }
+                            .foregroundStyle(cache.audioReactive.fractalAudioReactiveEnabled ? .blue : .secondary)
+                        }
 
-                Toggle("React to Audio", isOn: reactToMusicBinding)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-            }
+                        Spacer(minLength: 0)
 
-            Spacer(minLength: 0)
+                        Toggle("React to Audio", isOn: reactToMusicBinding)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                    }
 
-            if cache.audioReactive.fractalAudioReactiveEnabled {
-                visualizationAddButton
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    Spacer(minLength: 0)
+
+                    if cache.audioReactive.fractalAudioReactiveEnabled {
+                        visualizationAddButton
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                }
+                .padding(12)
+                .frame(width: 148, height: 112, alignment: .topLeading)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill((cache.audioReactive.fractalAudioReactiveEnabled ? Color.blue : Color.secondary).opacity(0.10))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder((cache.audioReactive.fractalAudioReactiveEnabled ? Color.blue : Color.secondary).opacity(0.18), lineWidth: 1)
+                )
             }
         }
-        .padding(12)
-        .frame(width: 148, height: 112, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill((cache.audioReactive.fractalAudioReactiveEnabled ? Color.blue : Color.secondary).opacity(0.10))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder((cache.audioReactive.fractalAudioReactiveEnabled ? Color.blue : Color.secondary).opacity(0.18), lineWidth: 1)
-        )
     }
     private var librarySearchBinding: Binding<String> {
         Binding(get: { viewModel.librarySearch }, set: { viewModel.librarySearch = $0 })
@@ -1326,23 +1394,6 @@ struct MusicTabContent: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    if let isolatedID = cache.isolatedMusicReactiveMappingID,
-                       let isolated = cache.audioReactive.musicReactiveMappings.first(where: { $0.id == isolatedID }) {
-                        HStack(spacing: 8) {
-                            Label("Isolating \(mappingDisplayName(isolated))", systemImage: "scope")
-                                .font(.caption.weight(.semibold))
-                            Spacer()
-                            Button("Done") {
-                                cache.setMusicReactiveIsolation(nil)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                        Text("Other reactive effects are temporarily muted. Their previous enabled states return when isolation ends.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-
                     if !transformAudioAssignments.isEmpty {
                         transformAudioAssignmentsSection
                     }
@@ -1371,27 +1422,7 @@ struct MusicTabContent: View {
 
                                     Spacer()
 
-                                    Toggle(isOn: Binding(
-                                        get: { cache.isolatedMusicReactiveMappingID == mapping.id },
-                                        set: { shouldIsolate in
-                                            cache.setMusicReactiveIsolation(shouldIsolate ? mapping.id : nil)
-                                        }
-                                    )) {
-                                        Label("Isolate", systemImage: "scope")
-                                            .font(.caption.weight(.semibold))
-                                    }
-                                    .toggleStyle(.button)
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                    .help("Temporarily mute every other reactive effect and audition this one.")
-                                }
-
-                                if let isolatedID = cache.isolatedMusicReactiveMappingID,
-                                   isolatedID != mapping.id {
-                                    Label("Temporarily muted by Isolate", systemImage: "speaker.slash")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    isolationPreviewControl(for: mapping)
                                 }
 
                                 if canEditMappingTarget(mapping.target) {
@@ -1489,6 +1520,51 @@ struct MusicTabContent: View {
                     .background(RoundedRectangle(cornerRadius: 12).fill(Color.gray.opacity(0.10)))
             }
         }
+    }
+
+    /// A press-and-hold audition: the mapping is isolated only for the active
+    /// press, while the surrounding controls fade away to expose its visual
+    /// effect in the renderer.
+    private func isolationPreviewControl(for mapping: MusicReactiveMapping) -> some View {
+        Label("Hold to Isolate", systemImage: "scope")
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.5)))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color.secondary.opacity(0.24), lineWidth: 1)
+            )
+            .onLongPressGesture(
+                minimumDuration: 0,
+                maximumDistance: .infinity,
+                pressing: { isPressed in
+                    if isPressed {
+                        beginIsolationPreview(for: mapping.id)
+                    } else {
+                        endIsolationPreview()
+                    }
+                },
+                perform: {}
+            )
+            .accessibilityLabel("Preview \(mappingDisplayName(mapping)) in isolation")
+            .accessibilityHint("Touch and hold to show only this mapping's visual effect; release to return to the controls.")
+            .help("Hold to mute other reactive effects and preview this mapping in the renderer. Release to return to the controls.")
+    }
+
+    private func beginIsolationPreview(for mappingID: UUID) {
+        guard heldIsolationMappingID == nil,
+              cache.setMusicReactiveIsolation(mappingID) else { return }
+        heldIsolationMappingID = mappingID
+        appModel.isAudioReactivityIsolationPreviewActive = true
+    }
+
+    private func endIsolationPreview() {
+        guard heldIsolationMappingID != nil else { return }
+        cache.setMusicReactiveIsolation(nil)
+        heldIsolationMappingID = nil
+        appModel.isAudioReactivityIsolationPreviewActive = false
     }
 
     // MARK: - Transformation Audio Assignment

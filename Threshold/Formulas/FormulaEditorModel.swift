@@ -21,9 +21,8 @@
 //  CODE only, so the instant UI and the slow shader can disagree for seconds
 //  with zero rendering breakage.
 //
-//  Superseded draft libraries are left in CustomShaderCompiler's in-memory
-//  cache for the session (one per successful compile generation; the cache
-//  dies with the process and pipeline retention is bounded MRU-4).
+//  Superseded draft libraries may remain in CustomShaderCompiler's bounded
+//  in-memory LRU cache so recently used drafts can be restored cheaply.
 //
 
 import Foundation
@@ -95,6 +94,9 @@ final class FormulaEditorModel {
     private(set) var isInvalidated = false
     /// Monotonic edit generation; results for stale generations are discarded.
     private var generation: UInt64 = 0
+    /// The generation most recently published to the formula catalogs. A draft
+    /// loaded in manual mode is intentionally unpublished until Compile Now.
+    private var publishedDefinitionGeneration: UInt64?
 
     // MARK: - Init
 
@@ -244,6 +246,7 @@ final class FormulaEditorModel {
     func compileNow() {
         debounceTask?.cancel()
         debounceTask = nil
+        publishCurrentDefinitionIfNeeded()
         startCompileIfPossible()
     }
 
@@ -263,13 +266,22 @@ final class FormulaEditorModel {
         // Register the draft so the parameter UI regenerates NOW, even while
         // the source itself is mid-edit or broken — sliders follow pragmas,
         // values ride the uniforms, the renderer stays on last-good code.
-        definitionChangedHandler(currentDraft())
+        publishCurrentDefinitionIfNeeded()
 
         if immediateCompile {
             compileNow()
         } else if automaticallyCompilesEdits {
             scheduleDebouncedCompile()
         }
+    }
+
+    /// Publish exactly once per edit generation. This also covers an untouched
+    /// built-in loaded in manual mode: pressing Compile must register the draft
+    /// before the renderer attempts to activate its custom fractal type.
+    private func publishCurrentDefinitionIfNeeded() {
+        guard !isInvalidated, publishedDefinitionGeneration != generation else { return }
+        definitionChangedHandler(currentDraft())
+        publishedDefinitionGeneration = generation
     }
 
     private func refreshParse() {

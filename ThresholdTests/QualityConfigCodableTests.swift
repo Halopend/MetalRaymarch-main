@@ -17,14 +17,21 @@ import Foundation
 @Suite("QualityConfig — raymarch accelerator persistence")
 struct QualityConfigCodableTests {
 
-    @Test("default resolution is 50 percent")
+    @Test("default resolution is the 33 percent Low preset")
     func resolutionDefaults() {
-        #expect(QualityConfig().resolutionScale == 0.5)
-        #expect(SceneQualityTarget.standard.macResolutionScale == 0.5)
+        #expect(QualityConfig().resolutionScale == 0.33)
+        #expect(ControlCatalog.resolutionScale.defaultValue == 0.33)
+        #expect(SceneQualityTarget.standard.macResolutionScale == 0.33)
 
-        #if os(macOS)
-        #expect(RenderSettings().resolutionScale == 0.5)
+        #if os(macOS) || os(iOS)
+        #expect(RenderSettings().resolutionScale == 0.33)
         #endif
+    }
+
+    @Test("legacy quality without resolution preserves native fallback")
+    func legacyResolutionFallback() throws {
+        let legacy = try JSONDecoder().decode(QualityConfig.self, from: Data("{}".utf8))
+        #expect(legacy.resolutionScale == 1.0)
     }
 
     @Test("cone marching defaults to 84 percent")

@@ -25,16 +25,15 @@ private struct ThresholdiOSRootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("hasCompletedIntroOnboarding") private var hasCompletedIntroOnboarding = false
-    // Start phone users on the artwork. Controls remain one tap away and use
-    // the system's compact inspector sheet; iPad keeps its visible side panel.
+    // Start phone users on the artwork. Phone quick controls are opened with
+    // an intentional edge swipe; iPad keeps its visible side panel.
     @State private var isShowingControls = UIDevice.current.userInterfaceIdiom != .phone
     @State private var isAnimationEditorPresented = false
     @State private var isFormulaEditorPresented = false
     @State private var restoreControlsAfterFormulaEditor = false
     @State private var radialMenu = RadialMenuModel(interactionProfile: .touch)
     @State private var radialCurvature = 0.72
-    @State private var isCanvasChromeVisible = UIDevice.current.userInterfaceIdiom != .phone
-    @State private var chromeAutoHideTask: Task<Void, Never>?
+    @State private var isStartupCoverVisible = true
     private let controlsAnimation = MenuChrome.panelSpring
 
     private var isPhone: Bool {
@@ -52,7 +51,6 @@ private struct ThresholdiOSRootView: View {
                     || radialMenu.isPresented
                     || isFormulaEditorPresented
                     || isAnimationEditorPresented,
-                onInteraction: revealCanvasChrome,
                 onRadialMenuRequest: { location in
                     toggleRadialMenu(at: location, viewportSize: proxy.size)
                 }
@@ -60,24 +58,23 @@ private struct ThresholdiOSRootView: View {
                 .ignoresSafeArea()
                 .background(Color.black)
                 .overlay(alignment: .topTrailing) {
-                    if !isFormulaEditorPresented && (!isPhone || isCanvasChromeVisible) {
+                    if !isFormulaEditorPresented && !isPhone {
                         controlsToggle
-                            // The Metal surface stays edge-to-edge, but the control must
-                            // clear the status bar and Stage Manager window chrome.
-                            .padding(.top, isPhone ? max(4, safeAreaInsets.top + 1) : max(16, safeAreaInsets.top + 8))
+                            // The overlay already starts inside the safe area. Phones only
+                            // need a small local margin; iPad keeps extra window-chrome clearance.
+                            .padding(.top, isPhone ? 4 : max(16, safeAreaInsets.top + 8))
                             .padding(.trailing, isPhone ? max(10, safeAreaInsets.trailing + 6) : max(16, safeAreaInsets.trailing + 8))
                             .transition(.opacity)
                     }
                 }
                 .overlay(alignment: .bottom) {
-                    if !appModel.rendererStartupWarmupComplete && (!isPhone || isCanvasChromeVisible) {
+                    if !appModel.rendererStartupWarmupComplete && !isPhone {
                         shaderCompileBanner
                             .padding(.bottom, max(24, safeAreaInsets.bottom + 12))
                             .transition(.opacity)
                     }
                 }
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: appModel.rendererStartupWarmupComplete)
-                .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: isCanvasChromeVisible)
                 .inspector(isPresented: $isShowingControls) {
                     ThresholdiOSInspectorContent(isShowingControls: $isShowingControls)
                         .environment(appModel)
@@ -110,6 +107,10 @@ private struct ThresholdiOSRootView: View {
                             sceneAccent: RadialMenuSceneAccent.color(
                                 from: appModel.renderSettings.gradientColorMap
                             ),
+                            quickAccessShortcuts: RadialMenuProjectionFactory.quickAccessShortcuts(
+                                pinnedRouteIDs: appModel.navigationStore.pinnedRouteIDs,
+                                selectedRoute: appModel.navigationStore.currentRoute
+                            ),
                             suspendsHoverNavigation: false,
                             hoveredSlider: Binding(
                                 get: { radialMenu.hoveredSlider },
@@ -120,6 +121,9 @@ private struct ThresholdiOSRootView: View {
                                 else { appModel.endMenuAdjustment() }
                             },
                             onSelectPresentation: { _ in },
+                            onActivateQuickAccess: { route in
+                                activateQuickAccessRoute(route)
+                            },
                             onDismiss: dismissRadialMenu
                         )
                         .transition(.opacity)
@@ -131,6 +135,13 @@ private struct ThresholdiOSRootView: View {
                     // iOS has no pin concept, so it always collapses.
                     setControlsVisible(false)
                 }
+                .sceneNavigationFeedbackOverlay(
+                    isObscured: radialMenu.isPresented
+                        || isFormulaEditorPresented
+                        || isAnimationEditorPresented,
+                    instruction: "Three-finger swipe · Swipe card",
+                    bottomPadding: max(24, safeAreaInsets.bottom + 12)
+                )
                 .onDisappear(perform: dismissRadialMenu)
         }
         .overlay {
@@ -138,6 +149,28 @@ private struct ThresholdiOSRootView: View {
                 FormulaEditorWindowView(onClose: dismissFormulaEditor)
                     .environment(appModel)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .overlay {
+            if isStartupCoverVisible {
+                startupCover
+                    .transition(.opacity)
+                    .zIndex(100)
+            }
+        }
+        .task(id: appModel.rendererStartupWarmupComplete) {
+            guard appModel.rendererStartupWarmupComplete else {
+                isStartupCoverVisible = true
+                return
+            }
+
+            // Pipeline readiness precedes the first visible Metal frame. Keep
+            // the cover through that handoff so startup never flashes the
+            // clear surface or a stale renderer snapshot.
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) {
+                isStartupCoverVisible = false
             }
         }
         // Safety and privacy setup (photosensitivity acknowledgement, microphone,
@@ -172,8 +205,6 @@ private struct ThresholdiOSRootView: View {
             syncMenuWindowVisibility(isVisible)
         }
         .onDisappear {
-            chromeAutoHideTask?.cancel()
-            chromeAutoHideTask = nil
             appModel.openFormulaEditorHandler = nil
             appModel.openAnimationEditorHandler = nil
             appModel.dismissAnimationEditorHandler = nil
@@ -213,7 +244,6 @@ private struct ThresholdiOSRootView: View {
             return
         }
         guard appModel.inputOwnershipStore.claim(.radialMenu) else { return }
-        hideCanvasChrome()
         setControlsVisible(false)
         appModel.controlStateStore.startSync(with: appModel.renderSettings, appModel: appModel)
         let anchor = CGPoint(
@@ -281,6 +311,14 @@ private struct ThresholdiOSRootView: View {
         }
     }
 
+    /// Pinned items are explicit section shortcuts, so unlike a radial leaf
+    /// interaction they always reveal the inspector that contains the route.
+    private func activateQuickAccessRoute(_ route: AppRoute) {
+        appModel.navigationStore.select(route)
+        dismissRadialMenu()
+        setControlsVisible(true)
+    }
+
     private func inspectorColumnWidths(for size: CGSize) -> (min: CGFloat, ideal: CGFloat, max: CGFloat) {
         let availableWidth = max(size.width, 1)
         // Leave a little room for the system's window/inspector chrome and never
@@ -301,31 +339,6 @@ private struct ThresholdiOSRootView: View {
         }
     }
 
-    private func revealCanvasChrome() {
-        guard isPhone, !radialMenu.isPresented else { return }
-        chromeAutoHideTask?.cancel()
-        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
-            isCanvasChromeVisible = true
-        }
-        chromeAutoHideTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
-            guard !Task.isCancelled else { return }
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) {
-                isCanvasChromeVisible = false
-            }
-            chromeAutoHideTask = nil
-        }
-    }
-
-    private func hideCanvasChrome() {
-        guard isPhone else { return }
-        chromeAutoHideTask?.cancel()
-        chromeAutoHideTask = nil
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
-            isCanvasChromeVisible = false
-        }
-    }
-
     /// Shown while the renderer's generic pipeline is still compiling. On a
     /// cold GPU shader cache (first launch, OS update) this takes several
     /// seconds on iPad; without feedback the black viewport reads as a hang.
@@ -343,10 +356,35 @@ private struct ThresholdiOSRootView: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// App-owned half of the launch handoff. The system launch storyboard is
+    /// necessarily brief; this cover remains visible while the first Metal
+    /// pipeline and drawable become ready, which is the interval users
+    /// perceive as the splash screen on a cold launch.
+    private var startupCover: some View {
+        ZStack {
+            Color(red: 0.005, green: 0.006, blue: 0.008)
+                .ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                Image("LaunchWindowIcon")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 120, height: 120)
+                    .clipShape(RoundedRectangle(cornerRadius: 27, style: .continuous))
+                    .shadow(color: .black.opacity(0.35), radius: 16, y: 8)
+
+                ProgressView()
+                    .tint(.white.opacity(0.82))
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Threshold is starting")
+    }
+
     private var controlsToggle: some View {
         Button {
             setControlsVisible(!isShowingControls)
-            hideCanvasChrome()
         } label: {
             Label(
                 isShowingControls ? "Hide Controls" : "Controls",
@@ -386,6 +424,11 @@ private struct ThresholdiOSInspectorContent: View {
             // dense editors the full available workspace.
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+            // Keep the inspector mounted during a hold so its gesture receives
+            // the release edge, but make its presentation transparent to show
+            // the renderer beneath the Audio Reactivity preview.
+            .presentationBackground(.clear)
+            .opacity(appModel.isAudioReactivityIsolationPreviewActive ? 0 : 1)
             .overlay(alignment: .leading) {
                 swipeDismissHandle
             }

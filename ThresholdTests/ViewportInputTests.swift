@@ -59,6 +59,32 @@ struct ViewportInputTests {
         #expect(frame.actions.isEmpty)
     }
 
+    @Test("Clearing camera deltas preserves discrete scene navigation")
+    func clearCameraDeltasPreservesSceneNavigation() {
+        let input = ViewportInputAccumulator()
+        input.addOrbit(delta: SIMD2<Float>(4, -3))
+        input.addPan(delta: SIMD2<Float>(2, 1))
+        input.addZoom(delta: 0.5)
+        input.requestSceneStep(1)
+
+        input.clearCameraDeltas()
+
+        let frame = input.consumeFrame()
+        #expect(frame.orbitDelta == .zero)
+        #expect(frame.panDelta == .zero)
+        #expect(frame.zoomDelta == 0)
+        #expect(frame.sceneStep == 1)
+    }
+
+    @Test("Scene swipes require an intentional horizontal translation")
+    func sceneSwipePolicy() {
+        #expect(SceneSwipeGesturePolicy.sceneStep(for: SIMD2<Float>(-32, 0)) == 1)
+        #expect(SceneSwipeGesturePolicy.sceneStep(for: SIMD2<Float>(32, 0)) == -1)
+        #expect(SceneSwipeGesturePolicy.sceneStep(for: SIMD2<Float>(31, 0)) == 0)
+        #expect(SceneSwipeGesturePolicy.sceneStep(for: SIMD2<Float>(48, 48)) == 0)
+        #expect(SceneSwipeGesturePolicy.sceneStep(for: SIMD2<Float>(-.infinity, 0)) == 0)
+    }
+
     @Test("Concurrent producers are lossless across one drain")
     func concurrentProducers() {
         let input = ViewportInputAccumulator()

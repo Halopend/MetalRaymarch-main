@@ -37,6 +37,32 @@ enum RadialMenuProjectionFactory {
         )
     }
 
+    /// Pins already power the rectangular Quick Access rail. The radial host
+    /// renders these separately from its path-driven rings so they remain
+    /// reachable while browsing any depth of the menu.
+    ///
+    /// Pin state is canonicalized by `NavigationStore`, but this also filters
+    /// stale and repeated IDs defensively because persisted state can arrive
+    /// from an older build or a hand-edited defaults domain.
+    static func quickAccessShortcuts(
+        pinnedRouteIDs: [String],
+        selectedRoute: AppRoute
+    ) -> [RadialQuickAccessShortcut] {
+        var seenRouteIDs = Set<String>()
+
+        return pinnedRouteIDs.compactMap { id in
+            guard let route = AppRoute.route(withStableID: id),
+                  seenRouteIDs.insert(route.stableID).inserted else {
+                return nil
+            }
+
+            return RadialQuickAccessShortcut(
+                route: route,
+                isSelected: route == selectedRoute
+            )
+        }
+    }
+
     private static func node(
         _ definition: NavigationHierarchy.Node,
         appModel: AppModel,

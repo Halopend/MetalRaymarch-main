@@ -201,7 +201,7 @@ struct ContentView: View {
     /// inspector. Keep the phone presentation deliberately shallower: both
     /// navigation levels scroll horizontally instead of consuming multiple
     /// rows above the actual controls.
-    private var usesPhoneWorkspaceLayout: Bool {
+    var usesPhoneWorkspaceLayout: Bool {
 #if os(iOS)
         UIDevice.current.userInterfaceIdiom == .phone
 #else
@@ -395,7 +395,10 @@ struct ContentView: View {
         .background { menuSurfaceBackground }
         .overlay { menuSurfaceBorder }
         .thresholdGlassBackground(cornerRadius: 20)
-        .opacity(isMenuContentVisible ? 1 : 0)
+        // Holding an Audio Reactivity isolate control temporarily turns the
+        // controls into a transparent preview surface. It remains in the view
+        // hierarchy so the same press reliably receives its touch-up edge.
+        .opacity(isMenuContentVisible && !appModel.isAudioReactivityIsolationPreviewActive ? 1 : 0)
         .animation(motionSensitiveAnimation(.easeInOut(duration: 0.18)), value: isMenuContentVisible)
         .allowsHitTesting(isMenuContentVisible)
         .thresholdTopDockOrnament(isVisible: isShortcutOrnamentVisible) {

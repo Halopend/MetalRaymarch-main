@@ -85,6 +85,36 @@ struct RadialNavigationProjectionTests {
         ]
     }
 
+    @MainActor
+    @Test("Quick Access pins become stable persistent radial shortcuts")
+    func quickAccessPinsArePersistentShortcuts() {
+        let routes: [AppRoute] = [
+            .input(.reactive),
+            .shape(.formula),
+            .explore(.jumpingOff)
+        ]
+        let shortcuts = RadialMenuProjectionFactory.quickAccessShortcuts(
+            pinnedRouteIDs: [
+                routes[0].stableID,
+                "removed.route",
+                routes[1].stableID,
+                routes[0].stableID,
+                routes[2].stableID
+            ],
+            selectedRoute: routes[1]
+        )
+
+        #expect(shortcuts.map(\.id) == [
+            "quickAccess.\(routes[0].stableID)",
+            "quickAccess.\(routes[1].stableID)",
+            "quickAccess.\(routes[2].stableID)"
+        ])
+        #expect(shortcuts.map(\.title) == routes.map(\.title))
+        #expect(shortcuts.map(\.systemImage) == routes.map(\.systemImage))
+        #expect(shortcuts.map(\.isSelected) == [false, true, false])
+        #expect(shortcuts.map(\.route) == routes)
+    }
+
     private func makeOverflowHierarchy(clicked: @escaping () -> Void = {}) -> RadialNavigationProjection {
         let children = (1...4).map { index in
             RadialNavigationNode(
@@ -181,6 +211,135 @@ struct RadialNavigationProjectionTests {
 
         #expect(projection.reconciledPath(["root", "section.4"]) == ["root"])
         #expect(projection.reconciledPath(["root", "section.1"]) == ["root", "section.1"])
+    }
+
+    @Test("Singleton branch levels are transparent to radial navigation")
+    func singletonBranchesAreSkipped() {
+        let firstControl = RadialNavigationNode(
+            id: "control.first",
+            title: "First",
+            systemImage: "slider.horizontal.3",
+            slider: RadialSliderBinding(range: 0...1, read: { 0 }, write: { _ in })
+        )
+        let secondControl = RadialNavigationNode(
+            id: "control.second",
+            title: "Second",
+            systemImage: "switch.2",
+            toggle: RadialToggleBinding(read: { false }, write: { _ in })
+        )
+        let projection = RadialNavigationProjection(roots: [
+            RadialNavigationNode(
+                id: "root.quality",
+                title: "Quality",
+                systemImage: "gauge.with.dots.needle.67percent",
+                children: [
+                    RadialNavigationNode(
+                        id: "quality.tuning",
+                        title: "Tuning",
+                        systemImage: "slider.horizontal.3",
+                        children: [
+                            RadialNavigationNode(
+                                id: "quality.tuning.only-section",
+                                title: "Only Section",
+                                systemImage: "square.stack",
+                                children: [firstControl, secondControl]
+                            )
+                        ]
+                    )
+                ]
+            )
+        ])
+
+        let rings = projection.rings(along: ["root.quality"])
+        #expect(rings.count == 2)
+        #expect(rings[1].map(\.id) == ["control.first", "control.second"])
+
+        let keyboardTargets = projection.flattenedKeyboardTargets()
+        #expect(keyboardTargets.map(\.id) == [
+            "root.quality", "control.first", "control.second"
+        ])
+        #expect(keyboardTargets.last?.ancestorPath == ["root.quality"])
+
+        let visiblePath = projection.reconciledPath([
+            "root.quality", "quality.tuning", "quality.tuning.only-section"
+        ])
+        #expect(visiblePath == ["root.quality"])
+        #expect(RadialNavigationPathPolicy.retreating(from: visiblePath) == [])
+    }
+
+    @Test("Authored singleton paths retain deeper visible selections")
+    func singletonPathReconciliationPreservesVisibleTail() {
+        func section(_ id: String) -> RadialNavigationNode {
+            RadialNavigationNode(
+                id: "section.\(id)",
+                title: "Section \(id)",
+                systemImage: "square.stack",
+                children: [
+                    RadialNavigationNode(
+                        id: "control.\(id)",
+                        title: "Control \(id)",
+                        systemImage: "slider.horizontal.3",
+                        slider: RadialSliderBinding(
+                            range: 0...1,
+                            read: { 0 },
+                            write: { _ in }
+                        )
+                    )
+                ]
+            )
+        }
+
+        let projection = RadialNavigationProjection(roots: [
+            RadialNavigationNode(
+                id: "root",
+                title: "Root",
+                systemImage: "square.grid.2x2",
+                children: [
+                    RadialNavigationNode(
+                        id: "only.category",
+                        title: "Only Category",
+                        systemImage: "square.stack",
+                        children: [section("a"), section("b")]
+                    )
+                ]
+            )
+        ])
+
+        let visiblePath = projection.reconciledPath([
+            "root", "only.category", "section.a"
+        ])
+        #expect(visiblePath == ["root", "section.a"])
+        #expect(projection.rings(along: visiblePath).map { $0.map(\.id) } == [
+            ["root"],
+            ["section.a", "section.b"],
+            ["control.a"]
+        ])
+        #expect(RadialNavigationPathPolicy.retreating(from: visiblePath) == ["root"])
+    }
+
+    @Test("A sole terminal control remains visible")
+    func singletonLeafIsNotSkipped() {
+        let projection = RadialNavigationProjection(roots: [
+            RadialNavigationNode(
+                id: "root",
+                title: "Root",
+                systemImage: "square.grid.2x2",
+                children: [
+                    RadialNavigationNode(
+                        id: "control.only",
+                        title: "Only Control",
+                        systemImage: "slider.horizontal.3",
+                        slider: RadialSliderBinding(
+                            range: 0...1,
+                            read: { 0 },
+                            write: { _ in }
+                        )
+                    )
+                ]
+            )
+        ])
+
+        #expect(projection.rings(along: ["root"])[1].map(\.id) == ["control.only"])
     }
 
     @Test("Activating an expanded branch collapses exactly that level")
@@ -287,6 +446,26 @@ struct RadialNavigationProjectionTests {
         #expect(RadialActivationPolicy.shouldOpenFullControls(
             activationCount: 2,
             hasFullControlsAction: true
+        ))
+    }
+
+    @Test("Phone edge menu dismisses only toward its owning edge")
+    func phoneEdgeMenuDismissalPolicy() {
+        #expect(PhoneEdgeMenuGesturePolicy.shouldDismiss(
+            opensLeft: true,
+            horizontalTranslation: PhoneEdgeMenuGesturePolicy.dismissalDistance
+        ))
+        #expect(!PhoneEdgeMenuGesturePolicy.shouldDismiss(
+            opensLeft: true,
+            horizontalTranslation: -40
+        ))
+        #expect(PhoneEdgeMenuGesturePolicy.shouldDismiss(
+            opensLeft: false,
+            horizontalTranslation: -PhoneEdgeMenuGesturePolicy.dismissalDistance
+        ))
+        #expect(!PhoneEdgeMenuGesturePolicy.shouldDismiss(
+            opensLeft: false,
+            horizontalTranslation: 40
         ))
     }
 
@@ -702,9 +881,14 @@ struct RadialNavigationProjectionTests {
         let targets = projection.flattenedKeyboardTargets()
         #expect(Set(targets.map(\.id)).count == targets.count)
 
+        let retainedID = "transform.op.\(sharedID.uuidString.lowercased())"
+        #expect(projection.node(withID: retainedID)?.title == "1 · \(SpaceWarpKind.twist.displayName)")
+
+        // De-duplication leaves one transform branch, so the generic singleton
+        // rule promotes that branch's controls into the visible ring.
         let presented = projection.rings(along: ["root.transform"])[1]
-        #expect(presented.map(\.id) == ["transform.op.\(sharedID.uuidString.lowercased())"])
-        #expect(presented.first?.title == "1 · \(SpaceWarpKind.twist.displayName)")
+        #expect(!presented.map(\.id).contains(retainedID))
+        #expect(presented.map(\.id) == transformBranch(original, state: state).children.map(\.id))
     }
 
     @Test("Duplicate roots and duplicate siblings keep only their first occurrence")

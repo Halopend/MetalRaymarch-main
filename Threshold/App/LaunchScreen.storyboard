@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="25156" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="LaunchScreenViewController">
+    <device id="retina6_12" orientation="portrait" appearance="light"/>
+    <scenes>
+        <scene sceneID="LaunchScreenScene">
+            <objects>
+                <viewController id="LaunchScreenViewController" sceneMemberID="viewController">
+                    <view key="view" contentMode="scaleToFill" id="LaunchScreenView">
+                        <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
+                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                        <subviews>
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="LaunchWindowIcon" translatesAutoresizingMaskIntoConstraints="NO" id="LaunchIcon">
+                                <rect key="frame" x="136.5" y="366.0" width="120" height="120"/>
+                            </imageView>
+                        </subviews>
+                        <viewLayoutGuide key="safeArea" id="LaunchScreenSafeArea"/>
+                        <color key="backgroundColor" red="0.005" green="0.006" blue="0.008" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                        <constraints>
+                            <constraint firstItem="LaunchIcon" firstAttribute="centerX" secondItem="LaunchScreenView" secondAttribute="centerX" id="LaunchIconCenterX"/>
+                            <constraint firstItem="LaunchIcon" firstAttribute="centerY" secondItem="LaunchScreenView" secondAttribute="centerY" id="LaunchIconCenterY"/>
+                            <constraint firstItem="LaunchIcon" firstAttribute="width" constant="120" id="LaunchIconWidth"/>
+                            <constraint firstItem="LaunchIcon" firstAttribute="height" constant="120" id="LaunchIconHeight"/>
+                        </constraints>
+                    </view>
+                </viewController>
+                <placeholder placeholderIdentifier="IBFirstResponder" id="FirstResponder" userLabel="First Responder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="52" y="375"/>
+        </scene>
+    </scenes>
+    <resources>
+        <image name="LaunchWindowIcon" width="120" height="120"/>
+    </resources>
+</document>

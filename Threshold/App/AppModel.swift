@@ -201,6 +201,10 @@ class AppModel {
     var isRootRenderViewMounted = false
     #endif
     var rendererStartupWarmupComplete = false
+    /// True only while an Audio Reactivity mapping is being held in isolation.
+    /// Presentation hosts use this transient flag to reveal the live renderer
+    /// without changing the user's normal controls visibility.
+    var isAudioReactivityIsolationPreviewActive = false
     var runtimeViewMode: RuntimeViewMode =
         RuntimeViewMode(rawValue: UserDefaults.standard.string(forKey: runtimeViewModeDefaultsKey) ?? "")
         ?? .raymarch {

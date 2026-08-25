@@ -220,11 +220,12 @@ extension ContentView {
             platformSection
 #endif
 
-            // Handedness lives in display, not gestures: it affects which
-            // hand the renderer treats as the dominant one and the user
-            // expects to find it next to other "how I look at the scene"
-            // controls.
-            handednessSection
+            // Phone edge controls work from either side, so handedness is not
+            // a meaningful iPhone setting. It remains available where hand
+            // tracking or asymmetric launchers actually use it.
+            if !usesPhoneWorkspaceLayout {
+                handednessSection
+            }
 
             // Text size — Dynamic Type for the menu. visionOS only: Mac/iPad
             // already honor the system text-size setting, so an in-app knob would

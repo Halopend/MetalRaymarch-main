@@ -547,12 +547,16 @@ struct RadialMenu: View {
     let allowsPresentationSelection: Bool
     @Binding var path: [String]
     let sceneAccent: Color
+    /// Ordered pins from the app's Quick Access store. This is rendered
+    /// outside the path-driven rings so it stays reachable at every depth.
+    let quickAccessShortcuts: [RadialQuickAccessShortcut]
     /// True while the user shift-peeks at the fractal: the menu stays mounted
     /// but hover must not re-navigate underneath the faded pills.
     let suspendsHoverNavigation: Bool
     @Binding var hoveredSlider: RadialActiveSlider?
     let onSliderEditingChanged: (Bool) -> Void
     let onSelectPresentation: (NavigationPresentationStyle) -> Void
+    let onActivateQuickAccess: (AppRoute) -> Void
     let onDismiss: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -603,6 +607,14 @@ struct RadialMenu: View {
         projection.roots
     }
 
+    /// The bound path can outlive a projection change or come from the authored
+    /// hierarchy, where a singleton category still has an id. Every radial
+    /// interaction reads the flattened form so hidden categories never consume
+    /// a visible navigation or Back step.
+    private var presentedPath: [String] {
+        projection.reconciledPath(path)
+    }
+
     private var opensLeft: Bool { anchor.x >= size.width * 0.5 }
     private var bifurcates: Bool {
         // Enough room for the compact slider ring and its 118pt pill.
@@ -611,7 +623,44 @@ struct RadialMenu: View {
     }
 
     static let windowDragHandleSize: CGFloat = 44
+    private static let quickAccessShelfHeight: CGFloat = 64
+    private static let straightEdgeMinimumTop: CGFloat = 70
+    private static let straightEdgeBottomMargin: CGFloat = 22
+    private static let straightEdgeScrollableListTop: CGFloat = 56
+    private static let straightEdgeScrollableListBottom: CGFloat = 12
     private let radialSliderWidth: CGFloat = 118
+
+    private var hasQuickAccessShortcuts: Bool { !quickAccessShortcuts.isEmpty }
+    /// The bottom dock has an opaque hit surface, so all navigable rings stay
+    /// above it rather than allowing their final pills to be covered.
+    private var menuContentHeight: CGFloat {
+        max(0, size.height - (hasQuickAccessShortcuts ? Self.quickAccessShelfHeight : 0))
+    }
+
+    private var straightEdgeScrollableListHeight: CGFloat {
+        max(
+            0,
+            menuContentHeight
+                - Self.straightEdgeScrollableListTop
+                - Self.straightEdgeScrollableListBottom
+        )
+    }
+
+    /// A vertical strip needs at least one full touch target between adjacent
+    /// centers. If the current phone height cannot provide that above the
+    /// persistent dock, switch to a scrollable strip rather than overlapping
+    /// or hiding the final controls underneath Quick Access.
+    private func straightEdgeNeedsScrolling(itemCount: Int) -> Bool {
+        guard itemCount > 1 else { return false }
+        let availableSpan = max(
+            0,
+            menuContentHeight
+                - Self.straightEdgeMinimumTop
+                - Self.straightEdgeBottomMargin
+        )
+        let requiredSpan = CGFloat(itemCount - 1) * interactionProfile.minimumTargetSize
+        return availableSpan < requiredSpan
+    }
 
     /// Phone controls benefit more from horizontal precision than from the
     /// very narrow radial pill. Keep the iPad/Mac ring width unchanged.
@@ -645,7 +694,6 @@ struct RadialMenu: View {
         ZStack {
             Color.clear
                 .contentShape(Rectangle())
-                .onTapGesture(count: 2, perform: onDismiss)
 
             if layout == .straightEdge {
                 straightEdgeScrim
@@ -666,9 +714,40 @@ struct RadialMenu: View {
             if layout == .radial {
                 anchorMark
             }
+
+            if hasQuickAccessShortcuts {
+                quickAccessShelf
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .zIndex(3)
+            }
         }
         .frame(width: size.width, height: size.height)
         .coordinateSpace(name: Self.coordinateSpaceName)
+        .overlay(alignment: opensLeft ? .trailing : .leading) {
+            // A narrow, transparent edge handle reserves the reverse of the
+            // opening gesture for dismissal without stealing taps or drags
+            // from any control pill.
+            if layout == .straightEdge {
+                Color.clear
+                    .frame(width: 28)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: PhoneEdgeMenuGesturePolicy.dismissalDistance)
+                            .onEnded { value in
+                                guard PhoneEdgeMenuGesturePolicy.shouldDismiss(
+                                    opensLeft: opensLeft,
+                                    horizontalTranslation: value.translation.width
+                                ) else { return }
+                                onDismiss()
+                            }
+                    )
+                    .accessibilityLabel("Swipe toward the screen edge to close controls")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction { onDismiss() }
+            }
+        }
         .onAppear {
             // Initial paths may open directly onto the active route. Put
             // hardware-keyboard focus in the deepest visible ring as well, so
@@ -716,13 +795,14 @@ struct RadialMenu: View {
 
     // MARK: Ring layout
 
-    /// Walks `path` through the current radial projection, using concentric
-    /// arcs for every authored hierarchy level.
+    /// Walks the flattened path through the current radial projection, using
+    /// concentric arcs for every visible hierarchy level.
     private func ringLayouts() -> [RingLayout] {
         if layout == .straightEdge {
             return straightEdgeRingLayouts()
         }
 
+        let presentedPath = self.presentedPath
         var layouts: [RingLayout] = []
         var nodes = roots
         var ringBaseAngle: CGFloat = opensLeft ? .pi : 0
@@ -766,8 +846,8 @@ struct RadialMenu: View {
                 radius: ringRadius
             ))
 
-            guard depth < path.count,
-                  let selectedIndex = nodes.firstIndex(where: { $0.id == path[depth] }),
+            guard depth < presentedPath.count,
+                  let selectedIndex = nodes.firstIndex(where: { $0.id == presentedPath[depth] }),
                   nodes[selectedIndex].isBranch,
                   positions.indices.contains(selectedIndex) else { break }
 
@@ -793,11 +873,12 @@ struct RadialMenu: View {
     /// the key space saving on iPhone; the explicit Back control preserves the
     /// complete hierarchy without covering the artwork with multiple columns.
     private func straightEdgeRingLayouts() -> [RingLayout] {
+        let presentedPath = self.presentedPath
         var nodes = roots
         var depth = 0
 
-        while depth < path.count,
-              let selected = nodes.first(where: { $0.id == path[depth] }),
+        while depth < presentedPath.count,
+              let selected = nodes.first(where: { $0.id == presentedPath[depth] }),
               selected.isBranch {
             nodes = projection.presentedChildren(of: selected)
             depth += 1
@@ -805,19 +886,22 @@ struct RadialMenu: View {
 
         guard !nodes.isEmpty else { return [] }
 
-        // Reserve a compact header row above the list. On short landscape
-        // phones the visual spacing can tighten to 40pt while every control
-        // retains its 44pt touch target.
-        let minimumTop: CGFloat = 70
-        let bottomMargin: CGFloat = 22
-        let availableSpan = max(0, size.height - minimumTop - bottomMargin)
+        // Reserve a compact header row above the list. Never tighten below a
+        // full touch target; rings that cannot meet that requirement use the
+        // scrollable straight-edge strip instead of overlapping controls.
+        let minimumTop = Self.straightEdgeMinimumTop
+        let bottomMargin = Self.straightEdgeBottomMargin
+        let availableSpan = max(0, menuContentHeight - minimumTop - bottomMargin)
         let fittedSpacing = nodes.count > 1
             ? availableSpan / CGFloat(nodes.count - 1)
             : interactionProfile.itemSpacing
-        let spacing = min(interactionProfile.itemSpacing, max(40, fittedSpacing))
+        let spacing = min(
+            interactionProfile.itemSpacing,
+            max(interactionProfile.minimumTargetSize, fittedSpacing)
+        )
         let span = spacing * CGFloat(max(nodes.count - 1, 0))
         let desiredTop = anchor.y - span * 0.5
-        let maximumTop = max(minimumTop, size.height - bottomMargin - span)
+        let maximumTop = max(minimumTop, menuContentHeight - bottomMargin - span)
         let top = min(max(desiredTop, minimumTop), maximumTop)
         let positions = nodes.indices.map { index in
             CGPoint(x: straightEdgeCenterX, y: top + CGFloat(index) * spacing)
@@ -847,9 +931,14 @@ struct RadialMenu: View {
 
     @ViewBuilder
     private func straightEdgeChrome(ring: RingLayout?) -> some View {
-        if let ring, let top = ring.positions.first?.y {
+        if let ring {
+            let top = straightEdgeNeedsScrolling(itemCount: ring.nodes.count)
+                ? Self.straightEdgeScrollableListTop
+                    + interactionProfile.minimumTargetSize * 0.5
+                    + 2
+                : ring.positions.first?.y ?? Self.straightEdgeMinimumTop
             HStack(spacing: 8) {
-                if !path.isEmpty {
+                if !presentedPath.isEmpty {
                     Button(action: retreatOneLevel) {
                         Image(systemName: "chevron.backward")
                             .frame(width: 38, height: 38)
@@ -885,6 +974,7 @@ struct RadialMenu: View {
         sliderRing: Bool,
         priorLayouts: [RingLayout]
     ) -> (positions: [CGPoint], baseAngle: CGFloat) {
+        let presentedPath = self.presentedPath
         let geometry = RadialMenuGeometry(
             curvature: CGFloat(curvature),
             interactionProfile: interactionProfile
@@ -920,14 +1010,16 @@ struct RadialMenu: View {
                 if frame.minX < margin { total += (margin - frame.minX) * 80 }
                 if frame.maxX > size.width - margin { total += (frame.maxX - size.width + margin) * 80 }
                 if frame.minY < margin { total += (margin - frame.minY) * 80 }
-                if frame.maxY > size.height - margin { total += (frame.maxY - size.height + margin) * 80 }
+                if frame.maxY > menuContentHeight - margin {
+                    total += (frame.maxY - menuContentHeight + margin) * 80
+                }
 
                 for prior in priorLayouts {
                     for (priorIndex, priorPoint) in prior.positions.enumerated() {
                         let isSelectedParent = prior.depth == priorLayouts.last?.depth
-                            && path.indices.contains(prior.depth)
+                            && presentedPath.indices.contains(prior.depth)
                             && prior.nodes.indices.contains(priorIndex)
-                            && prior.nodes[priorIndex].id == path[prior.depth]
+                            && prior.nodes[priorIndex].id == presentedPath[prior.depth]
                         if isSelectedParent { continue }
                         let priorRestingHalfWidth: CGFloat = prior.depth == 0 ? 72 : 52
                         let priorRestingHalfHeight = max(
@@ -961,12 +1053,14 @@ struct RadialMenu: View {
         return offsets
             .map { offset -> (positions: [CGPoint], baseAngle: CGFloat, score: CGFloat) in
                 let angle = baseAngle + offset
-                let points = geometry.concentricPositions(
-                    count: count,
-                    anchor: anchor,
-                    radius: radius,
-                    baseAngle: angle,
-                    sliderRing: sliderRing
+                let points = fitAboveQuickAccessShelf(
+                    geometry.concentricPositions(
+                        count: count,
+                        anchor: anchor,
+                        radius: radius,
+                        baseAngle: angle,
+                        sliderRing: sliderRing
+                    )
                 )
                 return (points, angle, score(points, offset: offset))
             }
@@ -975,117 +1069,197 @@ struct RadialMenu: View {
             ?? ([], baseAngle)
     }
 
+    /// Applies the same bottom reservation to concentric child rings that the
+    /// primary-ring geometry receives through `availableHeight`. Translating a
+    /// complete ring keeps its angular relationship intact while ensuring the
+    /// Quick Access shelf never covers a live control.
+    private func fitAboveQuickAccessShelf(_ positions: [CGPoint]) -> [CGPoint] {
+        guard hasQuickAccessShortcuts, !positions.isEmpty else { return positions }
+
+        let margin: CGFloat = 30
+        let top = positions.map(\.y).min() ?? 0
+        let bottom = positions.map(\.y).max() ?? 0
+        let upperCorrection = max(0, margin - top)
+        let lowerCorrection = min(0, menuContentHeight - margin - bottom)
+        let correction = upperCorrection > 0 ? upperCorrection : lowerCorrection
+
+        return positions.map { CGPoint(x: $0.x, y: $0.y + correction) }
+    }
+
     @ViewBuilder
     private func ringView(_ ring: RingLayout) -> some View {
-        ForEach(Array(ring.nodes.enumerated()), id: \.element.id) { index, node in
-            let position = ring.positions[index]
-            let transitionDirection: CGFloat = position.x < anchor.x ? 1 : -1
-            let selectedPathID = path.indices.contains(ring.depth) ? path[ring.depth] : nil
-            let isSelectedPathNode = selectedPathID == node.id
-            let recedesBehindChildRing = selectedPathID != nil
-                && !isSelectedPathNode
-                && hoveredRingDepth != ring.depth
+        if layout == .straightEdge, straightEdgeNeedsScrolling(itemCount: ring.nodes.count) {
+            straightEdgeScrollableRingView(ring)
+        } else {
+            ForEach(Array(ring.nodes.enumerated()), id: \.element.id) { index, node in
+                let position = ring.positions[index]
+                let transitionDirection: CGFloat = position.x < anchor.x ? 1 : -1
 
-            Group {
-                if let slider = node.slider {
-                    let width = activeSliderWidth
-                    // Inflated hit frame for platform pointer/indirect-input
-                    // adapters, extending past the pill's hover scale.
-                    let hitFrame = CGRect(
-                        x: position.x - width * 0.5 - 8,
-                        y: position.y - interactionProfile.minimumTargetSize * 0.5 - 8,
-                        width: width + 16,
-                        height: interactionProfile.minimumTargetSize + 16
+                ringItemView(node, in: ring, at: position)
+                    .position(position)
+                    .transition(
+                        .offset(x: transitionDirection * (ring.depth == 0 ? 48 : 62))
+                            .combined(with: .scale(scale: 0.82, anchor: .trailing))
+                            .combined(with: .opacity)
                     )
-                    RadialSliderPill(
-                        node: node,
-                        slider: slider,
-                        fixedWidth: width,
-                        isFocused: focusedItemID == node.id,
-                        sceneAccent: sceneAccent,
-                        interactionProfile: interactionProfile,
-                        onHoverChanged: { hovering in
-                            updateHoveredRing(ring.depth, hovering: hovering)
-                            // Slider pills never arm the dwell, but their
-                            // enters must still disarm a stale one (see
-                            // RadialHoverDwellPolicy). The pill reports raw
-                            // hover so even a disabled pill reconciles;
-                            // availability gates only the scroll target below.
-                            handleNodeHover(node, depth: ring.depth, hovering: hovering)
-                            if hovering, slider.isEnabled() {
-                                hoveredSlider = RadialActiveSlider(id: node.id, frame: hitFrame)
-                            } else if hoveredSlider?.id == node.id {
-                                hoveredSlider = nil
-                            }
-                        },
-                        onEditingChanged: onSliderEditingChanged
-                    )
-                    .focusable()
-                    .focused($focusedItemID, equals: node.id)
-                } else if let toggle = node.toggle {
-                    RadialTogglePill(
-                        node: node,
-                        toggle: toggle,
-                        fixedWidth: activeSliderWidth,
-                        isFocused: focusedItemID == node.id,
-                        sceneAccent: sceneAccent,
-                        interactionProfile: interactionProfile,
-                        onHoverChanged: { hovering in
-                            updateHoveredRing(ring.depth, hovering: hovering)
-                            handleNodeHover(node, depth: ring.depth, hovering: hovering)
-                        }
-                    )
-                    .focusable()
-                    .focused($focusedItemID, equals: node.id)
-                } else {
-                    RadialMenuButton(
-                        item: node,
-                        depth: ring.depth,
-                        fixedWidth: nil,
-                        isFocused: focusedItemID == node.id,
-                        isExpanded: isSelectedPathNode,
-                        retreatDirection: position.x < anchor.x ? -1 : 1,
-                        sceneAccent: sceneAccent,
-                        interactionProfile: interactionProfile,
-                        onActivate: {
-                            // Click (or keyboard activation) on a pure branch
-                            // navigates immediately — hover-only switching
-                            // would strand click-first users. Clicking the
-                            // currently expanded parent collapses exactly that
-                            // level, giving pointer users a local Back action.
-                            if node.isBranch {
-                                activateBranch(node, depth: ring.depth)
-                            } else {
-                                node.fallbackAction?()
-                            }
-                        },
-                        onOpenFullControls: node.fullControlsAction,
-                        onHoverChanged: { hovering in
-                            updateHoveredRing(ring.depth, hovering: hovering)
-                            handleNodeHover(node, depth: ring.depth, hovering: hovering)
-                        }
-                    )
-                    .focused($focusedItemID, equals: node.id)
-                }
             }
-            // Once this layer opens a child arc, fade its siblings back while
-            // keeping the chosen parent fully lit. The resulting bright chain
-            // makes the active route through a deep hierarchy immediately clear.
-            .opacity(
-                recedesBehindChildRing
-                    ? RadialHoverDwellPolicy.recededSiblingOpacity
-                    : 1
-            )
-            .saturation(recedesBehindChildRing ? 0.42 : 1)
-            .scaleEffect(recedesBehindChildRing ? 0.97 : 1)
-            .position(position)
-            .animation(.easeOut(duration: 0.16), value: recedesBehindChildRing)
-            .transition(
-                .offset(x: transitionDirection * (ring.depth == 0 ? 48 : 62))
-                    .combined(with: .scale(scale: 0.82, anchor: .trailing))
-                    .combined(with: .opacity)
-            )
         }
+    }
+
+    /// A short landscape phone cannot always fit the full touch-target stack
+    /// above the persistent dock. Keep the same pills, but let their vertical
+    /// strip scroll within the space reserved for normal straight-edge content.
+    @ViewBuilder
+    private func straightEdgeScrollableRingView(_ ring: RingLayout) -> some View {
+        let listHeight = straightEdgeScrollableListHeight
+        if listHeight > 0 {
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: 8) {
+                        ForEach(Array(ring.nodes.enumerated()), id: \.element.id) { index, node in
+                            ringItemView(node, in: ring, at: ring.positions[index])
+                                .frame(maxWidth: .infinity)
+                                .frame(minHeight: interactionProfile.minimumTargetSize)
+                                .id(node.id)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .frame(width: activeSliderWidth + 16, height: listHeight)
+                .position(
+                    x: straightEdgeCenterX,
+                    y: Self.straightEdgeScrollableListTop + listHeight * 0.5
+                )
+                .onAppear {
+                    // The parent establishes initial keyboard focus after the
+                    // menu mounts. Yield once so an already-focused lower item
+                    // is visible in this shortened phone layout.
+                    Task { @MainActor in
+                        await Task.yield()
+                        guard let focusedItemID,
+                              ring.nodes.contains(where: { $0.id == focusedItemID }) else { return }
+                        proxy.scrollTo(focusedItemID, anchor: .center)
+                    }
+                }
+                .onChange(of: focusedItemID) { _, focusedID in
+                    guard let focusedID,
+                          ring.nodes.contains(where: { $0.id == focusedID }) else { return }
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
+                        proxy.scrollTo(focusedID, anchor: .center)
+                    }
+                }
+                .transition(.opacity)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func ringItemView(
+        _ node: RadialNavigationNode,
+        in ring: RingLayout,
+        at position: CGPoint
+    ) -> some View {
+        let selectedPathID = presentedPath.indices.contains(ring.depth)
+            ? presentedPath[ring.depth]
+            : nil
+        let isSelectedPathNode = selectedPathID == node.id
+        let recedesBehindChildRing = selectedPathID != nil
+            && !isSelectedPathNode
+            && hoveredRingDepth != ring.depth
+
+        Group {
+            if let slider = node.slider {
+                let width = activeSliderWidth
+                // Inflated hit frame for platform pointer/indirect-input
+                // adapters, extending past the pill's hover scale.
+                let hitFrame = CGRect(
+                    x: position.x - width * 0.5 - 8,
+                    y: position.y - interactionProfile.minimumTargetSize * 0.5 - 8,
+                    width: width + 16,
+                    height: interactionProfile.minimumTargetSize + 16
+                )
+                RadialSliderPill(
+                    node: node,
+                    slider: slider,
+                    fixedWidth: width,
+                    isFocused: focusedItemID == node.id,
+                    sceneAccent: sceneAccent,
+                    interactionProfile: interactionProfile,
+                    allowsVerticalScroll: layout == .straightEdge
+                        && straightEdgeNeedsScrolling(itemCount: ring.nodes.count),
+                    onHoverChanged: { hovering in
+                        updateHoveredRing(ring.depth, hovering: hovering)
+                        // Slider pills never arm the dwell, but their enters
+                        // must still disarm a stale one. The pill reports raw
+                        // hover so even a disabled pill reconciles; availability
+                        // gates only the scroll target below.
+                        handleNodeHover(node, depth: ring.depth, hovering: hovering)
+                        if hovering, slider.isEnabled() {
+                            hoveredSlider = RadialActiveSlider(id: node.id, frame: hitFrame)
+                        } else if hoveredSlider?.id == node.id {
+                            hoveredSlider = nil
+                        }
+                    },
+                    onEditingChanged: onSliderEditingChanged
+                )
+                .focusable()
+                .focused($focusedItemID, equals: node.id)
+            } else if let toggle = node.toggle {
+                RadialTogglePill(
+                    node: node,
+                    toggle: toggle,
+                    fixedWidth: activeSliderWidth,
+                    isFocused: focusedItemID == node.id,
+                    sceneAccent: sceneAccent,
+                    interactionProfile: interactionProfile,
+                    onHoverChanged: { hovering in
+                        updateHoveredRing(ring.depth, hovering: hovering)
+                        handleNodeHover(node, depth: ring.depth, hovering: hovering)
+                    }
+                )
+                .focusable()
+                .focused($focusedItemID, equals: node.id)
+            } else {
+                RadialMenuButton(
+                    item: node,
+                    depth: ring.depth,
+                    fixedWidth: nil,
+                    isFocused: focusedItemID == node.id,
+                    isExpanded: isSelectedPathNode,
+                    retreatDirection: position.x < anchor.x ? -1 : 1,
+                    sceneAccent: sceneAccent,
+                    interactionProfile: interactionProfile,
+                    onActivate: {
+                        // Click (or keyboard activation) on a pure branch
+                        // navigates immediately — hover-only switching would
+                        // strand click-first users. Clicking the expanded parent
+                        // collapses exactly that level as a local Back action.
+                        if node.isBranch {
+                            activateBranch(node, depth: ring.depth)
+                        } else {
+                            node.fallbackAction?()
+                        }
+                    },
+                    onOpenFullControls: node.fullControlsAction,
+                    onHoverChanged: { hovering in
+                        updateHoveredRing(ring.depth, hovering: hovering)
+                        handleNodeHover(node, depth: ring.depth, hovering: hovering)
+                    }
+                )
+                .focused($focusedItemID, equals: node.id)
+            }
+        }
+        // Once this layer opens a child arc, fade its siblings back while
+        // keeping the chosen parent fully lit. The resulting bright chain
+        // makes the active route through a deep hierarchy immediately clear.
+        .opacity(
+            recedesBehindChildRing
+                ? RadialHoverDwellPolicy.recededSiblingOpacity
+                : 1
+        )
+        .saturation(recedesBehindChildRing ? 0.42 : 1)
+        .scaleEffect(recedesBehindChildRing ? 0.97 : 1)
+        .animation(.easeOut(duration: 0.16), value: recedesBehindChildRing)
     }
 
     // MARK: Hover navigation
@@ -1118,7 +1292,7 @@ struct RadialMenu: View {
             nodeID: node.id,
             isBranch: node.isBranch,
             depth: depth,
-            path: path,
+            path: presentedPath,
             suspendsHoverNavigation: suspendsHoverNavigation
         ) {
         case .disarm:
@@ -1148,7 +1322,7 @@ struct RadialMenu: View {
 
     private func commitHoverSelection(_ node: RadialNavigationNode, depth: Int) {
         disarmPendingHover()
-        let newPath = Array(path.prefix(depth)) + [node.id]
+        let newPath = Array(presentedPath.prefix(depth)) + [node.id]
         setNavigationPath(newPath)
     }
 
@@ -1157,13 +1331,14 @@ struct RadialMenu: View {
         let newPath = RadialNavigationPathPolicy.activatingBranch(
             nodeID: node.id,
             depth: depth,
-            in: path
+            in: presentedPath
         )
         focusedItemID = node.id
         setNavigationPath(newPath)
     }
 
     private func setNavigationPath(_ newPath: [String]) {
+        let newPath = projection.reconciledPath(newPath)
         guard path != newPath else { return }
         if reduceMotion {
             path = newPath
@@ -1192,7 +1367,7 @@ struct RadialMenu: View {
             count: count,
             depth: depth,
             anchor: layoutAnchor,
-            availableHeight: size.height,
+            availableHeight: menuContentHeight,
             opensLeft: opensLeft,
             bifurcates: depth == 0 ? bifurcates : false,
             localBranch: depth > 0,
@@ -1205,7 +1380,7 @@ struct RadialMenu: View {
 
     private func layoutPicker(primaryPositions: [CGPoint]) -> some View {
         HStack(spacing: 3) {
-            if !path.isEmpty {
+            if !presentedPath.isEmpty {
                 let isKeyboardFocused = focusedItemID == ChromeFocusID.back
                 Button {
                     retreatOneLevel()
@@ -1320,8 +1495,118 @@ struct RadialMenu: View {
         .help(delta < 0 ? "Tighten radial curvature" : "Open radial curvature")
     }
 
+    /// A scrollable dock makes every pin reachable without adding an arbitrary
+    /// cap or expanding the hierarchy's root ring. It lives outside the
+    /// path-driven layout, so both concentric and straight-edge presentations
+    /// retain it while the user drills into controls.
+    private var quickAccessShelf: some View {
+        HStack(spacing: 8) {
+            Label("Quick Access", systemImage: AppIcons.pinFill)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.white.opacity(0.82))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+
+            Rectangle()
+                .fill(Color.white.opacity(0.14))
+                .frame(width: 1, height: 22)
+
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(quickAccessShortcuts) { shortcut in
+                            quickAccessButton(shortcut)
+                                .id(shortcut.id)
+                        }
+                    }
+                    .padding(.vertical, 1)
+                }
+                .onAppear {
+                    // Keyboard traversal can enter the unbounded dock at any
+                    // pin. Yield once so the scroll view has laid out its IDs
+                    // before revealing the focused shortcut.
+                    Task { @MainActor in
+                        await Task.yield()
+                        guard let focusedItemID,
+                              quickAccessShortcuts.contains(where: { $0.id == focusedItemID }) else { return }
+                        proxy.scrollTo(focusedItemID, anchor: .center)
+                    }
+                }
+                .onChange(of: focusedItemID) { _, focusedID in
+                    guard let focusedID,
+                          quickAccessShortcuts.contains(where: { $0.id == focusedID }) else { return }
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
+                        proxy.scrollTo(focusedID, anchor: .center)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding(4)
+        .frame(height: 56)
+        .background(Color(red: 0.045, green: 0.010, blue: 0.075).opacity(0.97), in: Capsule())
+        .overlay(
+            Capsule()
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [sceneAccent.opacity(0.42), Color.white.opacity(0.16)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    ),
+                    lineWidth: 0.9
+                )
+        )
+        .shadow(color: Color.black.opacity(0.34), radius: 10, y: 3)
+        .onHover { hovering in
+            // A dock sits above older rings; entering it must cancel any
+            // branch dwell that was armed before the pointer reached it.
+            if hovering { disarmPendingHover() }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Quick Access shortcuts")
+    }
+
+    private func quickAccessButton(_ shortcut: RadialQuickAccessShortcut) -> some View {
+        let isFocused = focusedItemID == shortcut.id
+        let isEmphasized = shortcut.isSelected || isFocused
+        let textWeight: Font.Weight = isEmphasized ? .bold : .semibold
+        let foreground = isEmphasized ? Color.white : Color.white.opacity(0.76)
+        let fill = isEmphasized ? sceneAccent.opacity(0.36) : Color.white.opacity(0.08)
+        let stroke = isFocused ? sceneAccent.opacity(0.92) : Color.white.opacity(0.11)
+        let strokeWidth: CGFloat = isFocused ? 1.2 : 0.7
+
+        return Button {
+            activateQuickAccessShortcut(shortcut)
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: shortcut.systemImage)
+                Text(shortcut.title)
+            }
+                .font(.caption2.weight(textWeight))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 9)
+                .frame(minHeight: interactionProfile.minimumTargetSize)
+                .foregroundStyle(foreground)
+                .background(fill, in: Capsule())
+                .overlay(Capsule().strokeBorder(stroke, lineWidth: strokeWidth))
+        }
+        .buttonStyle(.plain)
+        .focused($focusedItemID, equals: shortcut.id)
+        .help("Open \(shortcut.title) controls")
+        .accessibilityLabel(shortcut.title)
+        .accessibilityHint("Opens this pinned section's controls.")
+        .accessibilityAddTraits(shortcut.isSelected ? .isSelected : [])
+    }
+
+    private func activateQuickAccessShortcut(_ shortcut: RadialQuickAccessShortcut) {
+        disarmPendingHover()
+        onActivateQuickAccess(shortcut.route)
+    }
+
     private func radialGuide(rings: [RingLayout]) -> some View {
-        Canvas { context, _ in
+        let presentedPath = self.presentedPath
+        return Canvas { context, _ in
             for ring in rings {
                 let radius: CGFloat
                 let baseAngles: [CGFloat]
@@ -1369,8 +1654,10 @@ struct RadialMenu: View {
             // A single luminous route makes the selected ancestry legible at
             // a glance. It is static Canvas geometry—no blur and no timeline.
             let selectedPoints = rings.compactMap { ring -> CGPoint? in
-                guard path.indices.contains(ring.depth),
-                      let index = ring.nodes.firstIndex(where: { $0.id == path[ring.depth] }),
+                guard presentedPath.indices.contains(ring.depth),
+                      let index = ring.nodes.firstIndex(where: {
+                          $0.id == presentedPath[ring.depth]
+                      }),
                       ring.positions.indices.contains(index) else { return nil }
                 return ring.positions[index]
             }
@@ -1454,15 +1741,18 @@ struct RadialMenu: View {
         // evaluation while such a scene is loaded.
         let targetsByID = Dictionary(flattened.map { ($0.id, $0) }) { first, _ in first }
         let nodeTargets = rings.flatMap(\.nodes).compactMap { targetsByID[$0.id] }
+        let quickAccessTargets = quickAccessShortcuts.map {
+            NavigationHierarchy.KeyboardTarget(id: $0.id, ancestorPath: [])
+        }
 
         let chromeTargets = chromeFocusIDs.map {
             NavigationHierarchy.KeyboardTarget(id: $0, ancestorPath: [])
         }
-        return nodeTargets + chromeTargets
+        return nodeTargets + quickAccessTargets + chromeTargets
     }
 
     private var chromeFocusIDs: [String] {
-        (path.isEmpty ? [] : [ChromeFocusID.back]) + [
+        (presentedPath.isEmpty ? [] : [ChromeFocusID.back]) + [
             ChromeFocusID.windowLayout,
             ChromeFocusID.radialLayout,
             ChromeFocusID.panelLayout,
@@ -1504,7 +1794,9 @@ struct RadialMenu: View {
             moveFocus(through: focusOrder, backward: false)
             return .handled
         case .leftArrow:
-            if let slider = focusedNode?.slider {
+            if focusedQuickAccessShortcut != nil {
+                moveFocus(through: focusOrder, backward: true)
+            } else if let slider = focusedNode?.slider {
                 slider.step(by: -1)
             } else if let toggle = focusedNode?.toggle {
                 toggle.set(false)
@@ -1513,6 +1805,10 @@ struct RadialMenu: View {
             }
             return .handled
         case .rightArrow:
+            if focusedQuickAccessShortcut != nil {
+                moveFocus(through: focusOrder, backward: false)
+                return .handled
+            }
             if let slider = focusedNode?.slider {
                 slider.step(by: 1)
                 return .handled
@@ -1530,6 +1826,11 @@ struct RadialMenu: View {
     private var focusedNode: RadialNavigationNode? {
         guard let focusedItemID else { return nil }
         return projection.node(withID: focusedItemID)
+    }
+
+    private var focusedQuickAccessShortcut: RadialQuickAccessShortcut? {
+        guard let focusedItemID else { return nil }
+        return quickAccessShortcuts.first(where: { $0.id == focusedItemID })
     }
 
     private func activateFocusedItem() -> KeyPress.Result {
@@ -1556,6 +1857,11 @@ struct RadialMenu: View {
             return .handled
         default:
             break
+        }
+
+        if let shortcut = focusedQuickAccessShortcut {
+            activateQuickAccessShortcut(shortcut)
+            return .handled
         }
 
         guard let node = projection.node(withID: focusedItemID) else { return .ignored }
@@ -1595,7 +1901,7 @@ struct RadialMenu: View {
     }
 
     private func retreatOrDismiss() {
-        if RadialNavigationPathPolicy.retreating(from: path) != nil {
+        if RadialNavigationPathPolicy.retreating(from: presentedPath) != nil {
             retreatOneLevel()
             return
         }
@@ -1604,8 +1910,9 @@ struct RadialMenu: View {
     }
 
     private func retreatOneLevel() {
-        guard let newPath = RadialNavigationPathPolicy.retreating(from: path),
-              let collapsedParentID = path.last else { return }
+        let presentedPath = self.presentedPath
+        guard let newPath = RadialNavigationPathPolicy.retreating(from: presentedPath),
+              let collapsedParentID = presentedPath.last else { return }
         disarmPendingHover()
         setNavigationPath(newPath)
         focusedItemID = collapsedParentID
@@ -1992,6 +2299,10 @@ private struct RadialSliderPill: View {
     let isFocused: Bool
     let sceneAccent: Color
     let interactionProfile: RadialInteractionProfile
+    /// A slider in the short-phone fallback lives inside a vertical scroll
+    /// strip. Horizontal drags still adjust it, while vertical swipes must
+    /// remain available to reveal the controls below.
+    let allowsVerticalScroll: Bool
     let onHoverChanged: (Bool) -> Void
     let onEditingChanged: (Bool) -> Void
 
@@ -2088,10 +2399,13 @@ private struct RadialSliderPill: View {
         formattedValue: String,
         isEnabled: Bool
     ) -> AnyView {
-        AnyView(
-            content
-                .contentShape(Capsule().inset(by: -2))
-                .gesture(dragGesture, including: isEnabled ? .all : .none)
+        let interactiveContent = applyingDragGesture(
+            to: content.contentShape(Capsule().inset(by: -2)),
+            isEnabled: isEnabled
+        )
+
+        return AnyView(
+            interactiveContent
                 .onHover(perform: updateHover)
                 .onDisappear(perform: resetInteractionState)
                 .onChange(of: isEnabled) { _, enabled in
@@ -2112,10 +2426,33 @@ private struct RadialSliderPill: View {
         )
     }
 
+    private func applyingDragGesture<Content: View>(
+        to content: Content,
+        isEnabled: Bool
+    ) -> AnyView {
+        if allowsVerticalScroll {
+            return AnyView(
+                content.simultaneousGesture(
+                    dragGesture,
+                    including: isEnabled ? .all : .none
+                )
+            )
+        }
+
+        return AnyView(content.gesture(dragGesture, including: isEnabled ? .all : .none))
+    }
+
     private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .named(RadialMenu.coordinateSpaceName))
+        DragGesture(
+            minimumDistance: allowsVerticalScroll ? 6 : 0,
+            coordinateSpace: .named(RadialMenu.coordinateSpaceName)
+        )
             .onChanged { gesture in
                 guard slider.isEnabled() else { return }
+                if allowsVerticalScroll,
+                   abs(gesture.translation.height) >= abs(gesture.translation.width) {
+                    return
+                }
                 if !isDragging {
                     isDragging = true
                     dragStartValue = slider.read()
@@ -2128,6 +2465,7 @@ private struct RadialSliderPill: View {
                 ))
             }
             .onEnded { _ in
+                guard isDragging else { return }
                 isDragging = false
                 onEditingChanged(false)
             }

@@ -16,8 +16,9 @@
 //  arm via the marker comments `// __CUSTOM_DISPATCH_DIST__` and
 //  `// __CUSTOM_DISPATCH_ORBIT__`.
 //
-//  Compiled libraries are cached in-memory by `EmbeddedFormula.sourceHash`, so
-//  switching back to a previously-loaded `.threshfx` is free.
+//  Compiled libraries are kept in a small in-memory LRU by combined effect-set
+//  hash, so switching among recently loaded `.threshfx` files is free without
+//  retaining every live-editor generation for the life of the process.
 //
 
 import Foundation
@@ -50,6 +51,7 @@ enum CustomShaderCompilerError: Error, CustomStringConvertible {
 actor CustomShaderCompiler {
 
     private static let shaderFormulaIncludeMarker = "#include \"../Formulas/FractalFormulas.h\""
+    private static let maximumCachedLibraryCount = 8
 
     private static let shaderSections: (preamble: String, body: String) = {
         let source = EmbeddedMetalSources.shadersMetal
@@ -111,6 +113,9 @@ actor CustomShaderCompiler {
 
     private let device: MTLDevice
     private var libraryCache: [String: MTLLibrary] = [:]
+    /// Least-recently used key first. The cache is deliberately tiny, so an
+    /// array keeps the policy straightforward without meaningful overhead.
+    private var libraryCacheRecency: [String] = []
 
     init(device: MTLDevice) {
         self.device = device
@@ -152,6 +157,7 @@ actor CustomShaderCompiler {
                  warpStackSource: String? = nil, warpStackSignature: String = "s0") async throws -> MTLLibrary {
         let key = Self.combinedHash(fractal: fractal, spaceWarp: spaceWarp, warpStackSignature: warpStackSignature)
         if let cached = libraryCache[key] {
+            markLibraryRecentlyUsed(key)
             return cached
         }
         let source = try Self.synthesizeSource(fractal: fractal, spaceWarp: spaceWarp, warpStackSource: warpStackSource)
@@ -180,7 +186,7 @@ actor CustomShaderCompiler {
                     }
                 }
             }
-            libraryCache[key] = lib
+            cacheLibrary(lib, for: key)
             return lib
         } catch let error as CustomShaderCompilerError {
             throw error
@@ -198,14 +204,27 @@ actor CustomShaderCompiler {
     /// Metal compiler.
     func evictAll() {
         libraryCache.removeAll()
+        libraryCacheRecency.removeAll()
     }
 
-    /// Drop one cached library by its `combinedHash` key. The live formula
-    /// editor uses this to release superseded draft libraries — every
-    /// keystroke-generation compiles under a fresh source hash and would
-    /// otherwise accumulate in the cache for the whole session.
+    /// Drop one cached library by its `combinedHash` key.
     func evict(combinedHash key: String) {
         libraryCache.removeValue(forKey: key)
+        libraryCacheRecency.removeAll { $0 == key }
+    }
+
+    private func cacheLibrary(_ library: MTLLibrary, for key: String) {
+        libraryCache[key] = library
+        markLibraryRecentlyUsed(key)
+        while libraryCacheRecency.count > Self.maximumCachedLibraryCount {
+            let evictedKey = libraryCacheRecency.removeFirst()
+            libraryCache.removeValue(forKey: evictedKey)
+        }
+    }
+
+    private func markLibraryRecentlyUsed(_ key: String) {
+        libraryCacheRecency.removeAll { $0 == key }
+        libraryCacheRecency.append(key)
     }
 
     // MARK: - Source synthesis

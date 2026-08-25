@@ -272,7 +272,7 @@ enum MacBenchmarkHarness {
         // Fixed non-type constants so only the DE differs run-to-run. Iteration
         // count drives loop-unroll register cost, so probe a low and a high count.
         //
-        // deTailBaked controls FC 3/16/17 (hasSpaceWarp/hasEnvScrunch/hasHandField):
+        // deTailBaked controls FC 3/16/18 (hasSpaceWarp/hasEnvScrunch/hasHandField):
         //   nil   → left UNDEFINED (not set at all) — this is what
         //           `buildComputePipeline` produced for every compute pipeline
         //           BEFORE the selectComputePipeline DE-tail plumbing: the shader's
@@ -289,24 +289,24 @@ enum MacBenchmarkHarness {
             let c = MTLFunctionConstantValues()
             func setI(_ x: Int32, _ idx: Int) { var t = x; c.setConstantValue(&t, type: .int, index: idx) }
             func setB(_ x: Bool, _ idx: Int) { var t = x; c.setConstantValue(&t, type: .bool, index: idx) }
-            setI(iterations, 0)   // FC_FRACTAL_ITERATIONS
-            setI(max(iterations - 2, 2), 1) // FC_SHADOW_ITERATIONS
-            setI(1, 4)            // FC_QUALITY_MODE
-            setI(128, 6)          // FC_MAX_RAY_STEPS
-            setI(type, 7)         // FC_FRACTAL_TYPE
-            setB(false, 8)        // FC_NEON_MODE_ENABLED
-            setI(iterations, 9)   // FC_COLOR_ITERATIONS
-            setB(true, 11)        // FC_SHADOWS_ENABLED
-            setB(false, 2)        // FC_SAFETY_BUBBLE_ENABLED
-            setI(8, 12)           // FC_MANDELBULB_POWER
+            setI(iterations, FunctionConstantIndex.fractalIterations.rawValue)
+            setI(max(iterations - 2, 2), FunctionConstantIndex.shadowIterations.rawValue)
+            setI(1, FunctionConstantIndex.qualityMode.rawValue)
+            setI(128, FunctionConstantIndex.maxRaySteps.rawValue)
+            setI(type, FunctionConstantIndex.fractalType.rawValue)
+            setB(false, FunctionConstantIndex.neonModeEnabled.rawValue)
+            setI(iterations, FunctionConstantIndex.colorIterations.rawValue)
+            setB(true, FunctionConstantIndex.shadowsEnabled.rawValue)
+            setB(false, FunctionConstantIndex.safetyBubbleEnabled.rawValue)
+            setI(8, FunctionConstantIndex.mandelbulbPower.rawValue)
             if let deTailBaked {
-                setB(deTailBaked, 3)   // FC_HAS_SPACEWARP
-                setB(deTailBaked, 16)  // FC_HAS_ENVSCRUNCH
-                setB(deTailBaked, 17)  // FC_HAS_HANDFIELD
+                setB(deTailBaked, FunctionConstantIndex.hasSpaceWarp.rawValue)
+                setB(deTailBaked, FunctionConstantIndex.hasEnvScrunch.rawValue)
+                setB(deTailBaked, FunctionConstantIndex.hasHandField.rawValue)
             }
-            setB(false, 13)       // FC_WARM_START
-            setB(false, 15)       // FC_COARSE_WARM_START
-            setB(false, 14)       // FC_COHERENT_PACKET
+            setB(false, FunctionConstantIndex.warmStart.rawValue)
+            setB(false, FunctionConstantIndex.coarseWarmStart.rawValue)
+            setB(false, FunctionConstantIndex.coherentPacketEnabled.rawValue)
             return c
         }
 

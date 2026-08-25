@@ -2179,9 +2179,9 @@ final class ViewportRenderer {
         // fallback from its very first (generic) pipeline, not only after an
         // asynchronous scene specialization arrives.
         var hasEnvScrunch = false
-        constants.setConstantValue(&hasEnvScrunch, type: .bool, index: 16)
+        constants.setConstantValue(&hasEnvScrunch, type: .bool, index: FunctionConstantIndex.hasEnvScrunch.rawValue)
         var hasHandField = false
-        constants.setConstantValue(&hasHandField, type: .bool, index: 18)
+        constants.setConstantValue(&hasHandField, type: .bool, index: FunctionConstantIndex.hasHandField.rawValue)
         let fragmentFunction = try library.makeFunction(name: "fragmentShaderMono", constantValues: constants)
 
         let descriptor = MTLRenderPipelineDescriptor()
@@ -2340,7 +2340,6 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
     /// SwiftUI state publication and layout instead of letting 120 Hz command
     /// encoding monopolize the UI thread.
     let prioritizesControlUpdates: Bool
-    let onInteraction: () -> Void
     let onRadialMenuRequest: (CGPoint) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -2350,26 +2349,28 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
     func makeUIView(context: Context) -> MTKView {
         let device = MTLCreateSystemDefaultDevice()
         let view = TouchVisualizingMTKView(frame: .zero, device: device)
+        let renderConfiguration = IOSViewportRenderConfiguration.rendering(
+            for: UIDevice.current.userInterfaceIdiom == .phone ? .iPhone : .iPad
+        )
         // Extended-range surface — same rationale as the macOS view: float
         // pixels + extended linear sRGB let graded highlights above SDR white
         // reach the display's EDR headroom (XDR iPhone/iPad panels). The
         // colorspace is set on the CAMetalLayer in configure() —
         // MTKView.colorspace is macOS-only.
-        view.colorPixelFormat = .rgba16Float
-        view.depthStencilPixelFormat = .depth32Float
-        view.clearColor = MTLClearColor(red: 0.005, green: 0.006, blue: 0.008, alpha: 1.0)
-        view.clearDepth = 1.0
+        view.colorPixelFormat = renderConfiguration.colorPixelFormat
+        view.depthStencilPixelFormat = renderConfiguration.depthStencilPixelFormat
+        view.clearColor = renderConfiguration.clearColor
+        view.clearDepth = renderConfiguration.clearDepth
         updatePreferredFrameRate(of: view)
         view.enableSetNeedsDisplay = false
         view.isPaused = false
-        view.framebufferOnly = true
-        view.autoResizeDrawable = true
+        view.framebufferOnly = renderConfiguration.framebufferOnly
+        view.autoResizeDrawable = renderConfiguration.automaticallyResizesDrawable
         view.isMultipleTouchEnabled = true
         view.inputSink = context.coordinator.inputController
         view.shouldAcceptViewportInput = { [weak appModel] in
             appModel?.inputOwnershipStore.canConsume(.viewport) ?? false
         }
-        view.onInteraction = onInteraction
         view.onRadialMenuRequest = onRadialMenuRequest
         view.delegate = context.coordinator
         context.coordinator.attachGestures(to: view)
@@ -2385,7 +2386,6 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         view.shouldAcceptViewportInput = { [weak appModel] in
             appModel?.inputOwnershipStore.canConsume(.viewport) ?? false
         }
-        view.onInteraction = onInteraction
         view.onRadialMenuRequest = onRadialMenuRequest
     }
 
@@ -2394,7 +2394,6 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         if let view = uiView as? TouchVisualizingMTKView {
             view.clearTouchVisualizations()
             view.inputSink = nil
-            view.onInteraction = nil
             view.onRadialMenuRequest = nil
         }
         coordinator.tearDown()
@@ -2419,8 +2418,15 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         private var orbitOwnsInput = false
         private var panOwnsInput = false
         private var pinchOwnsInput = false
+        private var scenePanOwnsInput = false
+        private var didTriggerSceneStepForCurrentPan = false
+        private var cameraRecognizersSuspendedForScenePan = false
+        private weak var oneFingerOrbit: UIPanGestureRecognizer?
         private weak var twoFingerPan: UIPanGestureRecognizer?
+        private weak var threeFingerScenePan: UIPanGestureRecognizer?
         private weak var pinch: UIPinchGestureRecognizer?
+        private weak var leftEdgeMenuPan: UIScreenEdgePanGestureRecognizer?
+        private weak var rightEdgeMenuPan: UIScreenEdgePanGestureRecognizer?
 
         init(appModel: AppModel) {
             self.appModel = appModel
@@ -2483,6 +2489,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             orbit.cancelsTouchesInView = false
             orbit.delaysTouchesBegan = false
             orbit.delaysTouchesEnded = false
+            oneFingerOrbit = orbit
 
             let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
             pan.minimumNumberOfTouches = 2
@@ -2493,6 +2500,21 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             pan.delaysTouchesEnded = false
             twoFingerPan = pan
 
+            // Exact three-finger swipes browse scenes without competing with
+            // the one-finger orbit or two-finger camera gestures.
+            let scenePan = UIPanGestureRecognizer(
+                target: self,
+                action: #selector(handleScenePan(_:))
+            )
+            scenePan.minimumNumberOfTouches = 3
+            scenePan.maximumNumberOfTouches = 3
+            scenePan.delegate = self
+            scenePan.cancelsTouchesInView = false
+            scenePan.delaysTouchesBegan = false
+            scenePan.delaysTouchesEnded = false
+            scenePan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+            threeFingerScenePan = scenePan
+
             let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
             pinchGesture.delegate = self
             pinchGesture.cancelsTouchesInView = false
@@ -2500,21 +2522,47 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             pinchGesture.delaysTouchesEnded = false
             pinch = pinchGesture
 
-            let doubleTap = LowMovementTapGestureRecognizer(
-                maximumMovement: RadialActivationPolicy.maximumMovement(for: .touch),
-                target: self,
-                action: #selector(handleDoubleTap(_:))
-            )
-            doubleTap.numberOfTapsRequired = 2
-            doubleTap.cancelsTouchesInView = false
-            doubleTap.delaysTouchesBegan = false
-            doubleTap.delaysTouchesEnded = false
-            doubleTap.delegate = self
-
             view.addGestureRecognizer(orbit)
             view.addGestureRecognizer(pan)
+            view.addGestureRecognizer(scenePan)
             view.addGestureRecognizer(pinchGesture)
-            view.addGestureRecognizer(doubleTap)
+
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                attachPhoneEdgeMenuGesture(.left, to: view)
+                attachPhoneEdgeMenuGesture(.right, to: view)
+            } else {
+                let doubleTap = LowMovementTapGestureRecognizer(
+                    maximumMovement: RadialActivationPolicy.maximumMovement(for: .touch),
+                    target: self,
+                    action: #selector(handleDoubleTap(_:))
+                )
+                doubleTap.numberOfTapsRequired = 2
+                doubleTap.cancelsTouchesInView = false
+                doubleTap.delaysTouchesBegan = false
+                doubleTap.delaysTouchesEnded = false
+                doubleTap.delegate = self
+                view.addGestureRecognizer(doubleTap)
+            }
+        }
+
+        private func attachPhoneEdgeMenuGesture(_ edge: UIRectEdge, to view: UIView) {
+            let gesture = UIScreenEdgePanGestureRecognizer(
+                target: self,
+                action: #selector(handlePhoneEdgeMenuPan(_:))
+            )
+            gesture.edges = edge
+            gesture.delegate = self
+            gesture.cancelsTouchesInView = false
+            if edge == .left {
+                leftEdgeMenuPan = gesture
+            } else {
+                rightEdgeMenuPan = gesture
+            }
+            // An edge swipe is navigation, never the beginning of an orbit.
+            // Delay the one-finger camera recognizer until this recognizer has
+            // either claimed the edge or failed away from it.
+            oneFingerOrbit?.require(toFail: gesture)
+            view.addGestureRecognizer(gesture)
         }
 
         func tearDown() {
@@ -2533,6 +2581,11 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                 pinchOwnsInput = false
                 appModel.inputOwnershipStore.release(.viewport)
             }
+            if scenePanOwnsInput {
+                scenePanOwnsInput = false
+                appModel.inputOwnershipStore.release(.viewport)
+            }
+            cameraRecognizersSuspendedForScenePan = false
             inputController.setFocus(false)
             renderer = nil
             Task { @MainActor [appModel] in
@@ -2565,7 +2618,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                 lastOrbitTranslation = .zero
                 inputController.setFocus(true)
             case .changed:
-                guard orbitOwnsInput else { return }
+                guard orbitOwnsInput, !scenePanOwnsInput else { return }
                 let delta = SIMD2<Float>(Float(translation.x - lastOrbitTranslation.x),
                                          Float(translation.y - lastOrbitTranslation.y))
                 lastOrbitTranslation = translation
@@ -2591,7 +2644,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                 lastPanTranslation = .zero
                 inputController.setFocus(true)
             case .changed:
-                guard panOwnsInput else { return }
+                guard panOwnsInput, !scenePanOwnsInput else { return }
                 let delta = SIMD2<Float>(Float(translation.x - lastPanTranslation.x),
                                          Float(translation.y - lastPanTranslation.y))
                 lastPanTranslation = translation
@@ -2610,12 +2663,20 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
             switch gesture.state {
             case .began:
-                guard !pinchOwnsInput,
+                guard gesture.numberOfTouches == 2,
+                      !pinchOwnsInput,
                       appModel.inputOwnershipStore.claim(.viewport) else { return }
                 pinchOwnsInput = true
                 lastPinchScale = gesture.scale
                 inputController.setFocus(true)
             case .changed:
+                // UIPinchGestureRecognizer accepts more than two fingers. Once
+                // a third arrives, hand ownership to scene navigation instead
+                // of also changing the camera.
+                guard gesture.numberOfTouches == 2, !scenePanOwnsInput else {
+                    finishPinchInteraction()
+                    return
+                }
                 guard pinchOwnsInput else { return }
                 // Mirror the macOS `magnify` convention: pinch-out (scale > 1)
                 // feeds a negative zoom delta, which the renderer maps to a
@@ -2626,12 +2687,88 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                     inputController.addZoom(delta: -delta * 18.0)
                 }
             default:
-                lastPinchScale = 1.0
-                if pinchOwnsInput {
-                    pinchOwnsInput = false
-                    appModel.inputOwnershipStore.release(.viewport)
-                }
+                finishPinchInteraction()
             }
+        }
+
+        private func finishPinchInteraction() {
+            lastPinchScale = 1.0
+            if pinchOwnsInput {
+                pinchOwnsInput = false
+                appModel.inputOwnershipStore.release(.viewport)
+            }
+        }
+
+        @objc private func handleScenePan(_ gesture: UIPanGestureRecognizer) {
+            switch gesture.state {
+            case .began:
+                guard !scenePanOwnsInput,
+                      appModel.inputOwnershipStore.claim(.viewport) else { return }
+                scenePanOwnsInput = true
+                didTriggerSceneStepForCurrentPan = false
+                inputController.clearCameraDeltas()
+                suspendCameraRecognizersForScenePan()
+            case .changed:
+                triggerSceneStepIfNeeded(from: gesture)
+            case .ended:
+                triggerSceneStepIfNeeded(from: gesture)
+                finishScenePanInteraction()
+            default:
+                finishScenePanInteraction()
+            }
+        }
+
+        private func triggerSceneStepIfNeeded(from gesture: UIPanGestureRecognizer) {
+            guard scenePanOwnsInput, !didTriggerSceneStepForCurrentPan else { return }
+            let translation = gesture.translation(in: gesture.view)
+            let step = SceneSwipeGesturePolicy.sceneStep(
+                for: SIMD2(Float(translation.x), Float(translation.y))
+            )
+            guard step != 0 else { return }
+
+            didTriggerSceneStepForCurrentPan = true
+            inputController.requestSceneStep(step)
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+
+        private func finishScenePanInteraction() {
+            didTriggerSceneStepForCurrentPan = false
+            if scenePanOwnsInput {
+                scenePanOwnsInput = false
+                appModel.inputOwnershipStore.release(.viewport)
+            }
+            resumeCameraRecognizersAfterScenePan()
+        }
+
+        private func suspendCameraRecognizersForScenePan() {
+            guard !cameraRecognizersSuspendedForScenePan else { return }
+            cameraRecognizersSuspendedForScenePan = true
+
+            oneFingerOrbit?.isEnabled = false
+            twoFingerPan?.isEnabled = false
+            pinch?.isEnabled = false
+
+            // Disabling a recognizer normally produces a cancellation callback;
+            // balance defensively in case teardown or routing skips one.
+            lastOrbitTranslation = .zero
+            if orbitOwnsInput {
+                orbitOwnsInput = false
+                appModel.inputOwnershipStore.release(.viewport)
+            }
+            lastPanTranslation = .zero
+            if panOwnsInput {
+                panOwnsInput = false
+                appModel.inputOwnershipStore.release(.viewport)
+            }
+            finishPinchInteraction()
+        }
+
+        private func resumeCameraRecognizersAfterScenePan() {
+            guard cameraRecognizersSuspendedForScenePan else { return }
+            cameraRecognizersSuspendedForScenePan = false
+            oneFingerOrbit?.isEnabled = true
+            twoFingerPan?.isEnabled = true
+            pinch?.isEnabled = true
         }
 
         @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
@@ -2641,19 +2778,50 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             view.onRadialMenuRequest?(gesture.location(in: view))
         }
 
-        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            appModel.inputOwnershipStore.canConsume(.viewport)
+        @objc private func handlePhoneEdgeMenuPan(_ gesture: UIScreenEdgePanGestureRecognizer) {
+            guard gesture.state == .ended,
+                  appModel.inputOwnershipStore.canConsume(.viewport),
+                  let view = gesture.view as? TouchVisualizingMTKView else { return }
+            let location = gesture.location(in: view)
+            let edgeAnchor = CGPoint(
+                x: gesture.edges.contains(.left) ? 0 : view.bounds.width,
+                y: location.y
+            )
+            view.onRadialMenuRequest?(edgeAnchor)
         }
 
-        // Allow the two-finger pan and pinch to run together (natural combined
-        // pan + zoom); keep the one-finger orbit exclusive.
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard appModel.inputOwnershipStore.canConsume(.viewport) else { return false }
+            if gestureRecognizer === threeFingerScenePan,
+               UIAccessibility.isVoiceOverRunning {
+                return false
+            }
+            if gestureRecognizer === pinch {
+                return gestureRecognizer.numberOfTouches == 2
+            }
+            return true
+        }
+
+        // Allow natural two-finger pan + zoom. Camera recognizers may be active
+        // while a third finger lands, so allow scene-pan recognition long enough
+        // to suspend them cleanly once it takes ownership.
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
             let pair: Set<ObjectIdentifier> = [ObjectIdentifier(gestureRecognizer), ObjectIdentifier(other)]
-            var allowed: Set<ObjectIdentifier> = []
-            if let twoFingerPan { allowed.insert(ObjectIdentifier(twoFingerPan)) }
-            if let pinch { allowed.insert(ObjectIdentifier(pinch)) }
-            return pair.isSubset(of: allowed)
+            if let twoFingerPan, let pinch,
+               pair == [ObjectIdentifier(twoFingerPan), ObjectIdentifier(pinch)] {
+                return true
+            }
+            if let threeFingerScenePan {
+                let scenePanID = ObjectIdentifier(threeFingerScenePan)
+                let cameraRecognizers: [UIGestureRecognizer?] = [oneFingerOrbit, twoFingerPan, pinch]
+                for cameraRecognizer in cameraRecognizers.compactMap({ $0 }) {
+                    if pair == [scenePanID, ObjectIdentifier(cameraRecognizer)] {
+                        return true
+                    }
+                }
+            }
+            return false
         }
     }
 }

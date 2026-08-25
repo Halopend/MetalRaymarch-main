@@ -49,7 +49,8 @@ struct FormulaEditorWindowView: View {
             .allowsHitTesting(!isPreviewingRender)
 
             renderPreviewControl
-                .padding(20)
+                .padding(.trailing, 20)
+                .padding(.bottom, UIDevice.current.userInterfaceIdiom == .phone ? 0 : 20)
         }
         .onDisappear { isPreviewingRender = false }
         #else

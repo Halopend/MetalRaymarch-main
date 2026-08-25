@@ -284,6 +284,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				App/Info.plist,
+				App/LaunchScreen.storyboard,
 				App/ThresholdiOSInfo.plist,
 				App/ThresholdMacInfo.plist,
 			);
@@ -293,6 +294,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				App/Info.plist,
+				App/LaunchScreen.storyboard,
 				App/ThresholdiOSInfo.plist,
 				App/ThresholdMacInfo.plist,
 				Audio/AppleMusicManager.swift,

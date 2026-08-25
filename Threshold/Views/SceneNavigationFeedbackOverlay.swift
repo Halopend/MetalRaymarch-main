@@ -2,7 +2,7 @@
 //  SceneNavigationFeedbackOverlay.swift
 //  Threshold
 //
-//  Transient desktop scene information shown after a successful manual switch.
+//  Transient scene information shown after a successful manual switch.
 //
 
 import SwiftUI

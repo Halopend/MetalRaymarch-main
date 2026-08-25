@@ -87,8 +87,7 @@ struct FormulaParamsEditor: View {
                         VStack(spacing: 6) {
                             TripletRow(cache: cache, triplet: triplet)
 
-                            DisclosureGroup("Parameters") {
-                                VStack(spacing: 6) {
+                            VStack(spacing: 6) {
                                 ForEach(group.nodes) { node in
                                     ParameterNodeRow(cache: cache, node: node)
                                         .id(node.id)
@@ -98,7 +97,6 @@ struct FormulaParamsEditor: View {
                                 }
                             }
                             .padding(.top, 2)
-                            }
                         }
                         .padding(8)
                         .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.06)))

@@ -95,7 +95,7 @@ enum SceneQualityTarget: String, Codable, CaseIterable, Sendable {
     /// Mac / iOS MetalFX input-scale target (`resolutionScale`, 0.33…1.0).
     var macResolutionScale: Float {
         switch self {
-        case .standard: return 0.5    // platform default
+        case .standard: return QualityConfig.defaultResolutionScale
         case .high:     return 1.0    // native input
         case .ultra:    return 1.0    // Mac tops out at native
         }
@@ -128,6 +128,10 @@ enum SceneQualityTarget: String, Codable, CaseIterable, Sendable {
 }
 
 struct QualityConfig: Codable, Equatable, Sendable {
+    /// Mac/iOS MetalFX input scale used on a fresh install. Matches the
+    /// user-facing Low detail-budget preset.
+    static let defaultResolutionScale: Float = 0.33
+
     /// Default cone-marching strength for the opening scene on a fresh install.
     /// Kept in one place so RenderSettings, Codable migration, and UI reset agree.
     static let defaultConeMarchStrength: Float = 0.84
@@ -191,7 +195,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
     var baseMaxRaySteps: Int = 64
 
     // Resolution / tiling
-    var resolutionScale: Float = 0.5   // 0.33 - 1.0 (MetalFX spatial upscale input scale)
+    var resolutionScale: Float = Self.defaultResolutionScale // 0.33 - 1.0 (MetalFX spatial upscale input scale)
     var renderQuality: Float = Self.visionDefaultRenderQuality // visionMinRenderQuality...visionMaxRenderQuality (visionOS compositor drawable scale). Default favors framerate; the floor is for probing max framerate / the adaptive governor.
     var tileSize: Int = 0              // 0=disabled (fragment), 8=adaptive hierarchical compute
 
@@ -385,6 +389,8 @@ struct QualityConfig: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         baseFractalIterations = try c.decodeIfPresent(Int.self,   forKey: .baseFractalIterations) ?? 9
         baseMaxRaySteps       = try c.decodeIfPresent(Int.self,   forKey: .baseMaxRaySteps)       ?? 64
+        // Keep the historical native fallback for existing blobs that predate
+        // this key. Fresh installs use `defaultResolutionScale` above.
         resolutionScale       = try c.decodeIfPresent(Float.self, forKey: .resolutionScale)       ?? 1.0
         renderQuality         = Self.clampedVisionRenderQuality(
             try c.decodeIfPresent(Float.self, forKey: .renderQuality) ?? Self.visionDefaultRenderQuality

@@ -245,13 +245,13 @@ enum ControlCatalog {
         range: 4.0...16.0,
         defaultValue: 8.0)
 
-    /// Setter clamped 0.33…1 but the slider floored at 0.34 (dead sliver).
+    /// MetalFX input-scale span. The Low preset maps to the exact 0.33 floor.
     static let resolutionScale = ControlSpec(
         id: "quality.resolutionScale",
         name: "Resolution Scale",
         icon: "rectangle.compress.vertical",
         range: 0.33...1.0,
-        defaultValue: 0.5)
+        defaultValue: QualityConfig.defaultResolutionScale)
 
     /// Gradient mapping controls are scene-authored, static scalars. Repeat
     /// previously exposed only half of the renderer setter's supported range.

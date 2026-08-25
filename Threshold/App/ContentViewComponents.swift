@@ -502,9 +502,14 @@ struct FPSIndicatorView: View {
                 .foregroundStyle(appModel.isUsingSpecializedPipeline ? .green : .orange)
             if showFPS {
                 HStack(spacing: 5) {
-                    Circle().fill(fpsColor).frame(width: 8, height: 8)
-                    Text("\(fps, specifier: "%.0f") FPS")
-                        .font(.caption.bold()).monospacedDigit()
+                    Circle().fill(fpsColor).frame(width: 10, height: 10)
+                    Text("\(fps, specifier: "%.0f")")
+                        .font(.system(size: 16, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(fpsColor)
+                    Text("FPS")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
                 }
             }
             Label(appModel.renderMetrics.upscalerPath,
@@ -530,12 +535,13 @@ struct FPSIndicatorView: View {
             }
         }
         .padding(.horizontal, DS.Spacing.sm)
-        .padding(.vertical, DS.Spacing.xxs)
+        .padding(.vertical, DS.Spacing.xs)
         // Solid capsule rather than `.dsGlass` (which blurs its backdrop): this
         // indicator sits over the live Metal view as an always-on HUD, so a blur
         // here would be a per-frame cost on the render thread.
-        .background(Color.black.opacity(0.6), in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+        .background(Color.black.opacity(0.84), in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.28), lineWidth: 1))
+        .shadow(color: .black.opacity(0.45), radius: 3, y: 1)
     }
 }
 

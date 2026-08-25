@@ -64,6 +64,7 @@ typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
     FCIndexFractalIterations   = 0,  // int: Fractal iteration count (enables Map() loop auto-unrolling)
     FCIndexShadowIterations    = 1,  // int: Shadow iteration count
     FCIndexSafetyBubbleEnabled = 2,  // bool: Safety bubble feature toggle
+    FCIndexHasSpaceWarp        = 3,  // bool: Compile out the space-warp seam when unused
     FCIndexQualityMode         = 4,  // int: 0=high, 1=medium, 2=low - controls feature degradation
     FCIndexDebugHierarchical   = 5,  // bool: Debug visualization toggle
     FCIndexMaxRaySteps         = 6,  // int: Max raymarch steps (enables loop optimization)
@@ -74,8 +75,11 @@ typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
     FCIndexShadowsEnabled      = 11, // bool: Toggle shadow computation
     FCIndexMandelbulbPower     = 12, // int: Bake Mandelbulb power for fastPowR optimization
     FCIndexWarmStart           = 13, // bool: Compile in temporal-depth march warm-start (visionOS fragment path)
-    // index 14 = FC_COHERENT_PACKET (compute kernel only; see Shaders.metal)
+    FCIndexCoherentPacket      = 14, // bool: Compile in the coherent-packet compute experiment
     FCIndexCoarseWarmStart     = 15, // bool: Compile in the conservative cone coarse-prepass warm-start (fragment path + cone kernel). Index 14 is taken by FC_COHERENT_PACKET, so this uses the next free slot.
+    FCIndexHasEnvScrunch       = 16, // bool: Compile out the environment-scrunch DE tail when unused
+    FCIndexSphereProjection    = 17, // bool: Compile out per-fold sphere projection when unused
+    FCIndexHasHandField        = 18, // bool: Compile out the tracked-hand DE tail when unused
 };
 
 // Fractal type selection
