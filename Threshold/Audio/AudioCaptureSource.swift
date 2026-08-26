@@ -91,7 +91,7 @@ final class MicrophoneCaptureSource: AudioCaptureSource {
     }
 
     func stopCapture() async {
-        analyzer.stopCapture()
+        await analyzer.stopCapture()
     }
 
     func advanceFrame(at timestamp: TimeInterval) {

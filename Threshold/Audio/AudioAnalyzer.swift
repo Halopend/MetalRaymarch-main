@@ -16,6 +16,7 @@
 
 import AVFoundation
 import Accelerate
+import Dispatch
 import Synchronization
 import os
 #if os(macOS)
@@ -88,6 +89,117 @@ enum MacMicrophonePreflight {
 }
 #endif
 
+/// Platform-neutral description of the iOS microphone session. Keeping this
+/// policy independent of AVAudioSession makes the playback-routing guarantees
+/// testable from the macOS unit-test host.
+struct IOSMicrophoneAudioSessionPolicy: Equatable, Sendable {
+    struct RouteOptions: OptionSet, Equatable, Sendable {
+        let rawValue: UInt8
+
+        static let mixWithOthers = Self(rawValue: 1 << 0)
+        static let defaultToSpeaker = Self(rawValue: 1 << 1)
+        static let allowBluetoothA2DP = Self(rawValue: 1 << 2)
+        static let allowAirPlay = Self(rawValue: 1 << 3)
+        static let allowBluetoothHandsFree = Self(rawValue: 1 << 4)
+    }
+
+    let routeOptions: RouteOptions
+
+    /// Capture from an available microphone without turning music playback
+    /// into receiver audio or a narrow-band Bluetooth call route.
+    static let playbackPreserving = Self(routeOptions: [
+        .mixWithOthers,
+        .defaultToSpeaker,
+        .allowBluetoothA2DP,
+        .allowAirPlay,
+    ])
+}
+
+#if !os(macOS)
+private enum IOSAudioSessionActivationResult: Sendable {
+    case activated
+    case inputUnavailable
+    case failed(String)
+}
+
+/// AVAudioSession's iOS activation API is synchronous and may block while the
+/// system negotiates a route. Keep every category/activation call off the main
+/// actor, then return only Sendable state to the UI-owned analyzer.
+private enum IOSAudioSessionController {
+    /// Serial ordering is as important as leaving the main thread: a rapid
+    /// Stop→Start must not let the older deactivation land after the new start.
+    private static let transitionQueue = DispatchQueue(
+        label: "com.puppypower.Threshold.audio-session-transitions",
+        qos: .userInitiated
+    )
+
+    static func activate(
+        policy: IOSMicrophoneAudioSessionPolicy
+    ) async -> IOSAudioSessionActivationResult {
+        await withCheckedContinuation { continuation in
+            transitionQueue.async {
+                continuation.resume(returning: activateSynchronously(policy: policy))
+            }
+        }
+    }
+
+    private static func activateSynchronously(
+        policy: IOSMicrophoneAudioSessionPolicy
+    ) -> IOSAudioSessionActivationResult {
+        let session = AVAudioSession.sharedInstance()
+        var categoryOptions: AVAudioSession.CategoryOptions = []
+        if policy.routeOptions.contains(.mixWithOthers) {
+            categoryOptions.insert(.mixWithOthers)
+        }
+        if policy.routeOptions.contains(.defaultToSpeaker) {
+            categoryOptions.insert(.defaultToSpeaker)
+        }
+        if policy.routeOptions.contains(.allowBluetoothA2DP) {
+            categoryOptions.insert(.allowBluetoothA2DP)
+        }
+        if policy.routeOptions.contains(.allowAirPlay) {
+            categoryOptions.insert(.allowAirPlay)
+        }
+        if policy.routeOptions.contains(.allowBluetoothHandsFree) {
+            categoryOptions.insert(.allowBluetoothHFP)
+        }
+
+        do {
+            try session.setCategory(
+                .playAndRecord,
+                mode: .default,
+                options: categoryOptions
+            )
+            try session.setActive(true)
+
+            guard session.isInputAvailable,
+                  session.inputNumberOfChannels > 0 else {
+                try? session.setActive(
+                    false,
+                    options: [.notifyOthersOnDeactivation]
+                )
+                return .inputUnavailable
+            }
+            return .activated
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    static func deactivate() async {
+        await withCheckedContinuation { continuation in
+            transitionQueue.async {
+                try? AVAudioSession.sharedInstance().setActive(
+                    false,
+                    options: [.notifyOthersOnDeactivation]
+                )
+                continuation.resume()
+            }
+        }
+    }
+}
+#endif
+
 /// Analyzes audio input and provides normalized level values for visual effects
 @MainActor
 @Observable
@@ -153,6 +265,8 @@ class AudioAnalyzer {
     // error instead of looping.
     @ObservationIgnored private var restartTask: Task<Void, Never>?
     @ObservationIgnored private var restartAttempts: [TimeInterval] = []
+    /// Invalidates an activation that completes after Stop or a newer restart.
+    @ObservationIgnored private var captureTransitionGeneration: UInt64 = 0
     private static let restartDebounce: Duration = .milliseconds(500)
     private static let maxRestartAttempts = 3
     private static let restartAttemptWindow: TimeInterval = 10
@@ -193,24 +307,29 @@ class AudioAnalyzer {
             return false
         }
 
-        setupAudioCapture()
+        captureTransitionGeneration &+= 1
+        let generation = captureTransitionGeneration
+        await setupAudioCapture(expectedGeneration: generation)
         return isMicrophoneCapturing
     }
 
     /// Stop capturing audio
-    func stopCapture() {
+    func stopCapture() async {
+        captureTransitionGeneration &+= 1
         restartTask?.cancel()
         restartTask = nil
         teardownEngine()
         #if !os(macOS)
         removeSessionObservers()
-        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
         #endif
         if !isExternalCapturing {
             core.deactivate()
         }
         isMicrophoneCapturing = false
         refreshCaptureState(resetLevelsWhenIdle: true)
+        #if !os(macOS)
+        await IOSAudioSessionController.deactivate()
+        #endif
     }
 
     // MARK: - External PCM Ingestion
@@ -316,29 +435,7 @@ class AudioAnalyzer {
     }
 
     #if !os(macOS)
-    /// The default session category does not permit recording, so without this
-    /// the input node reports a dead 0 Hz format on iPadOS/visionOS.
-    /// `.playAndRecord` + `.mixWithOthers` keeps the user's music playing —
-    /// a visualizer must never silence what it is visualizing.
-    private func activateAudioSession() -> Bool {
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playAndRecord, options: [.mixWithOthers])
-            try session.setActive(true)
-
-            guard session.isInputAvailable, session.inputNumberOfChannels > 0 else {
-                errorMessage = "No microphone input is available on this device."
-                try? session.setActive(false, options: [.notifyOthersOnDeactivation])
-                return false
-            }
-
-            return true
-        } catch {
-            errorMessage = "Could not activate the audio session: \(error.localizedDescription)"
-            return false
-        }
-    }
-
+    /// Restart capture when interruptions end or the hardware route changes.
     private func installSessionObservers() {
         guard sessionObservers.isEmpty else { return }
         let center = NotificationCenter.default
@@ -370,7 +467,7 @@ class AudioAnalyzer {
     }
     #endif
 
-    private func setupAudioCapture() {
+    private func setupAudioCapture(expectedGeneration: UInt64) async {
         #if os(macOS)
         // Accessing `AVAudioEngine.inputNode` is itself fatal when the macOS
         // Audio Component registrar is missing HALOutput. This preflight must
@@ -380,7 +477,22 @@ class AudioAnalyzer {
             return
         }
         #else
-        guard activateAudioSession() else { return }
+        let activation = await IOSAudioSessionController.activate(
+            policy: .playbackPreserving
+        )
+        guard expectedGeneration == captureTransitionGeneration else {
+            return
+        }
+        switch activation {
+        case .activated:
+            break
+        case .inputUnavailable:
+            errorMessage = "No microphone input is available on this device."
+            return
+        case .failed(let message):
+            errorMessage = "Could not activate the audio session: \(message)"
+            return
+        }
         #endif
 
         let engine = AVAudioEngine()
@@ -390,7 +502,7 @@ class AudioAnalyzer {
         guard format.sampleRate > 0, format.channelCount > 0 else {
             errorMessage = "No audio input available"
 #if !os(macOS)
-            try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+            await IOSAudioSessionController.deactivate()
 #endif
             return
         }
@@ -432,7 +544,7 @@ class AudioAnalyzer {
             self.isMicrophoneCapturing = false
             self.refreshCaptureState(resetLevelsWhenIdle: true)
 #if !os(macOS)
-            try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+            await IOSAudioSessionController.deactivate()
 #endif
             self.errorMessage = "Failed to start audio: \(error.localizedDescription)"
         }
@@ -469,11 +581,11 @@ class AudioAnalyzer {
             try? await Task.sleep(for: Self.restartDebounce)
             guard let self, !Task.isCancelled else { return }
             self.restartTask = nil
-            self.restartCaptureAfterConfigurationChange()
+            await self.restartCaptureAfterConfigurationChange()
         }
     }
 
-    private func restartCaptureAfterConfigurationChange() {
+    private func restartCaptureAfterConfigurationChange() async {
         guard isMicrophoneCapturing else { return }
         let now = ProcessInfo.processInfo.systemUptime
         restartAttempts.removeAll { now - $0 > Self.restartAttemptWindow }
@@ -488,9 +600,11 @@ class AudioAnalyzer {
             return
         }
         restartAttempts.append(now)
+        captureTransitionGeneration &+= 1
+        let generation = captureTransitionGeneration
 
         // Re-reads the (possibly new) device format and re-locks band indices.
-        setupAudioCapture()
+        await setupAudioCapture(expectedGeneration: generation)
         refreshCaptureState(resetLevelsWhenIdle: true)
     }
 

@@ -48,6 +48,26 @@ struct MacMicrophonePreflightTests {
 }
 #endif
 
+@Suite("iOS microphone audio-session policy")
+struct IOSMicrophoneAudioSessionPolicyTests {
+    @Test("Microphone capture preserves music playback routes")
+    func playbackRoutesArePreserved() {
+        let options = IOSMicrophoneAudioSessionPolicy.playbackPreserving.routeOptions
+
+        #expect(options.contains(.mixWithOthers))
+        #expect(options.contains(.defaultToSpeaker))
+        #expect(options.contains(.allowBluetoothA2DP))
+        #expect(options.contains(.allowAirPlay))
+    }
+
+    @Test("Bluetooth capture never opts into the call-quality hands-free route")
+    func handsFreeRouteIsExcluded() {
+        let options = IOSMicrophoneAudioSessionPolicy.playbackPreserving.routeOptions
+
+        #expect(!options.contains(.allowBluetoothHandsFree))
+    }
+}
+
 @Suite("Audio analysis core")
 struct AudioAnalysisCoreTests {
 
