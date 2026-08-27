@@ -469,6 +469,15 @@ struct RadialNavigationProjectionTests {
         ))
     }
 
+    @Test("Phone edge menu reveal tracks the finger and commits past the threshold")
+    func phoneEdgeMenuRevealPolicy() {
+        #expect(PhoneEdgeMenuGesturePolicy.revealProgress(for: 0) == 0)
+        #expect(PhoneEdgeMenuGesturePolicy.revealProgress(for: PhoneEdgeMenuGesturePolicy.revealDistance * 0.5) == 0.5)
+        #expect(PhoneEdgeMenuGesturePolicy.revealProgress(for: PhoneEdgeMenuGesturePolicy.revealDistance + 40) == 1)
+        #expect(!PhoneEdgeMenuGesturePolicy.shouldPresent(translation: PhoneEdgeMenuGesturePolicy.revealDistance * 0.71))
+        #expect(PhoneEdgeMenuGesturePolicy.shouldPresent(translation: PhoneEdgeMenuGesturePolicy.revealDistance * 0.72))
+    }
+
     @Test("A stale or leaf path entry truncates the walk instead of orphaning rings")
     func staleAndLeafPathsTruncate() {
         let tree = makeTree()
