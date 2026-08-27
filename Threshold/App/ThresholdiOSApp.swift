@@ -266,6 +266,9 @@ private struct ThresholdiOSRootView: View {
     }
 
     private func presentRadialMenu(at location: CGPoint, viewportSize: CGSize) {
+        // Default to fully revealed. `handlePhoneEdgeMenuGesture` overrides
+        // this straight after presenting so the drag starts off-screen.
+        phoneEdgeMenuProgress = 1
         setControlsVisible(false)
         appModel.controlStateStore.startSync(with: appModel.renderSettings, appModel: appModel)
         let anchor = CGPoint(
@@ -300,12 +303,12 @@ private struct ThresholdiOSRootView: View {
                   appModel.inputOwnershipStore.claim(.radialMenu) else { return }
             phoneEdgeMenuInteractionID += 1
             phoneEdgeMenuEdge = edge
-            phoneEdgeMenuProgress = 0
             let anchor = CGPoint(
                 x: edge == .left ? 0 : viewportSize.width,
                 y: clampedPhoneMenuY(location.y, viewportSize: viewportSize)
             )
             presentRadialMenu(at: anchor, viewportSize: viewportSize)
+            phoneEdgeMenuProgress = 0
 
         case let .changed(edge, location, translation):
             guard radialMenu.isPresented, phoneEdgeMenuEdge == edge else { return }
@@ -360,11 +363,11 @@ private struct ThresholdiOSRootView: View {
                 phoneEdgeMenuProgress = 0
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-                guard interactionID == phoneEdgeMenuInteractionID,
-                      phoneEdgeMenuEdge == edge else { return }
-                phoneEdgeMenuEdge = nil
+                // Only a newer interaction may cancel this dismissal. Any
+                // other bail-out would leave the menu presented at progress
+                // zero: invisible, but still holding the viewport claim.
+                guard interactionID == phoneEdgeMenuInteractionID else { return }
                 dismissRadialMenu()
-                phoneEdgeMenuProgress = 1
             }
         }
     }
@@ -374,6 +377,12 @@ private struct ThresholdiOSRootView: View {
     }
 
     private func dismissRadialMenu() {
+        // Resolve the edge drag first, and unconditionally: a dismissal can
+        // arrive mid-drag from a route change, an editor, or view teardown,
+        // and a partial progress left behind here would re-present the strip
+        // off-screen while it still held the interaction claim.
+        phoneEdgeMenuEdge = nil
+        phoneEdgeMenuProgress = 1
         guard radialMenu.isPresented else { return }
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) {
             radialMenu.dismiss()
