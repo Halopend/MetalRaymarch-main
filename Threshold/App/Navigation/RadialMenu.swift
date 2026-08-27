@@ -544,6 +544,9 @@ struct RadialMenu: View {
     let projection: RadialNavigationProjection
     let interactionProfile: RadialInteractionProfile
     let layout: RadialMenuLayout
+    /// Interactive progress used by the phone edge reveal. The strip starts
+    /// off-screen, follows the finger, then settles at its resting inset.
+    var edgeRevealProgress: CGFloat = 1
     let allowsPresentationSelection: Bool
     @Binding var path: [String]
     let sceneAccent: Color
@@ -671,7 +674,12 @@ struct RadialMenu: View {
 
     private var straightEdgeCenterX: CGFloat {
         let inset = activeSliderWidth * 0.5 + 12
-        return opensLeft ? size.width - inset : inset
+        let resting = opensLeft ? size.width - inset : inset
+        let hidden = opensLeft
+            ? size.width + activeSliderWidth * 0.5 + 8
+            : -activeSliderWidth * 0.5 - 8
+        let progress = min(max(edgeRevealProgress, 0), 1)
+        return hidden + (resting - hidden) * progress
     }
 
     static func windowDragHandleFrame(
@@ -925,6 +933,7 @@ struct RadialMenu: View {
         )
         .frame(width: activeSliderWidth + 36)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: opensLeft ? .trailing : .leading)
+        .opacity(min(max(edgeRevealProgress, 0), 1))
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
