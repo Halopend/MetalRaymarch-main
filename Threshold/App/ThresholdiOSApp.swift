@@ -2,6 +2,13 @@
 import SwiftUI
 import UIKit
 
+enum PhoneEdgeMenuGesturePhase {
+    case began(edge: UIRectEdge, location: CGPoint)
+    case changed(edge: UIRectEdge, location: CGPoint, translation: CGFloat)
+    case ended(edge: UIRectEdge, location: CGPoint, translation: CGFloat)
+    case cancelled(edge: UIRectEdge, location: CGPoint)
+}
+
 @main
 struct ThresholdiOSApp: App {
     @State private var appModel = AppModel()
@@ -33,6 +40,9 @@ private struct ThresholdiOSRootView: View {
     @State private var restoreControlsAfterFormulaEditor = false
     @State private var radialMenu = RadialMenuModel(interactionProfile: .touch)
     @State private var radialCurvature = 0.72
+    @State private var phoneEdgeMenuEdge: UIRectEdge?
+    @State private var phoneEdgeMenuProgress: CGFloat = 1
+    @State private var phoneEdgeMenuInteractionID = 0
     @State private var isStartupCoverVisible = true
     private let controlsAnimation = MenuChrome.panelSpring
 
@@ -41,6 +51,76 @@ private struct ThresholdiOSRootView: View {
     }
 
     var body: some View {
+        rootViewport
+            .overlay {
+                if isFormulaEditorPresented {
+                    FormulaEditorWindowView(onClose: dismissFormulaEditor)
+                        .environment(appModel)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .overlay {
+                if isStartupCoverVisible {
+                    startupCover
+                        .transition(.opacity)
+                        .zIndex(100)
+                }
+            }
+            .task(id: appModel.rendererStartupWarmupComplete) {
+                guard appModel.rendererStartupWarmupComplete else {
+                    isStartupCoverVisible = true
+                    return
+                }
+
+                // Pipeline readiness precedes the first visible Metal frame. Keep
+                // the cover through that handoff so startup never flashes the
+                // clear surface or a stale renderer snapshot.
+                try? await Task.sleep(nanoseconds: 180_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) {
+                    isStartupCoverVisible = false
+                }
+            }
+            // Safety and privacy setup (photosensitivity acknowledgement, microphone,
+            // analytics, storage). Mirrors the macOS/visionOS gate; the cover cannot
+            // be swiped away and only `FirstLaunchWindowView` completes it.
+            .fullScreenCover(isPresented: Binding(
+                get: { !hasCompletedIntroOnboarding },
+                set: { _ in }
+            )) {
+                FirstLaunchWindowView()
+                    .environment(appModel)
+                    .interactiveDismissDisabled()
+            }
+            .fullScreenCover(isPresented: $isAnimationEditorPresented) {
+                AnimationEditorWindowView()
+                    .environment(appModel)
+            }
+            .onAppear {
+                appModel.openFormulaEditorHandler = presentFormulaEditor
+                appModel.openAnimationEditorHandler = presentAnimationEditor
+                appModel.dismissAnimationEditorHandler = { isAnimationEditorPresented = false }
+                // External-file imports (Files app, Share sheet) surface their
+                // sheet, progress, and errors inside the inspector's ContentView.
+                // Let AppModel.ensureWindowContentVisible() reveal it on iOS.
+                appModel.openMenuWindowHandler = { setControlsVisible(true) }
+                syncMenuWindowVisibility(isShowingControls)
+                Task { @MainActor in
+                    await appModel.startMicrophoneAtLaunchIfEnabled()
+                }
+            }
+            .onChange(of: isShowingControls) { _, isVisible in
+                syncMenuWindowVisibility(isVisible)
+            }
+            .onDisappear {
+                appModel.openFormulaEditorHandler = nil
+                appModel.openAnimationEditorHandler = nil
+                appModel.dismissAnimationEditorHandler = nil
+                appModel.openMenuWindowHandler = nil
+            }
+    }
+
+    private var rootViewport: some View {
         GeometryReader { proxy in
             let widths = inspectorColumnWidths(for: proxy.size)
             let safeAreaInsets = proxy.safeAreaInsets
@@ -53,12 +133,15 @@ private struct ThresholdiOSRootView: View {
                     || isAnimationEditorPresented,
                 onRadialMenuRequest: { location in
                     toggleRadialMenu(at: location, viewportSize: proxy.size)
+                },
+                onPhoneEdgeMenuGesture: { phase in
+                    handlePhoneEdgeMenuGesture(phase, viewportSize: proxy.size)
                 }
             )
                 .ignoresSafeArea()
                 .background(Color.black)
                 .overlay(alignment: .topTrailing) {
-                    if !isFormulaEditorPresented && !isPhone {
+                    if !isFormulaEditorPresented {
                         controlsToggle
                             // The overlay already starts inside the safe area. Phones only
                             // need a small local margin; iPad keeps extra window-chrome clearance.
@@ -99,6 +182,7 @@ private struct ThresholdiOSRootView: View {
                             projection: radialProjection,
                             interactionProfile: radialMenu.interactionProfile,
                             layout: UIDevice.current.userInterfaceIdiom == .phone ? .straightEdge : .radial,
+                            edgeRevealProgress: phoneEdgeMenuProgress,
                             allowsPresentationSelection: false,
                             path: Binding(
                                 get: { radialMenu.path },
@@ -144,72 +228,6 @@ private struct ThresholdiOSRootView: View {
                 )
                 .onDisappear(perform: dismissRadialMenu)
         }
-        .overlay {
-            if isFormulaEditorPresented {
-                FormulaEditorWindowView(onClose: dismissFormulaEditor)
-                    .environment(appModel)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .overlay {
-            if isStartupCoverVisible {
-                startupCover
-                    .transition(.opacity)
-                    .zIndex(100)
-            }
-        }
-        .task(id: appModel.rendererStartupWarmupComplete) {
-            guard appModel.rendererStartupWarmupComplete else {
-                isStartupCoverVisible = true
-                return
-            }
-
-            // Pipeline readiness precedes the first visible Metal frame. Keep
-            // the cover through that handoff so startup never flashes the
-            // clear surface or a stale renderer snapshot.
-            try? await Task.sleep(nanoseconds: 180_000_000)
-            guard !Task.isCancelled else { return }
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) {
-                isStartupCoverVisible = false
-            }
-        }
-        // Safety and privacy setup (photosensitivity acknowledgement, microphone,
-        // analytics, storage). Mirrors the macOS/visionOS gate; the cover cannot
-        // be swiped away and only `FirstLaunchWindowView` completes it.
-        .fullScreenCover(isPresented: Binding(
-            get: { !hasCompletedIntroOnboarding },
-            set: { _ in }
-        )) {
-            FirstLaunchWindowView()
-                .environment(appModel)
-                .interactiveDismissDisabled()
-        }
-        .fullScreenCover(isPresented: $isAnimationEditorPresented) {
-            AnimationEditorWindowView()
-                .environment(appModel)
-        }
-        .onAppear {
-            appModel.openFormulaEditorHandler = presentFormulaEditor
-            appModel.openAnimationEditorHandler = presentAnimationEditor
-            appModel.dismissAnimationEditorHandler = { isAnimationEditorPresented = false }
-            // External-file imports (Files app, Share sheet) surface their
-            // sheet, progress, and errors inside the inspector's ContentView.
-            // Let AppModel.ensureWindowContentVisible() reveal it on iOS.
-            appModel.openMenuWindowHandler = { setControlsVisible(true) }
-            syncMenuWindowVisibility(isShowingControls)
-            Task { @MainActor in
-                await appModel.startMicrophoneAtLaunchIfEnabled()
-            }
-        }
-        .onChange(of: isShowingControls) { _, isVisible in
-            syncMenuWindowVisibility(isVisible)
-        }
-        .onDisappear {
-            appModel.openFormulaEditorHandler = nil
-            appModel.openAnimationEditorHandler = nil
-            appModel.dismissAnimationEditorHandler = nil
-            appModel.openMenuWindowHandler = nil
-        }
     }
 
     /// Keep AppModel's window-visibility model truthful on iOS so
@@ -244,6 +262,10 @@ private struct ThresholdiOSRootView: View {
             return
         }
         guard appModel.inputOwnershipStore.claim(.radialMenu) else { return }
+        presentRadialMenu(at: location, viewportSize: viewportSize)
+    }
+
+    private func presentRadialMenu(at location: CGPoint, viewportSize: CGSize) {
         setControlsVisible(false)
         appModel.controlStateStore.startSync(with: appModel.renderSettings, appModel: appModel)
         let anchor = CGPoint(
@@ -264,6 +286,91 @@ private struct ThresholdiOSRootView: View {
         withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.82)) {
             radialMenu.present(at: anchor, initialPath: initialPath)
         }
+    }
+
+    private func handlePhoneEdgeMenuGesture(
+        _ phase: PhoneEdgeMenuGesturePhase,
+        viewportSize: CGSize
+    ) {
+        guard isPhone else { return }
+
+        switch phase {
+        case let .began(edge, location):
+            guard !radialMenu.isPresented,
+                  appModel.inputOwnershipStore.claim(.radialMenu) else { return }
+            phoneEdgeMenuInteractionID += 1
+            phoneEdgeMenuEdge = edge
+            phoneEdgeMenuProgress = 0
+            let anchor = CGPoint(
+                x: edge == .left ? 0 : viewportSize.width,
+                y: clampedPhoneMenuY(location.y, viewportSize: viewportSize)
+            )
+            presentRadialMenu(at: anchor, viewportSize: viewportSize)
+
+        case let .changed(edge, location, translation):
+            guard radialMenu.isPresented, phoneEdgeMenuEdge == edge else { return }
+            phoneEdgeMenuProgress = PhoneEdgeMenuGesturePolicy.revealProgress(for: translation)
+            radialMenu.anchor = CGPoint(
+                x: edge == .left ? 0 : viewportSize.width,
+                y: clampedPhoneMenuY(location.y, viewportSize: viewportSize)
+            )
+
+        case let .ended(edge, location, translation):
+            finishPhoneEdgeMenuGesture(
+                edge: edge,
+                location: location,
+                translation: translation,
+                viewportSize: viewportSize,
+                cancelled: false
+            )
+
+        case let .cancelled(edge, location):
+            finishPhoneEdgeMenuGesture(
+                edge: edge,
+                location: location,
+                translation: 0,
+                viewportSize: viewportSize,
+                cancelled: true
+            )
+        }
+    }
+
+    private func finishPhoneEdgeMenuGesture(
+        edge: UIRectEdge,
+        location: CGPoint,
+        translation: CGFloat,
+        viewportSize: CGSize,
+        cancelled: Bool
+    ) {
+        guard radialMenu.isPresented, phoneEdgeMenuEdge == edge else { return }
+        let interactionID = phoneEdgeMenuInteractionID
+        let shouldPresent = !cancelled && PhoneEdgeMenuGesturePolicy.shouldPresent(translation: translation)
+
+        if shouldPresent {
+            withAnimation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.86)) {
+                phoneEdgeMenuProgress = 1
+                radialMenu.anchor = CGPoint(
+                    x: edge == .left ? 0 : viewportSize.width,
+                    y: clampedPhoneMenuY(location.y, viewportSize: viewportSize)
+                )
+            }
+            phoneEdgeMenuEdge = nil
+        } else {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
+                phoneEdgeMenuProgress = 0
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                guard interactionID == phoneEdgeMenuInteractionID,
+                      phoneEdgeMenuEdge == edge else { return }
+                phoneEdgeMenuEdge = nil
+                dismissRadialMenu()
+                phoneEdgeMenuProgress = 1
+            }
+        }
+    }
+
+    private func clampedPhoneMenuY(_ y: CGFloat, viewportSize: CGSize) -> CGFloat {
+        min(max(y, 32), max(32, viewportSize.height - 32))
     }
 
     private func dismissRadialMenu() {
