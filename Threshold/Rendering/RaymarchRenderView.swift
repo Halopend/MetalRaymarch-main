@@ -197,6 +197,10 @@ struct ThresholdMacRenderView: NSViewRepresentable {
 
         @MainActor
         func configure(_ view: MTKView) {
+            // Take ownership before touching any renderer-facing app state, so
+            // the outgoing coordinator's deferred teardown can tell that this
+            // state is no longer its to clear.
+            appModel.viewportCoordinatorID = ObjectIdentifier(self)
             appModel.rendererStartupWarmupComplete = false
             guard let device = view.device,
                   let metalLayer = view.layer as? CAMetalLayer else { return }
@@ -242,7 +246,13 @@ struct ThresholdMacRenderView: NSViewRepresentable {
         func tearDown() {
             inputAccumulator.setFocus(false)
             renderer = nil
-            Task { @MainActor [appModel] in
+            Task { @MainActor [appModel, ownerID = ObjectIdentifier(self)] in
+                // A replacement viewport may have configured itself while this
+                // hop was pending. Clearing its handlers and warm-up flag would
+                // leave a live renderer behind a startup cover that never
+                // lifts, with no input reaching it.
+                guard appModel.viewportCoordinatorID == ownerID else { return }
+                appModel.viewportCoordinatorID = nil
                 appModel.activateEmbeddedFormulaHandler = nil
                 appModel.forceShaderRecompileHandler = nil
                 appModel.viewportCommandHandler = nil
@@ -2439,6 +2449,10 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
 
         @MainActor
         func configure(_ view: MTKView) {
+            // Take ownership before touching any renderer-facing app state, so
+            // the outgoing coordinator's deferred teardown can tell that this
+            // state is no longer its to clear.
+            appModel.viewportCoordinatorID = ObjectIdentifier(self)
             appModel.rendererStartupWarmupComplete = false
             guard let device = view.device,
                   let metalLayer = view.layer as? CAMetalLayer else { return }
@@ -2592,7 +2606,13 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             onPhoneEdgeMenuGesture = nil
             inputController.setFocus(false)
             renderer = nil
-            Task { @MainActor [appModel] in
+            Task { @MainActor [appModel, ownerID = ObjectIdentifier(self)] in
+                // A replacement viewport may have configured itself while this
+                // hop was pending. Clearing its handlers and warm-up flag would
+                // leave a live renderer behind a startup cover that never
+                // lifts, with no input reaching it.
+                guard appModel.viewportCoordinatorID == ownerID else { return }
+                appModel.viewportCoordinatorID = nil
                 appModel.activateEmbeddedFormulaHandler = nil
                 appModel.forceShaderRecompileHandler = nil
                 appModel.viewportCommandHandler = nil

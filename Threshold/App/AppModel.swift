@@ -201,6 +201,18 @@ class AppModel {
     var isRootRenderViewMounted = false
     #endif
     var rendererStartupWarmupComplete = false
+    /// Identifies the viewport coordinator that currently owns the renderer
+    /// handlers and `rendererStartupWarmupComplete`.
+    ///
+    /// A departing coordinator's teardown has to hop to the main actor, so it
+    /// can land *after* a replacement view has already configured itself
+    /// (SwiftUI rebuilds the Metal representable when the inspector, an editor,
+    /// or a scene change re-parents it). Clearing unconditionally then stranded
+    /// the new, live renderer with no handlers and the warm-up flag stuck
+    /// false — the startup cover stays up over a viewport that renders and
+    /// accepts nothing. Mirrors the visionOS `activeRenderLoopID` handshake in
+    /// `AppModel+RendererActivation`.
+    @ObservationIgnored var viewportCoordinatorID: ObjectIdentifier?
     /// True only while an Audio Reactivity mapping is being held in isolation.
     /// Presentation hosts use this transient flag to reveal the live renderer
     /// without changing the user's normal controls visibility.
