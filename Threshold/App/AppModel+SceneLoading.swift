@@ -88,7 +88,8 @@ extension AppModel {
             await applyLoadedScene(
                 preset,
                 options: options,
-                manualSceneNavigationRequest: manualSceneNavigationRequest
+                manualSceneNavigationRequest: manualSceneNavigationRequest,
+                loadGeneration: generation
             )
         }
     }
@@ -194,7 +195,8 @@ extension AppModel {
     func applyLoadedScene(
         _ preset: FractalPreset,
         options: StaticSceneLoadOptions,
-        manualSceneNavigationRequest: ManualSceneNavigationRequest? = nil
+        manualSceneNavigationRequest: ManualSceneNavigationRequest? = nil,
+        loadGeneration: UInt64? = nil
     ) async {
         // Custom and built-in scenes wait here alike: a custom formula has no
         // usable pipeline until its specialized one is compiled, and a built-in
@@ -207,10 +209,17 @@ extension AppModel {
         // ThresholdiOS targets). On iPad/Mac this is a no-op, and prewarming is
         // not needed there: `ViewportRenderer.selectPipeline` builds the
         // specialized pipeline in the background and draws the current frame
-        // with the generic one. Rapid iPad scene taps are made safe by the
-        // generation/cancellation guards in `loadStaticScene`, not by this await.
+        // with the generic one. Rapid scene taps are made safe by the
+        // generation/cancellation guards in `loadStaticScene`, including the
+        // post-await guard below.
         await preparePipelineHandler?(preset)
-        guard !Task.isCancelled else { return }
+        // Pipeline preparation is renderer-owned and may not observe Task
+        // cancellation while it awaits a Metal build. A newer scene can
+        // therefore supersede this task during the await; do not let the old
+        // scene apply after the newer selection, or scene switching becomes
+        // intermittent and appears to leave a stale look stuck on screen.
+        guard !Task.isCancelled,
+              loadGeneration.map({ $0 == staticSceneLoadGeneration }) ?? true else { return }
         customSceneDiagnostic("🔬 [CSDiag] applyLoadedScene preparePipelineHandler completed; loading preset NOW")
         // Snapshot the currently displayed parameters so the load can ease
         // from them toward the new preset.
@@ -221,6 +230,10 @@ extension AppModel {
             includePerformance: false,
             resetEnvironment: true
         )
+        // The preset is now authoritative. Discard layer-stack history from
+        // the previous scene before the next audio tick can resolve an old
+        // music base and write it back over the newly loaded values.
+        parameterPipeline.resetForSceneLoad()
         // Ease displayed parameters toward the new preset's values over the
         // configured "Same Scene Transition Time" instead of snapping.
         renderSettings.commitSceneTransition()

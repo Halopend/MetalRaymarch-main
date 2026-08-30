@@ -436,6 +436,21 @@ final class ParameterPipeline: @unchecked Sendable {
         }
     }
 
+    /// Drop all layer history after a scene/preset becomes authoritative.
+    ///
+    /// Scene loading writes the new values directly to RenderSettings. Keeping
+    /// the old stacks alive would let the next audio tick resolve against the
+    /// previous scene's UI base and write those values back into the new scene.
+    /// Resetting here makes the next operation bootstrap from the freshly loaded
+    /// settings instead of from stale layer state.
+    func resetForSceneLoad() {
+        _state.withLock { state in
+            state.coreStacks.removeAll()
+            state.formulaStacks.removeAll()
+        }
+        _liveValues.withLock { $0.removeAll() }
+    }
+
     /// Discard all formula parameter layer stacks. Call when the fractal type
     /// changes so stale entries from the old type's formula params don't interfere
     /// with the new type.
