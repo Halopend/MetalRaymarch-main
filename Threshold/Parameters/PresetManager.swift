@@ -159,6 +159,10 @@ enum StorePlaceholderReadPolicy {
 @Observable
 class PresetManager {
     private(set) var presets: [FractalPreset] = []
+    /// True only while a detached store scan is enumerating and decoding preset
+    /// files. Debounce time and the idle metadata watcher are intentionally not
+    /// included, so UI activity reflects work that is actually executing.
+    private(set) var isIndexingPresetFiles = false
     private static var bundledPresetsCache: [FractalPreset]?
     static let bundledCatalogMarkerFileName = ".seeded-bundled.json"
     /// Older releases wrote incremental catalog snapshots to separate markers.
@@ -234,6 +238,7 @@ class PresetManager {
     @ObservationIgnored private var presetFileCache: [URL: CachedPresetFile] = [:]
     @ObservationIgnored private var presetReloadTask: Task<Void, Never>?
     @ObservationIgnored private var presetReloadGeneration: UInt64 = 0
+    @ObservationIgnored private var activePresetScanCount = 0
     @ObservationIgnored private var failedPlaceholderProbeURLs: Set<URL> = []
     @ObservationIgnored private var mostRecentWriteError: String?
     /// Saves made while iCloud/root discovery is unresolved. They are flushed
@@ -963,6 +968,13 @@ class PresetManager {
     }
 
     private func performPresetScan(_ request: PresetScanRequest) async -> PresetScanResult {
+        activePresetScanCount += 1
+        isIndexingPresetFiles = true
+        defer {
+            activePresetScanCount -= 1
+            isIndexingPresetFiles = activePresetScanCount > 0
+        }
+
         let worker = Task.detached(priority: .utility) {
             Self.scanStorePresets(request)
         }

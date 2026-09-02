@@ -328,6 +328,23 @@ struct ContentView: View {
                 // and only renders while currentError is set.
                 ErrorBannerView(errorReporter: appModel.errorReporter)
 
+                if appModel.presetManager.isIndexingPresetFiles {
+                    Label {
+                        Text("Indexing files…")
+                    } icon: {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.cyan.opacity(0.35), lineWidth: 1))
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .accessibilityLabel("Indexing preset files")
+                }
+
                 if let saveConfirmationMessage {
                     Label(saveConfirmationMessage, systemImage: AppIcons.checkmarkCircleFill)
                         .font(.callout.weight(.semibold))

@@ -151,13 +151,20 @@ private struct ThresholdiOSRootView: View {
                     }
                 }
                 .overlay(alignment: .bottom) {
-                    if !appModel.rendererStartupWarmupComplete && !isPhone {
-                        shaderCompileBanner
-                            .padding(.bottom, max(24, safeAreaInsets.bottom + 12))
-                            .transition(.opacity)
+                    VStack(spacing: 8) {
+                        if appModel.presetManager.isIndexingPresetFiles {
+                            fileIndexingBanner
+                                .transition(.opacity)
+                        }
+                        if !appModel.rendererStartupWarmupComplete && !isPhone {
+                            shaderCompileBanner
+                                .transition(.opacity)
+                        }
                     }
+                    .padding(.bottom, max(24, safeAreaInsets.bottom + 12))
                 }
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: appModel.rendererStartupWarmupComplete)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: appModel.presetManager.isIndexingPresetFiles)
                 .inspector(isPresented: $isShowingControls) {
                     ThresholdiOSInspectorContent(isShowingControls: $isShowingControls)
                         .environment(appModel)
@@ -470,6 +477,22 @@ private struct ThresholdiOSRootView: View {
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
         .foregroundStyle(.primary)
         .accessibilityElement(children: .combine)
+    }
+
+    private var fileIndexingBanner: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Indexing files…")
+                .font(.footnote.weight(.medium))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.cyan.opacity(0.35), lineWidth: 1))
+        .foregroundStyle(.primary)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Indexing preset files")
     }
 
     /// App-owned half of the launch handoff. The system launch storyboard is
