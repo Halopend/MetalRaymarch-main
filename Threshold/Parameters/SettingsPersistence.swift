@@ -113,8 +113,12 @@ enum SettingsPersistence {
     private struct PendingSaveState {
         var nextGeneration: UInt64 = 0
         var latestGenerations: [Domain: UInt64] = [:]
-        var tasks: [Domain: (generation: UInt64, data: Data, task: Task<Void, Never>)] = [:]
-        var deferredWrites: [Domain: (generation: UInt64, data: Data)] = [:]
+        var tasks: [Domain: (generation: UInt64, task: Task<Void, Never>)] = [:]
+        /// Debounced values wait as LAZY encoders: the whole-domain JSON
+        /// encode used to run synchronously per slider tick on the calling
+        /// (main) thread before the debounce even began (M25). Encoding once,
+        /// at commit/flush time, coalesces an edit burst into ONE encode.
+        var deferredWrites: [Domain: (generation: UInt64, encode: @Sendable () -> Data?)] = [:]
         /// Writes that are eligible to reach UserDefaults now. Debounced values
         /// only enter this map when their delay expires (or they are flushed).
         /// Keeping the newest generation lets an older concurrent writer repair
@@ -152,27 +156,31 @@ enum SettingsPersistence {
     }
 
     static func saveDebounced<T: Codable & Sendable>(_ value: T, domain: Domain) {
-        guard !benchmarkHermetic, let data = encode(value) else { return }
+        guard !benchmarkHermetic else { return }
+        let encodeValue: @Sendable () -> Data? = { encode(value) }
 
         let generation = pendingSaves.withLock { state -> UInt64 in
             state.nextGeneration &+= 1
             state.tasks.removeValue(forKey: domain)?.task.cancel()
             state.latestGenerations[domain] = state.nextGeneration
-            state.deferredWrites[domain] = (state.nextGeneration, data)
+            state.deferredWrites[domain] = (state.nextGeneration, encodeValue)
             return state.nextGeneration
         }
 
         let task = Task.detached(priority: .utility) {
             try? await Task.sleep(for: debounceDelay)
             guard !Task.isCancelled else { return }
-            let shouldCommit = pendingSaves.withLock { state -> Bool in
-                guard state.deferredWrites[domain]?.generation == generation else { return false }
+            // Encode HERE — once, off the calling thread, only if this edit
+            // survived the trailing debounce.
+            let outcome: Data? = pendingSaves.withLock { state -> Data? in
+                guard state.deferredWrites[domain]?.generation == generation else { return nil }
                 state.tasks.removeValue(forKey: domain)
                 state.deferredWrites.removeValue(forKey: domain)
+                guard let data = encodeValue() else { return nil }
                 state.latestReadyWrites[domain] = (generation, data)
-                return true
+                return data
             }
-            guard shouldCommit else { return }
+            guard let data = outcome else { return }
             commit(data, generation: generation, domain: domain)
         }
 
@@ -183,7 +191,7 @@ enum SettingsPersistence {
                 task.cancel()
                 return
             }
-            state.tasks[domain] = (generation, data, task)
+            state.tasks[domain] = (generation, task)
         }
     }
 
@@ -198,9 +206,16 @@ enum SettingsPersistence {
             for pending in state.tasks.values {
                 pending.task.cancel()
             }
-            let writes = state.deferredWrites.map { domain, pending in
-                state.latestReadyWrites[domain] = pending
-                return (domain, pending.generation, pending.data)
+            let writes = state.deferredWrites.compactMap { domain, pending -> (Domain, UInt64, Data)? in
+                state.tasks.removeValue(forKey: domain)
+                // Encode now — a lifecycle flush must persist the edit NOW,
+                // even though the debounced path defers the encode (M25).
+                guard let data = pending.encode() else {
+                    print("⚠️ SettingsPersistence.flushPendingSaves: failed to encode domain \(domain.rawValue); keeping the last-good persisted blob.")
+                    return nil
+                }
+                state.latestReadyWrites[domain] = (pending.generation, data)
+                return (domain, pending.generation, data)
             }
             state.tasks.removeAll()
             state.deferredWrites.removeAll()

@@ -21,6 +21,12 @@ final class GestureSensitivityStore: Sendable {
 
     private let _sensitivities: Mutex<[String: Float]>
     private let defaultsKey = "parameterGestureSensitivities"
+    /// Trailing save debounce. Every slider tick used to run a full
+    /// JSON-encode + UserDefaults write, and each write fired the app-wide
+    /// `didChangeNotification` whose observer re-decodes persisted
+    /// transformation JSON — a write storm during a drag.
+    private let saveTaskLock = Mutex<Task<Void, Never>?>(nil)
+    private static let saveDebounce: Duration = .milliseconds(300)
 
     private init() {
         // Load persisted data during init
@@ -54,7 +60,7 @@ final class GestureSensitivityStore: Sendable {
                 sensitivities[parameterID] = clamped
             }
         }
-        save()
+        scheduleSave()
     }
 
     /// Reset a single parameter back to default sensitivity.
@@ -62,10 +68,23 @@ final class GestureSensitivityStore: Sendable {
         _ = _sensitivities.withLock {
             $0.removeValue(forKey: parameterID)
         }
-        save()
+        scheduleSave()
     }
 
     // MARK: - Persistence
+
+    /// Coalesce rapid edits into one trailing save (the final value always
+    /// persists — same trailing-debounce contract as SettingsPersistence).
+    private func scheduleSave() {
+        saveTaskLock.withLock { task in
+            task?.cancel()
+            task = Task.detached(priority: .utility) { [weak self] in
+                try? await Task.sleep(for: Self.saveDebounce)
+                guard !Task.isCancelled else { return }
+                self?.save()
+            }
+        }
+    }
 
     private func save() {
         let snapshot = _sensitivities.withLock { $0 }
