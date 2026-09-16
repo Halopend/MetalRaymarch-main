@@ -290,8 +290,10 @@ final class ParameterPipeline: @unchecked Sendable {
                     settings.setAudioFormulaParamOffset(index: formulaIndex, offset: resolved - outcome.base)
                 }
             } else {
-                FormulaCatalog.setParam(&params, index: formulaIndex, value: resolved)
-                settings.formulaParams = params
+                // Atomic per-slot write (inside the settings lock): the old
+                // read → setParam → write-back through the property raced a
+                // concurrent gesture/audio dispatch and lost one update.
+                settings.mutateFormulaParam(index: formulaIndex, value: resolved)
             }
             if debugTraceEnabled {
                 print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(resolved)")

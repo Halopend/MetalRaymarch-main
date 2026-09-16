@@ -787,11 +787,15 @@ final class RenderSettings: @unchecked Sendable {
 
     /// The composable domain-transform stack (Transformations UI). Order is the
     /// order of application; an empty stack means no transforms.
+    /// Over-capacity stacks (only possible from an imported scene — the UI
+    /// blocks additions past the cap) truncate to the GPU ABI here, keeping
+    /// repeat groups intact, so the live stack can never render a
+    /// group-sliced mutation of the authored fractal.
     var spaceWarpStack: [SpaceWarpOpValue] {
         get { withLock { _spaceWarpStack } }
         set {
             withLock {
-                _spaceWarpStack = newValue
+                _spaceWarpStack = spaceWarpOpsFittingGPUCap(newValue)
                 _spaceWarpAudioOffsets = allowedSpaceWarpAudioOffsetsLocked(
                     _spaceWarpAudioOffsets
                 )
@@ -1453,6 +1457,21 @@ final class RenderSettings: @unchecked Sendable {
                 if !_isAnimationPlaying {
                     _syncAnimationBaseFormulaParamsFromCurrent_locked()
                 }
+            }
+        }
+    }
+
+    /// Atomically write one formula-param slot (0–15). Callers that read-
+    /// modify-write the shared 16-float blob (`ParameterPipeline`'s gesture and
+    /// audio dispatch threads) previously read + wrote through the property
+    /// separately — two concurrent dispatches could lose an update between the
+    /// property's own locks.
+    func mutateFormulaParam(index: Int, value: Float) {
+        withLock {
+            guard index >= 0, index < 16 else { return }
+            FormulaCatalog.setParam(&_formulaParams, index: index, value: value)
+            if !_isAnimationPlaying {
+                _syncAnimationBaseFormulaParamsFromCurrent_locked()
             }
         }
     }
@@ -4582,12 +4601,17 @@ final class RenderSettings: @unchecked Sendable {
     }
 
     /// Set all targets at once (for preset loading)
+    /// Non-finite input is rejected (previous target kept): callers feed this
+    /// from files, animation keyframes, and SharePlay peers — a NaN/Inf target
+    /// poisons the smooth-damp pipeline session-wide.
     func setTargets(minDistance: Float, foldingLimit: Float, sphereRadius: Float, position: SIMD3<Float>) {
         withLock {
-            _targetMinDistance = minDistance
-            _targetFoldingLimit = foldingLimit
-            _targetSphereRadius = sphereRadius
-            _targetPosition = position
+            if minDistance.isFinite { _targetMinDistance = minDistance }
+            if foldingLimit.isFinite { _targetFoldingLimit = foldingLimit }
+            if sphereRadius.isFinite { _targetSphereRadius = sphereRadius }
+            if position.x.isFinite, position.y.isFinite, position.z.isFinite {
+                _targetPosition = position
+            }
         }
     }
     

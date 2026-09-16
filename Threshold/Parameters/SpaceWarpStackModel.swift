@@ -856,6 +856,30 @@ private func precomputedGPUOp(from v: SpaceWarpOpValue) -> SpaceWarpOp {
                        axisX: n.x, axisY: n.y, axisZ: n.z, groupControl: 0)
 }
 
+/// Fit `ops` inside the GPU ABI cap WITHOUT slicing a repeat group across the
+/// boundary: the shader clamps a group's length to the remaining slots, so a
+/// 3-op group truncated at the cap runs as 1 op × iterations — a different
+/// fractal than authored. Over-capacity trailing ops (whole trailing groups)
+/// are dropped with a console warning instead of failing silently.
+func spaceWarpOpsFittingGPUCap(_ ops: [SpaceWarpOpValue]) -> [SpaceWarpOpValue] {
+    let cap = Int(kMaxSpaceWarpOps)
+    guard ops.count > cap else { return ops }
+    var index = 0
+    while index < cap {
+        if let groupID = ops[index].groupID {
+            var end = index
+            while end < ops.count, ops[end].groupID == groupID { end += 1 }
+            if end > cap { break }   // whole group doesn't fit → stop before it
+            index = end
+        } else {
+            index += 1
+        }
+    }
+    let fit = min(index, cap)
+    print("⚠️ Space-warp stack exceeds GPU capacity (\(ops.count) ops > \(cap)); dropped \(ops.count - fit) trailing op(s), keeping repeat groups intact.")
+    return Array(ops.prefix(fit))
+}
+
 /// Pack the enabled ops (in order) into the GPU `SpaceWarpStack`, precomputing each
 /// (`precomputedGPUOp`). Disabled ops are dropped; the list is capped at `kMaxSpaceWarpOps`.
 func cSpaceWarpStack(from ops: [SpaceWarpOpValue]) -> SpaceWarpStack {
@@ -863,7 +887,8 @@ func cSpaceWarpStack(from ops: [SpaceWarpOpValue]) -> SpaceWarpStack {
     let maxN = Int(kMaxSpaceWarpOps)
     // Same collapse the codegen path applies, so the packed buffer and the unrolled
     // shader index identical ops (SpaceWarpStackSimplifier is pure → both agree).
-    let active = SpaceWarpStackSimplifier.simplify(ops.filter { $0.isEnabled }).prefix(maxN)
+    // Group-aware cap: never slice a repeat group across the boundary.
+    let active = spaceWarpOpsFittingGPUCap(SpaceWarpStackSimplifier.simplify(ops.filter { $0.isEnabled }))
     withUnsafeMutablePointer(to: &stack.ops) { tuplePtr in
         tuplePtr.withMemoryRebound(to: SpaceWarpOp.self, capacity: maxN) { base in
             for (i, v) in active.enumerated() {

@@ -321,12 +321,60 @@ final class ControlStateStore {
     /// `updateSpaceWarpOp` and intentionally avoid the revision bump.
     func replaceSpaceWarpStack(_ updated: [SpaceWarpOpValue]) {
         guard let settings else { return }
-        let structureChanged = !Self.hasSameSpaceWarpStructure(spaceWarpStack, updated)
+        let old = spaceWarpStack
+        // Commit through the setter first (it truncates over-cap imports to
+        // the GPU ABI) and mirror the POST-TRUNCATION truth, so the cache can
+        // never diverge from what the renderer will execute.
         settings.spaceWarpStack = updated
-        spaceWarpStack = updated
-        if structureChanged {
+        let committed = settings.spaceWarpStack
+        // Music mappings address transform ops by SLOT INDEX. Without a remap,
+        // inserting/reordering an op above a mapped slot silently re-points the
+        // audio (and the ♪ badge) at whatever now occupies that index. Follow
+        // the mapped OP by its stable UUID across the edit instead.
+        let remapped = Self.remapSpaceWarpMusicMappings(
+            settings.musicReactiveMappings,
+            oldStack: old,
+            newStack: committed
+        )
+        if remapped != settings.musicReactiveMappings {
+            settings.musicReactiveMappings = remapped
+        }
+        spaceWarpStack = committed
+        if !Self.hasSameSpaceWarpStructure(old, committed) {
             spaceWarpStructureRevision &+= 1
         }
+    }
+
+    /// Follow slot-indexed music mappings across a stack structure edit:
+    /// old slot → op UUID → new slot. A mapping whose op was deleted is
+    /// dropped (its target no longer exists) rather than left pointing at an
+    /// unrelated transform.
+    private static func remapSpaceWarpMusicMappings(
+        _ mappings: [MusicReactiveMapping],
+        oldStack: [SpaceWarpOpValue],
+        newStack: [SpaceWarpOpValue]
+    ) -> [MusicReactiveMapping] {
+        guard !oldStack.isEmpty else { return mappings }
+        var output = mappings
+        var dropped: [Int] = []
+        for index in output.indices {
+            guard let slot = output[index].target.spaceWarpSlot else { continue }
+            guard oldStack.indices.contains(slot),
+                  let newSlot = newStack.firstIndex(where: { $0.id == oldStack[slot].id }),
+                  MusicReactiveTarget.allSpaceWarpCases.indices.contains(newSlot) else {
+                dropped.append(index)
+                continue
+            }
+            output[index].target = MusicReactiveTarget.allSpaceWarpCases[newSlot]
+        }
+        guard !dropped.isEmpty else { return output }
+        let dropSet = Set(dropped)
+        var result: [MusicReactiveMapping] = []
+        result.reserveCapacity(output.count - dropSet.count)
+        for (index, mapping) in output.enumerated() where !dropSet.contains(index) {
+            result.append(mapping)
+        }
+        return result
     }
 
     func addScenePrimitive(_ kind: ScenePrimitiveKind) {
