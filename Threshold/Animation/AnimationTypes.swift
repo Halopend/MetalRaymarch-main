@@ -429,16 +429,24 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.id = try c.decode(UUID.self, forKey: .id)
         self.name = try c.decode(String.self, forKey: .name)
         self.duration = try c.decode(TimeInterval.self, forKey: .duration)
-        self.minDistance = try c.decode(Float.self, forKey: .minDistance)
-        self.foldingLimit = try c.decode(Float.self, forKey: .foldingLimit)
-        self.sphereRadius = try c.decode(Float.self, forKey: .sphereRadius)
-        self.fractalScale = try c.decode(Float.self, forKey: .fractalScale)
-        self.baseFractalIterations = try c.decode(Int.self, forKey: .baseFractalIterations)
-        self.baseMaxRaySteps = try c.decode(Int.self, forKey: .baseMaxRaySteps)
+        // The shape/quality fields were required (`decode`): a `.threshanim`
+        // missing ANY one key rejected the whole scene — the exact bug class
+        // the one-level-up AnimationScene decoder already fixed. Fall back to
+        // the engine defaults and clamp the budget fields to their specs.
+        self.minDistance = try c.decodeIfPresent(Float.self, forKey: .minDistance) ?? 0.8
+        self.foldingLimit = try c.decodeIfPresent(Float.self, forKey: .foldingLimit) ?? 1.0
+        self.sphereRadius = try c.decodeIfPresent(Float.self, forKey: .sphereRadius) ?? 0.5
+        self.fractalScale = try c.decodeIfPresent(Float.self, forKey: .fractalScale) ?? 2.8
+        self.baseFractalIterations = try c.decodeIfPresent(Int.self, forKey: .baseFractalIterations)
+            .map { max(ControlCatalog.iterations.integerRange.lowerBound,
+                       min(ControlCatalog.iterations.integerRange.upperBound, $0)) } ?? 9
+        self.baseMaxRaySteps = try c.decodeIfPresent(Int.self, forKey: .baseMaxRaySteps)
+            .map { max(ControlCatalog.maxRaySteps.integerRange.lowerBound,
+                       min(ControlCatalog.maxRaySteps.integerRange.upperBound, $0)) } ?? 64
         self.scale = try c.decodeIfPresent(Float.self, forKey: .scale) ?? 1.0
-        self.positionX = try c.decode(Float.self, forKey: .positionX)
-        self.positionY = try c.decode(Float.self, forKey: .positionY)
-        self.positionZ = try c.decode(Float.self, forKey: .positionZ)
+        self.positionX = try c.decodeIfPresent(Float.self, forKey: .positionX) ?? 0.0
+        self.positionY = try c.decodeIfPresent(Float.self, forKey: .positionY) ?? 0.0
+        self.positionZ = try c.decodeIfPresent(Float.self, forKey: .positionZ) ?? 0.0
 
         self.detailScale = try c.decodeIfPresent(Float.self, forKey: .detailScale) ?? 1.0
         self.worldRotationX = try c.decodeIfPresent(Float.self, forKey: .worldRotationX) ?? 0.0

@@ -1249,7 +1249,14 @@ final class AnimationManager {
             NSMetadataItemFSNameKey,
             NSMetadataItemFSNameKey
         )
-        query.operationQueue = .main
+        // File Provider can emit a burst of metadata events while iCloud is
+        // hydrating the folder. Keep query gathering/notification delivery off
+        // the main actor; only the debounced reload hop below touches observable
+        // scene state.
+        let queryQueue = OperationQueue()
+        queryQueue.maxConcurrentOperationCount = 1
+        queryQueue.qualityOfService = .utility
+        query.operationQueue = queryQueue
 
         let finishObserver = NotificationCenter.default.addObserver(
             forName: .NSMetadataQueryDidFinishGathering,
@@ -1559,6 +1566,7 @@ final class AnimationManager {
         // Also update currentScene if it's the same
         if currentScene?.id == scene.id {
             currentScene = updated
+            revalidatePlayheadAfterKeyframeMutation()
         }
     }
     
@@ -1575,6 +1583,27 @@ final class AnimationManager {
             userScenes[index].removeKeyframe(at: keyframeIndex)
             if currentScene?.id == sceneID { currentScene = userScenes[index] }
             saveScenes()
+        }
+        revalidatePlayheadAfterKeyframeMutation()
+    }
+
+    /// Re-validate the playhead against the current scene's keyframe list
+    /// after any keyframe mutation (delete/reorder/replace) on the playing
+    /// scene: the stored segment index can fall out of bounds (crash on the
+    /// next `update()` subscript) and `elapsedInSegment` may exceed the new
+    /// segment duration. Clamp both.
+    private func revalidatePlayheadAfterKeyframeMutation() {
+        guard let scene = currentScene else { return }
+        let count = scene.keyframes.count
+        guard count >= 1 else {
+            // No keyframes left to play.
+            if playhead.state == .playing || playhead.state == .paused { stop() }
+            return
+        }
+        if playhead.currentKeyframeIndex >= count || playhead.currentKeyframeIndex < 0 {
+            playhead.currentKeyframeIndex = min(max(playhead.currentKeyframeIndex, 0), count - 1)
+            // The segment we were interpolating through no longer exists.
+            playhead.elapsedInSegment = 0
         }
     }
     
@@ -1983,8 +2012,18 @@ final class AnimationManager {
 
         // Resolve the current segment (from → to) based on playback mode.
         // `fromIndex` is the keyframe we started the segment at.
-        // `toIndex`   is the keyframe we are interpolating toward.
-        var fromIndex = playhead.currentKeyframeIndex
+        // `toIndex`   = the keyframe we are interpolating toward.
+        // The stored playhead index can point past the end of the list after a
+        // keyframe delete/reorder while playing (e.g. the keyframe list is
+        // edited during looping playback) — clamp it instead of crashing on
+        // the subscript below.
+        var fromIndex = min(max(playhead.currentKeyframeIndex, 0), keyframeCount - 1)
+        if fromIndex != playhead.currentKeyframeIndex {
+            // The segment we were in no longer exists: restart it at the
+            // clamped keyframe rather than carrying a stale elapsed time.
+            playhead.currentKeyframeIndex = fromIndex
+            playhead.elapsedInSegment = 0
+        }
         var toIndex: Int
         var goingForward = mode == .forward ? true : (mode == .reverse ? false : playhead.isGoingForward)
 
@@ -2413,14 +2452,25 @@ final class AnimationManager {
         saveCoalesceTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(100))
             guard !Task.isCancelled, let self else { return }
-            if self.pendingSaveHidden {
-                self.pendingSaveHidden = false
-                self.saveHiddenDefaults()
-            }
-            if self.pendingSaveOverrides {
-                self.pendingSaveOverrides = false
-                self.saveOverrides()
-            }
+            self.flushPendingSavesNow()
+        }
+    }
+
+    /// Immediate flush of any pending coalesced hidden-defaults/override
+    /// writes. Called by the debounce AND at lifecycle checkpoints
+    /// (`AppModel.saveLastState`) — a quit/kill inside the 100 ms coalesce
+    /// window (or a visionOS SIGKILL teardown that never runs the `.inactive`
+    /// scene phase) otherwise loses the edit.
+    func flushPendingSavesNow() {
+        saveCoalesceTask?.cancel()
+        saveCoalesceTask = nil
+        if pendingSaveHidden {
+            pendingSaveHidden = false
+            saveHiddenDefaults()
+        }
+        if pendingSaveOverrides {
+            pendingSaveOverrides = false
+            saveOverrides()
         }
     }
     

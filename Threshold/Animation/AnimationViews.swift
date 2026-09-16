@@ -1073,7 +1073,10 @@ struct SceneEditorView: View {
                         )
                     }
                     .onDelete { indexSet in
-                        for index in indexSet {
+                        // Delete high→low: removing an earlier index shifts the
+                        // remaining ones, so ascending iteration deletes the
+                        // wrong keyframes (and can over-delete) on multi-select.
+                        for index in indexSet.sorted(by: >) {
                             scene.removeKeyframe(at: index)
                         }
                     }
