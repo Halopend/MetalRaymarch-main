@@ -1867,11 +1867,11 @@ final class ViewportRenderer {
             return
         }
 
-        settings.bassLevel = min(1.0, max(0, features.bass * bassSensitivity))
-        settings.midLevel = min(1.0, max(0, features.mid * midSensitivity))
-        settings.trebleLevel = min(1.0, max(0, features.treble * trebleSensitivity))
-        settings.beatIntensity = min(1.0, max(0, features.onset * beatSensitivity))
-        settings.audioLevel = min(1.0, max(0, features.overall))
+        settings.bassLevel = AudioBandMapping.scaledLevel(features.bass, sensitivity: bassSensitivity)
+        settings.midLevel = AudioBandMapping.scaledLevel(features.mid, sensitivity: midSensitivity)
+        settings.trebleLevel = AudioBandMapping.scaledLevel(features.treble, sensitivity: trebleSensitivity)
+        settings.beatIntensity = AudioBandMapping.scaledLevel(features.onset, sensitivity: beatSensitivity)
+        settings.audioLevel = AudioBandMapping.scaledLevel(features.overall, sensitivity: 1.0)
     }
 
     private func updateMusicReactiveParameters(appModel: AppModel,

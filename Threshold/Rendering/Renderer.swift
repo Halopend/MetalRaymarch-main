@@ -1242,12 +1242,14 @@ actor Renderer {
 
             // An inactive snapshot is `.empty` with all-zero features (the
             // mixer never pairs isActive == false with live values), so the
-            // scaled levels are already zero without an explicit gate.
-            let bassLevel = min(1.0, max(0.0, features.bass * bassSens))
-            let midLevel = min(1.0, max(0.0, features.mid * midSens))
-            let trebleLevel = min(1.0, max(0.0, features.treble * trebleSens))
-            let beatLevel = min(1.0, max(0.0, features.onset * beatSens))
-            let overallLevel = min(1.0, max(0.0, features.overall))
+            // scaled levels are already zero without an explicit gate. The
+            // shared mapper additionally zeroes non-finite features — the
+            // visionOS path previously had no finite guard (tech debt #26).
+            let bassLevel = AudioBandMapping.scaledLevel(features.bass, sensitivity: bassSens)
+            let midLevel = AudioBandMapping.scaledLevel(features.mid, sensitivity: midSens)
+            let trebleLevel = AudioBandMapping.scaledLevel(features.treble, sensitivity: trebleSens)
+            let beatLevel = AudioBandMapping.scaledLevel(features.onset, sensitivity: beatSens)
+            let overallLevel = AudioBandMapping.scaledLevel(features.overall, sensitivity: 1.0)
             settings.bassLevel = bassLevel
             settings.midLevel = midLevel
             settings.trebleLevel = trebleLevel

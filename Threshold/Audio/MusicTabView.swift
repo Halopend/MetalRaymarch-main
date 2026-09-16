@@ -1792,16 +1792,16 @@ struct MusicTabContent: View {
                     .foregroundStyle(.secondary)
                 HStack(spacing: 10) {
                     meterBar(label: "Bass",
-                             level: min(1, max(0, mixed.bass * reactive.bassSensitivity)),
+                             level: AudioBandMapping.scaledLevel(mixed.bass, sensitivity: reactive.bassSensitivity),
                              color: .red)
                     meterBar(label: "Mid",
-                             level: min(1, max(0, mixed.mid * reactive.midSensitivity)),
+                             level: AudioBandMapping.scaledLevel(mixed.mid, sensitivity: reactive.midSensitivity),
                              color: .green)
                     meterBar(label: "Treble",
-                             level: min(1, max(0, mixed.treble * reactive.trebleSensitivity)),
+                             level: AudioBandMapping.scaledLevel(mixed.treble, sensitivity: reactive.trebleSensitivity),
                              color: .blue)
                     meterBar(label: "Drop",
-                             level: min(1, max(0, mixed.onset * reactive.beatSensitivity)),
+                             level: AudioBandMapping.scaledLevel(mixed.onset, sensitivity: reactive.beatSensitivity),
                              color: .purple)
                 }
             }
