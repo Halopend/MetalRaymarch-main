@@ -112,7 +112,7 @@ extension Renderer {
 
         let config = FunctionConstantConfig(
             fractalIterations: Int32(iterations),
-            shadowIterations: Int32(max(iterations - 2, 2)),
+            shadowIterations: reducedSecondaryIterationsForShader(iterations: iterations, fractalType: fractalType, forShadow: true),
             safetyBubbleEnabled: bubbleEnabled,
             qualityMode: Int32(qualityMode),
             debugHierarchical: false,
@@ -363,7 +363,7 @@ extension Renderer {
 
         let config = FunctionConstantConfig(
             fractalIterations: Int32(iterations),
-            shadowIterations: Int32(max(iterations - 2, 2)),
+            shadowIterations: reducedSecondaryIterationsForShader(iterations: iterations, fractalType: fractalType, forShadow: true),
             safetyBubbleEnabled: bubbleEnabled,  // Baked; toggle changes the cache key and rebuilds async
             hasSpaceWarp: hasSpaceWarp,
             hasEnvScrunch: hasEnvScrunch,
@@ -606,7 +606,7 @@ extension Renderer {
 
             let exactConfig = FunctionConstantConfig(
                 fractalIterations: Int32(iterations),
-                shadowIterations: Int32(max(iterations - 2, 2)),
+                shadowIterations: reducedSecondaryIterationsForShader(iterations: iterations, fractalType: fractalType, forShadow: true),
                 safetyBubbleEnabled: bubbleEnabled,
                 hasSpaceWarp: hasSpaceWarp,   // pair the baked FC with cacheKey's _SW segment
                 hasEnvScrunch: hasEnvScrunch, // nil on non-Mac (FC stays undefined = ON)
@@ -1064,7 +1064,7 @@ extension Renderer {
                     cacheKey: exactKey,
                     fractalType: Int32(fractalType.rawValue),
                     fractalIterations: Int32(fractalIterations),
-                    shadowIterations: Int32(max(fractalIterations - 2, 2)),
+                    shadowIterations: reducedSecondaryIterationsForShader(iterations: Int(fractalIterations), fractalType: fractalType, forShadow: true),
                     maxRaySteps: Int32(maxRaySteps),
                     mandelbulbPower: mbPowerInt,
                     safetyBubbleEnabled: bubbleEnabled,
@@ -1098,7 +1098,7 @@ extension Renderer {
             cacheKey: exactKey,
             fractalType: Int32(fractalType.rawValue),
             fractalIterations: Int32(fractalIterations),
-            shadowIterations: Int32(max(fractalIterations - 2, 2)),
+            shadowIterations: reducedSecondaryIterationsForShader(iterations: Int(fractalIterations), fractalType: fractalType, forShadow: true),
             maxRaySteps: Int32(maxRaySteps),
             mandelbulbPower: mbPowerInt,
             safetyBubbleEnabled: bubbleEnabled,

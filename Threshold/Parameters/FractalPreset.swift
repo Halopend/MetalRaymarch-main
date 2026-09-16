@@ -987,7 +987,7 @@ struct FractalPreset: Codable, Identifiable {
     ///
     /// The derived constants include:
     /// - `fractalIterations`: Enables Map() loop unrolling
-    /// - `shadowIterations`: Typically fractalIterations - 2
+    /// - `shadowIterations`: The designed reduced secondary (shadow/AO) count
     /// - `maxRaySteps`: Enables raymarch loop optimization
     /// - `neonModeEnabled`: Eliminates neon orbit tracking when false
     /// - `colorIterations`: Enables color loop unrolling
@@ -1012,7 +1012,7 @@ struct FractalPreset: Codable, Identifiable {
         let qualityMode: Int32
         switch fractalIterations {
         case 0...7: qualityMode = 2   // Low
-        case 8...9: qualityMode = 1   // Medium  
+        case 8...9: qualityMode = 1   // Medium
         default: qualityMode = 0      // High
         }
 
@@ -1021,10 +1021,16 @@ struct FractalPreset: Codable, Identifiable {
                   let rawPower = formulaParamValues?.first else { return nil }
             return FormulaCatalog.specializedMandelbulbPower(rawPower: rawPower)
         }()
-        
+
         return (
             fractalIterations: Int32(fractalIterations),
-            shadowIterations: Int32(max(fractalIterations - 2, 2)),
+            // Shader-equivalent reduced secondary count — the previous
+            // `fractalIterations - 2` bake defeated the reduced-iteration
+            // design (shadows/AO ran ~2.5× the designed cost, M10).
+            shadowIterations: reducedSecondaryIterationsForShader(
+                iterations: Int(fractalIterations),
+                fractalType: fractalType,
+                forShadow: true),
             maxRaySteps: Int32(maxRaySteps),
             neonModeEnabled: colorScheme.isNeonMode,
             colorIterations: Int32(colorIterations),

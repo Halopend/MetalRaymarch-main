@@ -1,6 +1,29 @@
 import Foundation
 import simd
 
+/// CPU mirror of the shader's `ReducedSecondaryIterations` (Shaders.metal):
+/// the DESIGNED secondary (normal/shadow) fold count. Pipeline bake sites
+/// previously passed `iterations - 2` as FC_SHADOW_ITERATIONS, so the
+/// always-set function constant defeated the reduced-iteration design —
+/// shadows/AO marched ~2.5× the designed cost on every specialized pipeline
+/// (M10). Baking the shader-equivalent value keeps loop unrolling AND matches
+/// the non-specialized runtime behavior exactly: `lodIterations` in the shader
+/// is just `max(uniforms.fractalIterations, 2)` — the same base count the bake
+/// is built from — and the cache key needs no new segment because the shadow
+/// count is a pure function of the (fractal type, iteration count) already in
+/// the key. NOTE: `FunctionConstantConfig.forQualityPreset` still bakes
+/// `iterations - 2` — its configs carry no fractal type to resolve.
+/// Lives here (not on `Renderer`) because preset prewarm derives the same
+/// constant and this file is shared by every rendering backend + Quick Look.
+func reducedSecondaryIterationsForShader(iterations: Int, fractalType: FractalModelType, forShadow: Bool) -> Int32 {
+    switch fractalType {
+    case .mandelbulb, .mandelbulbJulia, .boxFoldMandelbulb:
+        return Int32(max(forShadow ? (iterations + 2) / 3 : (iterations + 1) / 3, 2))
+    default:
+        return Int32(max((iterations * 2) / 5, 3))
+    }
+}
+
 /// Cross-platform CPU precomputation of frame-uniform shader values.
 ///
 /// These pure functions are shared by every rendering backend — the visionOS
