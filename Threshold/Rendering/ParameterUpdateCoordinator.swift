@@ -19,7 +19,15 @@ final class ParameterUpdateCoordinator: Sendable {
         var lastAudioUpdate: TimeInterval = 0
         var pendingAnimationUpdate = false
         var pendingAudioUpdate = false
-        var pendingDeltaTime: TimeInterval = 1.0 / 90.0
+        /// Frame deltas banked since the last CONSUMED animation update. The
+        /// animation gate only decides *when* to dispatch; the dt handed to
+        /// `AnimationManager.update` must be the elapsed time since the last
+        /// consumed update — the sum of every frame delta in between — not the
+        /// last single frame's dt. On a 120 Hz display the 90 Hz gate passes
+        /// every other frame, and storing the per-frame dt ran keyframed
+        /// animation at ~0.5× real speed (scenes drift out of sync with
+        /// attached audio the same way).
+        var accumulatedAnimationDelta: TimeInterval = 0
         var isMainActorDispatchScheduled = false
     }
 
@@ -63,19 +71,29 @@ final class ParameterUpdateCoordinator: Sendable {
                 (currentTime - state.lastAnimationUpdate >= animationUpdateInterval)
             let needsAudioUpdate = shouldUpdateAudio &&
                 (currentTime - state.lastAudioUpdate >= audioUpdateInterval)
-            
+
+            // Animation dt bookkeeping must run BEFORE the early return: the
+            // frames the animation gate declines are exactly the ones whose
+            // deltas must be banked for the next consumed update.
+            if shouldUpdateAnimation {
+                state.accumulatedAnimationDelta += deltaTime
+            } else {
+                // Animation not playing: don't carry stale accumulation into
+                // the next playback session.
+                state.accumulatedAnimationDelta = 0
+            }
+
             guard needsAnimationUpdate || needsAudioUpdate else { return false }
-            
+
             if needsAnimationUpdate {
                 state.lastAnimationUpdate = currentTime
             }
             if needsAudioUpdate {
                 state.lastAudioUpdate = currentTime
             }
-            
+
             state.pendingAnimationUpdate = state.pendingAnimationUpdate || needsAnimationUpdate
             state.pendingAudioUpdate = state.pendingAudioUpdate || needsAudioUpdate
-            state.pendingDeltaTime = deltaTime
             
             guard !state.isMainActorDispatchScheduled else { return false }
             
@@ -99,10 +117,19 @@ final class ParameterUpdateCoordinator: Sendable {
                 state.isMainActorDispatchScheduled = false
             }
 
+            // Consume the accumulated dt exactly when the animation update is
+            // delivered — this is the elapsed time since the previous consumed
+            // update, regardless of how many gate cycles it spanned.
+            var deltaTime: TimeInterval = 0
+            if state.pendingAnimationUpdate {
+                deltaTime = max(state.accumulatedAnimationDelta, 1.0 / 240.0)
+                state.accumulatedAnimationDelta = 0
+            }
+
             return PendingParameterWork(
                 shouldUpdateAnimation: state.pendingAnimationUpdate,
                 shouldUpdateAudio: state.pendingAudioUpdate,
-                deltaTime: state.pendingDeltaTime
+                deltaTime: deltaTime
             )
         }
 
