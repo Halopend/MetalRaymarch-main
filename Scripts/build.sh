@@ -17,6 +17,10 @@
 #   Scripts/build.sh embeds    # generate an inspection copy under .build/Generated
 #   Scripts/build.sh all       # embeds + mac + iPadOS + vision + test
 #
+# Releases/App Store: Scripts/version.sh (show|check|bump|set|marketing) — ONE build number shared
+# by Mac + iOS + visionOS (QL appexes inherit it). Run `bump` BEFORE each Organizer upload; `check`
+# is the CI drift gate.
+#
 # Override the toolchain explicitly:  DEVELOPER_DIR=/path/to/Xcode.app/Contents/Developer Scripts/build.sh mac
 
 set -euo pipefail

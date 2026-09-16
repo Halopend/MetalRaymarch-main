@@ -49,7 +49,7 @@
 		522D0EBE5B4AD8DB253BD23B /* PreviewViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1131A122AD8E8C61F00CF65 /* PreviewViewController.swift */; };
 		57E6C682186713D4EFFFCDC9 /* FingerGestureAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9DF786ED3BC98E2F232D550 /* FingerGestureAction.swift */; };
 		583434B273EC906E48710819 /* RenderSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 725149DCC30BFBEC6B030A69 /* RenderSettings.swift */; };
-		5908837C22E4E141B8B4C9C9 /* ThresholdQLPreview.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 11AA65335B2C07FEACA59B69 /* ThresholdQLPreview.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		5908837C22E4E141B8B4C9C9 /* ThresholdQLPreview.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 11AA65335B2C07FEACA59B69 /* ThresholdQLPreview.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		5D184D4FF06420DC33FC962B /* GradientColorSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5452116D4975BC87388B1C02 /* GradientColorSystem.swift */; };
 		5D83C598DA34F54BA4518A31 /* SettingsPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CDDB2DC7FC5EB734A23428C /* SettingsPersistence.swift */; };
 		65FBF0B95462B50150340873 /* GestureConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5033E2BFD21479F5C5DD621 /* GestureConfig.swift */; };
@@ -106,7 +106,7 @@
 		F638B6C567B1055C7031DE49 /* FractalModelType.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2ABDB6BC0435A12CEF659CF /* FractalModelType.swift */; };
 		F77351A72ACFDB0DE1919E14 /* LightingTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03E7522477BCD8B767E1FEAD /* LightingTypes.swift */; };
 		F78F895497B34B17AE8C7DBC /* HandAttractionConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C5C7E2D7B294CB5BAC955F4 /* HandAttractionConfig.swift */; };
-		F88BA773C7D8F0471D54B19D /* ThresholdQLThumbnail.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 8BC439643071C561249FAE99 /* ThresholdQLThumbnail.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		F88BA773C7D8F0471D54B19D /* ThresholdQLThumbnail.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 8BC439643071C561249FAE99 /* ThresholdQLThumbnail.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FCE029F5DBCF2DF1E35858EF /* AudioReactiveConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9824E07E16D25804B68E737E /* AudioReactiveConfig.swift */; };
 		FF839A449C97E5F4B0C2E334 /* FractalModelType.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDAC6A707202A0F62AF31B93 /* FractalModelType.swift */; };
 /* End PBXBuildFile section */
@@ -147,16 +147,16 @@
 			name = "Copy Formula Catalog";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		484A83441DFAD497CC97D953 /* Embed App Extensions */ = {
+		484A83441DFAD497CC97D953 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				F88BA773C7D8F0471D54B19D /* ThresholdQLThumbnail.appex in Embed App Extensions */,
-				5908837C22E4E141B8B4C9C9 /* ThresholdQLPreview.appex in Embed App Extensions */,
+				F88BA773C7D8F0471D54B19D /* ThresholdQLThumbnail.appex in Embed Foundation Extensions */,
+				5908837C22E4E141B8B4C9C9 /* ThresholdQLPreview.appex in Embed Foundation Extensions */,
 			);
-			name = "Embed App Extensions";
+			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		B7733E5CAB69F1D2BEAAA5B5 /* Copy Formula Catalog */ = {
@@ -629,7 +629,7 @@
 				D7D716B32CEAC4B200CEEA51 /* Sources */,
 				D7D716B42CEAC4B200CEEA51 /* Frameworks */,
 				D7D716B52CEAC4B200CEEA51 /* Resources */,
-				484A83441DFAD497CC97D953 /* Embed App Extensions */,
+				484A83441DFAD497CC97D953 /* Embed Foundation Extensions */,
 				D7B3C4000000000000000002 /* Stamp Git SHA */,
 			);
 			buildRules = (
@@ -715,7 +715,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1610;
-				LastUpgradeCheck = 2650;
+				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					D7D716902CEAC4B100CEEA51 = {
 						CreatedOnToolsVersion = 16.1;
@@ -1137,6 +1137,7 @@
 				CLANG_USE_OPTIMIZATION_PROFILE = YES;
 				CODE_SIGN_ENTITLEMENTS = ThresholdQuickLook/Thumbnail/ThresholdQLThumbnail.entitlements;
 				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1162,6 +1163,7 @@
 				CLANG_USE_OPTIMIZATION_PROFILE = YES;
 				CODE_SIGN_ENTITLEMENTS = ThresholdQuickLook/Preview/ThresholdQLPreview.entitlements;
 				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1191,7 +1193,7 @@
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdMac.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 29;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_ASSET_PATHS = "";
@@ -1231,7 +1233,7 @@
 				CLANG_USE_OPTIMIZATION_PROFILE = YES;
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdiOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 29;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_PREVIEWS = YES;
@@ -1241,9 +1243,14 @@
 				INFOPLIST_FILE = Threshold/App/ThresholdiOSInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1267,6 +1274,7 @@
 		8FC8011F2FFFCBFC00C1D435 /* PGO */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				MACOSX_DEPLOYMENT_TARGET = "$(RECOMMENDED_MACOSX_DEPLOYMENT_TARGET)";
 				PRODUCT_NAME = ThresholdTests;
 			};
 			name = PGO;
@@ -1277,6 +1285,7 @@
 				CLANG_USE_OPTIMIZATION_PROFILE = YES;
 				CODE_SIGN_ENTITLEMENTS = ThresholdQuickLook/Thumbnail/ThresholdQLThumbnail.entitlements;
 				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1302,6 +1311,7 @@
 				CLANG_USE_OPTIMIZATION_PROFILE = YES;
 				CODE_SIGN_ENTITLEMENTS = ThresholdQuickLook/Preview/ThresholdQLPreview.entitlements;
 				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1327,6 +1337,7 @@
 				CLANG_USE_OPTIMIZATION_PROFILE = YES;
 				CODE_SIGN_ENTITLEMENTS = ThresholdQuickLook/Thumbnail/ThresholdQLThumbnail.entitlements;
 				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1352,6 +1363,7 @@
 				CLANG_USE_OPTIMIZATION_PROFILE = YES;
 				CODE_SIGN_ENTITLEMENTS = ThresholdQuickLook/Preview/ThresholdQLPreview.entitlements;
 				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1380,7 +1392,7 @@
 				CODE_SIGN_ENTITLEMENTS = Threshold/Threshold.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_PREVIEWS = YES;
@@ -1391,9 +1403,10 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(TARGET_NAME)/App/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
 				INFOPLIST_KEY_NSHandsTrackingUsageDescription = "Hand tracking is used to interact with some parameters.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold analyzes live audio input to create music-reactive fractal visualizations.";
 				INFOPLIST_KEY_NSWorldSensingUsageDescription = "This app uses world sensing to track hand gestures for controlling the fractal visualization.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1421,7 +1434,7 @@
 				CODE_SIGN_ENTITLEMENTS = Threshold/Threshold.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 29;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
@@ -1433,9 +1446,10 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(TARGET_NAME)/App/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
 				INFOPLIST_KEY_NSHandsTrackingUsageDescription = "Hand tracking is used to interact with some parameters.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold analyzes live audio input to create music-reactive fractal visualizations.";
 				INFOPLIST_KEY_NSWorldSensingUsageDescription = "This app uses world sensing to track hand gestures for controlling the fractal visualization.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1489,7 +1503,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				"CODE_SIGN_ENTITLEMENTS[sdk=xros*]" = Threshold/Threshold.entitlements;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 29;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -1560,7 +1574,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				"CODE_SIGN_ENTITLEMENTS[sdk=xros*]" = Threshold/Threshold.entitlements;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 29;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -1599,7 +1613,7 @@
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdMac.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 29;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
@@ -1640,7 +1654,7 @@
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdMac.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 29;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_ASSET_PATHS = "";
@@ -1707,7 +1721,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				"CODE_SIGN_ENTITLEMENTS[sdk=xros*]" = Threshold/Threshold.entitlements;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 29;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -1746,7 +1760,7 @@
 				CODE_SIGN_ENTITLEMENTS = Threshold/Threshold.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 29;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
@@ -1763,9 +1777,10 @@
 				GENERATE_PROFILING_CODE = YES;
 				INFOPLIST_FILE = "$(TARGET_NAME)/App/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
 				INFOPLIST_KEY_NSHandsTrackingUsageDescription = "Hand tracking is used to interact with some parameters.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold analyzes live audio input to create music-reactive fractal visualizations.";
 				INFOPLIST_KEY_NSWorldSensingUsageDescription = "This app uses world sensing to track hand gestures for controlling the fractal visualization.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1802,7 +1817,7 @@
 				CLANG_USE_OPTIMIZATION_PROFILE = YES;
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdiOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_PREVIEWS = YES;
 				EXCLUDED_RESOURCE_FILE_NAMES = App/Info.plist;
@@ -1811,9 +1826,14 @@
 				INFOPLIST_FILE = Threshold/App/ThresholdiOSInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1842,7 +1862,7 @@
 				CLANG_USE_OPTIMIZATION_PROFILE = YES;
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdiOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 29;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_PREVIEWS = YES;
@@ -1852,9 +1872,14 @@
 				INFOPLIST_FILE = Threshold/App/ThresholdiOSInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1880,7 +1905,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 29;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1889,7 +1914,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = "$(RECOMMENDED_MACOSX_DEPLOYMENT_TARGET)";
 				MARKETING_VERSION = 1.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.ThresholdTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1906,7 +1931,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 29;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1915,7 +1940,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = "$(RECOMMENDED_MACOSX_DEPLOYMENT_TARGET)";
 				MARKETING_VERSION = 1.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.ThresholdTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";

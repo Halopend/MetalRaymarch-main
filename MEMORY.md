@@ -28,6 +28,13 @@ compiled at runtime and grafted into the renderer. Unofficial bundle IDs say `co
 - Build/test: `Scripts/build.sh mac|vision|ios|test|testfast|embeds|all`. Pins `DEVELOPER_DIR`
   (Xcode-beta → Xcode → xcode-select), requires macOS 26+ SDK, always `CODE_SIGNING_ALLOWED=NO`,
   passes `THRESHOLD_GIT_SHA`/`THRESHOLD_GIT_DIRTY`. DerivedData at `.build/DerivedData`.
+- **Build numbers: ONE shared counter for all targets** (`CURRENT_PROJECT_VERSION`; the QL appexes
+  inherit it from project defaults, so Mac/iOS/visionOS uploads always match — ASC requires the
+  appex number == host app number). `Scripts/version.sh`: `bump` **before every App Store upload**
+  (writes all 14 pbxproj configs atomically), `set N` if ASC rejects "build N already exists",
+  `marketing x.y.z`, `show`, `check` (CI drift gate). History: build 24 was committed while ASC
+  already had 28 → project re-synced to 29 on 2026-09-15. Every bump resets the PSO pipeline cache
+  (see `PipelineBinaryArchive` below — keys on `CFBundleVersion`), costing one cold Metal compile.
 - **`test` = clean + `-parallel-testing-enabled NO`, the ONLY trustworthy run.** Incremental builds have
   linked a stale `.swiftmodule` (false "TEST SUCCEEDED"); parallel MTLDevice hosts crash into phantom failures.
   `testfast` is explicitly untrusted.

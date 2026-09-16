@@ -29,6 +29,8 @@ jobs:
         run: Scripts/check_no_large_files.sh --all
       - name: Validate mixed-scene metadata
         run: python3 Scripts/mark_mixed_scenes.py --check
+      - name: Validate version sync
+        run: Scripts/version.sh check
 
   tests:
     name: Clean unit tests
