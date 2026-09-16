@@ -434,7 +434,9 @@ class AppModel {
     /// Mirror of `handTrackingEnabled` readable from the render loop off the
     /// MainActor. Writes are MainActor-only; the load/store pair makes the
     /// cross-thread read race-free instead of relying on `nonisolated(unsafe)`.
-    var handTrackingEnabledForRenderer: Bool {
+    /// `nonisolated` is what makes the render-thread read legal — the atomic
+    /// backing is what makes it sound.
+    nonisolated var handTrackingEnabledForRenderer: Bool {
         get { handTrackingEnabledForRendererValue.load(ordering: .relaxed) }
         set { handTrackingEnabledForRendererValue.store(newValue, ordering: .relaxed) }
     }
