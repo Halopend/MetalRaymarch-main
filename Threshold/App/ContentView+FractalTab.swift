@@ -647,11 +647,7 @@ extension ContentView {
                 EffectSliderRow(icon: "arrow.left.and.right", label: "Pitch",
                     value: Binding(
                         get: { rotationEuler.x },
-                        set: { newValue in
-                            var e = rotationEuler
-                            e.x = newValue
-                            setDetailRotationEuler(e)
-                        }
+                        set: { newValue in setDetailRotationAxis(0, newValue) }
                     ), range: -180...180,
                     enabled: .constant(true),
                     onChanged: {},
@@ -660,11 +656,7 @@ extension ContentView {
                 EffectSliderRow(icon: "arrow.clockwise", label: "Yaw",
                     value: Binding(
                         get: { rotationEuler.y },
-                        set: { newValue in
-                            var e = rotationEuler
-                            e.y = newValue
-                            setDetailRotationEuler(e)
-                        }
+                        set: { newValue in setDetailRotationAxis(1, newValue) }
                     ), range: -180...180,
                     enabled: .constant(true),
                     onChanged: {},
@@ -673,11 +665,7 @@ extension ContentView {
                 EffectSliderRow(icon: "arrow.up.and.down", label: "Roll",
                     value: Binding(
                         get: { rotationEuler.z },
-                        set: { newValue in
-                            var e = rotationEuler
-                            e.z = newValue
-                            setDetailRotationEuler(e)
-                        }
+                        set: { newValue in setDetailRotationAxis(2, newValue) }
                     ), range: -180...180,
                     enabled: .constant(true),
                     onChanged: {},
@@ -1706,6 +1694,16 @@ extension ContentView {
         appModel.renderSettings.worldRotation = q
         appModel.renderSettings.targetWorldRotation = q
         cache.liveWorldRotation = q
+    }
+
+    /// Set one Detail-rotation axis. Samples the LIVE quaternion at set-time:
+    /// composing from the 0.5 s-stale `cache.liveWorldRotation` mirror made a
+    /// drag after a grab rotation revert the gesture's yaw/roll with a visible
+    /// snap-back (M32).
+    private func setDetailRotationAxis(_ axis: Int, _ value: Float) {
+        var e = eulerAngles(from: appModel.renderSettings.worldRotation)
+        e[axis] = value
+        setDetailRotationEuler(e)
     }
     
     /// Extract Euler angles (degrees) from a quaternion for display.
