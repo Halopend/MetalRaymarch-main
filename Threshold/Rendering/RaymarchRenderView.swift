@@ -2351,7 +2351,6 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
     /// encoding monopolize the UI thread.
     let prioritizesControlUpdates: Bool
     let onRadialMenuRequest: (CGPoint) -> Void
-    let onPhoneEdgeMenuGesture: (PhoneEdgeMenuGesturePhase) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(appModel: appModel)
@@ -2383,7 +2382,6 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             appModel?.inputOwnershipStore.canConsume(.viewport) ?? false
         }
         view.onRadialMenuRequest = onRadialMenuRequest
-        context.coordinator.onPhoneEdgeMenuGesture = onPhoneEdgeMenuGesture
         view.delegate = context.coordinator
         context.coordinator.attachGestures(to: view)
         context.coordinator.configure(view)
@@ -2399,7 +2397,6 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             appModel?.inputOwnershipStore.canConsume(.viewport) ?? false
         }
         view.onRadialMenuRequest = onRadialMenuRequest
-        context.coordinator.onPhoneEdgeMenuGesture = onPhoneEdgeMenuGesture
     }
 
     static func dismantleUIView(_ uiView: MTKView, coordinator: Coordinator) {
@@ -2419,7 +2416,6 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
 
     final class Coordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDelegate {
         var appModel: AppModel
-        var onPhoneEdgeMenuGesture: ((PhoneEdgeMenuGesturePhase) -> Void)?
         let inputController = ViewportInputAccumulator()
         private var renderer: ViewportRenderer?
 
@@ -2439,8 +2435,6 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         private weak var twoFingerPan: UIPanGestureRecognizer?
         private weak var threeFingerScenePan: UIPanGestureRecognizer?
         private weak var pinch: UIPinchGestureRecognizer?
-        private weak var leftEdgeMenuPan: UIScreenEdgePanGestureRecognizer?
-        private weak var rightEdgeMenuPan: UIScreenEdgePanGestureRecognizer?
 
         init(appModel: AppModel) {
             self.appModel = appModel
@@ -2545,41 +2539,22 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             view.addGestureRecognizer(scenePan)
             view.addGestureRecognizer(pinchGesture)
 
-            if UIDevice.current.userInterfaceIdiom == .phone {
-                attachPhoneEdgeMenuGesture(.left, to: view)
-                attachPhoneEdgeMenuGesture(.right, to: view)
+            // Phone activation is an explicit toolbar button. A hidden
+            // double-tap made ordinary camera interaction feel unpredictable;
+            // iPad retains the compact canvas shortcut.
+            if UIDevice.current.userInterfaceIdiom != .phone {
+                let doubleTap = LowMovementTapGestureRecognizer(
+                    maximumMovement: RadialActivationPolicy.maximumMovement(for: .touch),
+                    target: self,
+                    action: #selector(handleDoubleTap(_:))
+                )
+                doubleTap.numberOfTapsRequired = 2
+                doubleTap.cancelsTouchesInView = false
+                doubleTap.delaysTouchesBegan = false
+                doubleTap.delaysTouchesEnded = false
+                doubleTap.delegate = self
+                view.addGestureRecognizer(doubleTap)
             }
-            let doubleTap = LowMovementTapGestureRecognizer(
-                maximumMovement: RadialActivationPolicy.maximumMovement(for: .touch),
-                target: self,
-                action: #selector(handleDoubleTap(_:))
-            )
-            doubleTap.numberOfTapsRequired = 2
-            doubleTap.cancelsTouchesInView = false
-            doubleTap.delaysTouchesBegan = false
-            doubleTap.delaysTouchesEnded = false
-            doubleTap.delegate = self
-            view.addGestureRecognizer(doubleTap)
-        }
-
-        private func attachPhoneEdgeMenuGesture(_ edge: UIRectEdge, to view: UIView) {
-            let gesture = UIScreenEdgePanGestureRecognizer(
-                target: self,
-                action: #selector(handlePhoneEdgeMenuPan(_:))
-            )
-            gesture.edges = edge
-            gesture.delegate = self
-            gesture.cancelsTouchesInView = false
-            if edge == .left {
-                leftEdgeMenuPan = gesture
-            } else {
-                rightEdgeMenuPan = gesture
-            }
-            // An edge swipe is navigation, never the beginning of an orbit.
-            // Delay the one-finger camera recognizer until this recognizer has
-            // either claimed the edge or failed away from it.
-            oneFingerOrbit?.require(toFail: gesture)
-            view.addGestureRecognizer(gesture)
         }
 
         func tearDown() {
@@ -2603,7 +2578,6 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                 appModel.inputOwnershipStore.release(.viewport)
             }
             cameraRecognizersSuspendedForScenePan = false
-            onPhoneEdgeMenuGesture = nil
             inputController.setFocus(false)
             renderer = nil
             Task { @MainActor [appModel, ownerID = ObjectIdentifier(self)] in
@@ -2800,27 +2774,6 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                   appModel.inputOwnershipStore.canConsume(.viewport),
                   let view = gesture.view as? TouchVisualizingMTKView else { return }
             view.onRadialMenuRequest?(gesture.location(in: view))
-        }
-
-        @objc private func handlePhoneEdgeMenuPan(_ gesture: UIScreenEdgePanGestureRecognizer) {
-            guard let view = gesture.view as? TouchVisualizingMTKView else { return }
-            let edge: UIRectEdge = gesture.edges.contains(.left) ? .left : .right
-            let location = gesture.location(in: view)
-            let translation = gesture.translation(in: view).x
-            switch gesture.state {
-            case .began:
-                onPhoneEdgeMenuGesture?(.began(edge: edge, location: location))
-            case .changed:
-                let inwardTranslation = edge == .left ? translation : -translation
-                onPhoneEdgeMenuGesture?(.changed(edge: edge, location: location, translation: max(0, inwardTranslation)))
-            case .ended:
-                let inwardTranslation = edge == .left ? translation : -translation
-                onPhoneEdgeMenuGesture?(.ended(edge: edge, location: location, translation: max(0, inwardTranslation)))
-            case .cancelled, .failed:
-                onPhoneEdgeMenuGesture?(.cancelled(edge: edge, location: location))
-            default:
-                break
-            }
         }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {

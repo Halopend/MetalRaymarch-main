@@ -63,20 +63,9 @@ enum RadialActivationPolicy {
     }
 }
 
-/// Phone quick controls deliberately use screen-edge swipes instead of a
-/// hidden double-tap. An inward edge swipe opens the strip; the reverse swipe
-/// from that strip dismisses it. Neither side is assigned to a dominant hand.
+/// Phone quick controls can be swiped back toward their owning edge to dismiss.
 enum PhoneEdgeMenuGesturePolicy {
-    static let revealDistance: CGFloat = 96
     static let dismissalDistance: CGFloat = 24
-
-    static func revealProgress(for translation: CGFloat) -> CGFloat {
-        min(max(translation / revealDistance, 0), 1)
-    }
-
-    static func shouldPresent(translation: CGFloat) -> Bool {
-        translation >= revealDistance * 0.72
-    }
 
     static func shouldDismiss(opensLeft: Bool, horizontalTranslation: CGFloat) -> Bool {
         opensLeft

@@ -2,13 +2,6 @@
 import SwiftUI
 import UIKit
 
-enum PhoneEdgeMenuGesturePhase {
-    case began(edge: UIRectEdge, location: CGPoint)
-    case changed(edge: UIRectEdge, location: CGPoint, translation: CGFloat)
-    case ended(edge: UIRectEdge, location: CGPoint, translation: CGFloat)
-    case cancelled(edge: UIRectEdge, location: CGPoint)
-}
-
 @main
 struct ThresholdiOSApp: App {
     @State private var appModel = AppModel()
@@ -40,9 +33,6 @@ private struct ThresholdiOSRootView: View {
     @State private var restoreControlsAfterFormulaEditor = false
     @State private var radialMenu = RadialMenuModel(interactionProfile: .touch)
     @State private var radialCurvature = 0.72
-    @State private var phoneEdgeMenuEdge: UIRectEdge?
-    @State private var phoneEdgeMenuProgress: CGFloat = 1
-    @State private var phoneEdgeMenuInteractionID = 0
     @State private var isStartupCoverVisible = true
     private let controlsAnimation = MenuChrome.panelSpring
 
@@ -133,16 +123,16 @@ private struct ThresholdiOSRootView: View {
                     || isAnimationEditorPresented,
                 onRadialMenuRequest: { location in
                     toggleRadialMenu(at: location, viewportSize: proxy.size)
-                },
-                onPhoneEdgeMenuGesture: { phase in
-                    handlePhoneEdgeMenuGesture(phase, viewportSize: proxy.size)
                 }
             )
                 .ignoresSafeArea()
                 .background(Color.black)
                 .overlay(alignment: .topTrailing) {
                     if !isFormulaEditorPresented {
-                        controlsToggle
+                        phoneAwareControls(
+                            viewportSize: proxy.size,
+                            safeAreaInsets: safeAreaInsets
+                        )
                             // The overlay already starts inside the safe area. Phones only
                             // need a small local margin; iPad keeps extra window-chrome clearance.
                             .padding(.top, isPhone ? 4 : max(16, safeAreaInsets.top + 8))
@@ -189,7 +179,6 @@ private struct ThresholdiOSRootView: View {
                             projection: radialProjection,
                             interactionProfile: radialMenu.interactionProfile,
                             layout: UIDevice.current.userInterfaceIdiom == .phone ? .straightEdge : .radial,
-                            edgeRevealProgress: phoneEdgeMenuProgress,
                             allowsPresentationSelection: false,
                             path: Binding(
                                 get: { radialMenu.path },
@@ -273,9 +262,6 @@ private struct ThresholdiOSRootView: View {
     }
 
     private func presentRadialMenu(at location: CGPoint, viewportSize: CGSize) {
-        // Default to fully revealed. `handlePhoneEdgeMenuGesture` overrides
-        // this straight after presenting so the drag starts off-screen.
-        phoneEdgeMenuProgress = 1
         setControlsVisible(false)
         appModel.controlStateStore.startSync(with: appModel.renderSettings, appModel: appModel)
         let anchor = CGPoint(
@@ -298,98 +284,7 @@ private struct ThresholdiOSRootView: View {
         }
     }
 
-    private func handlePhoneEdgeMenuGesture(
-        _ phase: PhoneEdgeMenuGesturePhase,
-        viewportSize: CGSize
-    ) {
-        guard isPhone else { return }
-
-        switch phase {
-        case let .began(edge, location):
-            guard !radialMenu.isPresented,
-                  appModel.inputOwnershipStore.claim(.radialMenu) else { return }
-            phoneEdgeMenuInteractionID += 1
-            phoneEdgeMenuEdge = edge
-            let anchor = CGPoint(
-                x: edge == .left ? 0 : viewportSize.width,
-                y: clampedPhoneMenuY(location.y, viewportSize: viewportSize)
-            )
-            presentRadialMenu(at: anchor, viewportSize: viewportSize)
-            phoneEdgeMenuProgress = 0
-
-        case let .changed(edge, location, translation):
-            guard radialMenu.isPresented, phoneEdgeMenuEdge == edge else { return }
-            phoneEdgeMenuProgress = PhoneEdgeMenuGesturePolicy.revealProgress(for: translation)
-            radialMenu.anchor = CGPoint(
-                x: edge == .left ? 0 : viewportSize.width,
-                y: clampedPhoneMenuY(location.y, viewportSize: viewportSize)
-            )
-
-        case let .ended(edge, location, translation):
-            finishPhoneEdgeMenuGesture(
-                edge: edge,
-                location: location,
-                translation: translation,
-                viewportSize: viewportSize,
-                cancelled: false
-            )
-
-        case let .cancelled(edge, location):
-            finishPhoneEdgeMenuGesture(
-                edge: edge,
-                location: location,
-                translation: 0,
-                viewportSize: viewportSize,
-                cancelled: true
-            )
-        }
-    }
-
-    private func finishPhoneEdgeMenuGesture(
-        edge: UIRectEdge,
-        location: CGPoint,
-        translation: CGFloat,
-        viewportSize: CGSize,
-        cancelled: Bool
-    ) {
-        guard radialMenu.isPresented, phoneEdgeMenuEdge == edge else { return }
-        let interactionID = phoneEdgeMenuInteractionID
-        let shouldPresent = !cancelled && PhoneEdgeMenuGesturePolicy.shouldPresent(translation: translation)
-
-        if shouldPresent {
-            withAnimation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.86)) {
-                phoneEdgeMenuProgress = 1
-                radialMenu.anchor = CGPoint(
-                    x: edge == .left ? 0 : viewportSize.width,
-                    y: clampedPhoneMenuY(location.y, viewportSize: viewportSize)
-                )
-            }
-            phoneEdgeMenuEdge = nil
-        } else {
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
-                phoneEdgeMenuProgress = 0
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-                // Only a newer interaction may cancel this dismissal. Any
-                // other bail-out would leave the menu presented at progress
-                // zero: invisible, but still holding the viewport claim.
-                guard interactionID == phoneEdgeMenuInteractionID else { return }
-                dismissRadialMenu()
-            }
-        }
-    }
-
-    private func clampedPhoneMenuY(_ y: CGFloat, viewportSize: CGSize) -> CGFloat {
-        min(max(y, 32), max(32, viewportSize.height - 32))
-    }
-
     private func dismissRadialMenu() {
-        // Resolve the edge drag first, and unconditionally: a dismissal can
-        // arrive mid-drag from a route change, an editor, or view teardown,
-        // and a partial progress left behind here would re-present the strip
-        // off-screen while it still held the interaction claim.
-        phoneEdgeMenuEdge = nil
-        phoneEdgeMenuProgress = 1
         guard radialMenu.isPresented else { return }
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) {
             radialMenu.dismiss()
@@ -541,6 +436,41 @@ private struct ThresholdiOSRootView: View {
         .buttonStyle(.plain)
         .accessibilityLabel(isShowingControls ? "Hide controls" : "Show controls")
     }
+
+    @ViewBuilder
+    private func phoneAwareControls(
+        viewportSize: CGSize,
+        safeAreaInsets: EdgeInsets
+    ) -> some View {
+        if isPhone {
+            HStack(spacing: 8) {
+                Button {
+                    toggleRadialMenu(
+                        at: CGPoint(
+                            x: viewportSize.width,
+                            y: max(safeAreaInsets.top + 88, viewportSize.height * 0.34)
+                        ),
+                        viewportSize: viewportSize
+                    )
+                } label: {
+                    Image(systemName: "circle.grid.cross")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+                        .foregroundStyle(.primary)
+                        .shadow(color: Color.black.opacity(0.35), radius: 10, x: 0, y: 4)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open radial controls")
+
+                controlsToggle
+            }
+        } else {
+            controlsToggle
+        }
+    }
 }
 
 private struct ThresholdiOSInspectorContent: View {
@@ -569,7 +499,12 @@ private struct ThresholdiOSInspectorContent: View {
             .presentationBackground(.clear)
             .opacity(appModel.isAudioReactivityIsolationPreviewActive ? 0 : 1)
             .overlay(alignment: .leading) {
-                swipeDismissHandle
+                // iPhone already supplies native sheet drag affordances. The
+                // side rail looked like a stray scrollbar and competed with
+                // the system's interactive dismissal gesture.
+                if UIDevice.current.userInterfaceIdiom != .phone {
+                    swipeDismissHandle
+                }
             }
     }
 
