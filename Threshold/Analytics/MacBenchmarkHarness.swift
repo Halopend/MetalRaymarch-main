@@ -754,21 +754,38 @@ enum MacBenchmarkHarness {
 
         var results: [BenchJobResult] = []
         var lastLoadedScene: String?
+        // What the previous job pinned, so a same-scene job that DOESN'T
+        // re-pin an axis can reload instead of silently measuring with the
+        // previous job's overrides (a nil shadows/qc pair is an early-return
+        // no-op, not a reset).
+        var lastPinnedShadows: Bool?
+        var lastPinnedQC: [(String, Float)] = []
         for job in jobs {
             guard let preset = resolvePreset(named: job.scene, in: all) else {
                 log("WARN scene not found: '\(job.scene)' — job '\(job.name)' skipped. Available: "
                     + all.map { $0.name }.joined(separator: " | "))
                 continue
             }
-            // Consecutive jobs on the same scene skip the reload + settle: the
-            // per-job overrides below re-pin every config axis a job can vary, so
-            // the only state a reload would reset is exactly what we re-apply.
+            // Consecutive jobs on the same scene skip the reload + settle — but
+            // ONLY when the previous job left nothing pinned that this job
+            // doesn't pin identically. Otherwise job B would measure with
+            // job A's overrides and downstream baselines would be wrong.
             let needsLoad = lastLoadedScene != job.scene
+                || !previousPinsCovered(previousShadows: lastPinnedShadows,
+                                        previousQC: lastPinnedQC,
+                                        currentShadows: job.shadows,
+                                        currentQC: job.qc)
+            lastPinnedShadows = job.shadows
+            lastPinnedQC = job.qc
             if let record = await measure(job: job, preset: preset, reload: needsLoad,
                                           appModel: appModel, renderer: renderer, settings: settings,
                                           pngDir: job.png ? pngDir : nil) {
                 results.append(record)
                 lastLoadedScene = job.scene
+            } else {
+                // A failed measure leaves unknown settings state: force the
+                // next same-scene job to reload.
+                lastLoadedScene = nil
             }
         }
 
@@ -794,6 +811,22 @@ enum MacBenchmarkHarness {
         } catch {
             log("FATAL write failed: \(error)"); exit(5)
         }
+    }
+
+    /// True when the current job re-pins (or leaves clean) every axis the
+    /// previous same-scene job pinned — the only case where skipping the
+    /// reload cannot leak the previous job's configuration into this
+    /// measurement. A nil shadows/qc on the previous job means it pinned
+    /// nothing (nothing to cover).
+    private static func previousPinsCovered(previousShadows: Bool?, previousQC: [(String, Float)],
+                                            currentShadows: Bool?, currentQC: [(String, Float)]) -> Bool {
+        if let previousShadows, previousShadows != currentShadows { return false }
+        if !previousQC.isEmpty {
+            // Tuples aren't Equatable — compare via stable key=value strings.
+            let serialize: ([(String, Float)]) -> [String] = { $0.map { "\($0.0)=\($0.1)" } }
+            if serialize(previousQC) != serialize(currentQC) { return false }
+        }
+        return true
     }
 
     /// Measure one resolved job. `reload: false` skips the scene load + settle

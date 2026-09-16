@@ -91,6 +91,23 @@ run_config accel-on  "$ACCEL_QC"
 run_config accel-off ""
 
 if [[ "$REBASELINE" == "1" ]]; then
+    # Refuse to reset the timing baselines from a degenerate run (zero
+    # GPU/step samples would re-baseline the gate on instrumentation loss).
+    python3 - "$WORK" <<'EOF' || { echo "FATAL: refusing to rebaseline an invalid run" >&2; exit 2; }
+import json, sys, pathlib
+work = pathlib.Path(sys.argv[1])
+bad = []
+for name in ("accel-on", "accel-off"):
+    rec = json.load(open(work / f"{name}.json"))["scenes"][0]
+    zero = [k for k in ("gpuMsAvg", "iterationsAvg") if float(rec.get(k) or 0) <= 0.0]
+    if not int(rec.get("frames") or 0) > 0:
+        zero.append("frames")
+    if zero:
+        bad.append(f"{name}: zero {', '.join(zero)}")
+if bad:
+    print("; ".join(bad), file=sys.stderr)
+    sys.exit(1)
+EOF
     mkdir -p "$BASE/png-accel-on" "$BASE/png-accel-off"
     cp "$WORK/accel-on.json"  "$BASE/mac-stress-1080p-accel-on.json"
     cp "$WORK/accel-off.json" "$BASE/mac-stress-1080p-accel-off.json"
@@ -105,9 +122,28 @@ python3 - "$WORK" "$BASE" "$TOLERANCE_PCT" "$STEPS_TOLERANCE_PCT" "$SCENE" <<'EO
 import json, sys, pathlib
 work, base, tol, steps_tol, scene = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4]), sys.argv[5]
 fail = False
+
+def instrumentation_loss(record):
+    # Zero samples = harness instrumentation loss (gpuMsAvg 0 when no GPU
+    # samples), which previously read as a −100% "improved" green pass.
+    zero = [k for k in ("gpuMsAvg", "iterationsAvg") if float(record.get(k) or 0) <= 0.0]
+    if not int(record.get("frames") or 0) > 0:
+        zero.append("frames")
+    return zero
+
 for name in ("accel-on", "accel-off"):
     cur = json.load(open(work / f"{name}.json"))["scenes"][0]
     ref = json.load(open(base / f"mac-stress-1080p-{name}.json"))["scenes"][0]
+    loss = instrumentation_loss(cur)
+    if loss:
+        print(f"{name}: INSTRUMENTATION LOSS — zero {', '.join(loss)}; failing the gate instead of reading it as an improvement.")
+        fail = True
+        continue
+    ref_loss = instrumentation_loss(ref)
+    if ref_loss:
+        print(f"{name}: BASELINE INSTRUMENTATION LOSS — zero {', '.join(ref_loss)}; rebaseline required before gating.")
+        fail = True
+        continue
     d_gpu = 100.0 * (cur["gpuMsAvg"] - ref["gpuMsAvg"]) / ref["gpuMsAvg"]
     d_steps = 100.0 * (cur["iterationsAvg"] - ref["iterationsAvg"]) / max(ref["iterationsAvg"], 1e-9)
     png_cur = (work / f"png-{name}" / f"{scene}.png").read_bytes()
