@@ -22,9 +22,18 @@ struct ControlCatalogSection: Hashable, Sendable {
 @MainActor
 final class ControlCatalogProjectionCache {
     private var projections: [ControlCatalogProjectionKey: [ControlCatalogSection]] = [:]
+    /// LRU access order. The only invalidation hook (`invalidate()`) had zero
+    /// call sites, so a long transform session — where the key's
+    /// `transformRevision` bumps on every structure edit — grew this
+    /// dictionary without bound.
+    private var accessOrder: [ControlCatalogProjectionKey] = []
+    private static let capacity = 64
 
     func sections(for key: ControlCatalogProjectionKey) -> [ControlCatalogSection] {
-        if let cached = projections[key] { return cached }
+        if let cached = projections[key] {
+            touch(key)
+            return cached
+        }
 
         let eligible: [(descriptor: SemanticControlDescriptor, section: String, order: Int)] =
             ParameterCatalog.semanticDescriptors.compactMap { descriptor in
@@ -54,11 +63,28 @@ final class ControlCatalogProjectionCache {
             )
         }
         projections[key] = result
+        touch(key)
+        evictIfNeeded()
         return result
+    }
+
+    private func touch(_ key: ControlCatalogProjectionKey) {
+        if let index = accessOrder.firstIndex(of: key) {
+            accessOrder.remove(at: index)
+        }
+        accessOrder.append(key)
+    }
+
+    private func evictIfNeeded() {
+        while accessOrder.count > Self.capacity {
+            let evicted = accessOrder.removeFirst()
+            projections.removeValue(forKey: evicted)
+        }
     }
 
     func invalidate() {
         projections.removeAll(keepingCapacity: true)
+        accessOrder.removeAll(keepingCapacity: true)
     }
 }
 

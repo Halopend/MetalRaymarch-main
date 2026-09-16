@@ -10,6 +10,7 @@ import SwiftUI
 import Foundation
 import ImageIO
 import simd
+import CryptoKit
 
 #if os(visionOS) || os(iOS)
 typealias PlatformImage = UIImage
@@ -1615,7 +1616,13 @@ struct FractalPreset: Codable, Identifiable {
     /// Get the thumbnail as a platform image.
     /// Uses ImageIO to downsample to display size, avoiding full-resolution decoding.
     private static let thumbnailMaxPixelSize: CGFloat = 240 // 120pt @2x
-    nonisolated(unsafe) private static let thumbnailCache = NSCache<NSString, PlatformImage>()
+    nonisolated(unsafe) private static let thumbnailCache: NSCache<NSString, PlatformImage> = {
+        let cache = NSCache<NSString, PlatformImage>()
+        // Bound orphaned data-hash entries (old payloads keep their key until
+        // evicted — content changes mint new keys).
+        cache.countLimit = 256
+        return cache
+    }()
 
     static func clearThumbnailCache(for id: UUID) {
         thumbnailCache.removeObject(forKey: id.uuidString as NSString)
@@ -1625,19 +1632,30 @@ struct FractalPreset: Codable, Identifiable {
         thumbnailCache.removeAllObjects()
     }
 
+    /// Stable cache key for a thumbnail payload: a digest of the BYTES, not the
+    /// preset id. Scene-card views build display-only presets with a fresh
+    /// `UUID()` per body evaluation, so the id-keyed cache missed on every
+    /// render — each card re-ran ImageIO decoding and inserted an orphaned
+    /// cache entry. Same bytes → same key → cache hit; changed bytes get a new
+    /// key, so no explicit invalidation is needed for content changes.
+    private static func thumbnailCacheKey(for data: Data) -> NSString {
+        var hasher = SHA256()
+        hasher.update(data: data)
+        let digest = hasher.finalize()
+        let hex = digest.prefix(12).map { String(format: "%02x", $0) }.joined()
+        return hex as NSString
+    }
+
     var thumbnailImage: PlatformImage? {
-        let cacheKey = id.uuidString as NSString
-        guard let data = thumbnailData else {
-            Self.thumbnailCache.removeObject(forKey: cacheKey)
-            return nil
-        }
+        guard let data = thumbnailData else { return nil }
+        let cacheKey = Self.thumbnailCacheKey(for: data)
         if let cached = Self.thumbnailCache.object(forKey: cacheKey) {
             return cached
         }
         guard let decoded = Self.downsampledImage(from: data) else {
             return nil
         }
-        Self.thumbnailCache.setObject(decoded, forKey: cacheKey)
+        Self.thumbnailCache.setObject(decoded, forKey: cacheKey, cost: data.count)
         return decoded
     }
 
