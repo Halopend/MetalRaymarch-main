@@ -934,12 +934,22 @@ extension EmbeddedFormula {
     /// reasonable and bounds compile time.
     static let maxSourceBytes: Int = 64 * 1024
 
+    /// True when a line of Metal source is a preprocessor `#include`/`#import`
+    /// directive. Whitespace-tolerant (`#  include` is valid C — the previous
+    /// raw substring scan missed it) and comment-aware (prose mentions inside
+    /// `//`-comments no longer over-reject). Block comments can still hide a
+    /// directive-looking line; erring toward rejection is the safe side.
+    static func isIncludeOrImportDirective(_ line: some StringProtocol) -> Bool {
+        var t = line.drop(while: { $0 == " " || $0 == "\t" })
+        guard t.first == "#" else { return false }
+        t = t.dropFirst().drop(while: { $0 == " " || $0 == "\t" })
+        return t.hasPrefix("include") || t.hasPrefix("import")
+    }
+
     /// Tokens that must not appear anywhere in `metalSource`. These would let the
     /// embedded payload pull in arbitrary headers or files at compile time, which
     /// defeats the validation we do up-front.
     static let forbiddenTokens: [String] = [
-        "#import",
-        "#include",
         "@import"
     ]
 
@@ -963,6 +973,12 @@ extension EmbeddedFormula {
         }
         for token in Self.forbiddenTokens where metalSource.contains(token) {
             throw ValidationError.forbiddenToken(token)
+        }
+        // Directive-level check for #include / #import (see
+        // isIncludeOrImportDirective — whitespace-tolerant, comment-aware).
+        for line in metalSource.split(separator: "\n", omittingEmptySubsequences: false)
+        where Self.isIncludeOrImportDirective(line) {
+            throw ValidationError.forbiddenToken("#include")
         }
 
         // Cheap text check — confirm the kind's required functions appear by name.
@@ -1012,7 +1028,12 @@ extension EmbeddedFormula {
 
     private static func containsFunctionDefinition(in source: String, named name: String) -> Bool {
         let escapedName = NSRegularExpression.escapedPattern(for: name)
-        let pattern = "(?m)^\\s*(?:[A-Za-z_][A-Za-z0-9_]*\\s+)+" + escapedName + "\\s*\\("
+        // Require a leading RETURN TYPE token and reject the call-site shapes
+        // that used to satisfy the old pattern and pass validation before
+        // failing at `makeLibrary` with an unmapped scaffolding error:
+        //   `return DE_Foo(...)`   — a call, not a definition
+        //   `case …: DE_Foo(...)`  — a dispatch arm
+        let pattern = "(?m)^\\s*(?!(?:return|case)\\b)(?:[A-Za-z_][A-Za-z0-9_]*\\s+)+" + escapedName + "\\s*\\("
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return source.contains(name)
         }

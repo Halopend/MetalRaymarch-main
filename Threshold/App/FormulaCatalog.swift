@@ -103,10 +103,17 @@ final class FormulaCatalog: @unchecked Sendable {
     }
     
     // MARK: - Queries
-    
+
     /// Descriptor for a given `FractalModelType`.
+    /// LOCKED READ: the ephemeral (custom) registration mutates `formulas` /
+    /// `byType` under `ephemeralLock`, and this reader runs on the render
+    /// thread (`RenderSettings._clampFormulaParamValue_locked`) concurrently
+    /// with live-editor keystrokes — an unlocked read was a Swift-Dictionary
+    /// read/write race (crash potential).
     func descriptor(for type: FractalModelType) -> FormulaDescriptor? {
-        byType[type.rawValue]
+        Self.ephemeralLock.lock()
+        defer { Self.ephemeralLock.unlock() }
+        return byType[type.rawValue]
     }
 
     // MARK: - FormulaParams Builder
@@ -114,7 +121,12 @@ final class FormulaCatalog: @unchecked Sendable {
     /// Build a `FormulaParams` from an array of `(paramIndex, value)` overrides.
     /// Missing params get their catalog default. Falls back to `FractalModelType.defaultFormulaParams()`.
     func buildParams(for type: FractalModelType, overrides: [(Int, Float)] = []) -> FormulaParams {
-        guard let desc = byType[type.rawValue] else {
+        // Locked snapshot of the descriptor (see `descriptor(for:)` — the
+        // dictionaries are mutated from the MainActor under the same lock).
+        Self.ephemeralLock.lock()
+        let desc = byType[type.rawValue]
+        Self.ephemeralLock.unlock()
+        guard let desc else {
             return type.defaultFormulaParams()
         }
         

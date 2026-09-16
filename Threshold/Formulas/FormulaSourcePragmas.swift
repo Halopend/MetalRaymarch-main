@@ -119,6 +119,10 @@ enum FormulaPragmaParser {
     }
 
     /// Returns the text after `// @param` when the line is a pragma attempt.
+    /// The token match is WORD-BOUNDED: a prose line like `// @params: see
+    /// below` shares the `@param` prefix but is not a pragma (the previous
+    /// prefix match hard-failed it → `.blockedByParseIssues`, and on legacy
+    /// payloads flipped `hasPragmas` → empty slider UI).
     private static func pragmaBody(of line: String) -> Substring? {
         var trimmed = Substring(line)
         while let first = trimmed.first, first == " " || first == "\t" {
@@ -130,7 +134,11 @@ enum FormulaPragmaParser {
             comment = comment.dropFirst()
         }
         guard comment.hasPrefix("@param") else { return nil }
-        return comment.dropFirst("@param".count)
+        let afterToken = comment.dropFirst("@param".count)
+        // Word boundary: `@param` must be followed by whitespace or EOL, so
+        // `@params` / `@paramX` prose is not a pragma attempt.
+        if let next = afterToken.first, next != " ", next != "\t" { return nil }
+        return afterToken
     }
 
     private enum PragmaBodyResult {
@@ -168,7 +176,17 @@ enum FormulaPragmaParser {
         }
         scanner = scanner.dropFirst()
         var name = ""
-        while let first = scanner.first, first != "\"" {
+        while let first = scanner.first {
+            if first == "\\" {
+                // Escaped character (the writer escapes \ and " in names).
+                scanner = scanner.dropFirst()
+                if let escaped = scanner.first {
+                    name.append(escaped)
+                    scanner = scanner.dropFirst()
+                }
+                continue
+            }
+            if first == "\"" { break }
             name.append(first)
             scanner = scanner.dropFirst()
         }
@@ -193,6 +211,15 @@ enum FormulaPragmaParser {
             skipWhitespace()
             guard let first = scanner.first else { break }
             guard first.isLetter else {
+                // Trailing PROSE after a well-formed pragma (e.g. a comment
+                // like `— controls the fold`) is a warning, not a parse
+                // error — only text that still looks like a pragma (a `=`
+                // or an unterminated quote) stays a hard error.
+                let rest = String(scanner)
+                if !rest.contains("="), !rest.contains("\"") {
+                    warnings.append("Trailing text ignored: “\(rest.prefix(24))”")
+                    break
+                }
                 return .failure("Unexpected text “\(scanner.prefix(12))…” — expected key=value pairs or the bool/hidden flags.")
             }
             var token = ""
@@ -322,7 +349,7 @@ enum FormulaPragmaParser {
         params
             .sorted { $0.index < $1.index }
             .map { param in
-                var line = "// @param \(param.index) \"\(param.name)\""
+                var line = "// @param \(param.index) \"\(Self.escape(param.name))\""
                 line += " default=\(format(param.default))"
                 line += " min=\(format(param.min))"
                 line += " max=\(format(param.max))"
@@ -334,7 +361,19 @@ enum FormulaPragmaParser {
             .joined(separator: "\n")
     }
 
+    /// Escape `\` and `"` so a display name containing either survives the
+    /// quoted round-trip (the parser mirrors this with its escape branch).
+    private static func escape(_ name: String) -> String {
+        name
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
     private static func format(_ value: Float) -> String {
-        String(format: "%g", value)
+        // Swift's Float description is the SHORTEST string that round-trips
+        // the binary value — `%g` (6 significant digits) silently re-rounded
+        // every pragma round-trip. The description form is locale-independent
+        // ("." decimal point) and parses back via C's float scanner.
+        String(describing: value)
     }
 }

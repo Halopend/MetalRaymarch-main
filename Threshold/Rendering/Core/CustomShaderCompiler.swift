@@ -348,17 +348,30 @@ actor CustomShaderCompiler {
     /// Remove `#include "..."` and `#import "..."` directives that reference
     /// headers we've already concatenated into the source string. Angle-bracket
     /// system includes (`<metal_stdlib>`, `<simd/simd.h>`) are kept.
+    /// Whitespace-tolerant: `#  include "x.h"` is valid C, so the exact-prefix
+    /// strip used to let it through to `makeLibrary` (where it failed to
+    /// resolve). Mirrors `EmbeddedFormula.isIncludeOrImportDirective`.
     static func stripLocalIncludes(_ src: String) -> String {
         var out: [Substring] = []
         out.reserveCapacity(src.count / 40 + 1)
         for line in src.split(separator: "\n", omittingEmptySubsequences: false) {
-            let trimmed = line.drop(while: { $0 == " " || $0 == "\t" })
-            if trimmed.hasPrefix(#"#include ""#) || trimmed.hasPrefix(#"#import ""#) {
-                continue
-            }
+            if isLocalIncludeDirective(line) { continue }
             out.append(line)
         }
         return out.joined(separator: "\n")
+    }
+
+    /// Line is a `#include "…"` / `#import "…"` directive (whitespace-tolerant,
+    /// quoted form only — the angle-bracket system form is kept).
+    private static func isLocalIncludeDirective(_ line: some StringProtocol) -> Bool {
+        var t = line.drop(while: { $0 == " " || $0 == "\t" })
+        guard t.first == "#" else { return false }
+        t = t.dropFirst().drop(while: { $0 == " " || $0 == "\t" })
+        for directive in ["include", "import"] where t.hasPrefix(directive) {
+            let rest = t.dropFirst(directive.count).drop(while: { $0 == " " || $0 == "\t" })
+            if rest.first == "\"" { return true }
+        }
+        return false
     }
 
     /// Inject `case FractalTypeCustom: return DE_<stem>...` arms into both

@@ -73,16 +73,40 @@ final class FormulaLibraryStore {
             return
         }
         let fm = FileManager.default
-        let urls = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?
+        let urls = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [
+            .isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey,
+            .contentModificationDateKey
+        ]))?
             .filter { $0.pathExtension.lowercased() == "threshfx" } ?? []
 
-        var seenIDs = Set<String>()
+        var bestByID: [String: (url: URL, modified: Date)] = [:]
         var loaded: [FormulaLibraryEntry] = []
         for url in urls.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            // iCloud placeholder policy (ported from PresetManager): reading an
+            // un-hydrated placeholder synchronously materializes it — a
+            // MainActor-blocked multi-second stall that also made the entry
+            // "vanish" (so `save()` would then write a duplicate-id file).
+            // Skip placeholders until the system hydrates them.
+            let values = try? url.resourceValues(forKeys: [
+                .isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey
+            ])
+            if values?.isUbiquitousItem == true {
+                let status = values?.ubiquitousItemDownloadingStatus
+                guard status == .current || status == .downloaded else { continue }
+            }
             guard let formula = (try? EmbeddedFormulaContainer.decode(fromContainerAt: url))?.formula else {
                 continue
             }
-            guard seenIDs.insert(formula.id).inserted else { continue }
+            // One file per formula id — post-hydration duplicates (the same id
+            // saved to a second file while a placeholder was skipped) keep the
+            // NEWEST content instead of the alphabetically-first file.
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            if let existing = bestByID[formula.id] {
+                if existing.modified >= modified { continue }
+                loaded.removeAll { $0.url == existing.url }
+            }
+            bestByID[formula.id] = (url, modified)
             loaded.append(FormulaLibraryEntry(url: url, formula: formula))
         }
         entries = loaded.sorted {

@@ -205,6 +205,12 @@ final class FormulaEditorModel {
         status = .idle
         compileDiagnostics = []
         saveErrorMessage = nil
+        // A model that survived an earlier dismissal (cover teardown, sidebar
+        // re-load) is invalidated forever unless `load` re-arms it: no publish,
+        // no compile, status frozen at `.idle` with no diagnostic. Loading is
+        // by definition a fresh editing session.
+        isInvalidated = false
+        publishedDefinitionGeneration = nil // force a fresh publish
 
         formulaID = formula.id
         name = formula.name
