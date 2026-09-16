@@ -39,15 +39,16 @@ struct ImmersiveSpaceAutoOpener: View {
                 // setup. No-op on a normal Run (flag absent).
                 if AppModel.autoOpenImmersiveOnLaunch,
                    appModel.immersiveSpaceState == .closed {
-                    appModel.immersiveSpaceState = .inTransition
-                    let result = await openImmersiveSpace(id: appModel.immersiveSpaceID)
-                    if case .userCancelled = result {
-                        appModel.immersiveSpaceState = .closed
-                    } else if case .error = result {
-                        appModel.immersiveSpaceState = .closed
-                    }
-                    // On `.opened` leave the state as `.inTransition`; the
-                    // normal `ImmersiveView.onAppear` path flips it to `.open`.
+                     await autoOpen()
+                }
+
+                // Drain a latched request at mount: the notification fires
+                // even when this view is NOT mounted (menu window dismissed
+                // — the listener dies with it), and `AppModel` remounts this
+                // window when the request is queued, so the latch is the
+                // reliable path.
+                if appModel.isImmersiveSpaceAutoOpenRequested {
+                    await autoOpen()
                 }
 
                 let notifications = NotificationCenter.default.notifications(
@@ -59,18 +60,29 @@ struct ImmersiveSpaceAutoOpener: View {
                     // when the immersive space is fully closed — if it's
                     // already open or mid-transition, ignore this signal.
                     guard appModel.immersiveSpaceState == .closed else { continue }
-                    appModel.immersiveSpaceState = .inTransition
-                    let result = await openImmersiveSpace(id: appModel.immersiveSpaceID)
-                    if case .userCancelled = result {
-                        appModel.immersiveSpaceState = .closed
-                    } else if case .error = result {
-                        appModel.immersiveSpaceState = .closed
-                    }
-                    // On `.opened` leave the state as `.inTransition` so
-                    // the normal `ImmersiveView.onAppear` path can flip it
-                    // to `.open` (matches the existing toggle button).
+                    await autoOpen()
                 }
 #endif
             }
     }
+
+#if os(visionOS)
+    /// Bring the immersive space up (and clear the latched request) unless
+    /// the user declines.
+    private func autoOpen() async {
+        guard appModel.immersiveSpaceState == .closed else { return }
+        appModel.isImmersiveSpaceAutoOpenRequested = false
+        appModel.immersiveSpaceState = .inTransition
+        let result = await openImmersiveSpace(id: appModel.immersiveSpaceID)
+        if case .userCancelled = result {
+            appModel.immersiveSpaceState = .closed
+            appModel.isImmersiveSpaceAutoOpenRequested = false
+        } else if case .error = result {
+            appModel.immersiveSpaceState = .closed
+            appModel.isImmersiveSpaceAutoOpenRequested = false
+        }
+        // On `.opened` leave the state as `.inTransition`; the normal
+        // `ImmersiveView.onAppear` path flips it to `.open`.
+    }
+#endif
 }

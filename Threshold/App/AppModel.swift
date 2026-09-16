@@ -150,6 +150,27 @@ class AppModel {
     /// a view that's about to navigate elsewhere can dedupe.
     static let requestOpenImmersiveSpaceNotification = Notification.Name("AppModel.requestOpenImmersiveSpace")
 
+    /// Latched auto-open request. The notification LISTENER lives inside the
+    /// dismissible menu window (`ImmersiveSpaceAutoOpener`), so a request
+    /// posted while the window is dismissed reached nothing — the space never
+    /// auto-opened and the import timed out with a "queued" banner. The flag
+    /// survives until a mounted opener drains it (at mount, or live).
+    var isImmersiveSpaceAutoOpenRequested = false
+
+    /// Queue an immersive-space auto-open: latch the request, remount the
+    /// menu window when it was dismissed (re-mounting the opener listener),
+    /// then post. Mount-time check drains a latched request even if the
+    /// notification raced ahead of the view's `.task`.
+    @MainActor
+    func requestOpenImmersiveSpace() {
+        isImmersiveSpaceAutoOpenRequested = true
+        ensureWindowContentVisible()
+        NotificationCenter.default.post(
+            name: AppModel.requestOpenImmersiveSpaceNotification,
+            object: nil
+        )
+    }
+
     /// Profiling/automation hook. When the process is launched with the
     /// `-ThresholdAutoOpenImmersive` argument — set ONLY in the Profile
     /// scheme's "Generate Optimization Profile" run — the

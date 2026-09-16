@@ -588,12 +588,8 @@ struct FractalGridView: View {
         animationManager.currentScene = scene
         onLoadAnimationScene?(scene)
 #if os(visionOS)
-        if AppModel.shared?.immersiveSpaceState != .open {
-            NotificationCenter.default.post(
-                name: AppModel.requestOpenImmersiveSpaceNotification,
-                object: nil,
-                userInfo: ["sceneID": scene.id.uuidString]
-            )
+        if let appModel = AppModel.shared, appModel.immersiveSpaceState != .open {
+            appModel.requestOpenImmersiveSpace()
         }
 #endif
 
