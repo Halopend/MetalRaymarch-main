@@ -4208,7 +4208,7 @@ kernel void adaptiveHierarchical8x8(
             FractalParams coarseParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
-                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch);
+                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch, &uniforms.handField);
             coarseTCenter = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, coarseParams, lodIterations, fractalType, uniforms.formulaParams, uniforms.maxViewDistance, uniforms.marchEpsilonScale);
             ranCoarseMarch = true;
 
@@ -4397,7 +4397,7 @@ kernel void adaptiveHierarchical8x8(
                 FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                     uniforms.precomputedFractal,
                     uniforms.minDistance,
-                    marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch);
+                    marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch, &uniforms.handField);
                 tg_shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
                 tg_shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
                 // Publish anchor surface frame for the coherent-packet normal gate.
@@ -4441,7 +4441,7 @@ kernel void adaptiveHierarchical8x8(
                     FractalParams shadowParamsLocal = makeFractalParamsFromPrecomputed(
                         uniforms.precomputedFractal,
                         uniforms.minDistance,
-                        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch);
+                        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch, &uniforms.handField);
                     shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParamsLocal, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
                     shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParamsLocal, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
                     // Tag debug overlay layer for shadow fallback (only when not already tagged by warm-start).
@@ -4454,7 +4454,7 @@ kernel void adaptiveHierarchical8x8(
             FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
-                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch);
+                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch, &uniforms.handField);
             shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
             shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
         }
@@ -4583,7 +4583,12 @@ kernel void coneCoarsePrepass8x8(uint2 texel [[thread_position_in_grid]],
     bool domainWarped = (uniforms.sphericalInversionMode != 0)
                      || (uniforms.sphereProjectionBlend > 0.0f)
                      || (uniforms.spaceWarpStrength > 0.0f)
-                     || (uniforms.spaceWarpStack.count > 0);
+                     || (uniforms.spaceWarpStack.count > 0)
+                     // Hand attraction adds a signed bulge to the DE the
+                     // analytic bound knows nothing about (the CPU dispatch
+                     // gate excludes it too; this kernel guard is the safety
+                     // authority) (M11).
+                     || (uniforms.handField.enabled != 0);
     // Full-target pixel center of this 8x8 block; convert to viewport-LOCAL coords
     // (reconstructModelPoint expects local pixels) and skip texels whose block
     // center falls outside this eye's viewport (write the cold sentinel there).
@@ -4622,7 +4627,7 @@ kernel void coneCoarsePrepass8x8(uint2 texel [[thread_position_in_grid]],
     FractalParams fp = makeFractalParamsFromPrecomputed(
         uniforms.precomputedFractal,
         uniforms.minDistance,
-        mO, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch);
+        mO, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch, &uniforms.handField);
 
     float hitThreshold = 0.02f * epsilonScale;
     float t = 0.05f;
@@ -4877,7 +4882,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
-                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch);
+                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch, &uniforms.handField);
 
             // Shadow marches are skipped when their result is multiplied by an
             // EXACT zero in ShadeSurface: shaSpot only ever scales terms

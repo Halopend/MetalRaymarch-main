@@ -1447,6 +1447,12 @@ actor Renderer {
             // Environment Scrunch can add a hug shell to the base DE, so the
             // analytic box/fold lower bound no longer proves that space is empty.
             && !settingsSnapshot.envScrunchEnabled
+            // Hand attraction adds a signed bulge to the DE (the full march
+            // includes it) — the analytic lower bound doesn't, so with an
+            // attracting hand the warmT could overshoot a real surface
+            // (per-block pops). Extend the cone gate like the other DE
+            // modifiers (M11).
+            && !settingsSnapshot.handAttractionEnabled
             // Stack warp ops (twist/ripple/kaleido, repeat-group recurrence) void
             // the Lipschitz-1 lower-bound proof the same way. The kernel guards
             // this independently and writes cold sentinels; checking the packed
