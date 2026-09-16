@@ -33,23 +33,11 @@ else
 fi
 
 # --- Toolchain selection -----------------------------------------------------
-# Prefer a local Xcode installation, then fall back to the active Xcode selected
-# by xcode-select. CI uses the latter because GitHub runner app names are
-# versioned (for example, Xcode_26.5.app).
-if [[ -z "${DEVELOPER_DIR:-}" ]]; then
-    for candidate in \
-        "/Applications/Xcode-beta.app/Contents/Developer" \
-        "/Applications/Xcode-beta 2.app/Contents/Developer" \
-        "/Applications/Xcode.app/Contents/Developer"; do
-        if [[ -d "$candidate" ]]; then
-            DEVELOPER_DIR="$candidate"
-            break
-        fi
-    done
-fi
-if [[ -z "${DEVELOPER_DIR:-}" ]]; then
-    DEVELOPER_DIR="$(xcode-select -p 2>/dev/null || true)"
-fi
+# Prefer a local Xcode installation (NEWEST-FIRST), then fall back to the
+# active Xcode selected by xcode-select. Shared resolver with the QL render
+# gate so both always use the SAME toolchain; CI uses the xcode-select
+# fallback because GitHub runner app names are versioned.
+DEVELOPER_DIR="$(bash "$REPO_ROOT/Scripts/select_developer_dir.sh")"
 export DEVELOPER_DIR
 
 if [[ -z "$DEVELOPER_DIR" || ! -x "$DEVELOPER_DIR/usr/bin/xcodebuild" ]]; then

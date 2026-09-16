@@ -17,15 +17,9 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Need a full Xcode (Metal toolchain + macOS SDK) — CommandLineTools lacks `metal`.
-# Honor a caller-provided DEVELOPER_DIR; otherwise probe known Xcode locations.
-if [[ -z "${DEVELOPER_DIR:-}" || ! -d "$DEVELOPER_DIR" ]]; then
-  for cand in \
-    /Applications/Xcode-beta.app/Contents/Developer \
-    /Applications/Xcode.app/Contents/Developer \
-    "$(xcode-select -p 2>/dev/null)"; do
-    if [[ -d "$cand" && -x "$cand/usr/bin/xcodebuild" ]]; then DEVELOPER_DIR="$cand"; break; fi
-  done
-fi
+# Shared resolver (NEWEST-FIRST) with build.sh, so this gate and the build can
+# never use different toolchains on machines running parallel betas.
+DEVELOPER_DIR="$(bash "$REPO/Scripts/select_developer_dir.sh")"
 export DEVELOPER_DIR
 echo "==> DEVELOPER_DIR=$DEVELOPER_DIR"
 
