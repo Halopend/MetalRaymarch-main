@@ -547,6 +547,50 @@ struct FPSIndicatorView: View {
 
 // MARK: - Render Diagnostics (isolated to RenderMetrics observation)
 
+/// Bottom-bar performance strip (menu chrome). A standalone View so the ~2 Hz
+/// `renderMetrics` churn invalidates ONLY this strip, not the whole controls
+/// surface — the previous inline computed property made the entire ContentView
+/// re-evaluate at 2 Hz whenever the strip was shown. (FPSIndicatorView
+/// precedent.)
+struct BottomPerformanceStripView: View {
+    @Environment(AppModel.self) private var appModel
+
+    var body: some View {
+        let metrics = appModel.renderMetrics
+        return HStack(spacing: 10) {
+            metric("FPS", metrics.fps > 0 ? String(format: "%.0f", metrics.fps) : "—", color: fpsColor)
+            metric("GPU", metrics.gpuFrameMs > 0 ? String(format: "%.1f", metrics.gpuFrameMs) : "—", color: .cyan)
+            metric("Q", metrics.renderQuality > 0 ? "\(Int((metrics.renderQuality * 100).rounded()))%" : "—", color: .blue)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 36)
+        .background(Capsule().fill(Color.secondary.opacity(0.10)))
+        .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1))
+        .accessibilityLabel("Performance")
+    }
+
+    private var fpsColor: Color {
+        let fps = appModel.renderMetrics.fps
+        if fps >= 85 { return .green }
+        if fps >= 60 { return .yellow }
+        return .red
+    }
+
+    private func metric(_ label: String, _ value: String, color: Color) -> some View {
+        VStack(spacing: 0) {
+            Text(value)
+                .font(.caption.weight(.bold).monospacedDigit())
+                .foregroundStyle(color)
+            Text(label)
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        .frame(minWidth: 34)
+    }
+}
+
+// MARK: - Render Diagnostics (isolated to RenderMetrics observation)
+
 /// Live readout of the actual render resolution and quality. Reads
 /// `renderMetrics` so its low-frequency updates only invalidate this view.
 /// Lets the user confirm in-headset that the drawable is at native resolution

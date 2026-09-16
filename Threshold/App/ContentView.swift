@@ -638,13 +638,6 @@ struct ContentView: View {
         }
     }
 
-    var liveFPSColor: Color {
-        let fps = cache.liveFPS
-        if fps >= 85 { return .green }
-        if fps >= 60 { return .yellow }
-        return .red
-    }
-
     private func motionSensitiveAnimation(_ animation: Animation) -> Animation? {
         reduceMotion ? nil : animation
     }
@@ -1733,7 +1726,7 @@ struct ContentView: View {
             #endif
 
             if showPerformanceInMenu {
-                bottomPerformanceStrip
+                BottomPerformanceStripView()
             }
 
             HStack(spacing: 12) {
@@ -1745,32 +1738,6 @@ struct ContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-    }
-
-    private var bottomPerformanceStrip: some View {
-        let metrics = appModel.renderMetrics
-        return HStack(spacing: 10) {
-            bottomMetric("FPS", metrics.fps > 0 ? String(format: "%.0f", metrics.fps) : "—", color: liveFPSColor)
-            bottomMetric("GPU", metrics.gpuFrameMs > 0 ? String(format: "%.1f", metrics.gpuFrameMs) : "—", color: .cyan)
-            bottomMetric("Q", metrics.renderQuality > 0 ? "\(Int((metrics.renderQuality * 100).rounded()))%" : "—", color: .blue)
-        }
-        .padding(.horizontal, 10)
-        .frame(height: 36)
-        .background(Capsule().fill(Color.secondary.opacity(0.10)))
-        .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1))
-        .accessibilityLabel("Performance")
-    }
-
-    private func bottomMetric(_ label: String, _ value: String, color: Color) -> some View {
-        VStack(spacing: 0) {
-            Text(value)
-                .font(.caption.weight(.bold).monospacedDigit())
-                .foregroundStyle(color)
-            Text(label)
-                .font(.system(size: 8, weight: .semibold))
-                .foregroundStyle(.secondary)
-        }
-        .frame(minWidth: 34)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
