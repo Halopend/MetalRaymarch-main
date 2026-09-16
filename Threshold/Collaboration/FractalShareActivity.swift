@@ -88,6 +88,32 @@ struct FractalSyncMessage: Codable, Sendable {
     
     /// Apply this message's state to RenderSettings (for receiving participants)
     func apply(to settings: RenderSettings) {
+        // SharePlay delivers any participant's message verbatim — a malicious
+        // or buggy peer must not be able to wedge the GPU (maxRaySteps = 1e9
+        // marches effectively forever → watchdog kill, and each distinct
+        // resolution minted a fresh pipeline) or poison the smooth-damp
+        // camera state with NaN/Inf. Mirror the file-decode contract BEFORE
+        // any write: finite values only, clamped to the engine's ranges.
+        let finiteMinDistance = Self.sanitized(minDistance, in: -5.0...15.0, fallback: 0.8)
+        let finiteFoldingLimit = Self.sanitized(foldingLimit, in: -10.0...30.0, fallback: 1.0)
+        let finiteSphereRadius = Self.sanitized(sphereRadius, in: -5.0...8.0, fallback: 0.5)
+        let finiteScale = Self.sanitized(scale, in: 1e-3...1e3, fallback: 1.0)
+        let finiteFractalScale = Self.sanitized(fractalScale, in: ControlCatalog.fractalScale.range, fallback: ControlCatalog.fractalScale.defaultValue)
+        let finiteColorMix = Self.sanitized(colorMix, in: ControlCatalog.colorMix.range, fallback: ControlCatalog.colorMix.defaultValue)
+        let finitePosition = SIMD3<Float>(
+            Self.sanitized(position.x, in: -1e3...1e3, fallback: 0),
+            Self.sanitized(position.y, in: -1e3...1e3, fallback: 0),
+            Self.sanitized(position.z, in: -1e3...1e3, fallback: 0))
+        let iterationsClamped = max(ControlCatalog.iterations.integerRange.lowerBound,
+                                    min(ControlCatalog.iterations.integerRange.upperBound, fractalIterations))
+        // The single most expensive knob: unclamped, a peer could set 1e9
+        // (GPU marches forever → watchdog kill) and every distinct value
+        // minted a new specialized pipeline (cache-key churn DoS).
+        let rayStepsClamped = max(ControlCatalog.maxRaySteps.integerRange.lowerBound,
+                                  min(ControlCatalog.maxRaySteps.integerRange.upperBound, maxRaySteps))
+        let finiteBubbleRadius = Self.sanitized(safetyBubbleRadius, in: ControlCatalog.safetyBubbleRadius.range, fallback: ControlCatalog.safetyBubbleRadius.defaultValue)
+        let finiteBubbleShape = Self.sanitized(safetyBubbleShape, in: 0.0...SafetyBubbleShapePreset.maxStoredValue, fallback: 0.0)
+
         // Remote collaboration is another scene-origin mutation source: update
         // the live view without turning the peer's stream into local preferences.
         // It follows the shared-scene comfort rule as well — peers may opt a
@@ -95,31 +121,39 @@ struct FractalSyncMessage: Codable, Sendable {
         settings.withPersistenceSuppressed {
             // Set targets for smooth interpolation using the setTargets method
             settings.setTargets(
-                minDistance: minDistance,
-                foldingLimit: foldingLimit,
-                sphereRadius: sphereRadius,
-                position: position
+                minDistance: finiteMinDistance,
+                foldingLimit: finiteFoldingLimit,
+                sphereRadius: finiteSphereRadius,
+                position: finitePosition
             )
-            settings.scale = scale
+            settings.scale = finiteScale
 
             // Fractal parameters
             if let fractalModel = FractalModelType(rawValue: fractalType) {
                 settings.fractalType = fractalModel
             }
-            settings.fractalScale = fractalScale
-            settings.targetFractalScale = fractalScale
-            settings.fractalIterations = fractalIterations
-            settings.maxRaySteps = maxRaySteps
+            settings.fractalScale = finiteFractalScale
+            settings.targetFractalScale = finiteFractalScale
+            settings.fractalIterations = iterationsClamped
+            settings.maxRaySteps = rayStepsClamped
 
             // Color
-            settings.colorMix = colorMix
+            settings.colorMix = finiteColorMix
 
             // Safety bubble
             if safetyBubbleEnabled {
                 settings.safetyBubbleEnabled = true
-                settings.safetyBubbleRadius = safetyBubbleRadius
-                settings.safetyBubbleShape = safetyBubbleShape
+                settings.safetyBubbleRadius = finiteBubbleRadius
+                settings.safetyBubbleShape = finiteBubbleShape
             }
         }
+    }
+
+    /// Clamp a peer-supplied scalar into a safe range; non-finite values fall
+    /// back to the field's default rather than propagating NaN/Inf into the
+    /// render state.
+    private static func sanitized(_ v: Float, in range: ClosedRange<Float>, fallback: Float) -> Float {
+        guard v.isFinite else { return fallback }
+        return min(range.upperBound, max(range.lowerBound, v))
     }
 }

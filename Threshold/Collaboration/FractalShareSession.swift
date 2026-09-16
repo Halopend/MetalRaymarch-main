@@ -50,6 +50,10 @@ class FractalShareSession {
     
     /// Last received message timestamp (for detecting stale state)
     private(set) var lastReceivedTimestamp: TimeInterval = 0
+    /// Per-sender dedup watermarks. A single global watermark let one peer's
+    /// clock skew (or one large timestamp) permanently drop every later
+    /// message from every OTHER peer; wall clocks are independent per sender.
+    @ObservationIgnored private var lastReceivedTimestampBySender: [UUID: TimeInterval] = [:]
     
     // MARK: - Private Properties
     
@@ -236,9 +240,12 @@ class FractalShareSession {
             logger.info("Session state: joined")
             
         case .invalidated(let reason):
-            state = .error("Session ended: \(reason)")
             logger.info("Session state: invalidated - \(reason)")
+            // Teardown first, THEN publish the end reason — `stopSharing()`
+            // resets state to `.inactive`, which previously clobbered the
+            // `.error` set here, so the user never saw why the session ended.
             stopSharing()
+            state = .error("Session ended: \(reason)")
             
         @unknown default:
             logger.warning("Unknown session state")
@@ -248,11 +255,15 @@ class FractalShareSession {
     private func handleReceivedMessage(_ message: FractalSyncMessage) async {
         // Don't process our own messages
         guard message.senderID != localID else { return }
-        
-        // Don't process old messages
-        guard message.timestamp > lastReceivedTimestamp else { return }
-        lastReceivedTimestamp = message.timestamp
-        
+
+        // Dedup PER SENDER: each peer's wall clock is independent, so a
+        // global watermark let one skewed (or spoofed-large) timestamp
+        // permanently starve all other peers' sync traffic.
+        let previous = lastReceivedTimestampBySender[message.senderID] ?? 0
+        guard message.timestamp > previous else { return }
+        lastReceivedTimestampBySender[message.senderID] = message.timestamp
+        lastReceivedTimestamp = max(lastReceivedTimestamp, message.timestamp)
+
         // In viewer mode or collaborative mode, apply the state
         if role == .viewer || role == .collaborative {
             if let settings = renderSettings {
