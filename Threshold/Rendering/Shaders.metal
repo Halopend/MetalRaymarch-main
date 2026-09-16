@@ -448,7 +448,9 @@ FORCE_INLINE float sphereProjectionDEScale(float3 p, float blend, float radius) 
 #ifndef THRESHOLD_CUSTOM_SPACE_WARP
 // Default built-in warp: a "Twist" about a configurable axis through a
 // configurable origin. The twist angle is proportional to the distance along
-// the axis × strength. A pure rotation, so it is isometric (DE scale = 1).
+// the axis × strength. Isometric only ON the axis — the Jacobian's max
+// singular value grows with the lever arm off the axis (see the exact form
+// below); returning 1.0 under-divided the march off-axis.
 // param1/2/3 carry the origin point; the axis arrives via FractalParams.
 FORCE_INLINE float3 customSpaceWarp(float3 p, float strength, float param1, float param2, float param3) {
     if (strength <= 0.0f) { return p; }
@@ -457,7 +459,12 @@ FORCE_INLINE float3 customSpaceWarp(float3 p, float strength, float param1, floa
     return float3(c * p.x - s * p.z, p.y, s * p.x + c * p.z);
 }
 FORCE_INLINE float customSpaceWarpDEScale(float3 p, float strength, float param1, float param2, float param3) {
-    return 1.0f;   // pure rotation → no DE correction
+    if (strength <= 0.0f) { return 1.0f; }
+    // Exact twist σmax for the fixed Y axis: lever arm ρ = |(x, z)|.
+    float lever = sqrt(p.x * p.x + p.z * p.z);
+    float x = 1.5f * strength * lever;
+    float x2 = x * x;
+    return max(sqrt(0.5f * (2.0f + x2 + x * sqrt(x2 + 4.0f))), 1.0f);
 }
 #endif
 
@@ -691,6 +698,21 @@ FORCE_INLINE float3 warpTwist(float3 p, SpaceWarpOp op) {       // 0
     float c; float s = sincos(angle, c);   // one transcendental for both
     return p * c + cross(axis, p) * s + axis * dot(axis, p) * (1.0f - c);
 }
+// Max singular value of the twist Jacobian (exact). A twist by θ = k·(p·axis)
+// is a shear-rotation: in the (r̂, φ̂, ẑ) frame JᵀJ = [[1,0,0],[0,ρ²,kρ²],[0,kρ²,1+k²ρ²]]
+// with ρ = lever arm off the axis, k = 1.5·s, so
+//   σmax = sqrt((2 + x² + x·sqrt(x² + 4)) / 2),  x = k·ρ.
+// Returning 1.0 (the old "pure rotation" claim — true only ON the axis)
+// under-divided the march by up to ~3× at r ≈ 2 → sliced/holed surfaces
+// off-axis at the default strength.
+FORCE_INLINE float warpTwistDEScale(float3 p, SpaceWarpOp op) {
+    if (op.strength <= 0.0f) return 1.0f;
+    float3 axis = warpAxisNorm(op);
+    float lever = length(p - axis * dot(p, axis));
+    float x = 1.5f * op.strength * lever;
+    float x2 = x * x;
+    return max(sqrt(0.5f * (2.0f + x2 + x * sqrt(x2 + 4.0f))), 1.0f);
+}
 FORCE_INLINE float3 warpBend(float3 p, SpaceWarpOp op) {        // 1
     float strength = op.strength; if (strength <= 0.0f) return p;
     float3 axis = warpAxisNorm(op);
@@ -700,6 +722,32 @@ FORCE_INLINE float3 warpBend(float3 p, SpaceWarpOp op) {        // 1
     float c; float s = sincos(angle, c);   // one transcendental for both
     float3 perpDir = (length(perp) > 1e-6f) ? normalize(perp) : float3(0.0f);
     return perp + axis * (along * c) + perpDir * (along * s);
+}
+// Max singular value of the bend Jacobian (exact). With a = along-axis
+// coordinate, ρ = |perp|, k = 1.5·s, θ = k·ρ and x = a·k, the Jacobian in the
+// local orthonormal frame (axis, e_φ, ψ) is block-diagonal:
+//   A = [[cosθ, −x·sinθ], [sinθ, 1 + x·cosθ]] (axial/bend plane)
+//   tangential stretch = |1 + x·sinc(θ)| (sinc = sin θ / θ, → x·0/0 = x at ρ→0)
+// σmax = max(σ(A), |1 + x·sinc θ|). The old 1.0 under-divided the march the
+// same way twist did.
+FORCE_INLINE float warpBendDEScale(float3 p, SpaceWarpOp op) {
+    if (op.strength <= 0.0f) return 1.0f;
+    float3 axis = warpAxisNorm(op);
+    float along = dot(p, axis);
+    float perp = length(p - along * axis);
+    float k = 1.5f * op.strength;
+    float theta = k * perp;
+    float c; float s = sincos(theta, c);   // matches warpBend's angle
+    float x = along * k;
+    // 2×2 block σmax: sqrt((T + sqrt(T² − 4·det²)) / 2)
+    float trace = 2.0f + 2.0f * x * c + x * x;
+    float det = c + x;
+    float disc = max(trace * trace - 4.0f * det * det, 0.0f);
+    float sigmaPlane = sqrt(0.5f * (trace + sqrt(disc)));
+    // Tangential stretch: sin(θ)/θ → 1 as θ→0 (guard θ→0).
+    float sinc = (theta > 1e-6f) ? (s / theta) : 1.0f;
+    float sigmaTangent = abs(1.0f + x * sinc);
+    return max(max(sigmaPlane, sigmaTangent), 1.0f);
 }
 FORCE_INLINE float3 warpMirror(float3 p, SpaceWarpOp op) {      // 2
     return mix(p, abs(p), clamp(op.strength, 0.0f, 1.0f));
@@ -993,10 +1041,12 @@ FORCE_INLINE float warpMandelboxDEUpdate(float3 p, float currentDE, float origin
     return fma(currentDE, localScale, originDE);
 }
 
-// Runtime dispatch (default path): a coherent switch over op.type.
+// Runtime dispatch (default path): a coherent switch over op.type. Unknown
+// discriminators FAIL CLOSED to identity: they previously fell into the twist
+// arm, so a newer build's stack rendered an unplanned Twist on an older install.
 FORCE_INLINE float3 applyWarpOp(float3 p, float3 stackOrigin, SpaceWarpOp op) {
     switch (op.type) {
-        default:
+        default: return p;
         case 0: return warpTwist(p, op);
         case 1: return warpBend(p, op);
         case 2: return warpMirror(p, op);
@@ -1019,9 +1069,12 @@ FORCE_INLINE float3 applyWarpOp(float3 p, float3 stackOrigin, SpaceWarpOp op) {
         case 19: return warpCompressionShells(p, op);
     }
 }
-// Conservative DE divisor for one op (only radial / scaling warps stretch distance).
+// Conservative DE divisor for one op (radial / scaling warps stretch distance;
+// twist/bend shears stretch it too — see warpTwistDEScale/warpBendDEScale).
 FORCE_INLINE float warpOpDEScale(float3 p, SpaceWarpOp op) {
     switch (op.type) {
+        case 0:  return warpTwistDEScale(p, op);
+        case 1:  return warpBendDEScale(p, op);
         case 4:  return warpSphereFoldDEScale(p, op);
         case 5:  return warpInversionDEScale(p, op);
         case 8:  return warpCircleDEScale(p, op);
@@ -3638,7 +3691,11 @@ FORCE_INLINE float computeAO(float3 hitPos, float3 nor, FractalParams params, fl
         ao -= (h - d) * sca;
         sca *= 0.7f;
     }
-    return clamp(1.0f - ao, 0.0f, 1.0f);
+    // `ao` ends as the visibility term (1 − occlusion): each tap subtracts the
+    // (h − d) excess, so open surfaces stay near 1 and creases drop toward 0.
+    // Return it directly — the previous `1.0 - ao` re-inverted the term and
+    // lit creases while blacking out open surfaces.
+    return clamp(ao, 0.0f, 1.0f);
 }
 
 // === Shared lighting-assembly helper ===
