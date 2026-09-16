@@ -152,16 +152,20 @@ func packUniforms(_ settings: RenderSettingsSnapshot,
         benchCollectSteps: 0,
         benchAblate: 0,
         passthroughBackground: 0,
-        boundingFogEnabled: 0,
-        boundingShadowDepth: 0,
-        boundingShapeType: 0,
+        // Bounding Shape fog/shadow/type/ambient and the Bound-to-Space size
+        // are SCENE-AUTHORABLE (persisted in presets) — the hardcoded zeros
+        // and 4/2.5/4 size made previews silently render without them while
+        // the matrix above already followed the settings-backed size.
+        boundingFogEnabled: Int32(settings.boundingShapeFogMode),
+        boundingShadowDepth: settings.boundingShapeShadowDepth,
+        boundingShapeType: settings.boundingShapeType,
         // Pin the Bounding Shape while the Linear Rail slides content through it.
         boundingShapeCenter: settings.boundingShapeCenterModel(modelMatrix: modelMatrix),
-        // Bound to Space / Object Cutouts are live-room features; thumbnails
-        // render unclipped.
+        // Bound-to-Space clipping is a live-room feature; thumbnails render
+        // unclipped (mode pinned off), but the SIZE still rides the scene.
         boundToSpaceMode: 0,
-        boundSpaceSize: SIMD3<Float>(4.0, 2.5, 4.0),
-        boundAmbientStrength: 0.0,
+        boundSpaceSize: settings.boundSpaceSize,
+        boundAmbientStrength: settings.boundAmbientStrength,
         envScrunch: EnvScrunchParams(),
         distCache: DistanceCacheParams(),
         benchySDFAddress: benchySDFAddress)
