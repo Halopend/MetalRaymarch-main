@@ -512,7 +512,11 @@ final class AnimationManager {
         }
         result.append(contentsOf: userScenes)
         scenes = result.filter {
-            SceneTagging.isVisible($0.tags, includesScreenOnlyScenes: Self.includesScreenOnlyScenes)
+            SceneTagging.isVisible(
+                $0.tags,
+                includesScreenOnlyScenes: Self.includesScreenOnlyScenes,
+                includesMacOnlyScenes: Self.includesMacOnlyScenes
+            )
         }
     }
 
@@ -521,6 +525,14 @@ final class AnimationManager {
         false
 #else
         true
+#endif
+    }
+
+    private static var includesMacOnlyScenes: Bool {
+#if os(macOS)
+        true
+#else
+        false
 #endif
     }
     

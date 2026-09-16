@@ -819,7 +819,7 @@
   "sphericalInversionMode" : "off",
   "sphericalInversionRadius" : 2,
   "tags" : [
-
+    "Mac only"
   ],
   "tileSize" : 0,
   "tonemapStrength" : 0,

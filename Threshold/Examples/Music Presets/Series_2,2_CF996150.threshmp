@@ -287,6 +287,9 @@
     }
   ],
   "name" : "Series 2,2",
+  "tags" : [
+    "Mac only"
+  ],
   "platformEnabled" : true,
   "platformRadius" : 1.888,
   "polarRotationEffect" : {

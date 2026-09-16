@@ -582,6 +582,9 @@
     }
   ],
   "name" : "Add Rotation",
+  "tags" : [
+    "Mac only"
+  ],
   "platformEnabled" : true,
   "platformRadius" : 1.888,
   "polarRotationEffect" : {

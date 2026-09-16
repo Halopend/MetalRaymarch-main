@@ -82,6 +82,33 @@ struct PresetCatalogVisibilityTests {
         #expect(screenResult.map(\.id) == [environmentID, ordinaryID])
     }
 
+    @Test("Mac-only bundled identities stay hidden from non-Mac catalogs")
+    func macOnlyBundledScenesAreExcludedFromNonMacCatalogs() {
+        var bundledMacOnly = makePreset(id: environmentID, name: "Mountain")
+        bundledMacOnly.tags = [SceneTagging.macOnlyTag]
+        // Simulate a copy seeded before the bundled scene gained its tag.
+        let previouslySeededCopy = makePreset(id: environmentID, name: "Mountain")
+        let ordinary = makePreset(id: ordinaryID, name: "Ordinary")
+
+        let nonMacResult = PresetManager.filterSceneCatalogPresets(
+            [previouslySeededCopy, ordinary],
+            bundledPresets: [bundledMacOnly],
+            supportsEnvironmentReconstruction: true,
+            includesScreenOnlyScenes: true,
+            includesMacOnlyScenes: false
+        )
+        let macResult = PresetManager.filterSceneCatalogPresets(
+            [previouslySeededCopy, ordinary],
+            bundledPresets: [bundledMacOnly],
+            supportsEnvironmentReconstruction: true,
+            includesScreenOnlyScenes: true,
+            includesMacOnlyScenes: true
+        )
+
+        #expect(nonMacResult.map(\.id) == [ordinaryID])
+        #expect(macResult.map(\.id) == [environmentID, ordinaryID])
+    }
+
     private func makePreset(
         id: UUID,
         name: String,

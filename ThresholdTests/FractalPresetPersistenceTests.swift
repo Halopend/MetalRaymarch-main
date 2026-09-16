@@ -47,8 +47,14 @@ struct FractalPresetPersistenceTests {
 
         #expect(tagged == [SceneTagging.screenOnlyTag, "Favorites"])
         #expect(SceneTagging.isScreenOnly(tagged))
+        #expect(SceneTagging.isMacOnly(["mac ONLY"]))
         #expect(SceneTagging.isVisible(tagged, includesScreenOnlyScenes: true))
         #expect(!SceneTagging.isVisible(tagged, includesScreenOnlyScenes: false))
+        #expect(!SceneTagging.isVisible(
+            [SceneTagging.macOnlyTag],
+            includesScreenOnlyScenes: true,
+            includesMacOnlyScenes: false
+        ))
         #expect(SceneTagging.settingScreenOnly(false, in: tagged) == ["Favorites"])
     }
 

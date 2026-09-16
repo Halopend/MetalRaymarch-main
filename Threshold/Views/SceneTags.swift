@@ -10,9 +10,10 @@ enum SceneTagging {
     /// than an immersive view surrounding the viewer. Keeping this in `tags`
     /// means old app versions and exported scene files remain fully compatible.
     static let screenOnlyTag = "Screen only"
-    /// Recognized only to migrate scenes saved while this feature was briefly
-    /// labeled "Mac only" during development.
-    private static let legacyMacOnlyTag = "Mac only"
+    /// A reserved, portable tag for scenes that should only appear in the Mac
+    /// catalog. This remains distinct from `screenOnlyTag`, which also permits
+    /// flat-display iPhone and iPad hosts.
+    static let macOnlyTag = "Mac only"
 
     static func normalized(_ tags: [String]) -> [String] {
         var result: [String] = []
@@ -41,13 +42,17 @@ enum SceneTagging {
     }
 
     static func isScreenOnly(_ tags: [String]) -> Bool {
-        contains(tags, tag: screenOnlyTag) || contains(tags, tag: legacyMacOnlyTag)
+        contains(tags, tag: screenOnlyTag) || isMacOnly(tags)
+    }
+
+    static func isMacOnly(_ tags: [String]) -> Bool {
+        contains(tags, tag: macOnlyTag)
     }
 
     static func settingScreenOnly(_ enabled: Bool, in tags: [String]) -> [String] {
         let withoutReservedTag = tags.filter {
             $0.caseInsensitiveCompare(screenOnlyTag) != .orderedSame
-                && $0.caseInsensitiveCompare(legacyMacOnlyTag) != .orderedSame
+                && $0.caseInsensitiveCompare(macOnlyTag) != .orderedSame
         }
         guard enabled else { return normalized(withoutReservedTag) }
 
@@ -56,8 +61,13 @@ enum SceneTagging {
         return normalized([screenOnlyTag] + withoutReservedTag)
     }
 
-    static func isVisible(_ tags: [String], includesScreenOnlyScenes: Bool) -> Bool {
-        includesScreenOnlyScenes || !isScreenOnly(tags)
+    static func isVisible(
+        _ tags: [String],
+        includesScreenOnlyScenes: Bool,
+        includesMacOnlyScenes: Bool = true
+    ) -> Bool {
+        guard includesMacOnlyScenes || !isMacOnly(tags) else { return false }
+        return includesScreenOnlyScenes || !isScreenOnly(tags)
     }
 }
 

@@ -108,6 +108,19 @@ struct ExampleSceneDecodeTests {
         }
     }
 
+    @Test("Every bundled music preset is explicitly Mac-only")
+    func bundledMusicPresetsAreMacOnly() throws {
+        let decoder = Self.iso8601Decoder()
+        let files = Self.files(withExtension: "threshmp", in: "Music Presets")
+        for url in files {
+            let preset = try decoder.decode(FractalPreset.self, from: Data(contentsOf: url))
+            #expect(
+                SceneTagging.isMacOnly(preset.tags),
+                "\(url.lastPathComponent) must include the Mac-only scene tag"
+            )
+        }
+    }
+
     @Test("Every .threshanim decodes as an AnimationScene (animation import path)")
     func threshanimsDecode() throws {
         let decoder = Self.iso8601Decoder()

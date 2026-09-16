@@ -392,7 +392,8 @@ class PresetManager {
             Array(catalogByID.values).sorted { $0.createdAt > $1.createdAt },
             bundledPresets: Self.bundledPresets(),
             supportsEnvironmentReconstruction: Self.supportsEnvironmentReconstructionInSceneCatalog,
-            includesScreenOnlyScenes: Self.includesScreenOnlyScenesInSceneCatalog
+            includesScreenOnlyScenes: Self.includesScreenOnlyScenesInSceneCatalog,
+            includesMacOnlyScenes: Self.includesMacOnlyScenesInSceneCatalog
         )
     }
 
@@ -401,6 +402,14 @@ class PresetManager {
         false
 #else
         true
+#endif
+    }
+
+    private static var includesMacOnlyScenesInSceneCatalog: Bool {
+#if os(macOS)
+        true
+#else
+        false
 #endif
     }
 
@@ -416,10 +425,29 @@ class PresetManager {
         _ presets: [FractalPreset],
         bundledPresets: [FractalPreset],
         supportsEnvironmentReconstruction: Bool,
-        includesScreenOnlyScenes: Bool = true
+        includesScreenOnlyScenes: Bool = true,
+        includesMacOnlyScenes: Bool = true
     ) -> [FractalPreset] {
+        // Match bundled identities as well as their current stored tags. This
+        // keeps previously seeded copies subject to a platform classification
+        // added in a later app release, while user-authored scenes with similar
+        // names remain untouched.
+        let screenOnlyBundledIDs = Set(bundledPresets.compactMap {
+            SceneTagging.isScreenOnly($0.tags) ? $0.id : nil
+        })
+        let macOnlyBundledIDs = Set(bundledPresets.compactMap {
+            SceneTagging.isMacOnly($0.tags) ? $0.id : nil
+        })
         let platformVisiblePresets = presets.filter {
-            SceneTagging.isVisible($0.tags, includesScreenOnlyScenes: includesScreenOnlyScenes)
+            guard includesMacOnlyScenes
+                    || (!SceneTagging.isMacOnly($0.tags) && !macOnlyBundledIDs.contains($0.id)) else {
+                return false
+            }
+            guard includesScreenOnlyScenes
+                    || (!SceneTagging.isScreenOnly($0.tags) && !screenOnlyBundledIDs.contains($0.id)) else {
+                return false
+            }
+            return true
         }
 
         guard !supportsEnvironmentReconstruction else { return platformVisiblePresets }
