@@ -81,6 +81,8 @@ extension AppModel {
             // Direct (non-deferred) load: clear any leftover queued preset /
             // scene from a previous deferred import, so a stale queued apply
             // can't fire on the next handler binding.
+            pendingPresetActivationTask?.cancel()
+            pendingPresetActivationGeneration &+= 1
             pendingPresetForActivation = nil
             pendingPresetSceneNavigationRequest = nil
             pendingSceneApplyAfterActivation = nil
@@ -135,49 +137,76 @@ extension AppModel {
         // triggers the open. This is the only way to bridge the import
         // sheet (AppModel-level) to the SwiftUI environment value.
         if immersiveSpaceState != .open {
-            NotificationCenter.default.post(
-                name: AppModel.requestOpenImmersiveSpaceNotification,
-                object: nil,
-                userInfo: ["presetID": preset.id.uuidString]
-            )
+            requestOpenImmersiveSpace()
         }
-        Task { @MainActor in
+        // Structured poll: stored + generation-checked so a newer import or a
+        // cancel replaces/aborts this one instead of racing it (double
+        // compile, last-writer-wins, bogus timeout banner after cancel).
+        pendingPresetActivationGeneration &+= 1
+        let generation = pendingPresetActivationGeneration
+        pendingPresetActivationTask?.cancel()
+        pendingPresetActivationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
             customSceneDiagnostic("🔬 [CSDiag] queuePresetApplyAfterFormulaActivation name='\(preset.name)' hash=\(preset.embeddedFormula?.shortHash ?? "nil")")
             let deadline = Date().addingTimeInterval(timeout)
-            while activateEmbeddedFormulaHandler == nil {
+            while self.activateEmbeddedFormulaHandler == nil {
+                if Task.isCancelled || self.pendingPresetActivationGeneration != generation {
+                    return // superseded or cancelled — never apply this preset
+                }
                 if Date() > deadline {
-                    errorReporter.report(.preset(.importFailed(
-                        "Custom scene is queued. Enter the immersive space to compile and render the custom shader."
-                    )))
+                    // Only complain if the preset is still the queued one — a
+                    // newer import may have replaced the slot meanwhile.
+                    if self.pendingPresetForActivation?.id == preset.id {
+                        self.errorReporter.report(.preset(.importFailed(
+                            "Custom scene is queued. Enter the immersive space to compile and render the custom shader."
+                        )))
+                    }
                     return
                 }
                 try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            }
+            if Task.isCancelled || self.pendingPresetActivationGeneration != generation {
+                return
             }
             // Handler is now bound. Activate the formula, then run the
             // standard preset-apply path. The renderer's startup also runs
             // its own one-shot activation on `activeEmbeddedFormula`; the
             // activation is a no-op when hash + library already match.
-            if let handler = activateEmbeddedFormulaHandler,
+            if let handler = self.activateEmbeddedFormulaHandler,
                let formula = preset.embeddedFormula {
                 do {
                     try await handler(formula)
+                } catch is CancellationError {
+                    // Superseded by a newer import/activation: it now owns the
+                    // custom slot and the pending-preset state. Tearing down
+                    // the registration or clearing the pending slot here would
+                    // destroy the winner's work.
+                    return
                 } catch {
-                    errorReporter.report(.preset(.importFailed(
+                    self.errorReporter.report(.preset(.importFailed(
                         "Failed to compile custom shader: \(error.localizedDescription)"
                     )))
-                    uninstallEmbeddedFormula()
-                    pendingPresetForActivation = nil
-                    pendingPresetSceneNavigationRequest = nil
+                    // Uninstall only when the failing formula is still active.
+                    if self.activeEmbeddedFormulaHash == formula.shortHash {
+                        self.uninstallEmbeddedFormula()
+                    }
+                    self.pendingPresetForActivation = nil
+                    self.pendingPresetSceneNavigationRequest = nil
                     return
                 }
             }
+            if Task.isCancelled || self.pendingPresetActivationGeneration != generation {
+                return
+            }
             // If didSet hasn't already drained pendingPresetForActivation
             // (it may have, since it fires whenever the handler is bound),
-            // apply the preset now and clear the slot.
-            if pendingPresetForActivation != nil {
-                pendingPresetForActivation = nil
-                pendingPresetSceneNavigationRequest = nil
-                await applyLoadedScene(
+            // apply the preset now and clear the slot. Re-check identity: a
+            // newer import may have replaced the queued preset while we
+            // awaited the activation.
+            if self.pendingPresetForActivation?.id == preset.id {
+                self.pendingPresetForActivation = nil
+                self.pendingPresetSceneNavigationRequest = nil
+                await self.applyLoadedScene(
                     preset,
                     options: [],
                     manualSceneNavigationRequest: manualSceneNavigationRequest
@@ -281,6 +310,11 @@ extension AppModel {
     func waitForRendererAndActivate(_ formula: EmbeddedFormula, timeout: TimeInterval = 10) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while activateEmbeddedFormulaHandler == nil {
+            if Task.isCancelled {
+                // Caller superseded: stop instead of busy-spinning (the
+                // swallowed sleep below no longer throttles a cancelled task).
+                return false
+            }
             if Date() > deadline {
                 errorReporter.report(.preset(.importFailed(
                     "Custom scene is queued. Enter the immersive space to compile and render the custom shader."
@@ -303,11 +337,19 @@ extension AppModel {
         do {
             try await handler(formula)
             return true
+        } catch is CancellationError {
+            // Superseded by a newer activation: it owns the slot now; leave
+            // its registration (and any newer pending state) alone.
+            return false
         } catch {
             errorReporter.report(.preset(.importFailed(
                 "Failed to compile custom shader: \(error.localizedDescription)"
             )))
-            uninstallEmbeddedFormula()
+            // Uninstall only when the failing formula is still active — a
+            // later install may already have replaced it.
+            if activeEmbeddedFormulaHash == formula.shortHash {
+                uninstallEmbeddedFormula()
+            }
             return false
         }
     }

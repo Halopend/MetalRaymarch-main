@@ -554,11 +554,18 @@ class AppModel {
                         pendingSceneApplyAfterActivation = nil
                         queuedScene.apply()
                     }
+                } catch is CancellationError {
+                    // Superseded by a newer activation: the winner owns the
+                    // slot; tearing the registration down here would destroy
+                    // its install and kill its self-heal.
                 } catch {
                     self.errorReporter.report(.preset(.importFailed(
                         "Failed to compile custom shader: \(error.localizedDescription)"
                     )))
-                    self.uninstallEmbeddedFormula()
+                    // Uninstall only when the failing formula is still active.
+                    if activeEmbeddedFormulaHash == formula?.shortHash {
+                        self.uninstallEmbeddedFormula()
+                    }
                     self.pendingPresetForActivation = nil
                     self.pendingPresetSceneNavigationRequest = nil
                 }
@@ -584,6 +591,17 @@ class AppModel {
     /// and on every successful direct (non-deferred) load.
     @ObservationIgnored var pendingPresetForActivation: FractalPreset?
     @ObservationIgnored var pendingPresetSceneNavigationRequest: ManualSceneNavigationRequest?
+
+    /// The deferred-import poll task started by
+    /// `queuePresetApplyAfterFormulaActivation`. Stored so a newer import or a
+    /// cancel can stop it: an abandoned poll would otherwise keep running to
+    /// its 10 s deadline (double-compile against the newer import and post a
+    /// bogus "Custom scene is queued…" banner after the user cancelled).
+    @ObservationIgnored var pendingPresetActivationTask: Task<Void, Never>?
+    /// Bumped each time a new deferred-import poll starts or the pending slot
+    /// is cleared; the poll re-checks it so a superseded/cancelled import
+    /// never applies its captured preset.
+    @ObservationIgnored var pendingPresetActivationGeneration: UInt64 = 0
 
     /// Animation-scene counterpart of `pendingPresetForActivation`: an external
     /// `.threshanim`/`.threshanimv` whose embedded formula couldn't activate in
@@ -618,10 +636,7 @@ class AppModel {
         }
         pendingSceneApplyAfterActivation = (formulaHash, apply)
         if immersiveSpaceState != .open {
-            NotificationCenter.default.post(
-                name: AppModel.requestOpenImmersiveSpaceNotification,
-                object: nil
-            )
+            requestOpenImmersiveSpace()
         }
     }
     
@@ -858,6 +873,11 @@ class AppModel {
         // would undo the scene mutation boundary and overwrite device defaults.
         SettingsPersistence.flushPendingSaves()
         SettingsPersistence.save(buddhabrotSettings.config, domain: .buddhabrot)
+        // Flush the AnimationManager's 100 ms coalesced hidden-defaults /
+        // override writes (they live only in UserDefaults): quit/kill within
+        // the coalesce window — or a visionOS SIGKILL teardown that skips the
+        // `.inactive` scene phase entirely — otherwise loses the edit.
+        animationManager?.flushPendingSavesNow()
     }
 
     // MARK: - Storage Location
@@ -1127,6 +1147,20 @@ class AppModel {
             errorReporter.report(.preset(.importFailed("Invalid space warp: \(error.localizedDescription)")))
             return
         }
+        // A warp and a custom fractal share the single `activeEmbeddedFormula`
+        // slot. Overwriting a custom fractal with a warp compiles a warp-only
+        // library whose `FractalTypeCustom` dispatch returns 1e10 — fog/sky
+        // forever with no self-heal (the library is present, so the slot looks
+        // alive). Detach the custom-DE registration first: a kind switch, not
+        // an overwrite.
+        let previousFormula = activeEmbeddedFormula
+        let switchKinds = (previousFormula != nil) && (previousFormula?.effectKind != .spaceWarp)
+        if switchKinds {
+            FormulaCatalog.shared.unregisterEphemeral()
+            FractalTypeRegistry.unregisterCustom()
+            activeEmbeddedFormula = nil
+            activeEmbeddedFormulaHash = nil
+        }
         activeEmbeddedFormula = warp
         // Set the hash too, so `uninstallEmbeddedFormula()` (whose guard is
         // `activeEmbeddedFormulaHash != nil`) can detach the warp when a plain
@@ -1139,7 +1173,15 @@ class AppModel {
         // re-activates `activeEmbeddedFormula` when it binds (cold-start opens).
         if let handler = activateEmbeddedFormulaHandler {
             Task { @MainActor in
+                // Sequence the outgoing formula's detach before the warp
+                // activation so the warp's compiled library can't be clobbered
+                // by a late handler(nil) deactivation.
+                if switchKinds { try? await handler(nil) }
                 do { try await handler(warp) }
+                catch is CancellationError {
+                    // Superseded by a newer activation: it owns the slot now;
+                    // clearing state here would destroy the winner's install.
+                }
                 catch {
                     self.errorReporter.report(.preset(.importFailed("Failed to compile space warp: \(error.localizedDescription)")))
                     // Clear stale state so a failed warp doesn't linger.

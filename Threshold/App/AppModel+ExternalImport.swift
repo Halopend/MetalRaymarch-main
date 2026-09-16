@@ -321,7 +321,13 @@ extension AppModel {
                 externalPreviewCapturedEmbeddedFormula = true
             }
             guard let formula = scene.embeddedFormula else {
-                installEmbeddedFormulaIfNeeded(nil)
+                // PREVIEW ≠ COMMIT: the commit path (see the matching branch in
+                // `importExternalFile`) detaches the custom slot with
+                // `uninstallEmbeddedFormula`. The preview used to call
+                // `installEmbeddedFormulaIfNeeded(nil)` — a no-op — so the
+                // previous custom formula kept rendering through the preview
+                // and the scene visibly jumped at commit.
+                uninstallEmbeddedFormula()
                 animationManager?.currentScene = scene
                 return
             }
@@ -338,6 +344,10 @@ extension AppModel {
                 return
             }
             Task { @MainActor in
+                // Guard BEFORE installing: a superseded preview must not
+                // compile/activate its formula at all (the old check only
+                // ran after the install had already started).
+                guard activeExternalPreviewID == request.id else { return }
                 let installResult = await activateEmbeddedFormulaForSceneLoad(formula)
                 let ready: Bool
                 switch installResult {
@@ -480,5 +490,15 @@ extension AppModel {
         // applying the wrong scene. Every code path that queues a scene does so
         // *after* its clearExternalPreview call, so this never drops a live queue.
         pendingSceneApplyAfterActivation = nil
+        // Same treatment for the queued-preset slot and its structured poll:
+        // stop the poll so an abandoned deferred import can't keep running to
+        // its timeout (double compile + bogus banner), and clear the slot so a
+        // cancelled scene can't apply on the next handler bind. Callers that
+        // queue a preset do so *after* their clearExternalPreview call, so
+        // this never drops a live queue (same invariant as the scene slot).
+        pendingPresetActivationTask?.cancel()
+        pendingPresetActivationGeneration &+= 1
+        pendingPresetForActivation = nil
+        pendingPresetSceneNavigationRequest = nil
     }
 }

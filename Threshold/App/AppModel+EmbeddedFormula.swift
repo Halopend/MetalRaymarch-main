@@ -106,10 +106,17 @@ extension AppModel {
 
         let hash = formula.shortHash
         if activeEmbeddedFormulaHash != hash {
+            // Warp → fractal kind switch: the fractal-only library detaches the
+            // warp, so its strength must not linger on the built-in warp arm
+            // (same reset `uninstallEmbeddedFormula` performs on warp detach).
+            let previousWasWarp = (activeEmbeddedFormula?.effectKind == .spaceWarp)
             FormulaCatalog.shared.registerEphemeral(formula)
             FractalTypeRegistry.registerCustom(formula)
             activeEmbeddedFormula = formula
             activeEmbeddedFormulaHash = hash
+            if previousWasWarp && formula.effectKind != .spaceWarp {
+                renderSettings.spaceWarpStrength = 0
+            }
             customSceneDiagnostic("🔬 [CSDiag] installEmbeddedFormula registered in FormulaCatalog + FractalTypeRegistry")
         } else {
             customSceneDiagnostic("🔬 [CSDiag] installEmbeddedFormula already registered (hash unchanged)")
@@ -129,12 +136,23 @@ extension AppModel {
             try await handler?(formula)
             customSceneDiagnostic("🔬 [CSDiag] installEmbeddedFormula handler completed")
             return .ready
+        } catch is CancellationError {
+            // The activation was superseded by a newer one (or its task was
+            // cancelled): the renderer keeps whatever is current. Uninstalling
+            // here would tear down the registration that WON the race, and the
+            // error banner would blame a formula that didn't fail.
+            customSceneDiagnostic("🔬 [CSDiag] installEmbeddedFormula activation superseded/cancelled — keeping current registration")
+            return .failed
         } catch {
             customSceneDiagnostic("🔬 [CSDiag] ❌ installEmbeddedFormula handler THREW: \(error)")
             errorReporter.report(.preset(.importFailed(
                 "Failed to compile custom shader: \(error.localizedDescription)"
             )))
-            uninstallEmbeddedFormula()
+            // Uninstall only when the formula that failed to compile is still
+            // the active one — a later install may already have replaced it.
+            if activeEmbeddedFormulaHash == formula.shortHash {
+                uninstallEmbeddedFormula()
+            }
             return .failed
         }
     }

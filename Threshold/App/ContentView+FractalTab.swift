@@ -230,6 +230,18 @@ extension ContentView {
         editing formula: EmbeddedFormula? = nil,
         activatesImmediately: Bool = true
     ) {
+        // M4: the DE Studio's draft pipeline is fractal-only
+        // (`FormulaEditorModel.currentDraft()` hardcodes `.fractal` and the
+        // compile path registers `.custom` fractal descriptors) — seeding it
+        // with a space-warp payload used to re-register the warp as the
+        // ACTIVE custom fractal descriptor (corrupting its params) and wedge
+        // the editor at `.blockedByParseIssues`. Keep warps out of the
+        // editor; the Transformations rail edits warp instances instead.
+        if let formula, formula.effectKind == .spaceWarp {
+            appModel.errorReporter.report(
+                .preset(.importFailed("Space warps are edited in Transformations, not in the Metal DE Studio.")))
+            return
+        }
         appModel.formulaEditorSeed = formula.map {
             FormulaEditorSeed(formula: $0, activatesImmediately: activatesImmediately)
         }
