@@ -8,6 +8,7 @@
 import SwiftUI
 import ARKit
 import CoreGraphics
+import Synchronization
 
 struct FormulaEditorSeed {
     let formula: EmbeddedFormula
@@ -238,9 +239,18 @@ class AppModel {
     /// Presentation hosts use this transient flag to reveal the live renderer
     /// without changing the user's normal controls visibility.
     var isAudioReactivityIsolationPreviewActive = false
-    var runtimeViewMode: RuntimeViewMode =
-        RuntimeViewMode(rawValue: UserDefaults.standard.string(forKey: runtimeViewModeDefaultsKey) ?? "")
-        ?? .raymarch {
+    /// Sanitize the persisted view mode. The Buddhabrot renderer is DORMANT
+    /// (never constructed), but a stale persisted `"buddhabrot"` from an older
+    /// build booted the app into the Buddhabrot-only panel, replacing all
+    /// navigation. Only the live `.raymarch` mode may restore.
+    private static func restoredRuntimeViewMode() -> RuntimeViewMode {
+        let raw = UserDefaults.standard.string(forKey: runtimeViewModeDefaultsKey)
+        guard raw != RuntimeViewMode.buddhabrot.rawValue,
+              let mode = RuntimeViewMode(rawValue: raw ?? "") else { return .raymarch }
+        return mode
+    }
+
+    var runtimeViewMode: RuntimeViewMode = AppModel.restoredRuntimeViewMode() {
         didSet {
             runtimeViewModeForRenderer = runtimeViewMode
             if !SettingsPersistence.benchmarkHermetic {
@@ -413,7 +423,21 @@ class AppModel {
             }
         }
     }
-    @ObservationIgnored nonisolated(unsafe) var handTrackingEnabledForRenderer = true
+    /// Cross-thread mirror of `handTrackingEnabled` for the render loop's
+    /// hand-tracking path (`RendererFrameLoopHelpers`). The writer is MainActor
+    /// (init + the `handTrackingEnabled` didSet); the reader is the render
+    /// thread. Relaxed ordering is sufficient: a one-frame-stale toggle only
+    /// delays gesture routing by a frame. Replaces the former unguarded
+    /// `nonisolated(unsafe)` field (tech debt #6, sharpest site).
+    @ObservationIgnored private let handTrackingEnabledForRendererValue = Atomic<Bool>(true)
+
+    /// Mirror of `handTrackingEnabled` readable from the render loop off the
+    /// MainActor. Writes are MainActor-only; the load/store pair makes the
+    /// cross-thread read race-free instead of relying on `nonisolated(unsafe)`.
+    var handTrackingEnabledForRenderer: Bool {
+        get { handTrackingEnabledForRendererValue.load(ordering: .relaxed) }
+        set { handTrackingEnabledForRendererValue.store(newValue, ordering: .relaxed) }
+    }
     /// Forwarding accessors for hand tracking UI state.
     /// Reads/writes route to the isolated `handTrackingState` container so that
     /// high-frequency updates don't invalidate all AppModel observers.
