@@ -48,6 +48,8 @@ final class AppleMusicManager {
     private(set) var libraryAlbums: [LibraryAlbum] = []
     private(set) var libraryLoading: Bool = false
     private(set) var libraryErrorMessage: String?
+    private(set) var isRequestingAuthorization = false
+    private(set) var connectionErrorMessage: String?
 
     @ObservationIgnored var onStateDidChange: (() -> Void)?
     /// Live playback progress callback: `(currentTime, duration, isPlaying)`.
@@ -74,7 +76,8 @@ final class AppleMusicManager {
     /// the player must not be consulted until the user has authorized access
     /// from the Music UI.
     private var player: MPMusicPlayerController { MPMusicPlayerController.systemMusicPlayer }
-    private var isObservingPlayer = false
+    private(set) var isObservingPlayer = false
+    private var authorizationTimeoutTask: Task<Void, Never>?
     private var lastUpdateTime: CFTimeInterval = 0
     private var monitorTask: Task<Void, Never>?
     private var notificationObservers: [NSObjectProtocol] = []
@@ -84,15 +87,19 @@ final class AppleMusicManager {
     private let logger = Logger(subsystem: "com.puppypower.Threshold", category: "AppleMusic")
 
     init() {
+        #if targetEnvironment(simulator)
+        // MediaPlayer's Apple-account backend is unavailable in Simulator.
+        // Avoid touching it: on current runtimes it can block while repeatedly
+        // reporting ICError -7013 (account-store entitlement denied).
+        authorizationStatus = .restricted
+        connectionErrorMessage = "Apple Music requires a physical device."
+        return
+        #else
         authorizationStatus = MPMediaLibrary.authorizationStatus()
-        // Only an already-authorized library may attach to the system player at
-        // launch; otherwise wait for an explicit `requestAuthorization()` so the
-        // permission prompt appears in the context of the Music tab.
-        guard isAuthorized else { return }
-        attachToPlayerIfNeeded()
-        startMonitoring()
-        refreshLibrary()
-        updateMetadata()
+        // Authorization and player initialization are deliberately separate.
+        // `systemMusicPlayer` may synchronously initialize the Apple-account
+        // backend, so never touch it during launch or the Connect action.
+        #endif
     }
 
     /// Begins observing the system music player. Idempotent; must only be
@@ -105,28 +112,52 @@ final class AppleMusicManager {
     }
 
     func requestAuthorization() {
+        #if targetEnvironment(simulator)
+        connectionErrorMessage = "Apple Music requires a physical device."
+        onStateDidChange?()
+        return
+        #else
+        guard !isRequestingAuthorization else { return }
+
         if authorizationStatus == .authorized {
-            attachToPlayerIfNeeded()
-            startMonitoring()
-            refreshLibrary()
-            updateFrame()
+            connectionErrorMessage = nil
+            onStateDidChange?()
             return
+        }
+
+        isRequestingAuthorization = true
+        connectionErrorMessage = nil
+        onStateDidChange?()
+
+        authorizationTimeoutTask?.cancel()
+        authorizationTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(15))
+            guard !Task.isCancelled, self?.isRequestingAuthorization == true else { return }
+            self?.isRequestingAuthorization = false
+            self?.connectionErrorMessage = "Apple Music did not respond. Verify MusicKit is enabled for this App ID, then try again on a physical device."
+            self?.onStateDidChange?()
         }
 
         MPMediaLibrary.requestAuthorization { [weak self] status in
             Task { @MainActor in
-                self?.authorizationStatus = status
+                guard let self else { return }
+                self.authorizationTimeoutTask?.cancel()
+                self.authorizationTimeoutTask = nil
+                self.isRequestingAuthorization = false
+                self.authorizationStatus = status
                 if status == .authorized {
-                    self?.attachToPlayerIfNeeded()
-                    self?.startMonitoring()
-                    self?.refreshLibrary()
-                    self?.updateFrame()
+                    // Do not initialize `systemMusicPlayer` here. Keeping the
+                    // authorization callback lightweight prevents an account-
+                    // store failure from blocking the Connect button/main actor.
+                    self.connectionErrorMessage = nil
                 } else {
-                    self?.stopMonitoring()
-                    self?.clearLibrary(reason: "Apple Music access is required to browse songs and playlists.")
+                    self.stopMonitoring()
+                    self.clearLibrary(reason: "Apple Music access is required to browse songs and playlists.")
                 }
+                self.onStateDidChange?()
             }
         }
+        #endif
     }
 
     func refreshLibrary() {
@@ -137,6 +168,7 @@ final class AppleMusicManager {
 
         libraryLoading = true
         libraryErrorMessage = nil
+        onStateDidChange?()
 
         let songItems = sanitizedMediaItems(MPMediaQuery.songs().items ?? [], kind: "songs")
         songLookup = Dictionary(songItems.map { ($0.persistentID, $0) }, uniquingKeysWith: { first, _ in first })
@@ -184,6 +216,7 @@ final class AppleMusicManager {
             }
 
         libraryLoading = false
+        onStateDidChange?()
     }
 
     func playSong(id: UInt64) {
@@ -200,6 +233,7 @@ final class AppleMusicManager {
             return
         }
 
+        attachToPlayerIfNeeded()
         player.setQueue(with: MPMediaItemCollection(items: [item]))
         player.play()
         startMonitoring()
@@ -234,6 +268,7 @@ final class AppleMusicManager {
             return
         }
 
+        attachToPlayerIfNeeded()
         player.shuffleMode = shuffle ? .songs : .off
         player.setQueue(with: playlist)
         player.play()
@@ -255,6 +290,7 @@ final class AppleMusicManager {
             return
         }
 
+        attachToPlayerIfNeeded()
         player.shuffleMode = shuffle ? .songs : .off
         player.setQueue(with: album)
         player.play()
@@ -408,6 +444,7 @@ final class AppleMusicManager {
         albumLookup = [:]
         libraryLoading = false
         libraryErrorMessage = reason
+        onStateDidChange?()
     }
 
     private func observePlayerNotifications() {

@@ -172,6 +172,13 @@ final class AudioHub {
     func updateFrame() {
         let now = ProcessInfo.processInfo.systemUptime
         lastUpdateFrameTime = now
+        // Apple Music's activation isn't a capture-source start, so the timer
+        // must be ensured here too — otherwise the fallback timer (which keeps
+        // the metadata envelope + staleness live while rendering is paused)
+        // never exists for an Apple-Music-only session (M40).
+        if appleMusic.isActive {
+            ensureCaptureRefreshTimer()
+        }
         for source in captureSources {
             source.advanceFrame(at: now)
         }
@@ -230,7 +237,15 @@ final class AudioHub {
                 return
             }
             MainActor.assumeIsolated {
-                guard self.captureSources.contains(where: { $0.isActive }) else {
+                // Keep-alive covers BOTH source families: PCM capture sources
+                // AND the Apple Music metadata source. With Apple Music
+                // selected and the render loop paused, a capture-only guard
+                // retired the timer — updateFrame() stopped running, so the
+                // metadata envelope never decayed and the snapshot froze at
+                // stale band levels while still claiming isActive (M40).
+                let keepAlive = captureSources.contains(where: { $0.isActive })
+                    || appleMusic.isActive
+                guard keepAlive else {
                     self.captureRefreshTimer?.invalidate()
                     self.captureRefreshTimer = nil
                     self.refreshFeatureSnapshot()

@@ -140,6 +140,14 @@ final class MicrophoneCaptureSource: AudioCaptureSource {
 @MainActor
 final class AppleMusicMetadataFeatureSource {
     private let manager: AppleMusicManager
+    /// Rate limit for the render-loop-driven path: `advanceFrame()` used to run
+    /// inside EVERY AudioHub frame (~60 Hz on the main actor), each one doing
+    /// MediaPlayer IPC reads (`playbackState` / `nowPlayingItem` /
+    /// `currentPlaybackTime`) — even while the microphone was the active
+    /// source (M41). The manager's own monitor task polls at 200 ms; the
+    /// render-loop path now matches that cadence.
+    private var lastAdvanceAt: TimeInterval = 0
+    private static let advancePollInterval: TimeInterval = 0.2
 
     init(manager: AppleMusicManager) {
         self.manager = manager
@@ -169,7 +177,15 @@ final class AppleMusicMetadataFeatureSource {
         #endif
     }
 
+    /// Manager-backed liveness for the AudioHub fallback timer (M40): the
+    /// Apple Music source family is metadata, not a capture source, so its
+    /// keep-alive signal rides the manager's own active flag.
+    var isActive: Bool { manager.isActive }
+
     func advanceFrame() {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastAdvanceAt >= Self.advancePollInterval else { return }
+        lastAdvanceAt = now
         manager.updateFrame()
     }
 

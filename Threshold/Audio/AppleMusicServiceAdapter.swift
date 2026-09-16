@@ -23,6 +23,12 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
 
     // ── Connection ───────────────────────────────────────────────────────
     var connectionStatus: MusicServiceConnectionStatus {
+        if manager.isRequestingAuthorization {
+            return .connecting
+        }
+        if let message = manager.connectionErrorMessage {
+            return .error(message)
+        }
         switch manager.authorizationStatus {
         case .authorized:    return .connected
         case .denied:        return .error("Access denied. Enable in Settings.")
@@ -38,7 +44,14 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
 
     // ── Now Playing ──────────────────────────────────────────────────────
     var nowPlaying: UnifiedTrack? {
-        guard !manager.nowPlayingTitle.isEmpty else { return nil }
+        // Touching `systemMusicPlayer` state before the user authorized
+        // access pops the Media & Apple Music permission prompt on first tab
+        // open (MusicTabView reads `nowPlaying` ahead of the connections
+        // section). The manager's own contract defers ALL player access until
+        // the player-backend attach ran — which itself requires
+        // authorization — so gate on both.
+        guard manager.isAuthorized, manager.isObservingPlayer,
+              !manager.nowPlayingTitle.isEmpty else { return nil }
         let player = MPMusicPlayerController.systemMusicPlayer
         let pid = player.nowPlayingItem?.persistentID
         return UnifiedTrack(
