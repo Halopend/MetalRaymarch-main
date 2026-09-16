@@ -1,14 +1,22 @@
 import Metal
 import simd
+import Synchronization
 
 enum MetalLibraryCache {
-    nonisolated(unsafe) private static var defaultLibrary: MTLLibrary?
+    // Mutex-protected (was `nonisolated(unsafe)`): concurrently-read from the
+    // render thread and pipeline warm-start paths, and two simultaneous
+    // misses could both compile the default library. Formally UB under Swift 6
+    // regardless of the double-compile.
+    private static let lock = Mutex<MTLLibrary?>(nil)
 
     static func bundledDefaultLibrary(device: MTLDevice) -> MTLLibrary? {
-        if let cached = defaultLibrary { return cached }
+        if let cached = lock.withLock({ $0 }) { return cached }
         let library = device.makeDefaultLibrary()
-        defaultLibrary = library
-        return library
+        guard let library else { return nil }
+        lock.withLock { state in
+            if state == nil { state = library }
+        }
+        return lock.withLock { $0 } ?? library
     }
 }
 

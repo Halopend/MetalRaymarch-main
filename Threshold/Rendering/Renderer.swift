@@ -195,8 +195,14 @@ actor Renderer {
     var pendingScreenshotContinuation: CheckedContinuation<Data?, Never>?
     var shouldCaptureScreenshot: Bool = false
     
-    // Pipeline profiling trigger
-    nonisolated(unsafe) var shouldRunProfiler: Bool = false
+    // Pipeline profiling trigger. Mutex-protected (was `nonisolated(unsafe)`):
+    // written from the nonisolated `triggerProfiler()` entry and read/cleared
+    // on the render-thread loop.
+    private let shouldRunProfilerLock = Mutex(false)
+    nonisolated var shouldRunProfiler: Bool {
+        get { shouldRunProfilerLock.withLock { $0 } }
+        set { shouldRunProfilerLock.withLock { $0 = newValue } }
+    }
 
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
 
@@ -316,7 +322,14 @@ actor Renderer {
     nonisolated(unsafe) var backgroundRenderPipelineBuildTasks: [String: Task<Void, Never>] = [:]
     nonisolated(unsafe) var backgroundComputePipelineBuildTasks: [String: Task<Void, Never>] = [:]
     // At most one hand-tracking dispatch task is in flight due to handTrackingDispatchState.
-    nonisolated(unsafe) var handTrackingDispatchTask: Task<Void, Never>?
+    // Mutex-protected (was `nonisolated(unsafe)`): the detached dispatch's
+    // `defer` cleared the slot concurrently with the actor's teardown cancel —
+    // a data race that could lose a teardown cancel.
+    private let handTrackingDispatchTaskLock = Mutex<Task<Void, Never>?>(nil)
+    nonisolated var handTrackingDispatchTask: Task<Void, Never>? {
+        get { handTrackingDispatchTaskLock.withLock { $0 } }
+        set { handTrackingDispatchTaskLock.withLock { $0 = newValue } }
+    }
 
     /// Cross-launch cache of compiled compute pipeline binaries. Optional: nil if
     /// Application Support is unavailable, in which case every launch recompiles.
@@ -1525,8 +1538,12 @@ actor Renderer {
 
         renderEncoder.setFrontFacing(.counterClockwise)
 
-        // Get current iteration count for specialized pipeline selection
-        let currentIterations = settingsSnapshot.fractalIterations
+        // Get current iteration count for specialized pipeline selection.
+        // deIterationMismatch biases the baked FC_FRACTAL_ITERATIONS (geometry
+        // fold count) — the DE stays normalized to the unbiased count —
+        // matching Mac/iOS's cache-key formula; the raw count previously made
+        // the control a silent no-op on Vision Pro.
+        let currentIterations = max(0, settingsSnapshot.fractalIterations + Int(settingsSnapshot.deIterationMismatch.rounded()))
         let currentRaySteps = settingsSnapshot.maxRaySteps
         
         // Detect neon mode from colorSchemeParams.neonIntensity
@@ -2607,8 +2624,11 @@ actor Renderer {
         settingsSnapshot: RenderSettingsSnapshot,
         framePreparation: RendererFramePreparation
     ) -> Bool {
-        // Select the best compute pipeline for current iteration/ray step settings
-        let fi = settingsSnapshot.fractalIterations
+        // Select the best compute pipeline for current iteration/ray step
+        // settings. Biased count matches the fragment path
+        // (deIterationMismatch folds into FC_FRACTAL_ITERATIONS) — previously
+        // a silent no-op on the compute path too.
+        let fi = max(0, settingsSnapshot.fractalIterations + Int(settingsSnapshot.deIterationMismatch.rounded()))
         let rs = settingsSnapshot.maxRaySteps
         let computePipeline = selectComputePipeline(
             fractalIterations: fi,
