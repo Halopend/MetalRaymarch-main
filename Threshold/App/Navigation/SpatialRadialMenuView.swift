@@ -250,7 +250,7 @@
         route: nil,
         presentation: .spatialRadial,
         fractalType: store.fractalType,
-        catalogRevision: 1,
+        catalogRevision: ParameterCatalog.catalogRevision,
         transformRevision: store.spaceWarpStructureRevision,
         featureFlags: 0
       )

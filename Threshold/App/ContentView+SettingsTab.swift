@@ -111,7 +111,7 @@ extension ContentView {
             route: nil,
             presentation: .quickToggles,
             fractalType: cache.fractalType,
-            catalogRevision: 1,
+            catalogRevision: ParameterCatalog.catalogRevision,
             transformRevision: cache.spaceWarpStructureRevision,
             featureFlags: 0
         )

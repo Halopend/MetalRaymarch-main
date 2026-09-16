@@ -91,7 +91,7 @@ enum RadialMenuProjectionFactory {
             route: route,
             presentation: .radial2D,
             fractalType: appModel.controlStateStore.fractalType,
-            catalogRevision: 1,
+            catalogRevision: ParameterCatalog.catalogRevision,
             transformRevision: appModel.controlStateStore.spaceWarpStructureRevision,
             featureFlags: featureFlags
         )

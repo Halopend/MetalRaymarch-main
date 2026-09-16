@@ -1391,6 +1391,22 @@ enum ParameterCatalog {
         + toggleDescriptors.map(SemanticControlDescriptor.toggle)
         + actionDescriptors.map(SemanticControlDescriptor.action)
 
+    /// Content-derived revision for projection cache keys. Replaces the
+    /// hardcoded `catalogRevision: 1` at the presentation edges, which would
+    /// have silently served stale cached projections after any future
+    /// catalog edit. (Per-process consistent — projection caches are
+    /// in-process.) Recomputed only if the catalog content changes in a
+    /// future build, because this is a `static let`.
+    static let catalogRevision: Int = {
+        var hasher = Hasher()
+        for descriptor in semanticDescriptors {
+            hasher.combine(descriptor.id.rawValue)
+            hasher.combine(String(describing: descriptor.placement))
+            hasher.combine(descriptor.requiredPlatformCapabilities.rawValue)
+        }
+        return hasher.finalize()
+    }()
+
     static let semanticByID: [ControlID: SemanticControlDescriptor] =
         Dictionary(uniqueKeysWithValues: semanticDescriptors.map { ($0.id, $0) })
 

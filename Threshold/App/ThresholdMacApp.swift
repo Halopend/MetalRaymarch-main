@@ -1068,11 +1068,53 @@ private struct ThresholdMacRootView: View {
     }
 
     private var radialProjection: RadialNavigationProjection {
-        RadialMenuProjectionFactory.make(
+        // Memoized per STRUCTURE (route selection + fractal type + transform
+        // revision + profile). Building the tree per body evaluation AND per
+        // scroll tick (applyRadialSliderScroll) re-walked NavigationHierarchy,
+        // re-decoded transformation-mode/unlock UserDefaults JSON, and
+        // re-allocated every node + closure ~90×/s while scrolling a slider.
+        // Live VALUES stay live through the node closures, so only structure
+        // changes need a rebuild.
+        let store = appModel.controlStateStore
+        let nav = appModel.navigationStore.state
+        let key = RadialProjectionCacheKey(
+            currentRoute: nav.currentRoute,
+            returnRoute: nav.returnRoute,
+            pinnedRouteIDs: nav.pinnedRouteIDs,
+            fractalType: store.fractalType,
+            transformRevision: store.spaceWarpStructureRevision,
+            profile: appModel.platformProfile
+        )
+        let memo = radialProjectionMemo
+        if memo.key == key, let cached = memo.projection {
+            return cached
+        }
+        let fresh = RadialMenuProjectionFactory.make(
             appModel: appModel,
             allowsCustomScenes: true,
             onActivate: activateRadialTarget
         )
+        memo.key = key
+        memo.projection = fresh
+        return fresh
+    }
+
+    /// Reference-type memo so body evaluations and scroll ticks share one
+    /// built projection without triggering SwiftUI invalidation.
+    @State private var radialProjectionMemo = RadialProjectionMemo()
+
+    private final class RadialProjectionMemo {
+        var key: RadialProjectionCacheKey?
+        var projection: RadialNavigationProjection?
+    }
+
+    private struct RadialProjectionCacheKey: Equatable {
+        let currentRoute: AppRoute
+        let returnRoute: AppRoute?
+        let pinnedRouteIDs: [String]
+        let fractalType: FractalModelType
+        let transformRevision: Int
+        let profile: PlatformProfile
     }
 
     private func activateRadialTarget(_ target: AppNavigationTarget) {
