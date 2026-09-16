@@ -2100,14 +2100,20 @@ private struct RadialMenuButton: View {
     private func handleActivation() {
         #if os(macOS)
         if let event = NSApp.currentEvent,
-           event.type == .leftMouseUp,
-           RadialActivationPolicy.shouldOpenFullControls(
-               activationCount: event.clickCount,
-               hasFullControlsAction: onOpenFullControls != nil
-           ),
-           let onOpenFullControls {
-            onOpenFullControls()
-            return
+           event.type == .leftMouseUp {
+            if RadialActivationPolicy.shouldOpenFullControls(
+                activationCount: event.clickCount,
+                hasFullControlsAction: onOpenFullControls != nil
+            ),
+               let onOpenFullControls {
+                onOpenFullControls()
+                return
+            }
+            // Double-click on an action WITHOUT a full-controls action: the
+            // leaf action already ran on the first mouse-up — running it again
+            // net-zeroed toggles and raced pushConstructionPrimitive's two
+            // compile tasks. Swallow the second activation.
+            if event.clickCount >= 2 { return }
         }
         #endif
         onActivate()
