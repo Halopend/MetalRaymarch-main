@@ -181,7 +181,11 @@ class PresetManager {
         softness: 0.043115318,
         windowRadius: 3
     )
-    private let maxBackupCount: Int? = nil  // nil = unlimited retention
+    /// Finite backup retention. Unlimited retention grew `Documents/Backups/`
+    /// to hundreds of MB (each snapshot embeds ~30–80 KB base64 thumbnails per
+    /// preset, every 30 s during editing sessions). 24 × ~one snapshot each is
+    /// a comfortable safety window.
+    private let maxBackupCount: Int? = 24
     private var pendingSaveTask: Task<Void, Never>?
     private let saveDebounceNanoseconds: UInt64 = 250_000_000
     private var lastBackupAt: Date?
@@ -245,6 +249,10 @@ class PresetManager {
     /// before the first reload from that root so the folder-as-truth scan cannot
     /// discard an in-memory scene the user just created.
     @ObservationIgnored private var pendingRootWrites: [UUID: FractalPreset] = [:]
+    /// Deletions queued while the active root is unresolved — without this a
+    /// delete was a silent no-op and the next folder scan RESURRECTED the
+    /// deleted scene from its still-present file.
+    @ObservationIgnored private var pendingRootDeletions: Set<UUID> = []
     private static let presetReloadDebounce: Duration = .milliseconds(350)
     /// Observers that reload the store when the active root resolves or the mode changes.
     /// `nonisolated(unsafe)` so the nonisolated deinit can unregister them; the only
@@ -342,7 +350,14 @@ class PresetManager {
         query.searchScopes = dirs
         query.predicate = NSPredicate(format: "%K ENDSWITH '.threshscene' OR %K ENDSWITH '.threshmp'",
                                       NSMetadataItemFSNameKey, NSMetadataItemFSNameKey)
-        query.operationQueue = .main
+        // File Provider can emit a burst of metadata events while iCloud is
+        // hydrating the folder. Keep query gathering/notification delivery off
+        // the main actor; only the debounced `loadPresets()` hop below touches
+        // observable app state.
+        let queryQueue = OperationQueue()
+        queryQueue.maxConcurrentOperationCount = 1
+        queryQueue.qualityOfService = .utility
+        query.operationQueue = queryQueue
         let reload: @Sendable (Notification) -> Void = { [weak self] _ in
             Task { @MainActor in self?.loadPresets() }
         }
@@ -839,20 +854,50 @@ class PresetManager {
 
     /// Delete every store file (both folders) whose decoded id is in `ids`, scanning
     /// each folder once (vs one scan per id). Used by the delete sites and `replaceAll`.
+    ///
+    /// Runs OFF the main actor: the sweep decodes EVERY store file, and an
+    /// iCloud placeholder can synchronously materialize mid-read — a
+    /// multi-second main-actor stall on every save/rename/delete/replaceAll
+    /// (same treatment as the store scan). Callers already updated the
+    /// in-memory set, so the async file removal races nothing: the reload
+    /// invalidation hides the deleted ids until the removal completes.
     private func removePresetFiles(ids: Set<UUID>, root: URL, excluding: Set<URL> = []) {
         guard !ids.isEmpty else { return }
         let excluded = Set(excluding.map(\.standardizedFileURL))
         let exts = ThresholdExportFormat.extensions(in: .preset)
-        for dir in [StorageLocation.scenesDir(root), StorageLocation.musicPresetsDir(root)] {
-            guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
-            for url in files where exts.contains(url.pathExtension) {
-                guard !excluded.contains(url.standardizedFileURL) else { continue }
-                if let data = try? Data(contentsOf: url),
-                   let preset = try? presetDecoder.decode(FractalPreset.self, from: data), ids.contains(preset.id) {
-                    try? FileManager.default.removeItem(at: url)
+        let decoder = presetDecoder
+        Task.detached(priority: .utility) {
+            for dir in [StorageLocation.scenesDir(root), StorageLocation.musicPresetsDir(root)] {
+                guard let files = try? FileManager.default.contentsOfDirectory(
+                    at: dir, includingPropertiesForKeys: Self.fileResourceKeys) else { continue }
+                for url in files where exts.contains(url.pathExtension) {
+                    guard !excluded.contains(url.standardizedFileURL) else { continue }
+                    if Self.isUnmaterializedPlaceholder(url) { continue }
+                    if let data = try? Data(contentsOf: url),
+                       let preset = try? decoder.decode(FractalPreset.self, from: data), ids.contains(preset.id) {
+                        try? FileManager.default.removeItem(at: url)
+                    }
                 }
             }
         }
+    }
+
+    /// Resource keys fetched with directory enumerations (shared by the
+    /// placeholder probe).
+    nonisolated private static let fileResourceKeys: [URLResourceKey] = [
+        .isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey,
+        .fileSizeKey, .totalFileAllocatedSizeKey
+    ]
+
+    /// True when the file is an iCloud placeholder that has NOT been confirmed
+    /// readable locally — reading one synchronously materializes it. Mirrors
+    /// `StorePlaceholderReadPolicy`.
+    nonisolated private static func isUnmaterializedPlaceholder(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: Set(fileResourceKeys)) else { return false }
+        guard values.isUbiquitousItem == true else { return false }
+        let status = values.ubiquitousItemDownloadingStatus
+        if status == .current || status == .downloaded { return false }
+        return true
     }
 
     /// Persist a single preset, queueing it while the active root resolves.
@@ -876,12 +921,22 @@ class PresetManager {
     }
 
     private func flushPendingRootWrites() {
-        guard let root = storeRoot, !pendingRootWrites.isEmpty else { return }
-        invalidatePresetReloadForLocalMutation()
-        let pending = pendingRootWrites
-        for (id, preset) in pending {
-            if writePresetFile(preset, root: root) {
-                pendingRootWrites.removeValue(forKey: id)
+        guard let root = storeRoot, !pendingRootWrites.isEmpty || !pendingRootDeletions.isEmpty else { return }
+        if !pendingRootWrites.isEmpty {
+            invalidatePresetReloadForLocalMutation()
+            let pending = pendingRootWrites
+            for (id, preset) in pending {
+                if writePresetFile(preset, root: root) {
+                    pendingRootWrites.removeValue(forKey: id)
+                }
+            }
+        }
+        if !pendingRootDeletions.isEmpty {
+            invalidatePresetReloadForLocalMutation()
+            let deletions = pendingRootDeletions
+            pendingRootDeletions.removeAll()
+            for id in deletions {
+                removePresetFiles(id: id, root: root)
             }
         }
     }
@@ -904,7 +959,9 @@ class PresetManager {
             presetFileCache = [:]
             bundledPlaceholderFallbacks = []
             failedPlaceholderProbeURLs = []
-            presets = pendingRootWrites.values.sorted { $0.createdAt > $1.createdAt }
+            presets = pendingRootWrites.values
+                .filter { !pendingRootDeletions.contains($0.id) }
+                .sorted { $0.createdAt > $1.createdAt }
             return
         }
         StorageLocation.shared.ensureLayout(at: root)
@@ -1088,7 +1145,18 @@ class PresetManager {
 
     private func snapshotBackup() {
         guard !presets.isEmpty else { return }
-        if let data = try? presetEncoder.encode(presets) { writeBackup(data: data) }
+        // Off-main encode: the whole-set pretty-JSON encode costs tens of ms
+        // for realistic libraries and previously ran on the main actor after
+        // every debounced edit. FractalPreset is a value graph, so the copy
+        // into the detached task is the transfer.
+        let presets = self.presets
+        Task.detached(priority: .utility) { [weak self] in
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            guard let data = try? encoder.encode(presets) else { return }
+            await self?.writeBackup(data: data)
+        }
     }
 
     /// Force an immediate timestamped backup of the CURRENT presets, bypassing
@@ -1120,8 +1188,7 @@ class PresetManager {
         scheduleBackup()
     }
 
-    /// Write a timestamped backup. Retention is currently unlimited:
-    /// `maxBackupCount` is nil, so `pruneBackups` never removes old backups.
+    /// Write a timestamped backup with finite retention (`maxBackupCount`).
     private func writeBackup(data: Data) {
         let now = Date()
         if let lastBackupAt, now.timeIntervalSince(lastBackupAt) < backupInterval {
@@ -1132,7 +1199,9 @@ class PresetManager {
         let stamp = Self.backupTimestampFormatter.string(from: now)
         let backupURL = backupsDirectory.appendingPathComponent("presets-\(stamp).json")
         do {
-            try data.write(to: backupURL)
+            // Atomic: a kill mid-write previously left a truncated backup that
+            // looks complete to the prune pass (animations already do this).
+            try data.write(to: backupURL, options: .atomic)
             if let limit = maxBackupCount {
                 pruneBackups(keeping: limit)
             }
@@ -1219,6 +1288,12 @@ class PresetManager {
         if let root = storeRoot {
             invalidatePresetReloadForLocalMutation()
             removePresetFiles(id: preset.id, root: root)
+        } else {
+            // Root unresolved: the removal must be queued or the next scan
+            // resurrects the deleted scene from its still-present file.
+            pendingRootDeletions.insert(preset.id)
+            backupCurrentPresetsNow()
+            StorageLocation.shared.resolveICloud()
         }
         scheduleBackup()
     }
@@ -1233,7 +1308,15 @@ class PresetManager {
         for preset in removed {
             pendingRootWrites.removeValue(forKey: preset.id)
             FractalPreset.clearThumbnailCache(for: preset.id)
-            if let root = storeRoot { removePresetFiles(id: preset.id, root: root) }
+            if let root = storeRoot {
+                removePresetFiles(id: preset.id, root: root)
+            } else {
+                pendingRootDeletions.insert(preset.id)
+            }
+        }
+        if !removed.isEmpty && storeRoot == nil {
+            backupCurrentPresetsNow()
+            StorageLocation.shared.resolveICloud()
         }
         scheduleBackup()
     }
@@ -1281,16 +1364,31 @@ class PresetManager {
     @discardableResult
     func importPreset(_ preset: FractalPreset) -> FractalPreset {
         var preset = preset
-        if let existingIndex = presets.firstIndex(where: { $0.id == preset.id }) {
-            // Overwriting an existing id is a content change — advance the merge
-            // clock so the iCloud newest-wins reconcile favors this edit. (Not on
-            // the merge/reconcile path itself, so no ping-pong.) TECH_DEBT #6.
-            preset.updatedAt = Date()
+        let existingIndex = presets.firstIndex(where: { $0.id == preset.id })
+        let previous = existingIndex.map { presets[$0] }
+        if let existingIndex {
+            // Keep the file's own merge clock instead of stamping `now`:
+            // stamping let an OLDER re-imported export win the newest-wins
+            // iCloud reconcile and propagate stale content cross-device. The
+            // file's updatedAt is the honest recency signal — if it is
+            // genuinely older than the local edit, the local edit wins the
+            // merge (and this device's reconcile), so no regression spreads.
             presets[existingIndex] = preset
         } else {
             presets.insert(preset, at: 0)
         }
-        _ = persist(preset)
+        let result = persist(preset)
+        if case .failed = result {
+            // Do not leave an in-memory ghost that looks saved but disappears
+            // on the next folder-truth scan (same rollback as savePreset /
+            // updatePreset).
+            if let existingIndex, let previous {
+                presets[existingIndex] = previous
+            } else {
+                presets.removeAll { $0.id == preset.id }
+            }
+            return preset
+        }
         scheduleBackup()
         FractalPreset.clearThumbnailCache(for: preset.id)
         UsageAnalytics.shared.trackPresetSaved(preset: preset)
