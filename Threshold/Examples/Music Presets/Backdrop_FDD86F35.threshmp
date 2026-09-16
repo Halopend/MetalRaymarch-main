@@ -1,18 +1,18 @@
 {
-  "aoStrength" : 0.82190704,
+  "aoStrength" : 0.28560767,
   "audioReactiveConfig" : {
     "bassSensitivity" : 1.1,
     "beatSensitivity" : 1.2,
-    "fractalAudioAmount" : 0.29241937,
+    "fractalAudioAmount" : 0.25921875,
     "fractalAudioDamping" : 3,
     "fractalAudioReactiveEnabled" : true,
     "fractalBeatPunch" : 0.85,
     "midSensitivity" : 0.8,
     "musicReactiveMappings" : [
       {
-        "amount" : 0.6688267,
+        "amount" : 1,
         "hybridCombo" : 0.35,
-        "id" : "9D1F8146-F721-441A-8D2C-5CD4519F0E2A",
+        "id" : "B68A5090-AF06-4D62-BFD9-40A5C56212BF",
         "inputOffset" : 0,
         "inputScale" : 1,
         "isEnabled" : true,
@@ -22,8 +22,8 @@
           "frequency" : 0.1,
           "shape" : "sine"
         },
-        "responseCurve" : "sinusoidal",
-        "smoothingWindow" : 0,
+        "responseCurve" : "hybrid",
+        "smoothingWindow" : 0.6801945,
         "source" : "composite",
         "spaceWarpField" : "strength",
         "target" : "fractalScale"
@@ -31,7 +31,7 @@
       {
         "amount" : 1,
         "hybridCombo" : 0.35,
-        "id" : "2E013E83-BED2-4FFD-8223-744CEB11FBB7",
+        "id" : "5460BB37-24EE-4D4C-9BC8-7AB57245F876",
         "inputOffset" : 0,
         "inputScale" : 1,
         "isEnabled" : true,
@@ -41,16 +41,16 @@
           "frequency" : 0.1,
           "shape" : "sine"
         },
-        "responseCurve" : "sinusoidal",
-        "smoothingWindow" : 0,
+        "responseCurve" : "hybrid",
+        "smoothingWindow" : 1.1626456,
         "source" : "bass",
         "spaceWarpField" : "strength",
         "target" : "formulaParam0"
       },
       {
-        "amount" : 0.22606853,
+        "amount" : 1,
         "hybridCombo" : 0.35,
-        "id" : "C4CC39ED-F0B3-480E-ABDE-BF4CD69C18ED",
+        "id" : "E1957587-EF12-4573-8CDC-62E08017D6BD",
         "inputOffset" : 0,
         "inputScale" : 1,
         "isEnabled" : true,
@@ -60,8 +60,8 @@
           "frequency" : 0.1,
           "shape" : "sine"
         },
-        "responseCurve" : "sinusoidal",
-        "smoothingWindow" : 0,
+        "responseCurve" : "hybrid",
+        "smoothingWindow" : 1.2849938,
         "source" : "mid",
         "spaceWarpField" : "strength",
         "target" : "formulaParam1"
@@ -69,7 +69,7 @@
       {
         "amount" : 1,
         "hybridCombo" : 0.35,
-        "id" : "77264671-1156-4345-BF4D-6A69CF38E52A",
+        "id" : "1C7FB0E7-FC5C-4C58-B0AF-040D2472AD43",
         "inputOffset" : 0,
         "inputScale" : 1,
         "isEnabled" : true,
@@ -80,7 +80,7 @@
           "shape" : "sine"
         },
         "responseCurve" : "sinusoidal",
-        "smoothingWindow" : 0,
+        "smoothingWindow" : 1.2717606,
         "source" : "treble",
         "spaceWarpField" : "strength",
         "target" : "formulaParam2"
@@ -88,7 +88,26 @@
       {
         "amount" : 1,
         "hybridCombo" : 0.35,
-        "id" : "C90B7437-9FD9-437E-BBDE-CBD04B4D8CCB",
+        "id" : "2D2CD775-8E41-4F60-B156-395AF4F7C77F",
+        "inputOffset" : 0,
+        "inputScale" : 1,
+        "isEnabled" : true,
+        "lfo" : {
+          "amplitude" : 0.2,
+          "enabled" : false,
+          "frequency" : 0.1,
+          "shape" : "sine"
+        },
+        "responseCurve" : "hybrid",
+        "smoothingWindow" : 1.3418521,
+        "source" : "mid",
+        "spaceWarpField" : "strength",
+        "target" : "formulaParam3"
+      },
+      {
+        "amount" : 1.9523516,
+        "hybridCombo" : 0.35,
+        "id" : "A1DF881A-586C-4A14-A25A-7B77357C69C7",
         "inputOffset" : 0,
         "inputScale" : 1,
         "isEnabled" : true,
@@ -99,25 +118,6 @@
           "shape" : "sine"
         },
         "responseCurve" : "sinusoidal",
-        "smoothingWindow" : 0,
-        "source" : "mid",
-        "spaceWarpField" : "strength",
-        "target" : "formulaParam3"
-      },
-      {
-        "amount" : 1,
-        "hybridCombo" : 0.35,
-        "id" : "272FFDFD-BB87-4DC0-84CC-FC8ADF70E335",
-        "inputOffset" : 0,
-        "inputScale" : 1,
-        "isEnabled" : true,
-        "lfo" : {
-          "amplitude" : 0.2,
-          "enabled" : false,
-          "frequency" : 0.1,
-          "shape" : "sine"
-        },
-        "responseCurve" : "pulse",
         "smoothingWindow" : 0,
         "source" : "beat",
         "spaceWarpField" : "strength",
@@ -126,7 +126,7 @@
       {
         "amount" : 1,
         "hybridCombo" : 0.35,
-        "id" : "BE216B1E-464B-4F2C-8150-AC72D8175654",
+        "id" : "DF41D119-E77B-4108-9958-D476E73D0FF4",
         "inputOffset" : 0,
         "inputScale" : 1,
         "isEnabled" : true,
@@ -145,7 +145,7 @@
       {
         "amount" : 1,
         "hybridCombo" : 0.35,
-        "id" : "58D7DAAB-DD8C-41CC-AEA3-4D2D42ED87DA",
+        "id" : "4FD5A29E-4C27-4752-8ED1-1915FCE7BEC5",
         "inputOffset" : 0,
         "inputScale" : 1,
         "isEnabled" : true,
@@ -155,16 +155,16 @@
           "frequency" : 0.1,
           "shape" : "sine"
         },
-        "responseCurve" : "pulse",
+        "responseCurve" : "sinusoidal",
         "smoothingWindow" : 0,
         "source" : "beat",
         "spaceWarpField" : "strength",
         "target" : "bloom"
       },
       {
-        "amount" : 1.9762012,
+        "amount" : 1,
         "hybridCombo" : 0.35,
-        "id" : "AD90ED5B-A1ED-4B31-AED9-234DF9514369",
+        "id" : "8829DD01-3855-4305-B4AC-001D1AB68BAC",
         "inputOffset" : 0,
         "inputScale" : 1,
         "isEnabled" : true,
@@ -175,15 +175,15 @@
           "shape" : "sine"
         },
         "responseCurve" : "pulse",
-        "smoothingWindow" : 0,
-        "source" : "composite",
-        "spaceWarpField" : "strength",
-        "target" : "gradientOffset"
+        "smoothingWindow" : 1.2422135,
+        "source" : "bass",
+        "spaceWarpField" : "param1",
+        "target" : "spaceWarp0"
       },
       {
-        "amount" : 1,
+        "amount" : 2.25039,
         "hybridCombo" : 0.35,
-        "id" : "5F80DDC0-93B1-40CE-87F2-F87921074456",
+        "id" : "337D4901-50D7-4E0B-8A35-90946E9A1841",
         "inputOffset" : 0,
         "inputScale" : 1,
         "isEnabled" : true,
@@ -193,11 +193,11 @@
           "frequency" : 0.1,
           "shape" : "sine"
         },
-        "responseCurve" : "drift",
-        "smoothingWindow" : 0,
+        "responseCurve" : "hybrid",
+        "smoothingWindow" : 1.249883,
         "source" : "mid",
         "spaceWarpField" : "strength",
-        "target" : "saturation"
+        "target" : "spaceWarp1"
       }
     ],
     "trebleSensitivity" : 0.9,
@@ -214,7 +214,7 @@
     "colorGreen" : 0.96,
     "colorRed" : 1,
     "enabled" : true,
-    "strength" : 1.4452903
+    "strength" : 0.53601396
   },
   "boundAmbientStrength" : 0.5,
   "boundSpaceDepth" : 4,
@@ -227,36 +227,36 @@
   "boundingShapeRadius" : 6,
   "boundingShapeShadowDepth" : 0.35,
   "boundingShapeType" : 0,
-  "cellShadingEnabled" : true,
+  "cellShadingEnabled" : false,
   "cellShadingLevels" : 8,
-  "colorIterations" : 13.5873785,
-  "colorMix" : 0,
+  "colorIterations" : 14.937359,
+  "colorMix" : 0.808297,
   "colorScheme" : "classic",
   "colorSchemeAutoInterval" : 30,
   "colorSchemeAutoTransition" : false,
-  "colorSchemeContrast" : 1.466312,
-  "colorSchemeCurve" : 0.8566071,
-  "colorSchemeGamma" : 0.71647525,
+  "colorSchemeContrast" : 1.4449248,
+  "colorSchemeCurve" : 0.90314066,
+  "colorSchemeGamma" : 1.0678389,
   "colorSchemeHighlights" : 3,
-  "colorSchemeSaturation" : 1.5800726,
-  "colorSchemeShadows" : 0.05,
+  "colorSchemeSaturation" : 2.9061263,
+  "colorSchemeShadows" : -0.02368421,
   "colorSchemeTransitionDuration" : 2,
   "colorSchemeVibrance" : 1,
   "coneMarchCompatible" : true,
   "convolutionEffect" : {
-    "enabled" : false,
-    "kernelSize" : 3,
-    "kernelText" : "0 -1 0\n-1 5 -1\n0 -1 0",
-    "strength" : 0
-  },
-  "createdAt" : "2026-08-30T22:41:44Z",
-  "deIterationMismatch" : 0,
-  "detailScale" : 15.4138775,
-  "edgeDetectionEffect" : {
     "enabled" : true,
-    "softness" : 0.15,
-    "strength" : 1,
-    "threshold" : 0.23463356,
+    "kernelSize" : 3,
+    "kernelText" : "0 -1.5 0\n-1.5 5.5 -1.5\n0 -1.5 0",
+    "strength" : 1
+  },
+  "createdAt" : "2026-09-16T01:51:17Z",
+  "deIterationMismatch" : 0,
+  "detailScale" : 38.29303,
+  "edgeDetectionEffect" : {
+    "enabled" : false,
+    "softness" : 0.08,
+    "strength" : 0,
+    "threshold" : 0.12,
     "windowRadius" : 3
   },
   "envScrunchContain" : 0,
@@ -270,20 +270,20 @@
     "colorGreen" : 0.015,
     "colorRed" : 0.01,
     "enabled" : true,
-    "hueRotateEnabled" : false,
-    "hueRotateSpeed" : 0.1,
-    "intensity" : 0.9673342
+    "hueRotateEnabled" : true,
+    "hueRotateSpeed" : 0.5,
+    "intensity" : 0.36322272
   },
   "foldingLimit" : 1,
   "formulaParamValues" : [
-    1.4356726,
-    0.2607882,
-    1.2128958,
-    1.0586181,
+    1.8672725,
+    0.9222274,
+    1.094911,
+    0.9222913,
     0,
     0,
     0,
-    0,
+    0.0042400025,
     0,
     0,
     0,
@@ -293,15 +293,15 @@
     1,
     1
   ],
-  "fractalIterations" : 24,
-  "fractalScale" : 1.7288737,
+  "fractalIterations" : 6,
+  "fractalScale" : 0.87462646,
   "fractalType" : "theliPseudoKleinian",
   "glowEffect" : {
     "colorBlue" : 1,
     "colorGreen" : 0.97,
     "colorRed" : 0.95,
     "enabled" : true,
-    "intensity" : 0.8004482
+    "intensity" : 0.5204065
   },
   "gradientCycleEffect" : {
     "enabled" : true,
@@ -310,79 +310,61 @@
   },
   "gradientState" : {
     "gradient" : {
-      "id" : "28117B1B-FBBF-430F-9428-8886CD0683E8",
+      "id" : "29461EC2-273A-4014-B08A-D14A3F6BA1B7",
       "mappingMode" : 5,
-      "name" : "Rainbow",
-      "offset" : 0.92222804,
-      "repeatCount" : 10,
+      "name" : "Classic",
+      "offset" : 0.360372,
+      "repeatCount" : 8.106627,
       "smoothing" : 1,
       "stops" : [
         {
           "color" : [
-            1,
-            0,
-            0
+            0.05,
+            0.02,
+            0.02
           ],
-          "id" : "6508ACB1-2ABC-4A4A-9E5A-D29C8EC556CC",
+          "id" : "BF0A633C-FB6D-4CDF-9B08-E2550804F37B",
           "position" : 0
         },
         {
           "color" : [
             1,
-            0.5,
-            0
+            0.1,
+            0.1
           ],
-          "id" : "F4EAEADE-D788-408F-8023-15CBD25EC553",
-          "position" : 0.167
+          "id" : "380EF45D-8F3A-4906-BE72-518C9C84651B",
+          "position" : 0.25
         },
         {
           "color" : [
-            1,
-            1,
-            0
+            0.2,
+            0.4,
+            0.9
           ],
-          "id" : "EB73EB1F-9A88-4EC6-95BB-A883751A4922",
-          "position" : 0.333
-        },
-        {
-          "color" : [
-            0,
-            1,
-            0
-          ],
-          "id" : "6C575577-6EC7-4BA1-9AD6-D63E2698594A",
+          "id" : "2FCEA433-4BD2-4ED7-BFB0-F28FFCB1940B",
           "position" : 0.5
         },
         {
           "color" : [
-            0,
-            0.5,
-            1
-          ],
-          "id" : "FE728BA0-B844-4836-B814-51EE18BC8B1C",
-          "position" : 0.667
-        },
-        {
-          "color" : [
-            0.5,
-            0,
-            1
-          ],
-          "id" : "693F292E-E006-40C3-833F-AA2BB9A71F96",
-          "position" : 0.833
-        },
-        {
-          "color" : [
             1,
-            0,
-            0.5
+            0.8,
+            0
           ],
-          "id" : "7A8CEF63-C6BE-4E18-89E6-0DB734C9B0B7",
+          "id" : "26422D39-6130-430D-90BE-7B1437C4D3E4",
+          "position" : 0.75
+        },
+        {
+          "color" : [
+            0,
+            0.2,
+            0.8
+          ],
+          "id" : "FA961058-27B3-4A50-BC05-1D3012F0A9B3",
           "position" : 1
         }
       ]
     },
-    "gradientPreset" : "rainbow"
+    "gradientPreset" : "classic"
   },
   "handAttraction" : {
     "ballScale" : 0.5,
@@ -400,33 +382,33 @@
   "hueRotationEffect" : {
     "enabled" : true,
     "intensity" : 0.8,
-    "speed" : 0.20585796
+    "speed" : 0.2
   },
-  "id" : "18D4B550-511E-4D01-8325-B5FEAF20D5AE",
+  "id" : "FDD86F35-EB7D-43E9-B28C-5975075CC112",
   "juliaDriftEffect" : {
     "enabled" : false,
     "speed" : 0
   },
-  "lightVariationRate" : 0.5,
-  "lightingMode" : "audioReactive",
+  "lightVariationRate" : 1,
+  "lightingMode" : "visualizer",
   "lightingPreset" : "Custom",
-  "lightingSoftness" : 0,
+  "lightingSoftness" : 1,
   "linearRailEffect" : {
-    "amplitude" : 0.27613097,
+    "amplitude" : 2.3167849,
     "axis" : "z",
     "enabled" : true,
-    "multiplier" : 4.4906225,
-    "orbitAmount" : 0.15242836,
-    "orbitSpeed" : 0.18,
-    "speed" : 0.00720938
+    "multiplier" : 1,
+    "orbitAmount" : 0,
+    "orbitSpeed" : 0.014515374,
+    "speed" : 0.008906882
   },
-  "maxRaySteps" : 168,
+  "maxRaySteps" : 184,
   "minDistance" : 0.8,
   "musicReactiveMappings" : [
     {
-      "amount" : 0.6688267,
+      "amount" : 1,
       "hybridCombo" : 0.35,
-      "id" : "9D1F8146-F721-441A-8D2C-5CD4519F0E2A",
+      "id" : "B68A5090-AF06-4D62-BFD9-40A5C56212BF",
       "inputOffset" : 0,
       "inputScale" : 1,
       "isEnabled" : true,
@@ -436,8 +418,8 @@
         "frequency" : 0.1,
         "shape" : "sine"
       },
-      "responseCurve" : "sinusoidal",
-      "smoothingWindow" : 0,
+      "responseCurve" : "hybrid",
+      "smoothingWindow" : 0.6801945,
       "source" : "composite",
       "spaceWarpField" : "strength",
       "target" : "fractalScale"
@@ -445,7 +427,7 @@
     {
       "amount" : 1,
       "hybridCombo" : 0.35,
-      "id" : "2E013E83-BED2-4FFD-8223-744CEB11FBB7",
+      "id" : "5460BB37-24EE-4D4C-9BC8-7AB57245F876",
       "inputOffset" : 0,
       "inputScale" : 1,
       "isEnabled" : true,
@@ -455,16 +437,16 @@
         "frequency" : 0.1,
         "shape" : "sine"
       },
-      "responseCurve" : "sinusoidal",
-      "smoothingWindow" : 0,
+      "responseCurve" : "hybrid",
+      "smoothingWindow" : 1.1626456,
       "source" : "bass",
       "spaceWarpField" : "strength",
       "target" : "formulaParam0"
     },
     {
-      "amount" : 0.22606853,
+      "amount" : 1,
       "hybridCombo" : 0.35,
-      "id" : "C4CC39ED-F0B3-480E-ABDE-BF4CD69C18ED",
+      "id" : "E1957587-EF12-4573-8CDC-62E08017D6BD",
       "inputOffset" : 0,
       "inputScale" : 1,
       "isEnabled" : true,
@@ -474,8 +456,8 @@
         "frequency" : 0.1,
         "shape" : "sine"
       },
-      "responseCurve" : "sinusoidal",
-      "smoothingWindow" : 0,
+      "responseCurve" : "hybrid",
+      "smoothingWindow" : 1.2849938,
       "source" : "mid",
       "spaceWarpField" : "strength",
       "target" : "formulaParam1"
@@ -483,7 +465,7 @@
     {
       "amount" : 1,
       "hybridCombo" : 0.35,
-      "id" : "77264671-1156-4345-BF4D-6A69CF38E52A",
+      "id" : "1C7FB0E7-FC5C-4C58-B0AF-040D2472AD43",
       "inputOffset" : 0,
       "inputScale" : 1,
       "isEnabled" : true,
@@ -494,7 +476,7 @@
         "shape" : "sine"
       },
       "responseCurve" : "sinusoidal",
-      "smoothingWindow" : 0,
+      "smoothingWindow" : 1.2717606,
       "source" : "treble",
       "spaceWarpField" : "strength",
       "target" : "formulaParam2"
@@ -502,7 +484,26 @@
     {
       "amount" : 1,
       "hybridCombo" : 0.35,
-      "id" : "C90B7437-9FD9-437E-BBDE-CBD04B4D8CCB",
+      "id" : "2D2CD775-8E41-4F60-B156-395AF4F7C77F",
+      "inputOffset" : 0,
+      "inputScale" : 1,
+      "isEnabled" : true,
+      "lfo" : {
+        "amplitude" : 0.2,
+        "enabled" : false,
+        "frequency" : 0.1,
+        "shape" : "sine"
+      },
+      "responseCurve" : "hybrid",
+      "smoothingWindow" : 1.3418521,
+      "source" : "mid",
+      "spaceWarpField" : "strength",
+      "target" : "formulaParam3"
+    },
+    {
+      "amount" : 1.9523516,
+      "hybridCombo" : 0.35,
+      "id" : "A1DF881A-586C-4A14-A25A-7B77357C69C7",
       "inputOffset" : 0,
       "inputScale" : 1,
       "isEnabled" : true,
@@ -513,25 +514,6 @@
         "shape" : "sine"
       },
       "responseCurve" : "sinusoidal",
-      "smoothingWindow" : 0,
-      "source" : "mid",
-      "spaceWarpField" : "strength",
-      "target" : "formulaParam3"
-    },
-    {
-      "amount" : 1,
-      "hybridCombo" : 0.35,
-      "id" : "272FFDFD-BB87-4DC0-84CC-FC8ADF70E335",
-      "inputOffset" : 0,
-      "inputScale" : 1,
-      "isEnabled" : true,
-      "lfo" : {
-        "amplitude" : 0.2,
-        "enabled" : false,
-        "frequency" : 0.1,
-        "shape" : "sine"
-      },
-      "responseCurve" : "pulse",
       "smoothingWindow" : 0,
       "source" : "beat",
       "spaceWarpField" : "strength",
@@ -540,7 +522,7 @@
     {
       "amount" : 1,
       "hybridCombo" : 0.35,
-      "id" : "BE216B1E-464B-4F2C-8150-AC72D8175654",
+      "id" : "DF41D119-E77B-4108-9958-D476E73D0FF4",
       "inputOffset" : 0,
       "inputScale" : 1,
       "isEnabled" : true,
@@ -559,7 +541,7 @@
     {
       "amount" : 1,
       "hybridCombo" : 0.35,
-      "id" : "58D7DAAB-DD8C-41CC-AEA3-4D2D42ED87DA",
+      "id" : "4FD5A29E-4C27-4752-8ED1-1915FCE7BEC5",
       "inputOffset" : 0,
       "inputScale" : 1,
       "isEnabled" : true,
@@ -569,16 +551,16 @@
         "frequency" : 0.1,
         "shape" : "sine"
       },
-      "responseCurve" : "pulse",
+      "responseCurve" : "sinusoidal",
       "smoothingWindow" : 0,
       "source" : "beat",
       "spaceWarpField" : "strength",
       "target" : "bloom"
     },
     {
-      "amount" : 1.9762012,
+      "amount" : 1,
       "hybridCombo" : 0.35,
-      "id" : "AD90ED5B-A1ED-4B31-AED9-234DF9514369",
+      "id" : "8829DD01-3855-4305-B4AC-001D1AB68BAC",
       "inputOffset" : 0,
       "inputScale" : 1,
       "isEnabled" : true,
@@ -589,15 +571,15 @@
         "shape" : "sine"
       },
       "responseCurve" : "pulse",
-      "smoothingWindow" : 0,
-      "source" : "composite",
-      "spaceWarpField" : "strength",
-      "target" : "gradientOffset"
+      "smoothingWindow" : 1.2422135,
+      "source" : "bass",
+      "spaceWarpField" : "param1",
+      "target" : "spaceWarp0"
     },
     {
-      "amount" : 1,
+      "amount" : 2.25039,
       "hybridCombo" : 0.35,
-      "id" : "5F80DDC0-93B1-40CE-87F2-F87921074456",
+      "id" : "337D4901-50D7-4E0B-8A35-90946E9A1841",
       "inputOffset" : 0,
       "inputScale" : 1,
       "isEnabled" : true,
@@ -607,14 +589,14 @@
         "frequency" : 0.1,
         "shape" : "sine"
       },
-      "responseCurve" : "drift",
-      "smoothingWindow" : 0,
+      "responseCurve" : "hybrid",
+      "smoothingWindow" : 1.249883,
       "source" : "mid",
       "spaceWarpField" : "strength",
-      "target" : "saturation"
+      "target" : "spaceWarp1"
     }
   ],
-  "name" : "Leven",
+  "name" : "Backdrop",
   "platformEnabled" : true,
   "platformRadius" : 1.888,
   "polarRotationEffect" : {
@@ -622,9 +604,9 @@
     "speed" : 0
   },
   "position" : [
-    4.4260287,
-    -5.0256276,
-    -1.5193038
+    -0.07187522,
+    -0.064932875,
+    -21.886438
   ],
   "pulseEffect" : {
     "amount" : 0.5,
@@ -632,28 +614,28 @@
     "speed" : 1
   },
   "rating" : 0,
-  "resolutionScale" : 0.5,
-  "safetyBubbleBlend" : 0.0048965868,
+  "resolutionScale" : 0.33,
+  "safetyBubbleBlend" : 0.017730283,
   "safetyBubbleEnabled" : true,
   "safetyBubbleFadeEnabled" : true,
   "safetyBubbleFadeWidth" : 0.1,
-  "safetyBubbleRadius" : 1.9369406,
+  "safetyBubbleRadius" : 0.93554664,
   "safetyBubbleShape" : 0,
   "scale" : 1,
   "sceneState" : {
     "audioReactive" : {
       "bassSensitivity" : 1.1,
       "beatSensitivity" : 1.2,
-      "fractalAudioAmount" : 0.29241937,
+      "fractalAudioAmount" : 0.25921875,
       "fractalAudioDamping" : 3,
       "fractalAudioReactiveEnabled" : true,
       "fractalBeatPunch" : 0.85,
       "midSensitivity" : 0.8,
       "musicReactiveMappings" : [
         {
-          "amount" : 0.6688267,
+          "amount" : 1,
           "hybridCombo" : 0.35,
-          "id" : "9D1F8146-F721-441A-8D2C-5CD4519F0E2A",
+          "id" : "B68A5090-AF06-4D62-BFD9-40A5C56212BF",
           "inputOffset" : 0,
           "inputScale" : 1,
           "isEnabled" : true,
@@ -663,8 +645,8 @@
             "frequency" : 0.1,
             "shape" : "sine"
           },
-          "responseCurve" : "sinusoidal",
-          "smoothingWindow" : 0,
+          "responseCurve" : "hybrid",
+          "smoothingWindow" : 0.6801945,
           "source" : "composite",
           "spaceWarpField" : "strength",
           "target" : "fractalScale"
@@ -672,7 +654,7 @@
         {
           "amount" : 1,
           "hybridCombo" : 0.35,
-          "id" : "2E013E83-BED2-4FFD-8223-744CEB11FBB7",
+          "id" : "5460BB37-24EE-4D4C-9BC8-7AB57245F876",
           "inputOffset" : 0,
           "inputScale" : 1,
           "isEnabled" : true,
@@ -682,16 +664,16 @@
             "frequency" : 0.1,
             "shape" : "sine"
           },
-          "responseCurve" : "sinusoidal",
-          "smoothingWindow" : 0,
+          "responseCurve" : "hybrid",
+          "smoothingWindow" : 1.1626456,
           "source" : "bass",
           "spaceWarpField" : "strength",
           "target" : "formulaParam0"
         },
         {
-          "amount" : 0.22606853,
+          "amount" : 1,
           "hybridCombo" : 0.35,
-          "id" : "C4CC39ED-F0B3-480E-ABDE-BF4CD69C18ED",
+          "id" : "E1957587-EF12-4573-8CDC-62E08017D6BD",
           "inputOffset" : 0,
           "inputScale" : 1,
           "isEnabled" : true,
@@ -701,8 +683,8 @@
             "frequency" : 0.1,
             "shape" : "sine"
           },
-          "responseCurve" : "sinusoidal",
-          "smoothingWindow" : 0,
+          "responseCurve" : "hybrid",
+          "smoothingWindow" : 1.2849938,
           "source" : "mid",
           "spaceWarpField" : "strength",
           "target" : "formulaParam1"
@@ -710,7 +692,7 @@
         {
           "amount" : 1,
           "hybridCombo" : 0.35,
-          "id" : "77264671-1156-4345-BF4D-6A69CF38E52A",
+          "id" : "1C7FB0E7-FC5C-4C58-B0AF-040D2472AD43",
           "inputOffset" : 0,
           "inputScale" : 1,
           "isEnabled" : true,
@@ -721,7 +703,7 @@
             "shape" : "sine"
           },
           "responseCurve" : "sinusoidal",
-          "smoothingWindow" : 0,
+          "smoothingWindow" : 1.2717606,
           "source" : "treble",
           "spaceWarpField" : "strength",
           "target" : "formulaParam2"
@@ -729,7 +711,26 @@
         {
           "amount" : 1,
           "hybridCombo" : 0.35,
-          "id" : "C90B7437-9FD9-437E-BBDE-CBD04B4D8CCB",
+          "id" : "2D2CD775-8E41-4F60-B156-395AF4F7C77F",
+          "inputOffset" : 0,
+          "inputScale" : 1,
+          "isEnabled" : true,
+          "lfo" : {
+            "amplitude" : 0.2,
+            "enabled" : false,
+            "frequency" : 0.1,
+            "shape" : "sine"
+          },
+          "responseCurve" : "hybrid",
+          "smoothingWindow" : 1.3418521,
+          "source" : "mid",
+          "spaceWarpField" : "strength",
+          "target" : "formulaParam3"
+        },
+        {
+          "amount" : 1.9523516,
+          "hybridCombo" : 0.35,
+          "id" : "A1DF881A-586C-4A14-A25A-7B77357C69C7",
           "inputOffset" : 0,
           "inputScale" : 1,
           "isEnabled" : true,
@@ -740,25 +741,6 @@
             "shape" : "sine"
           },
           "responseCurve" : "sinusoidal",
-          "smoothingWindow" : 0,
-          "source" : "mid",
-          "spaceWarpField" : "strength",
-          "target" : "formulaParam3"
-        },
-        {
-          "amount" : 1,
-          "hybridCombo" : 0.35,
-          "id" : "272FFDFD-BB87-4DC0-84CC-FC8ADF70E335",
-          "inputOffset" : 0,
-          "inputScale" : 1,
-          "isEnabled" : true,
-          "lfo" : {
-            "amplitude" : 0.2,
-            "enabled" : false,
-            "frequency" : 0.1,
-            "shape" : "sine"
-          },
-          "responseCurve" : "pulse",
           "smoothingWindow" : 0,
           "source" : "beat",
           "spaceWarpField" : "strength",
@@ -767,7 +749,7 @@
         {
           "amount" : 1,
           "hybridCombo" : 0.35,
-          "id" : "BE216B1E-464B-4F2C-8150-AC72D8175654",
+          "id" : "DF41D119-E77B-4108-9958-D476E73D0FF4",
           "inputOffset" : 0,
           "inputScale" : 1,
           "isEnabled" : true,
@@ -786,7 +768,7 @@
         {
           "amount" : 1,
           "hybridCombo" : 0.35,
-          "id" : "58D7DAAB-DD8C-41CC-AEA3-4D2D42ED87DA",
+          "id" : "4FD5A29E-4C27-4752-8ED1-1915FCE7BEC5",
           "inputOffset" : 0,
           "inputScale" : 1,
           "isEnabled" : true,
@@ -796,16 +778,16 @@
             "frequency" : 0.1,
             "shape" : "sine"
           },
-          "responseCurve" : "pulse",
+          "responseCurve" : "sinusoidal",
           "smoothingWindow" : 0,
           "source" : "beat",
           "spaceWarpField" : "strength",
           "target" : "bloom"
         },
         {
-          "amount" : 1.9762012,
+          "amount" : 1,
           "hybridCombo" : 0.35,
-          "id" : "AD90ED5B-A1ED-4B31-AED9-234DF9514369",
+          "id" : "8829DD01-3855-4305-B4AC-001D1AB68BAC",
           "inputOffset" : 0,
           "inputScale" : 1,
           "isEnabled" : true,
@@ -816,15 +798,15 @@
             "shape" : "sine"
           },
           "responseCurve" : "pulse",
-          "smoothingWindow" : 0,
-          "source" : "composite",
-          "spaceWarpField" : "strength",
-          "target" : "gradientOffset"
+          "smoothingWindow" : 1.2422135,
+          "source" : "bass",
+          "spaceWarpField" : "param1",
+          "target" : "spaceWarp0"
         },
         {
-          "amount" : 1,
+          "amount" : 2.25039,
           "hybridCombo" : 0.35,
-          "id" : "5F80DDC0-93B1-40CE-87F2-F87921074456",
+          "id" : "337D4901-50D7-4E0B-8A35-90946E9A1841",
           "inputOffset" : 0,
           "inputScale" : 1,
           "isEnabled" : true,
@@ -834,11 +816,11 @@
             "frequency" : 0.1,
             "shape" : "sine"
           },
-          "responseCurve" : "drift",
-          "smoothingWindow" : 0,
+          "responseCurve" : "hybrid",
+          "smoothingWindow" : 1.249883,
           "source" : "mid",
           "spaceWarpField" : "strength",
-          "target" : "saturation"
+          "target" : "spaceWarp1"
         }
       ],
       "trebleSensitivity" : 0.9,
@@ -847,105 +829,87 @@
       }
     },
     "color" : {
-      "aoStrength" : 0.82190704,
-      "cellShadingEnabled" : true,
+      "aoStrength" : 0.28560767,
+      "cellShadingEnabled" : false,
       "cellShadingLevels" : 8,
-      "colorIterations" : 13.5873785,
-      "colorMix" : 0,
+      "colorIterations" : 14.937359,
+      "colorMix" : 0.808297,
       "colorScheme" : "classic",
       "colorSchemeAutoInterval" : 30,
       "colorSchemeAutoTransition" : false,
-      "colorSchemeContrast" : 1.466312,
-      "colorSchemeCurve" : 0.8566071,
-      "colorSchemeGamma" : 0.71647525,
+      "colorSchemeContrast" : 1.4449248,
+      "colorSchemeCurve" : 0.90314066,
+      "colorSchemeGamma" : 1.0678389,
       "colorSchemeHighlights" : 3,
-      "colorSchemeSaturation" : 1.5800726,
-      "colorSchemeShadows" : 0.05,
+      "colorSchemeSaturation" : 2.9061263,
+      "colorSchemeShadows" : -0.02368421,
       "colorSchemeTransitionDuration" : 2,
       "colorSchemeVibrance" : 1,
       "gradientState" : {
         "gradient" : {
-          "id" : "28117B1B-FBBF-430F-9428-8886CD0683E8",
+          "id" : "29461EC2-273A-4014-B08A-D14A3F6BA1B7",
           "mappingMode" : 5,
-          "name" : "Rainbow",
-          "offset" : 0.92222804,
-          "repeatCount" : 10,
+          "name" : "Classic",
+          "offset" : 0.360372,
+          "repeatCount" : 8.106627,
           "smoothing" : 1,
           "stops" : [
             {
               "color" : [
-                1,
-                0,
-                0
+                0.05,
+                0.02,
+                0.02
               ],
-              "id" : "6508ACB1-2ABC-4A4A-9E5A-D29C8EC556CC",
+              "id" : "BF0A633C-FB6D-4CDF-9B08-E2550804F37B",
               "position" : 0
             },
             {
               "color" : [
                 1,
-                0.5,
-                0
+                0.1,
+                0.1
               ],
-              "id" : "F4EAEADE-D788-408F-8023-15CBD25EC553",
-              "position" : 0.167
+              "id" : "380EF45D-8F3A-4906-BE72-518C9C84651B",
+              "position" : 0.25
             },
             {
               "color" : [
-                1,
-                1,
-                0
+                0.2,
+                0.4,
+                0.9
               ],
-              "id" : "EB73EB1F-9A88-4EC6-95BB-A883751A4922",
-              "position" : 0.333
-            },
-            {
-              "color" : [
-                0,
-                1,
-                0
-              ],
-              "id" : "6C575577-6EC7-4BA1-9AD6-D63E2698594A",
+              "id" : "2FCEA433-4BD2-4ED7-BFB0-F28FFCB1940B",
               "position" : 0.5
             },
             {
               "color" : [
-                0,
-                0.5,
-                1
-              ],
-              "id" : "FE728BA0-B844-4836-B814-51EE18BC8B1C",
-              "position" : 0.667
-            },
-            {
-              "color" : [
-                0.5,
-                0,
-                1
-              ],
-              "id" : "693F292E-E006-40C3-833F-AA2BB9A71F96",
-              "position" : 0.833
-            },
-            {
-              "color" : [
                 1,
-                0,
-                0.5
+                0.8,
+                0
               ],
-              "id" : "7A8CEF63-C6BE-4E18-89E6-0DB734C9B0B7",
+              "id" : "26422D39-6130-430D-90BE-7B1437C4D3E4",
+              "position" : 0.75
+            },
+            {
+              "color" : [
+                0,
+                0.2,
+                0.8
+              ],
+              "id" : "FA961058-27B3-4A50-BC05-1D3012F0A9B3",
               "position" : 1
             }
           ]
         },
-        "gradientPreset" : "rainbow"
+        "gradientPreset" : "classic"
       },
-      "lightingSoftness" : 0,
-      "tonemapStrength" : 0.36743292,
-      "vignetteStrength" : 1.5
+      "lightingSoftness" : 1,
+      "tonemapStrength" : 0,
+      "vignetteStrength" : 0.9775413
     },
     "display" : {
       "deIterationMismatch" : 0,
-      "lightingMode" : "audioReactive",
+      "lightingMode" : "visualizer",
       "lightingPlay" : false,
       "platformEnabled" : true,
       "platformRadius" : 1.888,
@@ -956,17 +920,17 @@
       "sphericalInversionRadius" : 2
     },
     "geometry" : {
-      "detailScale" : 15.4138775,
+      "detailScale" : 38.29303,
       "foldingLimit" : 1,
       "formulaParamValues" : [
-        1.4356726,
-        0.2607882,
-        1.2128958,
-        1.0586181,
+        1.8672725,
+        0.9222274,
+        1.094911,
+        0.9222913,
         0,
         0,
         0,
-        0,
+        0.0042400025,
         0,
         0,
         0,
@@ -976,23 +940,23 @@
         1,
         1
       ],
-      "fractalScale" : 1.7288737,
+      "fractalScale" : 0.87462646,
       "fractalType" : "theliPseudoKleinian",
       "minDistance" : 0.8,
       "position" : [
-        4.4260287,
-        -5.0256276,
-        -1.5193038
+        -0.07187522,
+        -0.064932875,
+        -21.886438
       ],
       "scale" : 1,
       "scenePrimitives" : [
 
       ],
       "sphereRadius" : 0.5,
-      "worldRotationW" : 0.060341615,
-      "worldRotationX" : -0.16902657,
-      "worldRotationY" : 0.33075374,
-      "worldRotationZ" : 0.9264939
+      "worldRotationW" : 0.0012724632,
+      "worldRotationX" : -0.0012667708,
+      "worldRotationY" : -0.70889956,
+      "worldRotationZ" : -0.7053072
     },
     "handAttraction" : {
       "ballScale" : 0.5,
@@ -1017,19 +981,19 @@
         "colorGreen" : 0.96,
         "colorRed" : 1,
         "enabled" : true,
-        "strength" : 1.4452903
+        "strength" : 0.53601396
       },
       "convolutionEffect" : {
-        "enabled" : false,
+        "enabled" : true,
         "kernelSize" : 3,
-        "kernelText" : "0 -1 0\n-1 5 -1\n0 -1 0",
-        "strength" : 0
+        "kernelText" : "0 -1.5 0\n-1.5 5.5 -1.5\n0 -1.5 0",
+        "strength" : 1
       },
       "edgeDetectionEffect" : {
-        "enabled" : true,
-        "softness" : 0.15,
-        "strength" : 1,
-        "threshold" : 0.23463356,
+        "enabled" : false,
+        "softness" : 0.08,
+        "strength" : 0,
+        "threshold" : 0.12,
         "windowRadius" : 3
       },
       "fogEffect" : {
@@ -1037,16 +1001,16 @@
         "colorGreen" : 0.015,
         "colorRed" : 0.01,
         "enabled" : true,
-        "hueRotateEnabled" : false,
-        "hueRotateSpeed" : 0.1,
-        "intensity" : 0.9673342
+        "hueRotateEnabled" : true,
+        "hueRotateSpeed" : 0.5,
+        "intensity" : 0.36322272
       },
       "glowEffect" : {
         "colorBlue" : 1,
         "colorGreen" : 0.97,
         "colorRed" : 0.95,
         "enabled" : true,
-        "intensity" : 0.8004482
+        "intensity" : 0.5204065
       },
       "gradientCycleEffect" : {
         "enabled" : true,
@@ -1056,22 +1020,22 @@
       "hueRotationEffect" : {
         "enabled" : true,
         "intensity" : 0.8,
-        "speed" : 0.20585796
+        "speed" : 0.2
       },
       "juliaDriftEffect" : {
         "enabled" : false,
         "speed" : 0
       },
-      "lightVariationRate" : 0.5,
+      "lightVariationRate" : 1,
       "lightingPreset" : "Custom",
       "linearRailEffect" : {
-        "amplitude" : 0.27613097,
+        "amplitude" : 2.3167849,
         "axis" : "z",
         "enabled" : true,
-        "multiplier" : 4.4906225,
-        "orbitAmount" : 0.15242836,
-        "orbitSpeed" : 0.18,
-        "speed" : 0.00720938
+        "multiplier" : 1,
+        "orbitAmount" : 0,
+        "orbitSpeed" : 0.014515374,
+        "speed" : 0.008906882
       },
       "polarRotationEffect" : {
         "direction" : "off",
@@ -1091,8 +1055,8 @@
 
     },
     "quality" : {
-      "baseFractalIterations" : 24,
-      "baseMaxRaySteps" : 168,
+      "baseFractalIterations" : 6,
+      "baseMaxRaySteps" : 184,
       "boundAmbientStrength" : 0.5,
       "boundSpaceDepth" : 4,
       "boundSpaceHeight" : 2.5,
@@ -1111,7 +1075,7 @@
       "envScrunchMode" : 0,
       "envScrunchReach" : 0.75,
       "envScrunchStrength" : 0.8,
-      "resolutionScale" : 0.5,
+      "resolutionScale" : 0.33,
       "shadowsEnabled" : true,
       "tileSize" : 0,
       "zoomFogCompensationEnabled" : false
@@ -1122,9 +1086,9 @@
       "fadeWidth" : 0.1,
       "mixedAutoShrinkEnabled" : true,
       "mixedRadius" : 0.97484297,
-      "radius" : 1.9369406,
+      "radius" : 0.93554664,
       "shape" : 0,
-      "strength" : 0.0048965868
+      "strength" : 0.017730283
     },
     "schemaVersion" : 1,
     "space" : {
@@ -1145,11 +1109,50 @@
             1,
             0
           ],
-          "id" : "BF633A82-A9B5-4F12-A902-767A82400CD3",
+          "id" : "6D028F9F-5858-4D78-9F90-F84FC47C6C71",
           "isEnabled" : true,
-          "p1" : 2.5063868,
+          "p1" : 0.55537647,
           "p2" : 0,
-          "strength" : 0.6216653,
+          "strength" : 1.1291023,
+          "type" : 5
+        },
+        {
+          "axis" : [
+            0,
+            1,
+            0
+          ],
+          "id" : "33767962-7A69-47FE-99D0-6944D434E142",
+          "isEnabled" : true,
+          "p1" : 0.55755675,
+          "p2" : 0,
+          "strength" : 0.43565312,
+          "type" : 3
+        },
+        {
+          "axis" : [
+            0,
+            1,
+            0
+          ],
+          "id" : "B0A2A289-3DA9-45F9-AEA7-7C7E52A82A88",
+          "isEnabled" : true,
+          "p1" : 0,
+          "p2" : 0,
+          "strength" : 2,
+          "type" : 13
+        },
+        {
+          "axis" : [
+            0,
+            1,
+            0
+          ],
+          "id" : "F332B496-8956-4A3C-8DE2-21A455460A12",
+          "isEnabled" : true,
+          "p1" : 2.1319754,
+          "p2" : 0,
+          "strength" : 1,
           "type" : 10
         }
       ],
@@ -1164,11 +1167,50 @@
         1,
         0
       ],
-      "id" : "BF633A82-A9B5-4F12-A902-767A82400CD3",
+      "id" : "6D028F9F-5858-4D78-9F90-F84FC47C6C71",
       "isEnabled" : true,
-      "p1" : 2.5063868,
+      "p1" : 0.55537647,
       "p2" : 0,
-      "strength" : 0.6216653,
+      "strength" : 1.1291023,
+      "type" : 5
+    },
+    {
+      "axis" : [
+        0,
+        1,
+        0
+      ],
+      "id" : "33767962-7A69-47FE-99D0-6944D434E142",
+      "isEnabled" : true,
+      "p1" : 0.55755675,
+      "p2" : 0,
+      "strength" : 0.43565312,
+      "type" : 3
+    },
+    {
+      "axis" : [
+        0,
+        1,
+        0
+      ],
+      "id" : "B0A2A289-3DA9-45F9-AEA7-7C7E52A82A88",
+      "isEnabled" : true,
+      "p1" : 0,
+      "p2" : 0,
+      "strength" : 2,
+      "type" : 13
+    },
+    {
+      "axis" : [
+        0,
+        1,
+        0
+      ],
+      "id" : "F332B496-8956-4A3C-8DE2-21A455460A12",
+      "isEnabled" : true,
+      "p1" : 2.1319754,
+      "p2" : 0,
+      "strength" : 1,
       "type" : 10
     }
   ],
@@ -1179,13 +1221,13 @@
   "sphericalInversionMode" : "off",
   "sphericalInversionRadius" : 2,
   "tags" : [
-    "Mac only"
+
   ],
   "tileSize" : 0,
-  "tonemapStrength" : 0.36743292,
-  "updatedAt" : "2026-08-30T22:41:44Z",
-  "worldRotationW" : 0.060341615,
-  "worldRotationX" : -0.16902657,
-  "worldRotationY" : 0.33075374,
-  "worldRotationZ" : 0.9264939
+  "tonemapStrength" : 0,
+  "updatedAt" : "2026-09-16T01:51:17Z",
+  "worldRotationW" : 0.0012724632,
+  "worldRotationX" : -0.0012667708,
+  "worldRotationY" : -0.70889956,
+  "worldRotationZ" : -0.7053072
 }
