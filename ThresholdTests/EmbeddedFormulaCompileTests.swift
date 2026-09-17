@@ -225,6 +225,36 @@ struct EmbeddedFormulaCompileTests {
         #expect(!formulas.isEmpty, "no embedded-formula example assets found under \(Self.examplesDir.path)")
     }
 
+    /// One parametrized compile case: the file a formula came from plus the
+    /// slot it compiles through. Swift Testing runs these cases concurrently
+    /// (the Metal compiler service parallelizes `makeLibrary` ~3–4×), so the
+    /// whole suite compiles in roughly one per-formula wall-time instead of
+    /// `count × ~30 s`, and each case fits a per-test time limit.
+    struct EmbeddedFormulaCompileCase: Sendable, Hashable {
+        let sourceName: String
+        let fileURL: URL
+        /// `.preset` (scene/music-preset JSON) or `.container` (`.threshfx`).
+        let decodeAsKind: Kind
+
+        enum Kind: String, Sendable { case preset, container }
+    }
+
+    /// Non-throwing best-effort collection for `@Test` arguments: a file that
+    /// fails to decode yields no case here (decode correctness is covered by
+    /// `ExampleSceneDecodeTests`); this test only asserts compilation.
+    private static func collectCompileCases() -> [EmbeddedFormulaCompileCase] {
+        let presetDirectories = ["Scenes", "Mixed", "Custom Scene Example", "Music Presets"]
+        var cases: [EmbeddedFormulaCompileCase] = []
+        for url in files(withExtension: "threshscene", in: presetDirectories)
+                 + files(withExtension: "threshmp", in: presetDirectories) {
+            cases.append(.init(sourceName: url.lastPathComponent, fileURL: url, decodeAsKind: .preset))
+        }
+        for url in files(withExtension: "threshfx", in: presetDirectories + ["Formulas"]) {
+            cases.append(.init(sourceName: url.lastPathComponent, fileURL: url, decodeAsKind: .container))
+        }
+        return cases
+    }
+
     @Test(
         "Every embedded formula compiles through the production CustomShaderCompiler",
         // No Metal device on this host (e.g. headless CI without a GPU) —
@@ -232,31 +262,56 @@ struct EmbeddedFormulaCompileTests {
         // ExampleSceneDecodeTests; skip rather than false-fail (Issue.record
         // counts as a failure in Swift Testing).
         .enabled(if: MTLCreateSystemDefaultDevice() != nil,
-                 "No Metal device available; skipping embedded-DE compile coverage")
+                 "No Metal device available; skipping embedded-DE compile coverage"),
+        // Each case synthesizes the ~400 KB combined source and runs the
+        // production `makeLibrary` — tens of seconds per formula on current
+        // Apple Silicon (measured 26–33 s on an M1 Pro). Xcode 26 applies a
+        // default per-test time limit (~1 min) that would otherwise kill the
+        // host mid-suite and fail every launch with "unexpected exit, crash,
+        // or test timeout".
+        .timeLimit(.minutes(15)),
+        arguments: Self.collectCompileCases()
     )
-    func embeddedFormulasCompile() async throws {
-        guard let device = MTLCreateSystemDefaultDevice() else { return }
+    func embeddedFormulasCompile(_ compileCase: EmbeddedFormulaCompileCase) async throws {
+        guard let device = MTLCreateSystemDefaultDevice(),
+              let compiler = Self.sharedCompiler else { return }
 
-        let formulas = try Self.collectEmbeddedFormulas()
-        let compiler = CustomShaderCompiler(device: device)
-
-        for (source, formula) in formulas {
-            let isWarp = formula.effectKind == .spaceWarp
-            let kind = isWarp ? "space-warp" : "DE"
-            do {
-                // Route exactly as Renderer.activateEmbeddedFormula does: a warp
-                // rides the built-in DEs (spaceWarp slot), a fractal supplies its
-                // own DE (fractal slot).
-                _ = try await compiler.library(
-                    forFractal: isWarp ? nil : formula,
-                    spaceWarp: isWarp ? formula : nil
-                )
-            } catch {
-                // The error carries the exact Metal compiler diagnostic (file:line +
-                // message), e.g. an embedded DE using the GLSL-ism `radians()` which
-                // MSL does not provide. Surfaced in the test failure / .xcresult.
-                Issue.record("Embedded \(kind) '\(formula.name)' from \(source) FAILED to compile: \(error)")
+        let formula: EmbeddedFormula
+        switch compileCase.decodeAsKind {
+        case .preset:
+            let preset = try Self.iso8601Decoder().decode(FractalPreset.self, from: Data(contentsOf: compileCase.fileURL))
+            guard let embedded = preset.embeddedFormula else {
+                return // scene without an embedded formula — nothing to compile
             }
+            formula = embedded
+        case .container:
+            formula = try EmbeddedFormulaContainer.decode(fromContainerAt: compileCase.fileURL).formula
+        }
+
+        let isWarp = formula.effectKind == .spaceWarp
+        let kind = isWarp ? "space-warp" : "DE"
+        do {
+            // Route exactly as Renderer.activateEmbeddedFormula does: a warp
+            // rides the built-in DEs (spaceWarp slot), a fractal supplies its
+            // own DE (fractal slot).
+            _ = try await compiler.library(
+                forFractal: isWarp ? nil : formula,
+                spaceWarp: isWarp ? formula : nil
+            )
+        } catch {
+            // The error carries the exact Metal compiler diagnostic (file:line +
+            // message), e.g. an embedded DE using the GLSL-ism `radians()` which
+            // MSL does not provide. Surfaced in the test failure / .xcresult.
+            Issue.record("Embedded \(kind) '\(formula.name)' from \(compileCase.sourceName) FAILED to compile: \(error)")
         }
     }
+
+    /// One shared compiler: its LRU is keyed by combined hash, so duplicate
+    /// payloads across shipped scenes (the same formula embedded in several
+    /// scenes) collapse to one compile per test run instead of
+    /// `duplicates × ~30 s`. Lazy: created on first case only, which is
+    /// always on a host with a Metal device (the `.enabled` trait gates the
+    /// suite otherwise).
+    private static let sharedCompiler: CustomShaderCompiler? =
+        MTLCreateSystemDefaultDevice().map(CustomShaderCompiler.init)
 }

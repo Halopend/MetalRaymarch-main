@@ -547,7 +547,20 @@ class AppModel {
             let formula = activeEmbeddedFormula
             let rendererFormula = formula?.isBundledConstructionPrimitive == true ? nil : formula
             let queuedPreset = pendingPresetForActivation
+            let autoCompileStatusID = UUID()
+            if let startupFormula = rendererFormula {
+                // The startup re-activation of the restored formula also
+                // compiles for tens of seconds on a fresh session — show it.
+                customFormulaCompileStatus = .init(
+                    id: autoCompileStatusID,
+                    formulaName: startupFormula.name
+                )
+            }
             Task { @MainActor in
+                // Cleared here (inside the detached task) rather than at
+                // didSet scope exit: the status must outlive this synchronous
+                // body for the whole duration of the compile.
+                defer { if customFormulaCompileStatus?.id == autoCompileStatusID { customFormulaCompileStatus = nil } }
                 do {
                     try await handler(rendererFormula)
                     // If a preset was queued behind a deferred activation,
@@ -598,6 +611,24 @@ class AppModel {
     /// Stored so preview cancellation and save/export paths can restore the
     /// previous custom formula rather than only its hash.
     @ObservationIgnored var activeEmbeddedFormula: EmbeddedFormula?
+
+    /// Embedded-formula PREWARM handler (set by Renderer / ViewportRenderer).
+    /// Compiles a `.threshfx` formula's MTLLibrary into the renderer's compiler
+    /// cache WITHOUT installing it as the active library. Used by the Custom
+    /// Scenes browse tab so a scene's ~10–40 s first compile runs while the
+    /// user is still browsing instead of after the tap. Pass-through: the
+    /// activation handler remains the sole owner of what is installed.
+    @ObservationIgnored var warmCustomFormulaLibraryHandler: ((EmbeddedFormula) async throws -> Void)?
+
+    /// True while a custom formula's MTLLibrary is compiling. The scene-load
+    /// path blocks on that compile (tens of seconds on current Apple Silicon
+    /// for the ~400 KB synthesized source), and without this state the tap
+    /// appears dead. Observed by the scene-feedback overlay.
+    struct CustomFormulaCompileStatus: Equatable {
+        let id: UUID
+        let formulaName: String
+    }
+    var customFormulaCompileStatus: CustomFormulaCompileStatus?
 
     /// The formula currently installed in the renderer (if any). Used to avoid
     /// redundant recompilation when the same formula is referenced multiple times

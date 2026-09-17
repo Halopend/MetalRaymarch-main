@@ -159,7 +159,11 @@ Threshold's renderer rather than accepting a general Metal project.
 - Use unique parameter indexes from `0` through `15`. The renderer passes these
   values every frame, so changing a value does not require recompiling the DE.
 - Runtime compilation is asynchronous and cached in memory for the current
-  renderer session. The first activation may take a few seconds.
+  renderer session. The first activation of a formula compiles the full
+  synthesized renderer source (~400 KB), which takes tens of seconds on
+  current Apple Silicon; after that, the compiled library is reused for the
+  session. Browsing the Custom Scenes tab starts compiling its formulas in
+  the background, so a tap often lands on an already-compiled library.
 - Keep work bounded: the DE runs repeatedly while ray marching. Guard divisions,
   avoid undefined values, and begin with modest iteration counts.
 

@@ -132,6 +132,13 @@ extension AppModel {
             customSceneDiagnostic("🔬 [CSDiag] ⚠️ installEmbeddedFormula DEFERRED (handler nil) — pipeline cache will NOT have FractalTypeCustom arm until renderer starts")
             return .deferred
         }
+        // The compile of the synthesized ~400 KB source runs for tens of
+        // seconds on current Apple Silicon, and the scene-load path awaits it
+        // — surface that so the tap doesn't read as dead (see
+        // `customFormulaCompileStatus`).
+        let compileStatusID = UUID()
+        customFormulaCompileStatus = .init(id: compileStatusID, formulaName: formula.name)
+        defer { if customFormulaCompileStatus?.id == compileStatusID { customFormulaCompileStatus = nil } }
         do {
             try await handler?(formula)
             customSceneDiagnostic("🔬 [CSDiag] installEmbeddedFormula handler completed")
@@ -192,6 +199,21 @@ extension AppModel {
         Task { @MainActor in
             _ = await self.installEmbeddedFormulaIfNeededAndWait(formula)
         }
+    }
+
+    /// Compile a custom formula's MTLLibrary into the renderer's compiler
+    /// cache WITHOUT activating it. Awaited item-by-item by the Custom Scenes
+    /// browse tab (whose `.task` cancels on tab exit), so the ~10–40 s first
+    /// compile of a formula runs while the user is still browsing instead of
+    /// after the tap. Never installs and never changes the active formula;
+    /// already-cached formulas return immediately. A prewarm failure is
+    /// swallowed on purpose — the eventual activation compiles (and reports)
+    /// on its own path.
+    func warmCustomFormulaLibrary(_ formula: EmbeddedFormula) async {
+        guard formula.effectKind == .fractal,
+              !formula.isBundledConstructionPrimitive else { return }
+        guard let handler = warmCustomFormulaLibraryHandler else { return }
+        try? await handler(formula)
     }
 
     @discardableResult

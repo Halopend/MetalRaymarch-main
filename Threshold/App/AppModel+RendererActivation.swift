@@ -56,6 +56,7 @@ extension AppModel {
         triggerProfilerHandler = nil
         forceShaderRecompileHandler = nil
         activateEmbeddedFormulaHandler = nil
+        warmCustomFormulaLibraryHandler = nil
         presentSpatialMenuHandler = nil
         dismissSpatialMenuHandler = nil
         if isSpatialMenuVisible {

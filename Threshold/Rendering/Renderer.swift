@@ -801,6 +801,16 @@ actor Renderer {
                         warpStackSignature: renderSettings.warpStackCodegenSignature)
                 }
 
+                // Browse-tab prewarm: compile a formula's library into the
+                // compiler cache WITHOUT installing it, so tapping a prewarmed
+                // custom scene skips the ~10–40 s compile.
+                appModel.warmCustomFormulaLibraryHandler = { [renderSettings = appModel.renderSettings] formula in
+                    try await renderer.prewarmCustomFormula(
+                        formula,
+                        warpStackSource: renderSettings.warpStackCodegenSource,
+                        warpStackSignature: renderSettings.warpStackCodegenSignature)
+                }
+
                 // The spatial menu renders inside this compositor layer. Its
                 // presentation closure captures the latest tracked palm once;
                 // later samples move only the cursor through the planted frame.
@@ -859,8 +869,10 @@ actor Renderer {
             // it so the renderer compiles the custom MTLLibrary instead of
             // rendering fog/sky only.
             //
-            // CRITICAL: this must NOT be awaited before `renderLoop()`. A fresh
-            // custom-shader compile takes ~0.5-5s, and on visionOS the compositor
+            // CRITICAL: this must NOT be awaited before `renderLoop()`. A cold
+            // custom-shader compile takes tens of seconds (the synthesized
+            // source is ~400 KB: ~26–33 s on an M1 Pro, measured 2026-09), and
+            // on visionOS the compositor
             // kills the app (no Swift trace) if the first frame doesn't arrive
             // shortly after the immersive space opens. Awaiting the compile here
             // delayed first-frame past that deadline — which is exactly why every

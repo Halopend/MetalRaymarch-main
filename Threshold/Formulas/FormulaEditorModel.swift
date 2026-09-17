@@ -11,8 +11,9 @@
 //
 //  DEBOUNCED (0.9 s after the last edit, or Compile Now): validate() +
 //  pragma/stem pre-flight (free), then hand the draft to
-//  `AppModel.installEmbeddedFormulaForLiveEdit` (0.5–5 s Metal compile,
-//  latest-wins with one compile in flight and at most one pending). On
+//  `AppModel.installEmbeddedFormulaForLiveEdit` (tens-of-seconds Metal
+//  compile on a cold editor — the synthesized source is ~400 KB; latest-wins
+//  with one compile in flight and at most one pending). On
 //  failure the compile log is mapped back to user-source lines; the previous
 //  shader keeps rendering.
 //
@@ -349,7 +350,7 @@ final class FormulaEditorModel {
     private func startCompileIfPossible() {
         guard !isInvalidated else { return }
         // Free pre-flight: pragma errors or an unresolved stem block the
-        // 0.5–5 s compile before it starts.
+        // tens-of-seconds compile before it starts.
         let hasPragmaErrors = pragmaDiagnostics.contains { $0.severity == .error }
         guard !hasPragmaErrors, stemDerivation.stem != nil else {
             status = .blockedByParseIssues

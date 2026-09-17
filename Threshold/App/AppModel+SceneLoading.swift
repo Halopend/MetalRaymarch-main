@@ -174,6 +174,9 @@ extension AppModel {
             // activation is a no-op when hash + library already match.
             if let handler = self.activateEmbeddedFormulaHandler,
                let formula = preset.embeddedFormula {
+                let compileStatusID = UUID()
+                self.customFormulaCompileStatus = .init(id: compileStatusID, formulaName: formula.name)
+                defer { if self.customFormulaCompileStatus?.id == compileStatusID { self.customFormulaCompileStatus = nil } }
                 do {
                     try await handler(formula)
                 } catch is CancellationError {

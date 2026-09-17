@@ -176,6 +176,25 @@ extension Renderer {
 
     // MARK: - Force recompile (debug)
 
+    /// Compile `formula`'s MTLLibrary into this renderer's compiler cache
+    /// WITHOUT installing it. Backs `AppModel.warmCustomFormulaLibraryHandler`
+    /// (Custom Scenes browse prewarm): a prewarmed formula makes the eventual
+    /// `activateEmbeddedFormula` a cache hit, skipping the ~10–40 s compile.
+    /// The effect-set split and stack arguments must match `activateEmbeddedFormula`'s
+    /// so the combined hash — and therefore the cached entry — is reused.
+    func prewarmCustomFormula(_ formula: EmbeddedFormula,
+                              warpStackSource: String?,
+                              warpStackSignature: String) async throws {
+        let isWarp = (formula.effectKind == .spaceWarp)
+        _ = try await ensureCompiler().library(
+            forFractal: isWarp ? nil : formula,
+            spaceWarp: isWarp ? formula : nil,
+            warpStackSource: warpStackSource,
+            warpStackSignature: warpStackSignature)
+    }
+
+    // MARK: - Force recompile (debug)
+
     /// Debug "Force Recompile": drop every cached pipeline state (built-in +
     /// custom) so they rebuild fresh on the next frames, and recompile the
     /// active custom `.threshfx` library from source. Safe to call mid-render:

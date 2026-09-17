@@ -71,6 +71,12 @@ struct FractalGridView: View {
     var onEditScene: ((AnimationScene) -> Void)? = nil
     var onLoadAnimationScene: ((AnimationScene) -> Void)? = nil
     var onLoadStaticScene: ((FractalPreset) -> Void)? = nil
+    /// Called per formula when the Custom Scenes tab appears: precompiles the
+    /// formula's MTLLibrary into the renderer's compiler cache WITHOUT
+    /// activating it, so tapping a custom scene hits the cache instead of a
+    /// ~10–40 s compile. Awaited item-by-item inside a `.task` that the view
+    /// cancels on tab exit. `nil` on hosts without a live renderer.
+    var onPrewarmCustomFormula: ((EmbeddedFormula) async -> Void)? = nil
     var tabSelection: Binding<FractalBrowseTab>? = nil
     @AppStorage("FractalGridView.innerTab") private var storedTabSelection: FractalBrowseTab = .jumpingOff
     /// Held here so toggling Settings ▸ Display re-renders every browse tab
@@ -90,7 +96,8 @@ struct FractalGridView: View {
         onCreateAnimation: (() -> Void)? = nil,
         onEditScene: ((AnimationScene) -> Void)? = nil,
         onLoadAnimationScene: ((AnimationScene) -> Void)? = nil,
-        onLoadStaticScene: ((FractalPreset) -> Void)? = nil
+        onLoadStaticScene: ((FractalPreset) -> Void)? = nil,
+        onPrewarmCustomFormula: ((EmbeddedFormula) async -> Void)? = nil
     ) {
         self.animationManager = animationManager
         self.presetManager = presetManager
@@ -100,6 +107,7 @@ struct FractalGridView: View {
         self.onEditScene = onEditScene
         self.onLoadAnimationScene = onLoadAnimationScene
         self.onLoadStaticScene = onLoadStaticScene
+        self.onPrewarmCustomFormula = onPrewarmCustomFormula
     }
 
     private var effectiveTabSelection: Binding<FractalBrowseTab> {
@@ -293,6 +301,33 @@ struct FractalGridView: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.mint.opacity(0.08)))
+        .task(id: customPrewarmKey) {
+            // Prewarm the tab's formulas while the user browses: the first
+            // compile of a formula's ~400 KB synthesized source takes ~10–40 s
+            // and the load path blocks on it, so starting it here makes a tap
+            // land on the compiler's cache. Serial on purpose (one compile at
+            // a time), capped at the compiler's LRU window, and cancelled as
+            // soon as the tab goes away — the in-flight compile finishes,
+            // remaining ones don't start.
+            guard let onPrewarmCustomFormula else { return }
+            for formula in prewarmFormulas {
+                if Task.isCancelled { break }
+                await onPrewarmCustomFormula(formula)
+            }
+        }
+    }
+
+    /// Distinct custom DEs visible on this tab, capped at the compiler's
+    /// library-cache window (`CustomShaderCompiler.maximumCachedLibraryCount`
+    /// = 8): beyond that a prewarmed library would be evicted before its
+    /// scene could be tapped. Sorted with the tab so the same formulas warm
+    /// run-to-run.
+    private var prewarmFormulas: [EmbeddedFormula] {
+        Array(FractalFormulaOrder.customFormulas(in: customScenePresets()).prefix(8))
+    }
+
+    private var customPrewarmKey: String {
+        prewarmFormulas.map(\.shortHash).joined(separator: ",")
     }
 
     @ViewBuilder

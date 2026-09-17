@@ -70,9 +70,13 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
     }
 
     /// Compile + install a custom embedded formula (or pass nil to deactivate).
-    /// The ~0.5–5 s compile runs on the `CustomShaderCompiler` actor — off the
-    /// render and main threads. Library + hash are published together under one
-    /// lock so a frame never sees library-A with hash-B.
+    /// The compile runs on the `CustomShaderCompiler` actor — off the render
+    /// and main threads. Library + hash are published together under one lock
+    /// so a frame never sees library-A with hash-B. NOTE: the synthesized
+    /// source is ~400 KB (full renderer scaffolding + the embedded DE), so a
+    /// COLD compile takes tens of seconds on current Apple Silicon
+    /// (~26–33 s on an M1 Pro, measured 2026-09); the Custom Scenes browse
+    /// tab prewarms formulas so taps can hit the compiler's cache.
     func activate(_ formula: EmbeddedFormula?,
                   warpStackSource: String? = nil,
                   warpStackSignature: String = "s0",
@@ -104,6 +108,25 @@ final class ViewportCustomShaderBox: @unchecked Sendable {
             cache.evict(prefix: "CX\(old)_")   // retire the previous effect's pipelines
         }
         set(library: compiled, hash: newHash)
+    }
+
+    /// Compile `formula`'s MTLLibrary into the shared compiler cache WITHOUT
+    /// installing it. Backs `AppModel.warmCustomFormulaLibraryHandler`: the
+    /// Custom Scenes browse tab prewarms the formulas on screen so a tap hits
+    /// the cache instead of a ~10–40 s compile. Arguments must match
+    /// `activate`'s exactly (same effect-set split + stack signature) so the
+    /// produced combined hash — and therefore the cached entry — is the one
+    /// the eventual activation reuses.
+    func prewarm(_ formula: EmbeddedFormula,
+                 warpStackSource: String?,
+                 warpStackSignature: String,
+                 device: MTLDevice) async throws {
+        let isWarp = (formula.effectKind == .spaceWarp)
+        _ = try await sharedCompiler(device: device).library(
+            forFractal: isWarp ? nil : formula,
+            spaceWarp: isWarp ? formula : nil,
+            warpStackSource: warpStackSource,
+            warpStackSignature: warpStackSignature)
     }
 
     /// Debug "Force Recompile": drop every cached specialized pipeline and the
@@ -233,6 +256,10 @@ struct ThresholdMacRenderView: NSViewRepresentable {
             if let renderer {
                 appModel.activateEmbeddedFormulaHandler = renderer.embeddedFormulaActivator(renderSettings: appModel.renderSettings)
                 appModel.forceShaderRecompileHandler = renderer.shaderRecompiler(appModel: appModel)
+                // Browse-tab prewarm: compile custom formulas into the SAME
+                // compiler cache the activator installs from, so tapping a
+                // prewarmed scene skips the ~10–40 s compile.
+                appModel.warmCustomFormulaLibraryHandler = renderer.customFormulaPrecompiler(renderSettings: appModel.renderSettings)
             }
             appModel.viewportCommandHandler = { [weak inputAccumulator] command in
                 switch command {
@@ -255,6 +282,7 @@ struct ThresholdMacRenderView: NSViewRepresentable {
                 appModel.viewportCoordinatorID = nil
                 appModel.activateEmbeddedFormulaHandler = nil
                 appModel.forceShaderRecompileHandler = nil
+                appModel.warmCustomFormulaLibraryHandler = nil
                 appModel.viewportCommandHandler = nil
                 appModel.rendererStartupWarmupComplete = false
             }
@@ -1543,6 +1571,21 @@ final class ViewportRenderer {
         }
     }
 
+    /// A `@Sendable` prewarm closure for `AppModel.warmCustomFormulaLibraryHandler`,
+    /// bound to the SAME custom-shader box the activator installs from, so a
+    /// prewarmed library is an activation cache hit. Captures only Sendable
+    /// values (box, device, settings), never the renderer itself.
+    func customFormulaPrecompiler(renderSettings: RenderSettings) -> @Sendable (EmbeddedFormula) async throws -> Void {
+        let box = customShaderBox
+        let device = self.device
+        return { formula in
+            try await box.prewarm(formula,
+                                  warpStackSource: renderSettings.warpStackCodegenSource,
+                                  warpStackSignature: renderSettings.warpStackCodegenSignature,
+                                  device: device)
+        }
+    }
+
     private func makeRenderPassDescriptor(drawable: CAMetalDrawable) -> MTLRenderPassDescriptor? {
         guard let depthTexture = depthTexture(width: drawable.texture.width, height: drawable.texture.height) else {
             return nil
@@ -2466,6 +2509,10 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             if let renderer {
                 appModel.activateEmbeddedFormulaHandler = renderer.embeddedFormulaActivator(renderSettings: appModel.renderSettings)
                 appModel.forceShaderRecompileHandler = renderer.shaderRecompiler(appModel: appModel)
+                // Browse-tab prewarm: compile custom formulas into the SAME
+                // compiler cache the activator installs from, so tapping a
+                // prewarmed scene skips the ~10–40 s compile.
+                appModel.warmCustomFormulaLibraryHandler = renderer.customFormulaPrecompiler(renderSettings: appModel.renderSettings)
             }
             appModel.viewportCommandHandler = { [weak inputController] command in
                 switch command {
@@ -2574,6 +2621,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                 appModel.viewportCoordinatorID = nil
                 appModel.activateEmbeddedFormulaHandler = nil
                 appModel.forceShaderRecompileHandler = nil
+                appModel.warmCustomFormulaLibraryHandler = nil
                 appModel.viewportCommandHandler = nil
                 appModel.rendererStartupWarmupComplete = false
             }

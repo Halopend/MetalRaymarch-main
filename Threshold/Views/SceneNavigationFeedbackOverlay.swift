@@ -153,19 +153,56 @@ private struct SceneNavigationFeedbackOverlayModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .overlay(alignment: .bottom) {
-                if isEnabled, !isObscured, let feedback = presentedFeedback {
-                    SceneNavigationFeedbackCard(
-                        feedback: feedback,
-                        instruction: instruction,
-                        onPrevious: { navigate(forward: false) },
-                        onNext: { navigate(forward: true) },
-                        onInteractionChanged: { isInteracting = $0 }
-                    )
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, bottomPadding)
-                    .transition(transition(for: feedback))
-                    .zIndex(8)
+                VStack(spacing: 10) {
+                    // Custom formula compile progress: the scene-load path
+                    // awaits a ~10–40 s MTLLibrary compile on the first
+                    // activation of a formula, and without this the tap
+                    // reads as dead. Shown regardless of the scene-feedback
+                    // preference — it is a progress state, not a nicety.
+                    if let compileStatus = appModel.customFormulaCompileStatus {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(.orange)
+
+                            Text("Compiling custom shader “\(compileStatus.formulaName)”…")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.78)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .frame(maxWidth: 480)
+                        .background(Color.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 18))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18)
+                                .strokeBorder(Color.orange.opacity(0.42), lineWidth: 1)
+                        )
+                        .shadow(color: Color.black.opacity(0.4), radius: 12, y: 5)
+                        .transition(.opacity)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Compiling custom shader \(compileStatus.formulaName)")
+                    }
+
+                    if isEnabled, !isObscured, let feedback = presentedFeedback {
+                        SceneNavigationFeedbackCard(
+                            feedback: feedback,
+                            instruction: instruction,
+                            onPrevious: { navigate(forward: false) },
+                            onNext: { navigate(forward: true) },
+                            onInteractionChanged: { isInteracting = $0 }
+                        )
+                        .transition(transition(for: feedback))
+                        .zIndex(8)
+                    }
                 }
+                .padding(.horizontal, 24)
+                .padding(.bottom, bottomPadding)
+                .animation(
+                    reduceMotion ? nil : .easeInOut(duration: 0.18),
+                    value: appModel.customFormulaCompileStatus
+                )
             }
             .onChange(of: appModel.sceneNavigationFeedback) { _, feedback in
                 guard isEnabled, let feedback else { return }

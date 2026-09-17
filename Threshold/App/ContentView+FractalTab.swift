@@ -43,6 +43,9 @@ extension ContentView {
                     onLoadStaticScene: { preset in
                         appModel.loadStaticScene(preset)
                         appModel.dismissMenuWindowForSceneLoad()
+                    },
+                    onPrewarmCustomFormula: { formula in
+                        await appModel.warmCustomFormulaLibrary(formula)
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
