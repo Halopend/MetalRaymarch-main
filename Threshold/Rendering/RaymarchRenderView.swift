@@ -661,11 +661,6 @@ final class ViewportRenderer {
     /// Last value published to the UI; avoids scheduling a MainActor task every
     /// frame when the presentation path is unchanged.
     private var publishedUpscalerPath: String?
-    #if os(macOS)
-    /// Last held state sent to the SwiftUI acknowledgement card. Publishing only
-    /// changes keeps the render loop free of per-frame MainActor work.
-    private var publishedAttributionShortcutHeld = false
-    #endif
     private var temporalInvalidationKey: TemporalInvalidationKey?
 
     // Shared music-reactive engine — same type used by the visionOS `Renderer`,
@@ -1715,11 +1710,12 @@ final class ViewportRenderer {
         let input = inputController.consumeFrame()
 
         #if os(macOS)
-        let shouldShowAttribution = input.isAttributionShortcutHeld
-        if shouldShowAttribution != publishedAttributionShortcutHeld {
-            publishedAttributionShortcutHeld = shouldShowAttribution
+        // The I key is edge-triggered (one action per non-repeat press); the
+        // info card's show/hide state lives in `AppModel` so it persists
+        // across drains until the key toggles it again.
+        if input.shouldToggleInfo {
             Task { @MainActor [weak appModel] in
-                appModel?.setAttributionShortcutHeld(shouldShowAttribution)
+                appModel?.toggleInfoOverlay()
             }
         }
         #endif

@@ -509,9 +509,10 @@ class AppModel {
     var isSpatialMenuVisible: Bool = false
     var isMenuInteractionActive: Bool = false
     #if os(macOS)
-    /// True while the render viewport's acknowledgement shortcut is held.
-    /// The renderer publishes only edge changes, so this remains UI-only state.
-    var isAttributionShortcutHeld: Bool = false
+    /// Whether the viewport's I-key-toggled info card is showing. The renderer
+    /// publishes only key edges (one per non-repeat press), so this remains
+    /// UI-only state that persists until toggled again.
+    var isInfoOverlayVisible = false
     #endif
     /// Monotonic token shared by the MainActor presentation edge and Renderer.
     /// It makes rapid open/close/open requests last-writer-wins even though the
@@ -1280,9 +1281,10 @@ class AppModel {
     }
 
     #if os(macOS)
-    func setAttributionShortcutHeld(_ isHeld: Bool) {
-        guard isAttributionShortcutHeld != isHeld else { return }
-        isAttributionShortcutHeld = isHeld
+    /// Shows the viewport info card when hidden, hides it when shown — one
+    /// press of the I key per toggle.
+    func toggleInfoOverlay() {
+        isInfoOverlayVisible.toggle()
     }
     #endif
 

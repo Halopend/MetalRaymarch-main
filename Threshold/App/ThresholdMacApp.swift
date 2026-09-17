@@ -508,9 +508,14 @@ private struct ThresholdMacRootView: View {
                         .animation(viewportHUDAnimation, value: isViewportHUDVisible)
                 }
 
-                // Always-on perf HUD (top-leading, opposite the pin button). Shows
-                // FPS plus the continuous GPU-ms cost so acceleration tuning is
-                // visible even when the frame rate is pinned by the display refresh.
+                // Perf HUD (top-leading, opposite the pin button). Shows FPS
+                // plus the continuous GPU-ms cost so acceleration tuning is
+                // visible even when the frame rate is pinned by the display
+                // refresh. Pinned up through the startup shader compile —
+                // watching the meter recover as pipelines land is the whole
+                // point during warmup — then it fades out shortly after the
+                // compile completes (the completion handler below re-marks
+                // HUD activity, handing it back to the shared idle fade).
                 if !hasDetachedControls && !appModel.isViewportChromeHidden {
                     FPSIndicatorView()
                         .environment(appModel)
@@ -518,12 +523,13 @@ private struct ThresholdMacRootView: View {
                         .padding(.leading, panelPadding)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .allowsHitTesting(false)
-                        .opacity(isViewportHUDVisible ? 1 : 0)
+                        .opacity(isFPSMeterVisible ? 1 : 0)
                         .animation(viewportHUDAnimation, value: isViewportHUDVisible)
+                        .animation(viewportHUDAnimation, value: appModel.rendererStartupWarmupComplete)
                 }
 
-                if appModel.isAttributionShortcutHeld && !appModel.isViewportChromeHidden {
-                    AttributionOverlay()
+                if appModel.isInfoOverlayVisible && !appModel.isViewportChromeHidden {
+                    ViewportInfoOverlay()
                         .padding(24)
                         .frame(
                             maxWidth: .infinity,
@@ -606,7 +612,7 @@ private struct ThresholdMacRootView: View {
             .frame(minWidth: minimumWindowSize.width, minHeight: minimumWindowSize.height)
             .animation(
                 reduceMotion ? nil : .easeOut(duration: 0.16),
-                value: appModel.isAttributionShortcutHeld
+                value: appModel.isInfoOverlayVisible
             )
             .onReceive(
                 NotificationCenter.default.publisher(
@@ -666,6 +672,13 @@ private struct ThresholdMacRootView: View {
         }
         .onChange(of: appModel.isMenuInteractionActive) { _, _ in
             updateAutoHideState(animated: true)
+        }
+        .onChange(of: appModel.rendererStartupWarmupComplete) { _, isComplete in
+            // The startup shader compile just finished: the FPS capsule has
+            // shown the frame-rate recovery, so hand it to the shared HUD
+            // idle fade — it drops out `viewportHUDIdleDelay` from now (or
+            // from the last pointer activity, whichever is later).
+            if isComplete { noteViewportHUDActivity() }
         }
         .onChange(of: launcherStyle) { _, style in
             applyNavigationStyle(style)
@@ -755,6 +768,13 @@ private struct ThresholdMacRootView: View {
 
     private var viewportHUDAnimation: Animation? {
         reduceMotion ? nil : .easeInOut(duration: 0.28)
+    }
+
+    /// The FPS capsule stays visible through the startup shader compile
+    /// regardless of pointer idle, then falls back to the shared HUD idle
+    /// fade shortly after the compile completes.
+    private var isFPSMeterVisible: Bool {
+        isViewportHUDVisible || !appModel.rendererStartupWarmupComplete
     }
 
     /// Keeps the lightweight viewport affordances available while the pointer is
