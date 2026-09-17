@@ -1231,14 +1231,6 @@ extension ContentView {
                     .foregroundStyle(.green)
             }
 
-            Text("MetricKit quietly collects OS-level performance diagnostics in the background. Submit the current structured sample using the anonymous analytics preference when you want to share it.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Text("Have a file to share too? Send the original Threshold file—such as .threshfx or .threshscene—through Files, AirDrop, or your normal feedback channel. Include the device, macOS version, active formula, and steps to reproduce; no performance-report file is needed.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-
             HStack(spacing: 8) {
                 Button {
                     performanceReportStatus = "Submitting…"
@@ -1332,10 +1324,6 @@ extension ContentView {
                                 .font(.caption2.monospacedDigit().weight(.bold))
                                 .foregroundStyle(.green)
                         }
-                        Text("Formula Iterations do not apply to construction primitives. Group Passes control the repeated geometry; Max Ray Steps controls raymarch quality.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(8)
                     .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
@@ -1370,11 +1358,6 @@ extension ContentView {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    if cache.fractalType == .constructionPrimitive {
-                        Text("For this analytic base, presets use their ray-step budget; their formula-iteration value is ignored.")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
                 } else {
                     VStack(spacing: 12) {
                         if cache.fractalType != .constructionPrimitive {
@@ -1462,10 +1445,6 @@ extension ContentView {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-
-                Text(RendererModeOption.from(tileSize: cache.quality.tileSize).helperText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
 
             // ── Acceleration card (already carries its own card chrome) ──
@@ -1529,12 +1508,6 @@ extension ContentView {
                     .font(.caption2)
                     .foregroundStyle(group.workPerSample > 32 ? .orange : .secondary)
                 }
-                Text(cache.fractalType == .constructionPrimitive
-                     ? "This is the only geometry recurrence. It is not multiplied by Formula Iterations."
-                     : "Transforms run before the formula loop. The two costs are sequential, not multiplied together.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(8)
             .background(Color.indigo.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
@@ -1619,10 +1592,6 @@ extension ContentView {
                 Text(effectiveDirectBudgetUnavailableText)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-            } else {
-                Text("MetalFX uses temporal upscaling when available. 50% to 75% is the usual quality/performance sweet spot.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
         }
         #endif
@@ -1674,10 +1643,6 @@ extension ContentView {
             ))
             .tint(.cyan)
             .help("When FPS sags, render quality steps down to recover headroom, then climbs back toward your slider setting (the ceiling).")
-
-            Text("Vision Pro compositor drawable size. This is the main memory ceiling; lower values reduce drawable memory and GPU cost.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
         }
         #endif
     }

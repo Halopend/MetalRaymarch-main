@@ -312,15 +312,6 @@ enum RendererModeOption: String, CaseIterable {
             return .fragment
         }
     }
-
-    var helperText: String {
-        switch self {
-        case .fragment:
-            return "Default path with full shading. Supports MetalFX spatial upscaling."
-        case .adaptiveCompute:
-            return "8x8 adaptive compute path. Best for raw performance; MetalFX is disabled in this mode."
-        }
-    }
 }
 
 enum QualityGoalPreference: Int, CaseIterable {
