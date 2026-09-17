@@ -33,8 +33,10 @@ enum SceneRestoreScope: Sendable {
 /// temporal reprojection, cone-march strength, adaptive resolution, etc.) is
 /// intentionally absent: those settings belong to the destination device.
 struct SceneQualityState: Codable, Equatable {
-    var baseFractalIterations: Int = 9
-    var baseMaxRaySteps: Int = 64
+    // Scenes that do not author a DE budget open at the Low quality preset —
+    // the same factory default as a fresh install (see QualityConfig).
+    var baseFractalIterations: Int = QualityConfig.defaultFractalIterations
+    var baseMaxRaySteps: Int = QualityConfig.defaultMaxRaySteps
     var resolutionScale: Float?
     var tileSize: Int?
     var coneMarchCompatible: Bool = true
@@ -105,8 +107,8 @@ struct SceneQualityState: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        baseFractalIterations = try c.decodeIfPresent(Int.self, forKey: .baseFractalIterations) ?? 9
-        baseMaxRaySteps = try c.decodeIfPresent(Int.self, forKey: .baseMaxRaySteps) ?? 64
+        baseFractalIterations = try c.decodeIfPresent(Int.self, forKey: .baseFractalIterations) ?? QualityConfig.defaultFractalIterations
+        baseMaxRaySteps = try c.decodeIfPresent(Int.self, forKey: .baseMaxRaySteps) ?? QualityConfig.defaultMaxRaySteps
         resolutionScale = try c.decodeIfPresent(Float.self, forKey: .resolutionScale)
         tileSize = try c.decodeIfPresent(Int.self, forKey: .tileSize)
         coneMarchCompatible = try c.decodeIfPresent(Bool.self, forKey: .coneMarchCompatible) ?? true
@@ -602,9 +604,10 @@ struct FractalPreset: Codable, Identifiable {
         self.thumbnailData = thumbnailData
         self.rating = 0
         
-        // Initialize with defaults
-        self.fractalIterations = 9
-        self.maxRaySteps = 64
+        // Initialize with defaults (DE budget = the Low quality preset, so a
+        // preset built without explicit quality opens at the factory default)
+        self.fractalIterations = QualityConfig.defaultFractalIterations
+        self.maxRaySteps = QualityConfig.defaultMaxRaySteps
         self.colorMix = 0.5
         self.colorIterations = 8.0
         self.position = .zero
@@ -644,9 +647,9 @@ struct FractalPreset: Codable, Identifiable {
         thumbnailData = try container.decodeIfPresent(Data.self, forKey: .thumbnailData)
         rating = try container.decodeIfPresent(Int.self, forKey: .rating) ?? 0
         fractalIterations = try container.decodeIfPresent(Int.self, forKey: .fractalIterations)
-            ?? decodedSceneState?.quality.baseFractalIterations ?? 9
+            ?? decodedSceneState?.quality.baseFractalIterations ?? QualityConfig.defaultFractalIterations
         maxRaySteps = try container.decodeIfPresent(Int.self, forKey: .maxRaySteps)
-            ?? decodedSceneState?.quality.baseMaxRaySteps ?? 64
+            ?? decodedSceneState?.quality.baseMaxRaySteps ?? QualityConfig.defaultMaxRaySteps
         colorMix = try container.decodeIfPresent(Float.self, forKey: .colorMix)
             ?? decodedSceneState?.color.colorMix ?? 0.5
         colorIterations = try container.decodeIfPresent(Float.self, forKey: .colorIterations)

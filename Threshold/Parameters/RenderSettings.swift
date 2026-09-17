@@ -162,10 +162,10 @@ final class RenderSettings: @unchecked Sendable {
     private var _position: SIMD3<Float> = SIMD3<Float>(0.1, 0.1, 0.1)
     private var _scenePrimitives: [ScenePrimitive] = []
     private var _fractalScale: Float = 2.8
-    private var _fractalIterations: Int = 9         // Mid quality default
-    private var _maxRaySteps: Int = 64              // Mid quality default
-    private var _baseFractalIterations: Int = 9     // User-set base
-    private var _baseMaxRaySteps: Int = 64          // User-set base
+    private var _fractalIterations: Int = QualityConfig.defaultFractalIterations   // Low preset default on first launch
+    private var _maxRaySteps: Int = QualityConfig.defaultMaxRaySteps               // Low preset default on first launch
+    private var _baseFractalIterations: Int = QualityConfig.defaultFractalIterations  // User-set base
+    private var _baseMaxRaySteps: Int = QualityConfig.defaultMaxRaySteps              // User-set base
     private var _colorMix: Float = 0.5
     private var _lightingPlay: Bool = false         // Play/pause lighting effects
     private var _lightingMode: LightingMode = .animated  // Static, animated, or audio-reactive

@@ -28,6 +28,56 @@ struct QualityConfigCodableTests {
         #endif
     }
 
+    @Test("first launch quality is the Low preset")
+    func firstLaunchQualityIsLowPreset() {
+        // Fresh-install budgets must sit exactly on the Low preset so the UI's
+        // preset chips highlight Low on first launch (see QualityPreset.detect).
+        #expect(QualityConfig().baseFractalIterations == QualityPreset.low.fractalIterations)
+        #expect(QualityConfig().baseMaxRaySteps == QualityPreset.low.raySteps)
+        #expect(QualityPreset.detect(
+            fractalIterations: QualityConfig().baseFractalIterations,
+            raySteps: QualityConfig().baseMaxRaySteps
+        ) == .low)
+
+        #if os(macOS) || os(iOS)
+        #expect(RenderSettings().baseFractalIterations == QualityPreset.low.fractalIterations)
+        #expect(RenderSettings().baseMaxRaySteps == QualityPreset.low.raySteps)
+        #endif
+
+        // Slider reset defaults agree with the first-launch state.
+        #expect(ControlCatalog.iterations.defaultValue == Float(QualityPreset.low.fractalIterations))
+        #expect(ControlCatalog.maxRaySteps.defaultValue == Float(QualityPreset.low.raySteps))
+
+        // A settings blob missing the quality keys decodes to the same Low default.
+        let legacy = try? JSONDecoder().decode(QualityConfig.self, from: Data("{}".utf8))
+        #expect(legacy?.baseFractalIterations == QualityPreset.low.fractalIterations)
+        #expect(legacy?.baseMaxRaySteps == QualityPreset.low.raySteps)
+    }
+
+    @Test("first-launch opening scene does not stomp the Low preset")
+    @MainActor
+    func openingSceneKeepsLowPreset() {
+        // On a fresh install restoreLastState finds no saved last state and
+        // applies mandelboxDefaultPreset(). That preset must carry the Low
+        // budget, and applying it must leave the device at Low.
+        let opening = PresetManager.mandelboxDefaultPreset()
+        #expect(opening.fractalIterations == QualityPreset.low.fractalIterations)
+        #expect(opening.maxRaySteps == QualityPreset.low.raySteps)
+
+        let fresh = RenderSettings()
+        #expect(fresh.baseFractalIterations == QualityPreset.low.fractalIterations)
+        opening.apply(to: fresh, scope: .session)
+        #expect(fresh.baseFractalIterations == QualityPreset.low.fractalIterations)
+        #expect(fresh.baseMaxRaySteps == QualityPreset.low.raySteps)
+
+        // A preset created without explicit quality carries the same Low budget
+        // (FractalPreset's placeholder defaults), so scene captures from a fresh
+        // install and legacy keyless scene files stay Low too.
+        let blank = FractalPreset(name: "Blank")
+        #expect(blank.fractalIterations == QualityPreset.low.fractalIterations)
+        #expect(blank.maxRaySteps == QualityPreset.low.raySteps)
+    }
+
     @Test("legacy quality without resolution preserves native fallback")
     func legacyResolutionFallback() throws {
         let legacy = try JSONDecoder().decode(QualityConfig.self, from: Data("{}".utf8))

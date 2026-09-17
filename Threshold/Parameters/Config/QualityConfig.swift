@@ -132,6 +132,14 @@ struct QualityConfig: Codable, Equatable, Sendable {
     /// user-facing Low detail-budget preset.
     static let defaultResolutionScale: Float = 0.33
 
+    /// First-launch DE iteration / ray-step budgets. They match the user-facing
+    /// Low quality preset (`QualityPreset.low`) so a fresh install opens at Low,
+    /// with the Low preset chip highlighted in the UI. Kept here so
+    /// RenderSettings' live defaults, the Codable fallbacks, and the
+    /// ControlCatalog slider defaults all agree.
+    static let defaultFractalIterations = QualityPreset.low.fractalIterations
+    static let defaultMaxRaySteps = QualityPreset.low.raySteps
+
     /// Default cone-marching strength for the opening scene on a fresh install.
     /// Kept in one place so RenderSettings, Codable migration, and UI reset agree.
     static let defaultConeMarchStrength: Float = 0.84
@@ -190,9 +198,9 @@ struct QualityConfig: Codable, Equatable, Sendable {
         return min(visionMaxRenderQuality, max(visionMinRenderQuality, value))
     }
 
-    // User-set base values
-    var baseFractalIterations: Int = 9
-    var baseMaxRaySteps: Int = 64
+    // User-set base values (first launch opens at the Low preset)
+    var baseFractalIterations: Int = Self.defaultFractalIterations
+    var baseMaxRaySteps: Int = Self.defaultMaxRaySteps
 
     // Resolution / tiling
     var resolutionScale: Float = Self.defaultResolutionScale // 0.33 - 1.0 (MetalFX spatial upscale input scale)
@@ -387,8 +395,8 @@ struct QualityConfig: Codable, Equatable, Sendable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        baseFractalIterations = try c.decodeIfPresent(Int.self,   forKey: .baseFractalIterations) ?? 9
-        baseMaxRaySteps       = try c.decodeIfPresent(Int.self,   forKey: .baseMaxRaySteps)       ?? 64
+        baseFractalIterations = try c.decodeIfPresent(Int.self,   forKey: .baseFractalIterations) ?? Self.defaultFractalIterations
+        baseMaxRaySteps       = try c.decodeIfPresent(Int.self,   forKey: .baseMaxRaySteps)       ?? Self.defaultMaxRaySteps
         // Keep the historical native fallback for existing blobs that predate
         // this key. Fresh installs use `defaultResolutionScale` above.
         resolutionScale       = try c.decodeIfPresent(Float.self, forKey: .resolutionScale)       ?? 1.0

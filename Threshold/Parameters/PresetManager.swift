@@ -1541,6 +1541,12 @@ extension PresetManager {
         preset.minDistance = 0.18
         preset.position = SIMD3<Float>(0, 0, -1.15)
         preset.scale = 1.0
+        // The opening scene on a fresh install must open at the Low quality
+        // preset: this preset is applied on first launch by restoreLastState
+        // (no saved last state), and its DE budget would otherwise stomp the
+        // device's Low first-launch defaults back up to a heavier budget.
+        preset.fractalIterations = QualityPreset.low.fractalIterations
+        preset.maxRaySteps = QualityPreset.low.raySteps
         return preset
     }
     

@@ -112,7 +112,7 @@ enum ControlCatalog {
         name: "Iterations",
         icon: "number",
         range: 2.0...24.0,
-        defaultValue: 9.0)
+        defaultValue: Float(QualityConfig.defaultFractalIterations))
 
     // MARK: Post-process effects
 
@@ -355,7 +355,7 @@ enum ControlCatalog {
 
     static let maxRaySteps = ControlSpec(
         id: "quality.maxRaySteps", name: "Max Ray Steps", icon: "arrow.forward.to.line",
-        range: 16.0...200.0, defaultValue: 64.0)
+        range: 16.0...200.0, defaultValue: Float(QualityConfig.defaultMaxRaySteps))
 
     static let overRelaxationMax = ControlSpec(
         id: "quality.overRelaxationMax", name: "Over-Relaxation", icon: "forward.frame",
