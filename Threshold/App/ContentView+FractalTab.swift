@@ -1184,8 +1184,9 @@ extension ContentView {
         performanceTuningContent
     }
 
-    /// On iPhone the tuning controls should lead, with live diagnostics following
-    /// them. iPad keeps the desktop-style diagnostics-first ordering.
+    /// On iPhone the header drops the FPS headline, which then reappears beside
+    /// the live diagnostics at the tail of the page. iPad and Mac keep it in the
+    /// section header.
     private var usesPhonePerformanceOrdering: Bool {
         #if os(iOS)
         UIDevice.current.userInterfaceIdiom == .phone
@@ -1275,14 +1276,6 @@ extension ContentView {
                 systemImage: "slider.horizontal.3",
                 showsFPSIndicator: !usesPhonePerformanceOrdering
             )
-
-            #if os(iOS)
-            if !usesPhonePerformanceOrdering {
-                PerformanceMetricsView(cache: cache)
-            }
-            #else
-            PerformanceMetricsView(cache: cache)
-            #endif
 
             #if os(macOS)
             performanceReportCard
@@ -1453,13 +1446,15 @@ extension ContentView {
             // ── Acceleration card (already carries its own card chrome) ──
             fractalAccelerationSection
 
+            // Live performance dashboard sits last so the actionable controls —
+            // Budget, Renderer Mode, Acceleration — lead the page on every device.
             #if os(iOS)
             if usesPhonePerformanceOrdering {
                 FPSIndicatorView()
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                PerformanceMetricsView(cache: cache)
             }
             #endif
+            PerformanceMetricsView(cache: cache)
         }
     }
 
