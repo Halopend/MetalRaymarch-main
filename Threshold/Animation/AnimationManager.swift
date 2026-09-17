@@ -500,6 +500,14 @@ final class AnimationManager {
         updates()
     }
     
+    /// Re-runs the visibility filters after the Settings → Display
+    /// Mixed-reality opt-in flips, so the library, browse tabs, and the cue
+    /// scene switcher pool reflect the new gate immediately instead of
+    /// waiting for the next scene-input change.
+    func refreshSceneVisibility() {
+        rebuildScenes()
+    }
+
     private func rebuildScenes() {
         var result: [AnimationScene] = []
         for defaultScene in DefaultScenes.all() {
@@ -517,6 +525,10 @@ final class AnimationManager {
                 includesScreenOnlyScenes: Self.includesScreenOnlyScenes,
                 includesMacOnlyScenes: Self.includesMacOnlyScenes
             )
+                // Mixed-reality scenes are authored for Vision Pro Mixed
+                // immersion; flat-display hosts hide them from the scene
+                // list unless the user opts in via Settings → Display.
+                && (Self.includesMixedRealityScenes || $0.mixedModeScene != true)
         }
     }
 
@@ -534,6 +546,12 @@ final class AnimationManager {
 #else
         false
 #endif
+    }
+
+    /// Live read so toggling Settings → Display rebuilds the list on the
+    /// next scene-input change without a relaunch.
+    private static var includesMixedRealityScenes: Bool {
+        MixedRealitySceneCatalogSettings.includesScenes
     }
     
     /// Check whether a scene is a built-in default (original or edited overlay)
@@ -753,13 +771,22 @@ final class AnimationManager {
 
     /// A one-keyframe animation cannot play through a transition, so it stays
     /// available elsewhere in the library but is skipped by the cue switcher.
+    /// Mixed-reality scenes are also excluded here (read live) so the canvas
+    /// arrow-key switch and the Transitions tab pool follow the Settings →
+    /// Display opt-in without waiting for the next scene rebuild.
     private var musicCueGroupAvailableAnimationScenes: [AnimationScene] {
-        scenes.filter { $0.keyframes.count >= 2 }
+        scenes.filter {
+            $0.keyframes.count >= 2
+                && (Self.includesMixedRealityScenes || $0.mixedModeScene != true)
+        }
     }
 
     /// Both animation sequences and the static preset catalog can feed the
     /// switcher. This is the complete catalog; the source toggles below derive
     /// the active pool from it without constructing duplicate scene objects.
+    /// Mixed-reality scenes are excluded here (read live) so the Transitions
+    /// tab and the canvas arrow-key switch honor the Settings → Display
+    /// opt-in regardless of how a provider assembles its list.
     var musicCueGroupAvailableTargets: [MusicCueSceneTarget] {
         let animations = musicCueGroupAvailableAnimationScenes.map { scene in
             MusicCueSceneTarget(
@@ -772,6 +799,7 @@ final class AnimationManager {
         }
         let staticScenes = (musicCueStaticSceneProvider?() ?? [])
             .filter { $0.name != "__lastState__" }
+            .filter { Self.includesMixedRealityScenes || $0.mixedModeScene != true }
             .map { preset in
                 MusicCueSceneTarget(
                     kind: .staticScene,

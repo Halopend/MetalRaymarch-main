@@ -109,6 +109,50 @@ struct PresetCatalogVisibilityTests {
         #expect(macResult.map(\.id) == [environmentID, ordinaryID])
     }
 
+    @Test("Flat-display catalogs hide Mixed-reality scenes until opted in")
+    func mixedRealityScenesAreHiddenUntilOptedIn() {
+        var bundledMixed = makePreset(id: environmentID, name: "Passthrough float")
+        bundledMixed.mixedModeScene = true
+        // A user-authored copy whose scene file itself carries the Mixed mark.
+        var userMixed = makePreset(id: userEnvironmentID, name: "User mixed")
+        userMixed.mixedModeScene = true
+        let ordinary = makePreset(id: ordinaryID, name: "Ordinary")
+
+        let gatedResult = PresetManager.filterSceneCatalogPresets(
+            [bundledMixed, userMixed, ordinary],
+            bundledPresets: [bundledMixed],
+            supportsEnvironmentReconstruction: true,
+            includesMixedRealityScenes: false
+        )
+        let optedInResult = PresetManager.filterSceneCatalogPresets(
+            [bundledMixed, userMixed, ordinary],
+            bundledPresets: [bundledMixed],
+            supportsEnvironmentReconstruction: true,
+            includesMixedRealityScenes: true
+        )
+
+        #expect(gatedResult.map(\.id) == [ordinaryID])
+        #expect(optedInResult.map(\.id) == [environmentID, userEnvironmentID, ordinaryID])
+    }
+
+    @Test("A stored copy seeded before its bundled source was marked Mixed is still classified")
+    func seededMixedCopyIsClassifiedByBundledProvenance() {
+        var bundledMixed = makePreset(id: environmentID, name: "Passthrough")
+        bundledMixed.mixedModeScene = true
+        var storedCopy = bundledMixed
+        storedCopy.mixedModeScene = nil
+        let ordinary = makePreset(id: ordinaryID, name: "Ordinary")
+
+        let result = PresetManager.filterSceneCatalogPresets(
+            [storedCopy, ordinary],
+            bundledPresets: [bundledMixed],
+            supportsEnvironmentReconstruction: true,
+            includesMixedRealityScenes: false
+        )
+
+        #expect(result.map(\.id) == [ordinaryID])
+    }
+
     private func makePreset(
         id: UUID,
         name: String,

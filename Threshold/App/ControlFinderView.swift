@@ -71,7 +71,18 @@ struct ControlFinderDestination: Identifiable {
     }
 
     func isAvailable(on profile: PlatformProfile) -> Bool {
-        profile.supports(requiredCapabilities)
+        guard profile.supports(requiredCapabilities) else { return false }
+        // Mixed-reality scene browsing is authored for Vision Pro Mixed
+        // immersion: visionOS always offers it, while flat-display hosts only
+        // surface it after the Settings → Display opt-in (see
+        // `MixedRealitySceneCatalogSettings`). The exemption follows the
+        // queried profile so cross-platform availability stays correct even
+        // when evaluated on a flat-display build.
+        if target.stableID == AppNavigationTarget.route(.explore(.mixed)).stableID {
+            if profile.platform == .visionOS { return true }
+            if !MixedRealitySceneCatalogSettings.includesScenes { return false }
+        }
+        return true
     }
 
     var availabilityLabel: String? {

@@ -28,7 +28,8 @@ enum RadialMenuProjectionFactory {
         let hierarchy = NavigationHierarchy.application(availability: .resolve(
             profile: appModel.platformProfile,
             allowsCustomScenes: allowsCustomScenes,
-            includesGestureEditing: true
+            includesGestureEditing: true,
+            includesMixedRealityScenes: MixedRealitySceneCatalogSettings.includesScenes
         ))
         return RadialNavigationProjection(
             roots: hierarchy.roots.map {

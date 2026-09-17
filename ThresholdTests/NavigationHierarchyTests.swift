@@ -5,12 +5,14 @@ import Testing
 struct NavigationHierarchyTests {
     private func makeHierarchy(
         allowCustomScenes: Bool = false,
+        includesMixedRealityScenes: Bool = true,
         shapeSections: [ShapeRailSection] = [.formula, .space],
         musicSections: [MusicRailSection] = [.parameters, .reactive, .playback],
         includesGestureEditing: Bool = false
     ) -> NavigationHierarchy {
         NavigationHierarchy.application(availability: NavigationAvailability(
             allowsCustomScenes: allowCustomScenes,
+            includesMixedRealityScenes: includesMixedRealityScenes,
             shapeSections: shapeSections,
             musicSections: musicSections,
             includesGestureEditing: includesGestureEditing
@@ -67,7 +69,8 @@ struct NavigationHierarchyTests {
         let availability = NavigationAvailability.resolve(
             profile: .iPadOS,
             allowsCustomScenes: true,
-            includesGestureEditing: false
+            includesGestureEditing: false,
+            includesMixedRealityScenes: true
         )
         let input = NavigationHierarchy.application(availability: availability)
             .children(ofWorkspace: .input)
@@ -77,6 +80,26 @@ struct NavigationHierarchyTests {
             .route(.input(.parameters)),
             .route(.input(.reactive)),
             .route(.input(.playback))
+        ])
+    }
+
+    @Test("Mixed browse section appears only when Mixed scenes are included")
+    func mixedSectionFollowsMixedRealityAvailability() {
+        let included = makeHierarchy(includesMixedRealityScenes: true)
+        let excluded = makeHierarchy(includesMixedRealityScenes: false)
+
+        #expect(included.children(ofWorkspace: .explore).contains {
+            $0.id == "explore.\(ExploreRailSection.mixed.rawValue)"
+        })
+        #expect(!excluded.children(ofWorkspace: .explore).contains {
+            $0.id == "explore.\(ExploreRailSection.mixed.rawValue)"
+        })
+        // Filtering the section never disturbs its siblings. (Custom Scenes
+        // stays filtered too — the default hierarchy omits it.)
+        #expect(excluded.children(ofWorkspace: .explore).map(\.id) == [
+            "explore.\(ExploreRailSection.jumpingOff.rawValue)",
+            "explore.\(ExploreRailSection.musicReactive.rawValue)",
+            "explore.\(ExploreRailSection.animated.rawValue)"
         ])
     }
 

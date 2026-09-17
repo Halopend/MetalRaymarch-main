@@ -5,16 +5,24 @@ import Foundation
 /// never redefine labels, routes, or ordering.
 struct NavigationAvailability: Sendable {
     let allowsCustomScenes: Bool
+    /// Whether Vision Pro Mixed-reality scenes appear in scene browse
+    /// surfaces. visionOS always includes them; flat-display hosts require the
+    /// Settings → Display opt-in (see `MixedRealitySceneCatalogSettings`).
+    let includesMixedRealityScenes: Bool
     let shapeSections: [ShapeRailSection]
     let musicSections: [MusicRailSection]
     let includesGestureEditing: Bool
 
     /// Runtime feature flags remain explicit inputs; platform support comes
     /// from the injected profile rather than target-conditional navigation.
+    /// Mixed-reality availability is a user preference rather than a
+    /// process-constant platform fact, so hosts pass the live value from
+    /// `MixedRealitySceneCatalogSettings.includesScenes`.
     static func resolve(
         profile: PlatformProfile,
         allowsCustomScenes: Bool,
-        includesGestureEditing: Bool
+        includesGestureEditing: Bool,
+        includesMixedRealityScenes: Bool
     ) -> NavigationAvailability {
         let shapeSections = ShapeRailSection.allCases.filter {
             $0 != .hands || profile.supports(.handTracking)
@@ -22,6 +30,7 @@ struct NavigationAvailability: Sendable {
 
         return NavigationAvailability(
             allowsCustomScenes: allowsCustomScenes,
+            includesMixedRealityScenes: includesMixedRealityScenes,
             shapeSections: shapeSections,
             musicSections: MusicRailSection.availableCases(for: profile),
             includesGestureEditing: includesGestureEditing && profile.supports(.gestureEditing)
@@ -126,6 +135,9 @@ struct NavigationHierarchy: Sendable {
 
         let explore = ExploreRailSection.allCases
             .filter { $0 != .customScenes || availability.allowsCustomScenes }
+            // Mixed-reality scene browsing is a Vision Pro feature; other
+            // platforms only surface the section after the Settings opt-in.
+            .filter { $0 != .mixed || availability.includesMixedRealityScenes }
             .map { section in
                 leaf(
                     title: section.rawValue,

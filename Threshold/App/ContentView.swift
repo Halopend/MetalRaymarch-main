@@ -58,6 +58,12 @@ struct ContentView: View {
 #endif
     @AppStorage("ContentView.showPerformanceInMenu") var showPerformanceInMenu: Bool = false
     @AppStorage("ContentView.showFPSInHUD") var showFPSInHUD: Bool = true
+    /// Vision Pro Mixed-reality scenes are hidden from the scene catalog on
+    /// flat-display hosts unless the user opts in (Settings ▸ Display). Held
+    /// here so flipping the toggle re-renders the navigation rail and scene
+    /// browser live; the same key drives `MixedRealitySceneCatalogSettings`.
+    @AppStorage(MixedRealitySceneCatalogSettings.defaultsKey)
+    var includesMixedRealityScenes: Bool = false
     @AppStorage(SceneNavigationFeedbackSettings.defaultsKey)
     var showSceneNavigationFeedback: Bool = SceneNavigationFeedbackSettings.defaultValue
     @State var showStopsPopover = false
@@ -221,7 +227,8 @@ struct ContentView: View {
         NavigationHierarchy.application(availability: .resolve(
             profile: appModel.platformProfile,
             allowsCustomScenes: true,
-            includesGestureEditing: supportsGestureEditing
+            includesGestureEditing: supportsGestureEditing,
+            includesMixedRealityScenes: includesMixedRealityScenes
         ))
     }
 

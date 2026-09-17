@@ -1,5 +1,34 @@
 import SwiftUI
 
+/// Cross-platform visibility gate for Vision Pro Mixed-reality scenes.
+///
+/// Scenes marked `mixedModeScene` (the "Open in Mixed Immersion" opt-in, plus
+/// everything bundled under `Examples/Mixed`) are authored for Mixed immersion:
+/// on Vision Pro the fractal composites over the room passthrough. On
+/// flat-display hosts (macOS, iPadOS) there is no passthrough context, so those
+/// scenes are hidden from every scene catalog and browse surface unless the
+/// user explicitly enables them in Settings → Display. visionOS always
+/// includes them — Mixed scenes belong there.
+///
+/// Mirrors the reserved-tag rules in `SceneTagging`, keyed off the
+/// `mixedModeScene` field rather than a tag. The value is read live from
+/// `UserDefaults` so catalog computations and navigation projections stay
+/// current after the settings toggle flips.
+enum MixedRealitySceneCatalogSettings {
+    /// `@AppStorage`/UserDefaults key backing the Settings → Display toggle.
+    static let defaultsKey = "SceneCatalog.includesMixedRealityScenes"
+
+    /// Whether this host's catalogs include Mixed-reality scenes. Always
+    /// `true` on visionOS; every other platform requires the explicit opt-in.
+    static var includesScenes: Bool {
+        #if os(visionOS)
+        true
+        #else
+        UserDefaults.standard.bool(forKey: defaultsKey)
+        #endif
+    }
+}
+
 /// Shared rules for the small, user-authored labels attached to scenes.
 /// Tags are deliberately plain strings so exported files stay portable and
 /// older builds can safely ignore them.

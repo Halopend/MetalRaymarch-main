@@ -138,7 +138,8 @@ struct NavigationStoreTests {
         let hierarchy = NavigationHierarchy.application(availability: .resolve(
             profile: .visionOS,
             allowsCustomScenes: true,
-            includesGestureEditing: true
+            includesGestureEditing: true,
+            includesMixedRealityScenes: true
         ))
         let expected = AppRoute.look(.mapping)
         let hierarchyTarget = hierarchy.node(withID: expected.stableID)!.target
@@ -158,5 +159,38 @@ struct NavigationStoreTests {
             #expect(store.currentRoute == expected)
             defaults.removePersistentDomain(forName: name)
         }
+    }
+
+    @Test("A persisted Mixed destination follows the Settings opt-in")
+    func persistedMixedRouteFollowsOptIn() throws {
+        // Seed a persisted snapshot that lands on the Mixed browse section.
+        let snapshot = try JSONEncoder().encode(NavigationState(
+            currentRoute: .explore(.mixed),
+            lastRouteByWorkspace: [WorkspaceRoot.explore.rawValue: .explore(.mixed)],
+            returnRoute: .explore(.mixed)
+        ))
+
+        // The Mixed-reality gate is a live user preference in the standard
+        // defaults domain; pin and restore it around the assertions.
+        let mixedKey = MixedRealitySceneCatalogSettings.defaultsKey
+        let originalSetting = UserDefaults.standard.bool(forKey: mixedKey)
+        defer { UserDefaults.standard.set(originalSetting, forKey: mixedKey) }
+
+        // Opted out: the stale Mixed destination falls back to the explore root.
+        UserDefaults.standard.set(false, forKey: mixedKey)
+        let (gatedDefaults, gatedName) = isolatedDefaults()
+        defer { gatedDefaults.removePersistentDomain(forName: gatedName) }
+        gatedDefaults.set(snapshot, forKey: NavigationStore.snapshotKey)
+        let gated = NavigationStore(profile: .macOS, defaults: gatedDefaults, allowsCustomScenes: true)
+        #expect(gated.currentRoute == .explore(.jumpingOff))
+        #expect(gated.state.returnRoute == .explore(.jumpingOff))
+
+        // Opted in: the persisted Mixed destination survives unchanged.
+        UserDefaults.standard.set(true, forKey: mixedKey)
+        let (openDefaults, openName) = isolatedDefaults()
+        defer { openDefaults.removePersistentDomain(forName: openName) }
+        openDefaults.set(snapshot, forKey: NavigationStore.snapshotKey)
+        let optedIn = NavigationStore(profile: .macOS, defaults: openDefaults, allowsCustomScenes: true)
+        #expect(optedIn.currentRoute == .explore(.mixed))
     }
 }

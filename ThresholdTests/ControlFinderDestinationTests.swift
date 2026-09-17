@@ -59,6 +59,16 @@ struct ControlFinderDestinationTests {
 
     @Test("Platform filtering hides unsupported routes")
     func platformFiltering() {
+        // The Mixed-reality gate is a live user preference stored in the
+        // standard defaults domain; pin and restore it around the assertions.
+        let mixedKey = MixedRealitySceneCatalogSettings.defaultsKey
+        let originalMixedSetting = UserDefaults.standard.bool(forKey: mixedKey)
+        defer { UserDefaults.standard.set(originalMixedSetting, forKey: mixedKey) }
+
+        // Default (opted out): Mixed scene browsing stays Vision Pro only, so
+        // the counts still order mac < iPad < vision but neither flat host
+        // lists the Mixed destination.
+        UserDefaults.standard.set(false, forKey: mixedKey)
         let mac = ControlFinderDestination.results(matching: "", on: .macOS)
         let iPad = ControlFinderDestination.results(matching: "", on: .iPadOS)
         let vision = ControlFinderDestination.results(matching: "", on: .visionOS)
@@ -70,7 +80,18 @@ struct ControlFinderDestinationTests {
         #expect(iPad.contains { $0.id == "input.Songs" })
         #expect(!iPad.contains { $0.id == "shape.Hands" })
         #expect(vision.contains { $0.id == "shape.Hands" })
-        #expect(mac.contains { $0.id == "explore.Mixed" })
+        #expect(!mac.contains { $0.id == "explore.Mixed" })
+        #expect(!iPad.contains { $0.id == "explore.Mixed" })
+        #expect(vision.contains { $0.id == "explore.Mixed" })
+
+        // Opted in via Settings → Display: Mixed scenes surface on every host.
+        UserDefaults.standard.set(true, forKey: mixedKey)
+        let macOptedIn = ControlFinderDestination.results(matching: "", on: .macOS)
+        let iPadOptedIn = ControlFinderDestination.results(matching: "", on: .iPadOS)
+        #expect(macOptedIn.contains { $0.id == "explore.Mixed" })
+        #expect(iPadOptedIn.contains { $0.id == "explore.Mixed" })
+        #expect(macOptedIn.count == mac.count + 1)
+        #expect(iPadOptedIn.count == iPad.count + 1)
     }
 
     @Test("Search uses titles, descriptions, paths, and synonyms")

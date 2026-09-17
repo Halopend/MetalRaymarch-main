@@ -246,6 +246,13 @@ extension ContentView {
             macPerformanceDisplaySection
 #endif
 
+            // Mixed-reality scenes are authored for Vision Pro Mixed
+            // immersion. visionOS composites them over passthrough, so the
+            // opt-in is only meaningful on flat-display hosts.
+#if !os(visionOS)
+            mixedRealityScenesSection
+#endif
+
             // Experimental display features (kept here, not in Advanced,
             // because they're visual toggles the user can flip while the
             // scene is running).
@@ -253,6 +260,37 @@ extension ContentView {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+
+#if !os(visionOS)
+    /// Opt-in that unhides Vision Pro Mixed-reality scenes on flat-display
+    /// hosts (`MixedRealitySceneCatalogSettings`). The toggle updates the
+    /// scene catalog, the Mixed browse section, navigation, and the cue
+    /// scene switcher live.
+    private var mixedRealityScenesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(isOn: $includesMixedRealityScenes) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Vision Pro Mixed Scenes", systemImage: "circle.dashed.inset.filled")
+                        .font(.headline)
+                    Text("Shows mixed-reality scenes in the scene library and the Mixed browse section. They are authored to composite over the room passthrough on Vision Pro; here they render as ordinary scenes.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .tint(.mint)
+            // The catalog filters live, but the animation-scene list is
+            // rebuilt on scene-input changes — nudge it so animation library
+            // entries follow the toggle in the same moment.
+            .onChange(of: includesMixedRealityScenes) {
+                appModel.animationManager?.refreshSceneVisibility()
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.mint.opacity(0.07)))
+    }
+#endif
 
 #if os(macOS)
     private var sceneNavigationFeedbackSection: some View {

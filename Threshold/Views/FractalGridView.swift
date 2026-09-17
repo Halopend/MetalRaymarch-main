@@ -73,6 +73,10 @@ struct FractalGridView: View {
     var onLoadStaticScene: ((FractalPreset) -> Void)? = nil
     var tabSelection: Binding<FractalBrowseTab>? = nil
     @AppStorage("FractalGridView.innerTab") private var storedTabSelection: FractalBrowseTab = .jumpingOff
+    /// Held here so toggling Settings ▸ Display re-renders every browse tab
+    /// live: `sceneCatalogPresets` re-filters with the current opt-in.
+    @AppStorage(MixedRealitySceneCatalogSettings.defaultsKey)
+    private var includesMixedRealityScenes = false
     @SceneStorage("FractalGridView.selectedStaticSceneID") private var selectedStaticSceneIDRaw: String?
     @SceneStorage("FractalGridView.selectedTag") private var selectedTag: String?
     @State private var selectedStaticSceneForEdit: FractalPreset?
@@ -361,7 +365,13 @@ struct FractalGridView: View {
             )
 
             if staticScenePresets.isEmpty {
-                emptySectionLabel("No mixed-mode scenes yet — long-press any saved scene and enable Open in Mixed Immersion")
+                if includesMixedRealityScenes || PlatformProfile.current.platform == .visionOS {
+                    emptySectionLabel("No mixed-mode scenes yet — long-press any saved scene and enable Open in Mixed Immersion")
+                } else {
+                    // Reachable only through a stored tab selection on a host
+                    // where Mixed scenes are still hidden by the Settings gate.
+                    emptySectionLabel("Mixed scenes are authored for Vision Pro. Enable \"Vision Pro Mixed Scenes\" in Settings ▸ Display to browse them here.")
+                }
             } else {
                 sceneCollectionLayout {
                     ForEach(Array(staticScenePresets.enumerated()), id: \.offset) { _, preset in
@@ -819,6 +829,17 @@ private struct StaticSceneSettingsView: View {
                     Text("When off, loading this scene preserves your selected Immersive, Window, or Mixed mode.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    // Mixed-immersion scenes composite over room passthrough
+                    // on Vision Pro, so flat-display hosts keep them out of
+                    // the catalog until the Settings → Display opt-in.
+#if !os(visionOS)
+                    if preset.mixedModeScene == true {
+                        Text("Mixed scenes are authored for Vision Pro and stay hidden from this library unless \"Vision Pro Mixed Scenes\" is enabled in Settings ▸ Display.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+#endif
                 }
 
                 Section("Tags") {

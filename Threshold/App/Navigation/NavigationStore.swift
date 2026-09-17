@@ -276,13 +276,19 @@ final class NavigationStore {
         if let data = defaults.data(forKey: Self.snapshotKey),
            let decoded = try? decoder.decode(NavigationState.self, from: data),
            decoded.version == NavigationState.currentVersion {
-            state = Self.canonicalized(decoded, profile: profile, allowsCustomScenes: self.allowsCustomScenes)
+            state = Self.canonicalized(
+                decoded,
+                profile: profile,
+                allowsCustomScenes: self.allowsCustomScenes,
+                includesMixedRealityScenes: MixedRealitySceneCatalogSettings.includesScenes
+            )
             persist()
         } else {
             state = Self.importLegacyState(
                 defaults: defaults,
                 profile: profile,
-                allowsCustomScenes: self.allowsCustomScenes
+                allowsCustomScenes: self.allowsCustomScenes,
+                includesMixedRealityScenes: MixedRealitySceneCatalogSettings.includesScenes
             )
             persistAndRemoveLegacyKeysAfterVerification()
         }
@@ -362,7 +368,16 @@ final class NavigationStore {
     }
 
     func canonical(_ route: AppRoute) -> AppRoute {
-        Self.canonical(route, profile: profile, allowsCustomScenes: allowsCustomScenes)
+        // The Mixed-reality gate is a user preference rather than a
+        // process-constant platform fact, so it is read live on every
+        // canonicalization — toggling Settings reroutes stale destinations
+        // without a relaunch.
+        Self.canonical(
+            route,
+            profile: profile,
+            allowsCustomScenes: allowsCustomScenes,
+            includesMixedRealityScenes: MixedRealitySceneCatalogSettings.includesScenes
+        )
     }
 
     private func persist() {
@@ -382,22 +397,43 @@ final class NavigationStore {
     private static func canonicalized(
         _ decoded: NavigationState,
         profile: PlatformProfile,
-        allowsCustomScenes: Bool
+        allowsCustomScenes: Bool,
+        includesMixedRealityScenes: Bool
     ) -> NavigationState {
         var result = decoded
         result.version = NavigationState.currentVersion
-        result.currentRoute = canonical(decoded.currentRoute, profile: profile, allowsCustomScenes: allowsCustomScenes)
+        result.currentRoute = canonical(
+            decoded.currentRoute,
+            profile: profile,
+            allowsCustomScenes: allowsCustomScenes,
+            includesMixedRealityScenes: includesMixedRealityScenes
+        )
         result.returnRoute = decoded.returnRoute.map {
-            canonical($0, profile: profile, allowsCustomScenes: allowsCustomScenes)
+            canonical(
+                $0,
+                profile: profile,
+                allowsCustomScenes: allowsCustomScenes,
+                includesMixedRealityScenes: includesMixedRealityScenes
+            )
         }
         result.lastRouteByWorkspace = Dictionary(uniqueKeysWithValues: WorkspaceRoot.allCases.map { root in
             let route = decoded.lastRoute(for: root) ?? root.defaultRoute
-            return (root.rawValue, canonical(route, profile: profile, allowsCustomScenes: allowsCustomScenes))
+            return (root.rawValue, canonical(
+                route,
+                profile: profile,
+                allowsCustomScenes: allowsCustomScenes,
+                includesMixedRealityScenes: includesMixedRealityScenes
+            ))
         })
         var seen = Set<String>()
         result.pinnedRouteIDs = decoded.pinnedRouteIDs.compactMap { id in
             guard let route = AppRoute.route(withStableID: id) else { return nil }
-            let canonicalID = canonical(route, profile: profile, allowsCustomScenes: allowsCustomScenes).stableID
+            let canonicalID = canonical(
+                route,
+                profile: profile,
+                allowsCustomScenes: allowsCustomScenes,
+                includesMixedRealityScenes: includesMixedRealityScenes
+            ).stableID
             return seen.insert(canonicalID).inserted ? canonicalID : nil
         }
         return result
@@ -406,10 +442,15 @@ final class NavigationStore {
     private static func canonical(
         _ route: AppRoute,
         profile: PlatformProfile,
-        allowsCustomScenes: Bool
+        allowsCustomScenes: Bool,
+        includesMixedRealityScenes: Bool
     ) -> AppRoute {
         switch route {
         case .explore(.customScenes) where !allowsCustomScenes:
+            return .explore(.jumpingOff)
+        // A persisted Mixed destination outlives the Settings opt-in; fall
+        // back to the explore root so a hidden section is never restored.
+        case .explore(.mixed) where !includesMixedRealityScenes:
             return .explore(.jumpingOff)
         case .shape(.parameters):
             return .input(.parameters)
@@ -438,7 +479,8 @@ final class NavigationStore {
     private static func importLegacyState(
         defaults: UserDefaults,
         profile: PlatformProfile,
-        allowsCustomScenes: Bool
+        allowsCustomScenes: Bool,
+        includesMixedRealityScenes: Bool
     ) -> NavigationState {
         func value<E: RawRepresentable>(_ key: String, as: E.Type) -> E? where E.RawValue == String {
             guard let raw = defaults.string(forKey: key) else { return nil }
@@ -523,7 +565,12 @@ final class NavigationStore {
             state.returnRoute = state.currentRoute
             state.setLastRoute(state.currentRoute, for: root)
         } else {
-            let fallback = canonical(fallbackRoute, profile: profile, allowsCustomScenes: allowsCustomScenes)
+            let fallback = canonical(
+                fallbackRoute,
+                profile: profile,
+                allowsCustomScenes: allowsCustomScenes,
+                includesMixedRealityScenes: includesMixedRealityScenes
+            )
             state.returnRoute = fallback
             if let root = fallback.workspaceRoot { state.setLastRoute(fallback, for: root) }
         }
@@ -532,7 +579,12 @@ final class NavigationStore {
             .split(separator: ",")
             .compactMap { legacyPinnedRoute(String($0)) }
         state.pinnedRouteIDs = pins.map(\.stableID)
-        return canonicalized(state, profile: profile, allowsCustomScenes: allowsCustomScenes)
+        return canonicalized(
+            state,
+            profile: profile,
+            allowsCustomScenes: allowsCustomScenes,
+            includesMixedRealityScenes: includesMixedRealityScenes
+        )
     }
 
     private static func legacyPinnedRoute(_ raw: String) -> AppRoute? {

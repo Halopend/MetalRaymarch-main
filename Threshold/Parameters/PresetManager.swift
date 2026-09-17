@@ -398,6 +398,8 @@ class PresetManager {
     /// seeding, iCloud sync, export, and diagnostics retain every scene. Catalog
     /// filtering keys off bundled source IDs, which also catches copies already
     /// seeded into the preset store without hiding user-authored environment scenes.
+    /// Mixed-reality scenes additionally respect the live Settings → Display
+    /// opt-in (`MixedRealitySceneCatalogSettings`) on flat-display hosts.
     var sceneCatalogPresets: [FractalPreset] {
         var catalogByID = Dictionary(uniqueKeysWithValues: bundledPlaceholderFallbacks.map { ($0.id, $0) })
         for preset in presets {
@@ -408,7 +410,8 @@ class PresetManager {
             bundledPresets: Self.bundledPresets(),
             supportsEnvironmentReconstruction: Self.supportsEnvironmentReconstructionInSceneCatalog,
             includesScreenOnlyScenes: Self.includesScreenOnlyScenesInSceneCatalog,
-            includesMacOnlyScenes: Self.includesMacOnlyScenesInSceneCatalog
+            includesMacOnlyScenes: Self.includesMacOnlyScenesInSceneCatalog,
+            includesMixedRealityScenes: Self.includesMixedRealityScenesInSceneCatalog
         )
     }
 
@@ -428,6 +431,14 @@ class PresetManager {
 #endif
     }
 
+    /// Mixed-reality scenes are authored for Vision Pro Mixed immersion.
+    /// Flat-display hosts hide them from the catalog unless the user opts in
+    /// via Settings → Display; the read is live so toggling updates the
+    /// catalog without a relaunch.
+    private static var includesMixedRealityScenesInSceneCatalog: Bool {
+        MixedRealitySceneCatalogSettings.includesScenes
+    }
+
     private static var supportsEnvironmentReconstructionInSceneCatalog: Bool {
 #if os(visionOS)
         true
@@ -441,7 +452,8 @@ class PresetManager {
         bundledPresets: [FractalPreset],
         supportsEnvironmentReconstruction: Bool,
         includesScreenOnlyScenes: Bool = true,
-        includesMacOnlyScenes: Bool = true
+        includesMacOnlyScenes: Bool = true,
+        includesMixedRealityScenes: Bool = true
     ) -> [FractalPreset] {
         // Match bundled identities as well as their current stored tags. This
         // keeps previously seeded copies subject to a platform classification
@@ -453,6 +465,13 @@ class PresetManager {
         let macOnlyBundledIDs = Set(bundledPresets.compactMap {
             SceneTagging.isMacOnly($0.tags) ? $0.id : nil
         })
+        // Mixed-immersion classification travels inside the scene file
+        // (`mixedModeScene`), so a stored copy usually classifies itself; the
+        // bundled-ID cross-reference also catches copies seeded before the
+        // field existed but whose bundled source was later marked Mixed.
+        let mixedRealityBundledIDs = Set(bundledPresets.compactMap {
+            $0.mixedModeScene == true ? $0.id : nil
+        })
         let platformVisiblePresets = presets.filter {
             guard includesMacOnlyScenes
                     || (!SceneTagging.isMacOnly($0.tags) && !macOnlyBundledIDs.contains($0.id)) else {
@@ -460,6 +479,10 @@ class PresetManager {
             }
             guard includesScreenOnlyScenes
                     || (!SceneTagging.isScreenOnly($0.tags) && !screenOnlyBundledIDs.contains($0.id)) else {
+                return false
+            }
+            guard includesMixedRealityScenes
+                    || ($0.mixedModeScene != true && !mixedRealityBundledIDs.contains($0.id)) else {
                 return false
             }
             return true

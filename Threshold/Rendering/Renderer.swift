@@ -724,7 +724,8 @@ actor Renderer {
             availability: .resolve(
                 profile: appModel.platformProfile,
                 allowsCustomScenes: AppModel.allowCustomScenes,
-                includesGestureEditing: true
+                includesGestureEditing: true,
+                includesMixedRealityScenes: MixedRealitySceneCatalogSettings.includesScenes
             )
         )
         let renderLoopTask = Task(

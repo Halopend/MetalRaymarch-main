@@ -12,7 +12,8 @@
       availability: .resolve(
         profile: .current,
         allowsCustomScenes: AppModel.allowCustomScenes,
-        includesGestureEditing: true
+        includesGestureEditing: true,
+        includesMixedRealityScenes: MixedRealitySceneCatalogSettings.includesScenes
       )
     )
     private(set) var pendingActivationID: String?
@@ -63,7 +64,8 @@
         availability: .resolve(
           profile: .current,
           allowsCustomScenes: AppModel.allowCustomScenes,
-          includesGestureEditing: true
+          includesGestureEditing: true,
+          includesMixedRealityScenes: MixedRealitySceneCatalogSettings.includesScenes
         )
       )
     }

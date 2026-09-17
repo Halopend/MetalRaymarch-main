@@ -9,6 +9,7 @@ struct SpatialRadialNavigationTests {
     NavigationHierarchy.application(
       availability: NavigationAvailability(
         allowsCustomScenes: true,
+        includesMixedRealityScenes: true,
         shapeSections: ShapeRailSection.allCases,
         musicSections: MusicRailSection.availableCases(for: .current),
         includesGestureEditing: true
