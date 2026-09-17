@@ -508,12 +508,6 @@ class AppModel {
     var isMenuWindowVisible: Bool = true
     var isSpatialMenuVisible: Bool = false
     var isMenuInteractionActive: Bool = false
-    #if os(macOS)
-    /// Whether the viewport's I-key-toggled info card is showing. The renderer
-    /// publishes only key edges (one per non-repeat press), so this remains
-    /// UI-only state that persists until toggled again.
-    var isInfoOverlayVisible = false
-    #endif
     /// Monotonic token shared by the MainActor presentation edge and Renderer.
     /// It makes rapid open/close/open requests last-writer-wins even though the
     /// renderer calls cross an actor boundary.
@@ -1279,14 +1273,6 @@ class AppModel {
         isSpatialMenuVisible = visible
         refreshMenuInteractionState()
     }
-
-    #if os(macOS)
-    /// Shows the viewport info card when hidden, hides it when shown — one
-    /// press of the I key per toggle.
-    func toggleInfoOverlay() {
-        isInfoOverlayVisible.toggle()
-    }
-    #endif
 
     func beginSpatialMenuPresentationRequest() -> UInt64 {
         spatialMenuPresentationGeneration &+= 1

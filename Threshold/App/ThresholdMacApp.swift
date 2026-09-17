@@ -528,23 +528,6 @@ private struct ThresholdMacRootView: View {
                         .animation(viewportHUDAnimation, value: appModel.rendererStartupWarmupComplete)
                 }
 
-                if appModel.isInfoOverlayVisible && !appModel.isViewportChromeHidden {
-                    ViewportInfoOverlay()
-                        .padding(24)
-                        .frame(
-                            maxWidth: .infinity,
-                            maxHeight: .infinity,
-                            alignment: .bottomLeading
-                        )
-                        .allowsHitTesting(false)
-                        .transition(
-                            reduceMotion
-                                ? .opacity
-                                : .move(edge: .bottom).combined(with: .opacity)
-                        )
-                        .zIndex(10)
-                }
-
                 MacRadialInputMonitor(
                     isPressed: $isShiftPressed,
                     isRadialVisible: radialMenu.isPresented,
@@ -610,10 +593,6 @@ private struct ThresholdMacRootView: View {
                 bottomPadding: panelPadding
             )
             .frame(minWidth: minimumWindowSize.width, minHeight: minimumWindowSize.height)
-            .animation(
-                reduceMotion ? nil : .easeOut(duration: 0.16),
-                value: appModel.isInfoOverlayVisible
-            )
             .onReceive(
                 NotificationCenter.default.publisher(
                     for: ThresholdMacInteractiveView.didClickViewportNotification

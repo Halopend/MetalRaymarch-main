@@ -12,7 +12,6 @@ struct ViewportInputTests {
         let input = ViewportInputAccumulator()
         input.setMovementKey(.forward, isPressed: true)
         input.setShiftPressed(true)
-        input.requestInfoToggle()
         input.addOrbit(delta: SIMD2<Float>(3, -2))
         input.addPan(delta: SIMD2<Float>(1, 4))
         input.addZoom(delta: 0.5)
@@ -26,7 +25,7 @@ struct ViewportInputTests {
         #expect(first.orbitDelta == SIMD2<Float>(3, -2))
         #expect(first.panDelta == SIMD2<Float>(1, 4))
         #expect(first.zoomDelta == 0.5)
-        #expect(first.actions == [.togglePlayback, .resetView, .toggleInfo])
+        #expect(first.actions == [.togglePlayback, .resetView])
         #expect(first.sceneStep == -1)
 
         let second = input.consumeFrame()
@@ -136,24 +135,6 @@ struct ViewportInputTests {
         #expect(frame.heldKeys == [.forward])
         #expect(frame.actions == [.togglePlayback])
         #expect(frame.sceneStep == 1)
-    }
-
-    @Test("Mac info shortcut toggles once per non-repeat I press")
-    func infoShortcutToggle() {
-        let input = ViewportInputAccumulator()
-        #expect(ViewportKeyboardMap.macOS(keyCode: 0, characters: "i") == .toggleInfo)
-
-        // A clean press queues exactly one toggle; the overlay state itself
-        // persists in AppModel across drains.
-        input.applyKeyboard(.toggleInfo, isPressed: true, isRepeat: false)
-        #expect(input.consumeFrame().shouldToggleInfo)
-        #expect(!input.consumeFrame().shouldToggleInfo)
-
-        // Held-down repeats and the release do not retrigger the toggle.
-        input.applyKeyboard(.toggleInfo, isPressed: true, isRepeat: true)
-        input.applyKeyboard(.toggleInfo, isPressed: false, isRepeat: false)
-        let frame = input.consumeFrame()
-        #expect(frame.actions.isEmpty)
     }
 }
 #endif

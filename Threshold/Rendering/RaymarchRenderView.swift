@@ -1709,17 +1709,6 @@ final class ViewportRenderer {
 
         let input = inputController.consumeFrame()
 
-        #if os(macOS)
-        // The I key is edge-triggered (one action per non-repeat press); the
-        // info card's show/hide state lives in `AppModel` so it persists
-        // across drains until the key toggles it again.
-        if input.shouldToggleInfo {
-            Task { @MainActor [weak appModel] in
-                appModel?.toggleInfoOverlay()
-            }
-        }
-        #endif
-
         if input.shouldResetView {
             resetViewport(settings: settings)
         }
