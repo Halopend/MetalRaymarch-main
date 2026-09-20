@@ -2289,7 +2289,7 @@ final class AnimationManager {
         // the Space-tab Sphere Projection. The old MSP type read projection
         // blend/radius from formula params[4]/[5] and always projected; reproduce
         // that every frame so animated projection radius/blend tracks the
-        // interpolated keyframe (e.g. Scene 9 / Kaleidoscope animate params[5]).
+        // interpolated keyframe (e.g. Kaleidoscope animates params[5]).
         let legacyMSP = currentScene?.legacyMandelboxSphereProjection == true
         let mspParams: (blend: Float, radius: Float)? = {
             guard legacyMSP, let vals = keyframe.formulaParamValues, vals.count > 5 else { return nil }

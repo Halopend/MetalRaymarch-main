@@ -4049,7 +4049,19 @@ kernel void adaptiveHierarchical8x8(
             //
             // Backoff distance: max(probeHitThreshold * 6, 0.5% of t_pred) keeps the
             // restart safely outside the hit band even with non-monotone DEs.
-            float restartBackoff = max(probeHitThreshold * 6.0f, t_pred * 0.005f);
+            // BUT SceneWithCacheFromStart only searches a FIXED [start, start + 2]
+            // window (see its `endT`), and this kernel has no full-march fallback on
+            // a warm-start miss (unlike fragmentMain's `needFullMarch`). A backoff
+            // > 2 therefore starts the window entirely BEHIND the surface the probe
+            // just confirmed -> guaranteed miss -> background, and because that miss
+            // writes miss depth, the next frame reprojects from a miss, runs the
+            // full march, and the frame after flips back: a 2-frame hit/miss flicker
+            // plus repeated full-range marches. 0.5% of t_pred exceeds 2 only past
+            // t_pred ≈ 400, which is reachable ONLY for the Kleinian family
+            // (RendererGameState lifts its horizon cap to 420, and to 880 zoomed
+            // out; every other family caps at 80, where the backoff is ≤ 0.4). Clamp
+            // so the confirmed surface is always inside the restart window.
+            float restartBackoff = min(max(probeHitThreshold * 6.0f, t_pred * 0.005f), 1.0f);
             reprojectedStartT = max(0.05f, t_pred - restartBackoff);
             if (coherentPacketOn) packetLayer = 1;
         } else if (h_probe > probeBackoffMargin) {
