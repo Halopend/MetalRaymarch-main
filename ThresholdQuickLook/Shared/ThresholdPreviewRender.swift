@@ -127,6 +127,7 @@ enum ThresholdPreviewRender {
         case scene, musicPreset, animation, musicAnimation, formula, unknown
         init(url: URL) {
             switch url.pathExtension.lowercased() {
+            case "thresh":      self = .scene
             case "threshscene": self = .scene
             case "threshmp":    self = .musicPreset
             case "threshanim":  self = .animation

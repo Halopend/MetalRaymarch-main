@@ -49,13 +49,16 @@ struct RenderCheck {
         }
 
         let fm = FileManager.default
-        // Both .threshscene and .threshmp decode as FractalPreset and take the
-        // identical live render(preset:) path in the shipping extensions.
+        // Canonical `.thresh` plus the legacy `.threshscene` / `.threshmp`
+        // aliases all decode as FractalPreset and take the identical live
+        // render(preset:) path in the shipping extensions.
         let files = ((try? fm.contentsOfDirectory(atPath: scenesDir)) ?? [])
-            .filter { $0.hasSuffix(".threshscene") || $0.hasSuffix(".threshmp") }
+            .filter {
+                $0.hasSuffix(".thresh") || $0.hasSuffix(".threshscene") || $0.hasSuffix(".threshmp")
+            }
             .sorted()
         guard !files.isEmpty else {
-            FileHandle.standardError.write("FAIL: no .threshscene files in \(scenesDir)\n".data(using: .utf8)!)
+            FileHandle.standardError.write("FAIL: no scene files in \(scenesDir)\n".data(using: .utf8)!)
             exit(2)
         }
 

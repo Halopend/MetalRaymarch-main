@@ -518,12 +518,11 @@ Replace the five mutually-exclusive tabs with a **sidebar** built from the disk:
 
 ```
 LIBRARY
-  Scenes                    (kind)
+  Scenes                    (kind: every .thresh)
     Caverns                 (folder-derived category, live)
       Ice Caves
     ...
-  Music Presets
-  Animations
+  Animations                (kind: every .threshanim)
   Effects                   (kind: every .threshfx)
     Distance Estimators     (sub-kind, from the payload's `kind`)
       Mandelbox Variants    (folder-derived category)
@@ -549,16 +548,18 @@ Key changes:
 - **Smart Views are filters, not partitions.** They compose: a scene can be in
   "Custom DE" and "Music Reactive" and inside `Scenes/Caverns` at once.
 - **"Custom Scenes" is retired as a category.** `hasEmbeddedEffect` becomes a
-  smart view and a small **badge on scene cards** (§2.6.1). This removes the
+  smart view and a small **badge on scene cards** (§2.7.1). This removes the
   format-property-as-category confusion.
+- **"Music Reactive" is a Smart View, not a file type or folder.** A
+  music-reactive scene is just a `.thresh` with mappings inside (§2.3).
 - **Effects are one section grouped by `kind`, then by folder category.** The
   picker/Studio list reads `EffectLibraryStore` only — one surface per object.
 - **Embedded effects are never listed as reusable.** They appear only as a badge
   on their owning document and in the active-effect header, with an
-  **Extract to Effects…** action (§2.6).
+  **Extract to Effects…** action (§2.7).
 - **Importing a standalone `.threshfx`** loads it as the active effect and, if
   saved, writes it under `Effects/<Kind>/<Category>/` — it **no longer
-  materializes a phantom `.threshscene` card in `Scenes/`**. (See D2.)
+  materializes a phantom scene card in `Scenes/`**. (See D2.)
 - **Tag chips stay**, but reserved chips disappear (promoted to fields).
 
 ### 2.9 Worked examples
@@ -600,14 +601,16 @@ Nothing here requires a file-format break for existing users:
 
 | Current | New behavior |
 | --- | --- |
-| `Scenes/*.threshscene` (flat) | Unchanged; they are in the root category of Scenes |
-| `Music Presets/*.threshmp` | Unchanged; "Music Presets" kind root retained |
+| `Scenes/*.threshscene` (flat) | Read as Scenes forever; new saves write `.thresh` |
+| `Music Presets/*.threshmp` | Read as Scenes forever; `Music Presets/` becomes an ordinary category, not a kind |
+| `Animations/*.threshanimv` | Read as Animations forever; new saves write `.threshanim` |
+| Old builds receiving a `.thresh` | Will not recognize it — ship with a version bump; keep an "export as legacy `.threshscene`" toggle if sharing with old builds matters |
 | `tags` with `"Screen only"` / `"Mac only"` | Decoded into `platformVisibility`; re-emitted both ways for one release |
 | `mixedModeScene` on bundled files | Stops being folder-sniffed; set explicitly in each example file (one-time script) |
 | Bundled `Examples/Mixed`, `Examples/Custom Scene Example` | Folded into `Examples/Scenes/<Category>/` with explicit fields |
 | `embeddedFormula.category` | Still read/exported, no longer a grouping key |
 | `.threshfx` with no `kind` | Decodes as `de` (distance estimator) — unchanged |
-| `.threshfx` under `Formulas/` | Read as an alias of `Effects/` for one release, then migrated |
+| `.threshfx` under `Formulas/` | Read as an ordinary category, like `Music Presets/` |
 | Embedded formula inside a scene | Marked embedded; never listed in the library; still travels with the scene |
 | `.threshfx` imported from outside | Saved under `Effects/<Kind>/`, not converted into a `Scenes/` scene |
 
@@ -616,16 +619,19 @@ Suggested phasing:
 - **Phase 0 — index layer.** Introduce a `LibraryIndex` that recursively scans
   all roots and emits `(url, kind, subKind, categoryPath, provenance, tags,
   traits)`. No UI change yet. This is the keystone; everything else reads it.
-- **Phase 1 — sidebar.** Build the sidebar/categories from `LibraryIndex`.
+- **Phase 1 — file types.** Write only the three extensions (read all five
+  forever); register the `.thresh` UTType with the old types conforming to it;
+  delete the `preset(hasMusic:)` / `animation(hasSong:)` branching.
+- **Phase 2 — sidebar.** Build the sidebar/categories from `LibraryIndex`.
   Keep the old tabs available as Smart Views for continuity.
-- **Phase 2 — metadata.** Promote reserved tags to `platformVisibility`; stop
+- **Phase 3 — metadata.** Promote reserved tags to `platformVisibility`; stop
   folder-sniffing for `mixedModeScene`; write `categoryPath` on export.
-- **Phase 3 — effect kinds and provenance.** Generalize
+- **Phase 4 — effect kinds and provenance.** Generalize
   `EmbeddedFormulaContainer` → `ThresholdEffectContainer` (kind-discriminated);
   rename `FormulaLibraryStore` → `EffectLibraryStore` and group by `kind`;
   point the picker and Studio at the library only; add the embedded badge/icon
   and **Extract to Effects…**; stop the `.threshfx`→`Scenes/` materialization.
-- **Phase 4 — cleanup.** Delete `FractalBrowseTab`, `customScenePresets()`,
+- **Phase 5 — cleanup.** Delete `FractalBrowseTab`, `customScenePresets()`,
   `isCustomScenePreset`-based partitioning, `FractalFormulaOrder.customFormulas(in:)`,
   the `Examples/*` name special-casing, `FractalFormulaOrder.categoryOrder`, and
   the dead `fractal_browser_catalog` reference.
@@ -634,10 +640,13 @@ Suggested phasing:
 
 | Concern | Current location | Change |
 | --- | --- | --- |
+| Five extensions / two cosmetic renames | `PresetManager.swift:15-77` (`ThresholdExportFormat`) | Collapse to `.thresh` / `.threshanim` / `.threshfx`; delete `preset(hasMusic:)` + `animation(hasSong:)` |
+| UTType declarations | platform Info.plists (must mirror `ThresholdExportFormat`) | Register `.thresh`; keep the old UTTypes conforming to it |
+| Write routing by music field | `PresetManager.swift:855-859` | Delete — every scene saves into `Scenes/` as `.thresh` |
 | Fixed subfolder list | `StorageLocation.swift:52-60, 190-197` | Enumerate instead of hardcode categories; keep kind roots reserved |
-| Flat preset scan | `PresetManager.swift:518-525` | Recursive; carry `categoryPath` |
+| Flat preset scan | `PresetManager.swift:518-525` | Recursive; carry `categoryPath`; legacy `Music Presets/` still scanned |
 | Flat formula scan | `FormulaLibraryStore.swift:64-80` | Recursive; carry `categoryPath` |
-| Flat iCloud watcher | `PresetManager.swift:342-352` | Recursive scope + all extensions |
+| Flat iCloud watcher | `PresetManager.swift:342-352` | Recursive scope; watch all three roots + legacy extensions |
 | Tab partitions | `FractalGridView.swift:10-16, 487-507` | Replace with sidebar + Smart Views |
 | Format-as-category | `FractalPreset.swift:1688-1690` | Drop; becomes a trait/badge |
 | Reserved tags | `SceneTags.swift:38-101` | Promote to `platformVisibility` + shim |
@@ -671,11 +680,11 @@ Suggested phasing:
 - **B:** Keep materializing an editable scene on import, but file it under an
   `Effects/` category rather than `Scenes/`.
 
-**D3 — Do Music Presets stay a separate kind root, or become Scenes + a
-`hasMusic` trait?**
-- **A:** Keep the separate root (lowest migration risk).
-- **B:** Merge into Scenes and treat music-reactivity as a trait/Smart View
-  (cleaner, but changes where `.threshmp` files live).
+**D3 — ~~Do Music Presets stay a separate kind root?~~ Resolved by §2.3.**
+With `.threshmp` gone, a separate root is incoherent (same file type in two
+roots). Music presets are scenes with a trait; `Music Presets/` becomes an
+ordinary legacy category and "Music Reactive" is a Smart View. Nothing moves on
+disk unless the user moves it.
 
 **D4 — How do effect kinds map to the on-disk root?**
 - **A (recommended):** One root for every `.threshfx` (`Effects/`, migrating
@@ -695,10 +704,18 @@ Suggested phasing:
 - **C:** Always move (no duplication, but silently changes the scene's
   portability).
 
+**D6 — When do new saves start writing `.thresh`?**
+- **A (recommended):** Phase 1, alongside reading all five; the store watcher
+  reloads, so mixed libraries just work.
+- **B:** Only after the sidebar lands, so the UI never shows two "scene kinds"
+  at once.
+
 ---
 
 ## Appendix — quick reference index
 
+- Extension enum + cosmetic renames: `Threshold/Parameters/PresetManager.swift:15-77`
+- Import decode by schema: `Threshold/App/AppModel+ExternalImport.swift:133-157`
 - Storage roots and subfolders: `Threshold/Parameters/StorageLocation.swift:12-20, 52-60, 190-197`
 - Flat preset scan: `Threshold/Parameters/PresetManager.swift:518-525`
 - Write routing by music field: `Threshold/Parameters/PresetManager.swift:855-859`

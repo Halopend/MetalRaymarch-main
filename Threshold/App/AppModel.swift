@@ -387,6 +387,7 @@ class AppModel {
     
     nonisolated let renderSettings = RenderSettings()
     nonisolated let parameterPipeline = ParameterPipeline()
+    nonisolated let sceneFrameEvaluator = SceneFrameEvaluator()
 
     // Buddhabrot volume renderer settings (shared between UI and render loop)
     nonisolated let buddhabrotSettings = BuddhabrotSettings()

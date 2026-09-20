@@ -17,12 +17,18 @@
 //
 //  ControlSpec collapses that metadata into one declaration. Every consumer reads
 //  from ControlCatalog, so they cannot disagree. The spec is intentionally a pure
-//  value type (no closures, no live state): the live FloatParameterNode keeps its
-//  read/write closures and layer stack and simply *sources* its range/default/
-//  name/icon/motion from a ControlSpec.
+//  value type (no closures, no live state). UI nodes source their metadata from
+//  these specs; ParameterPipeline owns the shared mutable layer stacks.
 //
 
 import Foundation
+
+enum ParameterMotionStrategy: String, Codable, Sendable {
+    case none
+    case layerLerp
+    case smoothDamp
+}
+
 
 struct ControlID: RawRepresentable, Codable, Hashable, Sendable, CustomStringConvertible {
     let rawValue: String

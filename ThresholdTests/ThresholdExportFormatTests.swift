@@ -3,10 +3,12 @@
 //  ThresholdTests
 //
 //  Pins ThresholdExportFormat — the single file-type registry that all
-//  .threshscene/.threshmp/.threshanim/.threshanimv/.threshfx handling routes
-//  through (extension lookup, preset/animation format choice, category routing
-//  for imports, and import-sheet presentation metadata). Drift here would
-//  silently mis-route a file type on import/export, so lock the contract down.
+//  `.thresh` / `.threshanim` / `.threshfx` handling routes through (extension
+//  lookup, category routing for imports, and import-sheet presentation
+//  metadata). The legacy `.threshscene` / `.threshmp` / `.threshanimv`
+//  extensions are read-only aliases that must keep resolving to the same
+//  formats. Drift here would silently mis-route a file type on import/export,
+//  so lock the contract down.
 //
 
 import Testing
@@ -17,7 +19,7 @@ import SwiftUI
 @Suite("ThresholdExportFormat — the single file-type registry")
 struct ThresholdExportFormatTests {
 
-    @Test("Every format's extension is unique and round-trips through init?(fileExtension:)")
+    @Test("Every canonical format's extension is unique and round-trips through init?(fileExtension:)")
     func extensionsUniqueAndRoundTrip() {
         var seen = Set<String>()
         for format in ThresholdExportFormat.allCases {
@@ -26,37 +28,36 @@ struct ThresholdExportFormatTests {
         }
     }
 
-    @Test("init?(fileExtension:) tolerates a leading dot and any case, rejects unknown")
-    func fileExtensionParsing() {
-        #expect(ThresholdExportFormat(fileExtension: "threshscene") == .scenePreset)
-        #expect(ThresholdExportFormat(fileExtension: ".threshmp") == .musicPreset)
-        #expect(ThresholdExportFormat(fileExtension: "THRESHFX") == .customFormula)
-        #expect(ThresholdExportFormat(fileExtension: ".ThreshAnim") == .animationScene)
-        #expect(ThresholdExportFormat(fileExtension: "threshanimv") == .musicVideoScene)
-        #expect(ThresholdExportFormat(fileExtension: "png") == nil)
-        #expect(ThresholdExportFormat(fileExtension: "") == nil)
+    @Test("Canonical extensions are the three consolidated file types")
+    func canonicalExtensions() {
+        #expect(ThresholdExportFormat.scenePreset.ext == "thresh")
+        #expect(ThresholdExportFormat.animationScene.ext == "threshanim")
+        #expect(ThresholdExportFormat.customFormula.ext == "threshfx")
+        #expect(ThresholdExportFormat.allCases.count == 3)
     }
 
-    @Test("preset(hasMusic:) / animation(hasSong:) pick the right format")
-    func presetAndAnimationChoice() {
-        #expect(ThresholdExportFormat.preset(hasMusic: true) == .musicPreset)
-        #expect(ThresholdExportFormat.preset(hasMusic: false) == .scenePreset)
-        #expect(ThresholdExportFormat.animation(hasSong: true) == .musicVideoScene)
-        #expect(ThresholdExportFormat.animation(hasSong: false) == .animationScene)
+    @Test("Legacy extensions still resolve to their consolidated format")
+    func legacyExtensionsResolve() {
+        #expect(ThresholdExportFormat(fileExtension: "threshscene") == .scenePreset)
+        #expect(ThresholdExportFormat(fileExtension: ".threshmp") == .scenePreset)
+        #expect(ThresholdExportFormat(fileExtension: "thresh") == .scenePreset)
+        #expect(ThresholdExportFormat(fileExtension: "THRESHFX") == .customFormula)
+        #expect(ThresholdExportFormat(fileExtension: ".ThreshAnim") == .animationScene)
+        #expect(ThresholdExportFormat(fileExtension: "threshanimv") == .animationScene)
+        #expect(ThresholdExportFormat(fileExtension: "png") == nil)
+        #expect(ThresholdExportFormat(fileExtension: "") == nil)
     }
 
     @Test("category routes each format to the import arm it belongs to")
     func categoryRouting() {
         #expect(ThresholdExportFormat.scenePreset.category == .preset)
-        #expect(ThresholdExportFormat.musicPreset.category == .preset)
         #expect(ThresholdExportFormat.animationScene.category == .animation)
-        #expect(ThresholdExportFormat.musicVideoScene.category == .animation)
         #expect(ThresholdExportFormat.customFormula.category == .formula)
     }
 
-    @Test("extensions(in:) groups by category in declaration order")
+    @Test("extensions(in:) returns canonical + legacy for scans and prune")
     func extensionsByCategory() {
-        #expect(ThresholdExportFormat.extensions(in: .preset) == ["threshscene", "threshmp"])
+        #expect(ThresholdExportFormat.extensions(in: .preset) == ["thresh", "threshscene", "threshmp"])
         #expect(ThresholdExportFormat.extensions(in: .animation) == ["threshanim", "threshanimv"])
         #expect(ThresholdExportFormat.extensions(in: .formula) == ["threshfx"])
     }

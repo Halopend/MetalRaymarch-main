@@ -14,15 +14,6 @@ import Foundation
 
 // MARK: - Authored facets
 
-/// Music-reactive defaults for a control, projected from the `MusicReactiveTarget`
-/// switch bodies. nil for controls with no music target (e.g. the Twist params).
-struct MusicFacet: Sendable {
-    let category: MusicReactiveTargetCategory
-    let defaultSource: MusicReactiveSource
-    let defaultResponseCurve: ResponseCurve
-    let hasFlashingRisk: Bool
-}
-
 /// Gesture-binding classification. `tripletGroupKey` groups xyz axes (consumed by a
 /// later slice; nil for scalars).
 struct GestureFacet: Sendable {
@@ -60,20 +51,6 @@ struct UIBinding: Sendable {
     let read: @MainActor @Sendable (ControlStateStore) -> Float
     let write: @MainActor @Sendable (ControlStateStore, Float) -> Void
     let persists: Bool
-}
-
-/// Off-main binding into the lock-protected `RenderSettings`. `@Sendable`; only ever
-/// invoked on the off-main dispatch path. Carries the playback-relative music-offset
-/// closures too, so this mirror is lossless for the eventual `coreDescriptors`
-/// deletion (Slice 3).
-struct SettingsBinding: Sendable {
-    let read: @Sendable (RenderSettings) -> Float
-    let write: @Sendable (RenderSettings, Float) -> Void
-    /// During animation playback `applyKeyframe` owns the backing var, so the absolute
-    /// `write` would be stomped — the dispatcher deposits the pure music delta here
-    /// instead. nil → not keyframe-driven.
-    let writeAudioOffset: (@Sendable (RenderSettings, Float) -> Void)?
-    let audioOffsetActiveDuringPlayback: (@Sendable (RenderSettings) -> Bool)?
 }
 
 struct ControlPresentation: OptionSet, Codable, Hashable, Sendable {
@@ -225,16 +202,12 @@ enum ParameterCatalog {
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, tripletGroupKey: nil),
-            music: MusicFacet(category: .geometry, defaultSource: .composite, defaultResponseCurve: .sinusoidal, hasFlashingRisk: false),
+            music: RenderParameterCatalog.byID[ControlCatalog.fractalScale.id]!.music,
             ui: UIBinding(
                 read: { $0.fractalScale },
                 write: { cache, v in cache.fractalScale = v; cache.push(\.targetFractalScale, value: v) },
                 persists: true),
-            settings: SettingsBinding(
-                read: { $0.targetFractalScale },
-                write: { settings, value in settings.targetFractalScale = value },
-                writeAudioOffset: { settings, offset in settings.audioOffsetFractalScale = offset },
-                audioOffsetActiveDuringPlayback: { _ in true })),
+            settings: RenderParameterCatalog.byID[ControlCatalog.fractalScale.id]!.settings),
 
         ParameterDescriptor(
             spec: ControlCatalog.colorMix,
@@ -242,16 +215,12 @@ enum ParameterCatalog {
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, tripletGroupKey: nil),
-            music: MusicFacet(category: .color, defaultSource: .composite, defaultResponseCurve: .drift, hasFlashingRisk: false),
+            music: RenderParameterCatalog.byID[ControlCatalog.colorMix.id]!.music,
             ui: UIBinding(
                 read: { $0.color.colorMix },
                 write: { cache, v in cache.color.colorMix = v; cache.push(\.colorMix, value: v) },
                 persists: true),
-            settings: SettingsBinding(
-                read: { $0.colorMix },
-                write: { settings, value in settings.colorMix = value },
-                writeAudioOffset: nil,
-                audioOffsetActiveDuringPlayback: nil)),
+            settings: RenderParameterCatalog.byID[ControlCatalog.colorMix.id]!.settings),
 
         ParameterDescriptor(
             spec: ControlCatalog.iterations,
@@ -259,7 +228,7 @@ enum ParameterCatalog {
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
-            music: MusicFacet(category: .geometry, defaultSource: .mid, defaultResponseCurve: .sinusoidal, hasFlashingRisk: false),
+            music: RenderParameterCatalog.byID[ControlCatalog.iterations.id]!.music,
             ui: UIBinding(
                 read: { Float($0.quality.baseFractalIterations) },
                 write: { cache, v in
@@ -269,11 +238,7 @@ enum ParameterCatalog {
                     cache.push(\.baseFractalIterations, value: rounded)
                 },
                 persists: true),
-            settings: SettingsBinding(
-                read: { Float($0.fractalIterations) },
-                write: { settings, value in settings.fractalIterations = max(2, min(24, Int(round(value)))) },
-                writeAudioOffset: nil,
-                audioOffsetActiveDuringPlayback: nil)),
+            settings: RenderParameterCatalog.byID[ControlCatalog.iterations.id]!.settings),
 
         // MARK: Post-process effects
 
@@ -283,16 +248,12 @@ enum ParameterCatalog {
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
-            music: MusicFacet(category: .light, defaultSource: .beat, defaultResponseCurve: .pulse, hasFlashingRisk: true),
+            music: RenderParameterCatalog.byID[ControlCatalog.glow.id]!.music,
             ui: UIBinding(
                 read: { $0.lighting.glowEffect.intensity },
                 write: { cache, v in cache.lighting.glowEffect.intensity = v; cache.commitGlowEffect() },
                 persists: true),
-            settings: SettingsBinding(
-                read: { $0.glowEffect.intensity },
-                write: { settings, value in settings.audioModulateGlowIntensity(value) },
-                writeAudioOffset: { settings, offset in settings.audioOffsetGlowIntensity = offset },
-                audioOffsetActiveDuringPlayback: { $0.sceneDrivesGlow })),
+            settings: RenderParameterCatalog.byID[ControlCatalog.glow.id]!.settings),
 
         ParameterDescriptor(
             spec: ControlCatalog.fog,
@@ -300,16 +261,12 @@ enum ParameterCatalog {
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
-            music: MusicFacet(category: .light, defaultSource: .composite, defaultResponseCurve: .drift, hasFlashingRisk: false),
+            music: RenderParameterCatalog.byID[ControlCatalog.fog.id]!.music,
             ui: UIBinding(
                 read: { $0.lighting.fogEffect.intensity },
                 write: { cache, v in cache.lighting.fogEffect.intensity = v; cache.commitFogEffect() },
                 persists: true),
-            settings: SettingsBinding(
-                read: { $0.fogEffect.intensity },
-                write: { settings, value in settings.audioModulateFogIntensity(value) },
-                writeAudioOffset: { settings, offset in settings.audioOffsetFogIntensity = offset },
-                audioOffsetActiveDuringPlayback: { $0.sceneDrivesFog })),
+            settings: RenderParameterCatalog.byID[ControlCatalog.fog.id]!.settings),
 
         ParameterDescriptor(
             spec: ControlCatalog.bloom,
@@ -317,16 +274,12 @@ enum ParameterCatalog {
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
-            music: MusicFacet(category: .light, defaultSource: .beat, defaultResponseCurve: .pulse, hasFlashingRisk: true),
+            music: RenderParameterCatalog.byID[ControlCatalog.bloom.id]!.music,
             ui: UIBinding(
                 read: { $0.lighting.bloomEffect.strength },
                 write: { cache, v in cache.lighting.bloomEffect.strength = v; cache.commitBloomEffect() },
                 persists: true),
-            settings: SettingsBinding(
-                read: { $0.bloomEffect.strength },
-                write: { settings, value in settings.audioModulateBloomStrength(value) },
-                writeAudioOffset: { settings, offset in settings.audioOffsetBloomStrength = offset },
-                audioOffsetActiveDuringPlayback: { $0.sceneDrivesBloom })),
+            settings: RenderParameterCatalog.byID[ControlCatalog.bloom.id]!.settings),
 
         ParameterDescriptor(
             spec: ControlCatalog.hueSpeed,
@@ -334,16 +287,12 @@ enum ParameterCatalog {
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
-            music: MusicFacet(category: .color, defaultSource: .treble, defaultResponseCurve: .drift, hasFlashingRisk: true),
+            music: RenderParameterCatalog.byID[ControlCatalog.hueSpeed.id]!.music,
             ui: UIBinding(
                 read: { $0.lighting.hueRotationEffect.speed },
                 write: { cache, v in cache.lighting.hueRotationEffect.speed = v; cache.commitHueRotationEffect() },
                 persists: true),
-            settings: SettingsBinding(
-                read: { $0.hueRotationEffect.speed },
-                write: { settings, value in settings.audioModulateHueSpeed(value) },
-                writeAudioOffset: { settings, offset in settings.audioOffsetHueSpeed = offset },
-                audioOffsetActiveDuringPlayback: { $0.sceneDrivesHueSpeed })),
+            settings: RenderParameterCatalog.byID[ControlCatalog.hueSpeed.id]!.settings),
 
         ParameterDescriptor(
             spec: ControlCatalog.saturation,
@@ -351,16 +300,12 @@ enum ParameterCatalog {
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
-            music: MusicFacet(category: .color, defaultSource: .mid, defaultResponseCurve: .drift, hasFlashingRisk: true),
+            music: RenderParameterCatalog.byID[ControlCatalog.saturation.id]!.music,
             ui: UIBinding(
                 read: { $0.color.colorSchemeSaturation },
                 write: { cache, v in cache.color.colorSchemeSaturation = v; cache.commitColorSchemeSaturation() },
                 persists: true),
-            settings: SettingsBinding(
-                read: { $0.colorSchemeSaturation },
-                write: { settings, value in settings.audioModulateSaturation(value) },
-                writeAudioOffset: { settings, offset in settings.audioOffsetSaturation = offset },
-                audioOffsetActiveDuringPlayback: { $0.sceneDrivesSaturation })),
+            settings: RenderParameterCatalog.byID[ControlCatalog.saturation.id]!.settings),
 
         ParameterDescriptor(
             spec: ControlCatalog.safetyBubbleRadius,
@@ -368,16 +313,12 @@ enum ParameterCatalog {
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
-            music: MusicFacet(category: .geometry, defaultSource: .composite, defaultResponseCurve: .drift, hasFlashingRisk: false),
+            music: RenderParameterCatalog.byID[ControlCatalog.safetyBubbleRadius.id]!.music,
             ui: UIBinding(
                 read: { $0.safetyBubble.radius },
                 write: { cache, v in cache.safetyBubble.radius = v; cache.push(\.safetyBubbleRadius, value: v) },
                 persists: true),
-            settings: SettingsBinding(
-                read: { $0.safetyBubbleRadius },
-                write: { settings, value in settings.audioModulateSafetyBubbleRadius(value) },
-                writeAudioOffset: nil,
-                audioOffsetActiveDuringPlayback: nil)),
+            settings: RenderParameterCatalog.byID[ControlCatalog.safetyBubbleRadius.id]!.settings),
 
         // Gradient phase offset ("Color Offset"). Routed like saturation but without
         // the animation-playback offset path (no writeAudioOffset), matching colorMix.
@@ -387,16 +328,12 @@ enum ParameterCatalog {
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: false, tripletGroupKey: nil),
-            music: MusicFacet(category: .color, defaultSource: .composite, defaultResponseCurve: .drift, hasFlashingRisk: false),
+            music: RenderParameterCatalog.byID[ControlCatalog.gradientOffset.id]!.music,
             ui: UIBinding(
                 read: { $0.color.gradientState.gradient.offset },
                 write: { cache, v in cache.color.gradientState.gradient.offset = v; cache.push(\.gradientOffset, value: v) },
                 persists: true),
-            settings: SettingsBinding(
-                read: { $0.gradientOffset },
-                write: { settings, value in settings.audioModulateGradientOffset(value) },
-                writeAudioOffset: nil,
-                audioOffsetActiveDuringPlayback: nil)),
+            settings: RenderParameterCatalog.byID[ControlCatalog.gradientOffset.id]!.settings),
 
         // MARK: Space transforms (cross-fractal)
 
@@ -406,16 +343,12 @@ enum ParameterCatalog {
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, surfacesAsScalarGesture: true),
-            music: MusicFacet(category: .geometry, defaultSource: .composite, defaultResponseCurve: .drift, hasFlashingRisk: false),
+            music: RenderParameterCatalog.byID[ControlCatalog.sphereProjectionBlend.id]!.music,
             ui: UIBinding(
                 read: { $0.display.sphereProjectionBlend },
                 write: { cache, v in cache.display.sphereProjectionBlend = v; cache.commitSphereProjection() },
                 persists: true),
-            settings: SettingsBinding(
-                read: { $0.sphereProjectionBlend },
-                write: { settings, value in settings.audioModulateSphereProjectionBlend(value) },
-                writeAudioOffset: nil,
-                audioOffsetActiveDuringPlayback: nil)),
+            settings: RenderParameterCatalog.byID[ControlCatalog.sphereProjectionBlend.id]!.settings),
 
         ParameterDescriptor(
             spec: ControlCatalog.sphereProjectionRadius,
@@ -423,16 +356,12 @@ enum ParameterCatalog {
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, surfacesAsScalarGesture: true),
-            music: MusicFacet(category: .geometry, defaultSource: .bass, defaultResponseCurve: .drift, hasFlashingRisk: false),
+            music: RenderParameterCatalog.byID[ControlCatalog.sphereProjectionRadius.id]!.music,
             ui: UIBinding(
                 read: { $0.display.sphereProjectionRadius },
                 write: { cache, v in cache.display.sphereProjectionRadius = v; cache.commitSphereProjection() },
                 persists: true),
-            settings: SettingsBinding(
-                read: { $0.sphereProjectionRadius },
-                write: { settings, value in settings.audioModulateSphereProjectionRadius(value) },
-                writeAudioOffset: nil,
-                audioOffsetActiveDuringPlayback: nil)),
+            settings: RenderParameterCatalog.byID[ControlCatalog.sphereProjectionRadius.id]!.settings),
 
         // Twist (built-in space warp): strength + xyz origin. Gesture-mappable but
         // NOT music-reactive (no MusicReactiveTarget case), so `music` is nil.
@@ -442,16 +371,12 @@ enum ParameterCatalog {
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, surfacesAsScalarGesture: true),
-            music: nil,
+            music: RenderParameterCatalog.byID[ControlCatalog.spaceWarpStrength.id]!.music,
             ui: UIBinding(
                 read: { $0.renderSettings?.spaceWarpStrength ?? 0 },
                 write: { cache, v in cache.renderSettings?.spaceWarpStrength = v },
                 persists: false),
-            settings: SettingsBinding(
-                read: { $0.spaceWarpStrength },
-                write: { settings, value in settings.audioModulateSpaceWarpStrength(value) },
-                writeAudioOffset: nil,
-                audioOffsetActiveDuringPlayback: nil)),
+            settings: RenderParameterCatalog.byID[ControlCatalog.spaceWarpStrength.id]!.settings),
 
         ParameterDescriptor(
             spec: ControlCatalog.spaceWarpOriginX,
@@ -459,16 +384,12 @@ enum ParameterCatalog {
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, tripletGroupKey: "space.spaceWarpOrigin", surfacesAsScalarGesture: true),
-            music: nil,
+            music: RenderParameterCatalog.byID[ControlCatalog.spaceWarpOriginX.id]!.music,
             ui: UIBinding(
                 read: { $0.renderSettings?.spaceWarpParam1 ?? 0 },
                 write: { cache, v in cache.renderSettings?.spaceWarpParam1 = v },
                 persists: false),
-            settings: SettingsBinding(
-                read: { $0.spaceWarpParam1 },
-                write: { settings, value in settings.audioModulateSpaceWarpOriginX(value) },
-                writeAudioOffset: nil,
-                audioOffsetActiveDuringPlayback: nil)),
+            settings: RenderParameterCatalog.byID[ControlCatalog.spaceWarpOriginX.id]!.settings),
 
         ParameterDescriptor(
             spec: ControlCatalog.spaceWarpOriginY,
@@ -476,16 +397,12 @@ enum ParameterCatalog {
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, tripletGroupKey: "space.spaceWarpOrigin", surfacesAsScalarGesture: true),
-            music: nil,
+            music: RenderParameterCatalog.byID[ControlCatalog.spaceWarpOriginY.id]!.music,
             ui: UIBinding(
                 read: { $0.renderSettings?.spaceWarpParam2 ?? 0 },
                 write: { cache, v in cache.renderSettings?.spaceWarpParam2 = v },
                 persists: false),
-            settings: SettingsBinding(
-                read: { $0.spaceWarpParam2 },
-                write: { settings, value in settings.audioModulateSpaceWarpOriginY(value) },
-                writeAudioOffset: nil,
-                audioOffsetActiveDuringPlayback: nil)),
+            settings: RenderParameterCatalog.byID[ControlCatalog.spaceWarpOriginY.id]!.settings),
 
         ParameterDescriptor(
             spec: ControlCatalog.spaceWarpOriginZ,
@@ -493,16 +410,12 @@ enum ParameterCatalog {
             requiredPlatformCapabilities: [],
             capability: .universal,
             gesture: GestureFacet(isMappable: true, tripletGroupKey: "space.spaceWarpOrigin", surfacesAsScalarGesture: true),
-            music: nil,
+            music: RenderParameterCatalog.byID[ControlCatalog.spaceWarpOriginZ.id]!.music,
             ui: UIBinding(
                 read: { $0.renderSettings?.spaceWarpParam3 ?? 0 },
                 write: { cache, v in cache.renderSettings?.spaceWarpParam3 = v },
                 persists: false),
-            settings: SettingsBinding(
-                read: { $0.spaceWarpParam3 },
-                write: { settings, value in settings.audioModulateSpaceWarpOriginZ(value) },
-                writeAudioOffset: nil,
-                audioOffsetActiveDuringPlayback: nil))
+            settings: RenderParameterCatalog.byID[ControlCatalog.spaceWarpOriginZ.id]!.settings)
     ]
 
     private static let standardPresentations: ControlPresentation = [
@@ -1419,5 +1332,5 @@ enum ParameterCatalog {
 
     /// Narrowed off-main projection: the dispatch path looks up ONLY the `@Sendable`
     /// settings pair, never the full descriptor (which carries the @MainActor ui pair).
-    static func settingsBinding(for id: String) -> SettingsBinding? { byID[id]?.settings }
+    static func settingsBinding(for id: String) -> SettingsBinding? { RenderParameterCatalog.byID[id]?.settings }
 }

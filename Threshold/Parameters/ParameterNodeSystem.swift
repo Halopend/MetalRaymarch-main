@@ -9,11 +9,6 @@ enum ParameterLayer: String, Codable, Sendable {
     case music
 }
 
-enum ParameterMotionStrategy: String, Codable, Sendable {
-    case none
-    case layerLerp
-    case smoothDamp
-}
 
 struct ParameterGroup: Hashable, Codable, Sendable {
     let title: String
@@ -45,13 +40,12 @@ class AnyParameterNodeBase: @unchecked Sendable, Identifiable {
     }
 }
 
-/// @unchecked Sendable justification: mutable layer state is protected by Mutex;
-/// read/write closures are MainActor-isolated and only invoked from the UI path.
+/// Immutable parameter metadata and MainActor-isolated UI projections.
+/// ParameterPipeline is the sole owner of mutable parameter layer state.
 class FloatParameterNode: AnyParameterNodeBase, @unchecked Sendable {
     let range: ClosedRange<Float>
     let readValue: @MainActor (ControlStateStore) -> Float
     let writeValue: @MainActor (ControlStateStore, Float) -> Void
-    private let _layerStack: Mutex<ParameterLayerStack>
 
     init(id: String,
          name: String,
@@ -66,7 +60,6 @@ class FloatParameterNode: AnyParameterNodeBase, @unchecked Sendable {
         self.range = range
         self.readValue = readValue
         self.writeValue = writeValue
-        self._layerStack = Mutex(ParameterLayerStack(defaultValue: defaultValue, range: range))
         super.init(id: id,
                    name: name,
                    group: group,
@@ -75,27 +68,7 @@ class FloatParameterNode: AnyParameterNodeBase, @unchecked Sendable {
                    motionStrategy: motionStrategy)
     }
 
-    @discardableResult
-    func applyLayer(_ layer: ParameterLayer,
-                    value: Float,
-                    smoothingTime: Float? = nil,
-                    timestamp: TimeInterval = CFAbsoluteTimeGetCurrent()) -> Float {
-        _layerStack.withLock { layerStack in
-            layerStack.apply(layer: layer, value: value, smoothingTime: smoothingTime, timestamp: timestamp)
-        }
-    }
 
-    func resolvedValue(timestamp: TimeInterval = CFAbsoluteTimeGetCurrent()) -> Float {
-        _layerStack.withLock { layerStack in
-            layerStack.resolvedValue(at: timestamp)
-        }
-    }
-
-    func bootstrapBaseIfNeeded(from value: Float, timestamp: TimeInterval = CFAbsoluteTimeGetCurrent()) {
-        _layerStack.withLock { layerStack in
-            layerStack.setBaseIfNeeded(value, timestamp: timestamp)
-        }
-    }
 }
 
 extension FloatParameterNode {
@@ -205,12 +178,11 @@ struct ParameterLayerStack: Sendable {
     private(set) var defaultValue: Float
     private(set) var range: ClosedRange<Float>
 
-    /// The anchor (user/base) value the additive layers modulate around — i.e. the
-    /// `.ui` layer's raw value. Non-mutating so the UI can peek without disturbing
-    /// the smoothing state owned by the render side.
-    var baseRawValue: Float? { ui?.rawValue }
+    /// The current manual anchor, including a gesture which has taken ownership
+    /// from the slider. Audio is excluded so it is composed exactly once.
+    var baseRawValue: Float? { gesture?.rawValue ?? ui?.rawValue }
 
-    init(defaultValue: Float, range: ClosedRange<Float>, timestamp: TimeInterval = CFAbsoluteTimeGetCurrent()) {
+    init(defaultValue: Float, range: ClosedRange<Float>, timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) {
         self.defaultValue = defaultValue
         self.range = range
         self.ui = ParameterLayerEntry(rawValue: defaultValue, smoothingTime: nil, timestamp: timestamp)
@@ -237,6 +209,8 @@ struct ParameterLayerStack: Sendable {
                         value: Float,
                         smoothingTime: Float?,
                         timestamp: TimeInterval) -> Float {
+        // A new slider edit takes manual ownership from an earlier gesture.
+        if layer == .ui { gesture = nil }
         // Clamp absolute-valued layers at input. Music is additive (offset from
         // anchor) so its raw value is intentionally unclamped — the final clamp
         // in resolvedValue() catches the sum.

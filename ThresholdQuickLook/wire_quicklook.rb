@@ -27,6 +27,7 @@ SHARED_SOURCES = [
   # --- render closure: existing app source files (reused, not duplicated) ---
   "Threshold/Parameters/FractalPreset.swift",
   "Threshold/Parameters/RenderSettings.swift",
+  "Threshold/Parameters/RenderParameterCatalog.swift",
   "Threshold/Parameters/RenderSettingsSnapshot.swift",
   "Threshold/Rendering/Core/RendererMath.swift",
   "Threshold/Rendering/Core/RenderPrecompute.swift",

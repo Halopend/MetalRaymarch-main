@@ -127,7 +127,8 @@ struct ICloudStoreDeletionTests {
     private func sceneFileExists(id: UUID, in root: URL) -> Bool {
         let dir = StorageLocation.animationsDir(root)
         guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return false }
-        for url in files where ["threshanim", "threshanimv"].contains(url.pathExtension) {
+        let exts = ThresholdExportFormat.extensions(in: .animation)
+        for url in files where exts.contains(url.pathExtension) {
             if let data = try? Data(contentsOf: url),
                let s = try? isoDecoder.decode(AnimationScene.self, from: data),
                s.id == id {
@@ -149,9 +150,10 @@ struct ICloudStoreDeletionTests {
     }
 
     private func storedPreset(id: UUID, in root: URL) -> FractalPreset? {
+        let exts = ThresholdExportFormat.extensions(in: .preset)
         for dir in [StorageLocation.scenesDir(root), StorageLocation.musicPresetsDir(root)] {
             guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
-            for url in files where ["threshscene", "threshmp"].contains(url.pathExtension) {
+            for url in files where exts.contains(url.pathExtension) {
                 if let data = try? Data(contentsOf: url),
                    let p = try? isoDecoder.decode(FractalPreset.self, from: data),
                    p.id == id {
@@ -278,7 +280,7 @@ struct ICloudStoreDeletionTests {
     }
 
     @Test("PresetManager.replaceAll drops only known ids, never an unknown store file")
-    func presetReplaceAllAttributedDeletion() throws {
+    func presetReplaceAllAttributedDeletion() async throws {
         let root = makeStoreRoot()
         // Mark the store already-seeded so init doesn't write bundled defaults —
         // keeps the store deterministic for id-specific assertions.
@@ -295,6 +297,12 @@ struct ICloudStoreDeletionTests {
         let remaining = mgr.presets.filter { $0.id != drop.id }
         mgr.replaceAll(with: remaining)
 
+        // File removal runs on a detached utility task. Keep the temporary
+        // store alive and await the observable result before asserting it.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while presetFileExists(id: drop.id, in: root), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
         #expect(presetFileExists(id: keep.id, in: root))
         #expect(!presetFileExists(id: drop.id, in: root), "an explicitly dropped preset's file is removed")
         #expect(presetFileExists(id: foreign.id, in: root), "an unknown store file is never removed by replaceAll")
@@ -319,11 +327,16 @@ struct ICloudStoreDeletionTests {
         let recordedIDs = try isoDecoder.decode([UUID].self, from: Data(contentsOf: marker))
         #expect(Set(recordedIDs) == Set(bundled.map(\.id)))
 
-        let musicDir = StorageLocation.musicPresetsDir(root)
+        // Seeds now land in Scenes/ as `.thresh`; legacy roots are still read,
+        // so search both with every readable preset extension.
+        let seededDirs = [StorageLocation.scenesDir(root), StorageLocation.musicPresetsDir(root)]
+        let presetExts = ThresholdExportFormat.extensions(in: .preset)
         let deletedURL = try #require(
-            FileManager.default.contentsOfDirectory(at: musicDir, includingPropertiesForKeys: nil)
+            seededDirs
+                .flatMap { (try? FileManager.default.contentsOfDirectory(at: $0, includingPropertiesForKeys: nil)) ?? [] }
                 .first { url in
-                    guard let data = try? Data(contentsOf: url),
+                    guard presetExts.contains(url.pathExtension),
+                          let data = try? Data(contentsOf: url),
                           let preset = try? isoDecoder.decode(FractalPreset.self, from: data)
                     else { return false }
                     return preset.id == mountain.id

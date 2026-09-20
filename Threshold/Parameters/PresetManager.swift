@@ -12,32 +12,45 @@ import Foundation
 /// writers (PresetManager, AnimationManager, EmbeddedFormulaContainer) and the
 /// export-tab format reference both read from here; the UTType declarations in
 /// the platform Info.plists must mirror these extensions.
+/// Three file types, three schemas, three folders. Music-reactivity and an
+/// attached song are *traits inside the file*, not file types — so `.threshmp`
+/// and `.threshanimv` are no longer written. They stay readable forever via
+/// `legacyExtensions` (see CONTENT_MODEL_PROPOSAL.md §2.3).
 enum ThresholdExportFormat: CaseIterable, Sendable {
     case scenePreset
-    case musicPreset
     case animationScene
-    case musicVideoScene
     case customFormula
 
-    /// Filename extension without the leading dot.
+    /// Canonical filename extension without the leading dot. This is the ONLY
+    /// extension written on export.
     var ext: String {
         switch self {
-        case .scenePreset: return "threshscene"
-        case .musicPreset: return "threshmp"
+        case .scenePreset: return "thresh"
         case .animationScene: return "threshanim"
-        case .musicVideoScene: return "threshanimv"
         case .customFormula: return "threshfx"
         }
     }
 
+    /// Extensions from earlier releases that still decode to this format.
+    /// Read-compatibility only — never written.
+    var legacyExtensions: [String] {
+        switch self {
+        case .scenePreset: return ["threshscene", "threshmp"]
+        case .animationScene: return ["threshanimv"]
+        case .customFormula: return []
+        }
+    }
+
+    /// Canonical extension first, then legacy aliases — for directory scans,
+    /// prune, decode, and UTI matching.
+    var readableExtensions: [String] { [ext] + legacyExtensions }
+
     /// One-line description shown in the export tab's format reference.
     var summary: String {
         switch self {
-        case .scenePreset: return "Fractal preset (settings snapshot)"
-        case .musicPreset: return "Music-reactive preset (audio mappings)"
+        case .scenePreset: return "Scene (settings + optional audio mappings)"
         case .animationScene: return "Animation scene (keyframe sequence)"
-        case .musicVideoScene: return "Animation + music (music video)"
-        case .customFormula: return "Custom formula (standalone shader)"
+        case .customFormula: return "Custom effect (standalone shader)"
         }
     }
 
@@ -48,32 +61,26 @@ enum ThresholdExportFormat: CaseIterable, Sendable {
 
     var category: Category {
         switch self {
-        case .scenePreset, .musicPreset: return .preset
-        case .animationScene, .musicVideoScene: return .animation
+        case .scenePreset: return .preset
+        case .animationScene: return .animation
         case .customFormula: return .formula
         }
     }
 
-    /// Resolve a format from a filename extension (leading dot optional, any case).
+    /// Resolve a format from a filename extension (leading dot optional, any
+    /// case). Accepts this build's canonical extensions and every legacy alias.
     /// Returns nil for anything Threshold doesn't recognise.
     init?(fileExtension: String) {
         var e = fileExtension.lowercased()
         if e.hasPrefix(".") { e.removeFirst() }
-        guard let match = Self.allCases.first(where: { $0.ext == e }) else { return nil }
+        guard let match = Self.allCases.first(where: { $0.readableExtensions.contains(e) }) else { return nil }
         self = match
     }
 
-    /// The preset format for a preset, chosen by whether it carries music mappings:
-    /// `.threshmp` when music-reactive, `.threshscene` otherwise.
-    static func preset(hasMusic: Bool) -> ThresholdExportFormat { hasMusic ? .musicPreset : .scenePreset }
-
-    /// The animation format, chosen by whether the scene has an attached song:
-    /// `.threshanimv` when it does, `.threshanim` otherwise.
-    static func animation(hasSong: Bool) -> ThresholdExportFormat { hasSong ? .musicVideoScene : .animationScene }
-
-    /// Every extension belonging to a category — for directory scans, prune, and decode.
+    /// Every extension belonging to a category (canonical + legacy) — for
+    /// directory scans, prune, and decode.
     static func extensions(in category: Category) -> [String] {
-        allCases.filter { $0.category == category }.map(\.ext)
+        allCases.filter { $0.category == category }.flatMap(\.readableExtensions)
     }
 
     // MARK: - Presentation (import sheet / preset list)
@@ -81,11 +88,9 @@ enum ThresholdExportFormat: CaseIterable, Sendable {
     /// Human-facing name for the format.
     var displayName: String {
         switch self {
-        case .scenePreset:     return "Fractal Scene"
-        case .musicPreset:     return "Music Preset"
+        case .scenePreset:     return "Threshold Scene"
         case .animationScene:  return "Animation"
-        case .musicVideoScene: return "Music Video Animation"
-        case .customFormula:   return "Custom Formula"
+        case .customFormula:   return "Custom Effect"
         }
     }
 
@@ -93,9 +98,7 @@ enum ThresholdExportFormat: CaseIterable, Sendable {
     var iconName: String {
         switch self {
         case .scenePreset:     return "cube.transparent"
-        case .musicPreset:     return "music.note.list"
         case .animationScene:  return "film.stack"
-        case .musicVideoScene: return "music.note.tv"
         case .customFormula:   return "function"
         }
     }
@@ -103,9 +106,9 @@ enum ThresholdExportFormat: CaseIterable, Sendable {
     /// Accent colour used when presenting the format.
     var accentColor: Color {
         switch self {
-        case .scenePreset, .customFormula:       return .purple
-        case .musicPreset:                       return .blue
-        case .animationScene, .musicVideoScene:  return .green
+        case .scenePreset:     return .purple
+        case .animationScene:  return .green
+        case .customFormula:   return .purple
         }
     }
 }
@@ -348,8 +351,12 @@ class PresetManager {
 
         let query = NSMetadataQuery()
         query.searchScopes = dirs
-        query.predicate = NSPredicate(format: "%K ENDSWITH '.threshscene' OR %K ENDSWITH '.threshmp'",
-                                      NSMetadataItemFSNameKey, NSMetadataItemFSNameKey)
+        // Watch every extension that resolves to a preset (canonical + legacy
+        // aliases), so a folder drop of any readable scene type refreshes.
+        let presetExts = ThresholdExportFormat.extensions(in: .preset)
+        query.predicate = NSCompoundPredicate(orPredicateWithSubpredicates: presetExts.map {
+            NSPredicate(format: "%K ENDSWITH %@", NSMetadataItemFSNameKey, ".\($0)")
+        })
         // File Provider can emit a burst of metadata events while iCloud is
         // hydrating the folder. Keep query gathering/notification delivery off
         // the main actor; only the debounced `loadPresets()` hop below touches
@@ -838,10 +845,9 @@ class PresetManager {
 
     // MARK: - Folder store: per-file write / remove
 
-    /// Write one preset as its own file, routed by music-reactivity
-    /// (.threshmp → Music Presets/, .threshscene → Scenes/). Removes any prior
-    /// file for the same id only AFTER the replacement is safely on disk. This
-    /// preserves the previous copy if encoding or writing fails.
+    /// Write one preset as its own file (`.thresh` in `Scenes/`). Removes any
+    /// prior file for the same id only AFTER the replacement is safely on disk.
+    /// This preserves the previous copy if encoding or writing fails.
     @discardableResult
     private func writePresetFile(_ preset: FractalPreset, root: URL) -> Bool {
         guard let writtenURL = writeNewPresetFile(preset, root: root) else { return false }
@@ -851,11 +857,12 @@ class PresetManager {
 
     /// Write a known-absent preset without scanning the store first. Used by
     /// migration/seeding after the detached scan has already established IDs.
+    /// All scenes write to `Scenes/` as `.thresh`: music-reactivity is a trait
+    /// inside the file, so it no longer picks a folder or an extension.
     @discardableResult
     private func writeNewPresetFile(_ preset: FractalPreset, root: URL) -> URL? {
-        let hasMusic = preset.hasMusicReactiveMappings
-        let dir = hasMusic ? StorageLocation.musicPresetsDir(root) : StorageLocation.scenesDir(root)
-        let ext = ThresholdExportFormat.preset(hasMusic: hasMusic).ext
+        let dir = StorageLocation.scenesDir(root)
+        let ext = ThresholdExportFormat.scenePreset.ext
         let url = dir.appendingPathComponent(Self.sanitizedFileName(preset.name, id: preset.id, ext: ext))
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -1022,18 +1029,15 @@ class PresetManager {
         root: URL,
         allowsPlaceholderProbe: Bool
     ) -> PresetScanRequest {
-        let bundledByName = Dictionary(
-            Self.bundledPresets().map { preset in
-                let ext = ThresholdExportFormat.preset(
-                    hasMusic: preset.hasMusicReactiveMappings
-                ).ext
-                return (
-                    Self.sanitizedFileName(preset.name, id: preset.id, ext: ext),
-                    preset
-                )
-            },
-            uniquingKeysWith: { first, _ in first }
-        )
+        // Bundled presets may already be seeded on disk under any readable
+        // scene extension (`.thresh`, `.threshscene`, `.threshmp`), so index
+        // every alias to keep the iCloud placeholder fallback working.
+        var bundledByName: [String: FractalPreset] = [:]
+        for preset in Self.bundledPresets() {
+            for ext in ThresholdExportFormat.scenePreset.readableExtensions {
+                bundledByName[Self.sanitizedFileName(preset.name, id: preset.id, ext: ext)] = preset
+            }
+        }
         return PresetScanRequest(
             root: root,
             cachedFiles: presetFileCache,
@@ -1356,13 +1360,12 @@ class PresetManager {
         UsageAnalytics.shared.trackPresetLoaded(name: preset.name)
     }
     
-    /// Export a preset to a file URL.
-    /// Uses `.threshmp` for presets with music-reactive mappings, `.threshscene` otherwise.
+    /// Export a preset to a `.thresh` file URL. Music-reactivity is a trait
+    /// inside the file, so it no longer changes the extension.
     /// Nonisolated: encoding + the temp-file write can take tens of ms for
     /// large presets — call it off the main actor (see `exportOffMain`).
     nonisolated static func exportPresetFile(_ preset: FractalPreset) -> URL? {
-        let hasMusicMappings = preset.hasMusicReactiveMappings
-        let format: ThresholdExportFormat = hasMusicMappings ? .musicPreset : .scenePreset
+        let format: ThresholdExportFormat = .scenePreset
         let fileName = "\(Self.sanitizedExportFileNameStem(preset.name)).\(format.ext)"
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
 

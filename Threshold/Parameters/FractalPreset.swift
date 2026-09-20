@@ -286,78 +286,80 @@ struct SceneState: Codable, Equatable {
     func apply(to settings: RenderSettings,
                includePerformance: Bool,
                scope: SceneRestoreScope) {
-        settings.geometryConfig = geometry
-        settings.targetMinDistance = geometry.minDistance
-        settings.targetFoldingLimit = geometry.foldingLimit
-        settings.targetSphereRadius = geometry.sphereRadius
-        settings.targetFractalScale = geometry.fractalScale
-        settings.targetPosition = geometry.position
-        settings.targetWorldRotation = geometry.worldRotation
-        settings.targetDetailScale = geometry.detailScale
+        settings.withSceneReplacement {
+            settings.geometryConfig = geometry
+            settings.targetMinDistance = geometry.minDistance
+            settings.targetFoldingLimit = geometry.foldingLimit
+            settings.targetSphereRadius = geometry.sphereRadius
+            settings.targetFractalScale = geometry.fractalScale
+            settings.targetPosition = geometry.position
+            settings.targetWorldRotation = geometry.worldRotation
+            settings.targetDetailScale = geometry.detailScale
 
-        let preservedResolutionScale = settings.resolutionScale
-        var mergedQuality = settings.qualityConfig
-        mergedQuality.baseFractalIterations = quality.baseFractalIterations
-        mergedQuality.baseMaxRaySteps = quality.baseMaxRaySteps
-        if includePerformance {
-            if let tileSize = quality.tileSize {
-                mergedQuality.tileSize = tileSize
+            let preservedResolutionScale = settings.resolutionScale
+            var mergedQuality = settings.qualityConfig
+            mergedQuality.baseFractalIterations = quality.baseFractalIterations
+            mergedQuality.baseMaxRaySteps = quality.baseMaxRaySteps
+            if includePerformance {
+                if let tileSize = quality.tileSize {
+                    mergedQuality.tileSize = tileSize
+                }
             }
+            mergedQuality.shadowsEnabled = quality.shadowsEnabled
+            mergedQuality.boundingSphereSkipEnabled = quality.boundingShapeEnabled
+            mergedQuality.boundingShapeRadius = quality.boundingShapeRadius
+            mergedQuality.boundingShapeFogMode = quality.boundingShapeFogMode
+            mergedQuality.boundingShapeShadowDepth = quality.boundingShapeShadowDepth
+            mergedQuality.boundingShapeType = quality.boundingShapeType
+            // Bound to Space is scene-authored containment, just like the shape
+            // bound. Preserve its enable bit as well as its dimensions.
+            mergedQuality.boundToSpaceEnabled = quality.boundToSpaceEnabled
+            mergedQuality.boundToSpaceMode = quality.boundToSpaceMode
+            mergedQuality.boundSpaceWidth = quality.boundSpaceWidth
+            mergedQuality.boundSpaceDepth = quality.boundSpaceDepth
+            mergedQuality.boundSpaceHeight = quality.boundSpaceHeight
+            mergedQuality.boundAmbientStrength = quality.boundAmbientStrength
+            mergedQuality.envScrunchEnabled = quality.envScrunchEnabled
+            mergedQuality.envScrunchMode = quality.envScrunchMode
+            mergedQuality.envScrunchStrength = quality.envScrunchStrength
+            mergedQuality.envScrunchReach = quality.envScrunchReach
+            mergedQuality.envScrunchContain = quality.envScrunchContain
+            mergedQuality.envScrunchContainFeather = quality.envScrunchContainFeather
+            mergedQuality.zoomFogCompensationEnabled = quality.zoomFogCompensationEnabled
+            settings.qualityConfig = mergedQuality
+            settings.sceneConeMarchCompatible = quality.coneMarchCompatible
+            settings.applyRecommendedQuality(quality.recommendedQuality)
+            settings.resolutionScale = preservedResolutionScale
+
+            settings.colorConfig = color
+            settings.lightingConfig = lighting
+
+            var mergedDisplay = settings.displayConfig
+            mergedDisplay.lightingPlay = display.lightingPlay
+            mergedDisplay.lightingMode = display.lightingMode
+            mergedDisplay.sphericalInversionMode = display.sphericalInversionMode
+            mergedDisplay.sphericalInversionRadius = display.sphericalInversionRadius
+            mergedDisplay.sphereProjectionEnabled = display.sphereProjectionEnabled
+            mergedDisplay.sphereProjectionBlend = display.sphereProjectionBlend
+            mergedDisplay.sphereProjectionRadius = display.sphereProjectionRadius
+            mergedDisplay.deIterationMismatch = display.deIterationMismatch
+            mergedDisplay.platformRadius = display.platformRadius
+            mergedDisplay.platformEnabled = display.platformEnabled
+            settings.displayConfig = mergedDisplay
+
+            if scope == .session || safetyBubble.enabled {
+                settings.safetyBubbleConfig = safetyBubble
+            }
+            settings.handAttractionConfig = handAttraction
+            settings.audioReactiveConfig = audioReactive
+
+            settings.spaceWarpStrength = space.warpStrength
+            settings.spaceWarpOrigin = space.warpOrigin
+            settings.spaceWarpAxis = space.warpAxis
+            settings.spaceWarpStack = space.warpStack
+            settings.infiniteZoomEnabled = motion.infiniteZoomEnabled
+            settings.infiniteZoomRate = motion.infiniteZoomRate
         }
-        mergedQuality.shadowsEnabled = quality.shadowsEnabled
-        mergedQuality.boundingSphereSkipEnabled = quality.boundingShapeEnabled
-        mergedQuality.boundingShapeRadius = quality.boundingShapeRadius
-        mergedQuality.boundingShapeFogMode = quality.boundingShapeFogMode
-        mergedQuality.boundingShapeShadowDepth = quality.boundingShapeShadowDepth
-        mergedQuality.boundingShapeType = quality.boundingShapeType
-        // Bound to Space is scene-authored containment, just like the shape
-        // bound. Preserve its enable bit as well as its dimensions.
-        mergedQuality.boundToSpaceEnabled = quality.boundToSpaceEnabled
-        mergedQuality.boundToSpaceMode = quality.boundToSpaceMode
-        mergedQuality.boundSpaceWidth = quality.boundSpaceWidth
-        mergedQuality.boundSpaceDepth = quality.boundSpaceDepth
-        mergedQuality.boundSpaceHeight = quality.boundSpaceHeight
-        mergedQuality.boundAmbientStrength = quality.boundAmbientStrength
-        mergedQuality.envScrunchEnabled = quality.envScrunchEnabled
-        mergedQuality.envScrunchMode = quality.envScrunchMode
-        mergedQuality.envScrunchStrength = quality.envScrunchStrength
-        mergedQuality.envScrunchReach = quality.envScrunchReach
-        mergedQuality.envScrunchContain = quality.envScrunchContain
-        mergedQuality.envScrunchContainFeather = quality.envScrunchContainFeather
-        mergedQuality.zoomFogCompensationEnabled = quality.zoomFogCompensationEnabled
-        settings.qualityConfig = mergedQuality
-        settings.sceneConeMarchCompatible = quality.coneMarchCompatible
-        settings.applyRecommendedQuality(quality.recommendedQuality)
-        settings.resolutionScale = preservedResolutionScale
-
-        settings.colorConfig = color
-        settings.lightingConfig = lighting
-
-        var mergedDisplay = settings.displayConfig
-        mergedDisplay.lightingPlay = display.lightingPlay
-        mergedDisplay.lightingMode = display.lightingMode
-        mergedDisplay.sphericalInversionMode = display.sphericalInversionMode
-        mergedDisplay.sphericalInversionRadius = display.sphericalInversionRadius
-        mergedDisplay.sphereProjectionEnabled = display.sphereProjectionEnabled
-        mergedDisplay.sphereProjectionBlend = display.sphereProjectionBlend
-        mergedDisplay.sphereProjectionRadius = display.sphereProjectionRadius
-        mergedDisplay.deIterationMismatch = display.deIterationMismatch
-        mergedDisplay.platformRadius = display.platformRadius
-        mergedDisplay.platformEnabled = display.platformEnabled
-        settings.displayConfig = mergedDisplay
-
-        if scope == .session || safetyBubble.enabled {
-            settings.safetyBubbleConfig = safetyBubble
-        }
-        settings.handAttractionConfig = handAttraction
-        settings.audioReactiveConfig = audioReactive
-
-        settings.spaceWarpStrength = space.warpStrength
-        settings.spaceWarpOrigin = space.warpOrigin
-        settings.spaceWarpAxis = space.warpAxis
-        settings.spaceWarpStack = space.warpStack
-        settings.infiniteZoomEnabled = motion.infiniteZoomEnabled
-        settings.infiniteZoomRate = motion.infiniteZoomRate
     }
 }
 
@@ -1271,7 +1273,7 @@ struct FractalPreset: Codable, Identifiable {
                includePerformance: Bool = true,
                resetEnvironment: Bool = false,
                scope: SceneRestoreScope = .scene) {
-        settings.withPersistenceSuppressed {
+        settings.withSceneReplacement {
             applyWithoutPersistence(
                 to: settings,
                 includePerformance: includePerformance,

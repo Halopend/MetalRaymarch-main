@@ -270,7 +270,7 @@ final class AnimationManager {
 
         for scene in scenes {
             do {
-                let ext = ThresholdExportFormat.animation(hasSong: scene.attachedSong != nil).ext
+                let ext = ThresholdExportFormat.animationScene.ext
                 let url = dir.appendingPathComponent(Self.sanitizedSceneFileName(scene.name, id: scene.id, ext: ext))
                 let data = try prettySceneEncoder.encode(scene)
                 try data.write(to: url, options: .atomic)
@@ -1662,140 +1662,141 @@ final class AnimationManager {
         let isStartingFromBeginning = playhead.state == .stopped ||
             (playhead.currentKeyframeIndex == 0 && playhead.elapsedInSegment <= 0.0001)
         
-        // Restore the complete scene baseline before pipeline precompilation:
-        // fractal type is part of GeometryConfig and is baked into function
-        // constants. The legacy flat fields remain compatibility overrides.
-        if let settings = renderSettings, let scene = currentScene {
-            settings.withPersistenceSuppressed {
-                settings.clearAnimationManualOffsets()
-                settings.clearAudioPlaybackOffsets()
-                settings.setSpaceWarpAudioOffsets([:])
-                if isStartingFromBeginning {
-                    settings.resetSceneAnimationPhases()
-                }
+        if let settings = renderSettings {
+            settings.withSceneReplacement {
+                // Restore the complete scene baseline before pipeline precompilation:
+                // fractal type is part of GeometryConfig and is baked into function
+                // constants. The legacy flat fields remain compatibility overrides.
+                if let settings = renderSettings, let scene = currentScene {
+                    settings.withPersistenceSuppressed {
+                        settings.clearAnimationManualOffsets()
+                        settings.clearAudioPlaybackOffsets()
+                        settings.setSpaceWarpAudioOffsets([:])
+                        if isStartingFromBeginning {
+                            settings.resetSceneAnimationPhases()
+                        }
 
-                if let baseline = scene.baseline {
-                    baseline.apply(to: settings, includePerformance: false, scope: .scene)
-                    if let legacyWarpStack = scene.spaceWarpOps {
-                        settings.spaceWarpStack = legacyWarpStack
+                        if let baseline = scene.baseline {
+                            baseline.apply(to: settings, includePerformance: false, scope: .scene)
+                            if let legacyWarpStack = scene.spaceWarpOps {
+                                settings.spaceWarpStack = legacyWarpStack
+                            }
+                        } else {
+                            // Backward-compatible authoritative baseline for animations
+                            // authored before SceneState existed. Preserve destination
+                            // comfort/hand settings unless the legacy animation explicitly
+                            // opts into them below, while clearing every visual lane that
+                            // otherwise could leak from the previously loaded scene.
+                            let legacyFractalType = scene.fractalType ?? .mandelbox
+                            var legacyBaseline = SceneState()
+                            legacyBaseline.geometry.fractalType = legacyFractalType
+                            legacyBaseline.geometry.formulaParams = legacyFractalType.defaultFormulaParams()
+                            legacyBaseline.safetyBubble.enabled = false
+                            legacyBaseline.handAttraction = settings.handAttractionConfig
+                            legacyBaseline.apply(to: settings, includePerformance: false, scope: .scene)
+                            settings.spaceWarpStack = scene.spaceWarpOps ?? []
+                        }
+
+                        let sceneFractalType: FractalModelType
+                        if scene.embeddedFormula?.effectKind == .fractal {
+                            sceneFractalType = .custom
+                        } else {
+                            sceneFractalType = scene.fractalType
+                                ?? scene.baseline?.geometry.fractalType
+                                ?? .mandelbox
+                        }
+                        if settings.fractalType != sceneFractalType {
+                            settings.fractalType = sceneFractalType
+                            print("🎬 Switched fractal type to \(sceneFractalType) for scene playback")
+                        }
                     }
-                } else {
-                    // Backward-compatible authoritative baseline for animations
-                    // authored before SceneState existed. Preserve destination
-                    // comfort/hand settings unless the legacy animation explicitly
-                    // opts into them below, while clearing every visual lane that
-                    // otherwise could leak from the previously loaded scene.
-                    let legacyFractalType = scene.fractalType ?? .mandelbox
-                    var legacyBaseline = SceneState()
-                    legacyBaseline.geometry.fractalType = legacyFractalType
-                    legacyBaseline.geometry.formulaParams = legacyFractalType.defaultFormulaParams()
-                    legacyBaseline.safetyBubble.enabled = false
-                    legacyBaseline.handAttraction = settings.handAttractionConfig
-                    legacyBaseline.apply(to: settings, includePerformance: false, scope: .scene)
-                    settings.spaceWarpStack = scene.spaceWarpOps ?? []
                 }
 
-                let sceneFractalType: FractalModelType
-                if scene.embeddedFormula?.effectKind == .fractal {
-                    sceneFractalType = .custom
-                } else {
-                    sceneFractalType = scene.fractalType
-                        ?? scene.baseline?.geometry.fractalType
-                        ?? .mandelbox
+                // Apply scene-level safety bubble / blend window settings
+                if let settings = renderSettings, let scene = currentScene {
+                    settings.withPersistenceSuppressed {
+                        if isStartingFromBeginning,
+                           let speedOverride = scene.playbackSpeedOverride {
+                            playbackSpeed = max(0.1, min(4.0, speedOverride))
+                        }
+
+                        #if os(visionOS)
+                        if let app = AppModel.shared {
+                            app.applySceneImmersionPreference(isMixedScene: scene.mixedModeScene == true)
+                        }
+                        #endif
+
+                        // Shared animations follow the same comfort contract as static
+                        // scenes: they may opt the bubble on and author its shape, but a
+                        // downloaded animation may not disable the user's active bubble.
+                        if scene.safetyBubbleEnabled == true {
+                            settings.safetyBubbleEnabled = true
+                            if let radius = scene.safetyBubbleRadius {
+                                settings.safetyBubbleRadius = radius
+                            }
+                            if let shape = scene.safetyBubbleShape {
+                                settings.safetyBubbleShape = shape
+                            }
+                            if let blend = scene.safetyBubbleBlend {
+                                settings.safetyBubbleBlend = blend
+                            }
+                        }
+
+                        // ── Apply scene-level gradient / color settings ──────────
+                        if let preset = scene.gradientPreset {
+                            settings.applyGradientPreset(preset)
+                            print("🎬 Restored gradient preset to \(preset) for scene playback")
+                        }
+                        if let mode = scene.colorMappingMode {
+                            settings.colorMappingMode = mode
+                        }
+                        if let rep = scene.gradientRepeat {
+                            settings.gradientRepeat = rep
+                        }
+                        if let off = scene.gradientOffset {
+                            settings.gradientOffset = off
+                        }
+                        if let sm = scene.gradientSmoothing {
+                            settings.gradientSmoothing = sm
+                        }
+                        if let sat = scene.colorSchemeSaturation {
+                            settings.colorSchemeSaturation = sat
+                        }
+                        if let con = scene.colorSchemeContrast {
+                            settings.colorSchemeContrast = con
+                        }
+                        if let gam = scene.colorSchemeGamma {
+                            settings.colorSchemeGamma = gam
+                        }
+                        if let vib = scene.colorSchemeVibrance {
+                            settings.colorSchemeVibrance = vib
+                        }
+                        if let cur = scene.colorSchemeCurve {
+                            settings.colorSchemeCurve = cur
+                        }
+                        if let shd = scene.colorSchemeShadows {
+                            settings.colorSchemeShadows = shd
+                        }
+                        if let hlt = scene.colorSchemeHighlights {
+                            settings.colorSchemeHighlights = hlt
+                        }
+                        if let soft = scene.lightingSoftness {
+                            settings.lightingSoftness = soft
+                        }
+
+                        // Apply the current playhead state immediately so first rendered
+                        // frame does not momentarily show values from prior interaction.
+                        if let keyframe = interpolatedKeyframeAtCurrentPlayhead(in: scene) {
+                            applyKeyframe(keyframe)
+                        }
+                    }
                 }
-                if settings.fractalType != sceneFractalType {
-                    settings.fractalType = sceneFractalType
-                    print("🎬 Switched fractal type to \(sceneFractalType) for scene playback")
-                }
+
+                // Publish the playback flag with its complete initial scene state.
+                renderSettings?.isAnimationPlaying = true
             }
         }
-
-        // Ensure pipelines are compiled before playback (after fractal type is set)
         precompilePipelinesForCurrentScene()
-
-        // Apply scene-level safety bubble / blend window settings
-        if let settings = renderSettings, let scene = currentScene {
-            settings.withPersistenceSuppressed {
-                if isStartingFromBeginning,
-                   let speedOverride = scene.playbackSpeedOverride {
-                    playbackSpeed = max(0.1, min(4.0, speedOverride))
-                }
-
-                #if os(visionOS)
-                if let app = AppModel.shared {
-                    app.applySceneImmersionPreference(isMixedScene: scene.mixedModeScene == true)
-                }
-                #endif
-
-                // Shared animations follow the same comfort contract as static
-                // scenes: they may opt the bubble on and author its shape, but a
-                // downloaded animation may not disable the user's active bubble.
-                if scene.safetyBubbleEnabled == true {
-                    settings.safetyBubbleEnabled = true
-                    if let radius = scene.safetyBubbleRadius {
-                        settings.safetyBubbleRadius = radius
-                    }
-                    if let shape = scene.safetyBubbleShape {
-                        settings.safetyBubbleShape = shape
-                    }
-                    if let blend = scene.safetyBubbleBlend {
-                        settings.safetyBubbleBlend = blend
-                    }
-                }
-            
-                // ── Apply scene-level gradient / color settings ──────────
-                if let preset = scene.gradientPreset {
-                    settings.applyGradientPreset(preset)
-                    print("🎬 Restored gradient preset to \(preset) for scene playback")
-                }
-                if let mode = scene.colorMappingMode {
-                    settings.colorMappingMode = mode
-                }
-                if let rep = scene.gradientRepeat {
-                    settings.gradientRepeat = rep
-                }
-                if let off = scene.gradientOffset {
-                    settings.gradientOffset = off
-                }
-                if let sm = scene.gradientSmoothing {
-                    settings.gradientSmoothing = sm
-                }
-                if let sat = scene.colorSchemeSaturation {
-                    settings.colorSchemeSaturation = sat
-                }
-                if let con = scene.colorSchemeContrast {
-                    settings.colorSchemeContrast = con
-                }
-                if let gam = scene.colorSchemeGamma {
-                    settings.colorSchemeGamma = gam
-                }
-                if let vib = scene.colorSchemeVibrance {
-                    settings.colorSchemeVibrance = vib
-                }
-                if let cur = scene.colorSchemeCurve {
-                    settings.colorSchemeCurve = cur
-                }
-                if let shd = scene.colorSchemeShadows {
-                    settings.colorSchemeShadows = shd
-                }
-                if let hlt = scene.colorSchemeHighlights {
-                    settings.colorSchemeHighlights = hlt
-                }
-                if let soft = scene.lightingSoftness {
-                    settings.lightingSoftness = soft
-                }
-
-                // Apply the current playhead state immediately so first rendered
-                // frame does not momentarily show values from prior interaction.
-                if let keyframe = interpolatedKeyframeAtCurrentPlayhead(in: scene) {
-                    applyKeyframe(keyframe)
-                }
-            }
-        }
-
-        // Signal render loop to tick animation updates every frame.
-        // Renderer gates animationManager.update(...) behind this flag.
-        renderSettings?.isAnimationPlaying = true
 
         // Initialise playhead direction for the current scene's playback mode.
         let mode = currentScene?.playbackMode ?? .forward
@@ -2507,8 +2508,8 @@ final class AnimationManager {
     /// actor (see `exportOffMain`).
     nonisolated static func exportSceneFile(_ scene: AnimationScene) -> URL? {
         let sanitizedName = PresetManager.sanitizedExportFileNameStem(scene.name)
-        // Scenes with attached music export as music videos.
-        let format: ThresholdExportFormat = scene.attachedSong != nil ? .musicVideoScene : .animationScene
+        // One animation format regardless of an attached song (a trait, not a type).
+        let format: ThresholdExportFormat = .animationScene
         let fileName = "\(sanitizedName).\(format.ext)"
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
 

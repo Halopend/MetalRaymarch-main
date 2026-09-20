@@ -1,10 +1,8 @@
 import Foundation
 import simd
 
-// RenderSettings uses os_unfair_lock for minimal lock overhead
-// This is the fastest synchronization primitive on Apple platforms
-// NSLock has ~2-3x more overhead due to Objective-C dispatch
-struct RenderSettingsSnapshot {
+/// Immutable render input captured at a completed scene transaction.
+struct RenderSettingsSnapshot: Sendable {
     let minDistance: Float
     let scale: Float
     let position: SIMD3<Float>
@@ -20,6 +18,7 @@ struct RenderSettingsSnapshot {
     let colorMix: Float
     let lightingPlay: Bool
     let lightingMode: LightingMode
+    let convolutionEffect: ConvolutionEffect
     let sphericalInversionMode: SphericalInversionMode
     let sphericalInversionRadius: Float
     let sphereProjectionEnabled: Bool

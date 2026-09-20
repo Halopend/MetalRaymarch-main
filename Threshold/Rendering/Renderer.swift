@@ -76,7 +76,7 @@ actor Renderer {
     private(set) var uiUpdateCoordinator: UIUpdateCoordinator?
 
     /// Coordinates parameter smoothing and animation updates without blocking MainActor
-    private(set) var parameterUpdateCoordinator: ParameterUpdateCoordinator?
+    private(set) var sceneFrameCoordinator: SceneFrameCoordinator?
 
     // Cached constant matrices (computed once, reused every frame)
     let cachedRotationMatrix: matrix_float4x4
@@ -312,7 +312,7 @@ actor Renderer {
     // damped source levels, the triplet-gain cache, and the reusable operation
     // buffer. The same engine type backs the macOS render path so the
     // response-curve / LFO / dispatch math lives in exactly one place.
-    private let musicReactiveEngine = MusicReactiveEngine()
+
 
     // Lifetime is bounded to init/deinit; the task body still hops back onto the actor.
     nonisolated(unsafe) private var setupTask: Task<Void, Never>?
@@ -435,7 +435,7 @@ actor Renderer {
         self.uiUpdateCoordinator = UIUpdateCoordinator(appModel: appModel)
 
         // Initialize parameter update coordinator to batch smoothing/animation updates
-        self.parameterUpdateCoordinator = ParameterUpdateCoordinator(appModel: appModel)
+        self.sceneFrameCoordinator = SceneFrameCoordinator(appModel: appModel)
 
         // Pre-compute constant rotation matrix (never changes)
         self.cachedRotationMatrix = matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
@@ -1220,110 +1220,33 @@ actor Renderer {
         self.updateHandTracking(atTime: time)
         frameBreakdown.handTrackingMs = (CACurrentMediaTime() - handTrackingStart) * 1000.0
 
-        // Update scene animation playback on MainActor
-        // Batched with audio frame updates into a single MainActor dispatch to reduce overhead
-        let animDelta = TimeInterval(cachedDeltaTime)
-        
         let settingsUpdateStart = CACurrentMediaTime()
-        settings.interpolateToTargets(deltaTime: cachedDeltaTime)
-        settings.updateLimitFlash(deltaTime: cachedDeltaTime)
-        settings.updateColorSchemeTransition(deltaTime: cachedDeltaTime,
-                                             mixedImmersionActive: appModel.immersionStyleForRenderer == .mixed)
-        frameBreakdown.settingsUpdateMs = (CACurrentMediaTime() - settingsUpdateStart) * 1000.0
-        
-        // === AUDIO PIPELINE ===
-        // Renderers consume one coherent hub snapshot. Source discovery,
-        // permission/lifecycle, fallback policy, and feature mixing all live
-        // behind AudioHub rather than being reimplemented per render path.
-        let backgroundCpuStart = CACurrentMediaTime()
-        let isAudioMode = settings.lightingMode == .audioReactive || settings.lightingMode == .visualizer || settings.fractalAudioReactiveEnabled
-        let audioSnapshot = appModel.audioHub.latestSnapshot()
-        let shouldUpdateAnimation = settings.isAnimationPlaying
-        
-        // === PARAMETER UPDATE COORDINATION ===
-        // Use ParameterUpdateCoordinator to batch animation/audio updates
-        // Prevents per-frame MainActor blocking that causes UI lag during heavy rendering
-        parameterUpdateCoordinator?.scheduleParameterUpdates(
-            shouldUpdateAnimation: shouldUpdateAnimation,
-            shouldUpdateAudio: isAudioMode,
-            deltaTime: animDelta,
-            currentTime: time
-        )
-        
-        if isAudioMode {
-            // Cached flag: avoids copying the mappings array out of the lock
-            // and scanning it every frame.
-            let hasEnabledFingerInputMapping = settings.hasEnabledFingerInputMapping
-
-            // Sensitivity multipliers from user settings
-            let bassSens = settings.bassSensitivity
-            let midSens = settings.midSensitivity
-            let trebleSens = settings.trebleSensitivity
-            let beatSens = settings.beatSensitivity
-            let features = audioSnapshot.mixed
-
-            let useFingerInput = hasEnabledFingerInputMapping
-            let processMusicReactive = settings.fractalAudioReactiveEnabled
-                && (audioSnapshot.isActive || useFingerInput)
-
-            // An inactive snapshot is `.empty` with all-zero features (the
-            // mixer never pairs isActive == false with live values), so the
-            // scaled levels are already zero without an explicit gate. The
-            // shared mapper additionally zeroes non-finite features — the
-            // visionOS path previously had no finite guard (tech debt #26).
-            let bassLevel = AudioBandMapping.scaledLevel(features.bass, sensitivity: bassSens)
-            let midLevel = AudioBandMapping.scaledLevel(features.mid, sensitivity: midSens)
-            let trebleLevel = AudioBandMapping.scaledLevel(features.treble, sensitivity: trebleSens)
-            let beatLevel = AudioBandMapping.scaledLevel(features.onset, sensitivity: beatSens)
-            let overallLevel = AudioBandMapping.scaledLevel(features.overall, sensitivity: 1.0)
-            settings.bassLevel = bassLevel
-            settings.midLevel = midLevel
-            settings.trebleLevel = trebleLevel
-            settings.beatIntensity = beatLevel
-            settings.audioLevel = overallLevel
-
-            let sanitizePinch: (Float) -> Float = {
-                min(1.0, max(0.0, $0))
-            }
-            let leftHandPinch = latestSpatialHandPose?.leftHand
-            let rightHandPinch = latestSpatialHandPose?.rightHand
-
-            // Music drives fractal geometry AND effects (Fractal Forge-inspired).
-            // The aggregation above produced the per-band levels; the shared engine
-            // applies damping, response curves, the LFO overlay, and dispatch.
-            if processMusicReactive {
-                let bandLevels = BandLevels(
-                    bass: bassLevel,
-                    mid: midLevel,
-                    treble: trebleLevel,
-                    beat: beatLevel,
-                    overall: overallLevel,
-                    leftIndexPinch: sanitizePinch(leftHandPinch?.indexPinch ?? 0),
-                    leftMiddlePinch: sanitizePinch(leftHandPinch?.middlePinch ?? 0),
-                    leftRingPinch: sanitizePinch(leftHandPinch?.ringPinch ?? 0),
-                    rightIndexPinch: sanitizePinch(rightHandPinch?.indexPinch ?? 0),
-                    rightMiddlePinch: sanitizePinch(rightHandPinch?.middlePinch ?? 0),
-                    rightRingPinch: sanitizePinch(rightHandPinch?.ringPinch ?? 0)
-                )
-                musicReactiveEngine.process(bandLevels: bandLevels,
-                                            settings: settings,
-                                            deltaTime: cachedDeltaTime,
-                                            pipeline: appModel.parameterPipeline)
-            } else {
-                musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
-            }
-        } else {
-            musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
+        let left = latestSpatialHandPose?.leftHand
+        let right = latestSpatialHandPose?.rightHand
+        func pinch(_ value: Float?) -> Float {
+            guard let value, value.isFinite else { return 0 }
+            return min(1, max(0, value))
         }
-        frameBreakdown.backgroundCpuMs = (CACurrentMediaTime() - backgroundCpuStart) * 1000.0
+        let input = SceneFrameInput(
+            timestamp: CACurrentMediaTime(),
+            mixedImmersion: appModel.immersionStyleForRenderer == .mixed,
+            fingers: BandLevels(
+                leftIndexPinch: pinch(left?.indexPinch),
+                leftMiddlePinch: pinch(left?.middlePinch),
+                leftRingPinch: pinch(left?.ringPinch),
+                rightIndexPinch: pinch(right?.indexPinch),
+                rightMiddlePinch: pinch(right?.middlePinch),
+                rightRingPinch: pinch(right?.ringPinch)
+            )
+        )
+        let evaluatedFrame = sceneFrameCoordinator?.frame(input)
+            ?? EvaluatedSceneFrame.capture(settings, at: input.timestamp)
+        let settingsSnapshot = evaluatedFrame.settings
+        frameBreakdown.settingsUpdateMs = (CACurrentMediaTime() - settingsUpdateStart) * 1000.0
 
-        let snapshotStart = CACurrentMediaTime()
-        let settingsSnapshot = settings.snapshot()
-        frameBreakdown.snapshotMs = (CACurrentMediaTime() - snapshotStart) * 1000.0
-        
         let updateGameStateStart = CACurrentMediaTime()
         let updateGameStateTraceState = RenderTrace.begin("Update Game State")
-        let framePreparation = self.updateGameState(drawable: drawable, settingsSnapshot: settingsSnapshot)
+        let framePreparation = self.updateGameState(drawable: drawable, settingsSnapshot: settingsSnapshot, evaluationTime: evaluatedFrame.timestamp)
         lastSubmittedEnvironmentGrid = framePreparation.environmentGrid
         // `EnvScrunchParams.gridAddress` is a bindless pointer, so Metal cannot
         // infer its owner from an ordinary buffer binding. Hold the frame's exact

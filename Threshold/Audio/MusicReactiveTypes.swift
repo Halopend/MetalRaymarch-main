@@ -329,7 +329,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         // ParameterCatalog facet (Slice 5). Formula param slots + legacy Mandelbox
         // aliases (no catalog facet) all group as .geometry.
         if isSpaceWarp { return .transform }
-        if let id = parameterTargetID, let facet = ParameterCatalog.byID[id]?.music { return facet.category }
+        if let id = parameterTargetID, let facet = RenderParameterCatalog.byID[id]?.music { return facet.category }
         return .geometry
     }
 
@@ -388,7 +388,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         // Routed targets project from the catalog facet (Slice 5). The remaining
         // formula param slots + legacy Mandelbox aliases keep their per-slot defaults.
         if let slot = spaceWarpSlot { return [.bass, .mid, .treble][slot % 3] }
-        if let id = parameterTargetID, let facet = ParameterCatalog.byID[id]?.music { return facet.defaultSource }
+        if let id = parameterTargetID, let facet = RenderParameterCatalog.byID[id]?.music { return facet.defaultSource }
         switch self {
         case .formulaParam0, .formulaParam4, .formulaParam8, .formulaParam12, .foldingLimit:
             return .bass
@@ -403,7 +403,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     var defaultResponseCurve: ResponseCurve {
         // Routed targets project from the catalog facet (Slice 5); formula slots +
         // legacy Mandelbox aliases all default to .sinusoidal.
-        if let id = parameterTargetID, let facet = ParameterCatalog.byID[id]?.music { return facet.defaultResponseCurve }
+        if let id = parameterTargetID, let facet = RenderParameterCatalog.byID[id]?.music { return facet.defaultResponseCurve }
         return .sinusoidal
     }
 
@@ -412,7 +412,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         // legacy Mandelbox aliases carry no flashing risk. (Legacy foldingLimit/
         // sphereRadius resolve to a non-catalog formula id, so they fall through to
         // false — matching the prior `self.migrated` mapping to formulaParam1/2.)
-        if let id = parameterTargetID, let facet = ParameterCatalog.byID[id]?.music { return facet.hasFlashingRisk }
+        if let id = parameterTargetID, let facet = RenderParameterCatalog.byID[id]?.music { return facet.hasFlashingRisk }
         return false
     }
 

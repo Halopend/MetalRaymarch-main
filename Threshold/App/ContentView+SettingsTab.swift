@@ -689,7 +689,7 @@ extension ContentView {
                             exportShareItem = ExportShareItem(url: url)
                         }
                     } label: {
-                        Label("Export Preset (.threshscene)", systemImage: AppIcons.docBadgeArrowUp)
+                        Label("Export Scene (.thresh)", systemImage: AppIcons.docBadgeArrowUp)
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
@@ -710,7 +710,7 @@ extension ContentView {
                             exportShareItem = ExportShareItem(url: url)
                         }
                     } label: {
-                        Label("Export Music Preset (.threshmp)", systemImage: AppIcons.musicNoteList)
+                        Label("Export Music-Reactive Scene (.thresh)", systemImage: AppIcons.musicNoteList)
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
@@ -727,7 +727,7 @@ extension ContentView {
                         .font(.headline)
                     Spacer()
                 }
-                Text("Export saved presets. Presets with audio mappings export as music presets.")
+                Text("Export saved scenes. Audio mappings stay inside the .thresh file.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -744,7 +744,7 @@ extension ContentView {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(preset.name).font(.subheadline.weight(.medium))
                                 HStack(spacing: 6) {
-                                    Text(".\(ThresholdExportFormat.preset(hasMusic: hasMusic).ext)")
+                                    Text(".\(ThresholdExportFormat.scenePreset.ext)")
                                     if hasMusic {
                                         Label("Music", systemImage: AppIcons.musicNote)
                                     }

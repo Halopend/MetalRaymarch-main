@@ -17,6 +17,7 @@ enum AppLifecycle {
         case .inactive, .background:
             if !keepActiveInBackground {
                 appModel.isAppActive = false
+                appModel.sceneFrameEvaluator.resetClock()
             }
             appModel.saveLastState()
             Task { @MainActor in

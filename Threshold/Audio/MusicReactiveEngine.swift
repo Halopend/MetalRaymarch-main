@@ -2,11 +2,9 @@ import Foundation
 
 /// Per-frame audio band levels feeding the music-reactive engine.
 ///
-/// Each platform computes these from whatever audio sources are available to it
-/// (visionOS blends microphone + Apple Music; macOS uses the analyzer feed), then
-/// hands them to the shared `MusicReactiveEngine` so the response-curve / LFO /
-/// dispatch math lives in exactly one place.
-struct BandLevels {
+/// SceneFrameEvaluator scales the shared AudioHub snapshot and combines it with
+/// optional platform finger input before advancing music response curves.
+struct BandLevels: Sendable {
     var bass: Float = 0
     var mid: Float = 0
     var treble: Float = 0
@@ -23,12 +21,8 @@ struct BandLevels {
 /// Shared, platform-neutral engine that turns aggregated audio band levels into
 /// additive `ParameterOperation`s for the layer stack.
 ///
-/// Both the visionOS `Renderer` (an `actor`) and the macOS `ThresholdMacRenderView`
-/// (a `@MainActor` class) own a private instance. The engine carries no shared
-/// global state — each owner has its own — so it is safe to use from either
-/// isolation domain. All mutable per-frame state (oscillator phases, decay/drift
-/// trackers, damped source levels, the triplet-gain cache, and the reusable
-/// operation buffer) lives here instead of being duplicated in each renderer.
+/// Owned by the session's SceneFrameEvaluator. Render backends consume its
+/// completed output rather than advancing independent oscillators/envelopes.
 final class MusicReactiveEngine {
 
     /// Per-mapping data that is expensive or redundant to resolve every frame.
@@ -119,7 +113,8 @@ final class MusicReactiveEngine {
     func process(bandLevels: BandLevels,
                  settings: RenderSettings,
                  deltaTime dt: Float,
-                 pipeline: ParameterPipeline) {
+                 pipeline: ParameterPipeline,
+                 timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) {
         layerActive = true
 
         let sceneGeneration = settings.sceneLoadGeneration
@@ -330,6 +325,7 @@ final class MusicReactiveEngine {
                         // The music layer is itself additive, so it must receive the
                         // raw offset to apply on top of the current base value.
                         value: finalOffset,
+                        timestamp: timestamp,
                         frameIndex: frameIndex,
                         smoothing: ParameterOperationSmoothing(
                             smoothingTime: mapping.smoothingTime
@@ -346,6 +342,14 @@ final class MusicReactiveEngine {
             pipeline.dispatchAudio(operationsBuffer, settings: settings)
             frameIndex &+= 1
         }
+    }
+
+    /// Forget the outgoing scene without restoring any of its parameter values.
+    func discardState() {
+        layerActive = false
+        lastSceneLoadGeneration = nil
+        clearCurveState()
+        resetDamping()
     }
 
     /// Clears the active music layer (if any) and resets all per-target and

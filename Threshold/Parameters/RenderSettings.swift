@@ -41,20 +41,41 @@ final class RenderSettings: @unchecked Sendable {
     static let infiniteZoomMaxRate: Float = 1.5    // cap on |log-units/sec|
     static let infiniteZoomMinScale: Float = 0.02  // deepest zoom-out (detailScale)
     static let infiniteZoomMaxScale: Float = 4096.0 // deepest zoom-in before octave-rebase is needed
-    // os_unfair_lock is a low-level spinlock - fastest for short critical sections
-    private var _lock = os_unfair_lock()
-    /// Scene loads, preview rollback, and animation playback mutate the live
-    /// renderer but must not rewrite the user's device-preference blobs. Nested
-    /// transactions are supported because a scene restore can call domain helpers
-    /// that also suppress persistence.
+    // A scene transaction nests existing property accessors. One recursive lock
+    // protects both individual accesses and complete scene/evaluation commits;
+    // readers cannot capture the middle of a preset or keyframe application.
+    private let _lock = NSRecursiveLock()
     private var _persistenceSuppressionDepth: Int = 0
-    
-    // Inline lock/unlock for zero function call overhead
+    private var _sceneReplacementDepth = 0
+
     @inline(__always)
     private func withLock<T>(_ body: () -> T) -> T {
-        os_unfair_lock_lock(&_lock)
-        defer { os_unfair_lock_unlock(&_lock) }
+        _lock.lock()
+        defer { _lock.unlock() }
         return body()
+    }
+
+    /// Synchronous only: never await, perform IO, or acquire a renderer lock in
+    /// this scope. ParameterPipeline locks are always acquired AFTER this lock.
+    @discardableResult
+    func withSceneTransaction<T>(_ body: () throws -> T) rethrows -> T {
+        _lock.lock()
+        defer { _lock.unlock() }
+        return try body()
+    }
+
+    /// Replacing authored scene state invalidates frame/modulation history once
+    /// at the outermost commit, including direct preset and preview restores.
+    @discardableResult
+    func withSceneReplacement<T>(_ body: () throws -> T) rethrows -> T {
+        try withPersistenceSuppressed {
+            _sceneReplacementDepth += 1
+            defer {
+                _sceneReplacementDepth -= 1
+                if _sceneReplacementDepth == 0 { _sceneLoadGeneration &+= 1 }
+            }
+            return try body()
+        }
     }
 
     /// Run mutations without feeding their intermediate values back into
@@ -62,13 +83,11 @@ final class RenderSettings: @unchecked Sendable {
     /// scene/session state and device/user preferences.
     @discardableResult
     func withPersistenceSuppressed<T>(_ body: () throws -> T) rethrows -> T {
-        withLock { _persistenceSuppressionDepth += 1 }
-        defer {
-            withLock {
-                _persistenceSuppressionDepth = max(0, _persistenceSuppressionDepth - 1)
-            }
+        try withSceneTransaction {
+            _persistenceSuppressionDepth += 1
+            defer { _persistenceSuppressionDepth -= 1 }
+            return try body()
         }
-        return try body()
     }
 
     private var persistenceIsSuppressed: Bool {
@@ -535,6 +554,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _manualOffsetBloomStrength: Float = 0.0
     private var _manualOffsetFogIntensity: Float = 0.0
     private var _manualOffsetSaturation: Float = 0.0
+    private var _manualOffsetHueSpeed: Float = 0.0
     private var _manualOffsetFormulaParams: [Float] = Array(repeating: 0.0, count: 16)
 
     // === ANIMATION AUDIO (MUSIC) OFFSETS ===
@@ -1204,7 +1224,7 @@ final class RenderSettings: @unchecked Sendable {
     /// invoked outside any lock, so it composes with the lock-taking property setters
     /// without reentrancy.
     func audioModulate(targetID: String, value: Float) {
-        guard let descriptor = ParameterCatalog.byID[targetID] else { return }
+        guard let descriptor = RenderParameterCatalog.byID[targetID] else { return }
         descriptor.settings.write(self, descriptor.clamp(value))
     }
     
@@ -3264,6 +3284,7 @@ final class RenderSettings: @unchecked Sendable {
                 colorMix: _colorMix,
                 lightingPlay: _lightingPlay,
                 lightingMode: _lightingMode,
+                convolutionEffect: _convolutionEffect,
                 sphericalInversionMode: _sphericalInversionMode,
                 sphericalInversionRadius: _sphericalInversionRadius,
                 sphereProjectionEnabled: _sphereProjectionEnabled,
@@ -3619,6 +3640,10 @@ final class RenderSettings: @unchecked Sendable {
     // === ANIMATION AUDIO (MUSIC) OFFSET ACCESSORS ===
     // Set by the parameter dispatcher (music delta) while playing; read by applyKeyframe
     // when it composes the live value on top of the animation base.
+    var manualOffsetHueSpeed: Float {
+        get { withLock { _manualOffsetHueSpeed } }
+        set { withLock { _manualOffsetHueSpeed = newValue } }
+    }
     var animationBaseHueSpeed: Float {
         get { withLock { _animationBaseHueSpeed } }
         set { withLock { _animationBaseHueSpeed = newValue } }
@@ -4017,7 +4042,7 @@ final class RenderSettings: @unchecked Sendable {
     // ═══════════════════════════════════════════════════════════════════════════
     // BATCHED ANIMATION KEYFRAME APPLY
     // One lock acquisition for the ~45 unconditional per-frame writes of
-    // animation playback (90 Hz), replacing one os_unfair_lock round-trip per
+    // animation playback (90 Hz), replacing one settings-lock round-trip per
     // property. Also a coherence fix: the manual/audio offset reads and the
     // writes they compose into can no longer shear against a concurrent
     // render-thread access mid-apply.
@@ -4122,7 +4147,7 @@ final class RenderSettings: @unchecked Sendable {
         if let hueSpeed = batch.hueSpeedBase {
             _sceneDrivesHueSpeed = true
             _animationBaseHueSpeed = hueSpeed
-            _hueRotationEffect.speed = ControlCatalog.hueSpeed.clamp(hueSpeed + _audioOffsetHueSpeed)
+            _hueRotationEffect.speed = ControlCatalog.hueSpeed.clamp(hueSpeed + _manualOffsetHueSpeed + _audioOffsetHueSpeed)
         } else {
             _sceneDrivesHueSpeed = false
         }
@@ -4231,6 +4256,7 @@ final class RenderSettings: @unchecked Sendable {
                 _manualOffsetBloomStrength *= (1.0 - decayRate)
                 _manualOffsetFogIntensity  *= (1.0 - decayRate)
                 _manualOffsetSaturation    *= (1.0 - decayRate)
+                _manualOffsetHueSpeed      *= (1.0 - decayRate)
                 _manualOffsetDetailScale   *= (1.0 - decayRate)
                 // Rotation override is a quaternion: ease it back toward identity via slerp.
                 _manualRotationOffset = simd_slerp(_manualRotationOffset, simd_quatf(ix: 0, iy: 0, iz: 0, r: 1), decayRate)
@@ -4250,6 +4276,7 @@ final class RenderSettings: @unchecked Sendable {
                 if abs(_manualOffsetBloomStrength) < 1e-5 { _manualOffsetBloomStrength = 0 }
                 if abs(_manualOffsetFogIntensity) < 1e-5 { _manualOffsetFogIntensity = 0 }
                 if abs(_manualOffsetSaturation) < 1e-5 { _manualOffsetSaturation = 0 }
+                if abs(_manualOffsetHueSpeed) < 1e-5 { _manualOffsetHueSpeed = 0 }
                 if abs(_manualOffsetDetailScale) < 1e-5 { _manualOffsetDetailScale = 0 }
                 // Snap the rotation override to identity once its angle is negligible.
                 if abs(_manualRotationOffset.real) > 0.999999 { _manualRotationOffset = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1) }
@@ -4555,6 +4582,7 @@ final class RenderSettings: @unchecked Sendable {
             _manualOffsetBloomStrength = 0.0
             _manualOffsetFogIntensity = 0.0
             _manualOffsetSaturation = 0.0
+            _manualOffsetHueSpeed = 0.0
             _manualOffsetFormulaParams = Array(repeating: 0.0, count: 16)
             // Drop any leftover music modulation so it doesn't bake a frozen offset into
             // the baked targets; the dispatcher re-centers music around the user value
@@ -4588,6 +4616,7 @@ final class RenderSettings: @unchecked Sendable {
             _manualOffsetBloomStrength = 0.0
             _manualOffsetFogIntensity = 0.0
             _manualOffsetSaturation = 0.0
+            _manualOffsetHueSpeed = 0.0
             _manualRotationOffset = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
             _manualOffsetDetailScale = 0.0
             _manualOffsetFormulaParams = Array(repeating: 0.0, count: 16)

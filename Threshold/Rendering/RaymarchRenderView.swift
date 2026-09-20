@@ -633,7 +633,7 @@ final class ViewportRenderer {
     private let clearColor: MTLClearColor
     private let inputController: ViewportInputAccumulator
     private let uiUpdateCoordinator: UIUpdateCoordinator
-    private let parameterUpdateCoordinator: ParameterUpdateCoordinator
+    private let sceneFrameCoordinator: SceneFrameCoordinator
     private let mesh: MTKMesh
     private let meshBindings: [CachedMeshBinding]
     private let uniformBuffers: [MTLBuffer]
@@ -693,7 +693,7 @@ final class ViewportRenderer {
 
     // Shared music-reactive engine — same type used by the visionOS `Renderer`,
     // so the response-curve / LFO / dispatch math lives in exactly one place.
-    private let musicReactiveEngine = MusicReactiveEngine()
+    private var evaluatedFrame: EvaluatedSceneFrame?
 
     // Tilt-to-orbit sensor. On macOS this is the Intel-MacBook Sudden Motion
     // Sensor (IOKit); on iPad it is the CoreMotion gyroscope/attitude reader.
@@ -720,7 +720,7 @@ final class ViewportRenderer {
         self.clearColor = clearColor
                 self.inputController = inputController
                 self.uiUpdateCoordinator = UIUpdateCoordinator(appModel: appModel)
-                self.parameterUpdateCoordinator = ParameterUpdateCoordinator(appModel: appModel)
+                self.sceneFrameCoordinator = SceneFrameCoordinator(appModel: appModel)
 
         guard let commandQueue = device.makeCommandQueue() else { return nil }
         self.commandQueue = commandQueue
@@ -839,7 +839,7 @@ final class ViewportRenderer {
         let frameSlot = uniformBufferIndex
         let uniformBuffer = uniformBuffers[frameSlot]
         uniformBufferIndex = (uniformBufferIndex + 1) % uniformBuffers.count
-        writeUniforms(to: uniformBuffer, appModel: appModel)
+        writeUniforms(to: uniformBuffer, appModel: appModel, frame: prepareSceneFrame(appModel: appModel, benchmark: true))
 
         let benchBuffer = benchCounterBuffers[frameSlot]
         let collectSteps = BenchmarkManager.shared.shouldCollectSteps
@@ -987,7 +987,8 @@ final class ViewportRenderer {
         // format so the raymarch pipeline needs no changes; only sub-native
         // scales engage a scaler. Temporal upscaling is preferred when supported
         // (better stability/detail); the spatial scaler is the fallback.
-        let resolutionScale = appModel.renderSettings.resolutionScale
+        let sceneFrame = prepareSceneFrame(appModel: appModel)
+        let resolutionScale = sceneFrame.settings.resolutionScale
         var temporalPass: (color: MTLTexture, depth: MTLTexture, motion: MTLTexture, output: MTLTexture)?
         var spatialPass: (color: MTLTexture, depth: MTLTexture, output: MTLTexture)?
         if resolutionScale < 0.985, blitPipelineState != nil {
@@ -1095,7 +1096,7 @@ final class ViewportRenderer {
 
         // Convolution needs a readable source texture. Preserve the zero-cost
         // native path unless a valid convolution is actually enabled.
-        let needsOutputFilter = appModel.renderSettings.convolutionEffect.isActive &&
+        let needsOutputFilter = sceneFrame.settings.convolutionEffect.isActive &&
             blitPipelineState != nil
 
         // The direct (native-resolution) path renders straight into the drawable
@@ -1147,6 +1148,7 @@ final class ViewportRenderer {
         var blitParams = writeUniforms(
             to: uniformBuffer,
             appModel: appModel,
+            frame: sceneFrame,
             deferEdgeDetection: didUpscale
         )
 
@@ -1182,7 +1184,7 @@ final class ViewportRenderer {
         // representative of display pacing, so leave these diagnostics empty
         // there instead of substituting command-buffer completion timestamps.
         let framePacingTracker = self.framePacingTracker
-        let submittedSceneGeneration = appModel.renderSettings.sceneLoadGeneration
+        let submittedSceneGeneration = sceneFrame.sceneGeneration
         drawable.addPresentedHandler { drawable in
             let event = framePacingTracker.withLock { tracker in
                 tracker.recordPresentation(at: drawable.presentedTime)
@@ -1422,7 +1424,7 @@ final class ViewportRenderer {
         // No generic pipeline yet: don't queue specialized builds either, so the
         // first-launch compile isn't competing with itself for the GPU compiler.
         guard let genericPipeline = genericPipelineSlot.current else { return nil }
-        let settings = appModel.renderSettings
+        let settings = evaluatedFrame?.settings ?? appModel.renderSettings.snapshot()
         // deIterationMismatch biases the baked FC_FRACTAL_ITERATIONS (geometry fold count)
         // while the DE stays normalized to the unbiased count (RenderPrecompute) — reproduces
         // the "Accidental Sphere Projection" under-fold. Negative → fewer folds → sphere.
@@ -1466,7 +1468,7 @@ final class ViewportRenderer {
         // desync (no stale-pipeline "transforms silently vanish" bug). Toggling the
         // first transform flips the key → cache miss → the generic pipeline (FC unset
         // → defaults ON) renders correctly while the new variant compiles.
-        let hasSpaceWarp = !settings.spaceWarpStack.isEmpty || custom.hash != nil
+        let hasSpaceWarp = settings.spaceWarpStack.count > 0 || custom.hash != nil
         // Environment Scrunch and the hand field each add a tail to EVERY DE.
         // Scanned surroundings and hand tracking are visionOS-only renderer
         // inputs, so the desktop variants always compile both tails out.
@@ -1646,41 +1648,34 @@ final class ViewportRenderer {
         return nativePostProcessTexture
     }
 
-    @discardableResult
-    private func writeUniforms(to buffer: MTLBuffer,
-                               appModel: AppModel,
-                               deferEdgeDetection: Bool = false) -> ViewportBlitParams {
+    private func prepareSceneFrame(appModel: AppModel, benchmark: Bool = false) -> EvaluatedSceneFrame {
         let now = CACurrentMediaTime()
         let deltaTime = max(1.0 / 240.0, min(now - lastFrameTime, 1.0 / 15.0))
         lastFrameTime = now
 
         let settings = appModel.renderSettings
         applyViewportInput(appModel: appModel, settings: settings, deltaTime: deltaTime)
-        settings.interpolateToTargets(deltaTime: Float(deltaTime))
-        settings.updateLimitFlash(deltaTime: Float(deltaTime))
-        settings.updateColorSchemeTransition(deltaTime: Float(deltaTime),
-                                             mixedImmersionActive: appModel.immersionStyleForRenderer == .mixed)
+        let frame: EvaluatedSceneFrame
+        if benchmark {
+            // Headless benchmark callers intentionally render immediately after
+            // setting a scene, without servicing the application's main run loop.
+            frame = EvaluatedSceneFrame.capture(settings, at: now, deltaTime: deltaTime)
+        } else {
+            frame = sceneFrameCoordinator.frame(SceneFrameInput(
+                timestamp: now,
+                mixedImmersion: appModel.immersionStyleForRenderer == .mixed
+            ))
+        }
+        evaluatedFrame = frame
+        return frame
+    }
 
-        let isAudioMode = settings.lightingMode == .audioReactive ||
-            settings.lightingMode == .visualizer ||
-            settings.fractalAudioReactiveEnabled
-        let audioSnapshot = appModel.audioHub.latestSnapshot()
-
-        parameterUpdateCoordinator.scheduleParameterUpdates(
-            shouldUpdateAnimation: settings.isAnimationPlaying,
-            shouldUpdateAudio: isAudioMode,
-            deltaTime: deltaTime,
-            currentTime: now
-        )
-        updateAudioLevels(settings: settings,
-                          isAudioMode: isAudioMode,
-                          snapshot: audioSnapshot)
-        updateMusicReactiveParameters(appModel: appModel,
-                                      settings: settings,
-                                      isAudioMode: isAudioMode,
-                                      snapshot: audioSnapshot,
-                                      deltaTime: Float(deltaTime))
-
+    @discardableResult
+    private func writeUniforms(to buffer: MTLBuffer,
+                               appModel: AppModel,
+                               frame: EvaluatedSceneFrame,
+                               deferEdgeDetection: Bool = false) -> ViewportBlitParams {
+        let now = CACurrentMediaTime()
         let framePacing = framePacingTracker.withLock { $0.snapshot() }
         uiUpdateCoordinator.scheduleUIUpdate(fps: framePacing.fps,
                                              gpuMs: gpuFrameMsHolder.withLock { $0 },
@@ -1691,16 +1686,16 @@ final class ViewportRenderer {
                                              hitchCount: framePacing.hitchCount,
                                              currentTime: now)
 
-        let snapshot = settings.snapshot()
+        let snapshot = frame.settings
         updateTemporalInvalidationState(settings: snapshot)
         // benchFixedTime pins animation time for the harness's PNG-capture frame so
         // visual-regression diffs are deterministic (color cycles/warps otherwise
         // land at a run-dependent phase). nil in normal use and for perf frames.
-        let effectiveElapsed = benchFixedTime ?? Float(now - startTime)
+        let effectiveElapsed = benchFixedTime ?? Float(max(0, frame.timestamp - startTime))
         var uniforms = makeUniforms(settings: snapshot,
-                                    animationPlaying: settings.isAnimationPlaying,
+                                    animationPlaying: frame.animationPlaying,
                                     elapsedTime: effectiveElapsed,
-                                    deltaTime: Float(deltaTime))
+                                    deltaTime: Float(min(frame.deltaTime, 1.0 / 15.0)))
         let edgeEnabled = deferEdgeDetection && uniforms.colorScheme.edgeDetectionEnabled != 0
         let edgeRadius = edgeEnabled
             ? Float(max(1, min(3, uniforms.colorScheme.edgeDetectionWindowRadius)))
@@ -1712,7 +1707,7 @@ final class ViewportRenderer {
             uniforms.colorScheme.edgeDetectionThreshold,
             uniforms.colorScheme.edgeDetectionSoftness
         )
-        let convolution = settings.convolutionEffect
+        let convolution = snapshot.convolutionEffect
         let parsedKernel = convolution.parsedKernel
         if convolution.isActive {
             blitParams.convolution = SIMD4<Float>(
@@ -1863,89 +1858,6 @@ final class ViewportRenderer {
             settings.targetWorldRotation = targetRotation
             settings.targetDetailScale = targetDetailScale
         }
-    }
-
-    private func updateAudioLevels(settings: RenderSettings,
-                                   isAudioMode: Bool,
-                                   snapshot: AudioFeatureSnapshot) {
-        guard isAudioMode else { return }
-
-        guard snapshot.isActive else {
-            settings.bassLevel = 0
-            settings.midLevel = 0
-            settings.trebleLevel = 0
-            settings.beatIntensity = 0
-            settings.audioLevel = 0
-            return
-        }
-
-        let bassSensitivity = settings.bassSensitivity
-        let midSensitivity = settings.midSensitivity
-        let trebleSensitivity = settings.trebleSensitivity
-        let beatSensitivity = settings.beatSensitivity
-        let features = snapshot.mixed
-
-        guard features.isFinite else {
-            renderLogger.error("Non-finite AudioHub snapshot detected — zeroing audio inputs")
-            settings.bassLevel = 0
-            settings.midLevel = 0
-            settings.trebleLevel = 0
-            settings.beatIntensity = 0
-            settings.audioLevel = 0
-            return
-        }
-
-        settings.bassLevel = AudioBandMapping.scaledLevel(features.bass, sensitivity: bassSensitivity)
-        settings.midLevel = AudioBandMapping.scaledLevel(features.mid, sensitivity: midSensitivity)
-        settings.trebleLevel = AudioBandMapping.scaledLevel(features.treble, sensitivity: trebleSensitivity)
-        settings.beatIntensity = AudioBandMapping.scaledLevel(features.onset, sensitivity: beatSensitivity)
-        settings.audioLevel = AudioBandMapping.scaledLevel(features.overall, sensitivity: 1.0)
-    }
-
-    private func updateMusicReactiveParameters(appModel: AppModel,
-                                               settings: RenderSettings,
-                                               isAudioMode: Bool,
-                                               snapshot: AudioFeatureSnapshot,
-                                               deltaTime: Float) {
-        // No finger-input bypass here: this render path has no hand tracking
-        // (pinch levels would be hardwired zero), and letting a finger mapping
-        // keep the engine alive would hold a permanent input-offset deviation
-        // with no audio playing. visionOS's Renderer keeps its bypass — the
-        // pinches are real inputs there.
-        guard isAudioMode,
-              settings.fractalAudioReactiveEnabled,
-              snapshot.isActive else {
-            musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
-            return
-        }
-
-        // The aggregation in `updateAudioLevels` produced the per-band levels; the
-        // shared engine applies damping, response curves, the LFO overlay, and dispatch.
-        let bass    = settings.bassLevel
-        let mid     = settings.midLevel
-        let treble  = settings.trebleLevel
-        let beat    = settings.beatIntensity
-        let overall = settings.audioLevel
-
-        // A non-finite band level here means something slipped past the earlier
-        // sanitization; bail out to prevent musicReactiveEngine from amplifying it.
-        guard bass.isFinite, mid.isFinite, treble.isFinite, beat.isFinite, overall.isFinite else {
-            renderLogger.error("Non-finite band level in updateMusicReactiveParameters — skipping engine dispatch")
-            musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
-            return
-        }
-
-        let bandLevels = BandLevels(
-            bass: bass,
-            mid: mid,
-            treble: treble,
-            beat: beat,
-            overall: overall
-        )
-        musicReactiveEngine.process(bandLevels: bandLevels,
-                                    settings: settings,
-                                    deltaTime: deltaTime,
-                                    pipeline: appModel.parameterPipeline)
     }
 
     /// Reads the Sudden Motion Sensor and injects tilt as orbit input when

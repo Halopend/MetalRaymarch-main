@@ -92,7 +92,10 @@
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>
-				<string>threshscene</string>
+				<array>
+					<string>thresh</string>
+					<string>threshscene</string>
+				</array>
 				<key>public.mime-type</key>
 				<string>application/vnd.puppypower.threshold.scene+json</string>
 			</dict>

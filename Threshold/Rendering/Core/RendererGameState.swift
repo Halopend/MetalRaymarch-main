@@ -202,7 +202,7 @@ extension Renderer {
         return state
     }
 
-    func updateGameState(drawable: LayerRenderer.Drawable, settingsSnapshot: RenderSettingsSnapshot) -> RendererFramePreparation {
+    func updateGameState(drawable: LayerRenderer.Drawable, settingsSnapshot: RenderSettingsSnapshot, evaluationTime: TimeInterval) -> RendererFramePreparation {
         /// Update any game state before rendering
 
         // Use already-smoothed position from settings (interpolated above)
@@ -326,7 +326,7 @@ extension Renderer {
         // Live elapsed-time clock (replaces the removed frozen AppClock) so the
         // visionOS path animates ambient time-motion — dither, spring vibration,
         // light-orbit drift — matching the Mac/iOS path (RaymarchRenderView).
-        let frameTime = Float(CACurrentMediaTime() - renderStartTime)
+        let frameTime = Float(max(0, evaluationTime - renderStartTime))
         let precomputedFractal = RenderPrecompute.makePrecomputedFractal(from: settingsSnapshot)
         let precomputedLighting = RenderPrecompute.makePrecomputedLighting(
             time: frameTime,

@@ -255,21 +255,23 @@ extension AppModel {
         customSceneDiagnostic("🔬 [CSDiag] applyLoadedScene preparePipelineHandler completed; loading preset NOW")
         // Snapshot the currently displayed parameters so the load can ease
         // from them toward the new preset.
-        renderSettings.beginSceneTransitionSnapshot()
-        presetManager.loadPreset(
-            preset,
-            into: renderSettings,
-            includePerformance: false,
-            resetEnvironment: true
-        )
-        // The preset is now authoritative. Discard layer-stack history from
-        // the previous scene before the next audio tick can resolve an old
-        // music base and write it back over the newly loaded values.
-        parameterPipeline.resetForSceneLoad()
-        // Ease displayed parameters toward the new preset's values over the
-        // configured "Same Scene Transition Time" instead of snapping.
-        renderSettings.commitSceneTransition()
-        applyPresetGestureOverridesIfNeeded(for: preset)
+        renderSettings.withSceneTransaction {
+            renderSettings.beginSceneTransitionSnapshot()
+            presetManager.loadPreset(
+                preset,
+                into: renderSettings,
+                includePerformance: false,
+                resetEnvironment: true
+            )
+            // The preset is now authoritative. Discard layer-stack history from
+            // the previous scene before the next audio tick can resolve an old
+            // music base and write it back over the newly loaded values.
+            parameterPipeline.resetForSceneLoad()
+            // Ease displayed parameters toward the new preset's values over the
+            // configured "Same Scene Transition Time" instead of snapping.
+            renderSettings.commitSceneTransition()
+            applyPresetGestureOverridesIfNeeded(for: preset)
+        }
         syncGestureProcessor()
         rememberActiveResetPreset(preset)
         if options.contains(.saveToLibrary) {
