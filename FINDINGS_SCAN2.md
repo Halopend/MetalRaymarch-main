@@ -325,6 +325,42 @@ has the same stale formula but is dead code (no callers); only the comment in
 
 ---
 
+## TEST-CONFIRMED BY THE SUITE RUN (2026-09-18)
+
+The clean+serial `Scripts/build.sh test` run executes **459 tests / 63 suites**;
+452 pass and all 7 reported issues come from the single test below (once the
+`ThresholdTests` deployment target is fixed — see the note at the end).
+
+### N22. Seven bundled Music Presets are missing the "Mac only" tag → guard test is red ✓ verified
+`Threshold/Examples/Music Presets/`: `Backdrop_FDD86F35`, `Balanced_CC1AFEC0`,
+`HYPERDRIVE_BE2ECC4F`, `Pop_art_blue_52FD8780`, `The_Edge_705DC082`,
+`This_one_0B9D54C9`, `Warp_70D1039D` all carry `"tags": []` (7 of 30 files).
+
+`ExampleSceneDecodeTests.bundledMusicPresetsAreMacOnly()`
+(`ThresholdTests/ExampleSceneDecodeTests.swift:112-122`) asserts every bundled
+`.threshmp` includes the Mac-only tag via `SceneTagging.isMacOnly`, and fails on
+each of the seven with "must include the Mac-only scene tag".
+
+Provenance: `f3388695 feat(scenes): Mac-only scene catalog` introduced both the
+assertion and the tag but left these files untagged; `81b62bcf Scene Cleanup`
+then renamed `Leven_18D4B550` → `Backdrop_FDD86F35` without the tag. So the guard
+has been red since `f3388695`, and because the catalog filters Mac-only scenes by
+tag (`PresetManager.macOnlyBundledIDs` / `SceneTagging.isMacOnly`), the seven
+also leak into the non-Mac (iPad/iPhone) scene catalog. Fix: tag the seven
+`["Mac only"]`, or relax the assertion if the intent changed.
+
+### Environment note (test run)
+`Scripts/build.sh test` cannot build the test bundle until the `ThresholdTests`
+target's `MACOSX_DEPLOYMENT_TARGET` matches the app's 26.0. `b727df0a
+("version increase")` changed the three `ThresholdTests` configs from `26.0` to
+`$(RECOMMENDED_MACOSX_DEPLOYMENT_TARGET)` (→ 14.0), so `@testable import
+Threshold` fails with "compiling for macOS 14.0, but module 'Threshold' has a
+minimum deployment target of macOS 26.0". The run above used a local 3-line
+restore to `26.0` (working-tree only). This should be fixed in the project so CI
+can build the tests at all.
+
+---
+
 ## Still open from `FINDINGS.md` (spot-checked, not re-audited)
 
 - `NavigationStore` still encodes + writes `UserDefaults` synchronously on every

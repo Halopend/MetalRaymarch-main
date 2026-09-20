@@ -102,6 +102,27 @@ struct ToggleImmersiveSpaceButton: View {
     }
 }
 
+/// Widths for the Immersive / Window / Mixed switcher. The segmented control
+/// divides its frame evenly between three labels, so it has to be wide enough
+/// that "Immersive" never truncates — the previous 220 pt bottom-bar frame and
+/// ~300 pt launch-window frame left Vision Pro users squinting at the segments.
+/// These are roughly 40–45% wider than the originals.
+enum ImmersionSwitcherMetrics {
+    /// Bottom-bar presentation inside the immersive workspace (was 220 pt).
+    static let bottomBarWidth: CGFloat = 320
+
+    /// Launch-window presentation (was effectively capped at 300 pt by the
+    /// 360 pt window minus its 30 pt padding).
+    static let launchWindowPickerWidth: CGFloat = 448
+
+    /// Launch window width: the picker plus its 30 pt padding on each side.
+    static let launchWindowWidth: CGFloat = launchWindowPickerWidth + 60
+
+    /// The launch window never shrinks below this, so the switcher keeps its
+    /// readable width even if something else in the card is narrow.
+    static let launchWindowMinimumWidth: CGFloat = 420
+}
+
 #if os(visionOS)
 /// Immersion style picker: Immersive (takes over the whole view; the Digital
 /// Crown dials it down to a window), Window (a persistent portal), or Mixed

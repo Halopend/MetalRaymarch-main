@@ -806,7 +806,7 @@ struct ContentView: View {
 
 #if os(visionOS)
             ImmersionStylePicker()
-                .frame(maxWidth: 320)
+                .frame(maxWidth: ImmersionSwitcherMetrics.launchWindowPickerWidth)
 #endif
 
             VStack(spacing: 8) {
@@ -820,7 +820,14 @@ struct ContentView: View {
             .animation(.easeInOut(duration: 0.2), value: isTransitioning)
         }
         .padding(30)
-        .frame(minWidth: 300, idealWidth: 360, maxWidth: 360, minHeight: 280)
+        // Wide enough for the three Immersive / Window / Mixed segments to stay
+        // legible before the immersive space opens.
+        .frame(
+            minWidth: ImmersionSwitcherMetrics.launchWindowMinimumWidth,
+            idealWidth: ImmersionSwitcherMetrics.launchWindowWidth,
+            maxWidth: ImmersionSwitcherMetrics.launchWindowWidth,
+            minHeight: 280
+        )
     }
     
     // MARK: - Immersive Layout (Sidebar + Content)
@@ -1726,7 +1733,7 @@ struct ContentView: View {
 
 #if os(visionOS)
                 ImmersionStylePicker(showsCaption: false)
-                    .frame(width: 220)
+                    .frame(width: ImmersionSwitcherMetrics.bottomBarWidth)
 #endif
             }
             .frame(maxWidth: .infinity, alignment: .center)
