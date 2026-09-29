@@ -1290,19 +1290,21 @@ extension ContentView {
     /// recompilation, iteration/ray-step budget, render quality, and acceleration.
     private var performanceTuningContent: some View {
         VStack(spacing: 12) {
-            performanceSectionHeader(
+            // Keep the large card trees out of one deeply nested SwiftUI type;
+            // runtime metadata decoding otherwise overflows while opening Tuning.
+            AnyView(performanceSectionHeader(
                 "Tuning",
                 systemImage: "slider.horizontal.3",
                 showsFPSIndicator: !usesPhonePerformanceOrdering
-            )
+            ))
 
             #if os(macOS)
-            performanceReportCard
+            AnyView(performanceReportCard)
             #endif
 
             // ── Budget card: iteration budget + detail budget, with the
             //    Simplified/Advanced goal picker in the header. ──
-            perfCard {
+            AnyView(perfCard {
                 HStack(spacing: 6) {
                     Image(systemName: "chart.bar.fill").foregroundStyle(.cyan)
                     Text("Budget").font(.headline)
@@ -1429,10 +1431,10 @@ extension ContentView {
 
                 // Detail budget (Mac/iOS resolution scale) / Priority (visionOS).
                 performanceQualityControls
-            }
+            })
 
             // ── Renderer Mode card ──
-            perfCard {
+            AnyView(perfCard {
                 HStack(spacing: 6) {
                     Image(systemName: "cpu").foregroundStyle(.cyan)
                     Text("Renderer Mode").font(.headline)
@@ -1460,20 +1462,20 @@ extension ContentView {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-            }
+            })
 
             // ── Acceleration card (already carries its own card chrome) ──
-            fractalAccelerationSection
+            AnyView(fractalAccelerationSection)
 
             // Live performance dashboard sits last so the actionable controls —
             // Budget, Renderer Mode, Acceleration — lead the page on every device.
             #if os(iOS)
             if usesPhonePerformanceOrdering {
-                FPSIndicatorView()
+                AnyView(FPSIndicatorView())
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
             #endif
-            PerformanceMetricsView(cache: cache)
+            AnyView(PerformanceMetricsView(cache: cache))
         }
     }
 
