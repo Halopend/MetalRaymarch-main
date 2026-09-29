@@ -20,6 +20,7 @@ struct LightingConfig: Codable, Equatable, Sendable {
     var bloomEffect: BloomEffect = BloomEffect()
     var edgeDetectionEffect: EdgeDetectionEffect = EdgeDetectionEffect()
     var convolutionEffect: ConvolutionEffect = ConvolutionEffect()
+    var navierStrokesEffect: NavierStrokesEffect = NavierStrokesEffect()
     var fogEffect: FogEffect = FogEffect()
     var gradientCycleEffect: GradientCycleEffect = GradientCycleEffect()
     var linearRailEffect: LinearRailEffect = LinearRailEffect()
@@ -30,7 +31,7 @@ struct LightingConfig: Codable, Equatable, Sendable {
     init() {}
 
     enum CodingKeys: String, CodingKey {
-        case lightingPreset, lightVariationRate, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, edgeDetectionEffect, convolutionEffect, fogEffect
+        case lightingPreset, lightVariationRate, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, edgeDetectionEffect, convolutionEffect, navierStrokesEffect, fogEffect
         case gradientCycleEffect, linearRailEffect, beatFlashEffect, polarRotationEffect, juliaDriftEffect
     }
 
@@ -44,6 +45,7 @@ struct LightingConfig: Codable, Equatable, Sendable {
         bloomEffect = try container.decodeIfPresent(BloomEffect.self, forKey: .bloomEffect) ?? BloomEffect()
         edgeDetectionEffect = try container.decodeIfPresent(EdgeDetectionEffect.self, forKey: .edgeDetectionEffect) ?? EdgeDetectionEffect()
         convolutionEffect = try container.decodeIfPresent(ConvolutionEffect.self, forKey: .convolutionEffect) ?? ConvolutionEffect()
+        navierStrokesEffect = try container.decodeIfPresent(NavierStrokesEffect.self, forKey: .navierStrokesEffect) ?? NavierStrokesEffect()
         fogEffect = try container.decodeIfPresent(FogEffect.self, forKey: .fogEffect) ?? FogEffect()
         gradientCycleEffect = try container.decodeIfPresent(GradientCycleEffect.self, forKey: .gradientCycleEffect) ?? GradientCycleEffect()
         linearRailEffect = try container.decodeIfPresent(LinearRailEffect.self, forKey: .linearRailEffect) ?? LinearRailEffect()
@@ -88,6 +90,7 @@ struct LightingConfig: Codable, Equatable, Sendable {
         )
         edgeDetectionEffect.normalize()
         convolutionEffect.normalize()
+        navierStrokesEffect.normalize()
     }
 
 }

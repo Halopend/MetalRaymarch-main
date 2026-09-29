@@ -668,6 +668,22 @@ final class ViewportRenderer {
     private var depthTexture: MTLTexture?
     private var nativePostProcessTexture: MTLTexture?
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // NAVIER STROKES (2D fluid post-process layer)
+    // Stateful sim fields + pipelines live in `NavierStrokesRenderer`. While
+    // the layer is active, the path's final blit (with its edge/convolution
+    // filters) draws into `navierStrokesSourceTexture` instead of the drawable,
+    // the sim advances, and the `navierCompositeFragment` pass composites the
+    // filtered source along the fluid into the drawable. Order of operations on
+    // this path is therefore: raymarch → MetalFX → filters → FLUID → drawable.
+    // The composite blend is 0 while a gust gate is closed — the plain blit
+    // then presents the filtered source untouched (identity bypass).
+    // ═════════════════════════════════════════════════════════════════════════
+    private var navierStrokesRenderer: NavierStrokesRenderer?
+    private var navierStrokesSourceTexture: MTLTexture?
+    private var navierStrokesCompositePipeline: MTLRenderPipelineState?
+    private var navierStrokesCompositePipelineColorFormat: MTLPixelFormat?
+
     /// Counts down after a GPU command buffer error. While non-zero, draws are
     /// skipped to let the GPU recover before new submissions are attempted.
     /// Reference type so it can be safely captured in the completion handler closure.
@@ -1095,9 +1111,23 @@ final class ViewportRenderer {
         RenderTrace.traceGPU("GPU Frame", commandBuffer: commandBuffer)
 
         // Convolution needs a readable source texture. Preserve the zero-cost
-        // native path unless a valid convolution is actually enabled.
-        let needsOutputFilter = sceneFrame.settings.convolutionEffect.isActive &&
+        // native path unless a valid convolution or the Navier Strokes fluid
+        // layer is actually enabled (both blit through an offscreen source).
+        let needsOutputFilter = (sceneFrame.settings.convolutionEffect.isActive ||
+            sceneFrame.settings.navierStrokesEffect.isActive) &&
             blitPipelineState != nil
+
+        // ── Navier Strokes (2D fluid post-process layer) ──
+        // While active, every path's final blit (with its filters) draws into
+        // `navierStrokesSourceTexture` instead of the drawable; the sim +
+        // composite chain then presents the fluid result (or an identity copy
+        // while a gust gate is closed). Order: raymarch → MetalFX → filters →
+        // FLUID → drawable.
+        let navierStrokesEffect = sceneFrame.settings.navierStrokesEffect
+        let navierStrokesActive = navierStrokesActive(navierStrokesEffect, drawable: drawable)
+        let blitDestination = navierStrokesActive
+            ? (ensureNavierStrokesSource(for: drawable) ?? drawable.texture)
+            : drawable.texture
 
         // The direct (native-resolution) path renders straight into the drawable
         // and needs the drawable-sized depth target.
@@ -1249,9 +1279,10 @@ final class ViewportRenderer {
                                     jitterPixels: currentJitterPixels,
                                     forceReset: !wasTemporalActive)
 
-            // 4. Blit the upscaled output to the drawable.
+            // 4. Blit the upscaled output to the drawable (or the Navier
+            //    Strokes source while the fluid layer is active).
             let blitDescriptor = MTLRenderPassDescriptor()
-            blitDescriptor.colorAttachments[0].texture = drawable.texture
+            blitDescriptor.colorAttachments[0].texture = blitDestination
             blitDescriptor.colorAttachments[0].loadAction = .dontCare
             blitDescriptor.colorAttachments[0].storeAction = .store
             guard let blitEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: blitDescriptor) else {
@@ -1283,9 +1314,10 @@ final class ViewportRenderer {
             // 2. MetalFX spatial upscale → full-resolution output.
             spatialUpscaler.encode(commandBuffer: commandBuffer)
 
-            // 3. Blit the upscaled output to the drawable.
+            // 3. Blit the upscaled output to the drawable (or the Navier
+            //    Strokes source while the fluid layer is active).
             let blitDescriptor = MTLRenderPassDescriptor()
-            blitDescriptor.colorAttachments[0].texture = drawable.texture
+            blitDescriptor.colorAttachments[0].texture = blitDestination
             blitDescriptor.colorAttachments[0].loadAction = .dontCare
             blitDescriptor.colorAttachments[0].storeAction = .store
             guard let blitEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: blitDescriptor) else {
@@ -1314,8 +1346,10 @@ final class ViewportRenderer {
             encodeRaymarch(into: encoder, pipeline: activePipeline, uniformBuffer: uniformBuffer, benchBuffer: benchBuffer)
             encoder.endEncoding()
 
+            // Blit the raymarch output through the output filters (or into the
+            // Navier Strokes source while the fluid layer is active).
             let blitDescriptor = MTLRenderPassDescriptor()
-            blitDescriptor.colorAttachments[0].texture = drawable.texture
+            blitDescriptor.colorAttachments[0].texture = blitDestination
             blitDescriptor.colorAttachments[0].loadAction = .dontCare
             blitDescriptor.colorAttachments[0].storeAction = .store
             guard let blitEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: blitDescriptor) else {
@@ -1342,6 +1376,44 @@ final class ViewportRenderer {
             encoder.endEncoding()
 
             wasTemporalActive = false
+        }
+
+        // ── Navier Strokes (2D fluid post-process layer) ──
+        // The path blits drew the filtered image into the fluid source; the
+        // sim + composite chain presents the fluid result. When the composite
+        // is bypassed this frame (gust gate closed / sim skipped), an identity
+        // blit still copies the filtered source into the drawable — the layer
+        // never leaves the drawable holding stale content.
+        if navierStrokesActive, let strokesSource = navierStrokesSourceTexture {
+            let composited = encodeNavierStrokesComposite(
+                commandBuffer: commandBuffer,
+                drawable: drawable,
+                source: strokesSource,
+                effect: navierStrokesEffect,
+                deltaTime: Float(min(sceneFrame.deltaTime, 1.0 / 15.0)),
+                beatIntensity: sceneFrame.settings.beatIntensity
+            )
+            if !composited {
+                if let blitEncoder = commandBuffer.makeBlitCommandEncoder() {
+                    blitEncoder.label = "Navier Strokes Bypass Copy"
+                    blitEncoder.copy(
+                        from: strokesSource,
+                        sourceSlice: 0,
+                        sourceLevel: 0,
+                        sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                        sourceSize: MTLSize(
+                            width: min(strokesSource.width, drawable.texture.width),
+                            height: min(strokesSource.height, drawable.texture.height),
+                            depth: 1
+                        ),
+                        to: drawable.texture,
+                        destinationSlice: 0,
+                        destinationLevel: 0,
+                        destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
+                    )
+                    blitEncoder.endEncoding()
+                }
+            }
         }
 
         commandBuffer.present(drawable)
@@ -1646,6 +1718,145 @@ final class ViewportRenderer {
         nativePostProcessTexture = device.makeTexture(descriptor: descriptor)
         nativePostProcessTexture?.label = "Threshold Native Convolution Source"
         return nativePostProcessTexture
+    }
+
+    // MARK: - Navier Strokes (2D fluid post-process layer)
+
+    /// Filtered-source target: while the fluid layer is active, the path's
+    /// final blit (with its edge/convolution filters) draws here instead of the
+    /// drawable, and the composite pass presents the fluid result.
+    private func ensureNavierStrokesSource(for drawable: CAMetalDrawable) -> MTLTexture? {
+        let texture = drawable.texture
+        if let navierStrokesSourceTexture,
+           navierStrokesSourceTexture.width == texture.width,
+           navierStrokesSourceTexture.height == texture.height,
+           navierStrokesSourceTexture.pixelFormat == texture.pixelFormat {
+            return navierStrokesSourceTexture
+        }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: texture.pixelFormat,
+            width: max(1, texture.width),
+            height: max(1, texture.height),
+            mipmapped: false
+        )
+        descriptor.usage = [.renderTarget, .shaderRead]
+        descriptor.storageMode = .private
+        let created = device.makeTexture(descriptor: descriptor)
+        created?.label = "NavierStrokes Source (Mac)"
+        navierStrokesSourceTexture = created
+        return created
+    }
+
+    /// Lazily builds the sim manager (plain `makeRenderPipelineState` — this
+    /// type is shared with the visionOS renderer, whose binary archive lives
+    /// behind visionOS-only targets).
+    private func ensureNavierStrokesRenderer() -> NavierStrokesRenderer? {
+        if let navierStrokesRenderer { return navierStrokesRenderer }
+        let renderer = NavierStrokesRenderer(device: device)
+        navierStrokesRenderer = renderer
+        return renderer
+    }
+
+    /// The `navierCompositeFragment` pipeline (full-screen triangle via the
+    /// shared `macBlitVertex`), rebuilt only when the drawable format changes.
+    private func ensureNavierStrokesCompositePipeline(
+        colorFormat: MTLPixelFormat
+    ) -> MTLRenderPipelineState? {
+        if let navierStrokesCompositePipeline,
+           navierStrokesCompositePipelineColorFormat == colorFormat {
+            return navierStrokesCompositePipeline
+        }
+        guard let strokes = ensureNavierStrokesRenderer(),
+              strokes.ensurePipelines(),
+              strokes.ensureCompositeFragmentPipeline(colorFormat: colorFormat),
+              let pipeline = strokes.compositeFragmentPipeline else {
+            return nil
+        }
+        navierStrokesCompositePipeline = pipeline
+        navierStrokesCompositePipelineColorFormat = colorFormat
+        return pipeline
+    }
+
+    /// True when the Navier-Strokes layer can run this frame (effect active +
+    /// pipelines + sim textures available). Callers that return false must
+    /// blit straight to the drawable as before — the identity bypass.
+    private func navierStrokesActive(
+        _ effect: NavierStrokesEffect,
+        drawable: CAMetalDrawable
+    ) -> Bool {
+        guard effect.isActive,
+              let strokes = ensureNavierStrokesRenderer(),
+              strokes.isReady(effect: effect),
+              strokes.ensureCompositeFragmentPipeline(colorFormat: drawable.texture.pixelFormat)
+        else {
+            if !effect.isActive {
+                // Follow the effect's working set (same policy as the visionOS
+                // renderer's auxiliary textures).
+                navierStrokesRenderer?.releaseSimTextures()
+                navierStrokesSourceTexture = nil
+            }
+            return false
+        }
+        return true
+    }
+
+    /// Advances the fluid sim and composites the filtered source along the
+    /// field into the drawable. Returns false when the layer must be bypassed
+    /// this frame (gate closed) — the caller's plain blit output already sits
+    /// in `navierStrokesSourceTexture`, so a skip means it must still reach the
+    /// drawable via a copy pass.
+    @discardableResult
+    private func encodeNavierStrokesComposite(
+        commandBuffer: MTLCommandBuffer,
+        drawable: CAMetalDrawable,
+        source: MTLTexture,
+        effect: NavierStrokesEffect,
+        deltaTime: Float,
+        beatIntensity: Float
+    ) -> Bool {
+        guard let strokes = navierStrokesRenderer,
+              let compositePipeline = ensureNavierStrokesCompositePipeline(
+                  colorFormat: drawable.texture.pixelFormat) else {
+            return false
+        }
+        let result = strokes.encodeSimulation(
+            commandBuffer: commandBuffer,
+            effect: effect,
+            deltaTime: deltaTime,
+            viewCount: 1,
+            regionWidth: max(1, drawable.texture.width),
+            regionHeight: max(1, drawable.texture.height),
+            audioBeat: beatIntensity
+        )
+        guard let result, result.appliedAmount > NavierStrokesEffect.activationEpsilon,
+              let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: {
+                  let descriptor = MTLRenderPassDescriptor()
+                  descriptor.colorAttachments[0].texture = drawable.texture
+                  // Every pixel is written by the full-screen triangle.
+                  descriptor.colorAttachments[0].loadAction = .dontCare
+                  descriptor.colorAttachments[0].storeAction = .store
+                  return descriptor
+              }()) else {
+            return false
+        }
+        encoder.label = "Navier Strokes Composite"
+        encoder.setRenderPipelineState(compositePipeline)
+        var params = NavierStrokesCompositeParams(
+            inkTint: vector_float3(result.inkTint.x, result.inkTint.y, result.inkTint.z),
+            displacement: result.displacement,
+            appliedAmount: result.appliedAmount,
+            inkGain: result.inkGain,
+            _pad0: 0, _pad1: 0, _pad2: 0
+        )
+        encoder.setFragmentTexture(source, index: 0)
+        encoder.setFragmentTexture(result.velocity, index: 1)
+        encoder.setFragmentTexture(result.dye, index: 2)
+        encoder.setFragmentBytes(&params,
+                                 length: MemoryLayout<NavierStrokesCompositeParams>.stride,
+                                 index: 0)
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        encoder.endEncoding()
+        return true
     }
 
     private func prepareSceneFrame(appModel: AppModel, benchmark: Bool = false) -> EvaluatedSceneFrame {

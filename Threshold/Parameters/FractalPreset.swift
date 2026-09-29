@@ -473,6 +473,9 @@ struct FractalPreset: Codable, Identifiable {
     var bloomEffect: BloomEffect?
     var edgeDetectionEffect: EdgeDetectionEffect?
     var convolutionEffect: ConvolutionEffect?
+    /// Navier Strokes fluid-simulation layer (additive, optional — older apps
+    /// ignore unknown keys; a missing key decodes to the default .off state).
+    var navierStrokesEffect: NavierStrokesEffect?
     var fogEffect: FogEffect?
     var gradientCycleEffect: GradientCycleEffect?
     var linearRailEffect: LinearRailEffect?
@@ -574,7 +577,7 @@ struct FractalPreset: Codable, Identifiable {
         case deIterationMismatch
         case spaceWarpOps
         // v2.0 modular lighting effects
-        case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, edgeDetectionEffect, convolutionEffect, fogEffect, gradientCycleEffect, linearRailEffect
+        case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, edgeDetectionEffect, convolutionEffect, navierStrokesEffect, fogEffect, gradientCycleEffect, linearRailEffect
         // Color scheme auto-transition
         case colorSchemeAutoTransition, colorSchemeAutoInterval, colorSchemeTransitionDuration
         // v2.1 gradient coloring system
@@ -769,6 +772,7 @@ struct FractalPreset: Codable, Identifiable {
         bloomEffect = try container.decodeIfPresent(BloomEffect.self, forKey: .bloomEffect)
         edgeDetectionEffect = try container.decodeIfPresent(EdgeDetectionEffect.self, forKey: .edgeDetectionEffect)
         convolutionEffect = try container.decodeIfPresent(ConvolutionEffect.self, forKey: .convolutionEffect)
+        navierStrokesEffect = try container.decodeIfPresent(NavierStrokesEffect.self, forKey: .navierStrokesEffect)
         fogEffect = try container.decodeIfPresent(FogEffect.self, forKey: .fogEffect)
         gradientCycleEffect = try container.decodeIfPresent(GradientCycleEffect.self, forKey: .gradientCycleEffect)
         linearRailEffect = try container.decodeIfPresent(LinearRailEffect.self, forKey: .linearRailEffect)
@@ -925,6 +929,7 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(bloomEffect, forKey: .bloomEffect)
         try container.encodeIfPresent(edgeDetectionEffect, forKey: .edgeDetectionEffect)
         try container.encodeIfPresent(convolutionEffect, forKey: .convolutionEffect)
+        try container.encodeIfPresent(navierStrokesEffect, forKey: .navierStrokesEffect)
         try container.encodeIfPresent(fogEffect, forKey: .fogEffect)
         try container.encodeIfPresent(gradientCycleEffect, forKey: .gradientCycleEffect)
         try container.encodeIfPresent(linearRailEffect, forKey: .linearRailEffect)
@@ -1182,6 +1187,7 @@ struct FractalPreset: Codable, Identifiable {
         preset.bloomEffect = lit.bloomEffect
         preset.edgeDetectionEffect = lit.edgeDetectionEffect
         preset.convolutionEffect = lit.convolutionEffect
+        preset.navierStrokesEffect = lit.navierStrokesEffect
         preset.fogEffect = lit.fogEffect
         preset.gradientCycleEffect = lit.gradientCycleEffect
         preset.linearRailEffect = lit.linearRailEffect
@@ -1547,6 +1553,11 @@ struct FractalPreset: Codable, Identifiable {
         settings.edgeDetectionEffect = edgeDetectionEffect
             ?? (lightingPreset ?? .off).effects().edge
         settings.convolutionEffect = convolutionEffect ?? .off
+        // Navier Strokes is opt-in like the other output-space layers: absent a
+        // saved effect, load OFF so it never persists from the previous scene.
+        // The fluid sim's field state resets on scene load (see the renderer's
+        // texture-lifecycle policy), so a stale field can't smear across loads.
+        settings.navierStrokesEffect = navierStrokesEffect ?? .off
         // Fog is opt-in: a scene must explicitly save it enabled. Absent a
         // saved fogEffect, load with fog OFF so it never persists from the
         // previously-live scene (matches every other effect defaulting to .off).

@@ -19,6 +19,10 @@ struct RenderSettingsSnapshot: Sendable {
     let lightingPlay: Bool
     let lightingMode: LightingMode
     let convolutionEffect: ConvolutionEffect
+    /// Navier Strokes — the 2D fluid-simulation post-process layer. The sim
+    /// runs on this snapshot's settings + audio levels each frame (state lives
+    /// in the renderer's `NavierStrokesRenderer`, not the uniform block).
+    let navierStrokesEffect: NavierStrokesEffect
     let sphericalInversionMode: SphericalInversionMode
     let sphericalInversionRadius: Float
     let sphereProjectionEnabled: Bool

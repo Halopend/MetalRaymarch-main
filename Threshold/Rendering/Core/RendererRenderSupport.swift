@@ -79,7 +79,15 @@ extension Renderer {
         }
 #endif
 
-        configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
+        configureDirectRenderTargets(
+            renderPassDescriptor: renderPassDescriptor,
+            drawable: drawable,
+            // Navier Strokes: render the composed image into the fluid layer's
+            // offscreen source instead of the drawable so the sim + composite
+            // chain can read it before the blit (MetalFX is disabled on
+            // visionOS, so this branch is the fragment path's only target).
+            colorOverride: strokesFragmentSourceTextureIfActive(settingsSnapshot, drawable: drawable)
+        )
 #if canImport(MetalFX)
         return RendererFragmentPassPlan(
             renderPassDescriptor: renderPassDescriptor,
@@ -388,8 +396,18 @@ extension Renderer {
         return true
     }
 
-    func configureDirectRenderTargets(renderPassDescriptor: MTLRenderPassDescriptor, drawable: LayerRenderer.Drawable) {
-        renderPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]
+    func configureDirectRenderTargets(
+        renderPassDescriptor: MTLRenderPassDescriptor,
+        drawable: LayerRenderer.Drawable,
+        colorOverride: MTLTexture? = nil
+    ) {
+        // Navier Strokes: while the fluid layer is active the composed image is
+        // rendered into an offscreen array (same format/size as the drawable;
+        // drawable depth is still attached for the compositor's reprojection),
+        // then the sim + kernel composite + blit chain presents it. The
+        // drawable's rate map stays attached so the offscreen holds the same
+        // physical-space pixels a direct render would have produced.
+        renderPassDescriptor.colorAttachments[0].texture = colorOverride ?? drawable.colorTextures[0]
         renderPassDescriptor.depthAttachment.texture = drawable.depthTextures[0]
 
         renderPassDescriptor.colorAttachments[0].storeAction = .store

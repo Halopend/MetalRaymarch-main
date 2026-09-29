@@ -107,6 +107,21 @@ actor Renderer {
     var computeOutputTexture: MTLTexture?
     var edgeOutputTexture: MTLTexture?
     private var hasLoggedComputeMemoryFallback = false
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // NAVIER STROKES (2D fluid post-process layer)
+    // Stateful sim fields + pipelines live in `NavierStrokesRenderer`; this
+    // renderer only routes the frame: compute path — sim on the raymarch
+    // output then a kernel composite before the blit; fragment path — the
+    // primary pass renders into `strokesFragmentSourceTexture` while the layer
+    // is active (same format/size as the drawable, drawable depth still
+    // attached), then the same sim + composite + blit chain runs. The layer is
+    // a blend OVER the composed image: `appliedAmount == 0` (gust gate closed)
+    // blits the untouched source — the identity bypass.
+    // ═══════════════════════════════════════════════════════════════════════════
+    private var navierStrokesRenderer: NavierStrokesRenderer?
+    private var strokesFragmentSourceTexture: MTLTexture?
+    private var hasLoggedStrokesSkip = false
     /// A recoverable command-buffer failure on the adaptive kernel disables that
     /// path for the rest of this renderer session. Repeating a known GPU fault on
     /// every frame can escalate into a device reset or compositor termination.
@@ -1623,6 +1638,46 @@ actor Renderer {
             framePreparation: framePreparation,
             settingsSnapshot: settingsSnapshot
         )
+
+        // ── Navier Strokes (post-process layer, fragment path) ──
+        // While the layer is active the primary pass rendered into the
+        // offscreen fluid source; the sim + kernel composite chain runs here
+        // and the blit presents the fluid result. When the layer is bypassed
+        // this frame (gust gate closed) `strokesOutput` is nil and the blit
+        // presents the untouched source instead — the identity bypass.
+        // MetalFX frames resolve directly into the drawable (the resolver owns
+        // the drawable that turn), so the fluid layer skips them entirely —
+        // MetalFX spatial upscaling is disabled on visionOS today, so this
+        // guard is the dormant-case safety net.
+#if canImport(MetalFX)
+        let strokesFragmentSource: MTLTexture? = fragmentPassPlan.metalFXBundle == nil
+            ? strokesFragmentSourceTextureIfActive(settingsSnapshot, drawable: drawable)
+            : nil
+#else
+        let strokesFragmentSource = strokesFragmentSourceTextureIfActive(
+            settingsSnapshot,
+            drawable: drawable
+        )
+#endif
+        var strokesOutput: MTLTexture? = nil
+        if let strokesFragmentSource {
+            strokesOutput = encodeNavierStrokes(
+                commandBuffer: commandBuffer,
+                drawable: drawable,
+                source: strokesFragmentSource,
+                settingsSnapshot: settingsSnapshot,
+                renderExtent: nil
+            )
+        }
+        if let strokesOutput {
+            blitComputeOutputToDrawable(
+                commandBuffer: commandBuffer,
+                drawable: drawable,
+                useEdgeOutput: false,
+                explicitSource: strokesOutput
+            )
+        }
+
         encodeSpatialRadialMenuPass(
             commandBuffer: commandBuffer,
             drawable: drawable,
@@ -2046,6 +2101,157 @@ actor Renderer {
         return texture
     }
 
+    // MARK: - Navier Strokes (2D fluid post-process layer)
+
+    /// Lazily builds the sim manager. Nil on allocation failure — the layer
+    /// then stays off for the session (other paths untouched).
+    private func ensureNavierStrokesRenderer() -> NavierStrokesRenderer? {
+        if let navierStrokesRenderer { return navierStrokesRenderer }
+        let renderer = NavierStrokesRenderer(device: device)
+        navierStrokesRenderer = renderer
+        return renderer
+    }
+
+    /// Offscreen color the fragment path renders into while the fluid layer is
+    /// active (drawable format/size, per-view slices, `.renderTarget` because
+    /// the primary fragment pass writes it). Gated by the same working-set
+    /// reasoning as the compute path's auxiliary textures: rgba16Float is
+    /// 8 B/px, and the blit/composite chain adds one full-size color target.
+    private func ensureStrokesFragmentSource(for drawable: LayerRenderer.Drawable) -> MTLTexture? {
+        let source = drawable.colorTextures[0]
+        let viewCount = max(1, drawable.views.count)
+        if let existing = strokesFragmentSourceTexture,
+           existing.width == source.width,
+           existing.height == source.height,
+           existing.arrayLength == viewCount,
+           existing.pixelFormat == source.pixelFormat {
+            return existing
+        }
+        // Working-set gate: refuse to allocate the aux color target when the
+        // estimate exceeds the compute path's budget (identity fallback).
+        let estimatedBytes = source.width * source.height * viewCount * 8
+        guard estimatedBytes <= 192 * 1024 * 1024 else {
+            if !hasLoggedStrokesSkip {
+                hasLoggedStrokesSkip = true
+                print("⚠️ Navier Strokes skipped: fragment-path source would use \(Int(Double(estimatedBytes) / 1048576.0)) MB")
+            }
+            return nil
+        }
+        let descriptor = MTLTextureDescriptor()
+        descriptor.textureType = .type2DArray
+        descriptor.pixelFormat = source.pixelFormat
+        descriptor.width = source.width
+        descriptor.height = source.height
+        descriptor.arrayLength = viewCount
+        descriptor.storageMode = .private
+        descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
+        texture.label = "NavierStrokes Fragment Source"
+        strokesFragmentSourceTexture = texture
+        return texture
+    }
+
+    /// The fragment path's color override for this frame — the fluid layer's
+    /// offscreen source while the effect is active (allocated lazily), nil
+    /// otherwise (byte-identical direct rendering).
+    func strokesFragmentSourceTextureIfActive(
+        _ settingsSnapshot: RenderSettingsSnapshot,
+        drawable: LayerRenderer.Drawable
+    ) -> MTLTexture? {
+        let effect = settingsSnapshot.navierStrokesEffect
+        guard effect.isActive,
+              let strokes = ensureNavierStrokesRenderer(),
+              strokes.isReady(effect: effect) else {
+            // Inactive: drop the sim's allocations so the working set follows
+            // the effect (same policy as edgeOutputTexture).
+            if !effect.isActive {
+                navierStrokesRenderer?.releaseSimTextures()
+                strokesFragmentSourceTexture = nil
+            }
+            return nil
+        }
+        return ensureStrokesFragmentSource(for: drawable)
+    }
+
+    /// The physical/viewport region (pixels) the upstream path wrote this
+    /// frame — the same convention the edge detector and the compute blit use.
+    private func strokesActiveRegion(
+        for drawable: LayerRenderer.Drawable,
+        renderExtent: SIMD2<Int>?
+    ) -> (width: Int, height: Int) {
+        if let renderExtent {
+            return (max(1, renderExtent.x), max(1, renderExtent.y))
+        }
+        // Fragment path: the drawable's per-eye physical region under
+        // foveation, else the drawable size.
+        let first = drawable.colorTextures[0]
+        if let map = drawable.rasterizationRateMaps.first {
+            let phys = map.physicalSize(layer: 0)
+            if phys.width <= first.width && phys.height <= first.height {
+                return (max(1, phys.width), max(1, phys.height))
+            }
+        }
+        let viewport = drawable.views.first?.textureMap.viewport
+        if let viewport, viewport.width > 0, viewport.height > 0 {
+            return (max(1, Int(viewport.width.rounded(.up))),
+                    max(1, Int(viewport.height.rounded(.up))))
+        }
+        return (max(1, first.width), max(1, first.height))
+    }
+
+    /// Advances the Navier-Strokes layer one frame: runs the sim chain and the
+    /// full-resolution kernel composite from `source` into a fresh composite
+    /// output texture. Returns the composite destination for the caller's blit,
+    /// or nil when the layer must be skipped this frame (identity bypass — the
+    /// source is untouched; the caller blits/presents it via its normal path).
+    private func encodeNavierStrokes(
+        commandBuffer: MTLCommandBuffer,
+        drawable: LayerRenderer.Drawable,
+        source: MTLTexture,
+        settingsSnapshot: RenderSettingsSnapshot,
+        renderExtent: SIMD2<Int>?
+    ) -> MTLTexture? {
+        let effect = settingsSnapshot.navierStrokesEffect
+        guard effect.isActive,
+              let strokes = ensureNavierStrokesRenderer(),
+              strokes.isReady(effect: effect),
+              let result = strokes.encodeSimulation(
+                  commandBuffer: commandBuffer,
+                  effect: effect,
+                  deltaTime: cachedDeltaTime,
+                  viewCount: drawable.views.count,
+                  regionWidth: strokesActiveRegion(for: drawable, renderExtent: renderExtent).width,
+                  regionHeight: strokesActiveRegion(for: drawable, renderExtent: renderExtent).height,
+                  audioBeat: settingsSnapshot.beatIntensity
+              ),
+              // The sim only runs while `appliedAmount` can be nonzero at some
+              // point this gust; a fully-closed gate skips the composite AND
+              // the blit swap — the caller presents the raw source.
+              result.appliedAmount > NavierStrokesEffect.activationEpsilon,
+              let output = strokes.ensureCompositeOutput(
+                  source: source,
+                  arrayLength: max(1, drawable.views.count)
+              ),
+              strokes.encodeKernelComposite(
+                  commandBuffer: commandBuffer,
+                  source: source,
+                  destination: output,
+                  regionWidth: strokesActiveRegion(for: drawable, renderExtent: renderExtent).width,
+                  regionHeight: strokesActiveRegion(for: drawable, renderExtent: renderExtent).height,
+                  viewCount: max(1, drawable.views.count),
+                  result: result
+              ) else {
+            // Inactive frame: drop the sim's allocations so the working set
+            // follows the effect (same policy as edgeOutputTexture).
+            if !effect.isActive {
+                navierStrokesRenderer?.releaseSimTextures()
+                strokesFragmentSourceTexture = nil
+            }
+            return nil
+        }
+        return output
+    }
+
     private func estimatedAdaptiveComputeAuxiliaryBytes(
         for drawable: LayerRenderer.Drawable,
         edgeEnabled: Bool
@@ -2236,14 +2442,18 @@ actor Renderer {
         }
     }
 
-    /// Copies compute output texture to drawable using blit encoder
+    /// Copies compute output texture to drawable using blit encoder.
+    /// `explicitSource` (when set) is the Navier-Strokes composite output — the
+    /// fluid layer's result replaces the raymarch/edge source for this frame.
     private func blitComputeOutputToDrawable(
         commandBuffer: MTLCommandBuffer,
         drawable: LayerRenderer.Drawable,
-        useEdgeOutput: Bool
+        useEdgeOutput: Bool,
+        explicitSource: MTLTexture? = nil
     ) {
-        let sourceTexture = (useEdgeOutput && edgeDetectionPipeline != nil && edgeOutputTexture != nil)
-            ? edgeOutputTexture : computeOutputTexture
+        let sourceTexture = explicitSource
+            ?? ((useEdgeOutput && edgeDetectionPipeline != nil && edgeOutputTexture != nil)
+                ? edgeOutputTexture : computeOutputTexture)
         guard let sourceTexture else { return }
         guard let blitEncoder = commandBuffer.makeBlitCommandEncoder() else { return }
         blitEncoder.label = "Copy Compute Output to Drawable"
@@ -2631,6 +2841,10 @@ actor Renderer {
         // Render each eye. Propagate encoder creation failures so the caller can
         // use the fragment path instead of presenting stale intermediate data.
         var edgeAppliedToEveryView = edgeEnabled && edgeTexture != nil
+        // Per-eye render extents (the physical region the kernel wrote). The
+        // Navier-Strokes composite dispatches over the first eye's region —
+        // layered drawables share one physical layout across slices.
+        var firstEyeRenderExtent: SIMD2<Int>?
         for viewIndex in 0..<drawable.views.count {
             guard let renderExtent = encodeAdaptiveCompute(
                 commandBuffer: commandBuffer,
@@ -2648,6 +2862,7 @@ actor Renderer {
                 releaseAdaptiveComputeAuxiliaryTextures()
                 return false
             }
+            if viewIndex == 0 { firstEyeRenderExtent = renderExtent }
             if edgeAppliedToEveryView, let edgeTexture {
                 let encoded = encodeEdgeDetection(
                     commandBuffer: commandBuffer,
@@ -2664,19 +2879,34 @@ actor Renderer {
                 edgeAppliedToEveryView = edgeAppliedToEveryView && encoded
             }
         }
-        
+
         // Advance temporal state for next frame
         temporalDepthIndex = 1 - temporalDepthIndex  // Swap ping-pong
         temporalFrameCount += 1
         computeWarmStartGate.recordDepthWritten(settingsSnapshot)
-        
+
+        // ── Navier Strokes (post-process layer) ──
+        // Composites the (edge-filtered, if active) raymarch output along the
+        // fluid into a fresh output texture. Returns nil while the layer is
+        // bypassed (gate closed) — the blit then presents the raw source.
+        let strokesCompositeSource = (edgeAppliedToEveryView && edgeOutputTexture != nil)
+            ? edgeOutputTexture! : outputTexture
+        let strokesOutput = encodeNavierStrokes(
+            commandBuffer: commandBuffer,
+            drawable: drawable,
+            source: strokesCompositeSource,
+            settingsSnapshot: settingsSnapshot,
+            renderExtent: firstEyeRenderExtent
+        )
+
         // Blit compute output to drawable for presentation
         blitComputeOutputToDrawable(
             commandBuffer: commandBuffer,
             drawable: drawable,
-            useEdgeOutput: edgeAppliedToEveryView
+            useEdgeOutput: edgeAppliedToEveryView && strokesOutput == nil,
+            explicitSource: strokesOutput
         )
-        
+
         return true
     }
     

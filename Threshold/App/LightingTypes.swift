@@ -771,6 +771,119 @@ struct BeatFlashEffect: LightingEffect {
     }
 }
 
+/// Navier Strokes — a 2D Navier-Stokes fluid-simulation post-processing layer.
+/// The renderer advects a velocity field (stable-fluids: advection → vorticity
+/// confinement → pressure projection) plus an ink field that is injected from
+/// splats and carries the scene's own colors. A composite pass smears the
+/// composed image along the field ("brush strokes") and blends it back.
+///
+/// Unlike the other output-space filters (edge detection / convolution, which
+/// are mutually exclusive), Navier Strokes is a permanent, stateful LAYER: it
+/// composes over whatever else is active because its blend is owned by the
+/// composite pass (`out = mix(source, stroked, appliedAmount)`), and
+/// `appliedAmount == 0` is a guaranteed pixel-identity bypass.
+///
+/// "Inconsistent application over time" is authored with `gustAmount` /
+/// `gustSpeed`: a CPU-side gust scheduler gates the strength (and fires the
+/// splats) through a smooth envelope — at 0 the layer applies steadily, at 1
+/// the fluid gathers in rare, sudden strokes.
+struct NavierStrokesEffect: LightingEffect {
+    /// Below this value the output is indistinguishable from the source. Use the
+    /// same cutoff for UI state and the renderer's dispatch gate so an
+    /// apparently-off fluid layer never allocates or dispatches the sim.
+    static let activationEpsilon: Float = 0.001
+
+    var enabled: Bool = false
+    /// Composite blend (0 = bypass). The authoritative on/off control.
+    var strength: Float = 0.0
+    /// Simulation dt multiplier (how fast the fluid evolves).
+    var simSpeed: Float = 1.0
+    /// Per-frame velocity dissipation (0 = keep momentum, higher = calmer).
+    var velocityDissipation: Float = 0.12
+    /// Per-frame ink fade (higher = strokes resolve back to the scene sooner).
+    var dyeDissipation: Float = 0.35
+    /// Vorticity confinement — re-injects curl lost to numerics (adds swirl).
+    var curlStrength: Float = 12.0
+    /// Pressure Jacobi iteration count (the sim's main GPU cost).
+    var pressureIterations: Int = 20
+    /// Splat impulse radius as a fraction of the sim's short edge.
+    var splatRadius: Float = 0.14
+    /// Splat impulse magnitude (velocity + ink injection energy).
+    var splatIntensity: Float = 0.6
+    /// Intermittency: 0 = steady continuous strokes, 1 = rare dramatic gusts.
+    var gustAmount: Float = 0.5
+    /// How fast the gust envelope evolves (higher = quicker bursts).
+    var gustSpeed: Float = 0.35
+    /// Fire an extra splat on detected beats (uses the precomputed audio band).
+    var audioSplats: Bool = false
+    /// Tint multiplier for injected ink. White keeps the scene's own colors.
+    var tintColor: SIMD3<Float> = SIMD3<Float>(1, 1, 1)
+    /// Composite displacement scale (how far the image is dragged per ink unit).
+    var displacement: Float = 0.35
+
+    var isActive: Bool {
+        enabled && strength > Self.activationEpsilon
+    }
+
+    var primaryValue: Float {
+        get { strength }
+        set { setStrength(newValue) }
+    }
+    static let primaryLabel = "Strength"
+
+    /// Strength is the authoritative on/off control (same contract as
+    /// EdgeDetectionEffect): dependent tuning is preserved while off.
+    mutating func setStrength(_ value: Float) {
+        strength = ControlCatalog.strokesStrength.clamp(value)
+        enabled = strength > Self.activationEpsilon
+        if !enabled { strength = 0 }
+    }
+
+    /// Clamp data arriving from scenes/UserDefaults. Legacy files could encode
+    /// `enabled: false` with a non-zero remembered strength; migrate that state
+    /// to the new zero-is-off representation without unexpectedly enabling it.
+    mutating func normalize() {
+        strength = ControlCatalog.strokesStrength.clamp(strength)
+        simSpeed = ControlCatalog.strokesSimSpeed.clamp(simSpeed)
+        velocityDissipation = ControlCatalog.strokesViscosity.clamp(velocityDissipation)
+        dyeDissipation = ControlCatalog.strokesDyeDissipation.clamp(dyeDissipation)
+        curlStrength = ControlCatalog.strokesCurl.clamp(curlStrength)
+        let iterations = ControlCatalog.strokesPressureIterations.clamp(Float(pressureIterations))
+        pressureIterations = max(2, Int(iterations.rounded()))
+        splatRadius = ControlCatalog.strokesSplatRadius.clamp(splatRadius)
+        splatIntensity = ControlCatalog.strokesSplatIntensity.clamp(splatIntensity)
+        gustAmount = ControlCatalog.strokesGustAmount.clamp(gustAmount)
+        gustSpeed = ControlCatalog.strokesGustSpeed.clamp(gustSpeed)
+        displacement = ControlCatalog.strokesDisplacement.clamp(displacement)
+        tintColor = SIMD3<Float>(
+            tintColor.x.clamped(to: 0.0...4.0),
+            tintColor.y.clamped(to: 0.0...4.0),
+            tintColor.z.clamped(to: 0.0...4.0)
+        )
+        if !enabled || strength <= Self.activationEpsilon {
+            enabled = false
+            strength = 0
+        }
+    }
+
+    static var off: NavierStrokesEffect {
+        NavierStrokesEffect(enabled: false, strength: 0.0)
+    }
+
+    /// A balanced starting look: visible strokes, moderate gusting.
+    static var strokes: NavierStrokesEffect {
+        NavierStrokesEffect(
+            enabled: true, strength: 0.65, simSpeed: 1.0,
+            velocityDissipation: 0.12, dyeDissipation: 0.35,
+            curlStrength: 12.0, pressureIterations: 20,
+            splatRadius: 0.14, splatIntensity: 0.6,
+            gustAmount: 0.5, gustSpeed: 0.35,
+            audioSplats: false, tintColor: SIMD3<Float>(1, 1, 1),
+            displacement: 0.35
+        )
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // MARK: - Lighting Presets
 // ═══════════════════════════════════════════════════════════════════════════════

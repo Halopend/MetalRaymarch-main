@@ -697,6 +697,59 @@ typedef struct
     vector_float3 boundingShapeCenter;
 } TileUniforms;
 
+// === NAVIER STROKES (2D fluid-simulation post-process layer) ===
+// Per-pass parameter blocks for the stable-fluids simulation kernels in
+// NavierStrokesShaders.metal. They ride setBytes — deliberately OUTSIDE the
+// shared Uniforms/TileUniforms block so the 2 KB uniform budget stays
+// untouched. Swift constructs these through the bridging header, so field
+// order and exact types must not drift; the size gate below pins the total.
+typedef struct
+{
+    vector_float2 texelSize;      // 1 / sim texels (uv step of the sim grid)
+    float dt;                     // clamped frame delta × simSpeed (seconds)
+    float velocityDissipation;    // per-step velocity decay (0 = keep momentum)
+    float dyeDissipation;         // per-step ink decay (0 = ink never fades)
+    float curl;                   // vorticity confinement strength
+    int pressureIterations;       // Jacobi sweeps for the projection pass
+} NavierStrokesSimParams;
+
+// Up to kMaxStrokesSplats impulses per dispatch, all sharing one direction and
+// one ink color — the CPU scheduler composes a gust's splats into one batch.
+#define kMaxStrokesSplats 4
+typedef struct
+{
+    vector_float4 splats[kMaxStrokesSplats]; // xy = center (uv), z = radius, w = strength (0 = unused)
+    vector_float2 velocity;       // shared velocity impulse (uv per second)
+    vector_float4 color;          // rgb = injected ink tint, a = ink amount
+    float aspect;                 // width/height — keeps splats round
+    float _pad0;
+    float _pad1;
+    float _pad2;
+} NavierStrokesSplatParams;
+
+typedef struct
+{
+    vector_float3 inkTint;        // multiplier applied to advected ink
+    float displacement;           // smear scale (uv per velocity unit)
+    float appliedAmount;          // composite blend; 0 = exact source copy
+    float inkGain;                // ink overlay gain
+    float _pad0;
+    float _pad1;
+    float _pad2;
+} NavierStrokesCompositeParams;
+
+#ifdef __METAL_VERSION__
+// Verified sizes (clang, arm64): Sim 32 (float2 tail pad), Splat 112
+// (4×float4 + tail), Composite 48 (float3's 16-byte alignment rounds the tail
+// up).
+static_assert(sizeof(NavierStrokesSimParams) == 32,
+              "NavierStrokesSimParams ABI drift");
+static_assert(sizeof(NavierStrokesSplatParams) == 112,
+              "NavierStrokesSplatParams ABI drift");
+static_assert(sizeof(NavierStrokesCompositeParams) == 48,
+              "NavierStrokesCompositeParams ABI drift");
+#endif
+
 // Include Buddhabrot types so they're visible through the bridging header
 #include "../Formulas/Buddhabrot/BuddhabrotTypes.h"
 
@@ -723,6 +776,11 @@ static_assert(sizeof(TileUniforms) <= 2336,
               "TileUniforms grew — bump this bound consciously (TECH_DEBT.md #8d)");
 static_assert(sizeof(FormulaParams) <= 176,
               "FormulaParams grew — bump this bound consciously (TECH_DEBT.md #8d)");
+// Navier Strokes keeps the shared block unchanged (its params ride setBytes);
+// the gate below documents that invariant consciously.
+static_assert(sizeof(NavierStrokesSimParams) + sizeof(NavierStrokesSplatParams)
+                  + sizeof(NavierStrokesCompositeParams) <= 256,
+              "Navier Strokes setBytes blocks grew");
 #endif
 
 #endif /* ShaderTypes_h */

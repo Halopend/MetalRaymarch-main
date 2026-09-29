@@ -660,6 +660,12 @@ final class ControlStateStore {
         settings.convolutionEffect = lighting.convolutionEffect
     }
 
+    func commitNavierStrokesEffect() {
+        guard let settings else { return }
+        lighting.navierStrokesEffect.normalize()
+        settings.navierStrokesEffect = lighting.navierStrokesEffect
+    }
+
     func commitFogEffect() {
         guard let settings else { return }
         if settings.isAnimationPlaying {

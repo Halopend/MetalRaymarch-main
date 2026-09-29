@@ -521,6 +521,53 @@ enum ControlCatalog {
         id: "post.edge.windowRadius", name: "Edge Window Size", icon: "square.grid.3x3",
         range: 1.0...3.0, defaultValue: 1.0)
 
+    // Navier Strokes is output-space and scene-authored like edge detection, so
+    // it stays long-tail too: every bound lives here and the effect struct's
+    // normalize(), the UI sliders, and the sim's dispatch gate all read them.
+    static let strokesStrength = ControlSpec(
+        id: "post.strokes.strength", name: "Strokes Strength", icon: "drop.fill",
+        range: 0.0...1.0, defaultValue: 0.0)
+
+    static let strokesSimSpeed = ControlSpec(
+        id: "post.strokes.simSpeed", name: "Flow Speed", icon: "wind",
+        range: 0.1...3.0, defaultValue: 1.0)
+
+    static let strokesViscosity = ControlSpec(
+        id: "post.strokes.viscosity", name: "Viscosity", icon: "liquid.wave",
+        range: 0.0...1.0, defaultValue: 0.12)
+
+    static let strokesDyeDissipation = ControlSpec(
+        id: "post.strokes.dyeDissipation", name: "Ink Fade", icon: "aqi.low",
+        range: 0.0...1.5, defaultValue: 0.35)
+
+    static let strokesCurl = ControlSpec(
+        id: "post.strokes.curl", name: "Swirl", icon: "hurricane",
+        range: 0.0...40.0, defaultValue: 12.0)
+
+    static let strokesPressureIterations = ControlSpec(
+        id: "post.strokes.pressureIterations", name: "Pressure Quality", icon: "gauge",
+        range: 4.0...40.0, defaultValue: 20.0)
+
+    static let strokesSplatRadius = ControlSpec(
+        id: "post.strokes.splatRadius", name: "Brush Size", icon: "paintbrush.pointed",
+        range: 0.01...0.45, defaultValue: 0.14)
+
+    static let strokesSplatIntensity = ControlSpec(
+        id: "post.strokes.splatIntensity", name: "Brush Force", icon: "wand.and.stars",
+        range: 0.0...2.0, defaultValue: 0.6)
+
+    static let strokesGustAmount = ControlSpec(
+        id: "post.strokes.gustAmount", name: "Gustiness", icon: "cloud.bolt.rain.fill",
+        range: 0.0...1.0, defaultValue: 0.5)
+
+    static let strokesGustSpeed = ControlSpec(
+        id: "post.strokes.gustSpeed", name: "Gust Speed", icon: "speedometer",
+        range: 0.02...2.0, defaultValue: 0.35)
+
+    static let strokesDisplacement = ControlSpec(
+        id: "post.strokes.displacement", name: "Smear", icon: "arrow.triangle.swap",
+        range: 0.0...1.5, defaultValue: 0.35)
+
     static let colorSchemeAutoInterval = ControlSpec(
         id: "color.autoInterval", name: "Auto Transition Interval", icon: "timer",
         range: 5.0...120.0, defaultValue: 30.0)
@@ -570,7 +617,11 @@ enum ControlCatalog {
         colorSchemeGamma, lightingSoftness, cellShadingLevels,
         colorSchemeAutoInterval, colorSchemeTransitionDuration,
         aoStrength, tonemapStrength, vignetteStrength,
-        edgeStrength, edgeThreshold, edgeSoftness, edgeWindowRadius
+        edgeStrength, edgeThreshold, edgeSoftness, edgeWindowRadius,
+        strokesStrength, strokesSimSpeed, strokesViscosity, strokesDyeDissipation,
+        strokesCurl, strokesPressureIterations, strokesSplatRadius,
+        strokesSplatIntensity, strokesGustAmount, strokesGustSpeed,
+        strokesDisplacement
     ]
 
     /// Routed + long-tail. Every spec the catalog declares.

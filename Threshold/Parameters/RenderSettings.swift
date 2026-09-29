@@ -463,6 +463,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _bloomEffect: BloomEffect = .off
     private var _edgeDetectionEffect: EdgeDetectionEffect = .off
     private var _convolutionEffect: ConvolutionEffect = .off
+    private var _navierStrokesEffect: NavierStrokesEffect = .off
     private var _fogEffect: FogEffect = .off
     /// Eased mixed-immersion fog attenuation applied at pack time (1.0 = full
     /// authored fog). Fog reads heavy against passthrough, so in .mixed the
@@ -2823,6 +2824,23 @@ final class RenderSettings: @unchecked Sendable {
             persistLighting()
         }
     }
+
+    /// Navier Strokes — the 2D fluid-simulation post-processing layer. Unlike
+    /// the edge/convolution filters it is a permanent, stateful LAYER: its
+    /// composite blends over whatever else is on screen, and the sim's field
+    /// textures persist across frames (owned by `NavierStrokesRenderer`).
+    var navierStrokesEffect: NavierStrokesEffect {
+        get { withLock { _navierStrokesEffect } }
+        set {
+            var normalized = newValue
+            normalized.normalize()
+            withLock {
+                _navierStrokesEffect = normalized
+                _lightingPreset = .custom
+            }
+            persistLighting()
+        }
+    }
     
     /// Fog effect (distance-based atmospheric haze)
     var fogEffect: FogEffect {
@@ -5028,6 +5046,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.bloomEffect = _bloomEffect
                 c.edgeDetectionEffect = _edgeDetectionEffect
                 c.convolutionEffect = _convolutionEffect
+                c.navierStrokesEffect = _navierStrokesEffect
                 c.fogEffect = _fogEffect
                 c.gradientCycleEffect = _gradientCycleEffect
                 c.linearRailEffect = _linearRailEffect
@@ -5049,6 +5068,7 @@ final class RenderSettings: @unchecked Sendable {
                 _bloomEffect = normalized.bloomEffect
                 _edgeDetectionEffect = normalized.edgeDetectionEffect
                 _convolutionEffect = normalized.convolutionEffect
+                _navierStrokesEffect = normalized.navierStrokesEffect
                 _fogEffect = normalized.fogEffect
                 _gradientCycleEffect = normalized.gradientCycleEffect
                 _linearRailEffect = normalized.linearRailEffect

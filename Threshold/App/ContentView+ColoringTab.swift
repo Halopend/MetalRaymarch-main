@@ -437,6 +437,9 @@ extension ContentView {
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.06)))
+
+            // ── Navier Strokes — the 2D fluid-simulation post-process layer ──
+            navierStrokesPanel
         }
     }
 
@@ -445,7 +448,6 @@ extension ContentView {
         if cache.lighting.edgeDetectionEffect.enabled { return .edgeDetection }
         return .none
     }
-
     private var outputFilterBinding: Binding<OutputFilter> {
         Binding(get: { selectedOutputFilter }, set: { filter in
             switch filter {
@@ -469,6 +471,218 @@ extension ContentView {
         })
     }
 
+    /// Navier Strokes — the 2D fluid-simulation post-processing layer. Unlike
+    /// the Output Filter picker above, this is a PERMANENT, stateful layer: it
+    /// composites over whatever else is active (filters included), and its
+    /// fluid field evolves across frames. `Gustiness` authors the inconsistent
+    /// application over time — 0 strokes steadily, 1 strokes in rare bursts.
+    ///
+    /// Type-erased deliberately: the panel composes ~15 nested view-builder
+    /// rows, which deepened `ContentView.body`'s opaque-type substitution chain
+    /// past the Release (-O) optimizer's recursion cap (Swift 6.4,
+    /// TypeSubstitution.cpp:1082 "Possible non-terminating type substitution"
+    /// crash in `ContentView.body`). AnyView here caps that depth — negligible
+    /// cost for a settings card.
+    private var navierStrokesPanel: AnyView {
+        AnyView(_NavierStrokesPanelContent(cache: cache))
+    }
+}
+
+/// The Navier Strokes panel as a standalone View struct — keeps the panel's
+/// composed type OUT of ContentView's opaque-type chain entirely (each View
+/// struct's body opaque type is resolved independently, so it does not deepen
+/// the enclosing composition).
+private struct _NavierStrokesPanelContent: View {
+    let cache: ControlStateStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            EffectSliderRow(
+                icon: "drop.fill", label: "Navier Strokes",
+                value: Binding(
+                    get: { cache.lighting.navierStrokesEffect.strength },
+                    set: { cache.lighting.navierStrokesEffect.setStrength($0) }
+                ),
+                range: ControlCatalog.strokesStrength.range,
+                enabled: Binding(
+                    get: { cache.lighting.navierStrokesEffect.enabled },
+                    set: { newEnabled in
+                        cache.lighting.navierStrokesEffect.enabled = newEnabled
+                        // Toggling on without a strength would be an invisible
+                        // layer — lift it to the balanced starting look (the
+                        // strength slider itself remains the on/off authority).
+                        if newEnabled, !cache.lighting.navierStrokesEffect.isActive {
+                            cache.lighting.navierStrokesEffect.setStrength(0.65)
+                        }
+                        cache.commitNavierStrokesEffect()
+                    }
+                ),
+                onChanged: { cache.commitNavierStrokesEffect() },
+                pairedColor: Binding(
+                    get: { cache.lighting.navierStrokesEffect.tintColor },
+                    set: { cache.lighting.navierStrokesEffect.tintColor = $0 }
+                )
+            )
+
+            if cache.lighting.navierStrokesEffect.isActive {
+                EffectSliderRow(
+                    icon: "wind", label: "Flow Speed",
+                    value: Binding(
+                        get: { cache.lighting.navierStrokesEffect.simSpeed },
+                        set: { cache.lighting.navierStrokesEffect.simSpeed = $0 }
+                    ),
+                    range: ControlCatalog.strokesSimSpeed.range,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitNavierStrokesEffect() },
+                    showToggle: false
+                )
+                Divider().padding(.leading, 159)
+                EffectSliderRow(
+                    icon: "liquid.wave", label: "Viscosity",
+                    value: Binding(
+                        get: { cache.lighting.navierStrokesEffect.velocityDissipation },
+                        set: { cache.lighting.navierStrokesEffect.velocityDissipation = $0 }
+                    ),
+                    range: ControlCatalog.strokesViscosity.range,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitNavierStrokesEffect() },
+                    showToggle: false
+                )
+                Divider().padding(.leading, 159)
+                EffectSliderRow(
+                    icon: "aqi.low", label: "Ink Fade",
+                    value: Binding(
+                        get: { cache.lighting.navierStrokesEffect.dyeDissipation },
+                        set: { cache.lighting.navierStrokesEffect.dyeDissipation = $0 }
+                    ),
+                    range: ControlCatalog.strokesDyeDissipation.range,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitNavierStrokesEffect() },
+                    showToggle: false
+                )
+                Divider().padding(.leading, 159)
+                EffectSliderRow(
+                    icon: "hurricane", label: "Swirl",
+                    value: Binding(
+                        get: { cache.lighting.navierStrokesEffect.curlStrength },
+                        set: { cache.lighting.navierStrokesEffect.curlStrength = $0 }
+                    ),
+                    range: ControlCatalog.strokesCurl.range,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitNavierStrokesEffect() },
+                    showToggle: false
+                )
+                Divider().padding(.leading, 159)
+                EffectSliderRow(
+                    icon: "arrow.triangle.swap", label: "Smear",
+                    value: Binding(
+                        get: { cache.lighting.navierStrokesEffect.displacement },
+                        set: { cache.lighting.navierStrokesEffect.displacement = $0 }
+                    ),
+                    range: ControlCatalog.strokesDisplacement.range,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitNavierStrokesEffect() },
+                    showToggle: false
+                )
+                Divider().padding(.leading, 159)
+                EffectSliderRow(
+                    icon: "paintbrush.pointed", label: "Brush Size",
+                    value: Binding(
+                        get: { cache.lighting.navierStrokesEffect.splatRadius },
+                        set: { cache.lighting.navierStrokesEffect.splatRadius = $0 }
+                    ),
+                    range: ControlCatalog.strokesSplatRadius.range,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitNavierStrokesEffect() },
+                    showToggle: false
+                )
+                Divider().padding(.leading, 159)
+                EffectSliderRow(
+                    icon: "wand.and.stars", label: "Brush Force",
+                    value: Binding(
+                        get: { cache.lighting.navierStrokesEffect.splatIntensity },
+                        set: { cache.lighting.navierStrokesEffect.splatIntensity = $0 }
+                    ),
+                    range: ControlCatalog.strokesSplatIntensity.range,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitNavierStrokesEffect() },
+                    showToggle: false
+                )
+
+                // ── Inconsistent application over time (gust scheduler) ──
+                Divider().padding(.leading, 159)
+                EffectSliderRow(
+                    icon: "cloud.bolt.rain.fill", label: "Gustiness",
+                    value: Binding(
+                        get: { cache.lighting.navierStrokesEffect.gustAmount },
+                        set: { cache.lighting.navierStrokesEffect.gustAmount = $0 }
+                    ),
+                    range: ControlCatalog.strokesGustAmount.range,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitNavierStrokesEffect() },
+                    showToggle: false
+                )
+                if cache.lighting.navierStrokesEffect.gustAmount > 0.001 {
+                    EffectSliderRow(
+                        icon: "speedometer", label: "Gust Speed",
+                        value: Binding(
+                            get: { cache.lighting.navierStrokesEffect.gustSpeed },
+                            set: { cache.lighting.navierStrokesEffect.gustSpeed = $0 }
+                        ),
+                        range: ControlCatalog.strokesGustSpeed.range,
+                        enabled: .constant(true),
+                        onChanged: { cache.commitNavierStrokesEffect() },
+                        showToggle: false
+                    )
+                }
+                Divider().padding(.leading, 159)
+                EffectSliderRow(
+                    icon: "gauge", label: "Pressure Quality",
+                    value: Binding(
+                        get: { Float(cache.lighting.navierStrokesEffect.pressureIterations) },
+                        set: { cache.lighting.navierStrokesEffect.pressureIterations = Int($0.rounded()) }
+                    ),
+                    range: ControlCatalog.strokesPressureIterations.range,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitNavierStrokesEffect() },
+                    showToggle: false,
+                    valueFormat: { String(Int($0.rounded())) }
+                )
+
+                HStack(spacing: 8) {
+                    Image(systemName: "waveform")
+                        .font(.caption)
+                        .frame(width: 16)
+                    Text("Beat Splats")
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(1)
+                    Spacer()
+                    Toggle("", isOn: Binding(
+                        get: { cache.lighting.navierStrokesEffect.audioSplats },
+                        set: { newValue in
+                            cache.lighting.navierStrokesEffect.audioSplats = newValue
+                            cache.commitNavierStrokesEffect()
+                        }))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                }
+                .frame(height: 32)
+            }
+
+            Text("A fluid simulation smears the scene like wet paint. Gustiness applies it inconsistently over time — 0 = steady strokes, 1 = rare, dramatic bursts. Beat Splats injects an extra impulse on detected beats.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.teal.opacity(0.06)))
+    }
+}
+
+extension ContentView {
     @ViewBuilder
     private var edgeDetectionFilterControls: some View {
         EffectSliderRow(
