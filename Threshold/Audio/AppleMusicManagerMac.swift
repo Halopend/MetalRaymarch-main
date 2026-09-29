@@ -100,6 +100,10 @@ final class AppleMusicManager {
     func previousTrack() async {}
     func seek(fraction: Float) {}
     func updateFrame() {}
+    /// Mac stub: Apple Music playback monitoring isn't part of the macOS
+    /// build, but `AppleMusicMetadataFeatureSource.advanceFrame()` calls this
+    /// in shared code — keep the surface in lockstep with the visionOS variant.
+    func ensurePlaybackMonitoringIfAuthorized() {}
 
     func createPlaylist(name: String, songIDs: [String]) async -> String? {
         libraryErrorMessage = "Creating Apple Music playlists isn't included in the macOS build."

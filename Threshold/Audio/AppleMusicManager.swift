@@ -78,6 +78,7 @@ final class AppleMusicManager {
     private var player: MPMusicPlayerController { MPMusicPlayerController.systemMusicPlayer }
     private(set) var isObservingPlayer = false
     private var authorizationTimeoutTask: Task<Void, Never>?
+    private var playbackMonitoringStartPending = false
     private var lastUpdateTime: CFTimeInterval = 0
     private var monitorTask: Task<Void, Never>?
     private var notificationObservers: [NSObjectProtocol] = []
@@ -111,6 +112,31 @@ final class AppleMusicManager {
         observePlayerNotifications()
     }
 
+    /// Start observing playback after the user has granted media-library
+    /// access. This also picks up Apple Music started outside Threshold, which
+    /// otherwise never reached the metadata-driven audio-reactive source.
+    private func startAuthorizedPlaybackMonitoring() {
+        guard isAuthorized else { return }
+        attachToPlayerIfNeeded()
+        startMonitoring()
+        updateFrame()
+    }
+
+    /// Defer the one-time player lookup until after the current frame/callback.
+    /// The metadata source calls this while refreshing, so users who already
+    /// granted Apple Music access still get external playback updates without
+    /// needing to start a track from inside Threshold.
+    func ensurePlaybackMonitoringIfAuthorized() {
+        guard isAuthorized, !isObservingPlayer, !playbackMonitoringStartPending else { return }
+        playbackMonitoringStartPending = true
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self else { return }
+            self.playbackMonitoringStartPending = false
+            self.startAuthorizedPlaybackMonitoring()
+        }
+    }
+
     func requestAuthorization() {
         #if targetEnvironment(simulator)
         connectionErrorMessage = "Apple Music requires a physical device."
@@ -122,6 +148,7 @@ final class AppleMusicManager {
         if authorizationStatus == .authorized {
             connectionErrorMessage = nil
             onStateDidChange?()
+            ensurePlaybackMonitoringIfAuthorized()
             return
         }
 
@@ -150,6 +177,7 @@ final class AppleMusicManager {
                     // authorization callback lightweight prevents an account-
                     // store failure from blocking the Connect button/main actor.
                     self.connectionErrorMessage = nil
+                    self.ensurePlaybackMonitoringIfAuthorized()
                 } else {
                     self.stopMonitoring()
                     self.clearLibrary(reason: "Apple Music access is required to browse songs and playlists.")

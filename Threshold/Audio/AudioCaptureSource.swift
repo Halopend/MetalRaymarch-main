@@ -183,6 +183,7 @@ final class AppleMusicMetadataFeatureSource {
     var isActive: Bool { manager.isActive }
 
     func advanceFrame() {
+        manager.ensurePlaybackMonitoringIfAuthorized()
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastAdvanceAt >= Self.advancePollInterval else { return }
         lastAdvanceAt = now
