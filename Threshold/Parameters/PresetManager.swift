@@ -1162,7 +1162,16 @@ class PresetManager {
         bundledPlaceholderFallbacks = result.bundledPlaceholderFallbacks
         if cacheChanged || presets.map(\.id) != result.presets.map(\.id) {
             presets = result.presets
-            FractalPreset.clearThumbnailCache()
+            // Thumbnail cache keys are content digests, so unchanged
+            // payloads stay warm across scans; clearing the whole cache here
+            // re-decoded every visible scene card on the main actor after
+            // each hydration pass — a multi-frame hitch under the
+            // "Indexing files…" banner. Prewarm off-main instead so grid
+            // body evaluations hit the cache.
+            let scannedPresets = result.presets
+            Task.detached(priority: .utility) {
+                FractalPreset.prewarmThumbnailCache(for: scannedPresets)
+            }
         }
         print(
             "📂 Preset scan [\(reason)]: files=\(result.fileCount), " +

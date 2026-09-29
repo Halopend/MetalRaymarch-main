@@ -129,6 +129,16 @@ final class FormulaLibraryStore {
     @ObservationIgnored nonisolated(unsafe) private var observers: [any NSObjectProtocol] = []
     private let storage: StorageLocation
 
+    // Scan generation: bumped on every reload; a detached scan applies only
+    // while its generation is still current, so a root change mid-scan can
+    // never install a stale snapshot. `scanTask` lets tests await the flight.
+    @ObservationIgnored private var scanGeneration: UInt64 = 0
+    @ObservationIgnored private var scanTask: Task<Void, Never>?
+    /// True once any scan (sync or async) has applied. Guards the mutation
+    /// fast path: before the first apply, `entries` is not yet disk truth, so
+    /// `save` falls back to a synchronous rescan to locate overwrite targets.
+    @ObservationIgnored private var initialScanApplied = false
+
     init(storage: StorageLocation = .shared) {
         self.storage = storage
         reload()
@@ -155,11 +165,61 @@ final class FormulaLibraryStore {
 
     // MARK: - Loading
 
+    /// Rescan the library off the main actor. Directory I/O, iCloud hydration
+    /// checks, reads, and JSON decoding all run detached; only the resulting
+    /// `entries` assignment hops back to MainActor. Previously this decoded
+    /// every `.threshfx` file synchronously at init and on every root/mode
+    /// notification — a multi-second main-actor stall that hitched the render
+    /// loop (and the music-reactive visuals) while the library was indexing.
+    /// A stale scan is discarded by generation.
     func reload() {
         guard let dir = formulasDirectory else {
+            scanGeneration &+= 1
+            scanTask = nil
+            initialScanApplied = true
             entries = []
             return
         }
+        scanGeneration &+= 1
+        let generation = scanGeneration
+        scanTask = Task.detached(priority: .utility) { [weak self] in
+            let scanned = Self.scanFormulaLibrary(directory: dir)
+            await self?.apply(scanned, generation: generation)
+        }
+    }
+
+    /// Synchronous rescan — for tests and callers that need the snapshot now.
+    /// Same trade-off as `PresetManager.loadPresetsNow`: does the full decode
+    /// on the calling actor, so reserve it for tooling and one-shot flows.
+    func reloadNow() {
+        scanGeneration &+= 1
+        scanTask = nil
+        guard let dir = formulasDirectory else {
+            initialScanApplied = true
+            entries = []
+            return
+        }
+        entries = Self.scanFormulaLibrary(directory: dir)
+        initialScanApplied = true
+    }
+
+    /// Awaits the most recently scheduled async scan (no-op when none is
+    /// in flight) — deterministic hook for tests observing the detached path.
+    func waitForScan() async {
+        await scanTask?.value
+    }
+
+    private func apply(_ scanned: [FormulaLibraryEntry], generation: UInt64) {
+        guard generation == scanGeneration else { return }
+        entries = scanned
+        initialScanApplied = true
+    }
+
+    /// Full scan of `dir`: enumerate `.threshfx` files, skip un-hydrated
+    /// iCloud placeholders, decode, dedupe by formula id (newest modified
+    /// wins), sort by name. Non-throwing: unreadable or corrupt files are
+    /// skipped, never fatal. `nonisolated` so `reload` can run it detached.
+    private nonisolated static func scanFormulaLibrary(directory dir: URL) -> [FormulaLibraryEntry] {
         let fm = FileManager.default
         // Recursive: every folder below Formulas/ is a user category.
         let urls = (fm.enumerator(at: dir, includingPropertiesForKeys: [
@@ -199,7 +259,7 @@ final class FormulaLibraryStore {
             bestByID[formula.id] = (url, modified)
             loaded.append(FormulaLibraryEntry(url: url, formula: formula))
         }
-        entries = loaded.sorted {
+        return loaded.sorted {
             $0.formula.name.localizedCaseInsensitiveCompare($1.formula.name) == .orderedAscending
         }
     }
@@ -222,12 +282,16 @@ final class FormulaLibraryStore {
 
         // One file per formula id: an in-place edit (same id, new source)
         // replaces its own file rather than accumulating stale versions.
+        // Until the first scan applies, `entries` is not disk truth, so fall
+        // back to a synchronous rescan (first save after launch only — the
+        // case where an async init scan is still in flight).
+        if !initialScanApplied { reloadNow() }
         let existing = entries.first { $0.formula.id == formula.id }?.url
         let url = existing ?? uniqueURL(for: formula.name, in: dir)
 
         let data = try EmbeddedFormulaContainer(formula: formula).encode()
         try data.write(to: url, options: .atomic)
-        reload()
+        upsert(FormulaLibraryEntry(url: url, formula: formula))
         return entries.first { $0.formula.id == formula.id }
             ?? FormulaLibraryEntry(url: url, formula: formula)
     }
@@ -244,7 +308,9 @@ final class FormulaLibraryStore {
         if destination != entry.url {
             try? FileManager.default.removeItem(at: entry.url)
         }
-        reload()
+        if !initialScanApplied { reloadNow() } else {
+            upsert(FormulaLibraryEntry(url: destination, formula: formula))
+        }
     }
 
     /// Duplicate as a new formula identity (fresh id, " Copy" suffix).
@@ -258,7 +324,21 @@ final class FormulaLibraryStore {
 
     func delete(_ entry: FormulaLibraryEntry) throws {
         try FileManager.default.removeItem(at: entry.url)
+        if !initialScanApplied { reloadNow(); return }
+        entries.removeAll { $0.url == entry.url }
+        // If a same-id duplicate file survives elsewhere (post-hydration
+        // dupes), it must now surface as the id's representative — let the
+        // off-main scan reconcile it instead of decoding synchronously.
         reload()
+    }
+
+    /// In-place entry update after a targeted write: one file per formula id,
+    /// newest content wins — exactly what a full scan would conclude, without
+    /// rescanning (and re-decoding) the whole library on the main actor.
+    private func upsert(_ entry: FormulaLibraryEntry) {
+        entries.removeAll { $0.formula.id == entry.formula.id || $0.url == entry.url }
+        entries.append(entry)
+        entries.sort { $0.formula.name.localizedCaseInsensitiveCompare($1.formula.name) == .orderedAscending }
     }
 
     // MARK: - Helpers

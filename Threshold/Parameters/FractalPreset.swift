@@ -1741,6 +1741,19 @@ struct FractalPreset: Codable, Identifiable {
         thumbnailCache.removeAllObjects()
     }
 
+    /// Decode thumbnail payloads into the shared digest cache, off the main
+    /// actor. Scene-card bodies call `thumbnailImage` on the main thread
+    /// during SwiftUI evaluation; with the cache warmed, a card's first
+    /// render is a hit instead of an ImageIO decode. `NSCache` is thread-safe
+    /// and every stored member is a value type, so this is callable from any
+    /// isolation. Bounded by the cache's own `countLimit`.
+    nonisolated static func prewarmThumbnailCache(for presets: [FractalPreset]) {
+        for preset in presets.prefix(thumbnailCache.countLimit) {
+            guard preset.thumbnailData != nil else { continue }
+            _ = preset.thumbnailImage
+        }
+    }
+
     /// Stable cache key for a thumbnail payload: a digest of the BYTES, not the
     /// preset id. Scene-card views build display-only presets with a fresh
     /// `UUID()` per body evaluation, so the id-keyed cache missed on every

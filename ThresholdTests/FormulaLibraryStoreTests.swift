@@ -51,7 +51,7 @@ struct FormulaLibraryStoreTests {
     }
 
     @Test("Save, reload, and read back a formula")
-    func saveAndReload() throws {
+    func saveAndReload() async throws {
         let (store, root) = try makeStore()
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -60,10 +60,12 @@ struct FormulaLibraryStoreTests {
         #expect(entry.formula.id == "user.test.save")
         #expect(entry.url.pathExtension == "threshfx")
 
-        // A fresh store over the same root sees the file.
+        // A fresh store over the same root sees the file via the async
+        // initial scan (init reloads off the main actor now).
         let storage = StorageLocation()
         storage.testRootOverride = root
         let reopened = FormulaLibraryStore(storage: storage)
+        await reopened.waitForScan()
         #expect(reopened.entries.count == 1)
         #expect(reopened.entries[0].formula.name == "Sphere Thing")
     }
@@ -141,8 +143,55 @@ struct FormulaLibraryStoreTests {
         try data.write(to: dir.appendingPathComponent("twin-a.threshfx"))
         try data.write(to: dir.appendingPathComponent("twin-b.threshfx"))
 
-        store.reload()
+        store.reloadNow()
         #expect(store.entries.count == 1)
         #expect(store.entries[0].formula.name == "Twin")
+    }
+
+    @Test("reload() applies asynchronously without decoding on the main actor")
+    func reloadAppliesAsynchronously() async throws {
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // A file dropped on disk while the store exists shows up after the
+        // detached rescan lands — no synchronous decode on the caller.
+        let dir = StorageLocation.formulasDir(root)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let data = try EmbeddedFormulaContainer(
+            formula: makeFormula(id: "user.test.async", name: "Async Thing")
+        ).encode()
+        try data.write(to: dir.appendingPathComponent("async.threshfx"))
+
+        store.reload()
+        await store.waitForScan()
+        #expect(store.entries.count == 1)
+        #expect(store.entries[0].formula.id == "user.test.async")
+    }
+
+    @Test("Save before the initial scan applies still overwrites, not duplicates")
+    func saveBeforeInitialScanAppliesOverwrites() async throws {
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // A same-id file already on disk, written while the store's initial
+        // async scan may still be in flight.
+        let dir = StorageLocation.formulasDir(root)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let preexisting = try EmbeddedFormulaContainer(
+            formula: makeFormula(id: "user.test.race", name: "Race Thing")
+        ).encode()
+        try preexisting.write(to: dir.appendingPathComponent("race_thing.threshfx"))
+
+        _ = try store.save(makeFormula(id: "user.test.race", name: "Race Thing", radius: 2.0))
+        await store.waitForScan()
+
+        let files = try FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "threshfx" }
+        #expect(files.count == 1)
+        #expect(store.entries.count == 1)
+        // The surviving payload is the edited one.
+        #expect(store.entries[0].formula.metalSource.contains("2.0f *") == true
+                || store.entries[0].formula.metalSource.contains("Radius 2.0"))
     }
 }
