@@ -731,6 +731,11 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     /// User-authored labels used to build flexible collections in Explore.
     /// Empty for scenes written before tagging was introduced.
     var tags: [String]
+    /// Platform gate — see `PlatformVisibility`. Optional so files written
+    /// before the field existed decode to `nil` after the legacy-tag shim.
+    var platformVisibility: PlatformVisibility?
+    /// Folder category this file was last saved into, relative to `Animations/`.
+    var categoryPath: [String]?
     var keyframes: [AnimationKeyframe]
     var isLooping: Bool
     /// Playback direction/mode for this scene — forward, reverse, or ping-pong.
@@ -813,7 +818,7 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     /// `legacyMandelboxSphereProjection` flag stays out of the on-disk format
     /// (the synthesized init/encode reference these only).
     private enum CodingKeys: String, CodingKey {
-        case id, name, tags, keyframes, isLooping, playbackMode, createdAt, modifiedAt
+        case id, name, tags, platformVisibility, categoryPath, keyframes, isLooping, playbackMode, createdAt, modifiedAt
         case fractalType, baseline, gradientPreset, colorMappingMode, gradientRepeat
         case gradientOffset, gradientSmoothing
         case colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
@@ -867,7 +872,13 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id             = try c.decode(UUID.self, forKey: .id)
         name           = try c.decode(String.self, forKey: .name)
-        tags           = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
+        let rawTags    = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
+        // Same legacy-tag shim as FractalPreset: reserved tags encoded platform
+        // visibility, so hide them from the user tag list and derive the field.
+        tags           = rawTags.filter { !PlatformVisibility.isReservedTag($0) }
+        platformVisibility = try c.decodeIfPresent(PlatformVisibility.self, forKey: .platformVisibility)
+            ?? PlatformVisibility.fromLegacyTags(rawTags)
+        categoryPath   = try c.decodeIfPresent([String].self, forKey: .categoryPath)
         keyframes      = try c.decode([AnimationKeyframe].self, forKey: .keyframes)
         isLooping      = try c.decode(Bool.self, forKey: .isLooping)
         playbackMode   = (try? c.decode(AnimationPlaybackMode.self, forKey: .playbackMode)) ?? .forward

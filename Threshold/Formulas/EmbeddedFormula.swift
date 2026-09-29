@@ -43,6 +43,35 @@ enum EffectKind: String, Codable, Equatable, Sendable {
     /// A space-domain warp: defines `customSpaceWarp` + `customSpaceWarpDEScale`,
     /// injected at `// __CUSTOM_SPACE_WARP__`; applies to any fractal.
     case spaceWarp
+
+    /// Library section title for this kind. A future effect kind (e.g. a 2D
+    /// filter) slots in here without touching the picker: add the case, its
+    /// Metal contract, and these three labels.
+    var librarySectionTitle: String {
+        switch self {
+        case .fractal: return "Distance Estimators"
+        case .spaceWarp: return "Space Warps"
+        }
+    }
+
+    /// Short human label for provenance captions and pickers.
+    var displayName: String {
+        switch self {
+        case .fractal: return "Distance Estimator"
+        case .spaceWarp: return "Space Warp"
+        }
+    }
+
+    /// SF Symbol for the kind's library tile.
+    var icon: String {
+        switch self {
+        case .fractal: return "function"
+        case .spaceWarp: return "arrow.triangle.2.circlepath"
+        }
+    }
+
+    /// Stable display order for grouped library sections.
+    static let libraryOrder: [EffectKind] = [.fractal, .spaceWarp]
 }
 
 // MARK: - Embedded formula payload

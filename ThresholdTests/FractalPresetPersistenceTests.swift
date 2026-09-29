@@ -41,21 +41,66 @@ struct FractalPresetPersistenceTests {
         #expect(legacyDecoded.tags.isEmpty)
     }
 
-    @Test("Screen-only scene tag is canonical and controls immersive visibility")
-    func screenOnlySceneTag() {
-        let tagged = SceneTagging.settingScreenOnly(true, in: ["Favorites", "mac ONLY"])
+    @Test("platformVisibility is canonical; legacy reserved tags decode into it")
+    func platformVisibilityIsCanonical() throws {
+        // A file written by an older build: reserved tag in `tags`, no field.
+        var legacy = FractalPreset(name: "Legacy Screen Only")
+        legacy.tags = [SceneTagging.screenOnlyTag, "Favorites"]
+        let legacyDecoded = try JSONDecoder().decode(
+            FractalPreset.self,
+            from: try JSONEncoder().encode(legacy)
+        )
+        #expect(legacyDecoded.platformVisibility == .flat)
+        #expect(legacyDecoded.tags == ["Favorites"], "reserved tags must not surface as user tags")
 
-        #expect(tagged == [SceneTagging.screenOnlyTag, "Favorites"])
-        #expect(SceneTagging.isScreenOnly(tagged))
-        #expect(SceneTagging.isMacOnly(["mac ONLY"]))
-        #expect(SceneTagging.isVisible(tagged, includesScreenOnlyScenes: true))
-        #expect(!SceneTagging.isVisible(tagged, includesScreenOnlyScenes: false))
-        #expect(!SceneTagging.isVisible(
-            [SceneTagging.macOnlyTag],
-            includesScreenOnlyScenes: true,
-            includesMacOnlyScenes: false
-        ))
-        #expect(SceneTagging.settingScreenOnly(false, in: tagged) == ["Favorites"])
+        // The field round-trips, and the reserved tag is still written for
+        // one-release backward compatibility.
+        var preset = FractalPreset(name: "Mac Only Thing")
+        preset.platformVisibility = .mac
+        let data = try JSONEncoder().encode(preset)
+        let decoded = try JSONDecoder().decode(FractalPreset.self, from: data)
+        #expect(decoded.platformVisibility == .mac)
+        #expect(decoded.tags.isEmpty)
+        let raw = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect((raw["tags"] as? [String])?.contains(SceneTagging.macOnlyTag) == true)
+        #expect(raw["platformVisibility"] as? String == "mac")
+
+        // Reserved tags are still recognised in raw tag lists (the decode shim
+        // reads them), but there is no tag-writing path any more.
+        #expect(SceneTagging.isReserved(SceneTagging.macOnlyTag))
+        #expect(SceneTagging.isReserved("mac ONLY"))
+        #expect(SceneTagging.isReserved(SceneTagging.screenOnlyTag))
+        #expect(!SceneTagging.isReserved("Favorites"))
+        #expect(SceneTagging.screenOnlyTag == PlatformVisibility.flatLegacyTag)
+        #expect(SceneTagging.macOnlyTag == PlatformVisibility.macLegacyTag)
+    }
+
+    @Test("Jumping Off classification follows the content trait, not a name list")
+    func jumpingOffTraitDrivesClassification() throws {
+        // A music-reactive scene is not a static starting point by default.
+        var reactive = FractalPreset(name: "A space ring Odyssey")
+        reactive.musicReactiveMappings = [
+            MusicReactiveMapping(target: .glow, source: .bass, amount: 1, isEnabled: true)
+        ]
+        #expect(!reactive.isJumpingOffPreset)
+
+        // The trait opts it back in — this replaces the old hardcoded name list,
+        // so renaming the scene no longer changes its classification.
+        reactive.jumpingOff = true
+        reactive.name = "Completely Different Name"
+        #expect(reactive.isJumpingOffPreset)
+
+        // It round-trips, and an unflagged scene stays "classify by content".
+        let decoded = try JSONDecoder().decode(
+            FractalPreset.self, from: try JSONEncoder().encode(reactive)
+        )
+        #expect(decoded.jumpingOff == true)
+
+        let plain = try JSONDecoder().decode(
+            FractalPreset.self, from: try JSONEncoder().encode(FractalPreset(name: "Plain"))
+        )
+        #expect(plain.jumpingOff == nil)
+        #expect(plain.isJumpingOffPreset, "a scene with no music mappings is a starting point")
     }
 
     @Test("Platform / cell-shading / light-rate / extra effects / bubble-fade survive fromSettings → encode → decode → apply")

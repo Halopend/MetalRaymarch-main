@@ -15,7 +15,7 @@ struct ControlFinderDestinationTests {
     @Test("Catalog IDs are unique and every destination is routable")
     func uniqueRoutableDestinations() {
         let catalog = ControlFinderDestination.catalog
-        #expect(catalog.count >= 32)
+        #expect(catalog.count >= 27)
         #expect(Set(catalog.map(\.id)).count == catalog.count)
         #expect(catalog.allSatisfy { !$0.title.isEmpty && !$0.path.isEmpty && !$0.description.isEmpty })
         #expect(catalog.allSatisfy { !$0.target.stableID.isEmpty })
@@ -47,7 +47,7 @@ struct ControlFinderDestinationTests {
             }
         }
 
-        #expect(explore == Set(ExploreRailSection.allCases.map(\.rawValue)))
+        #expect(explore.isEmpty)
         #expect(shape == Set(ShapeRailSection.allCases.map(\.rawValue)))
         #expect(visualizations == Set(VisualizationsRailSection.allCases.map(\.rawValue)))
         #expect(performance == Set(PerformanceRailSection.allCases.map(\.rawValue)))
@@ -65,9 +65,8 @@ struct ControlFinderDestinationTests {
         let originalMixedSetting = UserDefaults.standard.bool(forKey: mixedKey)
         defer { UserDefaults.standard.set(originalMixedSetting, forKey: mixedKey) }
 
-        // Default (opted out): Mixed scene browsing stays Vision Pro only, so
-        // the counts still order mac < iPad < vision but neither flat host
-        // lists the Mixed destination.
+        // Folder browsing is runtime data, not a static finder destination;
+        // other platform capabilities still produce the expected ordering.
         UserDefaults.standard.set(false, forKey: mixedKey)
         let mac = ControlFinderDestination.results(matching: "", on: .macOS)
         let iPad = ControlFinderDestination.results(matching: "", on: .iPadOS)
@@ -80,18 +79,12 @@ struct ControlFinderDestinationTests {
         #expect(iPad.contains { $0.id == "input.Songs" })
         #expect(!iPad.contains { $0.id == "shape.Hands" })
         #expect(vision.contains { $0.id == "shape.Hands" })
-        #expect(!mac.contains { $0.id == "explore.Mixed" })
-        #expect(!iPad.contains { $0.id == "explore.Mixed" })
-        #expect(vision.contains { $0.id == "explore.Mixed" })
-
-        // Opted in via Settings → Display: Mixed scenes surface on every host.
+        // The setting no longer changes static navigation results.
         UserDefaults.standard.set(true, forKey: mixedKey)
         let macOptedIn = ControlFinderDestination.results(matching: "", on: .macOS)
         let iPadOptedIn = ControlFinderDestination.results(matching: "", on: .iPadOS)
-        #expect(macOptedIn.contains { $0.id == "explore.Mixed" })
-        #expect(iPadOptedIn.contains { $0.id == "explore.Mixed" })
-        #expect(macOptedIn.count == mac.count + 1)
-        #expect(iPadOptedIn.count == iPad.count + 1)
+        #expect(macOptedIn.count == mac.count)
+        #expect(iPadOptedIn.count == iPad.count)
     }
 
     @Test("Search uses titles, descriptions, paths, and synonyms")
@@ -109,7 +102,7 @@ struct ControlFinderDestinationTests {
         #expect(edge.contains { $0.target == .route(.look(.grading)) })
 
         let custom = ControlFinderDestination.results(matching: "threshfx", on: .macOS)
-        #expect(custom.first?.id == "explore.Custom Scenes")
+        #expect(!custom.contains { $0.id.hasPrefix("explore.") })
 
         let mapping = ControlFinderDestination.results(matching: "audio mapping smoothing", on: .macOS)
         #expect(mapping.first?.id == "input.Reactive")

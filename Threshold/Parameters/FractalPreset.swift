@@ -363,6 +363,68 @@ struct SceneState: Codable, Equatable {
     }
 }
 
+/// Where a saved document is allowed to appear. Replaces the reserved
+/// `"Screen only"` / `"Mac only"` tags, which older builds wrote into `tags`.
+/// Those tags are still *read* (see the decode shim in `FractalPreset` /
+/// `AnimationScene`) and still *written* alongside this field for one release,
+/// so files stay readable by builds that predate it.
+///
+/// Defined here rather than in the app-only `SceneTags.swift` because the Quick
+/// Look targets compile `FractalPreset` without the scene-tagging UI.
+enum PlatformVisibility: String, Codable, CaseIterable, Sendable {
+    /// Every platform.
+    case all
+    /// Flat displays — macOS, iPadOS, iOS. Hidden from visionOS.
+    case flat
+    /// macOS only. Hidden from visionOS and iPadOS/iOS.
+    case mac
+
+    /// Legacy reserved tag strings. The single source of truth for both the
+    /// decode shim here and `SceneTagging`.
+    static let flatLegacyTag = "Screen only"
+    static let macLegacyTag = "Mac only"
+
+    /// True for a tag that only encoded visibility; it must not be shown as a
+    /// user tag once the field is authoritative.
+    static func isReservedTag(_ tag: String) -> Bool {
+        let lowered = tag.lowercased()
+        return lowered == flatLegacyTag.lowercased() || lowered == macLegacyTag.lowercased()
+    }
+
+    /// Resolve visibility from a legacy reserved-tag list, if present.
+    static func fromLegacyTags(_ tags: [String]) -> PlatformVisibility? {
+        for tag in tags {
+            let lowered = tag.lowercased()
+            if lowered == macLegacyTag.lowercased() { return .mac }
+            if lowered == flatLegacyTag.lowercased() { return .flat }
+        }
+        return nil
+    }
+
+    /// The reserved tag this value used to be written as, for one-release
+    /// backward-compatible exports. `nil` for `.all`.
+    var legacyTag: String? {
+        switch self {
+        case .all: return nil
+        case .flat: return Self.flatLegacyTag
+        case .mac: return Self.macLegacyTag
+        }
+    }
+
+    /// Resolve an optional field, treating "absent" as unrestricted.
+    static func resolved(_ value: PlatformVisibility?) -> PlatformVisibility { value ?? .all }
+
+    /// Whether a document with this visibility appears on a host that does or
+    /// does not include flat-only and Mac-only content.
+    func isVisible(includesScreenOnly: Bool, includesMacOnly: Bool) -> Bool {
+        switch self {
+        case .all: return true
+        case .flat: return includesScreenOnly
+        case .mac: return includesMacOnly
+        }
+    }
+}
+
 /// Represents a saved preset with all render settings and a preview image
 struct FractalPreset: Codable, Identifiable {
     static let currentSchemaVersion = 4
@@ -372,6 +434,19 @@ struct FractalPreset: Codable, Identifiable {
     /// User-authored labels used to build flexible collections in Explore.
     /// Empty for scenes written before tagging was introduced.
     var tags: [String]
+    /// Platform gate. Optional so files written before the field existed decode
+    /// to `nil` (unrestricted) after the legacy-tag shim runs.
+    var platformVisibility: PlatformVisibility?
+    /// Folder category this file was last saved into, relative to its kind root
+    /// (`["Caverns", "Ice Caves"]`). A portability hint for sharing; the on-disk
+    /// folder always wins once the file lives in a store.
+    var categoryPath: [String]?
+    /// Explicit Jumping Off classification. Replaces the hardcoded
+    /// `jumpingOffNameOverrides` name list: a scene belongs to Jumping Off when
+    /// it has no music mappings, or when this flag is set (which is how a
+    /// music-reactive scene opts back in). Optional so older files decode to
+    /// `nil`, meaning "classify by content".
+    var jumpingOff: Bool?
     var createdAt: Date
     /// Last time this preset's content was created or modified. Drives newest-wins
     /// conflict resolution in the iCloud merge. Decodes to `createdAt` for presets
@@ -563,7 +638,7 @@ struct FractalPreset: Codable, Identifiable {
     var safetyBubbleFadeWidth: Float?     // SafetyBubbleConfig — edge fade width
 
     enum CodingKeys: String, CodingKey {
-        case id, name, tags, createdAt, updatedAt, thumbnailData, rating
+        case id, name, tags, platformVisibility, categoryPath, jumpingOff, createdAt, updatedAt, thumbnailData, rating
         case fractalIterations, maxRaySteps, colorMix, colorIterations, position, scale
         case fractalType, colorScheme, colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
         case colorSchemeVibrance, colorSchemeCurve, colorSchemeShadows, colorSchemeHighlights
@@ -646,7 +721,15 @@ struct FractalPreset: Codable, Identifiable {
             && container.contains(.scale)
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
-        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        let rawTags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        // Reserved visibility tags are a legacy encoding of `platformVisibility`:
+        // strip them from the user-facing tag list now that the field is
+        // authoritative, and derive the field when an older file only has tags.
+        tags = rawTags.filter { !PlatformVisibility.isReservedTag($0) }
+        platformVisibility = try container.decodeIfPresent(PlatformVisibility.self, forKey: .platformVisibility)
+            ?? PlatformVisibility.fromLegacyTags(rawTags)
+        categoryPath = try container.decodeIfPresent([String].self, forKey: .categoryPath)
+        jumpingOff = try container.decodeIfPresent(Bool.self, forKey: .jumpingOff)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
         thumbnailData = try container.decodeIfPresent(Data.self, forKey: .thumbnailData)
@@ -872,7 +955,17 @@ struct FractalPreset: Codable, Identifiable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(name, forKey: .name)
-        try container.encode(tags, forKey: .tags)
+        // Emit the legacy reserved tag alongside the field for one release, so
+        // builds that predate `platformVisibility` still classify the file.
+        var encodedTags = tags
+        if let legacyTag = platformVisibility?.legacyTag,
+           !encodedTags.contains(where: { $0.caseInsensitiveCompare(legacyTag) == .orderedSame }) {
+            encodedTags.insert(legacyTag, at: 0)
+        }
+        try container.encode(encodedTags, forKey: .tags)
+        try container.encodeIfPresent(platformVisibility, forKey: .platformVisibility)
+        try container.encodeIfPresent(categoryPath, forKey: .categoryPath)
+        try container.encodeIfPresent(jumpingOff, forKey: .jumpingOff)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encodeIfPresent(thumbnailData, forKey: .thumbnailData)
@@ -1710,30 +1803,13 @@ extension FractalPreset {
         return !mappings.isEmpty
     }
 
-    /// Names that should appear in the "Jumping Off" browse tab even though they
-    /// carry music-reactive mappings. Shared by the browse UI and the keyboard
-    /// scene-switch cycling so both classify presets identically.
-    static let jumpingOffNameOverrides: Set<String> = [
-        "mandel box flower",
-        "replace that",
-        "the lovely bones",
-        "definitely aliens",
-        "ladybug two",
-        "ring around the rosie",
-        "a space ring odyssey"
-    ]
-
     /// Whether this preset belongs to the "Jumping Off" (static starting point)
-    /// collection. Custom embedded-formula presets are excluded.
+    /// smart view. Classification is a content trait (`jumpingOff`) or the
+    /// absence of music mappings — never a hardcoded scene name, and never the
+    /// presence of an embedded formula. Smart views are non-exclusive, so a
+    /// scene with an embedded DE also appears under Custom Scenes.
     var isJumpingOffPreset: Bool {
-        guard !isCustomScenePreset else { return false }
-        let normalizedName = name
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        if FractalPreset.jumpingOffNameOverrides.contains(normalizedName) {
-            return true
-        }
-        return !hasMusicReactiveMappings
+        jumpingOff == true || !hasMusicReactiveMappings
     }
 
     /// Whether this preset should participate in desktop left/right scene

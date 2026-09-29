@@ -695,7 +695,7 @@ struct SceneEditorView: View {
                         .font(.subheadline.weight(.semibold))
                     SceneTagEditor(tags: $scene.tags)
                 }
-                ScreenOnlySceneToggle(tags: $scene.tags)
+                ScreenOnlySceneToggle(visibility: $scene.platformVisibility)
                 Toggle("Loop Animation", isOn: $scene.isLooping)
                 HStack {
                     Text("Playback")

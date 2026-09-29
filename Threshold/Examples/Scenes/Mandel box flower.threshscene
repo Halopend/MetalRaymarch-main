@@ -1,4 +1,5 @@
 {
+  "jumpingOff" : true,
   "bloomEffect" : {
     "enabled" : true,
     "strength" : 0.15573439

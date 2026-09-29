@@ -1,4 +1,5 @@
 {
+  "jumpingOff" : true,
   "bloomEffect" : {
     "enabled" : false,
     "strength" : 0

@@ -62,7 +62,7 @@ struct PresetCatalogVisibilityTests {
     @Test("Vision Pro catalogs exclude screen-only tagged scenes")
     func screenOnlyScenesAreExcludedFromVisionCatalog() {
         var screenOnly = makePreset(id: environmentID, name: "Overwhelming")
-        screenOnly.tags = [SceneTagging.screenOnlyTag]
+        screenOnly.platformVisibility = .flat
         let ordinary = makePreset(id: ordinaryID, name: "Ordinary")
 
         let visionResult = PresetManager.filterSceneCatalogPresets(
@@ -85,7 +85,7 @@ struct PresetCatalogVisibilityTests {
     @Test("Mac-only bundled identities stay hidden from non-Mac catalogs")
     func macOnlyBundledScenesAreExcludedFromNonMacCatalogs() {
         var bundledMacOnly = makePreset(id: environmentID, name: "Mountain")
-        bundledMacOnly.tags = [SceneTagging.macOnlyTag]
+        bundledMacOnly.platformVisibility = .mac
         // Simulate a copy seeded before the bundled scene gained its tag.
         let previouslySeededCopy = makePreset(id: environmentID, name: "Mountain")
         let ordinary = makePreset(id: ordinaryID, name: "Ordinary")
@@ -107,6 +107,30 @@ struct PresetCatalogVisibilityTests {
 
         #expect(nonMacResult.map(\.id) == [ordinaryID])
         #expect(macResult.map(\.id) == [environmentID, ordinaryID])
+    }
+
+    @Test("A seeded copy resurfaces when its bundled source drops Mac-only")
+    func seededCopyFollowsLoosenedBundledClassification() {
+        // CLOWNING AROUND scenario: installs seeded the preset back when the
+        // bundled file carried the Mac-only tag. The seeded copy re-encoded the
+        // explicit `.mac` classification into its own field (the encoder
+        // re-emits the legacy tag) and the seed marker prevents a re-write, so
+        // only the bundled file's CURRENT classification can unlock it again.
+        var bundledNowUnrestricted = makePreset(id: environmentID, name: "CLOWNING AROUND")
+        bundledNowUnrestricted.platformVisibility = nil
+        var staleSeededCopy = makePreset(id: environmentID, name: "CLOWNING AROUND")
+        staleSeededCopy.platformVisibility = .mac
+        let ordinary = makePreset(id: ordinaryID, name: "Ordinary")
+
+        let visionResult = PresetManager.filterSceneCatalogPresets(
+            [staleSeededCopy, ordinary],
+            bundledPresets: [bundledNowUnrestricted],
+            supportsEnvironmentReconstruction: true,
+            includesScreenOnlyScenes: false,
+            includesMacOnlyScenes: false
+        )
+
+        #expect(visionResult.map(\.id) == [environmentID, ordinaryID])
     }
 
     @Test("Flat-display catalogs hide Mixed-reality scenes until opted in")

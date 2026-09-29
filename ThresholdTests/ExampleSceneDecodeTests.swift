@@ -97,17 +97,37 @@ struct ExampleSceneDecodeTests {
         }
     }
 
-    @Test("Every bundled music preset is explicitly Mac-only")
+    @Test("Every bundled music preset except CLOWNING AROUND is explicitly Mac-only")
     func bundledMusicPresetsAreMacOnly() throws {
         let decoder = Self.iso8601Decoder()
         let files = Self.files(withExtension: "threshmp", in: "Music Presets")
+            .filter { $0.lastPathComponent != "CLOWNING_AROUND.threshmp" }
         for url in files {
             let preset = try decoder.decode(FractalPreset.self, from: Data(contentsOf: url))
             #expect(
-                SceneTagging.isMacOnly(preset.tags),
-                "\(url.lastPathComponent) must include the Mac-only scene tag"
+                PlatformVisibility.resolved(preset.platformVisibility) == .mac,
+                "\(url.lastPathComponent) must be classified Mac-only"
             )
         }
+    }
+
+    @Test("CLOWNING AROUND carries no Mac requirement — it ships on every platform")
+    func clowningAroundIsUnrestricted() throws {
+        let decoder = Self.iso8601Decoder()
+        let files = Self.files(withExtension: "threshmp", in: "Music Presets")
+        guard let url = files.first(where: { $0.lastPathComponent == "CLOWNING_AROUND.threshmp" }) else {
+            Issue.record("CLOWNING_AROUND.threshmp is missing from the bundled Music Presets")
+            return
+        }
+        let preset = try decoder.decode(FractalPreset.self, from: Data(contentsOf: url))
+        #expect(
+            PlatformVisibility.resolved(preset.platformVisibility) == .all,
+            "CLOWNING AROUND must not be classified Mac-only"
+        )
+        #expect(
+            !preset.tags.contains(where: SceneTagging.isReserved),
+            "the legacy Mac-only tag must not ride along as a user tag"
+        )
     }
 
     @Test("Every .threshanim decodes as an AnimationScene (animation import path)")
@@ -129,6 +149,23 @@ struct ExampleSceneDecodeTests {
             #expect(throws: Never.self, "FAILED to decode/validate \(url.lastPathComponent)") {
                 _ = try EmbeddedFormulaContainer.decode(fromContainerAt: url)
             }
+        }
+    }
+
+    @Test("Mixed-immersion classification travels in the file, not the folder")
+    func mixedClassificationIsInFile() throws {
+        // The bundled loader no longer sniffs the `Examples/Mixed` folder name
+        // (and the bundle flattens it anyway), so every Mixed example must
+        // classify itself through `mixedModeScene`.
+        let decoder = Self.iso8601Decoder()
+        let files = Self.files(withExtension: "threshscene", in: "Mixed")
+        #expect(!files.isEmpty, "expected shipped Mixed examples")
+        for url in files {
+            let preset = try decoder.decode(FractalPreset.self, from: Data(contentsOf: url))
+            #expect(
+                preset.mixedModeScene == true,
+                "\(url.lastPathComponent) must carry mixedModeScene:true in the file"
+            )
         }
     }
 }

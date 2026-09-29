@@ -2,12 +2,13 @@ import SwiftUI
 
 /// Cross-platform visibility gate for Vision Pro Mixed-reality scenes.
 ///
-/// Scenes marked `mixedModeScene` (the "Open in Mixed Immersion" opt-in, plus
-/// everything bundled under `Examples/Mixed`) are authored for Mixed immersion:
-/// on Vision Pro the fractal composites over the room passthrough. On
-/// flat-display hosts (macOS, iPadOS) there is no passthrough context, so those
-/// scenes are hidden from every scene catalog and browse surface unless the
-/// user explicitly enables them in Settings → Display. visionOS always
+/// Scenes marked `mixedModeScene` (the "Open in Mixed Immersion" opt-in, and
+/// every bundled Mixed example) are authored for Mixed immersion: on Vision Pro
+/// the fractal composites over the room passthrough. Classification travels
+/// inside the file — the bundled loader no longer infers it from a folder name.
+/// On flat-display hosts (macOS, iPadOS) there is no passthrough context, so
+/// those scenes are hidden from every scene catalog and browse surface unless
+/// the user explicitly enables them in Settings → Display. visionOS always
 /// includes them — Mixed scenes belong there.
 ///
 /// Mirrors the reserved-tag rules in `SceneTagging`, keyed off the
@@ -36,13 +37,18 @@ enum SceneTagging {
     static let maximumTagCount = 12
     static let maximumTagLength = 28
     /// A reserved, portable tag for scenes designed for a flat display rather
-    /// than an immersive view surrounding the viewer. Keeping this in `tags`
-    /// means old app versions and exported scene files remain fully compatible.
-    static let screenOnlyTag = "Screen only"
-    /// A reserved, portable tag for scenes that should only appear in the Mac
-    /// catalog. This remains distinct from `screenOnlyTag`, which also permits
-    /// flat-display iPhone and iPad hosts.
-    static let macOnlyTag = "Mac only"
+    /// than an immersive view surrounding the viewer. This is now a *legacy wire
+    /// encoding* of `PlatformVisibility.flat`: the model strips it on decode and
+    /// re-emits it on encode for one release so older builds keep working.
+    static let screenOnlyTag = PlatformVisibility.flatLegacyTag
+    /// Legacy wire encoding of `PlatformVisibility.mac`.
+    static let macOnlyTag = PlatformVisibility.macLegacyTag
+
+    /// True for a tag that only ever encoded platform visibility. The tag UI
+    /// hides these now that `platformVisibility` is authoritative.
+    static func isReserved(_ tag: String) -> Bool {
+        PlatformVisibility.isReservedTag(tag)
+    }
 
     static func normalized(_ tags: [String]) -> [String] {
         var result: [String] = []
@@ -69,44 +75,26 @@ enum SceneTagging {
     static func contains(_ tags: [String], tag: String) -> Bool {
         tags.contains { $0.caseInsensitiveCompare(tag) == .orderedSame }
     }
-
-    static func isScreenOnly(_ tags: [String]) -> Bool {
-        contains(tags, tag: screenOnlyTag) || isMacOnly(tags)
-    }
-
-    static func isMacOnly(_ tags: [String]) -> Bool {
-        contains(tags, tag: macOnlyTag)
-    }
-
-    static func settingScreenOnly(_ enabled: Bool, in tags: [String]) -> [String] {
-        let withoutReservedTag = tags.filter {
-            $0.caseInsensitiveCompare(screenOnlyTag) != .orderedSame
-                && $0.caseInsensitiveCompare(macOnlyTag) != .orderedSame
-        }
-        guard enabled else { return normalized(withoutReservedTag) }
-
-        // Put the semantic tag first so it cannot be dropped when a scene is
-        // already at the user-tag limit.
-        return normalized([screenOnlyTag] + withoutReservedTag)
-    }
-
-    static func isVisible(
-        _ tags: [String],
-        includesScreenOnlyScenes: Bool,
-        includesMacOnlyScenes: Bool = true
-    ) -> Bool {
-        guard includesMacOnlyScenes || !isMacOnly(tags) else { return false }
-        return includesScreenOnlyScenes || !isScreenOnly(tags)
-    }
 }
 
+/// Platform gate editor. Binds `platformVisibility` rather than overloading the
+/// user's tag list with a reserved tag.
 struct ScreenOnlySceneToggle: View {
-    @Binding var tags: [String]
+    @Binding var visibility: PlatformVisibility?
 
     var body: some View {
         Toggle("Screen only", isOn: Binding(
-            get: { SceneTagging.isScreenOnly(tags) },
-            set: { tags = SceneTagging.settingScreenOnly($0, in: tags) }
+            get: {
+                switch PlatformVisibility.resolved(visibility) {
+                case .flat, .mac: return true
+                case .all: return false
+                }
+            },
+            set: { isOn in
+                // Off clears both gates; on selects the flat-display gate.
+                // Mac-only is an authoring classification set in the file.
+                visibility = isOn ? .flat : nil
+            }
         ))
         .help("Best viewed on a screen; hide this scene from the Vision Pro library.")
         .accessibilityHint("When enabled, this scene is excluded from Vision Pro because it is intended for a flat display.")
@@ -163,10 +151,11 @@ struct SceneTagRow: View {
     let tags: [String]
 
     var body: some View {
-        if !SceneTagging.normalized(tags).isEmpty {
+        let userTags = SceneTagging.normalized(tags).filter { !SceneTagging.isReserved($0) }
+        if !userTags.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 5) {
-                    ForEach(SceneTagging.normalized(tags), id: \.self) { tag in
+                    ForEach(userTags, id: \.self) { tag in
                         SceneTagPill(tag: tag)
                     }
                 }
@@ -180,6 +169,7 @@ struct SceneTagEditor: View {
     @State private var newTag = ""
 
     var body: some View {
+        let userTags = SceneTagging.normalized(tags).filter { !SceneTagging.isReserved($0) }
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 TextField("Add a tag", text: $newTag)
@@ -194,14 +184,14 @@ struct SceneTagEditor: View {
                 .accessibilityLabel("Add tag")
             }
 
-            if SceneTagging.normalized(tags).isEmpty {
+            if userTags.isEmpty {
                 Text("Use tags like \"favorites\", \"cavern\", or \"live\" to make your own collections.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 5) {
-                        ForEach(SceneTagging.normalized(tags), id: \.self) { tag in
+                        ForEach(userTags, id: \.self) { tag in
                             SceneTagPill(tag: tag) {
                                 tags.removeAll { $0.caseInsensitiveCompare(tag) == .orderedSame }
                             }
@@ -211,15 +201,31 @@ struct SceneTagEditor: View {
             }
         }
         .onAppear {
-            tags = SceneTagging.normalized(tags)
+            // Reserved visibility tags are a legacy encoding of the platform
+            // field and must never surface as user tags.
+            tags = SceneTagging.normalized(tags).filter { !SceneTagging.isReserved($0) }
         }
     }
 
     private func addTag() {
         guard let tag = SceneTagging.normalized(newTag),
+              !SceneTagging.isReserved(tag),
               !SceneTagging.contains(tags, tag: tag),
               tags.count < SceneTagging.maximumTagCount else { return }
         tags = SceneTagging.normalized(tags + [tag])
         newTag = ""
+    }
+}
+
+/// Marks a scene that carries its own embedded effect definition rather than
+/// referencing a reusable library `.threshfx`. See CONTENT_MODEL_PROPOSAL.md
+/// §2.7.1 — it makes the source of the effect obvious at a glance.
+struct EmbeddedEffectBadge: View {
+    var body: some View {
+        Image(systemName: "link")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .help("This scene carries its own embedded effect — not a shared library effect.")
+            .accessibilityLabel("Embedded effect")
     }
 }

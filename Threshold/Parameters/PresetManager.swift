@@ -422,6 +422,28 @@ class PresetManager {
         )
     }
 
+    /// Folder category for every scene file currently known to the store, keyed
+    /// by preset id. Folders are the taxonomy: a file in `Scenes/Caverns/Ice/`
+    /// maps to `["Caverns", "Ice"]`, one directly in `Scenes/` to `[]`, and one
+    /// in the legacy `Music Presets/` root to `["Music Presets", …]`. Presets
+    /// with no store file (bundle placeholders) map to the root category.
+    ///
+    /// Derived from the scan cache rather than persisted, so it can never drift
+    /// from where the file actually is. Callers should read it once per render
+    /// pass — it is O(files).
+    var categoryPathsByPresetID: [UUID: [String]] {
+        guard let root = storeRoot else { return [:] }
+        var result: [UUID: [String]] = [:]
+        result.reserveCapacity(presetFileCache.count)
+        for (url, cached) in presetFileCache {
+            result[cached.preset.id] = LibraryIndex.categoryPath(for: url, root: root) ?? []
+        }
+        for fallback in bundledPlaceholderFallbacks {
+            result[fallback.id] = result[fallback.id] ?? []
+        }
+        return result
+    }
+
     private static var includesScreenOnlyScenesInSceneCatalog: Bool {
 #if os(visionOS)
         false
@@ -462,16 +484,19 @@ class PresetManager {
         includesMacOnlyScenes: Bool = true,
         includesMixedRealityScenes: Bool = true
     ) -> [FractalPreset] {
-        // Match bundled identities as well as their current stored tags. This
-        // keeps previously seeded copies subject to a platform classification
-        // added in a later app release, while user-authored scenes with similar
-        // names remain untouched.
-        let screenOnlyBundledIDs = Set(bundledPresets.compactMap {
-            SceneTagging.isScreenOnly($0.tags) ? $0.id : nil
-        })
-        let macOnlyBundledIDs = Set(bundledPresets.compactMap {
-            SceneTagging.isMacOnly($0.tags) ? $0.id : nil
-        })
+        // Platform classification travels inside the bundled file and is
+        // authoritative for every copy carrying that identity — including
+        // copies seeded into the store by an older release, whose re-encoded
+        // `platformVisibility` field can be stale in EITHER direction: a
+        // preset tightened to Mac-only must hide on non-Mac hosts, and one
+        // loosened to unrestricted must resurface there. The seed marker
+        // prevents re-writing those copies, so the bundled file's CURRENT
+        // classification is the only thing that can reclassify them.
+        // User-authored scenes (unique ids) keep their own field.
+        let bundledVisibilityByID: [UUID: PlatformVisibility] = Dictionary(
+            bundledPresets.map { ($0.id, PlatformVisibility.resolved($0.platformVisibility)) },
+            uniquingKeysWith: { first, _ in first }
+        )
         // Mixed-immersion classification travels inside the scene file
         // (`mixedModeScene`), so a stored copy usually classifies itself; the
         // bundled-ID cross-reference also catches copies seeded before the
@@ -480,12 +505,12 @@ class PresetManager {
             $0.mixedModeScene == true ? $0.id : nil
         })
         let platformVisiblePresets = presets.filter {
-            guard includesMacOnlyScenes
-                    || (!SceneTagging.isMacOnly($0.tags) && !macOnlyBundledIDs.contains($0.id)) else {
+            let visibility = bundledVisibilityByID[$0.id]
+                ?? PlatformVisibility.resolved($0.platformVisibility)
+            guard includesMacOnlyScenes || visibility != .mac else {
                 return false
             }
-            guard includesScreenOnlyScenes
-                    || (!SceneTagging.isScreenOnly($0.tags) && !screenOnlyBundledIDs.contains($0.id)) else {
+            guard includesScreenOnlyScenes || (visibility != .flat && visibility != .mac) else {
                 return false
             }
             guard includesMixedRealityScenes
@@ -522,13 +547,18 @@ class PresetManager {
         ]
         var byID: [UUID: FractalPreset] = [:]
         var allURLs: [URL] = []
+        // Recursive: every folder below Scenes/ (and the legacy Music Presets/)
+        // is a user category, so nested scenes must be scanned, not just the
+        // root. See CONTENT_MODEL_PROPOSAL.md §2.4.
         for dir in [StorageLocation.scenesDir(request.root), StorageLocation.musicPresetsDir(request.root)] {
-            guard let files = try? FileManager.default.contentsOfDirectory(
+            guard let enumerator = FileManager.default.enumerator(
                 at: dir,
                 includingPropertiesForKeys: Array(resourceKeys),
-                options: [.skipsHiddenFiles]
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
             ) else { continue }
-            allURLs.append(contentsOf: files.filter { exts.contains($0.pathExtension) })
+            for case let url as URL in enumerator where exts.contains(url.pathExtension) {
+                allURLs.append(url)
+            }
         }
 
         let decoder = JSONDecoder()
@@ -626,7 +656,7 @@ class PresetManager {
             }
 
             guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
-                  let preset = try? decoder.decode(FractalPreset.self, from: data) else {
+                  var preset = try? decoder.decode(FractalPreset.self, from: data) else {
                 if isPlaceholderProbe {
                     failedPlaceholderProbeURLs.insert(url)
                 }
@@ -640,6 +670,10 @@ class PresetManager {
                 }
                 continue
             }
+
+            // Stamp the folder this file actually lives in, so exports and
+            // shared copies carry an accurate category hint.
+            preset.categoryPath = LibraryIndex.categoryPath(for: url, root: request.root)
 
             decodedCount += 1
             let entry = CachedPresetFile(signature: signature, preset: preset)
@@ -845,28 +879,45 @@ class PresetManager {
 
     // MARK: - Folder store: per-file write / remove
 
-    /// Write one preset as its own file (`.thresh` in `Scenes/`). Removes any
-    /// prior file for the same id only AFTER the replacement is safely on disk.
-    /// This preserves the previous copy if encoding or writing fails.
+    /// Write one preset as its own file (`.thresh`). Removes any prior file for
+    /// the same id only AFTER the replacement is safely on disk, and saves back
+    /// into the folder the scene already lives in so an edit never relocates it
+    /// out of its category. This preserves the previous copy if encoding or
+    /// writing fails.
     @discardableResult
     private func writePresetFile(_ preset: FractalPreset, root: URL) -> Bool {
-        guard let writtenURL = writeNewPresetFile(preset, root: root) else { return false }
+        let preferredDirectory = storedDirectory(forPresetID: preset.id)
+        guard let writtenURL = writeNewPresetFile(preset, root: root,
+                                                  preferredDirectory: preferredDirectory) else { return false }
         removePresetFiles(id: preset.id, root: root, excluding: [writtenURL])
         return true
     }
 
+    /// Directory currently holding `preset`'s store file, so an edit saves back
+    /// into the same folder category instead of relocating to the root.
+    /// nil when the preset has no store file yet (a fresh import/seeded scene).
+    private func storedDirectory(forPresetID id: UUID) -> URL? {
+        presetFileCache.first { $0.value.preset.id == id }?.key.deletingLastPathComponent()
+    }
+
     /// Write a known-absent preset without scanning the store first. Used by
     /// migration/seeding after the detached scan has already established IDs.
-    /// All scenes write to `Scenes/` as `.thresh`: music-reactivity is a trait
+    /// New scenes write to `Scenes/` as `.thresh`: music-reactivity is a trait
     /// inside the file, so it no longer picks a folder or an extension.
     @discardableResult
-    private func writeNewPresetFile(_ preset: FractalPreset, root: URL) -> URL? {
-        let dir = StorageLocation.scenesDir(root)
+    private func writeNewPresetFile(_ preset: FractalPreset, root: URL,
+                                    preferredDirectory: URL? = nil) -> URL? {
+        let dir = preferredDirectory ?? StorageLocation.scenesDir(root)
         let ext = ThresholdExportFormat.scenePreset.ext
         let url = dir.appendingPathComponent(Self.sanitizedFileName(preset.name, id: preset.id, ext: ext))
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let data = try presetEncoder.encode(preset)
+            // Record where the file lives, so a shared/exported copy carries a
+            // category hint the recipient can restore. (`FractalPreset`'s own
+            // encoder also re-emits the legacy visibility tag.)
+            var stored = preset
+            stored.categoryPath = LibraryIndex.categoryPath(for: url, root: root)
+            let data = try presetEncoder.encode(stored)
             try data.write(to: url, options: .atomic)
             return url
         } catch {
@@ -898,9 +949,13 @@ class PresetManager {
         let decoder = presetDecoder
         Task.detached(priority: .utility) {
             for dir in [StorageLocation.scenesDir(root), StorageLocation.musicPresetsDir(root)] {
-                guard let files = try? FileManager.default.contentsOfDirectory(
-                    at: dir, includingPropertiesForKeys: Self.fileResourceKeys) else { continue }
-                for url in files where exts.contains(url.pathExtension) {
+                guard let enumerator = FileManager.default.enumerator(
+                    at: dir, includingPropertiesForKeys: Self.fileResourceKeys,
+                    options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
+                // `while let nextObject()` rather than `for … in enumerator`:
+                // NSEnumerator's iterator is unavailable from async contexts.
+                while let item = enumerator.nextObject() {
+                    guard let url = item as? URL, exts.contains(url.pathExtension) else { continue }
                     guard !excluded.contains(url.standardizedFileURL) else { continue }
                     if Self.isUnmaterializedPlaceholder(url) { continue }
                     if let data = try? Data(contentsOf: url),
@@ -1437,99 +1492,63 @@ class PresetManager {
 extension PresetManager {
     
     // ─── Bundle-loaded default scenes ────────────────────────────────────
-    // Built-in presets are stored as .threshscene / .threshmp JSON files in
-    // Examples/Scenes (bundled as app resources). This keeps the
-    // preset data in the same format as user exports and avoids
-    // hardcoding parameter values in Swift.
-    
+    // Built-in presets are stored as preset JSON files under `Examples/`
+    // (bundled as app resources). This keeps the preset data in the same format
+    // as user exports and avoids hardcoding parameter values in Swift.
+
     private static func loadBundledPresets() -> [FractalPreset] {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
-        // Bundled scene files use either `.threshscene` / `.threshmp` or the
-        // double extension `.threshscene.json` / `.threshmp.json` (some assets
-        // were exported with the `.json` suffix to keep editor syntax
-        // highlighting). Synchronized Xcode resource folders may flatten some
-        // resources into the bundle root, so collect from every known location.
-        var sceneURLs: [URL] = []
-        var musicPresetURLs: [URL] = []
-        let sceneExts = ["threshscene", "json"]
-        let musicExts = ["threshmp", "json"]
-
-        for ext in sceneExts {
-            sceneURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Scenes") ?? []
-            sceneURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Mixed") ?? []
-            sceneURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Custom Scene Example") ?? []
-            sceneURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: nil) ?? []
-        }
-        for ext in musicExts {
-            musicPresetURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Scenes") ?? []
-            musicPresetURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Mixed") ?? []
-            musicPresetURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Music Presets") ?? []
-            musicPresetURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: nil) ?? []
-        }
-        // Filter the .json hits down to ones that are actually our preset files.
-        sceneURLs = sceneURLs.filter {
-            let n = $0.lastPathComponent
-            return n.hasSuffix(".threshscene") || n.hasSuffix(".threshscene.json")
-        }
-        musicPresetURLs = musicPresetURLs.filter {
-            let n = $0.lastPathComponent
-            return n.hasSuffix(".threshmp") || n.hasSuffix(".threshmp.json")
-        }
-
-        // Deep scan as a final safety net for mixed resource layouts.
+        // ONE deterministic recursive scan of the bundle's resources. Xcode's
+        // synchronized resource folders flatten `Examples/` into the bundle
+        // root, so per-directory `subdirectory:` lookups silently found nothing
+        // and the old "deep scan safety net" was the only mechanism that
+        // actually worked — this names that mechanism directly instead of
+        // guessing at folder names.
+        //
+        // Classification lives inside each file (`mixedModeScene`,
+        // `platformVisibility`), never in the folder name, so there is nothing
+        // to sniff for here. Legacy `.threshscene` / `.threshmp` and the
+        // canonical `.thresh` are all recognised.
+        var urls: [URL] = []
         if let resourcePath = Bundle.main.resourcePath {
             let enumerator = FileManager.default.enumerator(atPath: resourcePath)
             while let file = enumerator?.nextObject() as? String {
-                let url = URL(fileURLWithPath: resourcePath).appendingPathComponent(file)
-                if file.hasSuffix(".threshscene") || file.hasSuffix(".threshscene.json") {
-                    sceneURLs.append(url)
-                } else if file.hasSuffix(".threshmp") || file.hasSuffix(".threshmp.json") {
-                    musicPresetURLs.append(url)
-                }
+                let isPreset = file.hasSuffix(".threshscene")
+                    || file.hasSuffix(".threshscene.json")
+                    || file.hasSuffix(".threshmp")
+                    || file.hasSuffix(".threshmp.json")
+                    || file.hasSuffix(".thresh")
+                guard isPreset else { continue }
+                urls.append(URL(fileURLWithPath: resourcePath).appendingPathComponent(file))
             }
         }
 
-        let allURLs = Array(Set(sceneURLs + musicPresetURLs))
+        let allURLs = Array(Set(urls))
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
 
         guard !allURLs.isEmpty else {
-            print("⚠️ DefaultPresets: no bundled .threshscene/.threshmp files found anywhere in bundle")
+            print("⚠️ DefaultPresets: no bundled preset files found in the bundle")
             return []
         }
-        print("ℹ️ DefaultPresets: found \(allURLs.count) bundled preset file(s): \(allURLs.map(\.lastPathComponent))")
+        print("ℹ️ DefaultPresets: found \(allURLs.count) bundled preset file(s)")
 
         var presets: [FractalPreset] = []
         for url in allURLs {
             do {
                 let data = try Data(contentsOf: url)
-                var preset = try decoder.decode(FractalPreset.self, from: data)
-                // Scenes shipped under Examples/Mixed are authored for Mixed
-                // immersion: mark them even when the file predates the
-                // mixedModeScene field, so loading one switches the headset to
-                // Mixed and they populate the Mixed browse section.
-                if url.pathComponents.contains("Mixed") {
-                    preset.mixedModeScene = true
-                }
-                presets.append(preset)
+                presets.append(try decoder.decode(FractalPreset.self, from: data))
             } catch {
                 print("⚠️ DefaultPresets: failed to decode \(url.lastPathComponent) — \(error)")
             }
         }
-        // The multi-location scan can find the same file both in its Examples
-        // subdirectory and flattened at the bundle root. Dedupe by preset id,
-        // letting a Mixed-marked copy win regardless of scan order.
-        let mixedIDs = Set(presets.filter { $0.mixedModeScene == true }.map(\.id))
+
+        // Dedupe by id — a bundle can legitimately hold two copies (e.g. a
+        // flattened duplicate). First in sorted order wins.
         var seenIDs = Set<UUID>()
-        var uniquePresets: [FractalPreset] = []
-        for var preset in presets where seenIDs.insert(preset.id).inserted {
-            if mixedIDs.contains(preset.id) {
-                preset.mixedModeScene = true
-            }
-            uniquePresets.append(preset)
-        }
-        print("ℹ️ DefaultPresets: successfully decoded \(uniquePresets.count) unique preset(s) (\(mixedIDs.count) mixed-mode)")
+        let uniquePresets = presets.filter { seenIDs.insert($0.id).inserted }
+        print("ℹ️ DefaultPresets: successfully decoded \(uniquePresets.count) unique preset(s)")
         return uniquePresets
     }
     

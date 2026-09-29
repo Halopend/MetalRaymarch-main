@@ -134,6 +134,9 @@ class AppModel {
 
     /// User-authored `.threshfx` files in the store's Formulas/ folder.
     @ObservationIgnored lazy var formulaLibrary = FormulaLibraryStore()
+    /// Filesystem-derived folder/category snapshot of the active store. Drives
+    /// folder-derived categories in the browse UI (see `LibraryIndex`).
+    @ObservationIgnored lazy var library = LibraryStore()
     /// Formula handed to the editor window on open (nil = start a new one).
     /// One-shot payload consumed by Metal DE Studio when its window appears.
     /// Built-in formulas are opened for inspection first; an edit or explicit

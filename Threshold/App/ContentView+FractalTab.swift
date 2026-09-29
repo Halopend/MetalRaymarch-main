@@ -33,7 +33,8 @@ extension ContentView {
                 FractalGridView(
                     animationManager: appModel.animationManager,
                     presetManager: appModel.presetManager,
-                    tabSelection: fractalBrowseTabBinding,
+                    libraryStore: appModel.library,
+                    librarySelection: exploreLibrarySelectionBinding,
                     usesListLayout: usesPortraitIPadLayout,
                     onCreateAnimation: { openAnimationEditor() },
                     onEditScene: openAnimationEditor,
@@ -43,9 +44,6 @@ extension ContentView {
                     onLoadStaticScene: { preset in
                         appModel.loadStaticScene(preset)
                         appModel.dismissMenuWindowForSceneLoad()
-                    },
-                    onPrewarmCustomFormula: { formula in
-                        await appModel.warmCustomFormulaLibrary(formula)
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -225,7 +223,12 @@ extension ContentView {
             }
             .controlSize(.small)
 
-            FractalFormulaGrid(cache: cache, presetManager: appModel.presetManager)
+            FractalFormulaGrid(
+                cache: cache,
+                presetManager: appModel.presetManager,
+                formulaLibrary: appModel.formulaLibrary,
+                activeEmbeddedFormula: appModel.activeEmbeddedFormula
+            )
         }
     }
 

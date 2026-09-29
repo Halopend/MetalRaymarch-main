@@ -495,7 +495,11 @@ struct SpatialRadialNavigationTests {
     )
     #expect(activated)
     let plant = try #require(state.plant)
-    let position = handPosition(in: plant, index: 0, count: tree.roots.count, radius: 0.12)
+    // Explore is now a leaf root (it carries no per-view children), so target a
+    // branching root to exercise the navigate path.
+    let shapeID = NavigationHierarchy.rootID(for: .shape)
+    let rootIndex = try #require(tree.roots.firstIndex(where: { $0.id == shapeID }))
+    let position = handPosition(in: plant, index: rootIndex, count: tree.roots.count, radius: 0.12)
 
     _ = state.update(handPosition: position, pinchStrength: 1.0, in: tree)
     _ = state.update(handPosition: position, pinchStrength: 1.0, in: tree)
@@ -503,7 +507,7 @@ struct SpatialRadialNavigationTests {
 
     _ = state.update(handPosition: position, pinchStrength: 0.1, in: tree)
     let committed = state.update(handPosition: position, pinchStrength: 0.95, in: tree)
-    #expect(committed == .navigated(path: [tree.roots[0].id]))
+    #expect(committed == .navigated(path: [shapeID]))
   }
 
   @Test("Pinching the hub retreats one level and dismisses from the root")

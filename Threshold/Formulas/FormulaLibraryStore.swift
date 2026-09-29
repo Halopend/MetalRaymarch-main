@@ -25,6 +25,94 @@ struct FormulaLibraryEntry: Identifiable, Equatable {
     }
 }
 
+// MARK: - Picker provenance (library vs embedded)
+
+/// Where an effect definition physically lives. Library effects are reusable
+/// `.threshfx` files; embedded effects are private to the document carrying
+/// them (see CONTENT_MODEL_PROPOSAL.md §2.7).
+enum EffectProvenance: Equatable {
+    case library(URL)
+    case embedded
+
+    var isLibrary: Bool {
+        if case .library = self { return true }
+        return false
+    }
+}
+
+/// One row in the effects picker.
+struct EffectPickerEntry: Identifiable, Equatable {
+    let formula: EmbeddedFormula
+    let provenance: EffectProvenance
+
+    var id: String { formula.shortHash }
+    var isLibrary: Bool { provenance.isLibrary }
+
+    /// Caption telling the user where this effect comes from.
+    var provenanceLabel: String {
+        switch provenance {
+        case .library: return "Library"
+        case .embedded: return "Embedded"
+        }
+    }
+
+    /// Library effects wear their kind's glyph; embedded ones wear a link, so a
+    /// private non-reusable payload is unmistakable.
+    var provenanceIcon: String {
+        switch provenance {
+        case .library: return formula.effectKind.icon
+        case .embedded: return "link"
+        }
+    }
+}
+
+/// A kind-grouped block of picker entries.
+struct EffectPickerSection: Identifiable, Equatable {
+    let kind: EffectKind
+    let entries: [EffectPickerEntry]
+
+    var id: String { kind.rawValue }
+    var title: String { kind.librarySectionTitle }
+}
+
+/// Builds the effects picker from **library files only**. Embedded payloads are
+/// deliberately excluded from the reusable set: they belong to the single
+/// document that carries them and must not be offered for another scene.
+enum EffectPickerCatalog {
+
+    /// Reusable rows: every library `.threshfx` file.
+    static func libraryEntries(_ entries: [FormulaLibraryEntry]) -> [EffectPickerEntry] {
+        entries.map { EffectPickerEntry(formula: $0.formula, provenance: .library($0.url)) }
+    }
+
+    /// Kinds present, in a stable display order, each with its entries sorted
+    /// by name.
+    static func sections(_ entries: [EffectPickerEntry]) -> [EffectPickerSection] {
+        var byKind: [EffectKind: [EffectPickerEntry]] = [:]
+        for entry in entries {
+            byKind[entry.formula.effectKind, default: []].append(entry)
+        }
+        let orderedKinds = EffectKind.libraryOrder
+            + byKind.keys.filter { !EffectKind.libraryOrder.contains($0) }
+        return orderedKinds.compactMap { kind in
+            guard let items = byKind[kind], !items.isEmpty else { return nil }
+            return EffectPickerSection(
+                kind: kind,
+                entries: items.sorted {
+                    $0.formula.name.localizedStandardCompare($1.formula.name) == .orderedAscending
+                }
+            )
+        }
+    }
+
+    /// True when `hash` is NOT backed by a library file — i.e. the active effect
+    /// was embedded in a scene and is not reusable elsewhere.
+    static func isEmbeddedOnly(hash: String?, libraryHashes: Set<String>) -> Bool {
+        guard let hash else { return false }
+        return !libraryHashes.contains(hash)
+    }
+}
+
 @MainActor
 @Observable
 final class FormulaLibraryStore {
@@ -73,11 +161,13 @@ final class FormulaLibraryStore {
             return
         }
         let fm = FileManager.default
-        let urls = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [
+        // Recursive: every folder below Formulas/ is a user category.
+        let urls = (fm.enumerator(at: dir, includingPropertiesForKeys: [
             .isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey,
             .contentModificationDateKey
-        ]))?
-            .filter { $0.pathExtension.lowercased() == "threshfx" } ?? []
+        ], options: [.skipsHiddenFiles, .skipsPackageDescendants])?
+            .compactMap { $0 as? URL } ?? [])
+            .filter { $0.pathExtension.lowercased() == "threshfx" }
 
         var bestByID: [String: (url: URL, modified: Date)] = [:]
         var loaded: [FormulaLibraryEntry] = []

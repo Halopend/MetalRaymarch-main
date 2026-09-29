@@ -99,33 +99,6 @@ struct ControlFinderDestination: Identifiable {
     // MARK: Catalog
 
     private static let routeCatalog: [ControlFinderDestination] = [
-        // Explore
-        destination(
-            ExploreRailSection.jumpingOff,
-            description: "Browse curated static starting scenes and saved presets.",
-            keywords: ["start", "starter", "scene", "preset", "gallery", "browse"]
-        ),
-        destination(
-            ExploreRailSection.musicReactive,
-            description: "Open scenes with audio-reactive parameter mappings already configured.",
-            keywords: ["audio", "reactive", "beat", "sound", "music preset"]
-        ),
-        destination(
-            ExploreRailSection.animated,
-            description: "Browse and play keyframed animated scenes.",
-            keywords: ["animation", "video", "motion", "keyframe", "play"]
-        ),
-        destination(
-            ExploreRailSection.mixed,
-            description: "Browse scenes authored to blend with passthrough and your room.",
-            keywords: ["mixed reality", "passthrough", "room", "surroundings", "spatial"]
-        ),
-        destination(
-            ExploreRailSection.customScenes,
-            description: "Browse imported scenes that carry custom formulas or shader effects.",
-            keywords: ["custom", "import", "shader", "formula", "threshfx", "external"]
-        ),
-
         // Shape
         destination(
             ShapeRailSection.formula,

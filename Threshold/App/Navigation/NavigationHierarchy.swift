@@ -133,18 +133,11 @@ struct NavigationHierarchy: Sendable {
             )
         }
 
-        let explore = ExploreRailSection.allCases
-            .filter { $0 != .customScenes || availability.allowsCustomScenes }
-            // Mixed-reality scene browsing is a Vision Pro feature; other
-            // platforms only surface the section after the Settings opt-in.
-            .filter { $0 != .mixed || availability.includesMixedRealityScenes }
-            .map { section in
-                leaf(
-                    title: section.rawValue,
-                    systemImage: section.icon,
-                    route: .explore(section)
-                )
-            }
+        // Explore's second level is not static application navigation. It is
+        // the live filesystem folder tree, supplied by `LibraryStore` at the
+        // presentation layer. Keeping this branch empty prevents smart-view
+        // traits from masquerading as a second taxonomy beside user folders.
+        let explore: [Node] = []
         let shape = availability.shapeSections.map { section in
             leaf(
                 title: section.rawValue,

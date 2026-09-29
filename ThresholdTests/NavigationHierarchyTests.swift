@@ -44,9 +44,9 @@ struct NavigationHierarchyTests {
             includesGestureEditing: true
         )
 
-        #expect(hierarchy.children(ofWorkspace: .explore).contains {
-            $0.id == "explore.\(ExploreRailSection.customScenes.rawValue)"
-        })
+        // Explore's second level is supplied at runtime by the filesystem
+        // library tree; static navigation deliberately has no smart-view leaf.
+        #expect(hierarchy.children(ofWorkspace: .explore).isEmpty)
         #expect(hierarchy.children(ofWorkspace: .shape).map(\.id) == [
             "shape.\(ShapeRailSection.formula.rawValue)",
             "shape.\(ShapeRailSection.hands.rawValue)",
@@ -83,24 +83,13 @@ struct NavigationHierarchyTests {
         ])
     }
 
-    @Test("Mixed browse section appears only when Mixed scenes are included")
-    func mixedSectionFollowsMixedRealityAvailability() {
+    @Test("Explore never adds trait-based static navigation")
+    func exploreIsRuntimeLibraryNavigation() {
         let included = makeHierarchy(includesMixedRealityScenes: true)
         let excluded = makeHierarchy(includesMixedRealityScenes: false)
 
-        #expect(included.children(ofWorkspace: .explore).contains {
-            $0.id == "explore.\(ExploreRailSection.mixed.rawValue)"
-        })
-        #expect(!excluded.children(ofWorkspace: .explore).contains {
-            $0.id == "explore.\(ExploreRailSection.mixed.rawValue)"
-        })
-        // Filtering the section never disturbs its siblings. (Custom Scenes
-        // stays filtered too — the default hierarchy omits it.)
-        #expect(excluded.children(ofWorkspace: .explore).map(\.id) == [
-            "explore.\(ExploreRailSection.jumpingOff.rawValue)",
-            "explore.\(ExploreRailSection.musicReactive.rawValue)",
-            "explore.\(ExploreRailSection.animated.rawValue)"
-        ])
+        #expect(included.children(ofWorkspace: .explore).isEmpty)
+        #expect(excluded.children(ofWorkspace: .explore).isEmpty)
     }
 
     @Test("Keyboard projection is stable preorder with ancestor paths")

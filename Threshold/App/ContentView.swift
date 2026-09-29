@@ -71,6 +71,10 @@ struct ContentView: View {
     @State private var saveConfirmationMessage: String?
     @State private var isControlFinderPresented = false
     @State private var workspaceSize: CGSize = .zero
+    /// Explore's second level is the user's library tree, persisted as a
+    /// kind plus a folder path rather than as a hard-coded smart-view route.
+    @SceneStorage("ContentView.exploreLibraryKind") private var exploreLibraryKindRaw = LibraryItemKind.scene.rawValue
+    @SceneStorage("ContentView.exploreLibraryCategory") private var exploreLibraryCategoryRaw: String?
     @AppStorage("hasCompletedIntroOnboarding") var hasCompletedIntroOnboarding = false
     #if os(iOS)
     @State var isWelcomePresented = false
@@ -150,6 +154,28 @@ struct ContentView: View {
 
     var fractalBrowseTabBinding: Binding<FractalBrowseTab> {
         Binding(get: { fractalBrowseTab }, set: { fractalBrowseTab = $0 })
+    }
+
+    var exploreLibrarySelectionBinding: Binding<LibrarySidebarSelection> {
+        Binding(
+            get: {
+                let kind = LibraryItemKind(rawValue: exploreLibraryKindRaw) ?? .scene
+                guard let raw = exploreLibraryCategoryRaw, !raw.isEmpty else {
+                    return .all(kind)
+                }
+                return .category(kind, path: raw.components(separatedBy: "/"))
+            },
+            set: { selection in
+                switch selection {
+                case .all(let kind):
+                    exploreLibraryKindRaw = kind.rawValue
+                    exploreLibraryCategoryRaw = nil
+                case .category(let kind, let path):
+                    exploreLibraryKindRaw = kind.rawValue
+                    exploreLibraryCategoryRaw = path.joined(separator: "/")
+                }
+            }
+        )
     }
 
     private var musicSectionBinding: Binding<MusicRailSection> {
@@ -946,28 +972,32 @@ struct ContentView: View {
     private var phoneSectionTabs: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                ForEach(activeWorkspaceNavigationNodes) { node in
-                    Button {
-                        withMotionSensitiveAnimation(.easeInOut(duration: 0.16)) {
-                            activateNavigationNode(node)
-                        }
-                    } label: {
-                        Label(node.title, systemImage: node.systemImage)
-                            .font(.caption.weight(.semibold))
-                            .lineLimit(1)
-                            .padding(.horizontal, 10)
-                            .frame(minHeight: 38)
-                            .background(
-                                Capsule().fill(
-                                    isNavigationNodeSelected(node)
-                                        ? Color.accentColor.opacity(0.20)
-                                        : Color.secondary.opacity(0.08)
+                if activeWorkspaceRoot == .explore {
+                    exploreLibraryMenuButton
+                } else {
+                    ForEach(activeWorkspaceNavigationNodes) { node in
+                        Button {
+                            withMotionSensitiveAnimation(.easeInOut(duration: 0.16)) {
+                                activateNavigationNode(node)
+                            }
+                        } label: {
+                            Label(node.title, systemImage: node.systemImage)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                                .padding(.horizontal, 10)
+                                .frame(minHeight: 38)
+                                .background(
+                                    Capsule().fill(
+                                        isNavigationNodeSelected(node)
+                                            ? Color.accentColor.opacity(0.20)
+                                            : Color.secondary.opacity(0.08)
+                                    )
                                 )
-                            )
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(isNavigationNodeSelected(node) ? .primary : .secondary)
+                        .accessibilityAddTraits(isNavigationNodeSelected(node) ? .isSelected : [])
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(isNavigationNodeSelected(node) ? .primary : .secondary)
-                    .accessibilityAddTraits(isNavigationNodeSelected(node) ? .isSelected : [])
                 }
             }
             .padding(.horizontal, 8)
@@ -1071,13 +1101,18 @@ struct ContentView: View {
                         columns: secondLevelColumns(for: activeWorkspaceNavigationNodes.count),
                         spacing: 8
                     ) {
-                        ForEach(activeWorkspaceNavigationNodes) { node in
-                            compactSectionButton(
-                                title: node.title,
-                                systemImage: node.systemImage,
-                                isSelected: isNavigationNodeSelected(node),
-                                fillsGridCell: true
-                            ) { activateNavigationNode(node) }
+                        if activeWorkspaceRoot == .explore {
+                            exploreLibraryMenuButton
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            ForEach(activeWorkspaceNavigationNodes) { node in
+                                compactSectionButton(
+                                    title: node.title,
+                                    systemImage: node.systemImage,
+                                    isSelected: isNavigationNodeSelected(node),
+                                    fillsGridCell: true
+                                ) { activateNavigationNode(node) }
+                            }
                         }
                     }
 
@@ -1099,12 +1134,16 @@ struct ContentView: View {
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(activeWorkspaceNavigationNodes) { node in
-                            compactSectionButton(
-                                title: node.title,
-                                systemImage: node.systemImage,
-                                isSelected: isNavigationNodeSelected(node)
-                            ) { activateNavigationNode(node) }
+                        if activeWorkspaceRoot == .explore {
+                            exploreLibraryMenuButton
+                        } else {
+                            ForEach(activeWorkspaceNavigationNodes) { node in
+                                compactSectionButton(
+                                    title: node.title,
+                                    systemImage: node.systemImage,
+                                    isSelected: isNavigationNodeSelected(node)
+                                ) { activateNavigationNode(node) }
+                            }
                         }
 
                         Divider()
@@ -1128,6 +1167,40 @@ struct ContentView: View {
     private func secondLevelColumns(for itemCount: Int) -> [GridItem] {
         let columnCount = max(1, (itemCount + 1) / 2)
         return Array(repeating: GridItem(.flexible(), spacing: 8), count: columnCount)
+    }
+
+    private var exploreLibraryMenuButton: some View {
+        Menu {
+            let index = appModel.library.index
+            ForEach([LibraryItemKind.scene, .animation], id: \.rawValue) { kind in
+                Section(kind.displayName) {
+                    ForEach(LibrarySidebarCatalog.section(kind: kind, index: index).rows) { row in
+                        Button {
+                            exploreLibrarySelectionBinding.wrappedValue = row.selection
+                        } label: {
+                            Text(String(repeating: "    ", count: row.depth) + row.title)
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label(exploreLibraryMenuLabel, systemImage: "folder")
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .padding(.horizontal, 11)
+                .frame(minHeight: 40)
+                .background(Capsule().fill(Color.blue.opacity(0.20)))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
+        .accessibilityLabel("Choose a library folder")
+    }
+
+    private var exploreLibraryMenuLabel: String {
+        switch exploreLibrarySelectionBinding.wrappedValue {
+        case .all(let kind): return "All \(kind.displayName)"
+        case .category(_, let path): return path.joined(separator: " / ")
+        }
     }
 
     private func compactSectionButton(
@@ -1322,14 +1395,18 @@ struct ContentView: View {
         VStack(spacing: 0) {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 8) {
-                    ForEach(activeWorkspaceNavigationNodes) { node in
-                        railButton(
-                            title: node.title,
-                            systemImage: node.systemImage,
-                            isSelected: isNavigationNodeSelected(node),
-                            pinControl: pinnedRailControl(for: node.target)
-                        ) {
-                            activateNavigationNode(node)
+                    if activeWorkspaceRoot == .explore {
+                        exploreLibraryRail
+                    } else {
+                        ForEach(activeWorkspaceNavigationNodes) { node in
+                            railButton(
+                                title: node.title,
+                                systemImage: node.systemImage,
+                                isSelected: isNavigationNodeSelected(node),
+                                pinControl: pinnedRailControl(for: node.target)
+                            ) {
+                                activateNavigationNode(node)
+                            }
                         }
                     }
                 }
@@ -1404,6 +1481,83 @@ struct ContentView: View {
         .padding(.vertical, 8)
         .frame(width: sectionRailWidth)
         .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    /// Explore mirrors the user's folders in the existing second-level rail.
+    /// There is no intermediate smart-view column and no duplicate category
+    /// picker in the content area.
+    private var exploreLibraryRail: some View {
+        let index = appModel.library.index
+        let selection = exploreLibrarySelectionBinding.wrappedValue
+        return Group {
+            libraryRailSection(
+                LibrarySidebarCatalog.section(kind: .scene, index: index),
+                selection: selection
+            )
+
+            libraryRailSection(
+                LibrarySidebarCatalog.section(kind: .animation, index: index),
+                selection: selection
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func libraryRailSection(
+        _ section: LibrarySidebarSection,
+        selection: LibrarySidebarSelection
+    ) -> some View {
+        Text(section.kind.displayName.uppercased())
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.tertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.top, section.kind == .scene ? 2 : 10)
+
+        ForEach(section.rows) { row in
+            libraryRailButton(row, isSelected: row.selection == selection) {
+                exploreLibrarySelectionBinding.wrappedValue = row.selection
+            }
+        }
+    }
+
+    private func libraryRailButton(
+        _ row: LibrarySidebarRow,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: row.icon)
+                    .font(.system(size: IconSize.small, weight: .semibold))
+                    .frame(width: 16)
+                Text(row.title)
+                    .font(.footnote.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if let count = row.itemCount {
+                    Text(count, format: .number)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.leading, 10 + CGFloat(row.depth) * 12)
+            .padding(.trailing, 10)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(isSelected ? Color.blue.opacity(0.18) : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(isSelected ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.10), lineWidth: 1)
+        )
+        .foregroundStyle(isSelected ? .primary : .secondary)
     }
 
     @ViewBuilder

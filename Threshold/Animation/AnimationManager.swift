@@ -77,6 +77,19 @@ final class AnimationManager {
     /// Active store root for the current mode (nil while iCloud is resolving).
     private var storeRoot: URL? { StorageLocation.shared.activeRoot }
 
+    /// Folder category for every animation file in the store, keyed by scene id.
+    /// Mirrors `PresetManager.categoryPathsByPresetID`; derived from the scan
+    /// cache so it can never drift from where the file actually is.
+    var categoryPathsBySceneID: [UUID: [String]] {
+        guard let root = storeRoot else { return [:] }
+        var result: [UUID: [String]] = [:]
+        result.reserveCapacity(sceneFileCache.count)
+        for (url, cached) in sceneFileCache {
+            result[cached.scene.id] = LibraryIndex.categoryPath(for: url, root: root) ?? []
+        }
+        return result
+    }
+
     private nonisolated static func sanitizedSceneFileName(_ name: String, id: UUID, ext: String) -> String {
         let invalid = CharacterSet(charactersIn: "/\\?%*|\"<>:\n\r")
         let cleaned = name.components(separatedBy: invalid).joined()
@@ -99,10 +112,11 @@ final class AnimationManager {
             .isUbiquitousItemKey,
             .ubiquitousItemDownloadingStatusKey
         ]
-        guard let files = try? FileManager.default.contentsOfDirectory(
+        // Recursive: every folder below Animations/ is a user category.
+        guard let enumerator = FileManager.default.enumerator(
             at: dir,
             includingPropertiesForKeys: Array(resourceKeys),
-            options: [.skipsHiddenFiles]
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
         ) else {
             return SceneScanResult(
                 scenes: [], cachedFiles: [:], fileCount: 0, decodedCount: 0,
@@ -112,6 +126,7 @@ final class AnimationManager {
                 cancelled: false
             )
         }
+        let files = enumerator.compactMap { $0 as? URL }
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -201,7 +216,7 @@ final class AnimationManager {
             }
 
             guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
-                  let scene = try? decoder.decode(AnimationScene.self, from: data),
+                  var scene = try? decoder.decode(AnimationScene.self, from: data),
                   !DefaultScenes.isDefault(scene.id) else {
                 if isPlaceholderProbe {
                     failedPlaceholderProbeURLs.insert(url)
@@ -215,6 +230,10 @@ final class AnimationManager {
                 }
                 continue
             }
+
+            // Stamp the folder this file actually lives in, so exports carry an
+            // accurate category hint.
+            scene.categoryPath = LibraryIndex.categoryPath(for: url, root: request.root)
 
             decodedCount += 1
             let entry = CachedSceneFile(signature: signature, scene: scene)
@@ -257,12 +276,12 @@ final class AnimationManager {
     @discardableResult
     private func writeUserSceneFiles(_ scenes: [AnimationScene]) -> Set<UUID> {
         guard let root = storeRoot else { return [] }
-        let dir = StorageLocation.animationsDir(root)
+        let defaultDir = StorageLocation.animationsDir(root)
         invalidateUserSceneReloadForLocalMutation()
         var successfulIDs: Set<UUID> = []
         var writtenURLs: Set<URL> = []
         do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: defaultDir, withIntermediateDirectories: true)
         } catch {
             print("❌ Failed to create animation directory: \(error)")
             return []
@@ -271,8 +290,20 @@ final class AnimationManager {
         for scene in scenes {
             do {
                 let ext = ThresholdExportFormat.animationScene.ext
+                // Save back into the folder the scene already lives in, so an
+                // edit never relocates it out of its category.
+                let dir = storedDirectory(forSceneID: scene.id) ?? defaultDir
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 let url = dir.appendingPathComponent(Self.sanitizedSceneFileName(scene.name, id: scene.id, ext: ext))
-                let data = try prettySceneEncoder.encode(scene)
+                // Record where the file lives, and re-emit the legacy reserved
+                // visibility tag for one release (see PlatformVisibility).
+                var stored = scene
+                stored.categoryPath = LibraryIndex.categoryPath(for: url, root: root)
+                if let legacyTag = stored.platformVisibility?.legacyTag,
+                   !stored.tags.contains(where: { $0.caseInsensitiveCompare(legacyTag) == .orderedSame }) {
+                    stored.tags.insert(legacyTag, at: 0)
+                }
+                let data = try prettySceneEncoder.encode(stored)
                 try data.write(to: url, options: .atomic)
                 successfulIDs.insert(scene.id)
                 writtenURLs.insert(url)
@@ -283,6 +314,12 @@ final class AnimationManager {
 
         removeUserSceneFiles(ids: successfulIDs, excluding: writtenURLs)
         return successfulIDs
+    }
+
+    /// Directory currently holding `scene`'s store file, so an edit saves back
+    /// into the same folder category. nil when the scene has no store file yet.
+    private func storedDirectory(forSceneID id: UUID) -> URL? {
+        sceneFileCache.first { $0.value.scene.id == id }?.key.deletingLastPathComponent()
     }
 
     private func invalidateUserSceneReloadForLocalMutation() {
@@ -304,8 +341,10 @@ final class AnimationManager {
         let dir = StorageLocation.animationsDir(root)
         let excluded = Set(excluding.map(\.standardizedFileURL))
         let exts = ThresholdExportFormat.extensions(in: .animation)
-        guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
-        for url in files where exts.contains(url.pathExtension) {
+        guard let enumerator = FileManager.default.enumerator(
+            at: dir, includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return }
+        for case let url as URL in enumerator where exts.contains(url.pathExtension) {
             guard !excluded.contains(url.standardizedFileURL) else { continue }
             if let data = try? Data(contentsOf: url),
                let scene = try? sceneDecoder.decode(AnimationScene.self, from: data), ids.contains(scene.id) {
@@ -520,11 +559,11 @@ final class AnimationManager {
         }
         result.append(contentsOf: userScenes)
         scenes = result.filter {
-            SceneTagging.isVisible(
-                $0.tags,
-                includesScreenOnlyScenes: Self.includesScreenOnlyScenes,
-                includesMacOnlyScenes: Self.includesMacOnlyScenes
-            )
+            PlatformVisibility.resolved($0.platformVisibility)
+                .isVisible(
+                    includesScreenOnly: Self.includesScreenOnlyScenes,
+                    includesMacOnly: Self.includesMacOnlyScenes
+                )
                 // Mixed-reality scenes are authored for Vision Pro Mixed
                 // immersion; flat-display hosts hide them from the scene
                 // list unless the user opts in via Settings → Display.
@@ -2514,7 +2553,14 @@ final class AnimationManager {
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
 
         do {
-            let data = try makePrettySceneEncoder().encode(scene)
+            // `AnimationScene`'s encoder is synthesized, so the legacy reserved
+            // visibility tag is re-emitted here for one-release back-compat.
+            var exported = scene
+            if let legacyTag = exported.platformVisibility?.legacyTag,
+               !exported.tags.contains(where: { $0.caseInsensitiveCompare(legacyTag) == .orderedSame }) {
+                exported.tags.insert(legacyTag, at: 0)
+            }
+            let data = try makePrettySceneEncoder().encode(exported)
             try data.write(to: tempURL)
             return tempURL
         } catch {
