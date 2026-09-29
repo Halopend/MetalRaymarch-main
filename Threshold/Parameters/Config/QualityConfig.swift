@@ -105,7 +105,7 @@ enum SceneQualityTarget: String, Codable, CaseIterable, Sendable {
     /// `QualityConfig.visionMin…visionMaxRenderQuality`.
     var visionRenderQuality: Float {
         switch self {
-        case .standard: return 0.5
+        case .standard: return QualityConfig.visionDefaultRenderQuality
         case .high:     return 0.7
         case .ultra:    return QualityConfig.visionMaxRenderQuality
         }
@@ -181,7 +181,13 @@ struct QualityConfig: Codable, Equatable, Sendable {
     /// trade more sharpness for headroom on heavy scenes.
     static let visionMinRenderQuality: Float = 0.05
 
-    static let visionDefaultRenderQuality: Float = 0.5
+    /// First-launch compositor Render Quality on Vision Pro. Mirrors the Mac/iOS
+    /// Low detail budget (`defaultResolutionScale`, 0.33): Vision Pro is the most
+    /// thermally constrained target, so a fresh install opens as low as the
+    /// desktop's Low preset and lets the adaptive governor recover sharpness
+    /// headroom-first from there. Existing installs are nudged off the former
+    /// 0.5 default once (see `SettingsPersistence.migrateVisionRenderQualityDefault`).
+    static let visionDefaultRenderQuality: Float = 0.33
 
     /// Sanitizes values before they cross into CompositorServices. Passing NaN
     /// or infinity to `LayerRenderer.RenderQuality` is a client-contract
@@ -204,7 +210,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
 
     // Resolution / tiling
     var resolutionScale: Float = Self.defaultResolutionScale // 0.33 - 1.0 (MetalFX spatial upscale input scale)
-    var renderQuality: Float = Self.visionDefaultRenderQuality // visionMinRenderQuality...visionMaxRenderQuality (visionOS compositor drawable scale). Default favors framerate; the floor is for probing max framerate / the adaptive governor.
+    var renderQuality: Float = Self.visionDefaultRenderQuality // visionMinRenderQuality...visionMaxRenderQuality (visionOS compositor drawable scale). Default matches the desktop Low detail budget; the floor is for probing max framerate / the adaptive governor.
     var tileSize: Int = 0              // 0=disabled (fragment), 8=adaptive hierarchical compute
 
     // Vision Pro: auto-lower Render Quality to hold the frame rate, recovering

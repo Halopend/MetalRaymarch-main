@@ -28,6 +28,34 @@ struct QualityConfigCodableTests {
         #endif
     }
 
+    @Test("Vision Pro default render quality matches the desktop Low detail budget")
+    func visionRenderQualityDefaultsToLow() throws {
+        // Vision Pro is the most thermally constrained target, so a fresh
+        // install opens at the same 33% budget as the Mac/iOS Low preset and
+        // the adaptive governor recovers sharpness headroom-first from there.
+        #expect(QualityConfig.visionDefaultRenderQuality == QualityConfig.defaultResolutionScale)
+        #expect(QualityConfig.visionDefaultRenderQuality == 0.33)
+        #expect(QualityConfig().renderQuality == 0.33)
+
+        // The live settings and the Codable fallback agree, so a settings blob
+        // missing the renderQuality key decodes to the same Low default.
+        #expect(RenderSettings().renderQuality == 0.33)
+        let legacy = try JSONDecoder().decode(QualityConfig.self, from: Data("{}".utf8))
+        #expect(legacy.renderQuality == 0.33)
+
+        // The governor seeds from the ceiling, so a fresh install's first
+        // frame targets 33% rather than the former 0.5.
+        var controller = AdaptiveRenderQualityController()
+        let seeded = controller.update(
+            smoothedFPS: 90,
+            ceiling: QualityConfig().renderQuality,
+            sceneFloor: QualityConfig.visionMinRenderQuality,
+            now: 1.0,
+            enabled: true
+        )
+        #expect(abs(seeded - 0.33) < 0.0001)
+    }
+
     @Test("first launch quality is the Low preset")
     func firstLaunchQualityIsLowPreset() {
         // Fresh-install budgets must sit exactly on the Low preset so the UI's

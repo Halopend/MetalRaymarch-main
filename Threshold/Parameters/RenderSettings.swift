@@ -271,7 +271,7 @@ final class RenderSettings: @unchecked Sendable {
     #else
     private var _resolutionScale: Float = QualityConfig.defaultResolutionScale
     #endif
-    private var _renderQuality: Float = 0.5         // visionOS compositor drawable scale (default 0.5; 1.0 = native)
+    private var _renderQuality: Float = QualityConfig.visionDefaultRenderQuality // visionOS compositor drawable scale (first-launch Low parity, 0.33; 1.0 = native)
 
     private var _fractalType: FractalModelType = .mandelbox  // Current fractal type
     private var _formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()  // Generic formula params
@@ -3299,6 +3299,7 @@ final class RenderSettings: @unchecked Sendable {
                 lightingPlay: _lightingPlay,
                 lightingMode: _lightingMode,
                 convolutionEffect: _convolutionEffect,
+                navierStrokesEffect: _navierStrokesEffect,
                 sphericalInversionMode: _sphericalInversionMode,
                 sphericalInversionRadius: _sphericalInversionRadius,
                 sphereProjectionEnabled: _sphereProjectionEnabled,

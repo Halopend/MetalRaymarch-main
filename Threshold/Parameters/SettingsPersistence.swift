@@ -277,7 +277,9 @@ enum SettingsPersistence {
     static func restoreAll(into settings: RenderSettings) {
         if let c = load(GeometryConfig.self,      domain: .geometry)      { settings.geometryConfig = c }
         if let c = load(QualityConfig.self,       domain: .quality) {
-            settings.qualityConfig = migrateConeMarchStrengthDefault(migrateMacResolutionScale(c))
+            settings.qualityConfig = migrateConeMarchStrengthDefault(
+                migrateVisionRenderQualityDefault(migrateMacResolutionScale(c))
+            )
         }
         if let c = load(ColorConfig.self,         domain: .color)         { settings.colorConfig = c }
         if let c = load(LightingConfig.self,      domain: .lighting)      { settings.lightingConfig = c }
@@ -357,6 +359,29 @@ enum SettingsPersistence {
         migrated.coneMarchStrength = QualityConfig.defaultConeMarchStrength
         save(migrated, domain: .quality)
         return migrated
+    }
+
+    /// One-time visionOS migration: the compositor Render Quality default
+    /// dropped from 0.5 to 0.33 (Low-parity with the Mac/iOS detail budget).
+    /// An install that persisted the old default never sees the new one — its
+    /// saved value keeps winning on restore — so nudge a still-untouched 0.5
+    /// down to the new default exactly once, mirroring
+    /// `migrateMacResolutionScale`. The flag keeps it idempotent and
+    /// one-directional: a value the user deliberately chose (including a
+    /// re-chosen 0.5) is never re-stomped.
+    private static func migrateVisionRenderQualityDefault(_ config: QualityConfig) -> QualityConfig {
+        #if os(visionOS)
+        let flagKey = "didMigrateVisionRenderQualityToLow"
+        guard !defaults.bool(forKey: flagKey) else { return config }
+        defaults.set(true, forKey: flagKey)
+        guard abs(config.renderQuality - 0.5) < 1e-6 else { return config }
+        var migrated = config
+        migrated.renderQuality = QualityConfig.visionDefaultRenderQuality
+        save(migrated, domain: .quality)
+        return migrated
+        #else
+        return config
+        #endif
     }
 
     // MARK: - Music (Typed Section)

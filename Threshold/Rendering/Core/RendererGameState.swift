@@ -341,17 +341,13 @@ extension Renderer {
         )
         let precomputedAudio = RenderPrecompute.makePrecomputedAudio(from: settingsSnapshot)
         var precomputedFog = RenderPrecompute.makePrecomputedFog(from: settingsSnapshot)
-        // Zoom fog compensation (Settings toggle, default off): fog operates on
-        // MODEL-space march distance, so on zoom-out the fog sphere's world radius
-        // shrinks with the model and washes out the fractal — starting as soon as
-        // scale drops below 1.0. Scaling intensity by effectiveScale holds the
-        // fog's WORLD radius constant at its scale==1 value for the whole
-        // zoom-out range — a no-op at scale >= 1 (zoom-in unaffected). (Was
-        // previously hardcoded on for the Kleinian family only, and briefly keyed
-        // to the unrelated 0.15 horizon-lift floor.)
+        // Fog is evaluated in model space, so zooming the model out increases
+        // the ray distance through the fog. Keep its apparent world-space range
+        // stable on Vision Pro to prevent scenes washing into the dark fog tint.
+        // The compensation is a no-op at scale >= 1, so zoom-in keeps its look.
         precomputedFog = RenderPrecompute.applyZoomFogCompensation(
             precomputedFog,
-            enabled: settingsSnapshot.zoomFogCompensationEnabled,
+            enabled: true,
             effectiveScale: effectiveScale)
 
         // Hoist lightingWave out of per-eye loop — sin() is identical for both eyes
