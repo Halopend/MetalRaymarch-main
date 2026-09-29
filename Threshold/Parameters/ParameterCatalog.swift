@@ -605,6 +605,18 @@ enum ParameterCatalog {
             settingsWrite: { $0.handAttractionPocketSoftness = $1 }
         ),
         staticDescriptor(
+            ControlCatalog.handPredictionOffset,
+            route: .shape(.hands), section: "Hand Tracking", order: 0,
+            requiredPlatformCapabilities: [.handTracking],
+            uiRead: { $0.handAttraction.predictionOffsetMs },
+            uiWrite: { cache, value in
+                cache.handAttraction.predictionOffsetMs = value
+                cache.push(\.handPredictionOffsetMs, value: value)
+            },
+            settingsRead: { $0.handPredictionOffsetMs },
+            settingsWrite: { $0.handPredictionOffsetMs = $1 }
+        ),
+        staticDescriptor(
             ControlCatalog.gradientCycleSpeed,
             route: .look(.motion), section: "Lighting & Color", order: 0,
             uiRead: { $0.lighting.gradientCycleEffect.speed },

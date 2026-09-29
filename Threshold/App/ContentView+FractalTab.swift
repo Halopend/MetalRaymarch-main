@@ -352,6 +352,22 @@ extension ContentView {
                             valueFormat: { v in String(format: "%.0f cm", v * 100) })
                     }
 
+                    Divider()
+                    EffectSliderRow(icon: "clock.arrow.circlepath", label: "Prediction Offset",
+                        value: cacheBinding(\.handAttraction.predictionOffsetMs),
+                        range: ControlCatalog.handPredictionOffset.range,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.handPredictionOffsetMs, value: cache.handAttraction.predictionOffsetMs) },
+                        showToggle: false,
+                        valueFormat: { v in
+                            if abs(v) < 0.5 { return "ARKit default" }
+                            return v > 0 ? String(format: "+%.0f ms lead", v) : String(format: "%.0f ms lag", v)
+                        })
+                    Text("ARKit already predicts hands forward to the frame's trackable-anchor time. This trims that further to cover render latency: positive leads the hand, negative trails it. Too much lead makes the surface overshoot and snap back.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
                     if cache.handAttraction.strength > 0.02 {
                         Divider()
                         HStack {

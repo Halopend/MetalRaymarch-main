@@ -303,6 +303,7 @@ actor Renderer {
     let handTrackingDispatchState = Mutex(HandTrackingDispatchState())
     var hasLoggedHandTrackingNil: Bool = false          // One-shot guard for nil provider log
     var lastHandTrackingStateLogTime: TimeInterval = 0  // Throttle non-running state logs
+    var lastHandAnchorLatencyLogTime: TimeInterval = 0  // Throttle anchor-latency diagnostic
     var cachedDeltaTime: Float = 1.0 / 90.0  // Cached for use in updateGameState
     var lastPerfLogTime: TimeInterval = 0
     let perfLogFrameMsThreshold: Double = 30.0  // ~33 FPS
@@ -1074,6 +1075,20 @@ actor Renderer {
 
         let presentationTime = timing.presentationTime
         let time = LayerRenderer.Clock.Instant.epoch.duration(to: presentationTime).timeInterval
+        // Trackable anchors (hands) predict to `trackableAnchorTime`, NOT
+        // presentation time — CompositorServices documents the offset between the
+        // two as variable and recommends querying it per-frame
+        // (CompositorServices/frame_timing.h, `cp_frame_timing_get_trackable_anchor_time`).
+        // The device anchor is the documented exception and keeps presentation
+        // time, as ARKit's note says. Before visionOS 2.0 there is no trackable
+        // anchor time, so hands fall back to presentation time.
+        let handQueryTime: TimeInterval
+        if #available(visionOS 2.0, *) {
+            handQueryTime = LayerRenderer.Clock.Instant.epoch
+                .duration(to: timing.trackableAnchorTime).timeInterval
+        } else {
+            handQueryTime = time
+        }
         let deviceAnchor = worldTracking.state == .running
             ? worldTracking.queryDeviceAnchor(atTimestamp: time)
             : nil
@@ -1217,7 +1232,7 @@ actor Renderer {
         self.updateDynamicBufferState()
         // Update hand tracking and process gestures
         let handTrackingStart = CACurrentMediaTime()
-        self.updateHandTracking(atTime: time)
+        self.updateHandTracking(atTime: time, anchorQueryTime: handQueryTime)
         frameBreakdown.handTrackingMs = (CACurrentMediaTime() - handTrackingStart) * 1000.0
 
         let settingsUpdateStart = CACurrentMediaTime()

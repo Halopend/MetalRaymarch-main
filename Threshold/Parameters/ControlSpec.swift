@@ -310,6 +310,14 @@ enum ControlCatalog {
         id: "hands.pocketSoftness", name: "Hand Pocket Softness", icon: "aqi.low",
         range: 0.1...1.5, defaultValue: 0.18)
 
+    // Latency trim on ARKit's hand-anchor prediction. 0 by default because
+    // CompositorServices' `trackableAnchorTime` already carries ARKit's own
+    // per-frame-variable prediction; this only adds extra lead (or, when
+    // negative, lag) to cover this app's own render pipeline.
+    static let handPredictionOffset = ControlSpec(
+        id: "hands.predictionOffsetMs", name: "Hand Prediction Offset", icon: "clock.arrow.circlepath",
+        range: -30.0...100.0, defaultValue: 0.0)
+
     // Static lighting-animation controls.
     static let gradientCycleSpeed = ControlSpec(
         id: "lighting.gradientCycleSpeed", name: "Gradient Cycle Speed", icon: "circle.hexagongrid",
@@ -544,6 +552,7 @@ enum ControlCatalog {
         handAttractionBallScale, handAttractionSoftness,
         handAttractionProjectionDistance, handAttractionForearmRadius,
         handAttractionPocketSize, handAttractionPocketSoftness,
+        handPredictionOffset,
         gradientCycleSpeed, hueRotationIntensity, fogHueRotationSpeed,
         polarRotationSpeed, lightVariationRate, pulseSpeed, pulseAmount,
         linearRailSpeed, linearRailAmplitude, linearRailMultiplier,

@@ -413,6 +413,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _handAttractionProjectionDistance: Float = 0.08
     private var _handAttractionForearmEnabled: Bool = false
     private var _handAttractionForearmRadius: Float = 0.06
+    private var _handPredictionOffsetMs: Float = 0.0
 
     // === COLOR SCHEME ===
     // Controls the color palette and post-processing for fractal coloring
@@ -2432,6 +2433,19 @@ final class RenderSettings: @unchecked Sendable {
             withLock {
                 _handAttractionForearmRadius =
                     ControlCatalog.handAttractionForearmRadius.clamp(newValue)
+            }
+            persistHandAttraction()
+        }
+    }
+
+    /// Extra hand-anchor prediction trim, milliseconds (-30 to 100). Added on top
+    /// of CompositorServices' `trackableAnchorTime`; 0 trusts ARKit's own
+    /// prediction. Positive leads the hand, negative trails it.
+    var handPredictionOffsetMs: Float {
+        get { withLock { _handPredictionOffsetMs } }
+        set {
+            withLock {
+                _handPredictionOffsetMs = ControlCatalog.handPredictionOffset.clamp(newValue)
             }
             persistHandAttraction()
         }
@@ -5169,6 +5183,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.projectionDistance = _handAttractionProjectionDistance
                 c.forearmEnabled = _handAttractionForearmEnabled
                 c.forearmRadius = _handAttractionForearmRadius
+                c.predictionOffsetMs = _handPredictionOffsetMs
                 return c
             }
         }
@@ -5187,6 +5202,7 @@ final class RenderSettings: @unchecked Sendable {
                 _handAttractionProjectionDistance = newValue.projectionDistance
                 _handAttractionForearmEnabled = newValue.forearmEnabled
                 _handAttractionForearmRadius = newValue.forearmRadius
+                _handPredictionOffsetMs = newValue.predictionOffsetMs
             }
         }
     }

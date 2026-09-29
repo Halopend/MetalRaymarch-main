@@ -27,8 +27,15 @@ extension Renderer {
         uniforms = UnsafeMutableRawPointer(dynamicUniformBuffer.contents() + uniformBufferOffset).bindMemory(to:UniformsArray.self, capacity:1)
     }
 
-    /// Update hand tracking data and process gesture controls
-    func updateHandTracking(atTime time: TimeInterval) {
+    /// Update hand tracking data and process gesture controls.
+    ///
+    /// `time` is the compositor's presentation time and drives all cadence /
+    /// gesture bookkeeping. `anchorQueryTime` is a *separate* timestamp used only
+    /// for the ARKit query: ARKit predicts hand poses forward to whatever time you
+    /// ask for, so querying at the wrong one either over- or under-leads the
+    /// rendered frame. The caller derives it from CompositorServices'
+    /// `trackableAnchorTime` (see Renderer), and `handPredictionOffsetMs` trims it.
+    func updateHandTracking(atTime time: TimeInterval, anchorQueryTime: TimeInterval) {
         guard let ht = handTracking else {
             clearHandAttractionTrackingState()
             clearSpatialRadialTrackingState(atTime: time)
@@ -66,8 +73,32 @@ extension Renderer {
             return
         }
 
-        // Get hand anchors at the current time
-        let anchors = ht.handAnchors(at: time)
+        // Get hand anchors at the predicted photon time. The user trim is applied
+        // here (constant per frame, so it cancels out of the deltaTime math below
+        // and never distorts gesture velocities).
+        let predictionOffset = TimeInterval(appModel.renderSettings.handPredictionOffsetMs) / 1000.0
+        let queryTime = anchorQueryTime + predictionOffset
+        let anchors = ht.handAnchors(at: queryTime)
+
+        // Diagnostic: how far the returned pose sits from the time we asked for,
+        // and how stale it is relative to photon time. A `queryDeltaMs` near 0
+        // means ARKit honoured the prediction request; a large positive one means
+        // it clamped to its latest solved sample (prediction not engaging, so the
+        // offset knob will do nothing).
+        if appModel.renderSettings.handAttractionEnabled,
+           time - lastHandAnchorLatencyLogTime >= 1.0 {
+            lastHandAnchorLatencyLogTime = time
+            let trimMs = predictionOffset * 1000.0
+            let pairs = [(label: "L", anchor: anchors.leftHand), (label: "R", anchor: anchors.rightHand)]
+            for pair in pairs {
+                guard let anchor = pair.anchor, anchor.isTracked else { continue }
+                let queryDeltaMs = (anchor.timestamp - queryTime) * 1000.0
+                let ageMs = (time - anchor.timestamp) * 1000.0
+                print(String(
+                    format: "🖐 [Hands] %@ anchor: queryΔ %.1f ms, photon age %.1f ms (trim %.1f ms)",
+                    pair.label, queryDeltaMs, ageMs, trimMs))
+            }
+        }
 
         // Calculate deltaTime for this update
         let gestureUpdateDelta = Float(time - lastHandTrackingUpdateTime)

@@ -115,6 +115,7 @@ struct ControlCatalogConvergenceTests {
             ControlCatalog.handAttractionForearmRadius.controlID,
             ControlCatalog.handAttractionPocketSize.controlID,
             ControlCatalog.handAttractionPocketSoftness.controlID,
+            ControlCatalog.handPredictionOffset.controlID,
         ])
     }
 }

@@ -44,6 +44,15 @@ struct HandAttractionConfig: Codable, Equatable, Sendable {
     var forearmEnabled: Bool = false
     // Forearm capsule radius, meters.
     var forearmRadius: Float = 0.06
+    // Extra prediction trim, milliseconds, added on top of CompositorServices'
+    // `trackableAnchorTime` when querying hand poses. ARKit's base prediction is
+    // already applied by that timestamp (it is per-frame and variable, per
+    // frame_timing.h), so this only compensates for latency the base does not
+    // cover — chiefly this app's own render pipeline depth. 0 = trust ARKit.
+    // Negative reaches *behind* photon time, which can suit a sculpting field
+    // better than a registered overlay. Overshoot is visible: the DE bulge leads
+    // the real hand and snaps when the predictor corrects.
+    var predictionOffsetMs: Float = 0
 
     // MARK: - Codable (tolerant decode so adding fields never resets the
     // user's saved config to defaults)
@@ -52,6 +61,7 @@ struct HandAttractionConfig: Codable, Equatable, Sendable {
         case enabled, radius, strength, pocketEnabled
         case ballScale, softness, pocketSize, pocketSoftness, projectionDistance
         case forearmEnabled, forearmRadius
+        case predictionOffsetMs
     }
 
     init() {}
@@ -69,6 +79,7 @@ struct HandAttractionConfig: Codable, Equatable, Sendable {
         projectionDistance = try c.decodeIfPresent(Float.self, forKey: .projectionDistance) ?? 0.08
         forearmEnabled = try c.decodeIfPresent(Bool.self, forKey: .forearmEnabled) ?? false
         forearmRadius = try c.decodeIfPresent(Float.self, forKey: .forearmRadius) ?? 0.06
+        predictionOffsetMs = try c.decodeIfPresent(Float.self, forKey: .predictionOffsetMs) ?? 0
     }
 
     // MARK: - Validation
@@ -84,6 +95,7 @@ struct HandAttractionConfig: Codable, Equatable, Sendable {
             to: ControlCatalog.handAttractionProjectionDistance
         )
         forearmRadius = forearmRadius.clamped(to: ControlCatalog.handAttractionForearmRadius)
+        predictionOffsetMs = predictionOffsetMs.clamped(to: ControlCatalog.handPredictionOffset)
     }
 }
 
