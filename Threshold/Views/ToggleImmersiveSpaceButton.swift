@@ -153,4 +153,52 @@ struct ImmersionStylePicker: View {
         }
     }
 }
+
+/// Bottom-bar shortcut to the Bounding section (Shape ▸ Bounding). Containment
+/// is the natural follow-up to picking an immersion style on Vision Pro —
+/// entering Mixed immersion pre-gates the fractal behind the Bounded default,
+/// and the Bounding page owns every way to change that (Bounding Shape /
+/// Bound to Space / Surroundings scrunch) — so the page gets a launch point
+/// right beside the switcher instead of sitting two levels deep in the rail.
+struct BoundingShortcutButton: View {
+    @Environment(AppModel.self) private var appModel
+
+    /// True while any containment system is enabled. Tints the icon cyan (the
+    /// accent used across the Bounding page) so the shortcut doubles as a
+    /// quiet "is the fractal contained?" indicator.
+    private var isContainmentActive: Bool {
+        let quality = appModel.controlStateStore.quality
+        return quality.boundingSphereSkipEnabled
+            || quality.boundToSpaceEnabled
+            || quality.envScrunchEnabled
+    }
+
+    /// Mirrors the top dock's renderer-readiness gate: control pages target
+    /// the live render, and the workspace snaps non-Explore routes back to
+    /// Explore until startup warmup completes.
+    private var isRendererReady: Bool {
+        appModel.immersiveSpaceState == .open
+            && appModel.rendererStartupWarmupComplete
+    }
+
+    var body: some View {
+        Button {
+            appModel.navigationStore.select(.shape(.bounding))
+        } label: {
+            Label {
+                Text("Bounding")
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.9)
+            } icon: {
+                Image(systemName: "circle.dashed")
+                    .foregroundStyle(isContainmentActive ? Color.cyan : Color.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .disabled(!isRendererReady)
+        .fontWeight(.semibold)
+        .help("Open the Bounding section — containment mode, the bounding shape, Bound to Space, and Surroundings scrunch.")
+        .accessibilityLabel("Bounding controls")
+    }
+}
 #endif

@@ -1888,6 +1888,13 @@ struct ContentView: View {
 #if os(visionOS)
                 ImmersionStylePicker(showsCaption: false)
                     .frame(width: ImmersionSwitcherMetrics.bottomBarWidth)
+
+                // Containment is the follow-up to picking an immersion style
+                // (Mixed immersion pre-gates the fractal behind the Bounded
+                // default), so the Bounding page that owns those controls gets
+                // a one-tap launch point beside the switcher.
+                BoundingShortcutButton()
+                    .frame(width: 132, alignment: .center)
 #endif
             }
             .frame(maxWidth: .infinity, alignment: .center)
