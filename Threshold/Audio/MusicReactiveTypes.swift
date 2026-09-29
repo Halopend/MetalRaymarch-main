@@ -133,21 +133,16 @@ enum MusicReactiveSource: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    /// Sources offered in the UI picker. Excludes the deprecated `overall`
-    /// (redundant with Energy) so the control stays a clean, intuitive set.
-    /// Finger-pinch sources are visionOS-only: on macOS/iPadOS there is no
-    /// hand tracking and their values are hardwired to zero, so offering them
-    /// would let a mapping's input offset hold a permanent parameter
-    /// deviation with no audio playing. The enum cases themselves stay
-    /// unconditional so scenes shared from visionOS still decode.
+    /// Sources offered in the UI picker: the fixed audio set only. Excludes the
+    /// deprecated `overall` (redundant with Energy) so the control stays a
+    /// clean, intuitive set. The finger-pinch cases are gesture-system inputs
+    /// and are deliberately NOT offered as music sources — presenting them in
+    /// the Music tab's Source picker read as gesture params leaking into the
+    /// music controls. The enum cases stay unconditional so scenes saved while
+    /// they were offered still decode, and the engine keeps honoring those
+    /// legacy mappings (`sourceOptions(for:)` keeps them visible on their cards).
     static var pickerCases: [MusicReactiveSource] {
-        #if os(visionOS)
-        [.composite, .bass, .mid, .treble, .beat,
-         .leftIndexPinch, .leftMiddlePinch, .leftRingPinch,
-         .rightIndexPinch, .rightMiddlePinch, .rightRingPinch]
-        #else
         [.composite, .bass, .mid, .treble, .beat]
-        #endif
     }
 }
 

@@ -18,12 +18,16 @@ struct AudioHubTests {
         #expect(AudioInputLaunchPreference.microphoneStartsAtLaunch(in: defaults))
     }
 
-    @Test("Finger-pinch sources are not offered on platforms without hand tracking")
-    func fingerSourcesAbsentFromPickerWithoutHandTracking() {
-        // The test host is macOS: pinch levels are hardwired zero here, so a
-        // finger mapping could never produce input — offering one would let
-        // its input offset hold a permanent parameter deviation. The enum
-        // cases themselves must still exist for scene decode compatibility.
+    @Test("Finger-pinch sources are never offered in the music source picker")
+    func fingerSourcesAbsentFromPicker() {
+        // Finger-pinch inputs belong to the gesture system, so the music
+        // mapping Source picker stays a fixed audio-source set on every
+        // platform (previously the picker surfaced the six pinch sources on
+        // visionOS, which read as gesture params leaking into the music
+        // controls). The enum cases themselves must still exist so scenes
+        // saved while they were offered still decode — and legacy pinch
+        // mappings keep running and stay visible on their cards.
+        #expect(MusicReactiveSource.pickerCases == [.composite, .bass, .mid, .treble, .beat])
         #expect(MusicReactiveSource.pickerCases.allSatisfy { !$0.isFingerInput })
         #expect(MusicReactiveSource.allCases.contains(.leftIndexPinch))
     }

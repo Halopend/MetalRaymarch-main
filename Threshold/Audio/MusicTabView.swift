@@ -1430,7 +1430,7 @@ struct MusicTabContent: View {
                                         get: { mappingAt(index)?.source ?? .composite },
                                         set: { newValue in updateMapping(index) { $0.source = newValue } }
                                     )) {
-                                        ForEach(MusicReactiveSource.pickerCases, id: \.self) { source in
+                                        ForEach(sourceOptions(for: mappingAt(index)), id: \.self) { source in
                                             Text(source.displayName).tag(source)
                                         }
                                     }
@@ -1722,6 +1722,19 @@ struct MusicTabContent: View {
         return MusicReactiveTarget.availableCases(for: cache.fractalType).filter {
             !existing.contains(MusicReactiveMappingKey(target: $0)) && canEditMappingTarget($0)
         }
+    }
+
+    /// Source-picker options for one mapping card: the fixed audio-source set
+    /// (`MusicReactiveSource.pickerCases`), plus the card's current source when
+    /// it is a legacy finger-pinch input. Scenes saved while pinch sources were
+    /// offered keep rendering (and stay switchable) without the picker ever
+    /// presenting gesture sources as options for new mappings.
+    private func sourceOptions(for mapping: MusicReactiveMapping?) -> [MusicReactiveSource] {
+        let base = MusicReactiveSource.pickerCases
+        guard let mapping, mapping.source.isFingerInput, !base.contains(mapping.source) else {
+            return base
+        }
+        return base + [mapping.source]
     }
 
     private func canEditMappingTarget(_ target: MusicReactiveTarget) -> Bool {
