@@ -142,7 +142,7 @@ enum AppRoute: Codable, Hashable, Sendable {
         switch self {
         case .explore(let section): return section.rawValue
         case .input(let section): return section.canonical.title
-        case .shape(let section): return section == .performance ? "Tuning" : section.rawValue
+        case .shape(let section): return section == .performance ? "Tuning" : section.title
         case .look(let section): return section.title
         case .quality(let section): return section.rawValue
         case .quickToggles: return "Quick Toggles"

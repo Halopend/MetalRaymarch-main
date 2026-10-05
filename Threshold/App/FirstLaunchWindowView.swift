@@ -2,8 +2,8 @@ import SwiftUI
 import AVKit
 
 /// Four-page welcome flow:
-///   0. Safety (photosensitive-epilepsy warning, must acknowledge)
-///   1. Welcome (what Threshold is, what the app does)
+///   0. Welcome (what Threshold is, what the app does)
+///   1. Safety (photosensitive-epilepsy warning, must acknowledge)
 ///   2. Controls (movement + gestures on visionOS; navigation + creation elsewhere)
 ///   3. Setup (storage, microphone-at-launch, and anonymous analytics)
 ///
@@ -34,24 +34,30 @@ struct FirstLaunchWindowView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
+            ScrollView(.vertical) {
                 Group {
                     switch currentPage {
-                    case 0: safetyPage
-                    case 1: welcomePage
+                    case 0: welcomePage
+                    case 1: safetyPage
                     case 2: controlsPage
                     default: storagePage
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .animation(.default, value: currentPage)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .id(currentPage)
 
             Divider()
 
             navigationFooter
         }
-        #if os(iOS)
+        #if os(macOS)
+        // A sheet sizes itself from its content. An unbounded frame lets the
+        // scrolling page and the sheet repeatedly renegotiate their size,
+        // clipping the safety warning and shifting the controls at launch.
+        .frame(width: 780, height: 600)
+        #elseif os(iOS)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         #else
         .frame(minWidth: 680, idealWidth: 780, maxWidth: .infinity, minHeight: 500, idealHeight: 600, maxHeight: .infinity)
@@ -128,7 +134,7 @@ struct FirstLaunchWindowView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.regular)
-            .disabled(currentPage == 0 && !acknowledgedFlash)
+            .disabled(currentPage == 1 && !acknowledgedFlash)
             .accessibilityLabel(currentPage == pageCount - 1 ? "Start exploring" : "Next page")
         }
         .padding(.horizontal, 24)
@@ -137,8 +143,8 @@ struct FirstLaunchWindowView: View {
 
     private var onboardingStepLabel: String {
         switch currentPage {
-        case 0: "Safety"
-        case 1: "Overview"
+        case 0: "Overview"
+        case 1: "Safety"
         case 2: "Controls"
         default: "Setup"
         }
@@ -152,7 +158,7 @@ struct FirstLaunchWindowView: View {
         colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.08)
     }
 
-    // MARK: - Page 0: Safety
+    // MARK: - Page 1: Safety
 
     private var safetyPage: some View {
         OnboardingPageShell(
@@ -196,87 +202,77 @@ struct FirstLaunchWindowView: View {
                     detail: "Stop using Threshold if you feel dizziness, nausea, vision changes, twitching, or disorientation."
                 )
 
-#if os(macOS)
                 Toggle(isOn: $acknowledgedFlash) {
                     Text("I understand that some scenes may contain flashing lights and audio-driven flashes.")
                         .font(.subheadline.weight(.medium))
                 }
-                .toggleStyle(.checkbox)
-#else
-                Toggle(isOn: $acknowledgedFlash) {
-                    Text("I understand that some scenes may contain flashing lights and audio-driven flashes.")
-                        .font(.subheadline.weight(.medium))
-                }
-#endif
+                .toggleStyle(OnboardingCheckboxStyle())
             }
         }
     }
 
-    // MARK: - Page 1: Welcome
-
-    private var welcomeSubtitle: String {
-        #if os(visionOS)
-        "Explore infinite fractal worlds in spatial computing."
-        #else
-        "Explore, shape, animate, and save infinite GPU-rendered fractal worlds."
-        #endif
-    }
-
-    private var welcomeWorkflowSummary: String {
-        #if os(visionOS)
-        "Start with curated scenes, then shape them with hands, audio, and parameter controls."
-        #else
-        "Start with curated scenes, then shape them with the control workspace, audio, and precise parameter tools."
-        #endif
-    }
+    // MARK: - Page 0: Welcome
 
     private var welcomePage: some View {
         OnboardingPageShell(
             icon: "cube.transparent.fill",
-            title: "Threshold",
-            subtitle: welcomeSubtitle,
+            title: "Welcome to Threshold",
+            subtitle: "A real-time 3D renderer built on signed distance fields (SDFs)—where math becomes the shape you explore.",
             accent: .blue
         ) {
             VStack(alignment: .leading, spacing: 14) {
-                Text(welcomeWorkflowSummary)
+                Text("MATH IS THE MEDIUM")
+                    .font(.caption.weight(.bold))
+                    .tracking(1.2)
+                    .foregroundStyle(.blue)
+                Text("Choose a scene. Move through it. Change the math, color, and light as it renders.")
                     .font(.title3.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Threshold evaluates a distance field: a formula tells the renderer how far each point is from a surface. Rays step through that field until they reach the geometry, revealing fractals and other 3D forms. Change the formula and parameters, and the shape updates live.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
                     IntroPill(icon: "square.grid.2x2.fill", title: "Scenes")
-                    #if os(visionOS)
-                    IntroPill(icon: "hand.raised.fingers.spread", title: "Hands")
-                    #else
-                    IntroPill(icon: AppIcons.magnifyingglass, title: "Find")
-                    #endif
-                    IntroPill(icon: "waveform", title: "Music")
+                    IntroPill(icon: "move.3d", title: "Explore")
+                    IntroPill(icon: AppIcons.sliderHorizontal3, title: "Edit live")
+                    IntroPill(icon: "waveform", title: "React to music")
                 }
             }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [.blue.opacity(0.18), .purple.opacity(0.10)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.blue.opacity(0.22), lineWidth: 1)
+            )
         } detail: {
             VStack(alignment: .leading, spacing: 12) {
                 IntroTipRow(
-                    icon: "cube.transparent.fill",
-                    title: "Raymarched Fractals",
-                    detail: "Real-time GPU-rendered 3D fractals you can fly through, reshape, animate, and save."
+                    icon: AppIcons.function,
+                    title: "SDFs, fractals, and formulas",
+                    detail: "Signed distance fields describe geometry with math. Threshold combines distance-estimator fractals with SDF primitives, and lets you create or edit Metal formulas and see the result as it renders."
                 )
-                #if os(visionOS)
                 IntroTipRow(
-                    icon: "hand.raised.fingers.spread",
-                    title: "Hand Gesture Controls",
-                    detail: "Pinch, grab, and sculpt fractal parameters using natural hand tracking. More on the next pages."
+                    icon: AppIcons.sliderHorizontal3,
+                    title: "Explore and shape it",
+                    detail: "Navigate around and through a scene, then use Controls to tune its formula, shape, lighting, and color."
                 )
-                #else
                 IntroTipRow(
-                    icon: AppIcons.magnifyingglass,
-                    title: "Find Any Control",
-                    detail: "Search by feature or intent, then jump directly to the right workspace and section."
+                    icon: "waveform",
+                    title: "Let sound move the image",
+                    detail: "Map live audio, bass, and beats to visual parameters so a scene can react to music."
                 )
-                #endif
-                IntroTipRow(
-                    icon: "arrow.counterclockwise.circle",
-                    title: "Reset + Create",
-                    detail: "Tap Reset to jump back to your saved baseline. Use Save to create a named preset or deliberately update that reset point."
-                )
-                Text("You can always return to this window from Settings.")
+                Text("Start with a built-in scene. No math or shader experience is needed to explore it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -385,7 +381,9 @@ struct FirstLaunchWindowView: View {
                 }
                 Spacer(minLength: 8)
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 28, weight: .semibold))
                     .foregroundStyle(isSelected ? .cyan : .secondary)
+                    .frame(width: 32, height: 32)
             }
             .padding(14)
             .background(
@@ -408,8 +406,8 @@ struct FirstLaunchWindowView: View {
         #if os(visionOS)
         OnboardingPageShell(
             icon: "move.3d",
-            title: "Move and open controls",
-            subtitle: "Learn the core movement gestures and choose how to summon the floating controls.",
+            title: "Your first scene",
+            subtitle: "Move through the fractal, then open the controls to change what you see.",
             accent: .green
         ) {
             VStack(alignment: .leading, spacing: 12) {
@@ -443,6 +441,11 @@ struct FirstLaunchWindowView: View {
                     title: "Scale + Rotate",
                     detail: "Move hands apart to scale up, together to scale down, and rotate your hands to orbit."
                 )
+                IntroTipRow(
+                    icon: AppIcons.sliderHorizontal3,
+                    title: "Edit the scene",
+                    detail: "Use the floating controls to tune the fractal formula, shape, color, light, and music response. Changes render live."
+                )
 
                 Divider()
 
@@ -455,45 +458,48 @@ struct FirstLaunchWindowView: View {
         }
         #else
         OnboardingPageShell(
-            icon: AppIcons.sliderHorizontal3,
-            title: "Navigate and create",
-            subtitle: "Find any control, experiment freely, and keep reliable return points.",
+            icon: "move.3d",
+            title: "Your first scene",
+            subtitle: "Pick a fractal, move through it, and change it while it renders.",
             accent: .green
         ) {
             VStack(alignment: .leading, spacing: 10) {
                 IntroTipRow(
+                    icon: "square.grid.2x2.fill",
+                    title: "1. Choose a scene",
+                    detail: "Open Explore and choose a built-in scene from Jumping Off."
+                )
+                IntroTipRow(
+                    icon: "move.3d",
+                    title: "2. Explore the viewport",
+                    detail: viewportNavigationOnboardingDetail
+                )
+                IntroTipRow(
                     icon: AppIcons.sliderHorizontal3,
-                    title: controlsOnboardingTitle,
+                    title: "3. Open Controls",
                     detail: phoneControlsOnboardingDetail
-                )
-                IntroTipRow(
-                    icon: AppIcons.magnifyingglass,
-                    title: "Find",
-                    detail: "Search for a control by name or intent—try fog, FPS, export, gradient, or animation."
-                )
-                IntroTipRow(
-                    icon: AppIcons.pin,
-                    title: "Quick Access",
-                    detail: "Pin the sections you revisit so they remain one click away in the rail."
                 )
             }
         } detail: {
             VStack(alignment: .leading, spacing: 10) {
                 IntroTipRow(
-                    icon: AppIcons.arrowCounterclockwise,
-                    title: "Reset",
-                    detail: "Return the current fractal to its saved baseline."
+                    icon: AppIcons.function,
+                    title: "Shape and formula",
+                    detail: "Use Shape and Look to tune geometry, color, and lighting. Open Metal DE Studio to edit a custom distance-estimator formula."
                 )
                 IntroTipRow(
-                    icon: AppIcons.plusCircleFill,
-                    title: "Save",
-                    detail: "Create a named preset, include a preview, or deliberately update the Reset point."
+                    icon: "waveform",
+                    title: "Music Reactive",
+                    detail: "In Input, choose an audio source and map bands or beats to controls to make the scene respond."
                 )
                 IntroTipRow(
                     icon: AppIcons.filmStack,
                     title: "Animation Editor",
                     detail: "Capture parameter states as keyframes and preview the result."
                 )
+                Text("Use Find to jump to any control. Save a preset you like; Reset returns to its saved baseline.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         #endif
@@ -535,8 +541,9 @@ struct FirstLaunchWindowView: View {
                 }
                 Spacer(minLength: 0)
                 Image(systemName: isSelected ? AppIcons.checkmarkCircleFill : "circle")
-                    .font(.title3)
+                    .font(.system(size: 28, weight: .semibold))
                     .foregroundStyle(isSelected ? .purple : .secondary.opacity(0.5))
+                    .frame(width: 32, height: 32)
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -556,11 +563,11 @@ struct FirstLaunchWindowView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private var controlsOnboardingTitle: String {
+    private var viewportNavigationOnboardingDetail: String {
 #if os(iOS)
-        "Quick controls"
+        "Drag with one finger to orbit. Use two fingers to pan or zoom."
 #else
-        "Controls"
+        "Drag to orbit, right-drag to pan, scroll to zoom, or use WASD to move through the fractal."
 #endif
     }
 
@@ -585,6 +592,7 @@ struct FirstLaunchWindowView: View {
     // MARK: - Completion
 
     private func completeOnboarding() {
+        guard acknowledgedFlash else { return }
         // Persist the state the user just configured: storage, microphone launch,
         // analytics toggle, handedness, and menu-open gesture. (Handedness and the
         // gesture are also written live on change, so this is belt-and-braces.)
@@ -617,6 +625,36 @@ struct FirstLaunchWindowView: View {
         openWindow(id: appModel.menuWindowID)
         dismissWindow(id: AppModel.onboardingWindowID)
         #endif
+    }
+}
+
+private struct OnboardingCheckboxStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(configuration.isOn ? Color.orange : Color.clear)
+                    RoundedRectangle(cornerRadius: 7)
+                        .strokeBorder(Color.orange, lineWidth: 2)
+                    if configuration.isOn {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .frame(width: 30, height: 30)
+
+                configuration.label
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(configuration.isOn ? "Checked" : "Unchecked")
     }
 }
 

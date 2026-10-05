@@ -86,6 +86,76 @@ struct ControlStateStoreTests {
         }
     }
 
+    @Test("Bounding card order follows the containment selection")
+    func boundingCardOrderFollowsSelection() {
+        let settings = RenderSettings()
+        settings.withPersistenceSuppressed {
+            settings.boundingSphereSkipEnabled = true
+            let cache = ControlStateStore(renderSettings: settings)
+
+            // A Shape (Bounded) scene leads with the Shape card.
+            #expect(cache.containmentSectionOrder.first == .shape)
+
+            // Picking Space promotes it; Shape (now off) sinks to the bottom.
+            cache.applyMixedContainment(.space)
+            #expect(cache.containmentSectionOrder.first == .space)
+            #expect(cache.containmentSectionOrder.last == .shape)
+
+            // Picking Shape brings the Shape card back to the top.
+            cache.applyMixedContainment(.bounded)
+            #expect(cache.containmentSectionOrder.first == .shape)
+
+            // Surroundings (Scrunch) leads when picked.
+            cache.applyMixedContainment(.surroundings)
+            #expect(cache.containmentSectionOrder.first == .surroundings)
+
+            // Free selects no card → the stable default order.
+            cache.applyMixedContainment(.free)
+            #expect(cache.containmentSectionOrder == ContainmentSection.defaultOrder)
+        }
+    }
+
+    @Test("Activating a second system (Custom) still promotes its card")
+    func customKeepsLastSelectedCardOnTop() {
+        let settings = RenderSettings()
+        settings.withPersistenceSuppressed {
+            settings.boundingSphereSkipEnabled = true
+            let cache = ControlStateStore(renderSettings: settings)
+
+            // Space switched on while Shape stays on → Custom, Space card leads.
+            cache.setBoundToSpaceEnabled(true)
+            #expect(cache.mixedContainment == .custom)
+            #expect(cache.containmentSectionOrder.first == .space)
+
+            // Scrunch activated next takes the top; Shape stays enabled below it.
+            cache.setScrunchEnabled(true)
+            #expect(cache.mixedContainment == .custom)
+            #expect(cache.containmentSectionOrder.first == .surroundings)
+
+            // Turning the leading card off falls back to the next enabled card.
+            cache.setScrunchEnabled(false)
+            #expect(cache.containmentSectionOrder.first == .space)
+        }
+    }
+
+    @Test("External containment changes re-derive the leading card")
+    func externalContainmentChangeReDerivesOrder() {
+        let settings = RenderSettings()
+        settings.withPersistenceSuppressed {
+            settings.boundingSphereSkipEnabled = true
+            let cache = ControlStateStore(renderSettings: settings)
+            cache.applyMixedContainment(.space)
+
+            // Scene load flips the flags directly on RenderSettings.
+            settings.boundingSphereSkipEnabled = false
+            settings.boundToSpaceEnabled = false
+            settings.envScrunchEnabled = true
+            cache.loadFromSettings()
+
+            #expect(cache.containmentSectionOrder.first == .surroundings)
+        }
+    }
+
     @Test("live stats refresh according to the renderer lifecycle on each platform")
     func liveStatsUsePlatformLifecycle() {
         let settings = RenderSettings()

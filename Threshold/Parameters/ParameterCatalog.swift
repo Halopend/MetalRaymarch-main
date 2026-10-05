@@ -1120,95 +1120,7 @@ enum ParameterCatalog {
             settingsRead: { Float($0.edgeDetectionEffect.windowRadius) },
             settingsWrite: { settings, value in var effect = settings.edgeDetectionEffect; effect.windowRadius = Int(value.rounded()); settings.edgeDetectionEffect = effect }
         ),
-        // ── Navier Strokes (2D fluid post-process layer) ──
-        staticDescriptor(
-            ControlCatalog.strokesStrength,
-            route: .look(.grading), section: "Navier Strokes", order: 0,
-            uiRead: { $0.lighting.navierStrokesEffect.strength },
-            uiWrite: { cache, value in cache.lighting.navierStrokesEffect.setStrength(value); cache.commitNavierStrokesEffect() },
-            settingsRead: { $0.navierStrokesEffect.strength },
-            settingsWrite: { settings, value in var effect = settings.navierStrokesEffect; effect.setStrength(value); settings.navierStrokesEffect = effect }
-        ),
-        staticDescriptor(
-            ControlCatalog.strokesSimSpeed,
-            route: .look(.grading), section: "Navier Strokes", order: 1,
-            uiRead: { $0.lighting.navierStrokesEffect.simSpeed },
-            uiWrite: { cache, value in cache.lighting.navierStrokesEffect.simSpeed = value; cache.commitNavierStrokesEffect() },
-            settingsRead: { $0.navierStrokesEffect.simSpeed },
-            settingsWrite: { settings, value in var effect = settings.navierStrokesEffect; effect.simSpeed = value; settings.navierStrokesEffect = effect }
-        ),
-        staticDescriptor(
-            ControlCatalog.strokesViscosity,
-            route: .look(.grading), section: "Navier Strokes", order: 2,
-            uiRead: { $0.lighting.navierStrokesEffect.velocityDissipation },
-            uiWrite: { cache, value in cache.lighting.navierStrokesEffect.velocityDissipation = value; cache.commitNavierStrokesEffect() },
-            settingsRead: { $0.navierStrokesEffect.velocityDissipation },
-            settingsWrite: { settings, value in var effect = settings.navierStrokesEffect; effect.velocityDissipation = value; settings.navierStrokesEffect = effect }
-        ),
-        staticDescriptor(
-            ControlCatalog.strokesDyeDissipation,
-            route: .look(.grading), section: "Navier Strokes", order: 3,
-            uiRead: { $0.lighting.navierStrokesEffect.dyeDissipation },
-            uiWrite: { cache, value in cache.lighting.navierStrokesEffect.dyeDissipation = value; cache.commitNavierStrokesEffect() },
-            settingsRead: { $0.navierStrokesEffect.dyeDissipation },
-            settingsWrite: { settings, value in var effect = settings.navierStrokesEffect; effect.dyeDissipation = value; settings.navierStrokesEffect = effect }
-        ),
-        staticDescriptor(
-            ControlCatalog.strokesCurl,
-            route: .look(.grading), section: "Navier Strokes", order: 4,
-            uiRead: { $0.lighting.navierStrokesEffect.curlStrength },
-            uiWrite: { cache, value in cache.lighting.navierStrokesEffect.curlStrength = value; cache.commitNavierStrokesEffect() },
-            settingsRead: { $0.navierStrokesEffect.curlStrength },
-            settingsWrite: { settings, value in var effect = settings.navierStrokesEffect; effect.curlStrength = value; settings.navierStrokesEffect = effect }
-        ),
-        staticDescriptor(
-            ControlCatalog.strokesPressureIterations,
-            route: .look(.grading), section: "Navier Strokes", order: 4,
-            uiRead: { Float($0.lighting.navierStrokesEffect.pressureIterations) },
-            uiWrite: { cache, value in cache.lighting.navierStrokesEffect.pressureIterations = Int(value.rounded()); cache.commitNavierStrokesEffect() },
-            settingsRead: { Float($0.navierStrokesEffect.pressureIterations) },
-            settingsWrite: { settings, value in var effect = settings.navierStrokesEffect; effect.pressureIterations = Int(value.rounded()); settings.navierStrokesEffect = effect }
-        ),
-        staticDescriptor(
-            ControlCatalog.strokesSplatRadius,
-            route: .look(.grading), section: "Navier Strokes", order: 5,
-            uiRead: { $0.lighting.navierStrokesEffect.splatRadius },
-            uiWrite: { cache, value in cache.lighting.navierStrokesEffect.splatRadius = value; cache.commitNavierStrokesEffect() },
-            settingsRead: { $0.navierStrokesEffect.splatRadius },
-            settingsWrite: { settings, value in var effect = settings.navierStrokesEffect; effect.splatRadius = value; settings.navierStrokesEffect = effect }
-        ),
-        staticDescriptor(
-            ControlCatalog.strokesSplatIntensity,
-            route: .look(.grading), section: "Navier Strokes", order: 6,
-            uiRead: { $0.lighting.navierStrokesEffect.splatIntensity },
-            uiWrite: { cache, value in cache.lighting.navierStrokesEffect.splatIntensity = value; cache.commitNavierStrokesEffect() },
-            settingsRead: { $0.navierStrokesEffect.splatIntensity },
-            settingsWrite: { settings, value in var effect = settings.navierStrokesEffect; effect.splatIntensity = value; settings.navierStrokesEffect = effect }
-        ),
-        staticDescriptor(
-            ControlCatalog.strokesGustAmount,
-            route: .look(.grading), section: "Navier Strokes", order: 7,
-            uiRead: { $0.lighting.navierStrokesEffect.gustAmount },
-            uiWrite: { cache, value in cache.lighting.navierStrokesEffect.gustAmount = value; cache.commitNavierStrokesEffect() },
-            settingsRead: { $0.navierStrokesEffect.gustAmount },
-            settingsWrite: { settings, value in var effect = settings.navierStrokesEffect; effect.gustAmount = value; settings.navierStrokesEffect = effect }
-        ),
-        staticDescriptor(
-            ControlCatalog.strokesGustSpeed,
-            route: .look(.grading), section: "Navier Strokes", order: 8,
-            uiRead: { $0.lighting.navierStrokesEffect.gustSpeed },
-            uiWrite: { cache, value in cache.lighting.navierStrokesEffect.gustSpeed = value; cache.commitNavierStrokesEffect() },
-            settingsRead: { $0.navierStrokesEffect.gustSpeed },
-            settingsWrite: { settings, value in var effect = settings.navierStrokesEffect; effect.gustSpeed = value; settings.navierStrokesEffect = effect }
-        ),
-        staticDescriptor(
-            ControlCatalog.strokesDisplacement,
-            route: .look(.grading), section: "Navier Strokes", order: 9,
-            uiRead: { $0.lighting.navierStrokesEffect.displacement },
-            uiWrite: { cache, value in cache.lighting.navierStrokesEffect.displacement = value; cache.commitNavierStrokesEffect() },
-            settingsRead: { $0.navierStrokesEffect.displacement },
-            settingsWrite: { settings, value in var effect = settings.navierStrokesEffect; effect.displacement = value; settings.navierStrokesEffect = effect }
-        )
+
     ]
 
     static let allDescriptors: [ParameterDescriptor] = routedDescriptors + presentationDescriptors
@@ -1234,22 +1146,6 @@ enum ParameterCatalog {
             requiredPlatformCapabilities: [],
             read: { $0.lighting.fogEffect.enabled },
             write: { cache, value in cache.lighting.fogEffect.enabled = value; cache.commitFogEffect() }
-        ),
-        ToggleDescriptor(
-            controlID: ControlID("toggle.effect.navierStrokes"), name: "Navier Strokes", icon: "drop.fill",
-            placement: .presented(route: .look(.grading), section: "Navier Strokes", order: 0, presentations: [.fullControls, .quickToggles, .radial2D]),
-            requiredPlatformCapabilities: [],
-            read: { $0.lighting.navierStrokesEffect.enabled },
-            write: { cache, value in
-                cache.lighting.navierStrokesEffect.enabled = value
-                if value, !cache.lighting.navierStrokesEffect.isActive {
-                    // Enabling the toggle without a strength is a no-op visual —
-                    // lift strength to a balanced default, mirroring the Output
-                    // Filter picker's behavior for its filters.
-                    cache.lighting.navierStrokesEffect.setStrength(0.65)
-                }
-                cache.commitNavierStrokesEffect()
-            }
         ),
         ToggleDescriptor(
             controlID: ControlID("toggle.input.audioReactive"), name: "Audio Reactive", icon: "waveform",

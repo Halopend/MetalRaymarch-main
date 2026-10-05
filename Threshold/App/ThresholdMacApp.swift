@@ -72,8 +72,12 @@ struct ThresholdMacApp: App {
             FirstLaunchWindowView()
                 .environment(appModel)
         }
-        .defaultSize(width: 880, height: 660)
-        .windowResizability(.contentMinSize)
+        .defaultSize(width: 780, height: 600)
+        .windowResizability(.contentSize)
+        // On first launch the safety flow is already presented as a mandatory
+        // sheet. Do not open or restore a second Welcome window behind it.
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
 
         // Live formula editor: its own window so the fractal viewport stays
         // visible while typing — sliders regenerate per keystroke, the shader
@@ -86,6 +90,16 @@ struct ThresholdMacApp: App {
         .windowResizability(.contentMinSize)
 
         .commands {
+            // The first-launch safety flow is a non-dismissible sheet. Keep an
+            // explicit, always-available quit command in the app menu so the
+            // required acknowledgement cannot trap users in the app.
+            CommandGroup(replacing: .appTermination) {
+                Button("Quit Threshold") {
+                    NSApp.terminate(nil)
+                }
+                .keyboardShortcut("q", modifiers: .command)
+            }
+
             CommandGroup(after: .newItem) {
                 Button("Open Scene…") {
                     openScene()

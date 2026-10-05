@@ -65,6 +65,12 @@ enum ShapeRailSection: String, CaseIterable, Codable, Hashable, Sendable {
         case .performance: return "speedometer"
         }
     }
+
+    /// Preserve the saved route name while making the remaining page contents
+    /// (platform, zoom, and orientation) easier to recognize.
+    var title: String {
+        self == .space ? "View" : rawValue
+    }
 }
 
 enum PerformanceRailSection: String, CaseIterable, Codable, Hashable, Sendable {
@@ -227,10 +233,10 @@ enum MusicRailSection: String, CaseIterable, Codable, Hashable, Sendable {
 /// Bounding Shape / Scrunch toggles.
 enum MixedContainment: String, CaseIterable, Identifiable {
     case bounded = "Shape"
-    case space = "Space"
+    case space = "Room"
     case surroundings = "Surroundings"
     case environment = "Environment"
-    case free = "Free"
+    case free = "Open"
     /// Derived, read-only override state: multiple containment systems are on
     /// at once. Only reachable by flipping the individual side/quick toggles
     /// (the top-bar picker is mutually exclusive); tapping it in the picker is a
@@ -240,20 +246,39 @@ enum MixedContainment: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Shell is a variation of the Surroundings mode, selected inside its card.
+    /// The top-level picker therefore presents one choice for both states.
+    var pickerMode: MixedContainment {
+        self == .environment ? .surroundings : self
+    }
+
     var help: String {
         switch self {
         case .bounded:
-            return "The fractal is held inside a sphere shape instead of filling your space."
+            return "Clip the fractal to a chosen shape to give it a clear outer edge."
         case .space:
-            return "The fractal is clipped to the authored room dimensions, independent of scanned surroundings."
+            return "Fit the fractal to your scanned room. Fallback dimensions apply until room tracking is ready."
         case .surroundings:
-            return "No bounding shape — Scrunch makes the fractal conform to scanned surroundings, grounding it to the real room."
+            return "Let the fractal respond to nearby walls and objects. Choose Scrunch or Shell in the card below."
         case .environment:
-            return "No bounding shape — the fractal becomes a shell on scanned walls and objects, leaving open space empty."
+            return "Show the fractal as a shell on scanned walls and objects, leaving open space empty."
         case .free:
-            return "No containment — the fractal fills the space unbounded. Most immersive, least predictable."
+            return "No outer limit. The fractal can fill outward freely."
         case .custom:
-            return "A manual mix — more than one containment system is on. Pick Shape, Space, Surroundings, Environment, or Free to snap back to a single mode."
+            return "More than one bound is active. Choose a setup above to return to one clear boundary."
+        }
+    }
+
+    /// The Bounding-tab card this picker segment selects: picking a segment
+    /// promotes that card to the top of the tab (the top card follows the
+    /// containment selection). Free selects no card; Custom is derived and
+    /// never picked directly, so it selects none either.
+    var sectionFocus: ContainmentSection? {
+        switch self {
+        case .bounded: return .shape
+        case .space: return .space
+        case .surroundings, .environment: return .surroundings
+        case .free, .custom: return nil
         }
     }
 }

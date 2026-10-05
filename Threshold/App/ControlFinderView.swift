@@ -118,8 +118,8 @@ struct ControlFinderDestination: Identifiable {
         ),
         destination(
             ShapeRailSection.space,
-            description: "Tune safety, placement, zoom, orientation, and spatial detail.",
-            keywords: ["safety bubble", "platform", "zoom", "rotation", "detail", "space"]
+            description: "Adjust the platform, zoom, orientation, and spatial detail.",
+            keywords: ["platform", "zoom", "rotation", "detail", "view", "space"]
         ),
         destination(
             ShapeRailSection.transformations,
@@ -130,16 +130,16 @@ struct ControlFinderDestination: Identifiable {
             ShapeRailSection.bounding,
             description: {
                 #if os(visionOS)
-                "Control authored bounds, clipping shapes, and how the fractal conforms to scanned surroundings."
+                "Choose how the fractal fits the room, set its outer shape, and keep it clear around your viewpoint."
                 #else
-                "Control authored space bounds and clipping shapes."
+                "Set the fractal’s room-sized bounds, outer shape, and viewpoint safety."
                 #endif
             }(),
             keywords: {
                 #if os(visionOS)
-                ["containment", "bound", "sphere", "cube", "platonic", "scrunch", "shell", "environment", "room"]
+                ["containment", "bound", "safety bubble", "viewpoint safety", "sphere", "cube", "platonic", "scrunch", "shell", "environment", "room"]
                 #else
-                ["containment", "bound", "space", "sphere", "cube", "platonic", "room"]
+                ["containment", "bound", "safety bubble", "viewpoint safety", "space", "sphere", "cube", "platonic", "room"]
                 #endif
             }()
         ),
@@ -410,9 +410,9 @@ struct ControlFinderDestination: Identifiable {
         requiredCapabilities: PlatformCapability = []
     ) -> ControlFinderDestination {
         ControlFinderDestination(
-            title: section.rawValue,
+            title: section.title,
             category: .shape,
-            pathComponents: [WorkspaceRoot.shape.displayName, section.rawValue],
+            pathComponents: [WorkspaceRoot.shape.displayName, section.title],
             description: description,
             icon: section.icon,
             searchKeywords: keywords,

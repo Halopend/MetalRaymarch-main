@@ -430,14 +430,11 @@ extension ContentView {
         }
     }
 
-    private var fractalSpaceContent: some View {
-        let rotationEuler = eulerAngles(from: cache.liveWorldRotation)
-
-        return VStack(spacing: 12) {
-            // ── Safety Bubble ────────────────────────────────────────────────
+    private var safetyBubbleSection: some View {
+            // ── Viewpoint Safety ────────────────────────────────────────────
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Label("Safety Bubble", systemImage: AppIcons.shieldLefthalfFilled)
+                    Label("Viewpoint Safety", systemImage: AppIcons.shieldLefthalfFilled)
                         .font(.headline)
                     Spacer()
                     Toggle("", isOn: cacheBinding(\.safetyBubble.enabled))
@@ -446,7 +443,7 @@ extension ContentView {
                             cache.push(\.safetyBubbleEnabled, value: val)
                         }
                 }
-                Text("Prevents the camera from entering fractal geometry.")
+                Text("Keeps fractal geometry clear around your viewpoint. On Vision Pro, this follows your head. Room and shape bounds define the fractal’s outer edge.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -505,7 +502,7 @@ extension ContentView {
                     .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.05)))
 
                     VStack(alignment: .leading, spacing: 8) {
-                        EffectSliderRow(icon: "circle.dashed", label: "Radius",
+                        EffectSliderRow(icon: "circle.dashed", label: "Safety Radius",
                             value: cacheBinding(\.safetyBubble.radius),
                             range: ControlCatalog.safetyBubbleRadius.range,
                             enabled: .constant(true),
@@ -571,7 +568,16 @@ extension ContentView {
                 }
             }
             .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.07)))
+    }
+
+    private var fractalSpaceContent: some View {
+        let rotationEuler = eulerAngles(from: cache.liveWorldRotation)
+
+        return VStack(spacing: 12) {
+#if !os(visionOS)
+            safetyBubbleSection
+#endif
 
             // Platform section: only relevant on visionOS. The same controls
             // also live in Settings > Display, which is the canonical home
@@ -863,15 +869,12 @@ extension ContentView {
 
     /// Bounding Shape/Radius/Fog controls, moved out of Acceleration into their
     /// own Shape rail tab — these are shape/framing choices, not perf knobs.
+    /// The containment cards beneath the Containment picker follow the
+    /// selection: the card of whichever system was picked last (picker segment
+    /// or side toggle) rises to the top, directly under the picker — even when
+    /// a second system stays on (Custom), the card just activated still leads.
     var fractalBoundingContent: some View {
-        let selectedBoundingFamily = SafetyBubbleShapePreset.family(
-            for: cache.quality.boundingShapeType
-        )
-        let selectedBoundingPreset = SafetyBubbleShapePreset(
-            storedValue: cache.quality.boundingShapeType
-        )
-
-        return VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 10) {
             #if os(visionOS)
             // Containment — the headline mode framing, so it sits at the very top
             // of the tab. The MUTUALLY EXCLUSIVE picker sets a single canonical combo
@@ -879,50 +882,156 @@ extension ContentView {
             // independent and can override it (e.g. both on) — when they do, the
             // picker shows the read-only "Custom" segment. The mode is derived
             // from the same enable flags.
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: "circle.dashed.inset.filled").foregroundStyle(.cyan)
-                    Text("Containment").font(.headline)
-                    Spacer()
+            containmentModePickerSection
+            #endif
+
+            #if os(visionOS)
+            if cache.mixedContainment == .custom {
+                ForEach(enabledContainmentSections) { section in
+                    Divider().padding(.vertical, 2)
+                    containmentSectionCard(section)
                 }
-                Picker("Containment", selection: Binding(
-                    get: { cache.mixedContainment },
-                    // Tapping a canonical mode applies its exclusive combo; tapping
-                    // the derived "Custom" segment is a no-op (applyMixedContainment
-                    // guards it) — Custom is only reached via the side toggles.
-                    set: { cache.applyMixedContainment($0) }
-                )) {
-                    ForEach(MixedContainment.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                Text(cache.mixedContainment.help)
+            } else if let selectedSection = cache.mixedContainment.sectionFocus {
+                Divider().padding(.vertical, 2)
+                containmentSectionCard(selectedSection)
+            } else {
+                Text("Open setup has no room or shape boundary. Viewpoint Safety stays available below.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            DisclosureGroup("Add another bound") {
+                ForEach(inactiveContainmentSections) { section in
+                    Divider().padding(.vertical, 2)
+                    containmentSectionCard(section)
+                }
+            }
+            .font(.subheadline.weight(.semibold))
+            .tint(.cyan)
+            #else
+            // No Containment picker on other platforms, so the cards keep the
+            // static order.
+            boundToSpaceSection
+
             Divider().padding(.vertical, 2)
 
-            // Scrunch to Surroundings — the most-reached-for mode in Mixed immersion.
-            scrunchToSurroundingsSection
-
-            Divider().padding(.vertical, 2)
+            boundingShapeSection
             #endif
 
-            // On Vision Pro this follows the sensed current room. Authored
-            // dimensions remain the cross-platform and incomplete-scan fallback.
+#if os(visionOS)
+            Divider().padding(.vertical, 2)
+            safetyBubbleSection
+#endif
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Fade Effect").font(.caption)
+                Picker("Fade Effect", selection: Binding(
+                    get: { BoundingFogMode(rawValue: cache.quality.boundingShapeFogMode) ?? .off },
+                    set: { mode in
+                        cache.quality.boundingShapeFogMode = mode.rawValue
+                        cache.push(\.boundingShapeFogMode, value: mode.rawValue)
+                    }
+                )) {
+                    ForEach(BoundingFogMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(BoundingFogMode(rawValue: cache.quality.boundingShapeFogMode)?.help ?? BoundingFogMode.off.help)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .disabled(!boundingEdgeTreatmentActive)
+            .opacity(boundingEdgeTreatmentActive ? 1 : 0.45)
+
+            if cache.quality.boundingShapeFogMode == BoundingFogMode.innerShadow.rawValue {
+                accelSliderCompact("Shadow Depth",
+                            value: cache.quality.boundingShapeShadowDepth,
+                            range: ControlCatalog.boundingShapeShadowDepth.range,
+                            display: "\(Int((cache.quality.boundingShapeShadowDepth * 100).rounded()))%",
+                            help: "How far the darkening reaches in from the bounding shape's edge, as a fraction of its radius.") { v in
+                    cache.quality.boundingShapeShadowDepth = v; cache.push(\.boundingShapeShadowDepth, value: v)
+                }
+                .disabled(!boundingEdgeTreatmentActive)
+                .opacity(boundingEdgeTreatmentActive ? 1 : 0.45)
+            }
+        }
+        .padding()
+        .background(Color.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    #if os(visionOS)
+    /// The setup picker — the headline framing at the very top of
+    /// the Bounding tab. Picking a canonical mode applies its exclusive combo
+    /// (and promotes its card to the top of the tab); tapping the derived
+    /// "Custom" segment is a no-op (applyMixedContainment guards it) — Custom
+    /// is only reachable via the side toggles.
+    private var containmentModePickerSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "circle.dashed.inset.filled").foregroundStyle(.cyan)
+                Text("How should it fit?").font(.headline)
+                Spacer()
+            }
+            Picker("Fractal bounds", selection: Binding(
+                get: { cache.mixedContainment.pickerMode },
+                set: { cache.applyMixedContainment($0) }
+            )) {
+                ForEach(MixedContainment.allCases.filter { $0 != .environment }) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.menu)
+            Text(cache.mixedContainment.help)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// One containment system's card, positioned by the order loop above so the
+    /// selected system's card sits directly under the Containment picker.
+    @ViewBuilder
+    private func containmentSectionCard(_ section: ContainmentSection) -> some View {
+        switch section {
+        case .surroundings: scrunchToSurroundingsSection
+        case .space: boundToSpaceSection
+        case .shape: boundingShapeSection
+        }
+    }
+
+    private var enabledContainmentSections: [ContainmentSection] {
+        cache.containmentSectionOrder.filter { section in
+            switch section {
+            case .surroundings: return cache.quality.envScrunchEnabled
+            case .space: return cache.quality.boundToSpaceEnabled
+            case .shape: return cache.quality.boundingSphereSkipEnabled
+            }
+        }
+    }
+
+    private var inactiveContainmentSections: [ContainmentSection] {
+        cache.containmentSectionOrder.filter { !enabledContainmentSections.contains($0) }
+    }
+    #endif
+
+    /// Bound to Space card: clips the fractal to the sensed rectangular room
+    /// on Vision Pro, with the authored dimensions below as a fallback.
+    private var boundToSpaceSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: "house").foregroundStyle(.cyan)
-                Text("Bound to Space").font(.headline)
+                Text("Room Bounds").font(.headline)
                 Spacer()
                 Toggle("", isOn: Binding(
                     get: { cache.quality.boundToSpaceEnabled },
                     set: { cache.setBoundToSpaceEnabled($0) }
                 ))
                 .labelsHidden()
-                .help("Clips the fractal to the sensed rectangular room on Vision Pro, with the authored dimensions below as a fallback.")
+                .help("Clips the fractal to the sensed room on Vision Pro, with the authored room dimensions below as a fallback.")
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -986,12 +1095,24 @@ extension ContentView {
             }
             .disabled(!cache.quality.boundToSpaceEnabled)
             .opacity(cache.quality.boundToSpaceEnabled ? 1 : 0.45)
+        }
+    }
 
-            Divider().padding(.vertical, 2)
+    /// Shape card: the signed-distance bounding shape that culls rays and
+    /// clips the fractal, plus its size slider. The shape pickers move with
+    /// the card when it is promoted to the top of the tab.
+    private var boundingShapeSection: some View {
+        let selectedBoundingFamily = SafetyBubbleShapePreset.family(
+            for: cache.quality.boundingShapeType
+        )
+        let selectedBoundingPreset = SafetyBubbleShapePreset(
+            storedValue: cache.quality.boundingShapeType
+        )
 
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: "circle.dashed").foregroundStyle(.cyan)
-                Text("Shape").font(.headline)
+                Text("Fractal Bounds").font(.headline)
                 Spacer()
                 Toggle("", isOn: Binding(
                     get: { cache.quality.boundingSphereSkipEnabled },
@@ -1073,56 +1194,20 @@ extension ContentView {
             }
             .disabled(!cache.quality.boundingSphereSkipEnabled)
             .opacity(cache.quality.boundingSphereSkipEnabled ? 1 : 0.45)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Fade Effect").font(.caption)
-                Picker("Fade Effect", selection: Binding(
-                    get: { BoundingFogMode(rawValue: cache.quality.boundingShapeFogMode) ?? .off },
-                    set: { mode in
-                        cache.quality.boundingShapeFogMode = mode.rawValue
-                        cache.push(\.boundingShapeFogMode, value: mode.rawValue)
-                    }
-                )) {
-                    ForEach(BoundingFogMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Text(BoundingFogMode(rawValue: cache.quality.boundingShapeFogMode)?.help ?? BoundingFogMode.off.help)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .disabled(!boundingEdgeTreatmentActive)
-            .opacity(boundingEdgeTreatmentActive ? 1 : 0.45)
-
-            if cache.quality.boundingShapeFogMode == BoundingFogMode.innerShadow.rawValue {
-                accelSliderCompact("Shadow Depth",
-                            value: cache.quality.boundingShapeShadowDepth,
-                            range: ControlCatalog.boundingShapeShadowDepth.range,
-                            display: "\(Int((cache.quality.boundingShapeShadowDepth * 100).rounded()))%",
-                            help: "How far the darkening reaches in from the bounding shape's edge, as a fraction of its radius.") { v in
-                    cache.quality.boundingShapeShadowDepth = v; cache.push(\.boundingShapeShadowDepth, value: v)
-                }
-                .disabled(!boundingEdgeTreatmentActive)
-                .opacity(boundingEdgeTreatmentActive ? 1 : 0.45)
-            }
         }
-        .padding()
-        .background(Color.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
     }
 
     #if os(visionOS)
     /// "Surroundings Containment" (Environment Scrunch): the scanned surroundings
     /// (scene reconstruction on visionOS) become a distance field the fractal
     /// scrunches and bulges around — a proximity field like the hands, not a
-    /// see-through cut. Surfaced at the top of the Bounding tab.
+    /// see-through cut. Surfaced as a containment card in the Bounding tab; it
+    /// rises to the top when Surroundings/Environment is the selected mode.
     @ViewBuilder
     private var scrunchToSurroundingsSection: some View {
         HStack(spacing: 6) {
             Image(systemName: "square.3.layers.3d").foregroundStyle(.cyan)
-            Text("Surroundings Containment").font(.headline)
+            Text("Surroundings").font(.headline)
             Spacer()
             Toggle("", isOn: Binding(
                 get: { cache.quality.envScrunchEnabled },

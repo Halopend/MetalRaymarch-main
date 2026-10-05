@@ -140,7 +140,7 @@ struct NavigationHierarchy: Sendable {
         let explore: [Node] = []
         let shape = availability.shapeSections.map { section in
             leaf(
-                title: section.rawValue,
+                title: section.title,
                 systemImage: section.icon,
                 route: .shape(section)
             )

@@ -222,6 +222,16 @@ final class ControlStateStore {
         let newHandAttraction = settings.handAttractionConfig
         if handAttraction != newHandAttraction { handAttraction = newHandAttraction }
         let newQuality = settings.qualityConfig
+        // Containment enable flags changed from OUTSIDE the UI (scene load,
+        // immersion-style switch, external import): the Bounding card order
+        // must follow the new flags instead of the user's last in-UI pick.
+        // UI writes mutate `quality` in place first, so they never trip this.
+        if Self.containmentFlags(of: newQuality) != Self.containmentFlags(of: quality) {
+            containmentSectionFocus = Self.containmentFocus(
+                of: newQuality,
+                previous: containmentSectionFocus
+            )
+        }
         if quality != newQuality { quality = newQuality }
         let newDisplay = settings.displayConfig
         if display != newDisplay { display = newDisplay }
@@ -719,6 +729,39 @@ final class ControlStateStore {
         return .free
     }
 
+    /// The containment system most recently put ON — via the Containment
+    /// picker or a card's side toggle. Drives `containmentSectionOrder`: the
+    /// card the user just selected rises to the top of the Bounding tab,
+    /// directly under the picker, even when a second system stays on (Custom).
+    /// Runtime-only UI state; `loadFromSettings` re-derives it whenever the
+    /// enable flags change from the outside (scene load, immersion switch).
+    private(set) var containmentSectionFocus: ContainmentSection?
+
+    /// Display order of the containment cards under the Bounding tab's
+    /// Containment picker: the top card follows the selection. The focused
+    /// (most recently selected) system leads, then the other enabled systems,
+    /// then the disabled ones — stable within each group. A focus whose
+    /// system is no longer enabled is ignored in favor of the enabled ones.
+    var containmentSectionOrder: [ContainmentSection] {
+        // Capture the flags as locals so the predicate below needs no `self`.
+        let bounded = quality.boundingSphereSkipEnabled
+        let space = quality.boundToSpaceEnabled
+        let scrunch = quality.envScrunchEnabled
+        let isEnabled: (ContainmentSection) -> Bool = { section in
+            switch section {
+            case .shape: return bounded
+            case .space: return space
+            case .surroundings: return scrunch
+            }
+        }
+        let rest = ContainmentSection.defaultOrder.filter { $0 != containmentSectionFocus }
+        if let focus = containmentSectionFocus, isEnabled(focus) {
+            return [focus] + rest.filter(isEnabled) + rest.filter { !isEnabled($0) }
+        }
+        return ContainmentSection.defaultOrder.filter(isEnabled)
+            + ContainmentSection.defaultOrder.filter { !isEnabled($0) }
+    }
+
     /// Apply a canonical containment mode from the top-bar picker: sets the
     /// shape, authored-space, and scrunch flags MUTUALLY EXCLUSIVELY. Entering
     /// `.surroundings` also defaults Contain to Blend when it was still Off —
@@ -726,6 +769,7 @@ final class ControlStateStore {
     /// an unsigned distance field). `.custom` is a derived, read-only state, so
     /// it's a no-op here (there's no canonical combo to set). Every flag touched
     /// is scene-persisted (FractalPreset), so the mode is captured on save.
+    /// The picked mode's card rises to the top of the Bounding tab.
     func applyMixedContainment(_ mode: MixedContainment) {
         guard mode != .custom else { return }
         let bounded = (mode == .bounded)
@@ -749,29 +793,37 @@ final class ControlStateStore {
             quality.envScrunchContain = 2
             push(\.envScrunchContain, value: 2)
         }
+        // The picked mode's card leads the Bounding tab (Free clears the lead).
+        containmentSectionFocus = mode.sectionFocus
     }
 
     /// Toggle the bounding shape independently. It does not alter authored
     /// space or scanned-surroundings containment; combinations become Custom.
+    /// Turning it on promotes the Shape card to the top of the tab.
     func setBoundingShapeEnabled(_ on: Bool) {
         quality.boundingSphereSkipEnabled = on
         push(\.boundingSphereSkipEnabled, value: on)
+        if on { containmentSectionFocus = .shape }
     }
 
     /// Toggle the authored room bound independently. Combining it with Shape
     /// or scanned Surroundings intentionally produces the Custom state.
+    /// Turning it on promotes the Bound to Space card to the top of the tab.
     func setBoundToSpaceEnabled(_ on: Bool) {
         quality.boundToSpaceEnabled = on
         push(\.boundToSpaceEnabled, value: on)
+        if on { containmentSectionFocus = .space }
     }
 
     /// Toggle Scrunch INDEPENDENTLY — the individual side/quick toggle, which
     /// does not touch the bounding shape. Turning it on defaults Contain to
     /// Blend when it was still Off (same reason as the picker path). Leaving
-    /// both on moves the Containment picker to `.custom`.
+    /// both on moves the Containment picker to `.custom`. Turning it on also
+    /// promotes the Surroundings Containment card to the top of the tab.
     func setScrunchEnabled(_ on: Bool) {
         quality.envScrunchEnabled = on
         push(\.envScrunchEnabled, value: on)
+        if on { containmentSectionFocus = .surroundings }
         if on && quality.envScrunchContain == 0 {
             quality.envScrunchContain = 2
             push(\.envScrunchContain, value: 2)
@@ -816,6 +868,69 @@ final class ControlStateStore {
         push(\.gradientOffset, value: color.gradientState.gradient.offset)
         pushEffectParam(ParameterTargetID.Effect.gradientOffset, value: color.gradientState.gradient.offset)
     }
+
+    // MARK: - Containment Section Ordering
+
+    /// The three containment enable flags as a comparable triple — the only
+    /// QualityConfig fields that drive Bounding-tab card ordering. Used to
+    /// detect flag changes made from outside the UI (scene load, immersion
+    /// switch, external import), which re-derive the leading card.
+    private static func containmentFlags(of quality: QualityConfig) -> (Bool, Bool, Bool) {
+        (
+            quality.boundingSphereSkipEnabled,
+            quality.boundToSpaceEnabled,
+            quality.envScrunchEnabled
+        )
+    }
+
+    /// Re-derive the focused (top) Bounding card after an external flag
+    /// change. A single enabled system leads; Free clears the focus; a
+    /// multi-system (Custom) state keeps the previous focus only if that
+    /// system stayed enabled, else falls back to no leader.
+    private static func containmentFocus(
+        of quality: QualityConfig,
+        previous: ContainmentSection?
+    ) -> ContainmentSection? {
+        let bounded = quality.boundingSphereSkipEnabled
+        let space = quality.boundToSpaceEnabled
+        let scrunch = quality.envScrunchEnabled
+        switch (bounded, space, scrunch) {
+        case (true, false, false): return .shape
+        case (false, true, false): return .space
+        case (false, false, true): return .surroundings
+        case (false, false, false): return nil
+        default:
+            guard let previous else { return nil }
+            switch (previous, bounded, space, scrunch) {
+            case (.shape, true, _, _),
+                 (.space, _, true, _),
+                 (.surroundings, _, _, true):
+                return previous
+            default:
+                return nil
+            }
+        }
+    }
+}
+
+// MARK: - Containment Section
+
+/// One containment system's card in the Bounding tab: the Shape bound, the
+/// authored-space bound, or Surroundings (Environment Scrunch). The cards are
+/// positioned by `ControlStateStore.containmentSectionOrder` so the one
+/// matching the Containment picker selection sits directly beneath the
+/// picker — see `MixedContainment.sectionFocus`.
+enum ContainmentSection: String, CaseIterable, Identifiable {
+    case shape
+    case space
+    case surroundings
+
+    var id: String { rawValue }
+
+    /// Stable fallback ordering when no system leads the selection: Scrunch
+    /// first — the most-reached-for mode in Mixed immersion — then Space, then
+    /// Shape. This mirrors the tab's original static layout.
+    static let defaultOrder: [ContainmentSection] = [.surroundings, .space, .shape]
 }
 
 extension ControlStateStore {

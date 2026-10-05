@@ -144,12 +144,23 @@ struct ImmersionStylePicker: View {
                 }
                 .pickerStyle(.segmented)
 
-                if showsCaption && appModel.immersionStylePreference != .mixed {
-                    Text("Digital Crown smoothly sizes the window")
+                if showsCaption {
+                    Text(immersionCaption)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    private var immersionCaption: String {
+        switch appModel.immersionStylePreference {
+        case .immersive:
+            return "Fills your view. Use the Digital Crown to adjust immersion."
+        case .window:
+            return "Keeps Threshold in a movable window. Use the Digital Crown to resize it."
+        case .mixed:
+            return "Places the fractal in your room with passthrough."
         }
     }
 }
