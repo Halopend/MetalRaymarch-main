@@ -23,21 +23,14 @@
 import Testing
 import Foundation
 import simd
+@testable import Threshold
 
 @Suite("Shader world-field gates — bubble normal band + cone prepass trust")
 struct ShaderWorldFieldGateTests {
 
-    /// Repo root, derived from this source file's compile-time path (same
-    /// pattern as EmbedFreshnessTests): tests run from the repo, so a missing
-    /// shader file is a real failure, not a skip.
-    private static let repoRoot = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()   // …/ThresholdTests
-        .deletingLastPathComponent()   // repo root
-
     private static func shaderSource() throws -> String {
-        let url = repoRoot
-            .appendingPathComponent("Threshold/Rendering/Shaders.metal")
-        return try String(contentsOf: url, encoding: .utf8)
+        // The freshness suite verifies the assembled source against every module.
+        EmbeddedMetalSources.shadersMetal
     }
 
     // MARK: - Swift ports of the bubble pseudo-distances (Shaders.metal)

@@ -83,10 +83,12 @@ actor CustomShaderCompiler {
 
         // Shader macros + function constants must come before built-in formula
         // headers because those headers reference FORCE_INLINE and FC_* values.
+        // Shared ABI enums must precede function-constant declarations, which
+        // now refer to FCIndex* names instead of numeric literals.
+        pieces.append(stripLocalIncludes(EmbeddedMetalSources.shaderTypesH))
         pieces.append(shaderSections.preamble)
 
-        // Type declarations + helpers.
-        pieces.append(stripLocalIncludes(EmbeddedMetalSources.shaderTypesH))
+        // Formula type declarations + helpers.
         pieces.append(stripLocalIncludes(EmbeddedMetalSources.fractalFormulaCommonH))
 
         // Built-in formula headers — Shaders.metal still references their dispatch

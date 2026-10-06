@@ -78,12 +78,18 @@ deployment target.
 ## After editing shaders
 
 Each app and Quick Look target automatically regenerates its embedded Metal
-sources when `Threshold/Rendering/Shaders.metal`, `ShaderTypes.h`, or a built-in
+sources when `Threshold/Rendering/Shaders.metal`, any module under
+`Threshold/Rendering/Shaders/`, `ShaderTypes.h`, or a built-in
 formula header changes. To generate an inspection copy manually, run:
 
 ```sh
 Scripts/build.sh embeds   # generates an inspection copy under .build/Generated
 ```
+
+The assembly keeps shader modules as headers in a single Metal translation unit.
+The embed generator expands those modules in assembly order while retaining the
+formula insertion marker used by the runtime compiler. Add new module paths to
+`Scripts/metal_embed_inputs.xcfilelist` so Xcode rebuilds the embeds when they change.
 
 The target-local generated file lets the runtime shader compiler build
 self-contained `.threshfx` formulas while staying in sync with the static build.

@@ -507,6 +507,7 @@ extension Renderer {
         // `FractalPreset.pipelineCacheKey`'s deTailKey.
         let deTailKey = FractalPreset.deTailCacheKey(hasEnvScrunch: hasEnvScrunch,
                                                      hasHandField: hasHandField)
+        let sceneFeatureKey = "_B\(bubbleEnabled ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)\(deTailKey)"
         let keyContext = RenderPipelineKeyContext(
             prefix: customCacheKeyPrefix(),
             fractalTypeRawValue: Int(fractalType.rawValue),
@@ -515,7 +516,7 @@ extension Renderer {
             qualityMode: qualityMode,
             colorIterations: colorIterations,
             powerKey: powerKey,
-            sceneKey: "_B\(bubbleEnabled ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)\(deTailKey)"
+            sceneKey: sceneFeatureKey
         )
         let cacheKey = keyContext.exactKey(neonEnabled: neonMode)
         if RENDERER_DEBUG,
@@ -605,9 +606,9 @@ extension Renderer {
                 // Hashes are fixed-length, so the "CX<hash>_" prefix can't
                 // cross-match a different formula.
                 let nearMatchCustomPipeline: MTLRenderPipelineState? = customShaderHash.flatMap { hash in
-                    let prefix = "CX\(hash)_"
+                    let prefix = "CX\(hash)_FT\(fractalType.rawValue)_"
                     guard let key = pipelineCache.keys.first(where: {
-                        $0.hasPrefix(prefix)
+                        $0.hasPrefix(prefix) && $0.contains(sceneFeatureKey + "_N")
                     }) else {
                         return nil
                     }

@@ -12,8 +12,9 @@
 //  wiring regression cannot silently corrupt runtime-compiled shaders.
 //
 //  Generator contract this relies on (generate_metal_embeds.sh): each block is
-//  emitted as `#"""` + newline + file bytes + newline + `"""#` with the closing
-//  delimiter at column 0, so the Swift string value is exactly the file bytes.
+//  emitted as `#"""` + newline + source bytes + newline + `"""#` with the closing
+//  delimiter at column 0. The shader block expands assembly modules; all other
+//  blocks preserve their file bytes.
 //
 
 import Testing
@@ -46,11 +47,43 @@ struct EmbedFreshnessTests {
         ("shadersMetal",          EmbeddedMetalSources.shadersMetal,          "Threshold/Rendering/Shaders.metal"),
     ]
 
+    /// Match the generator's assembly expansion while retaining formula/ABI includes.
+    private static func expandedShaderSource(at url: URL) throws -> String {
+        let source = try String(contentsOf: url, encoding: .utf8)
+        var expanded = ""
+        for line in source.components(separatedBy: "\n").dropLast() {
+            if line.hasPrefix("#include \"Shaders/"), line.hasSuffix("\"") {
+                let path = String(line.dropFirst("#include \"".count).dropLast())
+                expanded += try String(contentsOf: url.deletingLastPathComponent()
+                    .appendingPathComponent(path), encoding: .utf8)
+            } else {
+                expanded += line + "\n"
+            }
+        }
+        return expanded
+    }
+
+    @Test("Every shader module is tracked by the embed build phase")
+    func moduleInputsAreTracked() throws {
+        let assembly = try String(contentsOf: Self.repoRoot.appendingPathComponent(
+            "Threshold/Rendering/Shaders.metal"), encoding: .utf8)
+        let inputs = try String(contentsOf: Self.repoRoot.appendingPathComponent(
+            "Scripts/metal_embed_inputs.xcfilelist"), encoding: .utf8)
+        for line in assembly.components(separatedBy: "\n") where line.hasPrefix("#include \"Shaders/") {
+            let path = String(line.dropFirst("#include \"".count).dropLast())
+            #expect(inputs.components(separatedBy: "\n").contains(
+                "$(SRCROOT)/Threshold/Rendering/" + path))
+        }
+        #expect(inputs.contains("$(SRCROOT)/Scripts/expand_metal_source.py"))
+    }
+
     @Test("Every embedded source block matches its on-disk file byte-for-byte")
     func embedsAreFresh() throws {
         for block in Self.blocks {
             let url = Self.repoRoot.appendingPathComponent(block.path)
-            let onDisk = try String(contentsOf: url, encoding: .utf8)
+            let onDisk = try block.name == "shadersMetal"
+                ? Self.expandedShaderSource(at: url)
+                : String(contentsOf: url, encoding: .utf8)
             if block.embedded != onDisk {
                 // Don't dump 6k-line strings — report the first divergent line.
                 let embeddedLines = block.embedded.components(separatedBy: "\n")

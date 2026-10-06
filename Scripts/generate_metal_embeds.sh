@@ -32,7 +32,11 @@ emit_block() {
     # Use a triple-quoted Swift raw string with a unique pound-delimiter so source
     # contents (which may contain "" or backslashes) are preserved verbatim.
     printf '    static let %s: String = #"""\n' "$name"
-    cat "$file"
+    if [[ "$name" == "shadersMetal" ]]; then
+        python3 "$REPO_ROOT/Scripts/expand_metal_source.py" "$file"
+    else
+        cat "$file"
+    fi
     printf '\n"""#\n\n'
 }
 

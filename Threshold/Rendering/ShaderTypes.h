@@ -40,6 +40,7 @@ typedef NS_ENUM(EnumBackingType, BufferIndex)
     BufferIndexMeshPositions = 0,
     BufferIndexMeshGenerics  = 1,
     BufferIndexUniforms      = 2,
+    BufferIndexDistanceCacheZOffset = 30, // Incremental bake slice offset
     BufferIndexBenchCounters = 3   // device atomic_uint[2] = {stepSum, hitCount} for the benchmark iteration counter
 };
 

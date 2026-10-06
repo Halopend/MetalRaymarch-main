@@ -10,7 +10,7 @@ func require(_ condition: Bool, _ message: String) throws {
                                  userInfo: [NSLocalizedDescriptionKey: message]) }
 }
 let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-let shader = try String(contentsOf: root.appendingPathComponent("Threshold/Rendering/Shaders.metal"), encoding: .utf8)
+let shader = try String(contentsOf: root.appendingPathComponent("Threshold/Rendering/Shaders/Common/FractalCommon.h"), encoding: .utf8)
 let header = try String(contentsOf: root.appendingPathComponent("Threshold/Rendering/ShaderTypes.h"), encoding: .utf8)
 let opEnd = header.range(of: "} SpaceWarpOp;")!.upperBound
 let opStart = header[..<opEnd].range(of: "typedef struct", options: .backwards)!.lowerBound

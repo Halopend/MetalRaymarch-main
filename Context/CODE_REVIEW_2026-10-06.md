@@ -116,3 +116,19 @@ Implemented the first five recommendations in the working tree:
 - Viewport specializations use a 64-entry LRU; vision render and compute specializations each use a 128-entry LRU. Generic fallbacks remain separately owned. Viewport failure metadata is bounded, with retry delay doubling from 250 ms up to 4 s, and cache statistics expose builds/hits/failures/evictions/stale completions.
 
 Added ten regression tests for cache tickets, eviction, retry, recency, captured shader features, and library scan lifecycle. Capacity values are conservative configurable defaults, not device-measured memory budgets. Device GPU timing and compute-path image comparisons still require hardware validation.
+
+Verification so far: final macOS, iPadOS, and visionOS builds passed. All ten new regression tests and embedded-source freshness checks passed in the final clean macOS run. The broader suite still fails two pre-existing checks: ParameterCatalogTests.swift:48 (eleven Navier Strokes specs missing descriptors) and ShaderWorldFieldGateTests.swift:279 (expects the cone-prepass guard removed by the pre-existing staged shader cleanup). Those unrelated source/test changes were not modified in this implementation. The bundled-scene Quick Look render gate is being checked separately.
+
+Validation boundary: concurrent workspace edits subsequently split Shaders.metal into header modules and changed embedded-source generation. The five fixes remain present, but the successful builds/tests above refer to the pre-split snapshot. The Quick Look render gate was sampled waiting in HeadlessRenderer.compileCustomPipeline → Metal newLibraryWithSource, then stopped because its source snapshot had been superseded. No successful render-gate result or device performance measurement is claimed. The new shader-module organization needs its own validation.
+
+
+Final shader-module validation (supersedes the pre-split validation boundary above):
+
+- Split the shader library into Common, Rendering, Temporal, Post, Cache, and Overlays headers assembled by Shaders.metal. Extracted adaptive ray setup, reprojection/probe validation, tile bounds/seeding, fine march, and shading into inline helpers; preserved all 17 entry points, three barriers, and edge-lane write masking.
+- Shared vertex proxy math, removed the edge detector's duplicate center fetch, replaced Metal function-constant literals with the existing shared FCIndex enum, named the distance-cache slice binding, and shared the bake/validation DE parameter policy.
+- Updated runtime source assembly, Xcode embed inputs, freshness/source checks, transform regression source lookup, and contributor/module documentation. Restricted custom near-match pipeline fallback to the same fractal type and scene feature gates.
+- Final macOS and visionOS builds passed. All four target-local shader embeds matched the final assembly. The clean macOS suite passed 525 of 527 tests, including all 91 custom-formula compile cases, embed freshness, and Metal diagnostic checks. The remaining failures are the pre-existing parameter-catalog descriptor mismatch and obsolete cone-prepass source assertion.
+- Quick Look rendered all 51 gate scenes successfully, with zero skips or failures. Twelve original/refactored adaptive GPU comparisons passed across regular and odd viewport sizes, history reuse, foveation, and bounds rejection; color/depth agreed within 0.0001 and edge/eye write masking was preserved (268 reference hits).
+- The existing transform GPU check passed 90,112 cases with eight repetitions and zero relative point/DE error, plus custom hook dispatch and zero-strength bypass checks.
+
+No device-specific speedup is claimed. Map macro replacement and radius specialization remain deferred until profiling; Vision Pro frame-time performance still requires on-device measurement.

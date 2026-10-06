@@ -699,7 +699,7 @@ final class FractalDistanceCache {
         encoder.setBuffer(uniformBuffer, offset: 0, index: BufferIndex.uniforms.rawValue)
         // Keep this kernel-private scalar away from the shared BufferIndex
         // namespace used by the render and compute pipelines.
-        encoder.setBytes(&zOffset, length: MemoryLayout<UInt32>.stride, index: 30)
+        encoder.setBytes(&zOffset, length: MemoryLayout<UInt32>.stride, index: BufferIndex.distanceCacheZOffset.rawValue)
         let threads = MTLSize(
             width: seed.dimension,
             height: seed.dimension,
