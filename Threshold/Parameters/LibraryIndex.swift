@@ -152,6 +152,7 @@ extension LibraryIndex {
         var state = WalkState()
 
         for kind in LibraryItemKind.allCases {
+            guard !Task.isCancelled else { return .empty }
             let primary = root.appendingPathComponent(kind.rootFolderName, isDirectory: true)
             walk(directory: primary, prefix: [], scannedKind: kind,
                  fileManager: fileManager, state: &state)
@@ -165,6 +166,7 @@ extension LibraryIndex {
 
         var categoriesByKind: [LibraryItemKind: [LibraryCategory]] = [:]
         for kind in LibraryItemKind.allCases {
+            guard !Task.isCancelled else { return .empty }
             let kindItems = state.items[kind] ?? []
             var paths = state.directories[kind] ?? []
             for item in kindItems where !item.categoryPath.isEmpty {
@@ -212,6 +214,7 @@ extension LibraryIndex {
         fileManager: FileManager,
         state: inout WalkState
     ) {
+        guard !Task.isCancelled else { return }
         guard let entries = try? fileManager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.isDirectoryKey],
@@ -219,6 +222,7 @@ extension LibraryIndex {
         ) else { return }
 
         for url in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            guard !Task.isCancelled else { return }
             let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?
                 .isDirectory ?? false
 

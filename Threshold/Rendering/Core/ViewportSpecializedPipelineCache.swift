@@ -1,4 +1,5 @@
 #if os(macOS) || os(iOS)
+import Foundation
 import Dispatch
 import Metal
 import Synchronization
@@ -16,50 +17,120 @@ import Synchronization
 /// `Mutex` keeps the access synchronous while giving compiler-checked `Sendable`
 /// isolation, so the async `makeRenderPipelineState` completion handler can safely
 /// store results without manual lock management.
-final class ViewportSpecializedPipelineCache: Sendable {
+/// Tickets identify an individual build, including a rebuild of an evicted key.
+struct PipelineBuildTicket: Equatable, Sendable {
+    let key: String
+    let generation: UInt64
+}
+
+/// Bounded cache shared by the viewport and pure cache-policy tests.
+final class SpecializationCache<Value: Sendable>: Sendable {
+    struct Statistics: Sendable {
+        var hits = 0
+        var builds = 0
+        var failures = 0
+        var evictions = 0
+        var staleCompletions = 0
+    }
+    private struct Failure {
+        var count: Int
+        var retryAfter: TimeInterval
+    }
     private struct State {
-        var cache: [String: MTLRenderPipelineState] = [:]
-        var pending: Set<String> = []
+        var cache: [String: Value] = [:]
+        var recency: [String] = []
+        var pending: [String: PipelineBuildTicket] = [:]
+        var failures: [String: Failure] = [:]
+        var generation: UInt64 = 0
+        var statistics = Statistics()
     }
-
     private let state = Mutex(State())
+    private let capacity: Int
+    init(capacity: Int = 64) { self.capacity = max(1, capacity) }
 
-    func pipeline(for key: String) -> MTLRenderPipelineState? {
-        state.withLock { $0.cache[key] }
-    }
-
-    /// Returns `true` if the caller should kick off a build (not cached and not
-    /// already in flight). Marks the key pending so concurrent frames don't
-    /// schedule duplicate compiles.
-    func beginBuildIfNeeded(_ key: String) -> Bool {
+    func pipeline(for key: String) -> Value? {
         state.withLock { current in
-            if current.cache[key] != nil || current.pending.contains(key) { return false }
-            current.pending.insert(key)
-            return true
+            guard let value = current.cache[key] else { return nil }
+            current.recency.removeAll { $0 == key }
+            current.recency.append(key)
+            current.statistics.hits += 1
+            return value
         }
     }
 
-    func store(_ pipeline: MTLRenderPipelineState, for key: String) {
+    func beginBuildIfNeeded(_ key: String,
+                            now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> PipelineBuildTicket? {
         state.withLock { current in
-            current.cache[key] = pipeline
-            current.pending.remove(key)
+            guard current.cache[key] == nil, current.pending[key] == nil,
+                  now >= (current.failures[key]?.retryAfter ?? 0) else { return nil }
+            current.generation &+= 1
+            let ticket = PipelineBuildTicket(key: key, generation: current.generation)
+            current.pending[key] = ticket
+            current.statistics.builds += 1
+            return ticket
         }
     }
 
-    func failBuild(_ key: String) {
-        _ = state.withLock { $0.pending.remove(key) }
+    func store(_ pipeline: Value, ticket: PipelineBuildTicket) {
+        state.withLock { current in
+            guard current.pending[ticket.key] == ticket else {
+                current.statistics.staleCompletions += 1
+                return
+            }
+            current.pending.removeValue(forKey: ticket.key)
+            current.failures.removeValue(forKey: ticket.key)
+            current.cache[ticket.key] = pipeline
+            current.recency.removeAll { $0 == ticket.key }
+            current.recency.append(ticket.key)
+            while current.recency.count > capacity {
+                current.cache.removeValue(forKey: current.recency.removeFirst())
+                current.statistics.evictions += 1
+            }
+        }
     }
 
-    /// Drop every cached pipeline (and any in-flight build) whose key starts with
-    /// `prefix`. Used to retire a custom formula's `CX{hash}_` pipelines on switch
-    /// or deactivation (pass `"CX"` to clear all custom pipelines).
+    /// Superseded requests release their ticket without recording a compiler failure.
+    func cancelBuild(_ ticket: PipelineBuildTicket) {
+        state.withLock { current in
+            if current.pending[ticket.key] == ticket {
+                current.pending.removeValue(forKey: ticket.key)
+            }
+        }
+    }
+
+    func failBuild(_ ticket: PipelineBuildTicket,
+                   now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        state.withLock { current in
+            guard current.pending[ticket.key] == ticket else { return }
+            current.pending.removeValue(forKey: ticket.key)
+            let count = min(5, (current.failures[ticket.key]?.count ?? 0) + 1)
+            // Bound failure metadata as well as completed GPU resources.
+            if current.failures[ticket.key] == nil, current.failures.count >= capacity,
+               let oldest = current.failures.min(by: { $0.value.retryAfter < $1.value.retryAfter })?.key {
+                current.failures.removeValue(forKey: oldest)
+            }
+            current.failures[ticket.key] = Failure(count: count,
+                retryAfter: now + min(4, 0.25 * pow(2, Double(count - 1))))
+            current.statistics.failures += 1
+        }
+    }
+
     func evict(prefix: String) {
         state.withLock { current in
-            current.cache = current.cache.filter { !$0.key.hasPrefix(prefix) }
-            current.pending = current.pending.filter { !$0.hasPrefix(prefix) }
+            let removed = current.cache.keys.filter { $0.hasPrefix(prefix) }
+            for key in removed { current.cache.removeValue(forKey: key) }
+            current.statistics.evictions += removed.count
+            current.recency.removeAll { $0.hasPrefix(prefix) }
+            current.pending = current.pending.filter { !$0.key.hasPrefix(prefix) }
+            current.failures = current.failures.filter { !$0.key.hasPrefix(prefix) }
         }
     }
+
+    var statistics: Statistics { state.withLock { $0.statistics } }
+    var count: Int { state.withLock { $0.cache.count } }
 }
+
+typealias ViewportSpecializedPipelineCache = SpecializationCache<MTLRenderPipelineState>
 
 /// Builds viewport specializations completely away from the render thread.
 ///
@@ -71,7 +142,8 @@ final class ViewportSpecializedPipelineCache: Sendable {
 /// slider drag cannot fan out into a concurrent Metal compile storm.
 final class ViewportSpecializedPipelineBuilder: @unchecked Sendable {
     struct Request: @unchecked Sendable {
-        let key: String
+        let ticket: PipelineBuildTicket
+        var key: String { ticket.key }
         let iterations: Int32
         let raySteps: Int32
         let fractalType: Int32
@@ -117,21 +189,21 @@ final class ViewportSpecializedPipelineBuilder: @unchecked Sendable {
     }
 
     func request(_ request: Request) {
-        let (supersededKey, shouldStart): (String?, Bool) = state.withLock { current in
-            let supersededKey = current.wanted?.key == request.key
+        let (supersededTicket, shouldStart): (PipelineBuildTicket?, Bool) = state.withLock { current in
+            let supersededTicket = current.wanted?.ticket == request.ticket
                 ? nil
-                : current.wanted?.key
+                : current.wanted?.ticket
             current.wanted = request
-            guard !current.draining else { return (supersededKey, false) }
+            guard !current.draining else { return (supersededTicket, false) }
             current.draining = true
-            return (supersededKey, true)
+            return (supersededTicket, true)
         }
 
         // The renderer marked this key pending before handing it to us. If a
         // newer request replaced it before work began, release that pending mark
         // so revisiting the configuration can schedule it again.
-        if let supersededKey {
-            cache.failBuild(supersededKey)
+        if let supersededTicket {
+            cache.cancelBuild(supersededTicket)
         }
 
         if shouldStart {
@@ -153,10 +225,10 @@ final class ViewportSpecializedPipelineBuilder: @unchecked Sendable {
             }
             guard let request else { return }
 
-            if let pipeline = build(request) {
-                cache.store(pipeline, for: request.key)
+            if let pipeline = autoreleasepool(invoking: { build(request) }) {
+                cache.store(pipeline, ticket: request.ticket)
             } else {
-                cache.failBuild(request.key)
+                cache.failBuild(request.ticket)
             }
         }
     }

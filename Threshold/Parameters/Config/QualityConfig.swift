@@ -230,20 +230,6 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // only across compatible distance fields; stale predictions are rejected.
     var computeTemporalReprojectionEnabled: Bool = true
 
-    // visionOS fragment path: conservative cone coarse-prepass warm-start. A
-    // low-res cone pass writes a provable LOWER BOUND on each 8x8 block's
-    // nearest-surface entry distance; the full march raises its start t to it.
-    // Off by default — when off, the code path is byte-identical to before.
-    // Trusted ONLY for box/fold fractals on an UN-warped domain: no spherical
-    // inversion, no sphere projection, no legacy spaceWarpStrength, and an
-    // EMPTY SpaceWarpOp stack (stack ops — twist/ripple/kaleido and the
-    // iterated repeat groups' additive DE recurrence — void the Lipschitz-1
-    // lower-bound proof). The kernel's `domainWarped` guard (Shaders.metal,
-    // coneCoarsePrepass8x8) is the safety authority and writes the cold
-    // sentinel otherwise; the CPU dispatch gate (`coneAllowed`, Renderer.swift)
-    // must mirror the same conditions to avoid dispatching a no-op pass.
-    var coarsePrepassWarmStartEnabled: Bool = false
-
     // Foveated raymarching strength (0...1); peripheral 8x8 tiles march fewer steps.
     var foveationStrength: Float = 0.0
 
@@ -384,7 +370,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case baseFractalIterations, baseMaxRaySteps
         case resolutionScale, renderQuality, tileSize
-        case debugHierarchical, coherentPacketEnabled, computeTemporalReprojectionEnabled, coarsePrepassWarmStartEnabled, foveationStrength
+        case debugHierarchical, coherentPacketEnabled, computeTemporalReprojectionEnabled, foveationStrength
         case smartAdvanceEnabled, coneMarchStrength, coneCoverageAAEnabled
         case overRelaxationMax, distanceLODStrength, shadowsEnabled, boundingSphereSkipEnabled, boundingShapeRadius
         case boundingShapeFogEnabled  // legacy Bool key, migrated into boundingShapeFogMode on decode
@@ -414,7 +400,6 @@ struct QualityConfig: Codable, Equatable, Sendable {
         debugHierarchical     = try c.decodeIfPresent(Bool.self,  forKey: .debugHierarchical)     ?? false
         coherentPacketEnabled = try c.decodeIfPresent(Bool.self,  forKey: .coherentPacketEnabled) ?? false
         computeTemporalReprojectionEnabled = try c.decodeIfPresent(Bool.self, forKey: .computeTemporalReprojectionEnabled) ?? true
-        coarsePrepassWarmStartEnabled = try c.decodeIfPresent(Bool.self, forKey: .coarsePrepassWarmStartEnabled) ?? false
         foveationStrength     = try c.decodeIfPresent(Float.self, forKey: .foveationStrength)     ?? 0.0
         smartAdvanceEnabled   = try c.decodeIfPresent(Bool.self,  forKey: .smartAdvanceEnabled)   ?? false
         coneMarchStrength     = try c.decodeIfPresent(Float.self, forKey: .coneMarchStrength)     ?? Self.defaultConeMarchStrength
@@ -462,7 +447,6 @@ struct QualityConfig: Codable, Equatable, Sendable {
         try c.encode(debugHierarchical, forKey: .debugHierarchical)
         try c.encode(coherentPacketEnabled, forKey: .coherentPacketEnabled)
         try c.encode(computeTemporalReprojectionEnabled, forKey: .computeTemporalReprojectionEnabled)
-        try c.encode(coarsePrepassWarmStartEnabled, forKey: .coarsePrepassWarmStartEnabled)
         try c.encode(foveationStrength, forKey: .foveationStrength)
         try c.encode(smartAdvanceEnabled, forKey: .smartAdvanceEnabled)
         try c.encode(coneMarchStrength, forKey: .coneMarchStrength)

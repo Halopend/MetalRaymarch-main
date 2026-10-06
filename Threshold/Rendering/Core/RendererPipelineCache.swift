@@ -62,14 +62,16 @@ private struct ComputePipelineKeyContext {
 }
 
 struct RenderPipelineRequest {
-    let fractalType: FractalModelType
-    let formulaParams: FormulaParams
-    let colorIterations: Float
+    let settings: RenderSettingsSnapshot
+    var fractalType: FractalModelType { settings.fractalType }
+    var formulaParams: FormulaParams { settings.formulaParams }
+    var colorIterations: Float { settings.colorIterations }
 }
 
 struct ComputePipelineRequest {
-    let fractalType: FractalModelType
-    let formulaParams: FormulaParams
+    let settings: RenderSettingsSnapshot
+    var fractalType: FractalModelType { settings.fractalType }
+    var formulaParams: FormulaParams { settings.formulaParams }
 }
 
 extension Renderer {
@@ -81,55 +83,6 @@ extension Renderer {
         fractalType != .mandelbulb && appModel.renderSettings.safetyBubbleEnabled
     }
 
-    /// Selects a fragment pipeline that bakes FC_COARSE_WARM_START=true (the
-    /// conservative cone coarse-prepass consumer). Mirrors selectPipeline's exact
-    /// specialization for the current config, but lives in its OWN cache so the
-    /// main pipeline cache stays byte-identical (always FC_COARSE_WARM_START off).
-    /// A cache miss queues a detached single-flight build and returns nil. The
-    /// caller keeps the base (FC-off) pipeline until the variant is ready, so an
-    /// on-demand Metal compile can never stall compositor frame submission.
-    func selectCoarseWarmStartPipeline(forIterations iterations: Int, raySteps: Int,
-                                       neonMode: Bool = false,
-                                       request: RenderPipelineRequest? = nil) -> MTLRenderPipelineState? {
-        let fractalType = request?.fractalType ?? appModel.renderSettings.fractalType
-        // Custom formulas need a separately-compiled library + the FractalTypeCustom
-        // dispatch arm; the cone family gate excludes them anyway. Keep it simple.
-        guard fractalType != .custom else { return nil }
-        let formulaParams = request?.formulaParams ?? appModel.renderSettings.formulaParams
-        let mandelbulbPower = FormulaCatalog.specializedMandelbulbPower(
-            fractalType: fractalType,
-            formulaParams: formulaParams
-        )
-        let colorIterations = Int32(request?.colorIterations ?? appModel.renderSettings.colorIterations)
-        let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
-        let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
-        let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
-
-        let cacheKey = "CWS_FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_Q\(qualityMode)_CI\(colorIterations)\(powerKey)_N\(neonMode ? 1 : 0)_B\(bubbleEnabled ? 1 : 0)"
-        if let cached = coarseWarmStartPipelineCache[cacheKey] {
-            return cached
-        }
-
-        let config = FunctionConstantConfig(
-            fractalIterations: Int32(iterations),
-            shadowIterations: reducedSecondaryIterationsForShader(iterations: iterations, fractalType: fractalType, forShadow: true),
-            safetyBubbleEnabled: bubbleEnabled,
-            qualityMode: Int32(qualityMode),
-            debugHierarchical: false,
-            maxRaySteps: Int32(raySteps),
-            fractalType: fractalType.rawValue,
-            neonModeEnabled: neonMode,
-            colorIterations: colorIterations,
-            mandelbulbPower: mandelbulbPower
-        )
-        enqueueBackgroundPipelineBuild(
-            cacheKey: cacheKey,
-            config: config,
-            coarseWarmStart: true
-        )
-        return nil
-    }
-
     /// Scene-stable feature bakes for exact compute-pipeline keys
     /// (safety bubble + coherent-packet experiment + the DE-tail trio), read
     /// from live settings / the preset's own space-warp state.
@@ -137,9 +90,11 @@ extension Renderer {
     fileprivate func computeSceneKey(for fractalType: FractalModelType,
                                      hasSpaceWarp: Bool,
                                      hasEnvScrunch: Bool,
-                                     hasHandField: Bool) -> String {
-        let bubble = effectiveSafetyBubbleEnabled(for: fractalType)
-        let packet = appModel.renderSettings.coherentPacketEnabled
+                                     hasHandField: Bool,
+                                     safetyBubble: Bool? = nil,
+                                     coherentPacket: Bool? = nil) -> String {
+        let bubble = safetyBubble ?? effectiveSafetyBubbleEnabled(for: fractalType)
+        let packet = coherentPacket ?? appModel.renderSettings.coherentPacketEnabled
         return "_B\(bubble ? 1 : 0)_CP\(packet ? 1 : 0)_SW\(hasSpaceWarp ? 1 : 0)"
             + "_ES\(hasEnvScrunch ? 1 : 0)_HF\(hasHandField ? 1 : 0)"
     }
@@ -444,7 +399,8 @@ extension Renderer {
                                          hasEnvScrunch: appModel.renderSettings.qualityConfig.envScrunchEnabled,
                                          hasHandField: appModel.renderSettings.handAttractionEnabled)
             ).exactKey
-            if prewarmedComputeKeys.insert(computeKey).inserted {
+            if appModel.renderSettings.tileSize == 8,
+               prewarmedComputeKeys.insert(computeKey).inserted {
                 await prewarmComputePipelineDuringStartup(forPreset: preset)
                 computePrewarmCount += 1
             }
@@ -482,9 +438,11 @@ extension Renderer {
     func selectPipeline(forIterations iterations: Int, raySteps: Int,
                         neonMode: Bool = false,
                         request: RenderPipelineRequest? = nil) -> MTLRenderPipelineState {
-        let fractalType = request?.fractalType ?? appModel.renderSettings.fractalType
-        let formulaParams = request?.formulaParams ?? appModel.renderSettings.formulaParams
-        let activeCustomHash = fractalType == .custom ? customShaderHash : nil
+        let frameSettings = request?.settings ?? appModel.renderSettings.snapshot()
+        let fractalType = frameSettings.fractalType
+        let formulaParams = frameSettings.formulaParams
+        let features = PipelineFeatureSnapshot(settings: frameSettings, hasCustomLibrary: customShaderHash != nil)
+        let activeCustomHash = customShaderHash
         let mandelbulbPower = FormulaCatalog.specializedMandelbulbPower(
             fractalType: fractalType,
             formulaParams: formulaParams
@@ -496,26 +454,14 @@ extension Renderer {
             let nextPower = mandelbulbPower.map { String($0) } ?? "runtime"
             print("🔀 [Pipeline] Mandelbulb power changed: \(previousPower) → \(nextPower)")
         }
-                let colorIterations = Int32(request?.colorIterations ?? appModel.renderSettings.colorIterations)
-        let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
-        // Live, authoritative per-frame derivation of whether the space-warp seam is
-        // needed. Conservative: an active custom library (custom fractal OR a
-        // `.threshfx` warp) keeps it ON. Only a pure built-in with an empty stack
-        // bakes it OFF (FC_HAS_SPACEWARP=false → the whole warp path DCEs). Because
-        // this reads the LIVE stack, adding the first transform flips it to true the
-        // same frame — so a `_SW0` pipeline can never be served for a warped scene.
-        let hasSpaceWarp = !appModel.renderSettings.spaceWarpStack.isEmpty || activeCustomHash != nil
+        let colorIterations = Int32(frameSettings.colorIterations)
+        let bubbleEnabled = features.safetyBubble
+        // Derive baked features from the same frame as the uniforms. An active
+        // custom library conservatively retains the warp seam.
+        let hasSpaceWarp = features.hasSpaceWarp
 
-        // Environment Scrunch and the hand field each add a tail to EVERY DE
-        // evaluation, so even runtime-disabled they inflate the megakernel's
-        // register footprint and slow the whole march (measured ~4 ms + ~6 ms
-        // at 1080p on Mac). Bake them out (FC 16/17 → dead-code elimination)
-        // unless live state needs them, mirroring the FC_HAS_SPACEWARP pattern.
-        // macOS only: on visionOS/iOS the constants stay undefined (shader
-        // defaults ON) so those platforms' pipelines/prewarm are untouched.
-        // `nil` on non-Mac → the DE-tail bakes are Mac-only; the fast-path guard
-        // and cache key below treat nil as "no segment", leaving other platforms
-        // byte-identical to before.
+        // Desktop inputs exclude scanned surroundings and hand tracking;
+        // other fragment platforms retain runtime-uniform fallback behavior.
         #if os(macOS)
         // Scanned surroundings and hand tracking are not desktop renderer inputs.
         let hasEnvScrunch: Bool? = false
@@ -810,6 +756,7 @@ extension Renderer {
     /// Prewarms the exact adaptive-compute pipeline for a preset without using
     /// the bundled generic fallback as the selected frame-time pipeline.
     func prewarmComputePipeline(forPreset preset: FractalPreset) {
+        guard appModel.renderSettings.tileSize == 8 else { return }
         let library = renderingLibrary()
 
         if preset.fractalType == .custom, library == nil {
@@ -896,7 +843,7 @@ extension Renderer {
         if var packet = coherentPacketEnabled {
             constants.setConstantValue(&packet, type: .bool, index: FunctionConstantIndex.coherentPacketEnabled.rawValue)
         }
-        // DE-tail bakes (FC 3/16/17): every DE evaluation in the hierarchical
+        // DE-tail feature bakes: every DE evaluation in the hierarchical
         // march pays the space-warp seam + env-scrunch + hand-field tail unless
         // these are baked off, mirroring the fragment path's FunctionConstantConfig.
         if var sw = hasSpaceWarp {
@@ -960,17 +907,19 @@ extension Renderer {
     func selectComputePipeline(fractalIterations: Int,
                                maxRaySteps: Int,
                                request: ComputePipelineRequest? = nil) -> MTLComputePipelineState? {
-        let fractalType = request?.fractalType ?? appModel.renderSettings.fractalType
-        let formulaParams = request?.formulaParams ?? appModel.renderSettings.formulaParams
-        let activeCustomHash = fractalType == .custom ? customShaderHash : nil
+        let frameSettings = request?.settings ?? appModel.renderSettings.snapshot()
+        let fractalType = frameSettings.fractalType
+        let formulaParams = frameSettings.formulaParams
+        let features = PipelineFeatureSnapshot(settings: frameSettings, hasCustomLibrary: customShaderHash != nil)
+        let activeCustomHash = customShaderHash
         let mbPowerInt = FormulaCatalog.specializedMandelbulbPower(
             fractalType: fractalType,
             formulaParams: formulaParams
         )
         let powerKey = mbPowerInt.map { "P\($0)" } ?? ""
-        let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
-        let packetEnabled = appModel.renderSettings.coherentPacketEnabled
-        // DE-tail bakes (FC 3/16/17): mirror selectPipeline's live derivation so the
+        let bubbleEnabled = features.safetyBubble
+        let packetEnabled = features.coherentPacket
+        // DE-tail feature bakes: mirror selectPipeline's live derivation so the
         // compute kernel's Map() evaluations get the same space-warp/env-scrunch/
         // hand-field dead-code elimination the fragment path relies on — every DE
         // eval pays this tail's register cost unless baked off (see FC_HAS_SPACEWARP/
@@ -981,9 +930,9 @@ extension Renderer {
         // the "Hand Attraction" feature toggle — a conservative over-approximation
         // when tracking itself is off, same "costs perf, never correctness" trade
         // as hasSpaceWarp above.)
-        let hasSpaceWarp = !appModel.renderSettings.spaceWarpStack.isEmpty || activeCustomHash != nil
-        let hasEnvScrunch = appModel.renderSettings.qualityConfig.envScrunchEnabled
-        let hasHandField = appModel.renderSettings.handAttractionEnabled
+        let hasSpaceWarp = features.hasSpaceWarp
+        let hasEnvScrunch = features.hasEnvScrunch
+        let hasHandField = features.hasHandField
         let cacheKeyPrefix = customCacheKeyPrefix()
         let keyContext = ComputePipelineKeyContext(
             prefix: cacheKeyPrefix,
@@ -994,7 +943,9 @@ extension Renderer {
             sceneKey: computeSceneKey(for: fractalType,
                                      hasSpaceWarp: hasSpaceWarp,
                                      hasEnvScrunch: hasEnvScrunch,
-                                     hasHandField: hasHandField)
+                                     hasHandField: hasHandField,
+                                     safetyBubble: bubbleEnabled,
+                                     coherentPacket: packetEnabled)
         )
 
         // Fast-path: parameters unchanged since last call
@@ -1224,20 +1175,6 @@ extension Renderer {
         scheduleArchiveSerialize()
     }
 
-    /// Inserts the cone-prepass fragment variant built by the same detached
-    /// single-flight machinery as ordinary render pipelines.
-    func insertBuiltCoarseWarmStartPipeline(
-        _ pipeline: MTLRenderPipelineState,
-        forKey key: String
-    ) {
-        pendingPipelineBuildKeys.remove(key)
-        backgroundRenderPipelineBuildTasks.removeValue(forKey: key)
-        renderPipelineBuildRetryStates.removeValue(forKey: key)
-        coarseWarmStartPipelineCache[key] = pipeline
-        if RENDERER_DEBUG { print("✅ [ConeWarmStart] Async-built and cached: \(key)") }
-        scheduleArchiveSerialize()
-    }
-
     /// Marks a background build as failed so the pending set doesn't leak.
     func markPipelineBuildFailed(forKey key: String) {
         pendingPipelineBuildKeys.remove(key)
@@ -1337,8 +1274,7 @@ extension Renderer {
     @discardableResult
     fileprivate func enqueueBackgroundPipelineBuild(
         cacheKey: String,
-        config: FunctionConstantConfig,
-        coarseWarmStart: Bool = false
+        config: FunctionConstantConfig
     ) -> Task<Void, Never>? {
         if pendingPipelineBuildKeys.contains(cacheKey) {
             return backgroundRenderPipelineBuildTasks[cacheKey]
@@ -1373,18 +1309,10 @@ extension Renderer {
                     mtlVertexDescriptor: vertexDescriptor,
                     config: config,
                     fragmentFunctionName: fragmentName,
-                    coarseWarmStart: coarseWarmStart,
                     library: customLibrary,
                     archive: archiveRef
                 )
-                if coarseWarmStart {
-                    await self?.insertBuiltCoarseWarmStartPipeline(
-                        pipeline,
-                        forKey: cacheKey
-                    )
-                } else {
-                    await self?.insertBuiltRenderPipeline(pipeline, forKey: cacheKey)
-                }
+                await self?.insertBuiltRenderPipeline(pipeline, forKey: cacheKey)
             } catch {
                 if RENDERER_DEBUG {
                     print("❌ [Pipeline] Background build failed for \(cacheKey): \(error)")

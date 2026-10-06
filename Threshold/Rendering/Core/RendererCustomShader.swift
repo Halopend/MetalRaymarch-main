@@ -128,8 +128,8 @@ extension Renderer {
             // bundled default library. Pipelines stay cached (hash-namespaced, inert).
             if customShaderLibrary != nil {
                 customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula DEACTIVATE — library detached, pipelines retained")
-                warmStartGate.invalidate()
                 resetPipelineFastPaths()
+                computeWarmStartGate.invalidate()
                 customShaderLibrary = nil
                 customShaderHash = nil
             }
@@ -145,11 +145,6 @@ extension Renderer {
             return
         }
 
-        // All custom effects share the namespaced cache, so the warm-start gate's
-        // geometry key cannot tell two effect sets apart — depth rendered by the
-        // outgoing effect must never seed the incoming one's marches.
-        warmStartGate.invalidate()
-
         // Compile (cached internally by combined hash). While this runs the default
         // library's runtime-loop fallback keeps rendering the current stack.
         customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula compiling library… stackSig=\(warpStackSignature)")
@@ -164,6 +159,9 @@ extension Renderer {
             return
         }
 
+        // Install atomically with compute-history invalidation: an outgoing
+        // custom field must not seed the incoming field's march predictions.
+        computeWarmStartGate.invalidate()
         customShaderLibrary = library
         customShaderHash = newHash
         retainCustomShaderPipelines(mostRecentHash: newHash)
@@ -211,7 +209,7 @@ extension Renderer {
         computePipelineCache.removeAll()
         recentCustomFormulaHashes.removeAll()
         resetPipelineFastPaths()
-        warmStartGate.invalidate()
+        computeWarmStartGate.invalidate()
 
         // If a custom formula is active, recompile it from source. Evicting the
         // compiler's library cache and detaching the live library forces

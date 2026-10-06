@@ -58,31 +58,8 @@ final class MetalFXManager {
     private(set) var inputTexture: MTLTexture?
     private(set) var outputTexture: MTLTexture?
 
-    // Ping-pong depth pair for the temporal march warm-start: the fragment pass
-    // renders depth into one while the shader samples the other (last frame's).
-    private var depthTextures: [MTLTexture] = []
-    private var depthWriteIndex = 0
-    /// False until a frame has actually been rendered into the previous slot
-    /// (fresh textures contain garbage).
-    private(set) var depthHistoryValid = false
-
-    /// Current frame's depth render target.
-    var depthTexture: MTLTexture? {
-        depthTextures.isEmpty ? nil : depthTextures[depthWriteIndex]
-    }
-
-    /// Previous frame's depth (valid only when `depthHistoryValid`).
-    var previousDepthTexture: MTLTexture? {
-        depthTextures.count == 2 ? depthTextures[1 - depthWriteIndex] : nil
-    }
-
-    /// Call once per frame after all passes reading the current depth have been
-    /// encoded. Makes this frame's depth next frame's history.
-    func advanceDepthHistory() {
-        guard depthTextures.count == 2 else { return }
-        depthHistoryValid = true
-        depthWriteIndex = 1 - depthWriteIndex
-    }
+    // Current depth is retained for compositor reprojection; no fragment history.
+    private(set) var depthTexture: MTLTexture?
 
     // Cached per-eye views (NO per-frame allocation)
     private var inputViews: [MTLTexture] = []
@@ -97,7 +74,7 @@ final class MetalFXManager {
         var viewCount: Int
         var scalers: [MTLFXSpatialScaler]
         var inputTexture: MTLTexture?
-        var depthTextures: [MTLTexture]
+        var depthTexture: MTLTexture?
         var outputTexture: MTLTexture?
         var inputViews: [MTLTexture]
         var outputViews: [MTLTexture]
@@ -134,8 +111,8 @@ final class MetalFXManager {
         let colorBytes = estimatedBytesPerPixel(for: configuration.colorFormat)
         let depthBytes = estimatedBytesPerPixel(for: configuration.depthFormat)
 
-        // Input color + two input-depth history textures + output color.
-        return inputPixels * (colorBytes + depthBytes + depthBytes) + outputPixels * colorBytes
+        // Input color + current depth + output color.
+        return inputPixels * (colorBytes + depthBytes) + outputPixels * colorBytes
     }
 
     private func captureSnapshot() -> PooledSnapshot {
@@ -144,7 +121,7 @@ final class MetalFXManager {
             viewCount: viewCount,
             scalers: scalers,
             inputTexture: inputTexture,
-            depthTextures: depthTextures,
+            depthTexture: depthTexture,
             outputTexture: outputTexture,
             inputViews: inputViews,
             outputViews: outputViews
@@ -156,13 +133,10 @@ final class MetalFXManager {
         viewCount = snap.viewCount
         scalers = snap.scalers
         inputTexture = snap.inputTexture
-        depthTextures = snap.depthTextures
+        depthTexture = snap.depthTexture
         outputTexture = snap.outputTexture
         inputViews = snap.inputViews
         outputViews = snap.outputViews
-        // Restored textures hold stale frames — depth history must re-prime.
-        depthWriteIndex = 0
-        depthHistoryValid = false
     }
 
     // MARK: - Init
@@ -277,8 +251,7 @@ final class MetalFXManager {
         input.label = "MetalFX Input"
         inputTexture = input
 
-        // Depth textures (REQUIRED for ASW / reprojection; ping-pong pair so the
-        // raymarch can warm-start from last frame's depth while writing this one)
+        // Current depth target for compositor reprojection.
         let depthDesc = MTLTextureDescriptor()
         depthDesc.textureType = .type2DArray
         depthDesc.arrayLength = viewCount
@@ -288,16 +261,11 @@ final class MetalFXManager {
         depthDesc.storageMode = .private
         depthDesc.usage = [.renderTarget, .shaderRead]
 
-        depthTextures = (0..<2).compactMap { i in
-            let t = device.makeTexture(descriptor: depthDesc)
-            t?.label = "MetalFX Depth \(i)"
-            return t
-        }
-        guard depthTextures.count == 2 else {
+        guard let depth = device.makeTexture(descriptor: depthDesc) else {
             throw Error.textureCreationFailed("depth")
         }
-        depthWriteIndex = 0
-        depthHistoryValid = false
+        depth.label = "MetalFX Depth"
+        depthTexture = depth
 
         // Upscaled output
         let outputDesc = MTLTextureDescriptor()

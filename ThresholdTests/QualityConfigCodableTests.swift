@@ -17,6 +17,19 @@ import Foundation
 @Suite("QualityConfig — raymarch accelerator persistence")
 struct QualityConfigCodableTests {
 
+    @Test("Retired cone warm-start settings are ignored without losing compute settings")
+    func retiredConeToggleMigration() throws {
+        let data = Data(#"{"coarsePrepassWarmStartEnabled":true,"tileSize":8,"computeTemporalReprojectionEnabled":false}"#.utf8)
+        let config = try JSONDecoder().decode(QualityConfig.self, from: data)
+        #expect(config.tileSize == 8)
+        #expect(!config.computeTemporalReprojectionEnabled)
+        let encoded = try JSONEncoder().encode(config)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        #expect(object["coarsePrepassWarmStartEnabled"] == nil)
+        let restored = try JSONDecoder().decode(QualityConfig.self, from: encoded)
+        #expect(restored == config)
+    }
+
     @Test("default resolution is the 33 percent Low preset")
     func resolutionDefaults() {
         #expect(QualityConfig().resolutionScale == 0.33)

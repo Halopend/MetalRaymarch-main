@@ -52,8 +52,8 @@ typedef NS_ENUM(EnumBackingType, VertexAttribute)
 typedef NS_ENUM(EnumBackingType, TextureIndex)
 {
     TextureIndexColor    = 0,
-    TextureIndexPrevDepth = 1,  // Previous-frame depth for temporal march warm-start
-    TextureIndexCoarseWarmStart = 2  // Conservative cone coarse-prepass warmT (LOWER BOUND on entry distance per 8x8 block)
+    TextureIndexPrevDepth = 1,  // Reserved: retired fragment depth history
+    TextureIndexCoarseWarmStart = 2  // Reserved: retired cone prepass
 };
 
 // Function constant indices for shader specialization
@@ -450,7 +450,7 @@ typedef struct
     float colorIterations;   // How many iterations contribute to color
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring, 4=pinky)
-    int warmStartEnabled;    // 1 = previous-frame depth texture is valid for march warm-start
+    int warmStartEnabled;    // Reserved fragment-history slot; always 0
     int fractalType;         // 0=Mandelbox, 1-14=formula types (see FractalType enum)
     float lightingSoftness;  // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
     int sphericalInversionMode; // 0=off, 1=outward-in ray inversion

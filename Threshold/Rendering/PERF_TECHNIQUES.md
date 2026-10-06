@@ -14,14 +14,44 @@
 > design doc as if it were established. If you need a real figure, measure it on
 > device and cite that.
 >
-> **What *is* trustworthy here** (code-grounded, verifiable by reading the
-> referenced lines):
-> - the **`STATUS:`** markers — ✅ active / 🟡 conditional / ⛔ disabled / 💀 dead
-> - the **`file:line`** references and the **structural** description of each technique
+> This catalog is a historical June 2026 inventory. Its status markers,
+> line references, and activation claims are no longer authoritative; inspect
+> the current implementation before using an entry.
 >
 > **The only citable perf numbers** come from on-device measurement — see
 > [`PERF_LOG.md`](../../PERF_LOG.md) / `PERF_LOG.jsonl` (Vision Pro benchmark
 > sweep). See also CONTRIBUTING.md → "Performance claims".
+
+## Current acceleration status (2026-10-06)
+
+- Fragment rendering is the default (`tileSize = 0`). Cone Marching, pipeline
+  specialization, orbit caching, and bounding-shape clipping remain available.
+  The default Cone Marching strength is 0.84. Mac/iOS default resolution scale
+  is 0.33; visionOS uses compositor Render Quality instead of MetalFX spatial
+  upscaling, which is explicitly disabled on that platform.
+- Adaptive Compute (`tileSize = 8`) retains temporal reprojection, coarse/tile
+  seeding, and its scene-compatibility gate. Compute pipelines are prewarmed only
+  while this renderer is selected; ordinary fragment sessions no longer compile
+  unused compute variants for each preset or slider change.
+- Cone coarse-prepass warm start and fragment temporal warm start have been
+  removed, including their textures, shader consumers, extra pipeline cache,
+  and the Cone Warm-Start control. Old quality JSON ignores the retired
+  `coarsePrepassWarmStartEnabled` key. Function-constant IDs and uniform layout
+  slots remain reserved for source/ABI compatibility.
+- Desktop distance caching remains an experimental `THRESHOLD_DIST_CACHE=1`
+  opt-in. Its benefit requires measurement for the selected scene.
+- Performance Sweep forces fragment rendering at native resolution. It cannot
+  establish the benefit of Adaptive Compute temporal reprojection or tile seeding;
+  compare renderer modes at matching fixed quality to measure those features.
+- Transform evaluation uses one operation dispatch and a combined point/divisor
+  contract. The numerical and custom-hook regression lives in
+  `Scripts/check_transform_evaluation.swift`; `--benchmark` isolates transform
+  evaluation rather than predicting full-scene FPS.
+
+## Historical inventory
+
+The sections below describe the June implementation, including features since
+removed. Their numbers were estimates, and their status labels are historical.
 
 ## 1. Executive Summary
 

@@ -846,12 +846,6 @@ extension ContentView {
                 .disabled(!isCompute)
                 .opacity(isCompute ? 1 : 0.45)
 
-                accelToggleCompact("Cone Warm-Start",
-                            isOn: cache.quality.coarsePrepassWarmStartEnabled,
-                            help: "A low-res cone pre-pass marches one cone per 8×8 block and writes a provable lower bound on the nearest surface distance; the full march starts there, skipping empty space without ever skipping a surface. Conservative and exact (box/fold fractals, un-warped domain only). Fragment renderer path; off by default.") { v in
-                    cache.quality.coarsePrepassWarmStartEnabled = v; cache.push(\.coarsePrepassWarmStartEnabled, value: v)
-                }
-
                 accelToggleCompact("Cone Coverage AA",
                             isOn: cache.quality.coneCoverageAAEnabled,
                             help: "Anti-aliases silhouettes from the cone footprint so Cone Marching can run harder (fewer steps) without blobby, inflated edges. Softens outer edges only — no sub-pixel thin-feature recovery. Fragment renderer path.") { v in

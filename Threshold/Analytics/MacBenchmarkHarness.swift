@@ -201,7 +201,6 @@ enum MacBenchmarkHarness {
             case "smartAdvanceEnabled":          qc.smartAdvanceEnabled = v != 0
             case "boundingSphereSkipEnabled":    qc.boundingSphereSkipEnabled = v != 0
             case "zoomFogCompensationEnabled":   qc.zoomFogCompensationEnabled = v != 0
-            case "coarsePrepassWarmStartEnabled": qc.coarsePrepassWarmStartEnabled = v != 0
             case "coherentPacketEnabled":        qc.coherentPacketEnabled = v != 0
             case "foveationStrength":            qc.foveationStrength = v
             case "baseFractalIterations":        qc.baseFractalIterations = Int(v)
@@ -267,7 +266,7 @@ enum MacBenchmarkHarness {
             (14, "MengerSphere"), (15, "TheliPseudoKleinian"), (17, "Kleinian"),
         ]
         // Kernels that inline the DE via Map/FractalDE_Dispatch.
-        let kernels = ["adaptiveHierarchical8x8", "coneCoarsePrepass8x8"]
+        let kernels = ["adaptiveHierarchical8x8"]
 
         // Fixed non-type constants so only the DE differs run-to-run. Iteration
         // count drives loop-unroll register cost, so probe a low and a high count.
@@ -311,9 +310,7 @@ enum MacBenchmarkHarness {
         }
 
         for kernel in kernels {
-            // Only adaptiveHierarchical8x8 is wired to selectComputePipeline's new
-            // DE-tail bakes (coneCoarsePrepass8x8 stays intentionally generic — see
-            // Renderer.swift's "Increment 1" comment — so it has nothing to compare).
+            // Compare feature bakes on the active adaptive-compute kernel.
             let compareDETail = kernel == "adaptiveHierarchical8x8"
             log("── occupancy: \(kernel) (maxThreads/threadgroup — higher = more occupancy) ──")
             for iters: Int32 in [6, 12] {

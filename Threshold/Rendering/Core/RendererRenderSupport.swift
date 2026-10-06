@@ -113,21 +113,11 @@ extension Renderer {
     ) {
 #if canImport(MetalFX)
         guard let bundle = fragmentPassPlan.metalFXBundle else {
-            // Direct render: no MetalFX depth was written this frame, so the
-            // next fragment frame must not warm-start from stale history.
-            warmStartGate.invalidate()
             return
         }
 
         do {
             try bundle.manager.encodeSpatialUpscale(commandBuffer: commandBuffer, fence: metalFXFence)
-
-            // Rotate per-eye view-proj history for the fragment depth warm-start
-            // (consumed next frame to start each ray near last frame's surface).
-            for viewIndex in 0..<min(drawable.views.count, previousViewProjMatrices.count) {
-                let eye = framePreparation.perEye[viewIndex]
-                previousViewProjMatrices[viewIndex] = eye.projection * eye.modelView
-            }
 
             // Single spatial upscale → RCAS sharpen → drawable. No temporal blend.
             resolveMetalFXOutputToDrawable(
@@ -137,16 +127,12 @@ extension Renderer {
                 resolutionScale: fragmentPassPlan.resolutionScale
             )
 
-            // This frame's depth becomes next frame's warm-start history.
-            bundle.manager.advanceDepthHistory()
-            warmStartGate.recordDepthWritten(settingsSnapshot)
         } catch {
             if RENDERER_DEBUG && !hasLoggedMetalFXFallback {
                 print("⚠️ MetalFX spatial upscale failed: \(error). Falling back to direct rendering next frame.")
                 hasLoggedMetalFXFallback = true
             }
             metalFXManager = nil
-            warmStartGate.invalidate()
         }
 #else
         _ = (commandBuffer, drawable, fragmentPassPlan, framePreparation, settingsSnapshot)
@@ -606,7 +592,7 @@ extension Renderer {
         let depthBytes = MetalFXManager.estimatedBytesPerPixel(for: drawable.depthTextures[0].pixelFormat)
         let inputPixels = inputWidth * inputHeight * viewCount
         let outputPixels = outWidth * outHeight * viewCount
-        return inputPixels * (colorBytes + depthBytes + depthBytes) + outputPixels * colorBytes
+        return inputPixels * (colorBytes + depthBytes) + outputPixels * colorBytes
     }
 
     func canAllocateVisionMetalFXTextures(
@@ -628,7 +614,6 @@ extension Renderer {
             print("⚠️ MetalFX spatial skipped: offscreen textures would use \(Int(mb.rounded())) MB")
         }
         metalFXManager = nil
-        warmStartGate.invalidate()
         return false
     }
     #endif

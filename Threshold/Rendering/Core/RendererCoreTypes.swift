@@ -13,8 +13,8 @@ let maxBuffersInFlight = 2
 
 // Fragment texture binding slots - must match [[texture(n)]] in Shaders.metal
 enum FragmentTextureIndex: Int {
-    case prevDepth = 1  // Previous-frame depth for the temporal march warm-start
-    case coarseWarmStart = 2  // Conservative cone coarse-prepass warmT (lower bound on entry distance)
+    case prevDepth = 1  // Reserved: retired fragment history
+    case coarseWarmStart = 2  // Reserved: retired cone prepass
 }
 
 enum RendererError: Error {
@@ -25,12 +25,9 @@ enum RendererError: Error {
 // ═══════════════════════════════════════════════════════════════════════════
 // TEMPORAL DEPTH WARM-START GATE
 // Single owner of "is last frame's depth history safe to warm-start from".
-// Render paths that don't write fragment depth call invalidate(); the MetalFX
-// fragment path calls recordDepthWritten() after a successful frame; the
-// per-frame uniform patch asks allowsWarmStart(). MetalFXManager's separate
-// depthHistoryValid flag intentionally stays distinct — it tracks texture
-// lifecycle (slot written at the current size), this gate tracks scene
-// semantics (written by a compatible distance field).
+// The adaptive-compute path invalidates history on render-path/scene cuts and
+// records compatibility after writing its temporal depth texture. The fragment
+// path has no history consumer.
 // ═══════════════════════════════════════════════════════════════════════════
 struct WarmStartGate {
 
@@ -107,11 +104,11 @@ struct WarmStartGate {
 
     private var recordedKey: GeometryKey?
 
-    /// The previous frame didn't produce trustworthy fragment depth
-    /// (adaptive compute, direct render, MetalFX failure).
+    /// The previous frame did not produce compatible compute depth
+    /// (a scene cut, path switch, or resource reset).
     mutating func invalidate() { recordedKey = nil }
 
-    /// A fragment+MetalFX frame just wrote depth under this snapshot.
+    /// An adaptive-compute frame just wrote depth under this snapshot.
     mutating func recordDepthWritten(_ s: RenderSettingsSnapshot) {
         // Scanned grids and tracked hands change outside RenderSettings, so the
         // snapshot has no stable identity/position to key those dynamic CSG

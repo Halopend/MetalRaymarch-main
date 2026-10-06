@@ -52,7 +52,6 @@ struct RenderSettingsSnapshot: Sendable {
     let debugHierarchical: Bool
     let coherentPacketEnabled: Bool
     let computeTemporalReprojectionEnabled: Bool
-    let coarsePrepassWarmStartEnabled: Bool
     let foveationStrength: Float
     let smartAdvanceEnabled: Bool
     let coneMarchStrength: Float
@@ -248,5 +247,22 @@ extension RenderSettingsSnapshot {
             p.containMaxGrid = cmax
         }
         return p
+    }
+}
+
+/// Shader feature decisions captured together with the frame's uniform inputs.
+struct PipelineFeatureSnapshot: Equatable, Sendable {
+    let safetyBubble: Bool
+    let coherentPacket: Bool
+    let hasSpaceWarp: Bool
+    let hasEnvScrunch: Bool
+    let hasHandField: Bool
+
+    init(settings: RenderSettingsSnapshot, hasCustomLibrary: Bool) {
+        safetyBubble = settings.fractalType != .mandelbulb && settings.safetyBubbleEnabled
+        coherentPacket = settings.coherentPacketEnabled
+        hasSpaceWarp = settings.spaceWarpStack.count > 0 || hasCustomLibrary
+        hasEnvScrunch = settings.envScrunchEnabled
+        hasHandField = settings.handAttractionEnabled
     }
 }

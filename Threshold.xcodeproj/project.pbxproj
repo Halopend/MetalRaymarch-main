@@ -903,7 +903,6 @@
 		};
 		D7B3C4000000000000000001 /* Stamp Git SHA */ = {
 			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 0;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -929,7 +928,6 @@
 		};
 		D7B3C4000000000000000002 /* Stamp Git SHA */ = {
 			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 0;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -955,7 +953,6 @@
 		};
 		D7B3C4000000000000000003 /* Stamp Git SHA */ = {
 			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 0;
 			buildActionMask = 2147483647;
 			files = (
 			);

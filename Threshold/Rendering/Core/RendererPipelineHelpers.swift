@@ -16,7 +16,6 @@ extension Renderer {
                                               fragmentFunctionName: String = "fragmentShader",
                                               usesVertexAmplification: Bool = true,
                                               functionConstants: MTLFunctionConstantValues? = nil,
-                                              coarseWarmStart: Bool = false,
                                               library: MTLLibrary? = nil,
                                               archive: PipelineBinaryArchive? = nil) throws -> MTLRenderPipelineState {
         /// Build a render state pipeline object. When `library` is non-nil, all
@@ -38,20 +37,12 @@ extension Renderer {
         // Always provide function constants (empty if nil) for fragment shaders that use them.
         let fragmentFunction: MTLFunction?
         let constants = functionConstants ?? MTLFunctionConstantValues()
-        if fragmentFunctionName == "fragmentShader" {
-            // FC_WARM_START (index 13): compile in the temporal-depth march
-            // warm-start (prev-depth texture argument + reprojection). Runtime
-            // engagement is still gated per frame via uniforms.warmStartEnabled.
-            // Screenshot and Mac pipelines bypass this helper and compile it out.
-            var warmStart = true
-            constants.setConstantValue(&warmStart, type: .bool, index: FunctionConstantIndex.warmStart.rawValue)
-            // FC_COARSE_WARM_START (index 15): compile in the conservative cone
-            // coarse-prepass warm-start (coarse texture argument + min-over-2x2 read
-            // + full-march seed). Default false → dead-code-eliminated; only the
-            // dedicated cone-enabled pipeline variant sets it true.
-            var coarse = coarseWarmStart
-            constants.setConstantValue(&coarse, type: .bool, index: FunctionConstantIndex.coarseWarmStart.rawValue)
-        }
+        // Retired fragment warm-start slots stay reserved for source compatibility.
+        // No history textures or prepass consumers are compiled into this path.
+        var disabled = false
+        constants.setConstantValue(&disabled, type: .bool, index: FunctionConstantIndex.warmStart.rawValue)
+        constants.setConstantValue(&disabled, type: .bool, index: FunctionConstantIndex.coarseWarmStart.rawValue)
+
         fragmentFunction = try library?.makeFunction(name: fragmentFunctionName, constantValues: constants)
 
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
@@ -224,7 +215,6 @@ extension Renderer {
                                          mtlVertexDescriptor: MTLVertexDescriptor,
                                          config: FunctionConstantConfig,
                                          fragmentFunctionName: String = "fragmentShader",
-                                         coarseWarmStart: Bool = false,
                                          library: MTLLibrary? = nil,
                                          archive: PipelineBinaryArchive? = nil) throws -> MTLRenderPipelineState {
         return try buildRenderPipelineWithDevice(
@@ -234,7 +224,6 @@ extension Renderer {
             mtlVertexDescriptor: mtlVertexDescriptor,
             fragmentFunctionName: fragmentFunctionName,
             functionConstants: config.toMTLConstants(),
-            coarseWarmStart: coarseWarmStart,
             library: library,
             archive: archive
         )

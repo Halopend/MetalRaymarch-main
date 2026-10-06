@@ -130,11 +130,9 @@ constant bool FC_SHADOWS_ENABLED [[function_constant(11)]];
 // branches in fastPowR and constant-folds power multiplications in the inner loop.
 constant int FC_MANDELBULB_POWER [[function_constant(12)]];
 
-// Temporal-depth march warm-start (visionOS fragment path). When unset (Mac,
-// screenshot, quad-shared pipelines) the prev-depth texture argument and the
-// warm-start code are compiled out entirely.
+// Retired fragment warm-start function-constant slot. Reserved for compatibility
+// with older pipeline callers; no fragment history consumer remains.
 constant bool FC_WARM_START [[function_constant(13)]];
-constant bool FC_WARM_START_ON = is_function_constant_defined(FC_WARM_START) ? FC_WARM_START : false;
 
 // Coherent-packet experiment toggle (adaptiveHierarchical8x8 only). When baked
 // false (the default settings state), the warm-start probe, the shadow
@@ -143,14 +141,8 @@ constant bool FC_WARM_START_ON = is_function_constant_defined(FC_WARM_START) ? F
 // runtime uniform so cache-miss fallbacks stay correct.
 constant bool FC_COHERENT_PACKET [[function_constant(14)]];
 
-// Conservative cone coarse-prepass warm-start (visionOS fragment path). When
-// baked true on the fragment pipeline, the coarse texture argument + the
-// min-over-2x2 warm-start read are compiled in; the full march then raises its
-// start t to that provable lower bound. Unset (Mac mono, cached default
-// pipelines, screenshot) → dead-code-eliminated, byte-identical to before.
-// NOTE: index 14 is taken by FC_COHERENT_PACKET, so this uses index 15.
+// Retired cone prepass slot; preserve numeric function-constant compatibility.
 constant bool FC_COARSE_WARM_START [[function_constant(15)]];
-constant bool FC_COARSE_WS_ON = is_function_constant_defined(FC_COARSE_WARM_START) ? FC_COARSE_WARM_START : false;
 
 // Sphere-projection presence gate. Undefined pipelines retain the runtime blend
 // check; exact scene pipelines bake false for the common unprojected case so the
@@ -3794,6 +3786,13 @@ FORCE_INLINE float computeAO(float3 hitPos, float3 nor, FractalParams params, fl
 // Schlick-fresnel specular contribution. Shadow computation (including
 // visionOS's tile-shared-shadow optimization) stays at each call site; this
 // function only consumes the resulting shadow scalars.
+// A shadow factor only affects lighting when its diffuse contribution is nonzero.
+// Use per-lane normals; a tile anchor's normal cannot decide for its neighbors.
+FORCE_INLINE bool needsLightShadow(float3 lightDirection, float3 normal, float intensity)
+{
+    return dot(lightDirection, normal) > 0.0f && intensity != 0.0f;
+}
+
 FORCE_INLINE half3 ShadeSurface(float3 hitPos, float3 nor, float3 viewDir,
                                  float3 spot, float atten, float3 sunDir,
                                  float sunDiffuseScale, float lightIntensity, float specPower,
@@ -4540,8 +4539,10 @@ kernel void adaptiveHierarchical8x8(
                         uniforms.precomputedFractal,
                         uniforms.minDistance,
                         marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch, &uniforms.handField);
-                    shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParamsLocal, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
-                    shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParamsLocal, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
+                    shaSpot = needsLightShadow(spot, nor, lightIntensity)
+                        ? half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParamsLocal, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0)) : 1.0h;
+                    shaSun = needsLightShadow(sunDir, nor, sunDiffuseScale)
+                        ? half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParamsLocal, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0)) : 1.0h;
                     // Tag debug overlay layer for shadow fallback (only when not already tagged by warm-start).
                     if (packetLayer == 0) packetLayer = 4;
                 }
@@ -4553,8 +4554,10 @@ kernel void adaptiveHierarchical8x8(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
                 marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch, &uniforms.handField);
-            shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
-            shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
+            shaSpot = needsLightShadow(spot, nor, lightIntensity)
+                        ? half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0)) : 1.0h;
+            shaSun = needsLightShadow(sunDir, nor, sunDiffuseScale)
+                        ? half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0)) : 1.0h;
         }
         
         col = ColourWithScheme(p, 1.0, uniforms.minDistance, uniforms.fractalScale,
@@ -4623,128 +4626,6 @@ kernel void adaptiveHierarchical8x8(
     if (laneInBounds) {
         outputTexture.write(finalColor, pixelCoord, uniforms.eyeIndex);
     }
-}
-
-// =============================================================================
-// CONSERVATIVE CONE COARSE-PREPASS WARM-START (Increment 1)
-// =============================================================================
-// A low-res compute pass that marches ONE cone per 8x8 pixel block and writes a
-// provable LOWER BOUND ("warmT") on the entry distance of the nearest surface
-// for every full-res ray covered by that block. The fragment shader later raises
-// its march start t to this bound (skip-to-then-full-march), skipping
-// provably-empty space WITHOUT EVER skipping a surface.
-//
-// SAFETY: the cone is only trusted for box/fold fractals (which expose an
-// analytic Lipschitz-1 lower-bound DE) on an UN-WARPED domain. Anything else
-// writes 0.0 (cold-start sentinel) and the fragment path falls back to a normal
-// full march. The cone advances by the DE (stepSafety = 1 is valid for these
-// estimators), and stops the moment its radius could poke outside the empty ball
-// (coneR >= DE) or it nears a surface (DE < hitThreshold). lastEmptyT is updated
-// ONLY on a passed empty-cone test — never on a hit — and warmT backs off a full
-// footprint from it, so the reported bound is strictly inside known-empty space.
-
-// True only for the box/fold family whose Map() DE is a conservative
-// (Lipschitz-1) lower bound, so cone-bounding is provably safe.
-FORCE_INLINE bool coneSafetyForFamily(int type, thread bool& coneTrusted) {
-    coneTrusted = (type == FractalTypeMandelbox)
-               || (type == FractalTypeMenger)
-               || (type == FractalTypeOctahedron)
-               || (type == FractalTypeMengerSphere);
-    return coneTrusted;
-}
-
-kernel void coneCoarsePrepass8x8(uint2 texel [[thread_position_in_grid]],
-    constant TileUniforms& uniforms [[buffer(0)]],
-    constant rasterization_rate_map_data& rateMapData [[buffer(1)]],
-    texture2d_array<float, access::write> coarseStartTex [[texture(0)]]) {
-    const float K = 8.0;
-    // The coarse texture spans the FULL render target / 8 so its texels line up
-    // 1:1 with the fragment shader's floor(fragCoord/8) (fragCoord is in
-    // full-render-target pixels). resolution here is the per-eye viewport SIZE;
-    // viewportOrigin places this eye within the full target.
-    uint2 coarseDimFull = uint2(ceil((uniforms.viewportOrigin + uniforms.resolution) / K));
-    if (texel.x >= coarseDimFull.x || texel.y >= coarseDimFull.y) return;
-
-    int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : uniforms.fractalType;
-    bool coneTrusted; coneSafetyForFamily(type, coneTrusted);
-    // GUARD 1: only box/fold + un-warped domain may write a real warmT.
-    // "Warped" must cover BOTH warp systems: the legacy single-warp uniform
-    // (spaceWarpStrength) AND the composable SpaceWarpOp stack, which runs
-    // whenever count > 0 regardless of spaceWarpStrength. Stack ops (twist,
-    // ripple, kaleido, and especially the iterated repeat groups' additive
-    // deScale recurrence) do not preserve the Lipschitz-1 lower-bound property
-    // the empty-ball argument below requires, so a populated stack means the
-    // cone's warmT could overshoot real surfaces. Must stay in lockstep with
-    // the CPU dispatch gate `coneAllowed` (Renderer.swift) — but this kernel
-    // guard is the safety authority: it writes the cold sentinel even if the
-    // CPU gate wrongly dispatches.
-    bool domainWarped = (uniforms.sphericalInversionMode != 0)
-                     || (uniforms.sphereProjectionBlend > 0.0f)
-                     || (uniforms.spaceWarpStrength > 0.0f)
-                     || (uniforms.spaceWarpStack.count > 0)
-                     // Hand attraction adds a signed bulge to the DE the
-                     // analytic bound knows nothing about (the CPU dispatch
-                     // gate excludes it too; this kernel guard is the safety
-                     // authority) (M11).
-                     || (uniforms.handField.enabled != 0);
-    // Full-target pixel center of this 8x8 block; convert to viewport-LOCAL coords
-    // (reconstructModelPoint expects local pixels) and skip texels whose block
-    // center falls outside this eye's viewport (write the cold sentinel there).
-    float2 pixelCenterFull = (float2(texel) + 0.5f) * K;
-    float2 pixelCenter = pixelCenterFull - uniforms.viewportOrigin;
-    bool outsideViewport = any(pixelCenter < 0.0f) || any(pixelCenter >= uniforms.resolution);
-    if (!coneTrusted || domainWarped || outsideViewport) {
-        coarseStartTex.write(float4(0.0f, 0.0f, 0.0f, 0.0f), texel, uniforms.eyeIndex);
-        return;
-    }
-
-    // Reconstruct the camera ray through the CENTER of this 8x8 block, exactly as
-    // the fragment path reconstructs per-pixel rays (so the bound is consistent).
-    float3 cameraPos = uniforms.cameraPos;
-    float3 rd = normalize(reconstructModelPoint(pixelCenter, uniforms, rateMapData) - cameraPos);
-    float3 mO = cameraPos, mD = rd;
-    // No-op here (domain is un-warped, gated above) but kept for parity with the
-    // full march's ray setup.
-    applySphericalInversionRay(mO, mD, uniforms.sphericalInversionMode, uniforms.sphericalInversionRadius);
-
-    // GUARD 2: the cone radius must bound the WHOLE block footprint at every t.
-    // Block diagonal half-extent in pixels = K*0.5*sqrt(2); times the raw per-pixel
-    // angular size gives lateral radius per unit distance. coarseRateMagMax is a
-    // conservative UPPER BOUND on physical->screen magnification under foveation,
-    // so the cone can only ever be too FAT (a too-fat cone stops earlier → a
-    // shorter, still-safe skip).
-    float coneRadiusPerDist = uniforms.pixelFootprintPerDist * (K * 0.5f * 1.41421356f) * uniforms.coarseRateMagMax;
-
-    float epsilonScale = uniforms.marchEpsilonScale;
-    // Coarse iteration count: fewer Map iterations make the DE a LOOSER (smaller,
-    // still-conservative) lower bound, which is safe — it just stops the cone a
-    // touch earlier. Box/fold DEs shrink monotonically with iteration count.
-    float coarseIters = float(max(uniforms.fractalIterations, 2)) * 0.6f;
-
-    // Build FractalParams exactly like adaptiveHierarchical8x8 does.
-    FractalParams fp = makeFractalParamsFromPrecomputed(
-        uniforms.precomputedFractal,
-        uniforms.minDistance,
-        mO, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius, uniforms.spaceWarpStrength, uniforms.spaceWarpParam1, uniforms.spaceWarpParam2, uniforms.spaceWarpParam3, uniforms.spaceWarpAxis, uniforms.spaceWarpStack.ops, uniforms.spaceWarpStack.count, &uniforms.envScrunch, &uniforms.handField);
-
-    float hitThreshold = 0.02f * epsilonScale;
-    float t = 0.05f;
-    float lastEmptyT = t;
-    const int maxCoarseSteps = 40;
-    for (int j = 0; j < maxCoarseSteps && t <= uniforms.maxViewDistance; j++) {
-        float3 p = fma(mD, float3(t), mO);
-        float de = MapContinuousUnified(p, fp, uniforms.foldingLimit, coarseIters, type, uniforms.formulaParams);
-        if (de < hitThreshold) break;            // near a surface — do NOT update lastEmptyT
-        float coneR = coneRadiusPerDist * t;
-        if (coneR >= de) break;                   // cone could poke outside the empty ball
-        lastEmptyT = t;                           // GUARD 3: only on a passed empty test
-        t += de;                                  // box/fold: stepSafety = 1 is valid
-    }
-    // Back off at least one footprint radius (and a hit-threshold floor) from the
-    // last provably-empty t, so warmT stays strictly inside known-empty space.
-    float backoff = max(2.0f * hitThreshold, coneRadiusPerDist * lastEmptyT);
-    float warmT = max(0.05f, lastEmptyT - backoff);
-    coarseStartTex.write(float4(warmT, 0.0f, 0.0f, 0.0f), texel, uniforms.eyeIndex);
 }
 
 // === SPRING BLOB NAVIGATION WIDGET ===
@@ -4843,9 +4724,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                                    constant Uniforms& uniforms,
                                    float2 fragCoord,
                                    float time,
-                                   float warmStartT = -1.0f,
                                    device atomic_uint* benchCounters = nullptr,
-                                   float coarseWarmStartT = -1.0f,
                                    bool reversedDepth = true)
 {
     FragmentOutput output;
@@ -4878,29 +4757,13 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     // the bounding-shape boundary (soft fade instead of the hard sphere clip).
     half boundFade = 1.0h;
 
-    // === TEMPORAL DEPTH WARM-START ===
-    // When the caller reprojected a valid previous-frame hit distance, march a
-    // narrow window around it with a reduced step budget (typically ~5-10 steps
-    // instead of hundreds). On a window miss (disocclusion / stale history) we
-    // fall back to the full march, so the warm start can never change WHAT is
-    // hit — only how fast we find it.
     SceneResult sceneResult;
-    bool needFullMarch = true;
-    if (FC_WARM_START_ON && warmStartT > 0.0f) {
-        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, warmStartT, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier, uniforms.smartAdvanceEnabled != 0, uniforms.marchEpsilonScale, uniforms.coneMarchScale, uniforms.distanceLODFalloff);
-        needFullMarch = sceneResult.distGlow.x >= kRayMissThreshold;
-    }
-    if (needFullMarch) {
-        // The conservative cone coarse-prepass warm start ONLY raises the full
-        // march's start t (never the reprojection-window path above). It's a
-        // provable lower bound, so the march still finds exactly what it would
-        // have; passing -1.0f (the default) when the feature is off is a no-op.
-        //
+    {
         // Bound to Space: clip the march to the room's interval along this ray
         // (start raised to room entry, budget capped at room exit). Rays that
         // never cross the room volume skip the march entirely. A no-op while
         // boundToSpaceMode == 0.
-        float marchStartT = coarseWarmStartT;
+        float marchStartT = -1.0f;
         float marchEndT = uniforms.maxViewDistance;
         if (!clampMarchToSpaceBounds(marchOrigin, marchDir, uniforms.modelToBoundSpaceMatrix,
                                      uniforms.boundSpaceSize, uniforms.boundToSpaceMode,
@@ -4916,8 +4779,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     hitCache = sceneResult.cache;
 
     // Bound to Space: reclassify hits outside the room as misses. The clamped
-    // full march can't produce them (beyond a single overshoot step), but the
-    // temporal depth warm-start path above can. The 1cm tolerance keeps hits
+    // march can overshoot a boundary by a step. The 1cm tolerance keeps hits
     // sliced open right at a wall from speckling into misses.
     if (uniforms.boundToSpaceMode != 0 && ret.x < kRayMissThreshold) {
         float3 hitModel = marchOrigin + ret.x * marchDir;
@@ -4991,10 +4853,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             // zero light scale) makes the marched value unreachable and the skip
             // is byte-identical, not an approximation. Terminator regions are
             // spatially coherent, so whole waves drop the 2×3-step march.
-            bool needSpotShadow = dot(spot, nor) > 0.0f
-                && uniforms.precomputedLighting.lightIntensity != 0.0f;
-            bool needSunShadow = dot(sunDir, nor) > 0.0f
-                && uniforms.precomputedLighting.sunDiffuseScale != 0.0f;
+            bool needSpotShadow = needsLightShadow(spot, nor, uniforms.precomputedLighting.lightIntensity);
+            bool needSunShadow = needsLightShadow(sunDir, nor, uniforms.precomputedLighting.sunDiffuseScale);
             half shaSpot = (benchAblate == 12 || !needSpotShadow) ? half(1.0h) : half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
             half shaSun = (benchAblate == 12 || !needSunShadow) ? half(1.0h) : half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams, uniforms.shadowsEnabled != 0));
 
@@ -5182,62 +5042,10 @@ kernel void edgeDetectSlidingWindow(
     destinationTexture.write(float4(result, sourceTexture.read(p, eye).a), p, eye);
 }
 
-// Reproject this pixel's ray into the previous frame's depth buffer and return
-// a conservative march start distance, or -1 when no valid history exists.
-// Mirrors the warm-start scheme already proven in adaptiveHierarchical8x8:
-// same-pixel probe → refine via reprojection → start at 0.9× the hit distance
-// (SceneWithCacheFromStart additionally backs off another 0.3 units).
-FORCE_INLINE float computeWarmStartT(
-    float2 fragCoord,
-    uint eyeIndex,
-    constant Uniforms& uniforms,
-    float3 marchOrigin,
-    float3 marchDir,
-    depth2d_array<float, access::sample> prevDepthTex)
-{
-    if (uniforms.warmStartEnabled == 0) return -1.0f;
-
-    constexpr sampler warmSampler(filter::nearest, address::clamp_to_edge);
-    // Miss pixels write ~1e-7 (far in reverse-Z); treat anything at or below
-    // that as "no surface" history.
-    constexpr float kValidDepthMin = 5e-7f;
-
-    float2 uv = fragCoord / uniforms.renderResolution;
-    float dSame = prevDepthTex.sample(warmSampler, uv, eyeIndex);
-    if (dSame <= kValidDepthMin) return -1.0f;
-
-    // Same-pixel probe: previous clip → model space point.
-    float2 ndc0 = float2(fma(uv.x, 2.0f, -1.0f), -fma(uv.y, 2.0f, -1.0f));
-    float4 m0 = uniforms.previousInvViewProjMatrix * float4(ndc0, dSame, 1.0f);
-    if (abs(m0.w) <= 1e-6f) return -1.0f;
-    float tGuess = dot(m0.xyz / m0.w - marchOrigin, marchDir);
-    if (tGuess <= 0.0f) return -1.0f;
-
-    // Refine: project the guess point on OUR ray into the previous frame and
-    // read the depth where it actually landed.
-    float3 probe = fma(marchDir, float3(tGuess), marchOrigin);
-    float4 prevClip = uniforms.previousViewProjMatrix * float4(probe, 1.0f);
-    if (prevClip.w <= 1e-5f) return -1.0f;
-    float2 prevNDC = prevClip.xy / prevClip.w;
-    float2 prevUV = float2(fma(prevNDC.x, 0.5f, 0.5f), fma(prevNDC.y, -0.5f, 0.5f));
-    if (any(prevUV < 0.0f) || any(prevUV > 1.0f)) return -1.0f;
-
-    float dRef = prevDepthTex.sample(warmSampler, prevUV, eyeIndex);
-    if (dRef <= kValidDepthMin) return -1.0f;
-    float4 m1 = uniforms.previousInvViewProjMatrix * float4(prevNDC, dRef, 1.0f);
-    if (abs(m1.w) <= 1e-6f) return -1.0f;
-    float tRef = dot(m1.xyz / m1.w - marchOrigin, marchDir);
-    if (tRef <= 0.0f || tRef >= kRayMissThreshold) return -1.0f;
-
-    return tRef * 0.9f;
-}
-
 fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
                                constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
                                device atomic_uint* benchCounters [[buffer(BufferIndexBenchCounters)]],
-                               ushort ampId [[amplification_id]],
-                               depth2d_array<float, access::sample> prevDepthTex [[texture(TextureIndexPrevDepth), function_constant(FC_WARM_START_ON)]],
-                               texture2d_array<float, access::read> coarseStartTex [[texture(TextureIndexCoarseWarmStart), function_constant(FC_COARSE_WS_ON)]])
+                               ushort ampId [[amplification_id]])
 {
     constant Uniforms& uniforms = uniformsArray.uniforms[ampId];
     float2 fragCoord = in.position.xy;
@@ -5248,51 +5056,7 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     // via the display's temporal integration at 90Hz.
     fragCoord += uniforms.jitterOffset;
 
-    float warmStartT = -1.0f;
-    if (FC_WARM_START_ON) {
-        // Warm start only runs without spherical inversion (CPU gates the flag),
-        // so the unwarped camera ray here matches fragmentMain's march ray.
-        float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
-        float3 rd = normalize(in.modelPos - cameraPos);
-        warmStartT = computeWarmStartT(fragCoord, ampId, uniforms, cameraPos, rd, prevDepthTex);
-    }
-
-    // === CONSERVATIVE CONE COARSE-PREPASS WARM-START (min over the 2x2 covering
-    // coarse texels) ===
-    // Each coarse texel holds a provable lower bound for its 8x8 block. A full-res
-    // pixel can straddle up to a 2x2 neighborhood of coarse texels; taking the MIN
-    // of their bounds keeps the start conservative for the whole pixel. warmT<=0.05
-    // is the cold-start sentinel (cone untrusted / domain warped / no skip found).
-    float coarseWS = -1.0f;
-    if (FC_COARSE_WS_ON) {
-        // fragCoord is in full-render-target pixels and the coarse texture is sized
-        // to full-render-target/8, so floor(fragCoord/8) indexes the covering
-        // coarse texels directly. Clamp against the texture's own dimensions so the
-        // 2x2 neighborhood can never read out of bounds at the right/bottom edge.
-        uint2 base = uint2(floor(fragCoord / 8.0f));
-        uint2 cdim = uint2(coarseStartTex.get_width(), coarseStartTex.get_height());
-        cdim = max(cdim, uint2(1u));
-        float m = FLT_MAX;
-        for (uint dy = 0; dy < 2; ++dy) {
-            for (uint dx = 0; dx < 2; ++dx) {
-                uint2 c = min(base + uint2(dx, dy), cdim - 1u);
-                float v = coarseStartTex.read(c, ampId).x;
-                if (v > 0.05f) m = min(m, v);   // treat warmT<=0.05 as cold
-            }
-        }
-        coarseWS = (m < FLT_MAX) ? m : -1.0f;
-    }
-
-    // Combine the two warm starts conservatively: take the MIN over the positive
-    // candidates (the lower start is always safe; a larger one might overshoot a
-    // disocclusion). The reprojection-window warmStartT keeps feeding the
-    // SceneWithCacheFromStart path unchanged inside fragmentMain; the cone bound is
-    // passed separately and only ever seeds the FULL-march SceneWithCache.
-    float coarseWarmStartT = coarseWS;
-
-    // Render fractal
-    return fragmentMain(in, uniforms, fragCoord, uniforms.time, warmStartT,
-                        benchCounters, coarseWarmStartT, true);
+    return fragmentMain(in, uniforms, fragCoord, uniforms.time, benchCounters, true);
 }
 
 fragment FragmentOutput fragmentShaderMono(ColorInOut in [[stage_in]],
@@ -5300,15 +5064,8 @@ fragment FragmentOutput fragmentShaderMono(ColorInOut in [[stage_in]],
                                device atomic_uint* benchCounters [[buffer(BufferIndexBenchCounters)]])
 {
     constant Uniforms& uniforms = uniformsArray.uniforms[0];
-    float2 fragCoord = in.position.xy;
-
-    fragCoord += uniforms.jitterOffset;
-
-    // benchCounters is always bound by the Mac renderer; fragmentMain only writes
-    // it when uniforms.benchCollectSteps != 0 (step-profiling armed), so normal
-    // frames pay nothing. No warm start on the mono path → warmStartT = -1.
-    return fragmentMain(in, uniforms, fragCoord, uniforms.time, -1.0f,
-                        benchCounters, -1.0f, false);
+    float2 fragCoord = in.position.xy + uniforms.jitterOffset;
+    return fragmentMain(in, uniforms, fragCoord, uniforms.time, benchCounters, false);
 }
 
 // === Format Conversion Shaders for MetalFX ===

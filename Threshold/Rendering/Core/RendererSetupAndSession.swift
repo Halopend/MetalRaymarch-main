@@ -190,10 +190,9 @@ extension Renderer {
     }
 
     /// A live containment boundary changes the distance field independently of
-    /// RenderSettings. Invalidate both temporal paths so an old room cannot
+    /// RenderSettings. Invalidate compute history so an old room cannot
     /// warm-start a ray beyond a newly moved wall.
     func roomBoundsDidChange() {
-        warmStartGate.invalidate()
         computeWarmStartGate.invalidate()
     }
 

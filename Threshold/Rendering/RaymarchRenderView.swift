@@ -1555,9 +1555,9 @@ final class ViewportRenderer {
 
         // Not ready yet — schedule a background build and use the generic
         // pipeline for this frame.
-        if specializedPipelineCache.beginBuildIfNeeded(key) {
+        if let ticket = specializedPipelineCache.beginBuildIfNeeded(key) {
             buildSpecializedPipeline(
-                key: key,
+                ticket: ticket,
                 iterations: iterations,
                 raySteps: raySteps,
                 fractalType: fractalType,
@@ -1579,7 +1579,7 @@ final class ViewportRenderer {
     /// Asynchronously compiles a specialized `fragmentShaderMono` pipeline and
     /// stores it in the cache. Function-constant specialization unrolls the
     /// iteration/ray-step loops and devirtualizes the fractal DE dispatch.
-    private func buildSpecializedPipeline(key: String,
+    private func buildSpecializedPipeline(ticket: PipelineBuildTicket,
                                           iterations: Int32,
                                           raySteps: Int32,
                                           fractalType: Int32,
@@ -1593,7 +1593,7 @@ final class ViewportRenderer {
                                           hasHandField: Bool,
                                           customLibrary: MTLLibrary?) {
         specializedPipelineBuilder.request(.init(
-            key: key,
+            ticket: ticket,
             iterations: iterations,
             raySteps: raySteps,
             fractalType: fractalType,

@@ -22,10 +22,17 @@ final class LibraryStore {
     // deinit for removal, so no concurrent access is possible.
     @ObservationIgnored nonisolated(unsafe) private var observers: [any NSObjectProtocol] = []
     private let storage: StorageLocation
+    private let rootProvider: @MainActor @Sendable () -> URL?
+    private let scan: @Sendable (URL) async -> LibraryIndex
     @ObservationIgnored private var scanGeneration: UInt64 = 0
+    @ObservationIgnored private(set) var scanTask: Task<Void, Never>?
 
-    init(storage: StorageLocation = .shared) {
+    init(storage: StorageLocation = .shared,
+         rootProvider: (@MainActor @Sendable () -> URL?)? = nil,
+         scan: @escaping @Sendable (URL) async -> LibraryIndex = LibraryStore.scanOffMain) {
         self.storage = storage
+        self.rootProvider = rootProvider ?? { storage.activeRoot }
+        self.scan = scan
         reload()
         for name in [StorageLocation.rootResolvedNotification, StorageLocation.modeChangedNotification] {
             observers.append(NotificationCenter.default.addObserver(
@@ -37,40 +44,61 @@ final class LibraryStore {
     }
 
     deinit {
+        scanTask?.cancel()
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
         }
     }
 
     /// The active store root this index reflects.
-    var root: URL? { storage.activeRoot }
+    var root: URL? { rootProvider() }
 
     /// Rescan off the main actor; a stale scan is discarded by generation.
     func reload() {
-        guard let root = storage.activeRoot else {
+        scanGeneration &+= 1
+        scanTask?.cancel()
+        scanTask = nil
+        guard let root = rootProvider() else {
             index = .empty
             return
         }
-        scanGeneration &+= 1
         let generation = scanGeneration
-        Task.detached(priority: .utility) { [weak self] in
-            let scanned = LibraryIndex.scan(root: root)
-            await self?.apply(scanned, generation: generation)
+        let scan = self.scan
+        scanTask = Task { [weak self] in
+            // Coalesce storage notifications before starting filesystem work.
+            do { try await Task.sleep(for: .milliseconds(100)) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            let scanned = await scan(root)
+            guard !Task.isCancelled else { return }
+            self?.apply(scanned, generation: generation, root: root)
         }
     }
 
     /// Synchronous rescan — for tests and callers that need the snapshot now.
     func reloadNow() {
-        guard let root = storage.activeRoot else {
+        scanGeneration &+= 1
+        scanTask?.cancel()
+        scanTask = nil
+        guard let root = rootProvider() else {
             index = .empty
             return
         }
-        scanGeneration &+= 1
         index = LibraryIndex.scan(root: root)
     }
 
-    private func apply(_ scanned: LibraryIndex, generation: UInt64) {
-        guard generation == scanGeneration else { return }
+    nonisolated private static func scanOffMain(_ root: URL) async -> LibraryIndex {
+        let worker = Task.detached(priority: .utility) { LibraryIndex.scan(root: root) }
+        return await withTaskCancellationHandler {
+            await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
+    }
+
+    private func apply(_ scanned: LibraryIndex, generation: UInt64, root: URL) {
+        guard generation == scanGeneration, root == rootProvider() else { return }
         index = scanned
+        scanTask = nil
     }
 }
