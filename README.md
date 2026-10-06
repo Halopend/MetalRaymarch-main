@@ -1,9 +1,15 @@
 # Threshold:
 ![pink-blue-fractal](metal-raymarch-demo.gif)
-A curiosity rooted in one of mathematics’ oldest instruments: make geometry something to sense, not just calculate.
-Explore a conceptual exploration at the intersection of art, math, chaos and order.
 
-Threshold is a continuous sensory space for exploring higher-dimensional objects through light, motion, sound, and interaction.
+## Origins
+
+Threshold began with a question: **Could we render a fractal in real time?** The question led beyond speed and pixels to a deeper curiosity: what can it feel like to encounter mathematics as a place—to move through a shape made by a rule, and to change that rule while it unfolds?
+
+Fractals are built through iteration. Apply a rule again and again, and simple operations can reveal intricate structure. Repetition gives the image its order; small changes that compound across iterations open onto chaos. Each rendered view is a finite calculation, yet the patterns invite us to look toward something without end. Threshold is an ongoing attempt to make that relationship tangible: a search for connection to the infinite through iteration, form, light, motion, and sound.
+
+That is where Threshold’s language of **chaos and order** comes from. They are not separate themes added to the imagery; they emerge together from the iterative mathematics that shapes it. The work continues—as a renderer, a creative instrument, and an exploration whose next step is still being discovered.
+
+Threshold is a continuous sensory space for exploring mathematical forms through light, motion, sound, and interaction.
 
 ![Threshold real-time Metal ray marching demo](metal-raymarch-demo.gif)
 

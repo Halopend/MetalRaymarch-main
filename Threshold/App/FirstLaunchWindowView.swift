@@ -29,6 +29,7 @@ struct FirstLaunchWindowView: View {
     @State private var shareAnalytics = UsageAnalytics.shared.analyticsEnabled
     @State private var storageMode = StorageLocation.shared.mode
     @State private var microphoneStartsAtLaunch = AudioInputLaunchPreference.microphoneStartsAtLaunch()
+    @State private var activeFormatPopover: String?
 
     private let pageCount = 4
 
@@ -214,69 +215,7 @@ struct FirstLaunchWindowView: View {
     // MARK: - Page 0: Welcome
 
     private var welcomePage: some View {
-        OnboardingPageShell(
-            icon: "cube.transparent.fill",
-            title: "Welcome to Threshold",
-            subtitle: "A real-time 3D renderer built on signed distance fields (SDFs)—where math becomes the shape you explore.",
-            accent: .blue
-        ) {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("MATH IS THE MEDIUM")
-                    .font(.caption.weight(.bold))
-                    .tracking(1.2)
-                    .foregroundStyle(.blue)
-                Text("Choose a scene. Move through it. Change the math, color, and light as it renders.")
-                    .font(.title3.weight(.semibold))
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Threshold evaluates a distance field: a formula tells the renderer how far each point is from a surface. Rays step through that field until they reach the geometry, revealing fractals and other 3D forms. Change the formula and parameters, and the shape updates live.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 8) {
-                    IntroPill(icon: "square.grid.2x2.fill", title: "Scenes")
-                    IntroPill(icon: "move.3d", title: "Explore")
-                    IntroPill(icon: AppIcons.sliderHorizontal3, title: "Edit live")
-                    IntroPill(icon: "waveform", title: "React to music")
-                }
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [.blue.opacity(0.18), .purple.opacity(0.10)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Color.blue.opacity(0.22), lineWidth: 1)
-            )
-        } detail: {
-            VStack(alignment: .leading, spacing: 12) {
-                IntroTipRow(
-                    icon: AppIcons.function,
-                    title: "SDFs, fractals, and formulas",
-                    detail: "Signed distance fields describe geometry with math. Threshold combines distance-estimator fractals with SDF primitives, and lets you create or edit Metal formulas and see the result as it renders."
-                )
-                IntroTipRow(
-                    icon: AppIcons.sliderHorizontal3,
-                    title: "Explore and shape it",
-                    detail: "Navigate around and through a scene, then use Controls to tune its formula, shape, lighting, and color."
-                )
-                IntroTipRow(
-                    icon: "waveform",
-                    title: "Let sound move the image",
-                    detail: "Map live audio, bass, and beats to visual parameters so a scene can react to music."
-                )
-                Text("Start with a built-in scene. No math or shader experience is needed to explore it.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
+        FirstLaunchWelcomePage()
     }
 
     // MARK: - Page 3: Storage + Audio + Analytics
@@ -407,7 +346,7 @@ struct FirstLaunchWindowView: View {
         OnboardingPageShell(
             icon: "move.3d",
             title: "Your first scene",
-            subtitle: "Move through the fractal, then open the controls to change what you see.",
+            subtitle: "Explore real-time fractals, distance fields, and geometry you can shape.",
             accent: .green
         ) {
             VStack(alignment: .leading, spacing: 12) {
@@ -444,8 +383,14 @@ struct FirstLaunchWindowView: View {
                 IntroTipRow(
                     icon: AppIcons.sliderHorizontal3,
                     title: "Edit the scene",
-                    detail: "Use the floating controls to tune the fractal formula, shape, color, light, and music response. Changes render live."
+                    detail: "Use the floating controls to tune the fractal formula, combine it with signed distance field (SDF) primitives, and adjust color, light, and music response. Changes render live."
                 )
+                IntroTipRow(
+                    icon: AppIcons.function,
+                    title: "How the shape is rendered",
+                    detail: "Distance estimators and SDFs tell the renderer how far a point is from geometry. Rays advance through those distances until they converge on a surface. Open Metal DE Studio to create or edit a formula."
+                )
+                fileFormatShareSection
 
                 Divider()
 
@@ -460,7 +405,7 @@ struct FirstLaunchWindowView: View {
         OnboardingPageShell(
             icon: "move.3d",
             title: "Your first scene",
-            subtitle: "Pick a fractal, move through it, and change it while it renders.",
+            subtitle: "Explore real-time fractals, distance fields, and geometry you can shape.",
             accent: .green
         ) {
             VStack(alignment: .leading, spacing: 10) {
@@ -484,9 +429,10 @@ struct FirstLaunchWindowView: View {
             VStack(alignment: .leading, spacing: 10) {
                 IntroTipRow(
                     icon: AppIcons.function,
-                    title: "Shape and formula",
-                    detail: "Use Shape and Look to tune geometry, color, and lighting. Open Metal DE Studio to edit a custom distance-estimator formula."
+                    title: "SDFs, fractals, and formulas",
+                    detail: "Distance estimators and signed distance fields (SDFs) describe how far a point is from geometry. Rays advance through those distances until they converge on a surface. Combine fractals with SDF primitives, then use Metal DE Studio to create or edit a formula."
                 )
+                fileFormatShareSection
                 IntroTipRow(
                     icon: "waveform",
                     title: "Music Reactive",
@@ -503,6 +449,96 @@ struct FirstLaunchWindowView: View {
             }
         }
         #endif
+    }
+
+    private var fileFormatShareSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("SAVE AND SHARE WHAT YOU MAKE")
+                .font(.caption.weight(.bold))
+                .tracking(1.1)
+                .foregroundStyle(.blue)
+            Text("Export scenes, animations, and custom formulas as JSON-based Threshold files. Select a format to see what it contains.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .top, spacing: 8) {
+                ForEach(ThresholdExportFormat.allCases, id: \.ext) { format in
+                    Button {
+                        activeFormatPopover = format.ext
+                    } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Image(systemName: format.iconName)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(format.accentColor)
+                            Text(".\(format.ext)")
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                            Text(format.displayName)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
+                        .padding(9)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(format.accentColor.opacity(0.08))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(format.accentColor.opacity(0.18), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .accessibilityLabel(".\(format.ext), \(format.displayName). Show file format details.")
+                    .popover(isPresented: Binding(
+                        get: { activeFormatPopover == format.ext },
+                        set: { isPresented in
+                            if !isPresented && activeFormatPopover == format.ext {
+                                activeFormatPopover = nil
+                            }
+                        }
+                    )) {
+                        fileFormatDetails(for: format)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.blue.opacity(0.05))
+        )
+    }
+
+    private func fileFormatDetails(for format: ThresholdExportFormat) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Label(".\(format.ext)", systemImage: format.iconName)
+                .font(.headline)
+                .foregroundStyle(format.accentColor)
+            Text(format.displayName)
+                .font(.subheadline.weight(.semibold))
+            Text(fileFormatDescription(for: format))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(width: 320, alignment: .leading)
+    }
+
+    private func fileFormatDescription(for format: ThresholdExportFormat) -> String {
+        switch format {
+        case .scenePreset:
+            return "A JSON scene document with render settings and optional audio mappings. It can also include a custom Metal distance estimator in its embeddedFormula field, keeping the scene and the formula that defines its geometry together in one shareable file."
+        case .animationScene:
+            return "A JSON animation scene containing its keyframe sequence and the scene state needed to load and play it in Threshold."
+        case .customFormula:
+            return "A versioned JSON container for a standalone custom Metal formula or effect. It carries the Metal source and formula metadata so it can be imported and reused in Threshold."
+        }
     }
 
     /// One selectable menu-gesture style card on the combined controls page.
@@ -658,7 +694,7 @@ private struct OnboardingCheckboxStyle: ToggleStyle {
     }
 }
 
-private struct OnboardingPageShell<Primary: View, Detail: View>: View {
+struct OnboardingPageShell<Primary: View, Detail: View>: View {
     let icon: String
     let title: String
     let subtitle: String
@@ -737,20 +773,6 @@ private enum OnboardingTutorialClip {
         case .movementAndScale:
             return "movement_and_scale"
         }
-    }
-}
-
-private struct IntroPill: View {
-    let icon: String
-    let title: String
-
-    var body: some View {
-        Label(title, systemImage: icon)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(Color.secondary.opacity(0.10)))
     }
 }
 
