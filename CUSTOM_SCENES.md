@@ -195,3 +195,43 @@ production runtime compiler. For Metal or Quick Look changes, also run
 | The compiler says a DE is missing. | The function stem and both required names must match exactly. |
 | The formula compiles but coloring looks wrong. | Ensure the full DE writes every `OrbitData` field and uses the same geometry as the `_Dist` variant. |
 | A file works locally but not after sharing. | Export the `.threshscene` with its active formula embedded, or share the `.threshfx` alongside the scene. |
+
+## Optional combined evaluation for custom space warps
+
+Existing space-warp sources continue to provide `customSpaceWarp` and
+`customSpaceWarpDEScale`. Authors can additionally define
+`THRESHOLD_CUSTOM_SPACE_WARP_COMBINED` and implement this optional Metal hook:
+
+```metal
+#define THRESHOLD_CUSTOM_SPACE_WARP_COMBINED
+float3 customSpaceWarpCombined(float3 p, float strength,
+                              float param1, float param2, float param3,
+                              thread float& deScale) {
+    // Example: uniform expansion, computing the factor once for both outputs.
+    float factor = 1.0f + strength;
+    deScale = factor;
+    return p * factor;
+}
+```
+
+The renderer calls the combined hook for distance samples, including the hot
+raymarch path. `deScale` is the local distance-estimator divisor, not an accumulated
+stack derivative: assign a finite, positive conservative stretch bound consistent
+with `customSpaceWarpDEScale`. The returned point must agree with `customSpaceWarp`.
+Keep both original functions: point-only and divisor-only probes still use them.
+The example's corresponding original functions return `p * (1.0f + strength)`
+and `1.0f + strength`, respectively. As before, non-positive strength bypasses
+custom evaluation in the combined path.
+
+Compute shared geometry in local variables inside the hook. Its lifetime is one
+sample; do not reuse it after another transform changes the point. This contract
+does not require built-in operation IDs, CPU-side parsing of custom mathematics,
+or a shared-memory cache. It optimizes the existing custom-warp override; it does
+not yet add user-defined entries to the editable built-in transform stack.
+
+Built-in operations use the same point-plus-divisor pattern internally, with an
+adapter for operations that retain separate functions. Their uniform layout and
+live stack ordering remain unchanged. Run the GPU numerical regression from the
+repository root with `swift Scripts/check_transform_evaluation.swift`.
+Add `--benchmark` to compare the legacy and combined evaluators with GPU timings.
+This isolates transform evaluation; it does not predict full-scene frame rate.

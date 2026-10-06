@@ -1095,6 +1095,86 @@ FORCE_INLINE float warpOpDEUpdate(float3 p, float currentDE, float originDE, Spa
 // marker) so the injected codegen stack can return it too.
 struct SpaceTransform { float3 point; float deScale; };
 
+// Explicit kind allows known group sequences to bypass runtime dispatch entirely.
+FORCE_INLINE SpaceTransform transformRadialWarpOp(SpaceTransform input,
+                                                  SpaceWarpOp op, int kind) {
+    float3 p = input.point;
+    SpaceTransform r = input;
+    float t = clamp(op.strength, 0.0f, 1.0f);
+    float radius2 = kind == 8 ? dot(p.xz, p.xz) : dot(p, p);
+    float factor = 1.0f;
+    if (kind == 5) {
+        factor = clamp(op.p1 / max(radius2, 1e-6f), 0.05f, 20.0f);
+    } else if (radius2 < op.p1) {
+        factor = op.p2 / op.p1;
+    } else if (radius2 < op.p2) {
+        factor = op.p2 / max(radius2, 1e-6f);
+    }
+    float3 folded = kind == 8
+        ? float3(p.x * factor, p.y, p.z * factor) : p * factor;
+    r.point = mix(p, folded, t);
+    if (op.strength > 0.0f)
+        r.deScale *= max(mix(1.0f, factor, t), 1e-3f);
+    return r;
+}
+
+// Combined evaluation contract: consume the incoming point/divisor and return
+// both outputs. Scratch values belong only to this sample and operation; never
+// carry geometry caches across arbitrary transforms. New operations can retain
+// the legacy pair of functions through the default adapter below, then opt into
+// a fused implementation when they have shared work worth eliminating.
+FORCE_INLINE SpaceTransform transformWarpOp(SpaceTransform input,
+                                            float3 origin, float originDE,
+                                            SpaceWarpOp op) {
+    float3 p = input.point;
+    SpaceTransform r = input;
+    switch (op.type) {
+        case 0:
+            r.deScale *= warpTwistDEScale(p, op);
+            r.point = warpTwist(p, op);
+            return r;
+        case 1:
+            r.deScale *= warpBendDEScale(p, op);
+            r.point = warpBend(p, op);
+            return r;
+        case 2: r.point = warpMirror(p, op); return r;
+        case 3: r.point = warpBoxFold(p, op); return r;
+        case 6: r.point = warpKaleido(p, op); return r;
+        case 7: r.point = warpRipple(p, op); return r;
+        case 9: r.point = warpShells(p, op); return r;
+        case 10:
+            r.deScale *= warpScaleRepeatDEScale(p, op);
+            r.point = warpScaleRepeat(p, op);
+            return r;
+        case 11: case 18: r.point = warpCoxeter(p, op); return r;
+        case 12: r.point = warpPlaneFold(p, op); return r;
+        case 13: r.point = warpMengerFold(p, op); return r;
+        case 14: r.point = warpTiling(p, op); return r;
+        case 15:
+            r.deScale *= warpScaleDEScale(p, op);
+            r.point = warpScale(p, op);
+            return r;
+        case 16: r.point = warpOffsetFold(p, op); return r;
+        case 19:
+            r.deScale *= warpCompressionShellsDEScale(p, op);
+            r.point = warpCompressionShells(p, op);
+            return r;
+        case 4: case 5: case 8:
+            return transformRadialWarpOp(input, op, op.type);
+        case 17: { // Affine derivative recurrence must preserve origin feedback.
+            float3 folded = fma(clamp(p, -op.p1, op.p1), float3(2.0f), -p);
+            float factor = mandelboxStepSphereScale(folded, op);
+            r.point = fma(folded, factor * op.strength, origin);
+            r.deScale = fma(input.deScale, abs(op.strength) * factor, originDE);
+            return r;
+        }
+        default:
+            r.deScale = warpOpDEUpdate(p, input.deScale, originDE, op);
+            r.point = applyWarpOp(p, origin, op);
+            return r;
+    }
+}
+
 // The deconstructed Mandelbox is the overwhelmingly common repeated group. Keep
 // its three editable uniform ops, but execute their fixed type sequence directly:
 // one coherent group branch and no inner-loop switches. This preserves live child
@@ -1137,8 +1217,7 @@ FORCE_INLINE SpaceTransform transformBoxSphereScaleGroupFast(
     float scaleStretch = warpScaleDEScale(point, scaleOp);
     for (int pass = 0; pass < passes; ++pass) {
         r.point = warpBoxFold(r.point, boxOp);
-        r.deScale *= warpSphereFoldDEScale(r.point, sphereOp);
-        r.point = warpSphereFold(r.point, sphereOp);
+        r = transformRadialWarpOp(r, sphereOp, 4);
         r.deScale *= scaleStretch;
         r.point = warpScale(r.point, scaleOp);
         if (addOriginFeedback) {
@@ -1230,8 +1309,10 @@ FORCE_INLINE float spaceWarpStackDEScale(float3 p, FractalParams params) {
                 for (int iteration = 0; iteration < iterations; ++iteration) {
                     for (int j = 0; j < groupLength; ++j) {
                         SpaceWarpOp op = params.spaceWarpOps[i + j];
-                        scale = warpOpDEUpdate(pt, scale, groupOriginScale, op);
-                        pt = applyWarpOp(pt, groupOrigin, op);
+                        SpaceTransform sample = { pt, scale };
+                        sample = transformWarpOp(sample, groupOrigin, groupOriginScale, op);
+                        pt = sample.point;
+                        scale = sample.deScale;
                     }
                     if (addOriginFeedback) {
                         pt += groupOrigin;
@@ -1241,8 +1322,10 @@ FORCE_INLINE float spaceWarpStackDEScale(float3 p, FractalParams params) {
             }
             i += groupLength;
         } else {
-            scale = warpOpDEUpdate(pt, scale, 1.0f, first);
-            pt = applyWarpOp(pt, stackOrigin, first);
+            SpaceTransform sample = { pt, scale };
+            sample = transformWarpOp(sample, stackOrigin, 1.0f, first);
+            pt = sample.point;
+            scale = sample.deScale;
             ++i;
         }
     }
@@ -1277,9 +1360,7 @@ FORCE_INLINE SpaceTransform spaceWarpStackTransform(float3 p, FractalParams para
                 for (int iteration = 0; iteration < iterations; ++iteration) {
                     for (int j = 0; j < groupLength; ++j) {
                         SpaceWarpOp op = params.spaceWarpOps[i + j];
-                        r.deScale = warpOpDEUpdate(
-                            r.point, r.deScale, groupOriginScale, op);
-                        r.point = applyWarpOp(r.point, groupOrigin, op);
+                        r = transformWarpOp(r, groupOrigin, groupOriginScale, op);
                     }
                     if (addOriginFeedback) {
                         r.point += groupOrigin;
@@ -1289,8 +1370,7 @@ FORCE_INLINE SpaceTransform spaceWarpStackTransform(float3 p, FractalParams para
             }
             i += groupLength;
         } else {
-            r.deScale = warpOpDEUpdate(r.point, r.deScale, 1.0f, first);
-            r.point   = applyWarpOp(r.point, stackOrigin, first);
+            r = transformWarpOp(r, stackOrigin, 1.0f, first);
             ++i;
         }
     }
@@ -1319,8 +1399,8 @@ FORCE_INLINE float applySpaceWarpDEScale(float3 p, FractalParams params) {
 #endif
 }
 // Fused point + DE-divisor for the hot march path. The built-in stack does it in a
-// single sweep; an opaque .threshfx warp can't be fused, so it falls back to its
-// two ABI calls (but those never looped, so no doubling is lost).
+// single sweep. Custom sources may opt into a combined hook; old files retain
+// their two-function ABI without requiring metadata or source rewriting.
 FORCE_INLINE SpaceTransform applySpaceWarpTransform(float3 p, FractalParams params) {
     if (!FC_HAS_SPACEWARP_ON) {   // no-transform variant: identity point, unit divisor
         SpaceTransform r; r.point = p; r.deScale = 1.0f; return r;
@@ -1331,8 +1411,14 @@ FORCE_INLINE SpaceTransform applySpaceWarpTransform(float3 p, FractalParams para
     r.deScale = 1.0f;
     float strength = params.spaceWarpStrength;
     if (strength <= 0.0f) { return r; }
+#ifdef THRESHOLD_CUSTOM_SPACE_WARP_COMBINED
+    r.point = customSpaceWarpCombined(p, strength, params.spaceWarpParam1,
+                                     params.spaceWarpParam2, params.spaceWarpParam3,
+                                     r.deScale);
+#else
     r.deScale = customSpaceWarpDEScale(p, strength, params.spaceWarpParam1, params.spaceWarpParam2, params.spaceWarpParam3);
     r.point   = customSpaceWarp(p, strength, params.spaceWarpParam1, params.spaceWarpParam2, params.spaceWarpParam3);
+#endif
     return r;
 #else
     return spaceWarpStackTransform(p, params);
