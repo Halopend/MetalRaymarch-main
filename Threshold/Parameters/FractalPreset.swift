@@ -11,6 +11,7 @@ import Foundation
 import ImageIO
 import simd
 import CryptoKit
+import Compression
 
 #if os(visionOS) || os(iOS)
 typealias PlatformImage = UIImage
@@ -1830,5 +1831,89 @@ extension FractalPreset {
     /// excluding custom embedded-formula scenes.
     var isKeyboardSwitchableStaticPreset: Bool {
         !isCustomScenePreset
+    }
+}
+
+// MARK: - Scene file compression
+
+/// Shared by the app and Quick Look. The magic identifies a versioned LZFSE
+/// envelope; files without it remain ordinary JSON, regardless of extension.
+/// Kept here because this source is compiled into all three targets.
+enum SceneFileCodec {
+    private static let magic = Data("THRSCN01".utf8)
+    private static let headerSize = 48 // magic + decoded length + SHA-256
+    static let maximumJSONSize = 64 * 1024 * 1024
+
+    enum FileError: LocalizedError {
+        case tooLarge, invalidCompressedFile
+        var errorDescription: String? {
+            switch self {
+            case .tooLarge: return "The scene exceeds the 64 MB file size limit."
+            case .invalidCompressedFile: return "The compressed scene is damaged or uses an unsupported format."
+            }
+        }
+    }
+
+    static func isCompressed(_ data: Data) -> Bool {
+        data.starts(with: magic)
+    }
+
+    static func encode<T: Encodable>(_ value: T, encoder: JSONEncoder) throws -> Data {
+        try compressJSON(encoder.encode(value))
+    }
+
+    static func decode<T: Decodable>(_ type: T.Type, from data: Data, decoder: JSONDecoder) throws -> T {
+        try decoder.decode(type, from: jsonData(from: data))
+    }
+
+    static func compressJSON(_ json: Data) throws -> Data {
+        guard json.count <= maximumJSONSize else { throw FileError.tooLarge }
+        guard !json.isEmpty else { return json }
+        let capacity = json.count + json.count / 8 + 1024
+        var compressed = Data(count: capacity)
+        let count = compressed.withUnsafeMutableBytes { destination in
+            json.withUnsafeBytes { source in
+                compression_encode_buffer(destination.bindMemory(to: UInt8.self).baseAddress!, capacity,
+                    source.bindMemory(to: UInt8.self).baseAddress!, json.count, nil, COMPRESSION_LZFSE)
+            }
+        }
+        // Small or incompressible documents can stay JSON. Detection is by
+        // content, so both representations remain interchangeable.
+        guard count > 0, count + headerSize < json.count else { return json }
+        var result = magic
+        let length = UInt64(json.count)
+        for shift in stride(from: 56, through: 0, by: -8) {
+            result.append(UInt8(truncatingIfNeeded: length >> shift))
+        }
+        result.append(contentsOf: SHA256.hash(data: json))
+        result.append(compressed.prefix(count))
+        return result
+    }
+
+    static func jsonData(from data: Data) throws -> Data {
+        guard data.count <= maximumJSONSize + headerSize else { throw FileError.tooLarge }
+        guard isCompressed(data) else {
+            // Recognize the envelope family, so future versions fail clearly
+            // instead of being mistaken for malformed JSON.
+            if data.starts(with: Data("THRSCN".utf8)) { throw FileError.invalidCompressedFile }
+            return data
+        }
+        guard data.count > headerSize else { throw FileError.invalidCompressedFile }
+        let length = data.dropFirst(8).prefix(8).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+        guard length > 0, length <= UInt64(maximumJSONSize) else { throw FileError.tooLarge }
+        let expectedSize = Int(length)
+        let payload = Data(data.dropFirst(headerSize))
+        var json = Data(count: expectedSize)
+        let count = json.withUnsafeMutableBytes { destination in
+            payload.withUnsafeBytes { source in
+                compression_decode_buffer(destination.bindMemory(to: UInt8.self).baseAddress!, expectedSize,
+                    source.bindMemory(to: UInt8.self).baseAddress!, payload.count, nil, COMPRESSION_LZFSE)
+            }
+        }
+        guard count == expectedSize,
+              Data(SHA256.hash(data: json)) == Data(data.dropFirst(16).prefix(32)) else {
+            throw FileError.invalidCompressedFile
+        }
+        return json
     }
 }

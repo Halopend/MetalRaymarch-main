@@ -36,7 +36,7 @@ enum ThresholdPreviewRender {
 
     private static func renderScene(url: URL, pixelSize: CGSize) -> CGImage? {
         guard let data = try? Data(contentsOf: url),
-              let preset = try? decoder.decode(FractalPreset.self, from: data) else {
+              let preset = try? SceneFileCodec.decode(FractalPreset.self, from: data, decoder: decoder) else {
             return infoCard(title: url.deletingPathExtension().lastPathComponent,
                             subtitle: "Threshold Scene", pixelSize: pixelSize)
         }
@@ -53,7 +53,7 @@ enum ThresholdPreviewRender {
     // MARK: - Animation / formula info cards (minimal local decoders)
 
     private static func animationCard(url: URL, pixelSize: CGSize) -> CGImage? {
-        let meta = (try? Data(contentsOf: url)).flatMap { try? decoder.decode(AnimationMeta.self, from: $0) }
+        let meta = (try? Data(contentsOf: url)).flatMap { try? SceneFileCodec.decode(AnimationMeta.self, from: $0, decoder: decoder) }
         let title = meta?.name ?? url.deletingPathExtension().lastPathComponent
         let n = meta?.keyframes?.count ?? 0
         return infoCard(title: title, subtitle: "Animation · \(n) keyframe\(n == 1 ? "" : "s")", pixelSize: pixelSize)

@@ -36,6 +36,23 @@ extension ContentView {
                     libraryStore: appModel.library,
                     librarySelection: exploreLibrarySelectionBinding,
                     usesListLayout: usesPortraitIPadLayout,
+                    captureCurrentScene: { original in
+                        var updated = FractalPreset.fromSettings(
+                            appModel.renderSettings,
+                            name: original.name,
+                            id: original.id,
+                            createdAt: original.createdAt,
+                            thumbnailData: generatedPresetPreviewData(named: original.name),
+                            embeddedFormula: appModel.activeEmbeddedFormula
+                        )
+                        updated.tags = original.tags
+                        updated.platformVisibility = original.platformVisibility
+                        updated.categoryPath = original.categoryPath
+                        updated.jumpingOff = original.jumpingOff
+                        updated.rating = original.rating
+                        updated.mixedModeScene = original.mixedModeScene
+                        return updated
+                    },
                     onCreateAnimation: { openAnimationEditor() },
                     onEditScene: openAnimationEditor,
                     onLoadAnimationScene: { _ in

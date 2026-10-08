@@ -78,7 +78,7 @@ struct PresetFolderCategoryTests {
         return enumerator.compactMap { $0 as? URL }.filter { url in
             guard exts.contains(url.pathExtension),
                   let data = try? Data(contentsOf: url),
-                  let preset = try? isoDecoder.decode(FractalPreset.self, from: data)
+                  let preset = try? SceneFileCodec.decode(FractalPreset.self, from: data, decoder: isoDecoder)
             else { return false }
             return preset.id == id
         }
@@ -185,7 +185,7 @@ struct PresetFolderCategoryTests {
         // The original file (planted without a hint) may briefly coexist with
         // the replacement, so assert that the hint was written somewhere.
         let hints = storedURLs(id: scene.id, under: root).compactMap { url -> [String]? in
-            (try? isoDecoder.decode(FractalPreset.self, from: Data(contentsOf: url)))?.categoryPath
+            (try? SceneFileCodec.decode(FractalPreset.self, from: Data(contentsOf: url), decoder: isoDecoder))?.categoryPath
         }
         #expect(hints.contains(["Caverns", "Ice Caves"]),
                 "a saved scene should carry its folder path for sharing; got \(hints)")

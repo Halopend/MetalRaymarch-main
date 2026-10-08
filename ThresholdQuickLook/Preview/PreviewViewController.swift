@@ -108,7 +108,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
             }
             guard HeadlessRenderer.shared != nil,
                   let data = try? Data(contentsOf: url),
-                  let preset = try? ThresholdPreviewRender.decoder.decode(FractalPreset.self, from: data),
+                  let preset = try? SceneFileCodec.decode(FractalPreset.self, from: data, decoder: ThresholdPreviewRender.decoder),
                   !(preset.fractalType == .custom && preset.embeddedFormula == nil) else { return nil }
             let settings = RenderSettings()
             preset.apply(to: settings)

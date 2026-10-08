@@ -750,7 +750,7 @@ struct ContentView: View {
         }
     }
 
-    private func generatedPresetPreviewData(named name: String) -> Data? {
+    func generatedPresetPreviewData(named name: String) -> Data? {
         PresetPreviewGenerator.makePNGData(
             name: name,
             fractalType: appModel.renderSettings.fractalType,

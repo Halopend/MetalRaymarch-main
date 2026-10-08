@@ -65,6 +65,10 @@ private enum FractalSceneSelection: Equatable {
 }
 
 struct FractalGridView: View {
+    #if os(macOS)
+    @Environment(AppModel.self) private var appModel
+    @State private var isHoldingSceneEditorAdjustment = false
+    #endif
     let animationManager: AnimationManager?
     let presetManager: PresetManager?
     /// Filesystem-derived folder/category snapshot, so a folder with no scenes
@@ -72,6 +76,7 @@ struct FractalGridView: View {
     /// to folder paths derived from loaded scenes.
     let libraryStore: LibraryStore?
     let usesListLayout: Bool
+    var captureCurrentScene: ((FractalPreset) -> FractalPreset)? = nil
     var onCreateAnimation: (() -> Void)? = nil
     var onEditScene: ((AnimationScene) -> Void)? = nil
     var onLoadAnimationScene: ((AnimationScene) -> Void)? = nil
@@ -101,6 +106,7 @@ struct FractalGridView: View {
         libraryStore: LibraryStore? = nil,
         librarySelection: Binding<LibrarySidebarSelection>? = nil,
         usesListLayout: Bool = false,
+        captureCurrentScene: ((FractalPreset) -> FractalPreset)? = nil,
         onCreateAnimation: (() -> Void)? = nil,
         onEditScene: ((AnimationScene) -> Void)? = nil,
         onLoadAnimationScene: ((AnimationScene) -> Void)? = nil,
@@ -109,6 +115,7 @@ struct FractalGridView: View {
         self.animationManager = animationManager
         self.presetManager = presetManager
         self.libraryStore = libraryStore
+        self.captureCurrentScene = captureCurrentScene
         self.usesListLayout = usesListLayout
         self.librarySelection = librarySelection
         self.onCreateAnimation = onCreateAnimation
@@ -200,9 +207,10 @@ struct FractalGridView: View {
             }
             if !stillExists { selectedCategoryPath = nil }
         }
-        .sheet(item: $selectedStaticSceneForEdit) { preset in
+        .onDisappear { releaseSceneEditorAdjustment() }
+        .sheet(item: $selectedStaticSceneForEdit, onDismiss: releaseSceneEditorAdjustment) { preset in
             if let presetManager {
-                StaticSceneSettingsView(preset: preset, presetManager: presetManager)
+                StaticSceneSettingsView(preset: preset, presetManager: presetManager, captureCurrentScene: captureCurrentScene)
             }
         }
     }
@@ -531,8 +539,22 @@ struct FractalGridView: View {
     private func staticSceneEditAction(for preset: FractalPreset) -> (() -> Void)? {
         guard presetManager != nil else { return nil }
         return {
+            #if os(macOS)
+            if !isHoldingSceneEditorAdjustment {
+                isHoldingSceneEditorAdjustment = true
+                appModel.beginMenuAdjustment()
+            }
+            #endif
             selectedStaticSceneForEdit = preset
         }
+    }
+
+    private func releaseSceneEditorAdjustment() {
+        #if os(macOS)
+        guard isHoldingSceneEditorAdjustment else { return }
+        isHoldingSceneEditorAdjustment = false
+        appModel.endMenuAdjustment()
+        #endif
     }
 
     private func animatedScenes(in animationManager: AnimationManager) -> [AnimationScene] {
@@ -894,10 +916,9 @@ struct FractalGridView: View {
 
         if let onEdit {
             card
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.6, maximumDistance: 24)
-                        .onEnded { _ in onEdit() }
-                )
+                .contextMenu {
+                    Button("Edit Scene…", systemImage: "slider.horizontal.3", action: onEdit)
+                }
                 .accessibilityAction(named: Text("Edit Scene")) {
                     onEdit()
                 }
@@ -939,17 +960,52 @@ struct FractalGridView: View {
 
 // MARK: - Static Scene Settings
 
-/// Metadata editor reached by long-pressing any static scene card.
+/// Scene editor reached from a scene card’s context menu or long press.
 private struct StaticSceneSettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State var preset: FractalPreset
     let presetManager: PresetManager
+    var captureCurrentScene: ((FractalPreset) -> FractalPreset)?
+    @State private var parameterJSON = ""
     @State private var saveError: String?
 
     var body: some View {
         NavigationStack {
             Form {
+                Section("Scene") {
+                    TextField("Name", text: $preset.name)
+                    if let captureCurrentScene {
+                        Button("Use Current Tweaks", systemImage: "arrow.down.doc") {
+                            do {
+                                try applyParameterDraft()
+                                preset = captureCurrentScene(preset)
+                                try refreshParameterDraft()
+                            } catch {
+                                saveError = error.localizedDescription
+                            }
+                        }
+                        Text("Copies the current live parameters into this draft. Save overwrites this scene; Cancel discards the draft.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Parameters (JSON)") {
+                    TextEditor(text: $parameterJSON)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(height: 260)
+                        .padding(6)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(.secondary.opacity(0.3))
+                        }
+                        .autocorrectionDisabled()
+                    Text("Edit sceneState for scene parameters. Name, tags, and presentation options below are saved separately.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Presentation") {
                     ScreenOnlySceneToggle(visibility: $preset.platformVisibility)
 
@@ -991,6 +1047,7 @@ private struct StaticSceneSettingsView: View {
                     SceneTagEditor(tags: $preset.tags)
                 }
             }
+            .formStyle(.grouped)
             .navigationTitle(preset.name)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1000,6 +1057,13 @@ private struct StaticSceneSettingsView: View {
                     Button("Save") { save() }
                 }
             }
+        }
+        #if os(macOS)
+        .frame(width: 680, height: 720)
+        #endif
+        .onAppear {
+            do { try refreshParameterDraft() }
+            catch { saveError = error.localizedDescription }
         }
         .alert(
             "Couldn’t Save Scene",
@@ -1014,7 +1078,48 @@ private struct StaticSceneSettingsView: View {
         }
     }
 
+    private func refreshParameterDraft() throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        var document = try JSONSerialization.jsonObject(with: encoder.encode(preset)) as! [String: Any]
+        // Keep image data out of the editor and make typed state authoritative,
+        // so legacy compatibility fields cannot undo edits to sceneState.
+        document.removeValue(forKey: "thumbnailData")
+        if preset.sceneState != nil {
+            document["canonicalStateOnly"] = true
+        }
+        parameterJSON = String(decoding: try JSONSerialization.data(withJSONObject: document, options: [.prettyPrinted, .sortedKeys]), as: UTF8.self)
+    }
+
+    private func applyParameterDraft() throws {
+        var edited = try JSONDecoder().decode(FractalPreset.self, from: Data(parameterJSON.utf8))
+        guard edited.id == preset.id else {
+            throw NSError(domain: "SceneEditor", code: 1, userInfo: [NSLocalizedDescriptionKey: "The scene ID cannot be changed."])
+        }
+        edited.name = preset.name
+        edited.tags = preset.tags
+        edited.platformVisibility = preset.platformVisibility
+        edited.jumpingOff = preset.jumpingOff
+        edited.mixedModeScene = preset.mixedModeScene
+        if edited.mixedModeScene == true {
+            edited.sceneState?.presentation.immersionStyle = nil
+        }
+        edited.categoryPath = preset.categoryPath
+        edited.createdAt = preset.createdAt
+        edited.thumbnailData = preset.thumbnailData
+        preset = edited
+    }
+
     private func save() {
+        do { try applyParameterDraft() }
+        catch {
+            saveError = error.localizedDescription
+            return
+        }
+        guard !preset.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            saveError = "Enter a scene name."
+            return
+        }
         switch presetManager.updatePreset(preset) {
         case .saved, .queuedForStorage:
             dismiss()

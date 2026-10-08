@@ -656,7 +656,7 @@ class PresetManager {
             }
 
             guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
-                  var preset = try? decoder.decode(FractalPreset.self, from: data) else {
+                  var preset = try? SceneFileCodec.decode(FractalPreset.self, from: data, decoder: decoder) else {
                 if isPlaceholderProbe {
                     failedPlaceholderProbeURLs.insert(url)
                 }
@@ -917,7 +917,7 @@ class PresetManager {
             // encoder also re-emits the legacy visibility tag.)
             var stored = preset
             stored.categoryPath = LibraryIndex.categoryPath(for: url, root: root)
-            let data = try presetEncoder.encode(stored)
+            let data = try SceneFileCodec.encode(stored, encoder: presetEncoder)
             try data.write(to: url, options: .atomic)
             return url
         } catch {
@@ -959,7 +959,7 @@ class PresetManager {
                     guard !excluded.contains(url.standardizedFileURL) else { continue }
                     if Self.isUnmaterializedPlaceholder(url) { continue }
                     if let data = try? Data(contentsOf: url),
-                       let preset = try? decoder.decode(FractalPreset.self, from: data), ids.contains(preset.id) {
+                       let preset = try? SceneFileCodec.decode(FractalPreset.self, from: data, decoder: decoder), ids.contains(preset.id) {
                         try? FileManager.default.removeItem(at: url)
                     }
                 }
@@ -1437,7 +1437,7 @@ class PresetManager {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(preset)
+            let data = try SceneFileCodec.encode(preset, encoder: encoder)
             try data.write(to: tempURL)
             return tempURL
         } catch {
@@ -1448,7 +1448,7 @@ class PresetManager {
 
     func decodePreset(from url: URL) throws -> FractalPreset {
         let data = try Data(contentsOf: url)
-        return try presetDecoder.decode(FractalPreset.self, from: data)
+        return try SceneFileCodec.decode(FractalPreset.self, from: data, decoder: presetDecoder)
     }
 
     @discardableResult
@@ -1547,7 +1547,7 @@ extension PresetManager {
         for url in allURLs {
             do {
                 let data = try Data(contentsOf: url)
-                presets.append(try decoder.decode(FractalPreset.self, from: data))
+                presets.append(try SceneFileCodec.decode(FractalPreset.self, from: data, decoder: decoder))
             } catch {
                 print("⚠️ DefaultPresets: failed to decode \(url.lastPathComponent) — \(error)")
             }
@@ -1625,7 +1625,7 @@ extension PresetManager {
             let data = try Data(contentsOf: lastStateFileURL)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            let preset = try decoder.decode(FractalPreset.self, from: data)
+            let preset = try SceneFileCodec.decode(FractalPreset.self, from: data, decoder: decoder)
             preset.apply(to: settings, scope: .session)
             print("✅ Last state restored")
             return preset

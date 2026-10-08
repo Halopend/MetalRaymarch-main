@@ -85,7 +85,7 @@ struct RenderCheck {
             let name = (f as NSString).deletingPathExtension
             let url = URL(fileURLWithPath: scenesDir).appendingPathComponent(f)
             guard let data = try? Data(contentsOf: url),
-                  let preset = try? dec.decode(FractalPreset.self, from: data) else {
+                  let preset = try? SceneFileCodec.decode(FractalPreset.self, from: data, decoder: dec) else {
                 failures.append("\(name): decode failed"); continue
             }
             guard let cg = renderer.render(preset: preset, pixelSize: CGSize(width: 512, height: 512)) else {
