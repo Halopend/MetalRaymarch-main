@@ -244,7 +244,7 @@ struct GradientStopRow: View {
                 .monospacedDigit()
                 .frame(width: 35)
             
-            Slider(value: $localPosition, in: 0...1, onEditingChanged: { editing in
+            ParameterSlider(value: $localPosition, in: 0...1, onEditingChanged: { editing in
                 if !editing {
                     var updated = stop
                     updated.position = localPosition

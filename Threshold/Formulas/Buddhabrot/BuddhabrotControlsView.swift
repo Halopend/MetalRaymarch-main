@@ -297,7 +297,7 @@ private struct SliderRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            Slider(value: $value, in: range)
+            ParameterSlider(value: $value, in: range)
         }
         .padding(.vertical, 2)
     }

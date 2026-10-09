@@ -356,6 +356,38 @@ private final class NonBlockingDrawableProvider: @unchecked Sendable {
 }
 #endif
 
+/// Transfers a fully compiled fluid renderer from a private build queue.
+private final class ViewportNavierPipelineSlot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var requested = false
+    private var ready: NavierStrokesRenderer?
+    private let queue = DispatchQueue(
+        label: "com.polinate.threshold.viewport-navier-pipelines", qos: .utility)
+
+    // The builder exclusively owns the renderer until publication under the
+    // lock. Taking it transfers ownership to the render loop; the builder never
+    // accesses it again. Failed builds stay disabled rather than retry per frame.
+    func takeOrRequest(device: MTLDevice, colorFormat: MTLPixelFormat) -> NavierStrokesRenderer? {
+        lock.lock()
+        let result = ready
+        ready = nil
+        let shouldRequest = !requested
+        requested = true
+        lock.unlock()
+        if shouldRequest {
+            queue.async { [self] in
+                let renderer = NavierStrokesRenderer(device: device)
+                guard renderer.ensurePipelines(),
+                      renderer.ensureCompositeFragmentPipeline(colorFormat: colorFormat) else { return }
+                lock.lock()
+                ready = renderer
+                lock.unlock()
+            }
+        }
+        return result
+    }
+}
+
 /// Owns the asynchronously compiled generic (unspecialized) `fragmentShaderMono`
 /// pipeline. On a cold GPU shader cache that single compile takes several
 /// seconds on iPad; building it inside `ViewportRenderer.init` — which runs on
@@ -367,11 +399,23 @@ private final class NonBlockingDrawableProvider: @unchecked Sendable {
 final class ViewportGenericPipelineSlot: @unchecked Sendable {
     private let lock = NSLock()
     private var pipeline: MTLRenderPipelineState?
+    private var blitPipeline: MTLRenderPipelineState?
+    private var motionPipeline: MTLRenderPipelineState?
     private var onReady: (@MainActor () -> Void)?
 
     var current: MTLRenderPipelineState? {
         lock.lock(); defer { lock.unlock() }
         return pipeline
+    }
+
+    var blit: MTLRenderPipelineState? {
+        lock.lock(); defer { lock.unlock() }
+        return blitPipeline
+    }
+
+    var motion: MTLRenderPipelineState? {
+        lock.lock(); defer { lock.unlock() }
+        return motionPipeline
     }
 
     /// Install the readiness callback. Fires immediately (on the main actor)
@@ -384,9 +428,13 @@ final class ViewportGenericPipelineSlot: @unchecked Sendable {
         if ready, let handler { Task { @MainActor in handler() } }
     }
 
-    func publish(_ built: MTLRenderPipelineState) {
+    func publish(_ built: MTLRenderPipelineState,
+                 blit: MTLRenderPipelineState? = nil,
+                 motion: MTLRenderPipelineState? = nil) {
         lock.lock()
         pipeline = built
+        blitPipeline = blit
+        motionPipeline = motion
         let handler = onReady
         lock.unlock()
         if let handler { Task { @MainActor in handler() } }
@@ -628,8 +676,8 @@ final class ViewportRenderer {
     private let customShaderBox = ViewportCustomShaderBox()
     private let spatialUpscaler: ViewportSpatialUpscaler
     private let temporalUpscaler: ViewportTemporalUpscaler
-    private let blitPipelineState: MTLRenderPipelineState?
-    private let motionPipelineState: MTLRenderPipelineState?
+    private var blitPipelineState: MTLRenderPipelineState? { genericPipelineSlot.blit }
+    private var motionPipelineState: MTLRenderPipelineState? { genericPipelineSlot.motion }
     private let clearColor: MTLClearColor
     private let inputController: ViewportInputAccumulator
     private let uiUpdateCoordinator: UIUpdateCoordinator
@@ -680,6 +728,7 @@ final class ViewportRenderer {
     // then presents the filtered source untouched (identity bypass).
     // ═════════════════════════════════════════════════════════════════════════
     private var navierStrokesRenderer: NavierStrokesRenderer?
+    private let navierPipelineSlot = ViewportNavierPipelineSlot()
     private var navierStrokesSourceTexture: MTLTexture?
     private var navierStrokesCompositePipeline: MTLRenderPipelineState?
     private var navierStrokesCompositePipelineColorFormat: MTLPixelFormat?
@@ -763,7 +812,12 @@ final class ViewportRenderer {
                     depthPixelFormat: depthPixelFormat,
                     vertexDescriptor: Self.buildMetalVertexDescriptor()
                 )
-                slot.publish(pipeline)
+                // These also invoke synchronous Metal compilation. Publishing
+                // them together keeps makeUIView responsive and ensures the
+                // first frame can use the requested reduced-resolution path.
+                let blit = Self.buildBlitPipeline(device: device, colorPixelFormat: colorPixelFormat)
+                let motion = Self.buildMotionPipeline(device: device)
+                slot.publish(pipeline, blit: blit, motion: motion)
             } catch {
                 print("Threshold viewport generic pipeline build failed: \(error)")
             }
@@ -783,8 +837,6 @@ final class ViewportRenderer {
         temporalUpscaler = ViewportTemporalUpscaler(device: device,
                                                colorFormat: colorPixelFormat,
                                                depthFormat: depthPixelFormat)
-        blitPipelineState = Self.buildBlitPipeline(device: device, colorPixelFormat: colorPixelFormat)
-        motionPipelineState = Self.buildMotionPipeline(device: device)
 
         let depthDescriptor = MTLDepthStencilDescriptor()
         depthDescriptor.depthCompareFunction = .less
@@ -1747,12 +1799,12 @@ final class ViewportRenderer {
         return created
     }
 
-    /// Lazily builds the sim manager (plain `makeRenderPipelineState` — this
-    /// type is shared with the visionOS renderer, whose binary archive lives
-    /// behind visionOS-only targets).
+    /// Skip the effect while its pipelines compile away from the UI/render
+    /// thread. The published manager already owns every required pipeline.
     private func ensureNavierStrokesRenderer() -> NavierStrokesRenderer? {
         if let navierStrokesRenderer { return navierStrokesRenderer }
-        let renderer = NavierStrokesRenderer(device: device)
+        let renderer = navierPipelineSlot.takeOrRequest(
+            device: device, colorFormat: metalLayer.pixelFormat)
         navierStrokesRenderer = renderer
         return renderer
     }

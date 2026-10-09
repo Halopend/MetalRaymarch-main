@@ -147,7 +147,7 @@ extension ContentView {
             // Signed speed: zoom out ← center (still) → zoom in
             HStack(spacing: 8) {
                 Text("Out").font(.caption2).foregroundStyle(.secondary)
-                Slider(
+                ParameterSlider(
                     value: Binding(
                         get: { appModel.renderSettings.infiniteZoomRate },
                         set: { appModel.renderSettings.infiniteZoomRate = $0 }

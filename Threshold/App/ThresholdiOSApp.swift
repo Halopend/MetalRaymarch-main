@@ -128,15 +128,14 @@ private struct ThresholdiOSRootView: View {
                 .ignoresSafeArea()
                 .background(Color.black)
                 .overlay(alignment: .topTrailing) {
-                    if !isFormulaEditorPresented {
+                    if !isFormulaEditorPresented && (isPhone || !isShowingControls) {
                         phoneAwareControls(
                             viewportSize: proxy.size,
                             safeAreaInsets: safeAreaInsets
                         )
-                            // The overlay already starts inside the safe area. Phones only
-                            // need a small local margin; iPad keeps extra window-chrome clearance.
-                            .padding(.top, isPhone ? 4 : max(16, safeAreaInsets.top + 8))
-                            .padding(.trailing, isPhone ? max(10, safeAreaInsets.trailing + 6) : max(16, safeAreaInsets.trailing + 8))
+                            // This overlay is already inside the window safe area.
+                            .padding(.top, isPhone ? 4 : 8)
+                            .padding(.trailing, isPhone ? 10 : 16)
                             .transition(.opacity)
                     }
                 }
@@ -155,11 +154,11 @@ private struct ThresholdiOSRootView: View {
                 }
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: appModel.rendererStartupWarmupComplete)
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: appModel.presetManager.isIndexingPresetFiles)
-                .inspector(isPresented: $isShowingControls) {
-                    ThresholdiOSInspectorContent(isShowingControls: $isShowingControls)
-                        .environment(appModel)
-                        .inspectorColumnWidth(min: widths.min, ideal: widths.ideal, max: widths.max)
-                }
+                .modifier(ThresholdiOSControlsPresentation(
+                    isShowingControls: $isShowingControls,
+                    isPhone: isPhone,
+                    widths: widths
+                ))
                 .accessibilityAction(named: Text("Open radial controls")) {
                     toggleRadialMenu(
                         at: CGPoint(x: proxy.size.width * 0.5, y: proxy.size.height * 0.5),
@@ -339,12 +338,15 @@ private struct ThresholdiOSRootView: View {
 
     private func inspectorColumnWidths(for size: CGSize) -> (min: CGFloat, ideal: CGFloat, max: CGFloat) {
         let availableWidth = max(size.width, 1)
-        // Leave a little room for the system's window/inspector chrome and never
-        // advertise a column wider than the current Stage Manager/Split View
-        // window. The normal 340-point floor yields only when the window is
-        // genuinely narrower than that.
-        let widthCeiling = max(1, availableWidth - 32)
-        let preferredIdeal = max(460, availableWidth * (size.width > size.height ? 0.66 : 0.72))
+        // Keep the iPad panel readable without covering most of the artwork.
+        // A narrow Stage Manager/Split View window can use its full width;
+        // the phone inspector still leaves room for system sheet chrome.
+        let widthCeiling = isPhone ? max(1, availableWidth - 32) : availableWidth
+        // Give iPad's inspector enough room for its section controls and dense
+        // parameter rows. The former 620pt cap made it feel like a narrow
+        // floating drawer on larger iPads; keep a generous width while leaving
+        // a useful slice of the canvas visible on either orientation.
+        let preferredIdeal = isPhone ? max(460, availableWidth * 0.72) : min(760, max(560, availableWidth * 0.76))
         let idealWidth = min(preferredIdeal, widthCeiling)
         let minWidth = min(340, idealWidth)
         let maxWidth = min(widthCeiling, max(idealWidth, availableWidth * 0.82))
@@ -473,18 +475,94 @@ private struct ThresholdiOSRootView: View {
     }
 }
 
-private struct ThresholdiOSInspectorContent: View {
+/// iPad scene selection auto-hides the controls. Keeping its panel in the
+/// SwiftUI hierarchy avoids a UIKit split-view dismissal while the scene load
+/// updates the explorer and viewport. The native adaptive inspector remains
+/// useful on phones, where it supplies sheet detents and dismissal gestures.
+private struct ThresholdiOSControlsPresentation: ViewModifier {
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @State private var sliderPreview = ParameterSliderPreview()
     @Binding var isShowingControls: Bool
+    let isPhone: Bool
+    let widths: (min: CGFloat, ideal: CGFloat, max: CGFloat)
 
-    private let swipeDismissThreshold: CGFloat = 90
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isPhone {
+            content.inspector(isPresented: $isShowingControls) {
+                ThresholdiOSInspectorContent()
+                    .inspectorColumnWidth(min: widths.min, ideal: widths.ideal, max: widths.max)
+            }
+        } else {
+            content.overlay(alignment: .trailing) {
+                if isShowingControls {
+                    VStack(spacing: 0) {
+                        HStack {
+                            Text("Controls")
+                                .font(.headline)
+                                .accessibilityAddTraits(.isHeader)
+                            Spacer()
+                            Button {
+                                withAnimation(reduceMotion ? nil : MenuChrome.panelSpring) {
+                                    isShowingControls = false
+                                }
+                            } label: {
+                                Image(systemName: "sidebar.right")
+                                    .font(.system(size: 20, weight: .medium))
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Hide controls")
+                            .help("Hide controls")
+                        }
+                        .padding(.leading, 20)
+                        .padding(.trailing, 8)
+                        .padding(.vertical, 4)
+                        Divider()
+                        ThresholdiOSInspectorContent()
+                            .environment(\.parameterSliderPreview, sliderPreview)
+                    }
+                    .frame(width: widths.ideal)
+                    .frame(maxHeight: .infinity)
+                    .background {
+                        Rectangle()
+                            .fill(.regularMaterial)
+                            // Extend only the surface under status/home chrome;
+                            // the title and controls stay in the usable safe area.
+                            .ignoresSafeArea(.container, edges: [.top, .bottom, .trailing])
+                    }
+                    .overlay(alignment: .leading) {
+                        Divider()
+                            .ignoresSafeArea(.container, edges: .vertical)
+                            .allowsHitTesting(false)
+                    }
+                    // Keep the exact same controls and hit targets throughout
+                    // the drag, including when previewing the artwork beneath.
+                    .opacity(appModel.isAudioReactivityIsolationPreviewActive ? 0 :
+                        (sliderPreview.isAdjusting && !reduceTransparency ? 0.12 : 1))
+                    // SwiftUI can exclude low-opacity views from automatic hit
+                    // testing. Keep touch-up delivery explicit during preview.
+                    .allowsHitTesting(true)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.18),
+                               value: sliderPreview.isAdjusting)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
+        }
+    }
+}
+
+private struct ThresholdiOSInspectorContent: View {
+    @Environment(AppModel.self) private var appModel
 
     var body: some View {
         ContentView()
             .environment(appModel)
-            // The controls always live in an inspector column, even when the
-            // enclosing iPad window has a regular size class. Mark the column
+            // The controls live in a side panel or inspector column, even when
+            // the enclosing iPad window has a regular size class. Mark the column
             // compact so ContentView selects its rail-free responsive shell.
             .environment(\.horizontalSizeClass, .compact)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -498,52 +576,6 @@ private struct ThresholdiOSInspectorContent: View {
             // the renderer beneath the Audio Reactivity preview.
             .presentationBackground(.clear)
             .opacity(appModel.isAudioReactivityIsolationPreviewActive ? 0 : 1)
-            .overlay(alignment: .leading) {
-                // iPhone already supplies native sheet drag affordances. The
-                // side rail looked like a stray scrollbar and competed with
-                // the system's interactive dismissal gesture.
-                if UIDevice.current.userInterfaceIdiom != .phone {
-                    swipeDismissHandle
-                }
-            }
-    }
-
-    private var swipeDismissHandle: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color.white.opacity(0.14), Color.clear],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-
-            Capsule()
-                .fill(Color.white.opacity(0.32))
-                .frame(width: 4, height: 52)
-        }
-        .frame(width: 26)
-        .frame(maxHeight: .infinity)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 10)
-                .onEnded { value in
-                    let horizontalDistance = value.translation.width
-                    let verticalDistance = abs(value.translation.height)
-                    guard horizontalDistance > swipeDismissThreshold,
-                          horizontalDistance > verticalDistance * 1.25 else { return }
-
-                    withAnimation(reduceMotion ? nil : MenuChrome.panelSpring) {
-                        isShowingControls = false
-                    }
-                }
-        )
-        .accessibilityLabel("Swipe right to dismiss controls")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint("Dismisses the control inspector")
-        .accessibilityAction {
-            withAnimation(reduceMotion ? nil : MenuChrome.panelSpring) {
-                isShowingControls = false
-            }
-        }
     }
 }
 #endif

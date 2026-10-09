@@ -347,7 +347,7 @@ private struct ParameterNodeRow: View {
                     .frame(width: 66, alignment: .leading)
                     .lineLimit(1)
 
-                  Slider(value: sensitivitySliderPosition,
+                  ParameterSlider(value: sensitivitySliderPosition,
                       in: 0...1)
                     .tint(.orange)
                     .onChange(of: sensitivityValue) { _, newVal in
@@ -605,7 +605,7 @@ private struct TripletRow: View {
                         .font(.caption2)
                         .foregroundStyle(.pink)
                         .frame(width: 32, alignment: .leading)
-                    Slider(
+                    ParameterSlider(
                         value: Binding(
                             get: { tripletGain },
                             set: { setTripletGain($0) }

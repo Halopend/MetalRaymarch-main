@@ -35,6 +35,7 @@ struct ContentView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.parameterSliderPreview) private var parameterSliderPreview
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openWindow) var openWindow
     @Environment(\.dismissWindow) var dismissWindow
@@ -650,7 +651,11 @@ struct ContentView: View {
 
     @ViewBuilder
     private var menuSurfaceBackground: some View {
-        if usesCompactWorkspaceLayout {
+        if parameterSliderPreview != nil {
+            // The iPad side panel owns one continuous material surface from
+            // the status bar to the home indicator, including its toolbar.
+            Color.clear
+        } else if usesCompactWorkspaceLayout {
             // The iPad inspector is already a bounded system surface. Extending
             // a rectangular fill through its vertical safe-area insets removes
             // the empty bands left by treating that column as a floating card.

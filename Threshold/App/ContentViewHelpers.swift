@@ -43,6 +43,75 @@ extension EnvironmentValues {
     }
 }
 
+/// Tracks individual touches so overlapping drags and disappearing controls
+/// cannot leave the iPad panel stuck in its preview appearance.
+@Observable
+@MainActor
+final class ParameterSliderPreview {
+    private var activeControls: Set<UUID> = []
+    var isAdjusting: Bool { !activeControls.isEmpty }
+
+    func setEditing(_ editing: Bool, for control: UUID) {
+        if editing { activeControls.insert(control) }
+        else { activeControls.remove(control) }
+    }
+}
+
+private struct ParameterSliderPreviewKey: EnvironmentKey {
+    static let defaultValue: ParameterSliderPreview? = nil
+}
+
+extension EnvironmentValues {
+    var parameterSliderPreview: ParameterSliderPreview? {
+        get { self[ParameterSliderPreviewKey.self] }
+        set { self[ParameterSliderPreviewKey.self] = newValue }
+    }
+}
+
+/// Uses the native slider's editing edges; a competing drag gesture would
+/// interfere with scrolling and with the slider's touch ownership.
+struct ParameterSlider<Value: BinaryFloatingPoint>: View where Value.Stride: BinaryFloatingPoint {
+    @Environment(\.parameterSliderPreview) private var preview
+    @Environment(\.menuAdjustmentActions) private var menuActions
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var controlID = UUID()
+    @State private var isEditing = false
+    @Binding var value: Value
+    let range: ClosedRange<Value>
+    let step: Value.Stride?
+    let onEditingChanged: (Bool) -> Void
+
+    init(value: Binding<Value>, in range: ClosedRange<Value>, step: Value.Stride? = nil,
+         onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
+        self._value = value
+        self.range = range
+        self.step = step
+        self.onEditingChanged = onEditingChanged
+    }
+
+    var body: some View {
+        Group {
+            if let step {
+                Slider(value: $value, in: range, step: step, onEditingChanged: editingChanged)
+            } else {
+                Slider(value: $value, in: range, onEditingChanged: editingChanged)
+            }
+        }
+        .onDisappear { editingChanged(false) }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { editingChanged(false) }
+        }
+    }
+
+    private func editingChanged(_ editing: Bool) {
+        guard editing != isEditing else { return }
+        isEditing = editing
+        preview?.setEditing(editing, for: controlID)
+        if editing { menuActions.begin() } else { menuActions.end() }
+        onEditingChanged(editing)
+    }
+}
+
 // MARK: - Derived Value (music-reactive) Environment
 
 /// Carries a resolver for a parameter's live (base, resolved) value plus whether
@@ -114,7 +183,6 @@ struct DerivedValueGhost: View {
 /// Condensed effect row: icon + label | slider | on/off toggle.
 /// Reflows to a two-line layout at accessibility Dynamic Type sizes.
 struct EffectSliderRow: View {
-    @Environment(\.menuAdjustmentActions) private var menuActions
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let icon: String
     let label: String
@@ -202,13 +270,7 @@ struct EffectSliderRow: View {
     }
 
     private var sliderControl: some View {
-        Slider(value: $value, in: range, onEditingChanged: { editing in
-            if editing {
-                menuActions.begin()
-            } else {
-                menuActions.end()
-            }
-        })
+        ParameterSlider(value: $value, in: range)
         .disabled(!enabled)
         .overlay {
             if let musicTargetID {
@@ -276,9 +338,9 @@ struct CompactValueSlider: View {
 
             Group {
                 if let step {
-                    Slider(value: $value, in: range, step: step, onEditingChanged: onEditingChanged)
+                    ParameterSlider(value: $value, in: range, step: step, onEditingChanged: onEditingChanged)
                 } else {
-                    Slider(value: $value, in: range, onEditingChanged: onEditingChanged)
+                    ParameterSlider(value: $value, in: range, onEditingChanged: onEditingChanged)
                 }
             }
             .tint(tint)

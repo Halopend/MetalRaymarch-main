@@ -470,7 +470,7 @@ extension ContentView {
                     .foregroundStyle(.secondary)
             }
 
-            Slider(value: stepBinding, in: 0...Double(lastIndex), step: 1)
+            ParameterSlider(value: stepBinding, in: 0...Double(lastIndex), step: 1)
                 .tint(.indigo)
 
             HStack {

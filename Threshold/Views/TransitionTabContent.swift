@@ -56,7 +56,7 @@ struct TransitionTabContent: View {
                     .foregroundStyle(.secondary)
             }
 
-            Slider(
+            ParameterSlider(
                 value: $animationManager.sceneTransitionDuration,
                 in: 0...3,
                 step: 0.05
@@ -161,7 +161,7 @@ struct TransitionTabContent: View {
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
-                    Slider(
+                    ParameterSlider(
                         value: $animationManager.musicCueThreshold,
                         in: 0.05...1,
                         step: 0.05
@@ -180,7 +180,7 @@ struct TransitionTabContent: View {
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
-                    Slider(
+                    ParameterSlider(
                         value: $animationManager.musicCueMinimumInterval,
                         in: 0...30,
                         step: 0.5

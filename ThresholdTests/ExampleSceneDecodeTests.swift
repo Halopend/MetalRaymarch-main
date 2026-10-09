@@ -80,7 +80,7 @@ struct ExampleSceneDecodeTests {
         for url in files {
             let data = try Data(contentsOf: url)
             #expect(throws: Never.self, "FAILED to decode \(url.lastPathComponent)") {
-                _ = try decoder.decode(FractalPreset.self, from: data)
+                _ = try SceneFileCodec.decode(FractalPreset.self, from: data, decoder: decoder)
             }
         }
     }
@@ -92,7 +92,7 @@ struct ExampleSceneDecodeTests {
         for url in files {
             let data = try Data(contentsOf: url)
             #expect(throws: Never.self, "FAILED to decode \(url.lastPathComponent)") {
-                _ = try decoder.decode(FractalPreset.self, from: data)
+                _ = try SceneFileCodec.decode(FractalPreset.self, from: data, decoder: decoder)
             }
         }
     }
@@ -103,7 +103,7 @@ struct ExampleSceneDecodeTests {
         let files = Self.files(withExtension: "threshmp", in: "Music Presets")
             .filter { $0.lastPathComponent != "CLOWNING_AROUND.threshmp" }
         for url in files {
-            let preset = try decoder.decode(FractalPreset.self, from: Data(contentsOf: url))
+            let preset = try SceneFileCodec.decode(FractalPreset.self, from: Data(contentsOf: url), decoder: decoder)
             #expect(
                 PlatformVisibility.resolved(preset.platformVisibility) == .mac,
                 "\(url.lastPathComponent) must be classified Mac-only"
@@ -119,7 +119,7 @@ struct ExampleSceneDecodeTests {
             Issue.record("CLOWNING_AROUND.threshmp is missing from the bundled Music Presets")
             return
         }
-        let preset = try decoder.decode(FractalPreset.self, from: Data(contentsOf: url))
+        let preset = try SceneFileCodec.decode(FractalPreset.self, from: Data(contentsOf: url), decoder: decoder)
         #expect(
             PlatformVisibility.resolved(preset.platformVisibility) == .all,
             "CLOWNING AROUND must not be classified Mac-only"
@@ -137,7 +137,7 @@ struct ExampleSceneDecodeTests {
         for url in files {
             let data = try Data(contentsOf: url)
             #expect(throws: Never.self, "FAILED to decode \(url.lastPathComponent)") {
-                _ = try decoder.decode(AnimationScene.self, from: data)
+                _ = try SceneFileCodec.decode(AnimationScene.self, from: data, decoder: decoder)
             }
         }
     }
@@ -161,7 +161,7 @@ struct ExampleSceneDecodeTests {
         let files = Self.files(withExtension: "threshscene", in: "Mixed")
         #expect(!files.isEmpty, "expected shipped Mixed examples")
         for url in files {
-            let preset = try decoder.decode(FractalPreset.self, from: Data(contentsOf: url))
+            let preset = try SceneFileCodec.decode(FractalPreset.self, from: Data(contentsOf: url), decoder: decoder)
             #expect(
                 preset.mixedModeScene == true,
                 "\(url.lastPathComponent) must carry mixedModeScene:true in the file"

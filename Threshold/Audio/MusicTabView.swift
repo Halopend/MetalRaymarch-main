@@ -1836,7 +1836,7 @@ struct MusicTabContent: View {
                 }
             }
             .frame(width: 96, alignment: .leading)
-            Slider(value: value, in: range)
+            ParameterSlider(value: value, in: range)
             Text("\(Int(value.wrappedValue * 100))%")
                 .font(.caption.monospacedDigit())
                 .frame(width: 44, alignment: .trailing)

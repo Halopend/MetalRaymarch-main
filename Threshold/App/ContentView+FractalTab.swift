@@ -1733,7 +1733,7 @@ extension ContentView {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .fixedSize()
-                Slider(value: Binding(
+                ParameterSlider(value: Binding(
                     get: { cache.quality.renderQuality },
                     set: { newValue in
                         let snapped = (newValue * 20).rounded() / 20   // 5% steps
