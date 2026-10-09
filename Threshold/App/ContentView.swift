@@ -1121,20 +1121,6 @@ struct ContentView: View {
                         }
                     }
 
-                    Divider()
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(navigationHierarchy.utilityRoots) { node in
-                                compactSectionButton(
-                                    title: node.title,
-                                    systemImage: node.systemImage,
-                                    isSelected: isNavigationNodeSelected(node)
-                                ) { activateNavigationNode(node) }
-                            }
-                        }
-                        .padding(.horizontal, 2)
-                    }
                 }
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -1245,12 +1231,49 @@ struct ContentView: View {
 
             Spacer(minLength: 8)
 
+            if !usesPhoneWorkspaceLayout {
+                compactUtilityButton("Find", systemImage: AppIcons.magnifyingglass) {
+                    presentControlFinder()
+                }
+                compactUtilityButton("Animate", systemImage: AppIcons.pencilAndListClipboard) {
+                    openAnimationEditor()
+                }
+                compactUtilityButton("Quick Toggles", systemImage: "switch.2") {
+                    withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) {
+                        appModel.navigationStore.select(.quickToggles)
+                    }
+                }
+                compactUtilityButton("Settings", systemImage: "gearshape.fill") {
+                    withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) {
+                        appModel.navigationStore.select(.settings(.display))
+                    }
+                }
+            }
+
             SaveControl {
                 showSaveDestinationSheet = true
             }
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 4)
+    }
+
+    private func compactUtilityButton(
+        _ title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: 38, height: 38)
+                .background(Circle().fill(Color.secondary.opacity(0.10)))
+                .overlay(Circle().strokeBorder(Color.secondary.opacity(0.16), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .accessibilityLabel(title)
+        .help(title)
     }
     
     // MARK: - Top Dock
@@ -1285,10 +1308,6 @@ struct ContentView: View {
                 }
             }
 
-            Divider()
-
-            findControlsButton
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
