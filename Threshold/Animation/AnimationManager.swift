@@ -216,7 +216,7 @@ final class AnimationManager {
             }
 
             guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
-                  var scene = try? decoder.decode(AnimationScene.self, from: data),
+                  var scene = try? SceneFileCodec.decode(AnimationScene.self, from: data, decoder: decoder),
                   !DefaultScenes.isDefault(scene.id) else {
                 if isPlaceholderProbe {
                     failedPlaceholderProbeURLs.insert(url)
@@ -303,7 +303,7 @@ final class AnimationManager {
                    !stored.tags.contains(where: { $0.caseInsensitiveCompare(legacyTag) == .orderedSame }) {
                     stored.tags.insert(legacyTag, at: 0)
                 }
-                let data = try prettySceneEncoder.encode(stored)
+                let data = try SceneFileCodec.encode(stored, encoder: prettySceneEncoder)
                 try data.write(to: url, options: .atomic)
                 successfulIDs.insert(scene.id)
                 writtenURLs.insert(url)
@@ -347,7 +347,7 @@ final class AnimationManager {
         for case let url as URL in enumerator where exts.contains(url.pathExtension) {
             guard !excluded.contains(url.standardizedFileURL) else { continue }
             if let data = try? Data(contentsOf: url),
-               let scene = try? sceneDecoder.decode(AnimationScene.self, from: data), ids.contains(scene.id) {
+               let scene = try? SceneFileCodec.decode(AnimationScene.self, from: data, decoder: sceneDecoder), ids.contains(scene.id) {
                 try? FileManager.default.removeItem(at: url)
             }
         }
@@ -1387,7 +1387,7 @@ final class AnimationManager {
 
     func decodeScene(from url: URL) throws -> AnimationScene {
         let data = try Data(contentsOf: url)
-        return try sceneDecoder.decode(AnimationScene.self, from: data)
+        return try SceneFileCodec.decode(AnimationScene.self, from: data, decoder: sceneDecoder)
     }
 
     @discardableResult
@@ -2560,7 +2560,7 @@ final class AnimationManager {
                !exported.tags.contains(where: { $0.caseInsensitiveCompare(legacyTag) == .orderedSame }) {
                 exported.tags.insert(legacyTag, at: 0)
             }
-            let data = try makePrettySceneEncoder().encode(exported)
+            let data = try SceneFileCodec.encode(exported, encoder: makePrettySceneEncoder())
             try data.write(to: tempURL)
             return tempURL
         } catch {

@@ -262,25 +262,20 @@ struct ShaderWorldFieldGateTests {
         }
     }
 
-    // MARK: - Finding: cone prepass must distrust the composable warp stack
+    // MARK: - Fine march starts from a proven per-pixel bound
 
-    @Test("cone prepass domainWarped covers every warp system, incl. the stack")
-    func conePrepassDistrustsWarpStack() throws {
+    @Test("fine march only skips the prefix when per-pixel reprojection is valid")
+    func fineMarchUsesValidatedReprojection() throws {
         let shader = try Self.shaderSource()
-        guard let declStart = shader.range(of: "bool domainWarped"),
-              let stmtEnd = shader.range(of: ";", range: declStart.upperBound..<shader.endIndex) else {
-            Issue.record("domainWarped guard not found in Shaders.metal")
+        guard let start = shader.range(of: "float fineStartT = 0.0f;") else {
+            Issue.record("fine march safe default was not found in Shaders.metal")
             return
         }
-        let statement = String(shader[declStart.lowerBound..<stmtEnd.lowerBound])
-        // The warm-start lower bound is only proven on an UN-warped domain.
-        // Every system that can reshape it must appear in the distrust guard —
-        // the composable stack runs whenever count > 0, independent of the
-        // legacy spaceWarpStrength uniform.
-        #expect(statement.contains("sphericalInversionMode"))
-        #expect(statement.contains("sphereProjectionBlend"))
-        #expect(statement.contains("spaceWarpStrength"))
-        #expect(statement.contains("spaceWarpStack.count"),
-                "cone prepass trusts warmT while the SpaceWarpOp stack warps the domain — warm starts can overshoot surfaces (silhouette holes)")
+        let tail = String(shader[start.lowerBound...].prefix(700))
+        #expect(tail.contains("if (reprojectionValid && reprojectedStartT > tileStartT)"),
+                "only validated per-pixel reprojection can move the fine march start forward")
+        #expect(tail.contains("fineStartT = reprojectedStartT;"))
+        #expect(!tail.contains("fineStartT = tileStartT;"),
+                "a tile-shared bound can skip geometry on neighboring rays")
     }
 }

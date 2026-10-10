@@ -26,6 +26,33 @@ Try Threshold on Apple platforms through TestFlight:
 [Join the Threshold beta](https://testflight.apple.com/join/M2h3z8JU)
 
 
+## Scene file storage
+
+New `.thresh` and `.threshanim` files use LZFSE compression when it reduces size.
+Readers detect the format by contents, so existing plain JSON files and legacy
+extensions remain supported. Existing files are converted when saved; the scene
+editor continues to display readable JSON. Older app releases cannot open the
+compressed representation.
+
+The binary envelope is `THRSCN01` (8 bytes), the uncompressed JSON length
+(8 bytes, unsigned big endian), a SHA-256 digest of the JSON (32 bytes), then
+the LZFSE payload. Decoding is capped at 64 MiB and checks the length and digest.
+Formula files, internal JSON backups and checkpoints remain plain JSON.
+
+To convert existing files in a folder from the command line (macOS with Xcode):
+
+```sh
+Scripts/scenes.sh compress "/path/to/Scenes" --recursive --dry-run
+Scripts/scenes.sh compress "/path/to/Scenes" --recursive
+```
+
+Omit `--recursive` to process only the folder itself. Conversion keeps filenames
+and exact JSON contents, verifies lossless decoding, and replaces each file
+atomically. Already compressed files are verified and skipped. Invalid files
+remain untouched; other files continue processing. Exit codes: `0` success,
+`1` file/traversal failures, `2` invalid arguments or folder. CLI regression checks:
+`python3 Scripts/test_scene_cli.py`.
+
 ## Custom scenes are the core workflow
 Write or import a portable DE, tune it live, then export a self-contained scene.
 

@@ -1396,7 +1396,7 @@ enum DefaultScenes {
         var scenes: [AnimationScene] = []
         for url in urls {
             do {
-                var data = try Data(contentsOf: url)
+                var data = try SceneFileCodec.jsonData(from: Data(contentsOf: url))
 
                 // Patch missing "modifiedAt" for older exports that predate the field.
                 if var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

@@ -240,6 +240,10 @@ extension ContentView {
             touchIndicatorsSection
 #endif
 
+#if os(iOS) || os(macOS)
+            radialMenuBetaSection
+#endif
+
 #if os(macOS)
             macLauncherSection
             sceneNavigationFeedbackSection
@@ -292,6 +296,31 @@ extension ContentView {
     }
 #endif
 
+    private var radialMenuBetaSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(isOn: $radialMenuEnabled) {
+                HStack(spacing: 8) {
+                    Label("Radial Menu", systemImage: NavigationPresentationStyle.radial.systemImage)
+                        .font(.headline)
+                    Text("BETA")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .tracking(0.5)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.18), in: Capsule())
+                        .foregroundStyle(.orange)
+                }
+            }
+            Text("Enables the radial navigation menu. This beta feature is off until you turn it on.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+    }
+
 #if os(macOS)
     private var sceneNavigationFeedbackSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -318,7 +347,7 @@ extension ContentView {
                 .font(.headline)
 
             Toggle("Show FPS in viewport", isOn: $showFPSInHUD)
-            Text("The viewport indicator still identifies the active Native, Spatial, or Temporal path when FPS is hidden.")
+            Text("The viewport indicator still identifies the active Direct, Spatial, or Temporal path when FPS is hidden.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
@@ -340,7 +369,7 @@ extension ContentView {
                 .font(.headline)
 
             Picker("Navigation style", selection: $macTabLauncherStyle) {
-                ForEach(NavigationPresentationStyle.allCases, id: \.self) { style in
+                ForEach(NavigationPresentationStyle.allCases.filter { $0 != .radial || radialMenuEnabled }, id: \.self) { style in
                     Label(style.displayName, systemImage: style.systemImage).tag(style)
                 }
             }
@@ -354,6 +383,7 @@ extension ContentView {
         .padding(12)
         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
+
 #endif
 
     /// VisionOS-only glass-floor platform settings. Mirrors the
@@ -470,7 +500,7 @@ extension ContentView {
                     .foregroundStyle(.secondary)
             }
 
-            Slider(value: stepBinding, in: 0...Double(lastIndex), step: 1)
+            ParameterSlider(value: stepBinding, in: 0...Double(lastIndex), step: 1)
                 .tint(.indigo)
 
             HStack {
@@ -975,6 +1005,7 @@ extension ContentView {
 
             Divider().opacity(0.4)
 
+#if !os(iOS)
             // ── Foveation — 8×8 compute path only ────────────────────────
             VStack(alignment: .leading, spacing: 4) {
                 CompactValueSlider(
@@ -990,8 +1021,9 @@ extension ContentView {
                 Text("Peripheral 8×8 tiles march fewer ray steps, ramping from the center outward. 0 = off. Cuts GPU cost where peripheral vision can't resolve detail. 8×8 compute path only.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                .fixedSize(horizontal: false, vertical: true)
             }
+#endif
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()

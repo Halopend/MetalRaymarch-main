@@ -50,16 +50,14 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
         // section). The manager's own contract defers ALL player access until
         // the player-backend attach ran — which itself requires
         // authorization — so gate on both.
-        guard manager.isAuthorized, manager.isObservingPlayer,
+        guard manager.isAuthorized, manager.isMonitoringPlayer,
               !manager.nowPlayingTitle.isEmpty else { return nil }
-        let player = MPMusicPlayerController.systemMusicPlayer
-        let pid = player.nowPlayingItem?.persistentID
         return UnifiedTrack(
-            id: pid.map { String($0) } ?? UUID().uuidString,
+            id: manager.nowPlayingPersistentID.map { String($0) } ?? "apple-music-now-playing",
             serviceID: serviceID,
             title: manager.nowPlayingTitle,
             artist: manager.nowPlayingArtist,
-            album: player.nowPlayingItem?.albumTitle ?? "",
+            album: manager.nowPlayingAlbum,
             artworkURL: nil,
             durationSeconds: manager.durationSeconds
         )
@@ -70,10 +68,7 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
     func next() async            { manager.nextTrack() }
     func previous() async        { manager.previousTrack() }
     func seek(fraction: Float) async {
-        let player = MPMusicPlayerController.systemMusicPlayer
-        let pos = Double(fraction) * manager.durationSeconds
-        player.currentPlaybackTime = pos
-        manager.updateFrame()
+        manager.seek(to: fraction)
     }
 
     // ── Library ──────────────────────────────────────────────────────────

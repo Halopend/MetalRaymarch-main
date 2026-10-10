@@ -457,6 +457,34 @@ enum ParameterCatalog {
         )
     }
 
+    /// Navier Strokes sliders edit one value-type effect shared by the UI and
+    /// renderer settings. Keep their bindings in the catalog so metadata stays
+    /// complete and every surface observes the same values.
+    private static func strokesDescriptor(
+        _ spec: ControlSpec,
+        order: Int,
+        read: @escaping @Sendable (NavierStrokesEffect) -> Float,
+        write: @escaping @Sendable (inout NavierStrokesEffect, Float) -> Void
+    ) -> ParameterDescriptor {
+        staticDescriptor(
+            spec,
+            route: .look(.grading), section: "Navier Strokes", order: order,
+            uiRead: { read($0.lighting.navierStrokesEffect) },
+            uiWrite: { cache, value in
+                var effect = cache.lighting.navierStrokesEffect
+                write(&effect, value)
+                cache.lighting.navierStrokesEffect = effect
+                cache.commitNavierStrokesEffect()
+            },
+            settingsRead: { read($0.navierStrokesEffect) },
+            settingsWrite: { settings, value in
+                var effect = settings.navierStrokesEffect
+                write(&effect, value)
+                settings.navierStrokesEffect = effect
+            }
+        )
+    }
+
     /// Static UI scalars that previously had a ControlSpec but were excluded
     /// from the vertically integrated descriptor catalog. They remain outside
     /// automation layer stacks while sharing IDs, placement, bindings, and
@@ -1120,6 +1148,32 @@ enum ParameterCatalog {
             settingsRead: { Float($0.edgeDetectionEffect.windowRadius) },
             settingsWrite: { settings, value in var effect = settings.edgeDetectionEffect; effect.windowRadius = Int(value.rounded()); settings.edgeDetectionEffect = effect }
         ),
+
+        strokesDescriptor(ControlCatalog.strokesStrength, order: 0, read: { $0.strength }, write: { $0.strength = $1 }),
+        strokesDescriptor(ControlCatalog.strokesSimSpeed, order: 1, read: { $0.simSpeed }, write: { $0.simSpeed = $1 }),
+        strokesDescriptor(ControlCatalog.strokesViscosity, order: 2, read: { $0.velocityDissipation }, write: { $0.velocityDissipation = $1 }),
+        strokesDescriptor(ControlCatalog.strokesDyeDissipation, order: 3, read: { $0.dyeDissipation }, write: { $0.dyeDissipation = $1 }),
+        strokesDescriptor(ControlCatalog.strokesCurl, order: 4, read: { $0.curlStrength }, write: { $0.curlStrength = $1 }),
+        staticDescriptor(
+            ControlCatalog.strokesPressureIterations,
+            route: .look(.grading), section: "Navier Strokes", order: 5,
+            uiRead: { Float($0.lighting.navierStrokesEffect.pressureIterations) },
+            uiWrite: { cache, value in
+                cache.lighting.navierStrokesEffect.pressureIterations = Int(value.rounded())
+                cache.commitNavierStrokesEffect()
+            },
+            settingsRead: { Float($0.navierStrokesEffect.pressureIterations) },
+            settingsWrite: { settings, value in
+                var effect = settings.navierStrokesEffect
+                effect.pressureIterations = Int(value.rounded())
+                settings.navierStrokesEffect = effect
+            }
+        ),
+        strokesDescriptor(ControlCatalog.strokesSplatRadius, order: 6, read: { $0.splatRadius }, write: { $0.splatRadius = $1 }),
+        strokesDescriptor(ControlCatalog.strokesSplatIntensity, order: 7, read: { $0.splatIntensity }, write: { $0.splatIntensity = $1 }),
+        strokesDescriptor(ControlCatalog.strokesGustAmount, order: 8, read: { $0.gustAmount }, write: { $0.gustAmount = $1 }),
+        strokesDescriptor(ControlCatalog.strokesGustSpeed, order: 9, read: { $0.gustSpeed }, write: { $0.gustSpeed = $1 }),
+        strokesDescriptor(ControlCatalog.strokesDisplacement, order: 10, read: { $0.displacement }, write: { $0.displacement = $1 }),
 
     ]
 

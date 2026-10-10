@@ -277,8 +277,10 @@ enum SettingsPersistence {
     static func restoreAll(into settings: RenderSettings) {
         if let c = load(GeometryConfig.self,      domain: .geometry)      { settings.geometryConfig = c }
         if let c = load(QualityConfig.self,       domain: .quality) {
-            settings.qualityConfig = migrateConeMarchStrengthDefault(
-                migrateVisionRenderQualityDefault(migrateMacResolutionScale(c))
+            settings.qualityConfig = migrateIOSResolutionScaleDefault(
+                migrateConeMarchStrengthDefault(
+                    migrateVisionRenderQualityDefault(migrateMacResolutionScale(c))
+                )
             )
         }
         if let c = load(ColorConfig.self,         domain: .color)         { settings.colorConfig = c }
@@ -341,6 +343,25 @@ enum SettingsPersistence {
         guard config.resolutionScale >= 0.985 else { return config }
         var migrated = config
         migrated.resolutionScale = 0.75
+        save(migrated, domain: .quality)
+        return migrated
+        #else
+        return config
+        #endif
+    }
+
+    /// Move an iPhone/iPad installation still on the former 33% default to
+    /// the new 25% default once. Keep any other saved scale the user chose.
+    private static func migrateIOSResolutionScaleDefault(_ config: QualityConfig) -> QualityConfig {
+        #if os(iOS)
+        let flagKey = "didMigrateIOSResolutionScaleTo25"
+        guard !defaults.bool(forKey: flagKey) else { return config }
+        defaults.set(true, forKey: flagKey)
+        let wasHistoricalDefault = abs(config.resolutionScale - 0.33) < 1e-6
+            || config.resolutionScale >= 0.985
+        guard wasHistoricalDefault else { return config }
+        var migrated = config
+        migrated.resolutionScale = QualityConfig.defaultResolutionScale
         save(migrated, domain: .quality)
         return migrated
         #else

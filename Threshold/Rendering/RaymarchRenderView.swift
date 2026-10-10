@@ -356,6 +356,38 @@ private final class NonBlockingDrawableProvider: @unchecked Sendable {
 }
 #endif
 
+/// Transfers a fully compiled fluid renderer from a private build queue.
+private final class ViewportNavierPipelineSlot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var requested = false
+    private var ready: NavierStrokesRenderer?
+    private let queue = DispatchQueue(
+        label: "com.polinate.threshold.viewport-navier-pipelines", qos: .utility)
+
+    // The builder exclusively owns the renderer until publication under the
+    // lock. Taking it transfers ownership to the render loop; the builder never
+    // accesses it again. Failed builds stay disabled rather than retry per frame.
+    func takeOrRequest(device: MTLDevice, colorFormat: MTLPixelFormat) -> NavierStrokesRenderer? {
+        lock.lock()
+        let result = ready
+        ready = nil
+        let shouldRequest = !requested
+        requested = true
+        lock.unlock()
+        if shouldRequest {
+            queue.async { [self] in
+                let renderer = NavierStrokesRenderer(device: device)
+                guard renderer.ensurePipelines(),
+                      renderer.ensureCompositeFragmentPipeline(colorFormat: colorFormat) else { return }
+                lock.lock()
+                ready = renderer
+                lock.unlock()
+            }
+        }
+        return result
+    }
+}
+
 /// Owns the asynchronously compiled generic (unspecialized) `fragmentShaderMono`
 /// pipeline. On a cold GPU shader cache that single compile takes several
 /// seconds on iPad; building it inside `ViewportRenderer.init` — which runs on
@@ -367,11 +399,23 @@ private final class NonBlockingDrawableProvider: @unchecked Sendable {
 final class ViewportGenericPipelineSlot: @unchecked Sendable {
     private let lock = NSLock()
     private var pipeline: MTLRenderPipelineState?
+    private var blitPipeline: MTLRenderPipelineState?
+    private var motionPipeline: MTLRenderPipelineState?
     private var onReady: (@MainActor () -> Void)?
 
     var current: MTLRenderPipelineState? {
         lock.lock(); defer { lock.unlock() }
         return pipeline
+    }
+
+    var blit: MTLRenderPipelineState? {
+        lock.lock(); defer { lock.unlock() }
+        return blitPipeline
+    }
+
+    var motion: MTLRenderPipelineState? {
+        lock.lock(); defer { lock.unlock() }
+        return motionPipeline
     }
 
     /// Install the readiness callback. Fires immediately (on the main actor)
@@ -384,9 +428,13 @@ final class ViewportGenericPipelineSlot: @unchecked Sendable {
         if ready, let handler { Task { @MainActor in handler() } }
     }
 
-    func publish(_ built: MTLRenderPipelineState) {
+    func publish(_ built: MTLRenderPipelineState,
+                 blit: MTLRenderPipelineState? = nil,
+                 motion: MTLRenderPipelineState? = nil) {
         lock.lock()
         pipeline = built
+        blitPipeline = blit
+        motionPipeline = motion
         let handler = onReady
         lock.unlock()
         if let handler { Task { @MainActor in handler() } }
@@ -628,8 +676,8 @@ final class ViewportRenderer {
     private let customShaderBox = ViewportCustomShaderBox()
     private let spatialUpscaler: ViewportSpatialUpscaler
     private let temporalUpscaler: ViewportTemporalUpscaler
-    private let blitPipelineState: MTLRenderPipelineState?
-    private let motionPipelineState: MTLRenderPipelineState?
+    private var blitPipelineState: MTLRenderPipelineState? { genericPipelineSlot.blit }
+    private var motionPipelineState: MTLRenderPipelineState? { genericPipelineSlot.motion }
     private let clearColor: MTLClearColor
     private let inputController: ViewportInputAccumulator
     private let uiUpdateCoordinator: UIUpdateCoordinator
@@ -667,6 +715,7 @@ final class ViewportRenderer {
     private var drawableSize: CGSize = .zero
     private var depthTexture: MTLTexture?
     private var nativePostProcessTexture: MTLTexture?
+    private let basicUpscaleTarget = ViewportScaledRenderTarget()
 
     // ═════════════════════════════════════════════════════════════════════════
     // NAVIER STROKES (2D fluid post-process layer)
@@ -680,6 +729,7 @@ final class ViewportRenderer {
     // then presents the filtered source untouched (identity bypass).
     // ═════════════════════════════════════════════════════════════════════════
     private var navierStrokesRenderer: NavierStrokesRenderer?
+    private let navierPipelineSlot = ViewportNavierPipelineSlot()
     private var navierStrokesSourceTexture: MTLTexture?
     private var navierStrokesCompositePipeline: MTLRenderPipelineState?
     private var navierStrokesCompositePipelineColorFormat: MTLPixelFormat?
@@ -763,7 +813,12 @@ final class ViewportRenderer {
                     depthPixelFormat: depthPixelFormat,
                     vertexDescriptor: Self.buildMetalVertexDescriptor()
                 )
-                slot.publish(pipeline)
+                // These also invoke synchronous Metal compilation. Publishing
+                // them together keeps makeUIView responsive and ensures the
+                // first frame can use the requested reduced-resolution path.
+                let blit = Self.buildBlitPipeline(device: device, colorPixelFormat: colorPixelFormat)
+                let motion = Self.buildMotionPipeline(device: device)
+                slot.publish(pipeline, blit: blit, motion: motion)
             } catch {
                 print("Threshold viewport generic pipeline build failed: \(error)")
             }
@@ -783,8 +838,6 @@ final class ViewportRenderer {
         temporalUpscaler = ViewportTemporalUpscaler(device: device,
                                                colorFormat: colorPixelFormat,
                                                depthFormat: depthPixelFormat)
-        blitPipelineState = Self.buildBlitPipeline(device: device, colorPixelFormat: colorPixelFormat)
-        motionPipelineState = Self.buildMotionPipeline(device: device)
 
         let depthDescriptor = MTLDepthStencilDescriptor()
         depthDescriptor.depthCompareFunction = .less
@@ -1007,6 +1060,7 @@ final class ViewportRenderer {
         let resolutionScale = sceneFrame.settings.resolutionScale
         var temporalPass: (color: MTLTexture, depth: MTLTexture, motion: MTLTexture, output: MTLTexture)?
         var spatialPass: (color: MTLTexture, depth: MTLTexture, output: MTLTexture)?
+        var usesBasicUpscale = false
         if resolutionScale < 0.985, blitPipelineState != nil {
             // Definition is a manual, exact render scale. It must not silently
             // collapse below the value shown in the UI: doing so made a displayed
@@ -1054,6 +1108,15 @@ final class ViewportRenderer {
                       let depth = spatialUpscaler.depthTexture,
                       let output = spatialUpscaler.outputTexture {
                 spatialPass = (color, depth, output)
+            }
+            if temporalPass == nil, spatialPass == nil,
+               basicUpscaleTarget.prepare(device: device, width: inputWidth, height: inputHeight,
+                                          colorFormat: colorPixelFormat, depthFormat: depthPixelFormat),
+               let color = basicUpscaleTarget.color, let depth = basicUpscaleTarget.depth {
+                // Preserve the requested raymarch budget below MetalFX's size
+                // limits and while a new scaler is being built asynchronously.
+                spatialPass = (color, depth, color)
+                usesBasicUpscale = true
             }
         }
 
@@ -1146,7 +1209,7 @@ final class ViewportRenderer {
         // direct path keeps the inline derivative version in fragmentMain.
         let didUpscale = temporalPass != nil || spatialPass != nil
         publishUpscalerPath(
-            temporalPass != nil ? "Temporal" : (spatialPass != nil ? "Spatial" : "Native"),
+            temporalPass != nil ? "Temporal" : (usesBasicUpscale ? "Basic" : (spatialPass != nil ? "Spatial" : "Direct")),
             appModel: appModel
         )
         commandBuffer.addCompletedHandler { [inFlightSemaphore, gpuFrameMsHolder] buffer in
@@ -1312,7 +1375,9 @@ final class ViewportRenderer {
             encoder.endEncoding()
 
             // 2. MetalFX spatial upscale → full-resolution output.
-            spatialUpscaler.encode(commandBuffer: commandBuffer)
+            if !usesBasicUpscale {
+                spatialUpscaler.encode(commandBuffer: commandBuffer)
+            }
 
             // 3. Blit the upscaled output to the drawable (or the Navier
             //    Strokes source while the fluid layer is active).
@@ -1747,12 +1812,12 @@ final class ViewportRenderer {
         return created
     }
 
-    /// Lazily builds the sim manager (plain `makeRenderPipelineState` — this
-    /// type is shared with the visionOS renderer, whose binary archive lives
-    /// behind visionOS-only targets).
+    /// Skip the effect while its pipelines compile away from the UI/render
+    /// thread. The published manager already owns every required pipeline.
     private func ensureNavierStrokesRenderer() -> NavierStrokesRenderer? {
         if let navierStrokesRenderer { return navierStrokesRenderer }
-        let renderer = NavierStrokesRenderer(device: device)
+        let renderer = navierPipelineSlot.takeOrRequest(
+            device: device, colorFormat: metalLayer.pixelFormat)
         navierStrokesRenderer = renderer
         return renderer
     }
@@ -2582,6 +2647,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         private var scenePanOwnsInput = false
         private var didTriggerSceneStepForCurrentPan = false
         private var cameraRecognizersSuspendedForScenePan = false
+        private var activatedControlsEdgePans = Set<ObjectIdentifier>()
         private weak var oneFingerOrbit: UIPanGestureRecognizer?
         private weak var twoFingerPan: UIPanGestureRecognizer?
         private weak var threeFingerScenePan: UIPanGestureRecognizer?
@@ -2694,10 +2760,25 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             view.addGestureRecognizer(scenePan)
             view.addGestureRecognizer(pinchGesture)
 
-            // Phone activation is an explicit toolbar button. A hidden
-            // double-tap made ordinary camera interaction feel unpredictable;
-            // iPad retains the compact canvas shortcut.
-            if UIDevice.current.userInterfaceIdiom != .phone {
+            // Reserve only edge-originating drags for phone quick controls.
+            // Interior drags rotate immediately; canvas taps have no action.
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                for edge in [UIRectEdge.left, .right] {
+                    let edgePan = UIPanGestureRecognizer(
+                        target: self,
+                        action: #selector(handleControlsEdgePan(_:))
+                    )
+                    edgePan.minimumNumberOfTouches = 1
+                    edgePan.maximumNumberOfTouches = 1
+                    edgePan.delegate = self
+                    edgePan.cancelsTouchesInView = false
+                    edgePan.delaysTouchesBegan = false
+                    edgePan.delaysTouchesEnded = false
+                    edgePan.name = edge == .left ? "controlsEdgeLeft" : "controlsEdgeRight"
+                    view.addGestureRecognizer(edgePan)
+                    orbit.require(toFail: edgePan)
+                }
+            } else {
                 let doubleTap = LowMovementTapGestureRecognizer(
                     maximumMovement: RadialActivationPolicy.maximumMovement(for: .touch),
                     target: self,
@@ -2763,6 +2844,8 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
         }
 
         @objc private func handleOrbit(_ gesture: UIPanGestureRecognizer) {
+            // UIKit includes movement in both the began and ended callbacks.
+            // A short swipe may have no changed callback at all.
             let translation = gesture.translation(in: gesture.view)
             switch gesture.state {
             case .began:
@@ -2771,13 +2854,19 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                 orbitOwnsInput = true
                 lastOrbitTranslation = .zero
                 inputController.setFocus(true)
-            case .changed:
+                fallthrough
+            case .changed, .ended:
                 guard orbitOwnsInput, !scenePanOwnsInput else { return }
                 let delta = SIMD2<Float>(Float(translation.x - lastOrbitTranslation.x),
                                          Float(translation.y - lastOrbitTranslation.y))
                 lastOrbitTranslation = translation
                 if simd_length_squared(delta) > 0 {
                     inputController.addOrbit(delta: delta)
+                }
+                if gesture.state == .ended {
+                    lastOrbitTranslation = .zero
+                    orbitOwnsInput = false
+                    appModel.inputOwnershipStore.release(.viewport)
                 }
             default:
                 lastOrbitTranslation = .zero
@@ -2797,13 +2886,19 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
                 panOwnsInput = true
                 lastPanTranslation = .zero
                 inputController.setFocus(true)
-            case .changed:
+                fallthrough
+            case .changed, .ended:
                 guard panOwnsInput, !scenePanOwnsInput else { return }
                 let delta = SIMD2<Float>(Float(translation.x - lastPanTranslation.x),
                                          Float(translation.y - lastPanTranslation.y))
                 lastPanTranslation = translation
                 if simd_length_squared(delta) > 0 {
                     inputController.addPan(delta: delta)
+                }
+                if gesture.state == .ended {
+                    lastPanTranslation = .zero
+                    panOwnsInput = false
+                    appModel.inputOwnershipStore.release(.viewport)
                 }
             default:
                 lastPanTranslation = .zero
@@ -2925,8 +3020,47 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             pinch?.isEnabled = true
         }
 
+        @objc private func handleControlsEdgePan(_ gesture: UIPanGestureRecognizer) {
+            let gestureID = ObjectIdentifier(gesture)
+
+            switch gesture.state {
+            case .began, .changed:
+                guard !activatedControlsEdgePans.contains(gestureID),
+                      let view = gesture.view as? TouchVisualizingMTKView else { return }
+
+                // A pan can begin on vertical movement before the finger has
+                // committed to a horizontal edge swipe. Decide only after a
+                // clear horizontal displacement, so slow diagonal swipes are
+                // not lost in the recognizer's initial threshold crossing.
+                let translation = gesture.translation(in: view)
+                let horizontalCommitDistance: CGFloat = 16
+                guard abs(translation.x) >= horizontalCommitDistance else { return }
+                activatedControlsEdgePans.insert(gestureID)
+
+                let isInwardSwipe = gesture.name == "controlsEdgeLeft"
+                    ? translation.x > 0
+                    : translation.x < 0
+                guard isInwardSwipe,
+                      appModel.inputOwnershipStore.canConsume(.viewport) else { return }
+
+                // Anchor at the side being touched so the phone quick controls
+                // open beside the inward swipe.
+                let anchor = CGPoint(
+                    x: gesture.name == "controlsEdgeLeft" ? 0 : view.bounds.width,
+                    y: gesture.location(in: view).y
+                )
+                view.onRadialMenuRequest?(anchor)
+
+            case .ended, .cancelled, .failed:
+                activatedControlsEdgePans.remove(gestureID)
+            default:
+                break
+            }
+        }
+
         @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
             guard gesture.state == .ended,
+                  UIDevice.current.userInterfaceIdiom != .phone,
                   appModel.inputOwnershipStore.canConsume(.viewport),
                   let view = gesture.view as? TouchVisualizingMTKView else { return }
             view.onRadialMenuRequest?(gesture.location(in: view))
@@ -2934,6 +3068,15 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             guard appModel.inputOwnershipStore.canConsume(.viewport) else { return false }
+            if gestureRecognizer.name == "controlsEdgeLeft" || gestureRecognizer.name == "controlsEdgeRight" {
+                guard let pan = gestureRecognizer as? UIPanGestureRecognizer,
+                      let view = pan.view else { return false }
+                let start = pan.location(in: view)
+                if gestureRecognizer.name == "controlsEdgeLeft" {
+                    return start.x <= 28
+                }
+                return start.x >= view.bounds.width - 28
+            }
             if gestureRecognizer === threeFingerScenePan,
                UIAccessibility.isVoiceOverRunning {
                 return false

@@ -336,6 +336,7 @@ private struct ParameterNodeRow: View {
         VStack(spacing: 4) {
             // ── Row 1: Gesture sensitivity ──
             HStack(spacing: 8) {
+                #if !os(iOS)
                 Image(systemName: AppIcons.gaugeWithDotsNeedle67percent)
                     .font(.caption)
                     .foregroundStyle(.orange)
@@ -346,18 +347,22 @@ private struct ParameterNodeRow: View {
                     .foregroundStyle(.orange)
                     .frame(width: 66, alignment: .leading)
                     .lineLimit(1)
+                #endif
 
-                  Slider(value: sensitivitySliderPosition,
-                      in: 0...1)
+                  ParameterSlider(value: sensitivitySliderPosition,
+                      in: 0...1, title: "Sensitivity",
+                      display: String(format: "%.1fx", sensitivityValue))
                     .tint(.orange)
                     .onChange(of: sensitivityValue) { _, newVal in
                         GestureSensitivityStore.shared.setSensitivity(newVal, for: floatNode.id)
                     }
 
+                #if !os(iOS)
                 Text(String(format: "%.1fx", sensitivityValue))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .frame(width: 32)
+                #endif
 
                 Button {
                     sensitivityValue = GestureSensitivityStore.defaultSensitivity
@@ -595,8 +600,9 @@ private struct TripletRow: View {
                 }
             }
 
-            if hasTripletMusicMapping {
+            if hasTripletMusicMapping && cache.fractalType != .theliPseudoKleinian {
                 HStack(spacing: 4) {
+                    #if !os(iOS)
                     Image(systemName: AppIcons.waveformCircleFill)
                         .font(.caption)
                         .foregroundStyle(.pink)
@@ -605,18 +611,22 @@ private struct TripletRow: View {
                         .font(.caption2)
                         .foregroundStyle(.pink)
                         .frame(width: 32, alignment: .leading)
-                    Slider(
+                    #endif
+                    ParameterSlider(
                         value: Binding(
                             get: { tripletGain },
                             set: { setTripletGain($0) }
                         ),
-                        in: 0...2
+                        in: 0...2, title: "Gain", display: String(format: "%.2f", tripletGain),
+                        icon: AppIcons.waveformCircleFill
                     )
                     .tint(.pink)
+                    #if !os(iOS)
                     Text(String(format: "%.2f", tripletGain))
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .frame(width: 32)
+                    #endif
                 }
                 .padding(.leading, 16)
             }

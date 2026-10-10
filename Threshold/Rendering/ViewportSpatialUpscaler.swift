@@ -25,7 +25,7 @@ import Synchronization
 /// window resize is a fresh size, so a drag was a hitch storm). Builds now run
 /// on ONE private serial queue, coalesced latest-wins: until the requested
 /// size lands, `prepare` returns `false` so the caller renders
-/// direct-full-resolution (or an exact-size temporal pass when enabled) for
+/// at the requested resolution with a basic upscale (or an exact-size temporal pass) for
 /// those frames — the same contract the temporal port documented.
 ///
 /// Thread shape: `prepare`/`encode` are render-thread calls; the exposed
@@ -113,7 +113,7 @@ final class ViewportSpatialUpscaler: @unchecked Sendable {
     /// Prepares textures and the scaler for the requested sizes. Returns `true`
     /// only when the EXACT requested configuration is ready; returns `false`
     /// while a missing configuration builds in the background (caller falls
-    /// back to direct full-resolution rendering) or when the input is too
+    /// back to basic upscaling at the requested resolution) or when the input is too
     /// small for MetalFX. Never blocks.
     func prepare(inputWidth: Int, inputHeight: Int, outputWidth: Int, outputHeight: Int) -> Bool {
         guard min(inputWidth, inputHeight) >= Self.minimumInputShortEdge,
@@ -165,7 +165,7 @@ final class ViewportSpatialUpscaler: @unchecked Sendable {
             }
 
             // Do not substitute a differently-sized pass: the caller renders
-            // direct full-resolution while the exact-size build completes.
+            // at the requested resolution while the exact-size build completes.
             s.activeKey = nil
             return (nil, startDrain)
         }

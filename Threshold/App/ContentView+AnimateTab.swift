@@ -146,16 +146,21 @@ extension ContentView {
 
             // Signed speed: zoom out ← center (still) → zoom in
             HStack(spacing: 8) {
+                #if !os(iOS)
                 Text("Out").font(.caption2).foregroundStyle(.secondary)
-                Slider(
+                #endif
+                ParameterSlider(
                     value: Binding(
                         get: { appModel.renderSettings.infiniteZoomRate },
                         set: { appModel.renderSettings.infiniteZoomRate = $0 }
                     ),
-                    in: -RenderSettings.infiniteZoomMaxRate...RenderSettings.infiniteZoomMaxRate
+                    in: -RenderSettings.infiniteZoomMaxRate...RenderSettings.infiniteZoomMaxRate,
+                    title: "Zoom speed", display: String(format: "%+.2f", appModel.renderSettings.infiniteZoomRate)
                 )
                 .tint(accent)
+                #if !os(iOS)
                 Text("In").font(.caption2).foregroundStyle(.secondary)
+                #endif
             }
         }
         .padding(12)

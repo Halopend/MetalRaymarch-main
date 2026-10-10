@@ -1,11 +1,15 @@
 import SwiftUI
 import AVKit
+#if os(iOS)
+import MediaPlayer
+import UIKit
+#endif
 
 /// Four-page welcome flow:
 ///   0. Welcome (what Threshold is, what the app does)
 ///   1. Safety (photosensitive-epilepsy warning, must acknowledge)
 ///   2. Controls (movement + gestures on visionOS; navigation + creation elsewhere)
-///   3. Setup (storage, microphone-at-launch, and anonymous analytics)
+///   3. Setup (storage, audio connections, and anonymous analytics)
 ///
 /// Each page uses one centered reading column and scrolls independently;
 /// a shared footer pins Back/Next and the page indicator to the bottom so
@@ -269,6 +273,12 @@ struct FirstLaunchWindowView: View {
                 }
 
                 Divider()
+
+                #if os(iOS)
+                OnboardingAppleMusicConnection(manager: appModel.appleMusicManager)
+
+                Divider()
+                #endif
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 10) {
@@ -601,7 +611,7 @@ struct FirstLaunchWindowView: View {
 
     private var viewportNavigationOnboardingDetail: String {
 #if os(iOS)
-        "Drag with one finger to orbit. Use two fingers to pan or zoom."
+        "Explore the scene directly in the viewport."
 #else
         "Drag to orbit, right-drag to pan, scroll to zoom, or use WASD to move through the fractal."
 #endif
@@ -609,7 +619,7 @@ struct FirstLaunchWindowView: View {
 
     private var phoneControlsOnboardingDetail: String {
 #if os(iOS)
-        "Swipe inward from either screen edge to open quick controls. Swipe back toward that edge, or use Close, to dismiss them."
+        "Tap Controls to tune the scene."
 #else
         "Use the labeled Controls button over the renderer to open the creative workspace."
 #endif
@@ -820,6 +830,73 @@ private struct OnboardingTutorialVideoView: View {
         }
     }
 }
+
+#if os(iOS)
+private struct OnboardingAppleMusicConnection: View {
+    let manager: AppleMusicManager
+    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Apple Music", systemImage: "apple.logo")
+                .font(.headline)
+                .foregroundStyle(.pink)
+
+            Text("Connect your library to choose songs and playlists in the Music controls.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            switch AppleMusicServiceAdapter(manager: manager).connectionStatus {
+            case .connected:
+                Label("Connected", systemImage: "checkmark.circle.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.green)
+            case .connecting:
+                ProgressView("Connecting to Apple Music…")
+                    .font(.caption)
+            case .disconnected:
+                connectButton
+            case .error(let message):
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if manager.authorizationStatus == .denied {
+                    Button("Open Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            openURL(url)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                } else if manager.authorizationStatus != .restricted {
+                    connectButton
+                }
+            }
+
+            Text("Optional. You can also connect later in the Music controls.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .onAppear { manager.refreshAuthorizationStatus() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                manager.refreshAuthorizationStatus()
+            }
+        }
+    }
+
+    private var connectButton: some View {
+        Button("Connect to Apple Music") {
+            manager.requestAuthorization()
+        }
+        .buttonStyle(.bordered)
+        .tint(.pink)
+    }
+}
+#endif
 
 @MainActor
 private final class OnboardingTutorialVideoController: ObservableObject {

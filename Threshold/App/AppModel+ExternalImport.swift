@@ -140,13 +140,13 @@ extension AppModel {
                 let data = try Data(contentsOf: url, options: [.mappedIfSafe])
                 let decoder = JSONDecoder()
                 decoder.dateDecodingStrategy = .iso8601
-                return .success(.preset(try decoder.decode(FractalPreset.self, from: data)))
+                return .success(.preset(try SceneFileCodec.decode(FractalPreset.self, from: data, decoder: decoder)))
 
             case .animation:
                 let data = try Data(contentsOf: url, options: [.mappedIfSafe])
                 let decoder = JSONDecoder()
                 decoder.dateDecodingStrategy = .iso8601
-                return .success(.animation(try decoder.decode(AnimationScene.self, from: data)))
+                return .success(.animation(try SceneFileCodec.decode(AnimationScene.self, from: data, decoder: decoder)))
 
             case .formula:
                 return .success(.formula(try EmbeddedFormulaContainer.decode(fromContainerAt: url)))

@@ -255,10 +255,11 @@ extension ContentView {
                         // Temporal/scaler construction is keyed by input size.
                         // Use coarse interaction steps so a drag cannot churn a
                         // fresh configuration for every pointer pixel, while still
-                        // preserving the control's explicit 33% minimum.
+                        // preserving the platform's exact minimum.
                         let coarse = (clamped * 20).rounded() / 20
-                        let snapped = clamped < 0.35
-                            ? ControlCatalog.resolutionScale.range.lowerBound
+                        let minimum = ControlCatalog.resolutionScale.range.lowerBound
+                        let snapped = clamped < (minimum * 20).rounded(.up) / 20
+                            ? minimum
                             : coarse
                         cache.quality.resolutionScale = snapped
                         cache.push(\.resolutionScale, value: snapped)

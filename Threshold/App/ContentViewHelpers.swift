@@ -43,6 +43,180 @@ extension EnvironmentValues {
     }
 }
 
+/// Tracks individual touches so overlapping drags and disappearing controls
+/// cannot leave the full controls panel stuck in its preview appearance.
+@Observable
+@MainActor
+final class ParameterSliderPreview {
+    private var activeControls: Set<UUID> = []
+    var isAdjusting: Bool { !activeControls.isEmpty }
+
+    func isEditing(_ control: UUID) -> Bool { activeControls.contains(control) }
+
+    func setEditing(_ editing: Bool, for control: UUID) {
+        if editing { activeControls.insert(control) }
+        else { activeControls.remove(control) }
+    }
+}
+
+/// Bounds travel with the original slider, so previewing never replaces the
+/// native control or interrupts the touch that owns its drag.
+struct ParameterSliderBoundsKey: PreferenceKey {
+    static let defaultValue: [UUID: Anchor<CGRect>] = [:]
+
+    static func reduce(value: inout [UUID: Anchor<CGRect>],
+                       nextValue: () -> [UUID: Anchor<CGRect>]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    }
+}
+
+extension View {
+    /// Keep a slider's label and value visible along with its track.
+    func parameterSliderPreviewRegion() -> some View {
+        transformAnchorPreference(key: ParameterSliderBoundsKey.self, value: .bounds) { bounds, region in
+            for id in Array(bounds.keys) { bounds[id] = region }
+        }
+    }
+}
+
+private struct ParameterSliderPreviewKey: EnvironmentKey {
+    static let defaultValue: ParameterSliderPreview? = nil
+}
+
+extension EnvironmentValues {
+    var parameterSliderPreview: ParameterSliderPreview? {
+        get { self[ParameterSliderPreviewKey.self] }
+        set { self[ParameterSliderPreviewKey.self] = newValue }
+    }
+}
+
+/// Shares editing ownership between the mobile scrub field and native sliders.
+struct ParameterSlider<Value: BinaryFloatingPoint>: View where Value.Stride: BinaryFloatingPoint {
+    @Environment(\.parameterSliderPreview) private var preview
+    @Environment(\.menuAdjustmentActions) private var menuActions
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var controlID = UUID()
+    @State private var isEditing = false
+    @Binding var value: Value
+    let range: ClosedRange<Value>
+    let step: Value.Stride?
+    let onEditingChanged: (Bool) -> Void
+    var title: String?
+    var display: String?
+    var icon: String?
+    var musicTargetID: String?
+    var showsFlashingWarning = false
+
+    init(value: Binding<Value>, in range: ClosedRange<Value>, step: Value.Stride? = nil,
+         title: String? = nil, display: String? = nil, icon: String? = nil,
+         musicTargetID: String? = nil, showsFlashingWarning: Bool = false,
+         onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
+        self._value = value
+        self.range = range
+        self.step = step
+        self.onEditingChanged = onEditingChanged
+        self.title = title
+        self.display = display
+        self.icon = icon
+        self.musicTargetID = musicTargetID
+        self.showsFlashingWarning = showsFlashingWarning
+    }
+
+    var body: some View {
+        Group {
+            #if os(iOS)
+            scrubField
+            #else
+            if let step {
+                Slider(value: $value, in: range, step: step, onEditingChanged: editingChanged)
+            } else {
+                Slider(value: $value, in: range, onEditingChanged: editingChanged)
+            }
+            #endif
+        }
+        .anchorPreference(key: ParameterSliderBoundsKey.self, value: .bounds) { bounds in
+            preview == nil ? [:] : [controlID: bounds]
+        }
+        .onDisappear { editingChanged(false) }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { editingChanged(false) }
+        }
+    }
+
+    #if os(iOS)
+    private var scrubField: some View {
+        let fraction = CGFloat(min(1, max(0, (value - range.lowerBound) /
+            max(Value.leastNonzeroMagnitude, range.upperBound - range.lowerBound))))
+        let valueText = display ?? String(format: "%.2f", Double(value))
+        return HStack(spacing: 6) {
+            if let icon {
+                Image(systemName: icon).font(.caption).foregroundStyle(.secondary)
+            }
+            if let title {
+                Text(title)
+                    .font(.subheadline)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+            }
+            if showsFlashingWarning { FlashingLightIndicator() }
+            Spacer(minLength: 4)
+            Text(valueText)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(minHeight: 44)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Color.secondary.opacity(0.09)
+                    Rectangle()
+                        .fill(.tint.opacity(0.16))
+                        .frame(width: geometry.size.width * fraction)
+                    Rectangle()
+                        .fill(.tint.opacity(0.65))
+                        .frame(width: 2)
+                        .offset(x: max(0, (geometry.size.width - 2) * fraction))
+                }
+            }
+        }
+        .overlay {
+            if let musicTargetID {
+                DerivedValueGhost(targetID: musicTargetID,
+                                  range: Float(range.lowerBound)...Float(range.upperBound),
+                                  isScrubField: true)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+        .opacity(isEnabled ? 1 : 0.45)
+        .accessibilityHidden(true)
+        .overlay {
+            ParameterScrubInput(
+                value: Binding(get: { Double(value) }, set: { value = Value($0) }),
+                range: Double(range.lowerBound)...Double(range.upperBound),
+                step: step.map { Double($0) },
+                title: title ?? "Value",
+                display: valueText,
+                onEditingChanged: editingChanged,
+                isSceneActive: scenePhase == .active
+            )
+        }
+    }
+    #endif
+
+    private func editingChanged(_ editing: Bool) {
+        guard editing != isEditing else { return }
+        isEditing = editing
+        preview?.setEditing(editing, for: controlID)
+        if editing { menuActions.begin() } else { menuActions.end() }
+        onEditingChanged(editing)
+    }
+}
+
 // MARK: - Derived Value (music-reactive) Environment
 
 /// Carries a resolver for a parameter's live (base, resolved) value plus whether
@@ -76,6 +250,7 @@ extension EnvironmentValues {
 struct DerivedValueGhost: View {
     let targetID: String
     let range: ClosedRange<Float>
+    var isScrubField = false
     @Environment(\.derivedValueProvider) private var provider
 
     /// Approximate half-thumb inset so the marker lines up with the slider track.
@@ -93,18 +268,21 @@ struct DerivedValueGhost: View {
                     if let live, live.isModulated {
                         let span = max(0.0001, range.upperBound - range.lowerBound)
                         let frac = CGFloat(min(1, max(0, (live.resolved - range.lowerBound) / span)))
-                        let trackWidth = max(0, geo.size.width - thumbInset * 2)
-                        let x = thumbInset + frac * trackWidth
+                        let inset: CGFloat = isScrubField ? 3 : thumbInset
+                        let trackWidth = max(0, geo.size.width - inset * 2)
+                        let x = inset + frac * trackWidth
                         Capsule()
-                            .fill(Color.accentColor)
-                            .frame(width: 2.5, height: geo.size.height * 0.62)
-                            .position(x: x, y: geo.size.height / 2)
-                            .shadow(color: Color.accentColor.opacity(0.7), radius: 3)
+                            .fill(isScrubField ? Color.pink : Color.accentColor)
+                            .frame(width: 2.5, height: isScrubField ? 10 : geo.size.height * 0.62)
+                            .position(x: x, y: isScrubField ? geo.size.height - 6 : geo.size.height / 2)
+                            .shadow(color: (isScrubField ? Color.pink : Color.accentColor).opacity(0.7), radius: 3)
                             .allowsHitTesting(false)
                             .transition(.opacity)
                     }
                 }
             }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
     }
 }
@@ -114,7 +292,6 @@ struct DerivedValueGhost: View {
 /// Condensed effect row: icon + label | slider | on/off toggle.
 /// Reflows to a two-line layout at accessibility Dynamic Type sizes.
 struct EffectSliderRow: View {
-    @Environment(\.menuAdjustmentActions) private var menuActions
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let icon: String
     let label: String
@@ -136,6 +313,16 @@ struct EffectSliderRow: View {
 
     var body: some View {
         Group {
+            #if os(iOS)
+            HStack(spacing: 6) {
+                ParameterSlider(value: $value, in: range, title: label,
+                                display: formattedValue, icon: icon, musicTargetID: musicTargetID)
+                    .disabled(!enabled)
+                    .onChange(of: value) { _, _ in onChanged() }
+                pairedColorWell
+                if showToggle { trailingAccessory(reservesEmptySpace: false) }
+            }
+            #else
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -154,7 +341,9 @@ struct EffectSliderRow: View {
                 }
                 .frame(minHeight: 32)
             }
+            #endif
         }
+        .parameterSliderPreviewRegion()
     }
 
     @ViewBuilder
@@ -202,13 +391,7 @@ struct EffectSliderRow: View {
     }
 
     private var sliderControl: some View {
-        Slider(value: $value, in: range, onEditingChanged: { editing in
-            if editing {
-                menuActions.begin()
-            } else {
-                menuActions.end()
-            }
-        })
+        ParameterSlider(value: $value, in: range)
         .disabled(!enabled)
         .overlay {
             if let musicTargetID {
@@ -260,6 +443,12 @@ struct CompactValueSlider: View {
     var onEditingChanged: (Bool) -> Void = { _ in }
 
     var body: some View {
+        #if os(iOS)
+        ParameterSlider(value: $value, in: range, step: step, title: title, display: display,
+                        onEditingChanged: onEditingChanged)
+            .tint(tint)
+            .help(helpText ?? "")
+        #else
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
                 Text(title)
@@ -276,9 +465,9 @@ struct CompactValueSlider: View {
 
             Group {
                 if let step {
-                    Slider(value: $value, in: range, step: step, onEditingChanged: onEditingChanged)
+                    ParameterSlider(value: $value, in: range, step: step, onEditingChanged: onEditingChanged)
                 } else {
-                    Slider(value: $value, in: range, onEditingChanged: onEditingChanged)
+                    ParameterSlider(value: $value, in: range, onEditingChanged: onEditingChanged)
                 }
             }
             .tint(tint)
@@ -286,7 +475,9 @@ struct CompactValueSlider: View {
             .accessibilityLabel(title)
             .accessibilityValue(display)
         }
+        .parameterSliderPreviewRegion()
         .help(helpText ?? "")
+        #endif
     }
 }
 

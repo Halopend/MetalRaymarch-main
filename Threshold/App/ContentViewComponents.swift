@@ -513,12 +513,12 @@ struct FPSIndicatorView: View {
                 }
             }
             Label(appModel.renderMetrics.upscalerPath,
-                  systemImage: appModel.renderMetrics.upscalerPath == "Native"
+                  systemImage: appModel.renderMetrics.upscalerPath == "Direct"
                       ? "rectangle"
                       : "arrow.up.left.and.arrow.down.right")
                 .font(.caption.bold())
                 .foregroundStyle(appModel.renderMetrics.upscalerPath == "Temporal" ? .mint : .secondary)
-                .help("Active presentation path: Temporal uses frame history, Spatial scales the current frame, and Native bypasses MetalFX.")
+                .help("Active presentation path: Temporal uses frame history, Spatial scales the current frame, and Direct renders into the display texture without MetalFX.")
             // GPU ms is the signal that actually moves when you tune the
             // acceleration settings — FPS is quantized by the display refresh.
             if gpuMs > 0 {

@@ -23,6 +23,7 @@ struct FormulaEditorWindowView: View {
     var onClose: (() -> Void)? = nil
     #if os(iOS)
     @State private var isPreviewingRender = false
+    @State private var sliderPreview = ParameterSliderPreview()
     #endif
 
     var body: some View {
@@ -45,6 +46,8 @@ struct FormulaEditorWindowView: View {
                         }
                     }
             }
+            .environment(\.parameterSliderPreview, sliderPreview)
+            .modifier(ThresholdSliderFocusPresentation(preview: sliderPreview))
             .opacity(isPreviewingRender ? 0 : 1)
             .allowsHitTesting(!isPreviewingRender)
 

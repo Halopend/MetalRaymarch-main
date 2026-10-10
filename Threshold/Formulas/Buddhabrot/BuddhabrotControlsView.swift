@@ -286,6 +286,10 @@ private struct SliderRow: View {
     let format: String
 
     var body: some View {
+        #if os(iOS)
+        ParameterSlider(value: $value, in: range, title: label,
+                        display: String(format: format, value))
+        #else
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
                 Text(label)
@@ -297,8 +301,9 @@ private struct SliderRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            Slider(value: $value, in: range)
+            ParameterSlider(value: $value, in: range)
         }
         .padding(.vertical, 2)
+        #endif
     }
 }

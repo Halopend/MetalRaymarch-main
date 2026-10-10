@@ -130,7 +130,7 @@ struct ICloudStoreDeletionTests {
         let exts = ThresholdExportFormat.extensions(in: .animation)
         for url in files where exts.contains(url.pathExtension) {
             if let data = try? Data(contentsOf: url),
-               let s = try? isoDecoder.decode(AnimationScene.self, from: data),
+               let s = try? SceneFileCodec.decode(AnimationScene.self, from: data, decoder: isoDecoder),
                s.id == id {
                 return true
             }
@@ -155,7 +155,7 @@ struct ICloudStoreDeletionTests {
             guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
             for url in files where exts.contains(url.pathExtension) {
                 if let data = try? Data(contentsOf: url),
-                   let p = try? isoDecoder.decode(FractalPreset.self, from: data),
+                   let p = try? SceneFileCodec.decode(FractalPreset.self, from: data, decoder: isoDecoder),
                    p.id == id {
                     return p
                 }
@@ -337,7 +337,7 @@ struct ICloudStoreDeletionTests {
                 .first { url in
                     guard presetExts.contains(url.pathExtension),
                           let data = try? Data(contentsOf: url),
-                          let preset = try? isoDecoder.decode(FractalPreset.self, from: data)
+                          let preset = try? SceneFileCodec.decode(FractalPreset.self, from: data, decoder: isoDecoder)
                     else { return false }
                     return preset.id == mountain.id
                 }

@@ -67,6 +67,70 @@ enum BoundToSpaceMode: Int, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// User-facing render-detail budgets. The iPhone tiers are derived from the
+/// platform ceiling so changing the device's maximum shifts every tier with it.
+enum DetailBudgetPreset: String, CaseIterable, Identifiable, Sendable {
+    case minimum
+    case veryLow
+    case low
+    case medium
+    case high
+    case full
+
+    var id: String { rawValue }
+
+    static var visiblePresets: [DetailBudgetPreset] {
+        #if os(iOS)
+        [.minimum, .veryLow, .low, .medium, .high, .full]
+        #else
+        [.low, .medium, .high, .full]
+        #endif
+    }
+
+    var title: String {
+        switch self {
+        case .minimum: "Minimum"
+        case .veryLow: "Very Low"
+        case .low: "Low"
+        case .medium: "Medium"
+        case .high: "High"
+        case .full: "Full"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .minimum: "circle"
+        case .veryLow, .low: "circle.grid.2x2"
+        case .medium: "circle.grid.3x3"
+        case .high: "circle.grid.3x3.fill"
+        case .full: "circle.grid.3x3.circle.fill"
+        }
+    }
+
+    var scale: Float {
+        let ceiling = QualityConfig.maximumResolutionScale
+        switch self {
+        case .minimum: return QualityConfig.minimumResolutionScale
+        case .veryLow: return ceiling * 0.4
+        case .low: return QualityConfig.defaultResolutionScale
+        case .medium:
+            #if os(iOS)
+            return ceiling * (2.0 / 3.0)
+            #else
+            return 0.50
+            #endif
+        case .high:
+            #if os(iOS)
+            return ceiling * (5.0 / 6.0)
+            #else
+            return 0.75
+            #endif
+        case .full: return ceiling
+        }
+    }
+}
+
 /// Author-declared "aim for this render quality" hint carried per-scene
 /// (`FractalPreset.recommendedQuality`). Deliberately distinct from iteration
 /// count: it targets the render RESOLUTION (MetalFX input scale on Mac; the
@@ -92,12 +156,12 @@ enum SceneQualityTarget: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    /// Mac / iOS MetalFX input-scale target (`resolutionScale`, 0.33…1.0).
-    var macResolutionScale: Float {
+    /// Render input-scale target, capped by the device's platform budget.
+    var resolutionScale: Float {
         switch self {
         case .standard: return QualityConfig.defaultResolutionScale
-        case .high:     return 1.0    // native input
-        case .ultra:    return 1.0    // Mac tops out at native
+        case .high:     return QualityConfig.maximumResolutionScale * 0.75
+        case .ultra:    return QualityConfig.maximumResolutionScale
         }
     }
 
@@ -128,9 +192,43 @@ enum SceneQualityTarget: String, Codable, CaseIterable, Sendable {
 }
 
 struct QualityConfig: Codable, Equatable, Sendable {
-    /// Mac/iOS MetalFX input scale used on a fresh install. Matches the
-    /// user-facing Low detail-budget preset.
-    static let defaultResolutionScale: Float = 0.33
+    /// Fresh-install input scale used by the Mac/iOS low-detail preset. The
+    /// iOS renderer allows a smaller budget and starts at 25%.
+    static var defaultResolutionScale: Float {
+        #if os(iOS)
+        0.25
+        #else
+        0.33
+        #endif
+    }
+
+    /// iOS can trade more sharpness for a smaller raymarch workload. Below
+    /// MetalFX's supported input sizes, the viewport uses a basic upscale.
+    static var minimumResolutionScale: Float {
+        #if os(iOS)
+        0.10
+        #else
+        0.33
+        #endif
+    }
+
+    /// Maximum detail budget for this platform. The iPhone renderer caps its
+    /// render input at half-size; other platforms retain their full-resolution top.
+    static var maximumResolutionScale: Float {
+        #if os(iOS)
+        0.50
+        #else
+        1.0
+        #endif
+    }
+
+    /// Display resolution as a percentage of the platform's available budget.
+    /// On iPhone a 0.50 render scale is the full 100% detail budget.
+    static func displayedResolutionPercent(_ scale: Float) -> Int {
+        guard scale.isFinite, maximumResolutionScale > 0 else { return 0 }
+        let relativeScale = min(1, max(0, scale / maximumResolutionScale))
+        return Int((relativeScale * 100).rounded())
+    }
 
     /// First-launch DE iteration / ray-step budgets. They match the user-facing
     /// Low quality preset (`QualityPreset.low`) so a fresh install opens at Low,
@@ -181,8 +279,9 @@ struct QualityConfig: Codable, Equatable, Sendable {
     /// trade more sharpness for headroom on heavy scenes.
     static let visionMinRenderQuality: Float = 0.05
 
-    /// First-launch compositor Render Quality on Vision Pro. Mirrors the Mac/iOS
-    /// Low detail budget (`defaultResolutionScale`, 0.33): Vision Pro is the most
+    /// First-launch compositor Render Quality on Vision Pro. Matches the Mac
+    /// Low detail budget (0.33); iOS uses its 25% phone-oriented default.
+    /// Vision Pro is the most
     /// thermally constrained target, so a fresh install opens as low as the
     /// desktop's Low preset and lets the adaptive governor recover sharpness
     /// headroom-first from there. Existing installs are nudged off the former
@@ -209,7 +308,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
     var baseMaxRaySteps: Int = Self.defaultMaxRaySteps
 
     // Resolution / tiling
-    var resolutionScale: Float = Self.defaultResolutionScale // 0.33 - 1.0 (MetalFX spatial upscale input scale)
+    var resolutionScale: Float = Self.defaultResolutionScale // minimumResolutionScale...maximumResolutionScale
     var renderQuality: Float = Self.visionDefaultRenderQuality // visionMinRenderQuality...visionMaxRenderQuality (visionOS compositor drawable scale). Default matches the desktop Low detail budget; the floor is for probing max framerate / the adaptive governor.
     var tileSize: Int = 0              // 0=disabled (fragment), 8=adaptive hierarchical compute
 

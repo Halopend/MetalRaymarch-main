@@ -1186,6 +1186,11 @@ struct SceneEditorView: View {
     }
 
     private var durationControlRow: some View {
+        #if os(iOS)
+        ParameterSlider(value: $defaultDuration, in: 0.5...10, step: 0.5,
+                        title: "New segment", display: String(format: "%.1fs", defaultDuration))
+            .help("Duration assigned to each newly captured keyframe after the first")
+        #else
         HStack(spacing: 10) {
             Label("New segment", systemImage: AppIcons.timer)
                 .font(.caption)
@@ -1199,9 +1204,14 @@ struct SceneEditorView: View {
         }
         .frame(minHeight: AnimationEditorLayout.defaultRowHeight)
         .help("Duration assigned to each newly captured keyframe after the first")
+        #endif
     }
 
     private func settingsSliderRow(label: String, value: Binding<Float>, range: ClosedRange<Float>, step: Float, format: String = "%.2f") -> some View {
+        #if os(iOS)
+        ParameterSlider(value: value, in: range, step: step, title: label,
+                        display: String(format: format, value.wrappedValue))
+        #else
         HStack(spacing: 10) {
             Text(label)
                 .font(.caption)
@@ -1213,9 +1223,14 @@ struct SceneEditorView: View {
                 .frame(width: AnimationEditorLayout.settingsValueWidth, alignment: .trailing)
         }
         .frame(minHeight: AnimationEditorLayout.defaultRowHeight)
+        #endif
     }
 
     private func settingsSliderRow(label: String, value: Binding<Double>, range: ClosedRange<Double>, step: Double, format: String = "%.2f", suffix: String = "") -> some View {
+        #if os(iOS)
+        ParameterSlider(value: value, in: range, step: step, title: label,
+                        display: "\(String(format: format, value.wrappedValue))\(suffix)")
+        #else
         HStack(spacing: 10) {
             Text(label)
                 .font(.caption)
@@ -1227,6 +1242,7 @@ struct SceneEditorView: View {
                 .frame(width: AnimationEditorLayout.settingsValueWidth, alignment: .trailing)
         }
         .frame(minHeight: AnimationEditorLayout.defaultRowHeight)
+        #endif
     }
     
     private func addKeyframe() {
@@ -1481,6 +1497,10 @@ struct KeyframeEditorView: View {
                                     .frame(maxWidth: 220)
                             }
                             .frame(height: AnimationEditorLayout.keyframeSheetControlRowHeight)
+                            #if os(iOS)
+                            ParameterSlider(value: $keyframe.duration, in: 0...30, step: 0.1,
+                                            title: "Duration", display: String(format: "%.1fs", keyframe.duration))
+                            #else
                             HStack {
                                 Text("Duration").font(.caption).foregroundStyle(.secondary)
                                 Spacer()
@@ -1491,6 +1511,7 @@ struct KeyframeEditorView: View {
                                     .frame(width: 46, alignment: .trailing)
                             }
                             .frame(height: AnimationEditorLayout.keyframeSheetControlRowHeight)
+                            #endif
                             summaryRow("Easing", text: keyframe.easingType.displayName)
                         }
                         
@@ -1751,6 +1772,11 @@ struct KeyframeEditorView: View {
     // Slider row for bezier control points (easing pane — still interactive)
     private func compactSliderRow(icon: String, label: String, value: Binding<Float>,
                                    range: ClosedRange<Float>, step: Float? = nil, format: String = "%.3f") -> some View {
+        #if os(iOS)
+        ParameterSlider(value: value, in: range, step: step, title: label,
+                        display: String(format: format, value.wrappedValue), icon: icon)
+            .padding(.horizontal, AnimationEditorLayout.keyframeSheetHorizontalPadding)
+        #else
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.caption)
@@ -1772,6 +1798,7 @@ struct KeyframeEditorView: View {
         }
         .frame(height: 36)
         .padding(.horizontal, AnimationEditorLayout.keyframeSheetHorizontalPadding)
+        #endif
     }
     
     private func sectionHeader(_ title: String) -> some View {

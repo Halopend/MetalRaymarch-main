@@ -8,6 +8,12 @@
 import SwiftUI
 import Foundation
 
+/// Carries decoded bundle presets from the utility worker to the main-actor
+/// cache. The preset graph is immutable during this transfer.
+private struct BundledPresetCollection: @unchecked Sendable {
+    let presets: [FractalPreset]
+}
+
 /// Single source of truth for Threshold's shareable file formats. The export
 /// writers (PresetManager, AnimationManager, EmbeddedFormulaContainer) and the
 /// export-tab format reference both read from here; the UTType declarations in
@@ -318,7 +324,17 @@ class PresetManager {
     }
 
     init() {
-        loadPresets(immediate: true)
+        // Bundle enumeration and decoding can touch dozens of resources. Keep
+        // it off the main actor so the first window and onboarding controls are
+        // interactive while the catalog warms up.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let bundled = await Task.detached(priority: .utility) {
+                BundledPresetCollection(presets: Self.loadBundledPresets())
+            }.value
+            Self.bundledPresetsCache = bundled.presets
+            self.loadPresets(immediate: true)
+        }
         // The folder store is the source of truth: reload whenever the active root
         // resolves (iCloud discovery finishes) or the user switches storage mode,
         // so files added/removed in the folder mirror into the app.
@@ -391,6 +407,14 @@ class PresetManager {
         return bundledPresetsCache ?? []
     }
 
+    private func ensureBundledPresetsLoaded() async {
+        guard Self.bundledPresetsCache == nil else { return }
+        let bundled = await Task.detached(priority: .utility) {
+            BundledPresetCollection(presets: Self.loadBundledPresets())
+        }.value
+        Self.bundledPresetsCache = bundled.presets
+    }
+
     /// Stable, process-local bundled catalog for deterministic headless runs.
     /// Benchmarking must not depend on whether File Provider has hydrated the
     /// seeded copies in the active store; user/store entries are overlaid by ID
@@ -414,7 +438,10 @@ class PresetManager {
         }
         return Self.filterSceneCatalogPresets(
             Array(catalogByID.values).sorted { $0.createdAt > $1.createdAt },
-            bundledPresets: Self.bundledPresets(),
+            // If a view asks before the background bundle load completes, show
+            // store results now; the load's following scan publishes the full
+            // catalog. A UI read must never decode every bundled asset.
+            bundledPresets: Self.bundledPresetsCache ?? [],
             supportsEnvironmentReconstruction: Self.supportsEnvironmentReconstructionInSceneCatalog,
             includesScreenOnlyScenes: Self.includesScreenOnlyScenesInSceneCatalog,
             includesMacOnlyScenes: Self.includesMacOnlyScenesInSceneCatalog,
@@ -656,7 +683,7 @@ class PresetManager {
             }
 
             guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
-                  var preset = try? decoder.decode(FractalPreset.self, from: data) else {
+                  var preset = try? SceneFileCodec.decode(FractalPreset.self, from: data, decoder: decoder) else {
                 if isPlaceholderProbe {
                     failedPlaceholderProbeURLs.insert(url)
                 }
@@ -708,7 +735,7 @@ class PresetManager {
     /// IDs the store has already seen. A set difference discovers new assets while
     /// preserving deletions of older bundled presets.
     @discardableResult
-    private func migrateAndSeedIfNeeded(root: URL, presentPresetIDs: Set<UUID>) -> Bool {
+    private func migrateAndSeedIfNeeded(root: URL, presentPresetIDs: Set<UUID>) async -> Bool {
         let marker = root.appendingPathComponent(Self.bundledCatalogMarkerFileName)
 
         // The off-main scan supplies the IDs actually present in this root. Do not
@@ -727,13 +754,14 @@ class PresetManager {
                     print("❌ Legacy preset migration deferred: presets.json could not be decoded")
                     return wroteFiles
                 }
-                for preset in legacy where !present.contains(preset.id) {
+                for (index, preset) in legacy.enumerated() where !present.contains(preset.id) {
                     if writeNewPresetFile(preset, root: root) != nil {
                         present.insert(preset.id)
                         wroteFiles = true
                     } else {
                         migrationSucceeded = false
                     }
+                    if index.isMultiple(of: 3) { await Task.yield() }
                 }
                 print("📦 Migrated \(legacy.count) preset(s) from legacy presets.json")
             }
@@ -756,13 +784,14 @@ class PresetManager {
 
         let additions = bundled.filter { !seenIDs.contains($0.id) }
         var seedSucceeded = true
-        for preset in additions where !present.contains(preset.id) {
+        for (index, preset) in additions.enumerated() where !present.contains(preset.id) {
             if writeNewPresetFile(preset, root: root) != nil {
                 present.insert(preset.id)
                 wroteFiles = true
             } else {
                 seedSucceeded = false
             }
+            if index.isMultiple(of: 3) { await Task.yield() }
         }
 
         guard seedSucceeded else { return wroteFiles }
@@ -917,7 +946,7 @@ class PresetManager {
             // encoder also re-emits the legacy visibility tag.)
             var stored = preset
             stored.categoryPath = LibraryIndex.categoryPath(for: url, root: root)
-            let data = try presetEncoder.encode(stored)
+            let data = try SceneFileCodec.encode(stored, encoder: presetEncoder)
             try data.write(to: url, options: .atomic)
             return url
         } catch {
@@ -959,7 +988,7 @@ class PresetManager {
                     guard !excluded.contains(url.standardizedFileURL) else { continue }
                     if Self.isUnmaterializedPlaceholder(url) { continue }
                     if let data = try? Data(contentsOf: url),
-                       let preset = try? decoder.decode(FractalPreset.self, from: data), ids.contains(preset.id) {
+                       let preset = try? SceneFileCodec.decode(FractalPreset.self, from: data, decoder: decoder), ids.contains(preset.id) {
                         try? FileManager.default.removeItem(at: url)
                     }
                 }
@@ -1061,6 +1090,7 @@ class PresetManager {
     /// Immediate off-main reload for storage-mode merges, where the merge must
     /// consume the newly selected store before writing the union back.
     func loadPresetsNow(forceRefreshBundled: Bool = false) async {
+        await ensureBundledPresetsLoaded()
         if forceRefreshBundled { _ = Self.bundledPresets(forceRefresh: true) }
         presetReloadGeneration &+= 1
         presetReloadTask?.cancel()
@@ -1077,7 +1107,7 @@ class PresetManager {
             allowsPlaceholderProbe: false
         ))
         guard !result.cancelled else { return }
-        applyPresetScanResult(result, root: root, reason: "immediate")
+        await applyPresetScanResult(result, root: root, reason: "immediate")
     }
 
     private func makePresetScanRequest(
@@ -1088,7 +1118,7 @@ class PresetManager {
         // scene extension (`.thresh`, `.threshscene`, `.threshmp`), so index
         // every alias to keep the iCloud placeholder fallback working.
         var bundledByName: [String: FractalPreset] = [:]
-        for preset in Self.bundledPresets() {
+        for preset in Self.bundledPresetsCache ?? [] {
             for ext in ThresholdExportFormat.scenePreset.readableExtensions {
                 bundledByName[Self.sanitizedFileName(preset.name, id: preset.id, ext: ext)] = preset
             }
@@ -1130,7 +1160,7 @@ class PresetManager {
             let result = await self.performPresetScan(request)
             guard !Task.isCancelled, !result.cancelled,
                   generation == self.presetReloadGeneration else { return }
-            self.applyPresetScanResult(result, root: root, reason: reason)
+            await self.applyPresetScanResult(result, root: root, reason: reason)
         }
     }
 
@@ -1152,7 +1182,15 @@ class PresetManager {
         }
     }
 
-    private func applyPresetScanResult(_ result: PresetScanResult, root: URL, reason: String) {
+    private func applyPresetScanResult(_ result: PresetScanResult, root: URL, reason: String) async {
+        // Keep the activity indicator true through first-install migration and
+        // seeding. Those writes are cooperative so they don't starve UI input.
+        activePresetScanCount += 1
+        isIndexingPresetFiles = true
+        defer {
+            activePresetScanCount -= 1
+            isIndexingPresetFiles = activePresetScanCount > 0
+        }
         let cacheChanged = presetFileCache.count != result.cachedFiles.count ||
             result.cachedFiles.contains { url, entry in
                 presetFileCache[url]?.signature != entry.signature
@@ -1182,7 +1220,7 @@ class PresetManager {
 
         // Migration/seeding is evaluated only after the detached scan, so its
         // presence checks never perform a second synchronous directory decode.
-        var wroteFiles = migrateAndSeedIfNeeded(
+        var wroteFiles = await migrateAndSeedIfNeeded(
             root: root,
             presentPresetIDs: Set(
                 (result.presets + result.bundledPlaceholderFallbacks).map(\.id)
@@ -1218,7 +1256,9 @@ class PresetManager {
         // Bundle resources are immutable for the lifetime of this process. Keep
         // the decoded overlay hot across foreground and view-appearance events;
         // forcing 94 resource reads here caused its own avoidable UI hitch.
-        _ = Self.bundledPresets()
+        // The initial load is already running on a utility task. If it has not
+        // completed, that task will schedule the first store scan when ready.
+        guard Self.bundledPresetsCache != nil else { return }
         loadPresets()
     }
     
@@ -1437,7 +1477,7 @@ class PresetManager {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(preset)
+            let data = try SceneFileCodec.encode(preset, encoder: encoder)
             try data.write(to: tempURL)
             return tempURL
         } catch {
@@ -1448,7 +1488,7 @@ class PresetManager {
 
     func decodePreset(from url: URL) throws -> FractalPreset {
         let data = try Data(contentsOf: url)
-        return try presetDecoder.decode(FractalPreset.self, from: data)
+        return try SceneFileCodec.decode(FractalPreset.self, from: data, decoder: presetDecoder)
     }
 
     @discardableResult
@@ -1505,7 +1545,7 @@ extension PresetManager {
     // (bundled as app resources). This keeps the preset data in the same format
     // as user exports and avoids hardcoding parameter values in Swift.
 
-    private static func loadBundledPresets() -> [FractalPreset] {
+    nonisolated private static func loadBundledPresets() -> [FractalPreset] {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
@@ -1547,7 +1587,7 @@ extension PresetManager {
         for url in allURLs {
             do {
                 let data = try Data(contentsOf: url)
-                presets.append(try decoder.decode(FractalPreset.self, from: data))
+                presets.append(try SceneFileCodec.decode(FractalPreset.self, from: data, decoder: decoder))
             } catch {
                 print("⚠️ DefaultPresets: failed to decode \(url.lastPathComponent) — \(error)")
             }
@@ -1625,7 +1665,7 @@ extension PresetManager {
             let data = try Data(contentsOf: lastStateFileURL)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            let preset = try decoder.decode(FractalPreset.self, from: data)
+            let preset = try SceneFileCodec.decode(FractalPreset.self, from: data, decoder: decoder)
             preset.apply(to: settings, scope: .session)
             print("✅ Last state restored")
             return preset
