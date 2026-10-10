@@ -816,6 +816,7 @@ extension ContentView {
                     helpText: "Faraway geometry uses fewer fractal iterations, where the lost detail is already sub-pixel. Speeds up deep scenes without inflating silhouettes the way cone marching does."
                 )
 
+                #if !os(iOS)
                 CompactValueSlider(
                     title: "Foveation",
                     value: Binding(
@@ -829,6 +830,7 @@ extension ContentView {
                 )
                 .disabled(!isCompute)
                 .opacity(isCompute ? 1 : 0.45)
+                #endif
             }
 
             Divider().opacity(0.4)
@@ -1648,16 +1650,30 @@ extension ContentView {
             }
 
             if qualityGoalPreference != .advanced {
-                HStack(spacing: 8) {
-                    // Shared labels (must match Iteration Budget wording): Low / Medium / High / Full.
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: {
+                    #if os(iOS)
+                    3
+                    #else
+                    4
+                    #endif
+                }()), spacing: 8) {
+                    // Extra iOS budgets fit into two rows on a phone.
                     // Dashed screen outline + inner grid conveys pixel density; increasing detail
                     // left-to-right.
-                    let presets: [(label: String, scale: Float, icon: String)] = [
-                        ("Low", QualityConfig.defaultResolutionScale, "circle.grid.2x2"),
-                        ("Medium", 0.50, "circle.grid.3x3"),
-                        ("High", 0.75, "circle.grid.3x3.fill"),
-                        ("Full", 1.0, "circle.grid.3x3.circle.fill")
-                    ]
+                    let presets: [(label: String, scale: Float, icon: String)] = {
+                        let standard: [(label: String, scale: Float, icon: String)] = [
+                            ("Low", QualityConfig.defaultResolutionScale, "circle.grid.2x2"),
+                            ("Medium", 0.50, "circle.grid.3x3"),
+                            ("High", 0.75, "circle.grid.3x3.fill"),
+                            ("Full", 1.0, "circle.grid.3x3.circle.fill")
+                        ]
+                        #if os(iOS)
+                        return [("Minimum", 0.10, "circle"),
+                                ("Very Low", 0.20, "circle.grid.2x2")] + standard
+                        #else
+                        return standard
+                        #endif
+                    }()
 
                     ForEach(presets, id: \.label) { preset in
                         Button {

@@ -1251,9 +1251,7 @@ final class RenderSettings: @unchecked Sendable {
     
     var resolutionScale: Float {
         get { withLock { _resolutionScale } }
-        // Min 0.33 (33%) for expanded low-resolution budget options
-        // Max 1.0 (100%) - no upscaling needed
-        // Sweet spot is 0.67-0.75 for best quality/performance balance
+        // Uses the platform's full range, including iOS's 10% minimum.
         set {
             withLock { _resolutionScale = ControlCatalog.resolutionScale.clamp(newValue) }
             persistQuality()

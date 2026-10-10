@@ -975,6 +975,7 @@ extension ContentView {
 
             Divider().opacity(0.4)
 
+#if !os(iOS)
             // ── Foveation — 8×8 compute path only ────────────────────────
             VStack(alignment: .leading, spacing: 4) {
                 CompactValueSlider(
@@ -990,8 +991,9 @@ extension ContentView {
                 Text("Peripheral 8×8 tiles march fewer ray steps, ramping from the center outward. 0 = off. Cuts GPU cost where peripheral vision can't resolve detail. 8×8 compute path only.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                .fixedSize(horizontal: false, vertical: true)
             }
+#endif
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()

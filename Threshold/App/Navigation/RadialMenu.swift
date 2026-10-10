@@ -700,8 +700,15 @@ struct RadialMenu: View {
         let focusOrder = keyboardFocusOrder(rings: rings)
 
         ZStack {
-            Color.clear
-                .contentShape(Rectangle())
+            if interactionProfile == .touch {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onDismiss)
+                    .accessibilityHidden(true)
+            } else {
+                Color.clear
+                    .contentShape(Rectangle())
+            }
 
             if layout == .straightEdge {
                 straightEdgeScrim
@@ -950,14 +957,14 @@ struct RadialMenu: View {
                 if !presentedPath.isEmpty {
                     Button(action: retreatOneLevel) {
                         Image(systemName: "chevron.backward")
-                            .frame(width: 38, height: 38)
+                            .frame(width: 44, height: 44)
                     }
                     .accessibilityLabel("Back")
                 }
 
                 Button(action: onDismiss) {
                     Image(systemName: "xmark")
-                        .frame(width: 38, height: 38)
+                        .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("Close controls")
             }

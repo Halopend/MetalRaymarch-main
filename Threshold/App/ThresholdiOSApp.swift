@@ -25,8 +25,7 @@ private struct ThresholdiOSRootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("hasCompletedIntroOnboarding") private var hasCompletedIntroOnboarding = false
-    // Start phone users on the artwork. Phone quick controls are opened with
-    // an intentional edge swipe; iPad keeps its visible side panel.
+    // Start phone users on the artwork; iPad keeps its visible side panel.
     @State private var isShowingControls = UIDevice.current.userInterfaceIdiom != .phone
     @State private var isAnimationEditorPresented = false
     @State private var isFormulaEditorPresented = false
@@ -127,18 +126,6 @@ private struct ThresholdiOSRootView: View {
             )
                 .ignoresSafeArea()
                 .background(Color.black)
-                .overlay(alignment: .topTrailing) {
-                    if !isFormulaEditorPresented && (isPhone || !isShowingControls) {
-                        phoneAwareControls(
-                            viewportSize: proxy.size,
-                            safeAreaInsets: safeAreaInsets
-                        )
-                            // This overlay is already inside the window safe area.
-                            .padding(.top, isPhone ? 4 : 8)
-                            .padding(.trailing, isPhone ? 10 : 16)
-                            .transition(.opacity)
-                    }
-                }
                 .overlay(alignment: .bottom) {
                     VStack(spacing: 8) {
                         if appModel.presetManager.isIndexingPresetFiles {
@@ -159,12 +146,18 @@ private struct ThresholdiOSRootView: View {
                     isPhone: isPhone,
                     widths: widths
                 ))
-                .accessibilityAction(named: Text("Open radial controls")) {
-                    toggleRadialMenu(
-                        at: CGPoint(x: proxy.size.width * 0.5, y: proxy.size.height * 0.5),
-                        viewportSize: proxy.size
-                    )
+                // Keep the launch button inside the safe area. The canvas
+                // ignores it, so adding the safe-area inset again pushed this
+                // control too far down on iPhone.
+                .overlay(alignment: .topTrailing) {
+                    if !isFormulaEditorPresented && (!isPhone || !isShowingControls) {
+                        controlsToggle
+                            .padding(.top, isPhone ? 4 : 8)
+                            .padding(.trailing, isPhone ? max(10, safeAreaInsets.trailing + 10) : 16)
+                            .transition(.opacity)
+                    }
                 }
+                .accessibilityAction(named: Text("Open controls")) { setControlsVisible(true) }
                 // The radial menu is a modal interaction surface. Keep the
                 // covered Metal view, inspector, and controls button out of
                 // VoiceOver traversal until the menu is dismissed.
@@ -354,6 +347,7 @@ private struct ThresholdiOSRootView: View {
     }
 
     private func setControlsVisible(_ isVisible: Bool) {
+        if isVisible { dismissRadialMenu() }
         withAnimation(reduceMotion ? nil : controlsAnimation) {
             isShowingControls = isVisible
         }
@@ -428,7 +422,8 @@ private struct ThresholdiOSRootView: View {
             )
                 .font(.system(size: 16, weight: .semibold))
                 .padding(.horizontal, 12)
-                .frame(minHeight: 44)
+                .frame(minWidth: 112, minHeight: 56)
+                .contentShape(Capsule())
                 .background(.ultraThinMaterial, in: Capsule())
                 .overlay(Capsule().strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
                 .foregroundStyle(.primary)
@@ -437,48 +432,16 @@ private struct ThresholdiOSRootView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(isShowingControls ? "Hide controls" : "Show controls")
+        .accessibilityHint(isShowingControls ? "Closes the scene controls panel." : "Opens the scene controls panel.")
     }
 
-    @ViewBuilder
-    private func phoneAwareControls(
-        viewportSize: CGSize,
-        safeAreaInsets: EdgeInsets
-    ) -> some View {
-        if isPhone {
-            HStack(spacing: 8) {
-                Button {
-                    toggleRadialMenu(
-                        at: CGPoint(
-                            x: viewportSize.width,
-                            y: max(safeAreaInsets.top + 88, viewportSize.height * 0.34)
-                        ),
-                        viewportSize: viewportSize
-                    )
-                } label: {
-                    Image(systemName: "circle.grid.cross")
-                        .font(.system(size: 17, weight: .semibold))
-                        .frame(width: 44, height: 44)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
-                        .foregroundStyle(.primary)
-                        .shadow(color: Color.black.opacity(0.35), radius: 10, x: 0, y: 4)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Open radial controls")
-
-                controlsToggle
-            }
-        } else {
-            controlsToggle
-        }
-    }
 }
 
 /// iPad scene selection auto-hides the controls. Keeping its panel in the
 /// SwiftUI hierarchy avoids a UIKit split-view dismissal while the scene load
 /// updates the explorer and viewport. The native adaptive inspector remains
-/// useful on phones, where it supplies sheet detents and dismissal gestures.
+/// On phones, the same content is presented in a detented sheet that can be
+/// dismissed by dragging it down.
 private struct ThresholdiOSControlsPresentation: ViewModifier {
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -491,9 +454,13 @@ private struct ThresholdiOSControlsPresentation: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if isPhone {
-            content.inspector(isPresented: $isShowingControls) {
+            content.sheet(isPresented: $isShowingControls) {
                 ThresholdiOSInspectorContent()
-                    .inspectorColumnWidth(min: widths.min, ideal: widths.ideal, max: widths.max)
+                    // Keep the inspector header clear of the sheet grabber.
+                    // Its content is clipped to the sheet's rounded top edge.
+                    .padding(.top, 24)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
             }
         } else {
             content.overlay(alignment: .trailing) {
@@ -566,11 +533,6 @@ private struct ThresholdiOSInspectorContent: View {
             // compact so ContentView selects its rail-free responsive shell.
             .environment(\.horizontalSizeClass, .compact)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // `inspector` adapts to a sheet on iPhone. Medium is useful for
-            // quick adjustments while preserving the live canvas; large gives
-            // dense editors the full available workspace.
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
             // Keep the inspector mounted during a hold so its gesture receives
             // the release edge, but make its presentation transparent to show
             // the renderer beneath the Audio Reactivity preview.

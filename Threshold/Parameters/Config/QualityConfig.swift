@@ -92,7 +92,7 @@ enum SceneQualityTarget: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    /// Mac / iOS MetalFX input-scale target (`resolutionScale`, 0.33…1.0).
+    /// Mac / iOS render input-scale target (`resolutionScale`).
     var macResolutionScale: Float {
         switch self {
         case .standard: return QualityConfig.defaultResolutionScale
@@ -128,9 +128,25 @@ enum SceneQualityTarget: String, Codable, CaseIterable, Sendable {
 }
 
 struct QualityConfig: Codable, Equatable, Sendable {
-    /// Mac/iOS MetalFX input scale used on a fresh install. Matches the
-    /// user-facing Low detail-budget preset.
-    static let defaultResolutionScale: Float = 0.33
+    /// Fresh-install input scale used by the Mac/iOS low-detail preset. The
+    /// iOS renderer allows a smaller budget and starts at 25%.
+    static var defaultResolutionScale: Float {
+        #if os(iOS)
+        0.25
+        #else
+        0.33
+        #endif
+    }
+
+    /// iOS can trade more sharpness for a smaller raymarch workload. Below
+    /// MetalFX's supported input sizes, the viewport uses a basic upscale.
+    static var minimumResolutionScale: Float {
+        #if os(iOS)
+        0.10
+        #else
+        0.33
+        #endif
+    }
 
     /// First-launch DE iteration / ray-step budgets. They match the user-facing
     /// Low quality preset (`QualityPreset.low`) so a fresh install opens at Low,
@@ -181,8 +197,9 @@ struct QualityConfig: Codable, Equatable, Sendable {
     /// trade more sharpness for headroom on heavy scenes.
     static let visionMinRenderQuality: Float = 0.05
 
-    /// First-launch compositor Render Quality on Vision Pro. Mirrors the Mac/iOS
-    /// Low detail budget (`defaultResolutionScale`, 0.33): Vision Pro is the most
+    /// First-launch compositor Render Quality on Vision Pro. Matches the Mac
+    /// Low detail budget (0.33); iOS uses its 25% phone-oriented default.
+    /// Vision Pro is the most
     /// thermally constrained target, so a fresh install opens as low as the
     /// desktop's Low preset and lets the adaptive governor recover sharpness
     /// headroom-first from there. Existing installs are nudged off the former
@@ -209,7 +226,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
     var baseMaxRaySteps: Int = Self.defaultMaxRaySteps
 
     // Resolution / tiling
-    var resolutionScale: Float = Self.defaultResolutionScale // 0.33 - 1.0 (MetalFX spatial upscale input scale)
+    var resolutionScale: Float = Self.defaultResolutionScale // minimumResolutionScale...1.0
     var renderQuality: Float = Self.visionDefaultRenderQuality // visionMinRenderQuality...visionMaxRenderQuality (visionOS compositor drawable scale). Default matches the desktop Low detail budget; the floor is for probing max framerate / the adaptive governor.
     var tileSize: Int = 0              // 0=disabled (fragment), 8=adaptive hierarchical compute
 

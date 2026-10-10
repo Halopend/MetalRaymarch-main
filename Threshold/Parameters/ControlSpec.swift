@@ -251,12 +251,12 @@ enum ControlCatalog {
         range: 4.0...16.0,
         defaultValue: 8.0)
 
-    /// MetalFX input-scale span. The Low preset maps to the exact 0.33 floor.
+    /// Render input scale; iOS also supports basic upscaling below MetalFX's limits.
     static let resolutionScale = ControlSpec(
         id: "quality.resolutionScale",
         name: "Resolution Scale",
         icon: "rectangle.compress.vertical",
-        range: 0.33...1.0,
+        range: QualityConfig.minimumResolutionScale...1.0,
         defaultValue: QualityConfig.defaultResolutionScale)
 
     /// Gradient mapping controls are scene-authored, static scalars. Repeat

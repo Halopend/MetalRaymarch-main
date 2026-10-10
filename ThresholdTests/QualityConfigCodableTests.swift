@@ -17,6 +17,24 @@ import Foundation
 @Suite("QualityConfig — raymarch accelerator persistence")
 struct QualityConfigCodableTests {
 
+    @Test("The platform minimum survives quality persistence and live restoration")
+    func minimumResolutionRoundTrip() throws {
+        #if os(iOS)
+        #expect(QualityConfig.minimumResolutionScale == 0.10)
+        #else
+        #expect(QualityConfig.minimumResolutionScale == 0.33)
+        #endif
+        var config = QualityConfig()
+        config.resolutionScale = QualityConfig.minimumResolutionScale
+        config.clamp()
+        let restored = try JSONDecoder().decode(QualityConfig.self, from: JSONEncoder().encode(config))
+        let settings = RenderSettings()
+        settings.qualityConfig = restored
+        #expect(settings.resolutionScale == QualityConfig.minimumResolutionScale)
+        settings.resolutionScale = 0
+        #expect(settings.resolutionScale == QualityConfig.minimumResolutionScale)
+    }
+
     @Test("Retired cone warm-start settings are ignored without losing compute settings")
     func retiredConeToggleMigration() throws {
         let data = Data(#"{"coarsePrepassWarmStartEnabled":true,"tileSize":8,"computeTemporalReprojectionEnabled":false}"#.utf8)
@@ -30,14 +48,22 @@ struct QualityConfigCodableTests {
         #expect(restored == config)
     }
 
-    @Test("default resolution is the 33 percent Low preset")
+    @Test("default resolution matches the platform's Low preset")
     func resolutionDefaults() {
+#if os(iOS)
+        #expect(QualityConfig().resolutionScale == 0.25)
+        #expect(ControlCatalog.resolutionScale.defaultValue == 0.25)
+        #expect(SceneQualityTarget.standard.macResolutionScale == 0.25)
+        #expect(QualityConfig.minimumResolutionScale == 0.10)
+#else
         #expect(QualityConfig().resolutionScale == 0.33)
         #expect(ControlCatalog.resolutionScale.defaultValue == 0.33)
         #expect(SceneQualityTarget.standard.macResolutionScale == 0.33)
+        #expect(QualityConfig.minimumResolutionScale == 0.33)
+#endif
 
         #if os(macOS) || os(iOS)
-        #expect(RenderSettings().resolutionScale == 0.33)
+        #expect(RenderSettings().resolutionScale == QualityConfig.defaultResolutionScale)
         #endif
     }
 
@@ -46,7 +72,6 @@ struct QualityConfigCodableTests {
         // Vision Pro is the most thermally constrained target, so a fresh
         // install opens at the same 33% budget as the Mac/iOS Low preset and
         // the adaptive governor recovers sharpness headroom-first from there.
-        #expect(QualityConfig.visionDefaultRenderQuality == QualityConfig.defaultResolutionScale)
         #expect(QualityConfig.visionDefaultRenderQuality == 0.33)
         #expect(QualityConfig().renderQuality == 0.33)
 

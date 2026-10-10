@@ -601,7 +601,7 @@ struct FirstLaunchWindowView: View {
 
     private var viewportNavigationOnboardingDetail: String {
 #if os(iOS)
-        "Drag with one finger to orbit. Use two fingers to pan or zoom."
+        "Explore the scene directly in the viewport."
 #else
         "Drag to orbit, right-drag to pan, scroll to zoom, or use WASD to move through the fractal."
 #endif
@@ -609,7 +609,7 @@ struct FirstLaunchWindowView: View {
 
     private var phoneControlsOnboardingDetail: String {
 #if os(iOS)
-        "Swipe inward from either screen edge to open quick controls. Swipe back toward that edge, or use Close, to dismiss them."
+        "Tap Controls to tune the scene."
 #else
         "Use the labeled Controls button over the renderer to open the creative workspace."
 #endif
