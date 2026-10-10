@@ -974,7 +974,6 @@ struct ContentView: View {
 
             phoneWorkspaceTabs
         }
-        .background(.ultraThinMaterial)
     }
 
     private var phoneSectionTabs: some View {

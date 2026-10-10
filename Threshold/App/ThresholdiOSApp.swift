@@ -423,25 +423,14 @@ private struct ThresholdiOSRootView: View {
         Button {
             setControlsVisible(!isShowingControls)
         } label: {
-            Group {
-                if isPhone {
-                    Label("Controls", systemImage: AppIcons.sliderHorizontalBelowRectangle)
-                        .font(.system(size: 16, weight: .semibold))
-                        .padding(.horizontal, 12)
-                        .frame(minWidth: 112, minHeight: 56)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
-                } else {
-                    Image(systemName: AppIcons.sliderHorizontalBelowRectangle)
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(width: 38, height: 38)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
-                }
-            }
-            .foregroundStyle(.primary)
-            .shadow(color: Color.black.opacity(0.35), radius: 10, x: 0, y: 4)
-            .contentShape(isPhone ? AnyShape(Capsule()) : AnyShape(Circle()))
+            Image(systemName: AppIcons.sliderHorizontalBelowRectangle)
+                .font(.system(size: 16, weight: .semibold))
+                .frame(width: 38, height: 38)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                .foregroundStyle(.primary)
+                .shadow(color: Color.black.opacity(0.35), radius: 10, x: 0, y: 4)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Show controls")
@@ -453,8 +442,8 @@ private struct ThresholdiOSRootView: View {
 /// iPad scene selection auto-hides the controls. Keeping its panel in the
 /// SwiftUI hierarchy avoids a UIKit split-view dismissal while the scene load
 /// updates the explorer and viewport.
-/// On phones, the same content is presented in a detented sheet that can be
-/// dismissed by dragging it down.
+/// On phones, the same content sits in a bottom panel that can be dismissed
+/// by dragging its handle down.
 private struct ThresholdiOSControlsPresentation: ViewModifier {
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -476,31 +465,23 @@ private struct ThresholdiOSControlsPresentation: ViewModifier {
                         if isShowingControls {
                             let availableHeight = max(0, geometry.size.height - safeAreaInsets.top)
                             let panelHeight = min(availableHeight,
-                                                  max(320, availableHeight * (phoneControlsExpanded ? 0.92 : 0.55)))
+                                                  max(320, availableHeight * (phoneControlsExpanded ? 0.94 : 0.78)))
 
                             VStack(spacing: 0) {
-                                HStack {
+                                Button {
+                                    withAnimation(reduceMotion ? nil : MenuChrome.panelSpring) {
+                                        isShowingControls = false
+                                        phoneControlsExpanded = false
+                                    }
+                                } label: {
                                     Capsule()
-                                        .fill(Color.secondary.opacity(0.45))
+                                        .fill(Color.white.opacity(0.5))
                                         .frame(width: 36, height: 5)
                                         .frame(maxWidth: .infinity)
-                                    Button {
-                                        withAnimation(reduceMotion ? nil : MenuChrome.panelSpring) {
-                                            isShowingControls = false
-                                            phoneControlsExpanded = false
-                                        }
-                                    } label: {
-                                        Image(systemName: "xmark")
-                                            .font(.system(size: 14, weight: .semibold))
-                                            .frame(width: 32, height: 32)
-                                            .background(.ultraThinMaterial, in: Circle())
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel("Hide controls")
+                                        .frame(height: 24)
+                                        .padding(.top, 4)
                                 }
-                                .padding(.horizontal, 16)
-                                .padding(.top, 10)
-                                .padding(.bottom, 8)
+                                .buttonStyle(.plain)
                                 .contentShape(Rectangle())
                                 .simultaneousGesture(DragGesture(minimumDistance: 12).onEnded { gesture in
                                     withAnimation(reduceMotion ? nil : MenuChrome.panelSpring) {
@@ -512,10 +493,10 @@ private struct ThresholdiOSControlsPresentation: ViewModifier {
                                         }
                                     }
                                 })
+                                .accessibilityLabel("Hide controls")
 
                                 ThresholdiOSInspectorContent()
                                     .environment(\.parameterSliderPreview, sliderPreview)
-                                    .padding(.top, 4)
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                                     .opacity(appModel.isAudioReactivityIsolationPreviewActive ? 0 : 1)
                             }
@@ -523,10 +504,19 @@ private struct ThresholdiOSControlsPresentation: ViewModifier {
                             .frame(height: panelHeight, alignment: .top)
                             .padding(.bottom, safeAreaInsets.bottom)
                             .background {
-                                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                UnevenRoundedRectangle(
+                                    cornerRadii: RectangleCornerRadii(
+                                        topLeading: 20,
+                                        bottomLeading: 0,
+                                        bottomTrailing: 0,
+                                        topTrailing: 20
+                                    ),
+                                    style: .continuous
+                                )
                                     .fill(.regularMaterial)
                                     .ignoresSafeArea(.container, edges: .bottom)
                             }
+                            .environment(\.colorScheme, .dark)
                             .shadow(color: .black.opacity(0.18), radius: 16, y: -4)
                             .modifier(ThresholdSliderFocusPresentation(preview: sliderPreview))
                             .transition(.move(edge: .bottom).combined(with: .opacity))
