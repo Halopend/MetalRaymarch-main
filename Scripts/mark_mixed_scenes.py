@@ -30,7 +30,12 @@ if not root.is_dir():
 changed = 0
 unmarked = []
 for path in sorted(root.rglob("*.threshscene")):
-    data = json.loads(path.read_text())
+    contents = path.read_bytes()
+    # Compressed scene files preserve the JSON marker from before compression.
+    # They use a binary envelope and cannot be parsed as UTF-8 here.
+    if contents.startswith(b"THRSCN01"):
+        continue
+    data = json.loads(contents.decode("utf-8"))
     if data.get("mixedModeScene") is True:
         continue
     if args.check:
