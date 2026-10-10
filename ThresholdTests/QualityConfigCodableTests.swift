@@ -21,8 +21,12 @@ struct QualityConfigCodableTests {
     func minimumResolutionRoundTrip() throws {
         #if os(iOS)
         #expect(QualityConfig.minimumResolutionScale == 0.10)
+        #expect(QualityConfig.maximumResolutionScale == 0.50)
+        #expect(ControlCatalog.resolutionScale.range.upperBound == 0.50)
         #else
         #expect(QualityConfig.minimumResolutionScale == 0.33)
+        #expect(QualityConfig.maximumResolutionScale == 1.0)
+        #expect(ControlCatalog.resolutionScale.range.upperBound == 1.0)
         #endif
         var config = QualityConfig()
         config.resolutionScale = QualityConfig.minimumResolutionScale
@@ -53,18 +57,65 @@ struct QualityConfigCodableTests {
 #if os(iOS)
         #expect(QualityConfig().resolutionScale == 0.25)
         #expect(ControlCatalog.resolutionScale.defaultValue == 0.25)
-        #expect(SceneQualityTarget.standard.macResolutionScale == 0.25)
+        #expect(SceneQualityTarget.standard.resolutionScale == 0.25)
         #expect(QualityConfig.minimumResolutionScale == 0.10)
 #else
         #expect(QualityConfig().resolutionScale == 0.33)
         #expect(ControlCatalog.resolutionScale.defaultValue == 0.33)
-        #expect(SceneQualityTarget.standard.macResolutionScale == 0.33)
+        #expect(SceneQualityTarget.standard.resolutionScale == 0.33)
         #expect(QualityConfig.minimumResolutionScale == 0.33)
 #endif
 
         #if os(macOS) || os(iOS)
         #expect(RenderSettings().resolutionScale == QualityConfig.defaultResolutionScale)
         #endif
+    }
+
+    @Test("detail budget presets scale from the platform ceiling")
+    func detailBudgetPresetsUsePlatformCeiling() {
+        #if os(iOS)
+        #expect(DetailBudgetPreset.visiblePresets.count == 6)
+        #expect(DetailBudgetPreset.minimum.scale == 0.10)
+        #expect(DetailBudgetPreset.veryLow.scale == 0.20)
+        #expect(DetailBudgetPreset.low.scale == 0.25)
+        #expect(abs(DetailBudgetPreset.medium.scale - (1.0 / 3.0)) < 0.0001)
+        #expect(abs(DetailBudgetPreset.high.scale - (5.0 / 12.0)) < 0.0001)
+        #expect(DetailBudgetPreset.full.scale == 0.50)
+        #expect(QualityConfig.displayedResolutionPercent(DetailBudgetPreset.minimum.scale) == 20)
+        #expect(QualityConfig.displayedResolutionPercent(DetailBudgetPreset.veryLow.scale) == 40)
+        #expect(QualityConfig.displayedResolutionPercent(DetailBudgetPreset.low.scale) == 50)
+        #expect(QualityConfig.displayedResolutionPercent(DetailBudgetPreset.medium.scale) == 67)
+        #expect(QualityConfig.displayedResolutionPercent(DetailBudgetPreset.high.scale) == 83)
+        #expect(QualityConfig.displayedResolutionPercent(DetailBudgetPreset.full.scale) == 100)
+        #expect(SceneQualityTarget.high.resolutionScale == 0.375)
+        #expect(SceneQualityTarget.ultra.resolutionScale == 0.50)
+        #else
+        #expect(DetailBudgetPreset.visiblePresets.count == 4)
+        #expect(DetailBudgetPreset.low.scale == 0.33)
+        #expect(DetailBudgetPreset.medium.scale == 0.50)
+        #expect(DetailBudgetPreset.high.scale == 0.75)
+        #expect(DetailBudgetPreset.full.scale == 1.0)
+        #expect(QualityConfig.displayedResolutionPercent(DetailBudgetPreset.low.scale) == 33)
+        #expect(QualityConfig.displayedResolutionPercent(DetailBudgetPreset.full.scale) == 100)
+        #expect(SceneQualityTarget.high.resolutionScale == 0.75)
+        #expect(SceneQualityTarget.ultra.resolutionScale == 1.0)
+        #endif
+    }
+
+    @Test("quality restoration clamps old resolution values to platform maximum")
+    func restoredResolutionRespectsPlatformMaximum() throws {
+        var config = try JSONDecoder().decode(
+            QualityConfig.self,
+            from: Data(#"{"resolutionScale":1.0}"#.utf8)
+        )
+        config.clamp()
+        #expect(config.resolutionScale == QualityConfig.maximumResolutionScale)
+
+        let settings = RenderSettings()
+        settings.qualityConfig = config
+        #expect(settings.resolutionScale == QualityConfig.maximumResolutionScale)
+        settings.resolutionScale = 1.0
+        #expect(settings.resolutionScale == QualityConfig.maximumResolutionScale)
     }
 
     @Test("Vision Pro default render quality matches the desktop Low detail budget")
