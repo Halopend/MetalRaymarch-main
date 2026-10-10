@@ -439,7 +439,7 @@ private struct ThresholdiOSRootView: View {
 
 /// iPad scene selection auto-hides the controls. Keeping its panel in the
 /// SwiftUI hierarchy avoids a UIKit split-view dismissal while the scene load
-/// updates the explorer and viewport. The native adaptive inspector remains
+/// updates the explorer and viewport.
 /// On phones, the same content is presented in a detented sheet that can be
 /// dismissed by dragging it down.
 private struct ThresholdiOSControlsPresentation: ViewModifier {
@@ -451,17 +451,36 @@ private struct ThresholdiOSControlsPresentation: ViewModifier {
     let isPhone: Bool
     let widths: (min: CGFloat, ideal: CGFloat, max: CGFloat)
 
+    private var isSliderPreviewing: Bool {
+        sliderPreview.isAdjusting && !reduceTransparency
+    }
+
+    private var isRevealingViewport: Bool {
+        isSliderPreviewing || appModel.isAudioReactivityIsolationPreviewActive
+    }
+
     @ViewBuilder
     func body(content: Content) -> some View {
         if isPhone {
-            content.sheet(isPresented: $isShowingControls) {
-                ThresholdiOSInspectorContent()
-                    // Keep the inspector header clear of the sheet grabber.
-                    // Its content is clipped to the sheet's rounded top edge.
-                    .padding(.top, 24)
-                    .presentationDetents([.medium, .large])
-                    .presentationDragIndicator(.visible)
-            }
+            content
+                // Removing the sheet's dimming must not hand the ongoing drag
+                // or another finger to the scene's navigation gestures.
+                .allowsHitTesting(!isRevealingViewport)
+                .sheet(isPresented: $isShowingControls) {
+                    ThresholdiOSInspectorContent()
+                        .environment(\.parameterSliderPreview, sliderPreview)
+                        // Keep the inspector header clear of the sheet grabber.
+                        // Its content is clipped to the sheet's rounded top edge.
+                        .padding(.top, 24)
+                        .background(.regularMaterial)
+                        .modifier(ThresholdSliderFocusPresentation(preview: sliderPreview))
+                        .opacity(appModel.isAudioReactivityIsolationPreviewActive ? 0 : 1)
+                        .presentationDetents([.medium, .large])
+                        .presentationDragIndicator(isRevealingViewport ? .hidden : .visible)
+                        .presentationBackground(.clear)
+                        .presentationBackgroundInteraction(isRevealingViewport ? .enabled : .disabled)
+                        .interactiveDismissDisabled(isRevealingViewport)
+                }
         } else {
             content.overlay(alignment: .trailing) {
                 if isShowingControls {
@@ -506,19 +525,74 @@ private struct ThresholdiOSControlsPresentation: ViewModifier {
                             .ignoresSafeArea(.container, edges: .vertical)
                             .allowsHitTesting(false)
                     }
-                    // Keep the exact same controls and hit targets throughout
-                    // the drag, including when previewing the artwork beneath.
-                    .opacity(appModel.isAudioReactivityIsolationPreviewActive ? 0 :
-                        (sliderPreview.isAdjusting && !reduceTransparency ? 0.12 : 1))
-                    // SwiftUI can exclude low-opacity views from automatic hit
-                    // testing. Keep touch-up delivery explicit during preview.
-                    .allowsHitTesting(true)
-                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.18),
-                               value: sliderPreview.isAdjusting)
+                    .modifier(ThresholdSliderFocusPresentation(preview: sliderPreview))
+                    .opacity(appModel.isAudioReactivityIsolationPreviewActive ? 0 : 1)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
         }
+    }
+}
+
+private struct ParameterSliderFramesKey: PreferenceKey {
+    static let defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    }
+}
+
+/// Cut away the panel's chrome and other rows while keeping the original
+/// active control in place. A mask changes drawing only, preserving layout,
+/// scroll position, and native slider touch ownership through release.
+private struct ThresholdSliderFocusPresentation: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    let preview: ParameterSliderPreview
+    @State private var frames: [UUID: CGRect] = [:]
+    @State private var lastFocusedFrames: [CGRect] = []
+
+    private var focusedFrames: [CGRect] {
+        frames.keys.sorted { $0.uuidString < $1.uuidString }
+            .filter { preview.isEditing($0) }
+            .compactMap { frames[$0] }
+    }
+
+    func body(content: Content) -> some View {
+        let activeFrames = focusedFrames
+        // Fail open if a control has no bounds yet, and honor accessibility.
+        let isFocused = !reduceTransparency && !activeFrames.isEmpty
+        content
+            .overlayPreferenceValue(ParameterSliderBoundsKey.self) { bounds in
+                GeometryReader { geometry in
+                    Color.clear
+                        .preference(key: ParameterSliderFramesKey.self,
+                                    value: bounds.mapValues { geometry[$0] })
+                }
+                .allowsHitTesting(false)
+            }
+            .onPreferenceChange(ParameterSliderFramesKey.self) { frames = $0 }
+            .onChange(of: activeFrames, initial: true) { _, updated in
+                // Retain the last row during fade-in so it never blinks away
+                // when the native slider reports the release edge.
+                if !updated.isEmpty { lastFocusedFrames = updated }
+            }
+            .mask {
+                ZStack(alignment: .topLeading) {
+                    Rectangle().fill(.white).opacity(isFocused ? 0 : 1)
+                    Path { path in
+                        for frame in activeFrames.isEmpty ? lastFocusedFrames : activeFrames {
+                            path.addRoundedRect(in: frame.insetBy(dx: -8, dy: -6),
+                                                cornerSize: CGSize(width: 12, height: 12))
+                        }
+                    }
+                    .fill(.white)
+                }
+            }
+            // The transparent panel continues to own its hit targets; never
+            // replace or disable the slider in the middle of a native drag.
+            .allowsHitTesting(true)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: isFocused)
     }
 }
 

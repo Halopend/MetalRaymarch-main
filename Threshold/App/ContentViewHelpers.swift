@@ -44,16 +44,38 @@ extension EnvironmentValues {
 }
 
 /// Tracks individual touches so overlapping drags and disappearing controls
-/// cannot leave the iPad panel stuck in its preview appearance.
+/// cannot leave the full controls panel stuck in its preview appearance.
 @Observable
 @MainActor
 final class ParameterSliderPreview {
     private var activeControls: Set<UUID> = []
     var isAdjusting: Bool { !activeControls.isEmpty }
 
+    func isEditing(_ control: UUID) -> Bool { activeControls.contains(control) }
+
     func setEditing(_ editing: Bool, for control: UUID) {
         if editing { activeControls.insert(control) }
         else { activeControls.remove(control) }
+    }
+}
+
+/// Bounds travel with the original slider, so previewing never replaces the
+/// native control or interrupts the touch that owns its drag.
+struct ParameterSliderBoundsKey: PreferenceKey {
+    static let defaultValue: [UUID: Anchor<CGRect>] = [:]
+
+    static func reduce(value: inout [UUID: Anchor<CGRect>],
+                       nextValue: () -> [UUID: Anchor<CGRect>]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    }
+}
+
+extension View {
+    /// Keep a slider's label and value visible along with its track.
+    func parameterSliderPreviewRegion() -> some View {
+        transformAnchorPreference(key: ParameterSliderBoundsKey.self, value: .bounds) { bounds, region in
+            for id in Array(bounds.keys) { bounds[id] = region }
+        }
     }
 }
 
@@ -96,6 +118,9 @@ struct ParameterSlider<Value: BinaryFloatingPoint>: View where Value.Stride: Bin
             } else {
                 Slider(value: $value, in: range, onEditingChanged: editingChanged)
             }
+        }
+        .anchorPreference(key: ParameterSliderBoundsKey.self, value: .bounds) { bounds in
+            preview == nil ? [:] : [controlID: bounds]
         }
         .onDisappear { editingChanged(false) }
         .onChange(of: scenePhase) { _, phase in
@@ -223,6 +248,7 @@ struct EffectSliderRow: View {
                 .frame(minHeight: 32)
             }
         }
+        .parameterSliderPreviewRegion()
     }
 
     @ViewBuilder
@@ -348,6 +374,7 @@ struct CompactValueSlider: View {
             .accessibilityLabel(title)
             .accessibilityValue(display)
         }
+        .parameterSliderPreviewRegion()
         .help(helpText ?? "")
     }
 }
