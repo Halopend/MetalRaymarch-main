@@ -516,6 +516,18 @@ private struct ThresholdiOSControlsPresentation: ViewModifier {
                                     .fill(.regularMaterial)
                                     .ignoresSafeArea(.container, edges: .bottom)
                             }
+                            // The inspector overlay is aligned to the safe-area
+                            // bottom. Continue its surface over the home-indicator
+                            // inset so the artwork cannot show through below it.
+                            .overlay(alignment: .bottom) {
+                                if safeAreaInsets.bottom > 0 {
+                                    Rectangle()
+                                        .fill(.regularMaterial)
+                                        .frame(height: safeAreaInsets.bottom)
+                                        .offset(y: safeAreaInsets.bottom)
+                                        .allowsHitTesting(false)
+                                }
+                            }
                             .environment(\.colorScheme, .dark)
                             .shadow(color: .black.opacity(0.18), radius: 16, y: -4)
                             .modifier(ThresholdSliderFocusPresentation(preview: sliderPreview))
