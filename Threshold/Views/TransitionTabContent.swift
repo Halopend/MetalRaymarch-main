@@ -47,6 +47,7 @@ struct TransitionTabContent: View {
 
     private var transitionTimeSection: some View {
         VStack(alignment: .leading, spacing: 8) {
+            #if !os(iOS)
             HStack {
                 Label("Same Scene Transition Time", systemImage: AppIcons.timer)
                     .font(.subheadline.bold())
@@ -55,11 +56,13 @@ struct TransitionTabContent: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
+            #endif
 
             ParameterSlider(
                 value: $animationManager.sceneTransitionDuration,
                 in: 0...3,
-                step: 0.05
+                step: 0.05,
+                title: "Transition time", display: durationLabel
             )
 
             Text(animationManager.sceneTransitionDuration <= 0
@@ -153,6 +156,7 @@ struct TransitionTabContent: View {
 
             if animationManager.musicCueSceneSwitchEnabled {
                 VStack(spacing: 8) {
+                    #if !os(iOS)
                     HStack {
                         Text("Required Drop")
                             .font(.caption)
@@ -161,10 +165,12 @@ struct TransitionTabContent: View {
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
+                    #endif
                     ParameterSlider(
                         value: $animationManager.musicCueThreshold,
                         in: 0.05...1,
-                        step: 0.05
+                        step: 0.05,
+                        title: "Required drop", display: cueThresholdLabel
                     )
 
                     Text("Lower values trigger more readily.")
@@ -172,6 +178,7 @@ struct TransitionTabContent: View {
                         .foregroundStyle(.tertiary)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
+                    #if !os(iOS)
                     HStack {
                         Text("Minimum Gap")
                             .font(.caption)
@@ -180,10 +187,12 @@ struct TransitionTabContent: View {
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
+                    #endif
                     ParameterSlider(
                         value: $animationManager.musicCueMinimumInterval,
                         in: 0...30,
-                        step: 0.5
+                        step: 0.5,
+                        title: "Minimum gap", display: cueMinimumIntervalLabel
                     )
                 }
             }

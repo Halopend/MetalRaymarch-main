@@ -1644,7 +1644,7 @@ final class RenderSettings: @unchecked Sendable {
         // higher quality; the governor may still shed below the preference under load.
         renderQuality = max(renderQuality, target.visionRenderQuality)
         #else
-        resolutionScale = max(resolutionScale, target.macResolutionScale)
+        resolutionScale = max(resolutionScale, target.resolutionScale)
         #endif
     }
 

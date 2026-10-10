@@ -535,7 +535,13 @@ struct MusicTabContent: View {
             ), range: 0...3)
         }
         .padding(12)
+        #if os(iOS)
+        // The iOS rows are taller scrub fields; let the tile take its full
+        // natural height so the final Damping control cannot be compressed.
+        .fixedSize(horizontal: false, vertical: true)
+        #else
         .frame(minHeight: 148, alignment: .topLeading)
+        #endif
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -1826,6 +1832,11 @@ struct MusicTabContent: View {
     // MARK: - Helpers
 
     private func sliderRow(label: String, value: Binding<Float>, range: ClosedRange<Float>, showsFlashingWarning: Bool = false) -> some View {
+        #if os(iOS)
+        ParameterSlider(value: value, in: range, title: label,
+                        display: "\(Int(value.wrappedValue * 100))%",
+                        showsFlashingWarning: showsFlashingWarning)
+        #else
         HStack {
             HStack(spacing: 6) {
                 Text(label)
@@ -1841,6 +1852,7 @@ struct MusicTabContent: View {
                 .font(.caption.monospacedDigit())
                 .frame(width: 44, alignment: .trailing)
         }
+        #endif
     }
 
     private func meterBar(label: String, level: Float, color: Color) -> some View {

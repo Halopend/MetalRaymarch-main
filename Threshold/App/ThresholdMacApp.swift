@@ -374,7 +374,8 @@ private struct ThresholdMacRootView: View {
     /// three explicit navigation modes.
     @AppStorage("MacTabLauncher.enabled") private var legacyLauncherEnabled = true
     @AppStorage("MacTabLauncher.navigationModeMigrated.v1") private var didMigrateNavigationMode = false
-    @AppStorage("MacTabLauncher.style") private var launcherStyle: NavigationPresentationStyle = .radial
+    @AppStorage("MacTabLauncher.style") private var launcherStyle: NavigationPresentationStyle = .controlPanel
+    @AppStorage("RadialMenu.enabled") private var radialMenuEnabled = false
     @AppStorage("MacTabLauncher.curvature") private var launcherCurvature: Double = 0.82
     @AppStorage("hasCompletedIntroOnboarding") private var hasCompletedIntroOnboarding = false
     @State private var showStorageChoice = false
@@ -652,6 +653,9 @@ private struct ThresholdMacRootView: View {
                 showStorageChoice = true
             }
             migrateLegacyNavigationPreferenceIfNeeded()
+            if !radialMenuEnabled && launcherStyle == .radial {
+                launcherStyle = .controlPanel
+            }
             Task { @MainActor in
                 await appModel.startMicrophoneAtLaunchIfEnabled()
             }
@@ -675,6 +679,13 @@ private struct ThresholdMacRootView: View {
         }
         .onChange(of: launcherStyle) { _, style in
             applyNavigationStyle(style)
+        }
+        .onChange(of: radialMenuEnabled) { _, isEnabled in
+            if isEnabled {
+                launcherStyle = .radial
+            } else if launcherStyle == .radial {
+                launcherStyle = .controlPanel
+            }
         }
         .onSceneLoadAutoHide {
             // A scene chosen from the radial-launched browser has completed
@@ -900,7 +911,7 @@ private struct ThresholdMacRootView: View {
         .accessibilityLabel(title)
         .accessibilityHint("Opens the Threshold control surface")
         .contextMenu {
-            ForEach(NavigationPresentationStyle.allCases, id: \.self) { style in
+            ForEach(NavigationPresentationStyle.allCases.filter { $0 != .radial || radialMenuEnabled }, id: \.self) { style in
                 Button {
                     launcherStyle = style
                 } label: {
@@ -1186,6 +1197,7 @@ private struct ThresholdMacRootView: View {
             }
 
         case .radial:
+            guard radialMenuEnabled else { return }
             guard !hasDetachedControls else { return }
             if radialMenu.isPresented {
                 hideRadialTabs(animated: true)
@@ -1213,7 +1225,7 @@ private struct ThresholdMacRootView: View {
     }
 
     private func toggleRadialShortcut(windowSize: CGSize) {
-        guard !appModel.isViewportChromeHidden, !hasDetachedControls else { return }
+        guard radialMenuEnabled, !appModel.isViewportChromeHidden, !hasDetachedControls else { return }
 
         let toggle = {
             toggleSelectedNavigation(windowSize: windowSize)
@@ -1354,7 +1366,7 @@ private struct ThresholdMacRootView: View {
     }
 
     private func showRadialLauncher(anchor: CGPoint, windowSize: CGSize) {
-        guard launcherStyle == .radial, !hasDetachedControls else { return }
+        guard radialMenuEnabled, launcherStyle == .radial, !hasDetachedControls else { return }
 
         pendingAutoHide?.cancel()
         pendingAutoHide = nil

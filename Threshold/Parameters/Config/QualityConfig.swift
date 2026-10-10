@@ -67,6 +67,70 @@ enum BoundToSpaceMode: Int, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// User-facing render-detail budgets. The iPhone tiers are derived from the
+/// platform ceiling so changing the device's maximum shifts every tier with it.
+enum DetailBudgetPreset: String, CaseIterable, Identifiable, Sendable {
+    case minimum
+    case veryLow
+    case low
+    case medium
+    case high
+    case full
+
+    var id: String { rawValue }
+
+    static var visiblePresets: [DetailBudgetPreset] {
+        #if os(iOS)
+        [.minimum, .veryLow, .low, .medium, .high, .full]
+        #else
+        [.low, .medium, .high, .full]
+        #endif
+    }
+
+    var title: String {
+        switch self {
+        case .minimum: "Minimum"
+        case .veryLow: "Very Low"
+        case .low: "Low"
+        case .medium: "Medium"
+        case .high: "High"
+        case .full: "Full"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .minimum: "circle"
+        case .veryLow, .low: "circle.grid.2x2"
+        case .medium: "circle.grid.3x3"
+        case .high: "circle.grid.3x3.fill"
+        case .full: "circle.grid.3x3.circle.fill"
+        }
+    }
+
+    var scale: Float {
+        let ceiling = QualityConfig.maximumResolutionScale
+        switch self {
+        case .minimum: return QualityConfig.minimumResolutionScale
+        case .veryLow: return ceiling * 0.4
+        case .low: return QualityConfig.defaultResolutionScale
+        case .medium:
+            #if os(iOS)
+            return ceiling * (2.0 / 3.0)
+            #else
+            return 0.50
+            #endif
+        case .high:
+            #if os(iOS)
+            return ceiling * (5.0 / 6.0)
+            #else
+            return 0.75
+            #endif
+        case .full: return ceiling
+        }
+    }
+}
+
 /// Author-declared "aim for this render quality" hint carried per-scene
 /// (`FractalPreset.recommendedQuality`). Deliberately distinct from iteration
 /// count: it targets the render RESOLUTION (MetalFX input scale on Mac; the
@@ -92,12 +156,12 @@ enum SceneQualityTarget: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    /// Mac / iOS render input-scale target (`resolutionScale`).
-    var macResolutionScale: Float {
+    /// Render input-scale target, capped by the device's platform budget.
+    var resolutionScale: Float {
         switch self {
         case .standard: return QualityConfig.defaultResolutionScale
-        case .high:     return 1.0    // native input
-        case .ultra:    return 1.0    // Mac tops out at native
+        case .high:     return QualityConfig.maximumResolutionScale * 0.75
+        case .ultra:    return QualityConfig.maximumResolutionScale
         }
     }
 
@@ -146,6 +210,24 @@ struct QualityConfig: Codable, Equatable, Sendable {
         #else
         0.33
         #endif
+    }
+
+    /// Maximum detail budget for this platform. The iPhone renderer caps its
+    /// render input at half-size; other platforms retain their full-resolution top.
+    static var maximumResolutionScale: Float {
+        #if os(iOS)
+        0.50
+        #else
+        1.0
+        #endif
+    }
+
+    /// Display resolution as a percentage of the platform's available budget.
+    /// On iPhone a 0.50 render scale is the full 100% detail budget.
+    static func displayedResolutionPercent(_ scale: Float) -> Int {
+        guard scale.isFinite, maximumResolutionScale > 0 else { return 0 }
+        let relativeScale = min(1, max(0, scale / maximumResolutionScale))
+        return Int((relativeScale * 100).rounded())
     }
 
     /// First-launch DE iteration / ray-step budgets. They match the user-facing
@@ -226,7 +308,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
     var baseMaxRaySteps: Int = Self.defaultMaxRaySteps
 
     // Resolution / tiling
-    var resolutionScale: Float = Self.defaultResolutionScale // minimumResolutionScale...1.0
+    var resolutionScale: Float = Self.defaultResolutionScale // minimumResolutionScale...maximumResolutionScale
     var renderQuality: Float = Self.visionDefaultRenderQuality // visionMinRenderQuality...visionMaxRenderQuality (visionOS compositor drawable scale). Default matches the desktop Low detail budget; the floor is for probing max framerate / the adaptive governor.
     var tileSize: Int = 0              // 0=disabled (fragment), 8=adaptive hierarchical compute
 

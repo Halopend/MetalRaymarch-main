@@ -1209,7 +1209,7 @@ final class ViewportRenderer {
         // direct path keeps the inline derivative version in fragmentMain.
         let didUpscale = temporalPass != nil || spatialPass != nil
         publishUpscalerPath(
-            temporalPass != nil ? "Temporal" : (usesBasicUpscale ? "Basic" : (spatialPass != nil ? "Spatial" : "Native")),
+            temporalPass != nil ? "Temporal" : (usesBasicUpscale ? "Basic" : (spatialPass != nil ? "Spatial" : "Direct")),
             appModel: appModel
         )
         commandBuffer.addCompletedHandler { [inFlightSemaphore, gpuFrameMsHolder] buffer in

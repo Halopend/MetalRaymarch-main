@@ -256,7 +256,7 @@ enum ControlCatalog {
         id: "quality.resolutionScale",
         name: "Resolution Scale",
         icon: "rectangle.compress.vertical",
-        range: QualityConfig.minimumResolutionScale...1.0,
+        range: QualityConfig.minimumResolutionScale...QualityConfig.maximumResolutionScale,
         defaultValue: QualityConfig.defaultResolutionScale)
 
     /// Gradient mapping controls are scene-authored, static scalars. Repeat

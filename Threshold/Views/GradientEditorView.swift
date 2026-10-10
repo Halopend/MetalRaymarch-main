@@ -239,12 +239,14 @@ struct GradientStopRow: View {
                 }
             
             // Position slider
+            #if !os(iOS)
             Text("\(localPosition, specifier: "%.2f")")
                 .font(.caption)
                 .monospacedDigit()
                 .frame(width: 35)
+            #endif
             
-            ParameterSlider(value: $localPosition, in: 0...1, onEditingChanged: { editing in
+            ParameterSlider(value: $localPosition, in: 0...1, title: "Position", onEditingChanged: { editing in
                 if !editing {
                     var updated = stop
                     updated.position = localPosition

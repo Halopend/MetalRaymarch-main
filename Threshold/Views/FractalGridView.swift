@@ -652,63 +652,109 @@ struct FractalGridView: View {
 
     @ViewBuilder
     private var tagFilterBar: some View {
-        if currentKind == .scene || !availableTags.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    if currentKind == .scene {
-                        Button {
-                            embeddedFormulaOnly.toggle()
-                        } label: {
-                            Label("Embedded Formula", systemImage: "chevron.left.forwardslash.chevron.right")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(embeddedFormulaOnly ? Color.white : Color.secondary)
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 5)
-                                .background(Capsule().fill(embeddedFormulaOnly ? Color.accentColor : Color.secondary.opacity(0.12)))
-                        }
-                        .buttonStyle(.plain)
+        if currentKind == .scene || currentKind == .animation || !availableTags.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                if currentKind == .scene {
+                    Button {
+                        embeddedFormulaOnly.toggle()
+                    } label: {
+                        Label("Embedded Formula", systemImage: "chevron.left.forwardslash.chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(embeddedFormulaOnly ? Color.white : Color.secondary)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(embeddedFormulaOnly ? Color.accentColor : Color.secondary.opacity(0.12)))
                     }
+                    .buttonStyle(.plain)
+                }
 
-                    if currentKind == .scene && !availableTags.isEmpty {
-                        Divider().frame(height: 20)
-                    }
+                if currentKind == .scene || currentKind == .animation {
+                    libraryScopeMenuButton
+                }
 
-                    if !availableTags.isEmpty {
-                        Label("Tags", systemImage: "tag.fill")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                if !availableTags.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            Label("Tags", systemImage: "tag.fill")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
 
-                        Button {
-                            selectedTag = nil
-                        } label: {
-                            Text("All")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(selectedTag == nil ? Color.white : Color.secondary)
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 5)
-                                .background(
-                                    Capsule().fill(selectedTag == nil ? Color.accentColor : Color.secondary.opacity(0.12))
-                                )
-                        }
-                        .buttonStyle(.plain)
-
-                        ForEach(availableTags, id: \.self) { tag in
                             Button {
-                                selectedTag = tag
+                                selectedTag = nil
                             } label: {
-                                SceneTagPill(
-                                    tag: tag,
-                                    isSelected: selectedTag?.caseInsensitiveCompare(tag) == .orderedSame
-                                )
+                                Text("All")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(selectedTag == nil ? Color.white : Color.secondary)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 5)
+                                    .background(
+                                        Capsule().fill(selectedTag == nil ? Color.accentColor : Color.secondary.opacity(0.12))
+                                    )
                             }
                             .buttonStyle(.plain)
+
+                            ForEach(availableTags, id: \.self) { tag in
+                                Button {
+                                    selectedTag = tag
+                                } label: {
+                                    SceneTagPill(
+                                        tag: tag,
+                                        isSelected: selectedTag?.caseInsensitiveCompare(tag) == .orderedSame
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                 }
-                .padding(.horizontal, 12)
             }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color.secondary.opacity(0.06)))
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Filter the selected folder")
+        }
+    }
+
+    private var libraryScopeMenuButton: some View {
+        Menu {
+            let index = libraryStore?.index ?? .empty
+            ForEach([LibraryItemKind.scene, .animation], id: \.rawValue) { kind in
+                Section(kind.displayName) {
+                    ForEach(LibrarySidebarCatalog.section(kind: kind, index: index).rows) { row in
+                        Button {
+                            selectLibraryScope(row)
+                        } label: {
+                            Text(String(repeating: "    ", count: row.depth) + row.title)
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "folder")
+                    .font(.caption.weight(.semibold))
+                Text(libraryScopePickerLabel)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+            }
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 36)
+            .background(RoundedRectangle(cornerRadius: 9).fill(Color.blue.opacity(0.14)))
+            .contentShape(RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
+        .accessibilityLabel("Choose a library folder")
+    }
+
+    private var libraryScopePickerLabel: String {
+        switch effectiveLibrarySelection.wrappedValue {
+        case .all(let kind): return "All \(kind.displayName)"
+        case .category(_, let path): return path.joined(separator: " / ")
         }
     }
     private func emptySectionLabel(_ text: String) -> some View {

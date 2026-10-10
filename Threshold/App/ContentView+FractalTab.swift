@@ -1644,7 +1644,7 @@ extension ContentView {
             HStack {
                 Text(effectiveDirectBudgetLabel)
                 Spacer()
-                Text("\(Int(cache.quality.resolutionScale * 100))%")
+                Text("\(QualityConfig.displayedResolutionPercent(cache.quality.resolutionScale))%")
                     .fontWeight(.bold)
                     .monospacedDigit()
             }
@@ -1657,28 +1657,13 @@ extension ContentView {
                     4
                     #endif
                 }()), spacing: 8) {
-                    // Extra iOS budgets fit into two rows on a phone.
-                    // Dashed screen outline + inner grid conveys pixel density; increasing detail
-                    // left-to-right.
-                    let presets: [(label: String, scale: Float, icon: String)] = {
-                        let standard: [(label: String, scale: Float, icon: String)] = [
-                            ("Low", QualityConfig.defaultResolutionScale, "circle.grid.2x2"),
-                            ("Medium", 0.50, "circle.grid.3x3"),
-                            ("High", 0.75, "circle.grid.3x3.fill"),
-                            ("Full", 1.0, "circle.grid.3x3.circle.fill")
-                        ]
-                        #if os(iOS)
-                        return [("Minimum", 0.10, "circle"),
-                                ("Very Low", 0.20, "circle.grid.2x2")] + standard
-                        #else
-                        return standard
-                        #endif
-                    }()
-
-                    ForEach(presets, id: \.label) { preset in
+                    // Dashed screen outline + inner grid conveys pixel density;
+                    // each platform's Full tier is its configured quality ceiling.
+                    ForEach(DetailBudgetPreset.visiblePresets) { preset in
+                        let scale = preset.scale
                         Button {
-                            cache.quality.resolutionScale = preset.scale
-                            cache.push(\.resolutionScale, value: preset.scale)
+                            cache.quality.resolutionScale = scale
+                            cache.push(\.resolutionScale, value: scale)
                         } label: {
                             VStack(spacing: 2) {
                                 ZStack {
@@ -1687,14 +1672,15 @@ extension ContentView {
                                     Image(systemName: preset.icon)
                                         .font(.caption2)
                                 }
-                                Text(preset.label).font(.caption2)
-                                Text("\(Int(preset.scale * 100))%").font(.caption.monospacedDigit())
+                                Text(preset.title).font(.caption2)
+                                Text("\(QualityConfig.displayedResolutionPercent(scale))%")
+                                    .font(.caption.monospacedDigit())
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 6)
                         }
                         .buttonStyle(.bordered)
-                        .tint(abs(cache.quality.resolutionScale - preset.scale) < 0.01 ? .blue : .secondary)
+                        .tint(abs(cache.quality.resolutionScale - scale) < 0.01 ? .blue : .secondary)
                         .disabled(cache.quality.tileSize == 8)
                     }
                 }
@@ -1713,7 +1699,7 @@ extension ContentView {
                     ),
                     range: ControlCatalog.resolutionScale.range,
                     step: 0.01,
-                    display: "\(Int((cache.quality.resolutionScale * 100).rounded()))%",
+                    display: "\(QualityConfig.displayedResolutionPercent(cache.quality.resolutionScale))%",
                     tint: .cyan
                 )
                 .disabled(cache.quality.tileSize == 8)

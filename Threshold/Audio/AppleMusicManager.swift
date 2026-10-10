@@ -3,6 +3,78 @@ import Foundation
 import os
 import QuartzCore
 
+private struct AppleMusicPlaybackSnapshot: Sendable {
+    let isPlaying: Bool
+    let isStopped: Bool
+    let playbackTime: Double
+    let duration: Double
+    let title: String
+    let artist: String
+    let album: String
+    let persistentID: UInt64?
+    let beatsPerMinute: Float
+}
+
+/// MediaPlayer getters can synchronously wait for Apple's account service.
+/// Keep those IPC reads off the main actor so an account-store failure cannot
+/// freeze rendering or control input.
+private final class AppleMusicPlaybackReader: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "com.puppypower.Threshold.apple-music-reader", qos: .utility)
+    private let pendingLock = NSLock()
+    private var readPending = false
+    private var player: MPMusicPlayerController?
+
+    func readAuthorizationStatus(_ completion: @escaping @Sendable (Int) -> Void) {
+        queue.async {
+            completion(Int(MPMediaLibrary.authorizationStatus().rawValue))
+        }
+    }
+
+    func read(_ completion: @escaping @Sendable (AppleMusicPlaybackSnapshot) -> Void) {
+        pendingLock.lock()
+        guard !readPending else {
+            pendingLock.unlock()
+            return
+        }
+        readPending = true
+        pendingLock.unlock()
+
+        queue.async {
+            defer {
+                self.pendingLock.lock()
+                self.readPending = false
+                self.pendingLock.unlock()
+            }
+            let player = self.systemPlayer()
+            let item = player.nowPlayingItem
+            let state = player.playbackState
+            let bpm = (item?.value(forProperty: MPMediaItemPropertyBeatsPerMinute) as? NSNumber)?.floatValue ?? 120
+            completion(AppleMusicPlaybackSnapshot(
+                isPlaying: state == .playing,
+                isStopped: state == .stopped,
+                playbackTime: max(0, player.currentPlaybackTime),
+                duration: max(0, item?.playbackDuration ?? 0),
+                title: item?.title ?? "",
+                artist: item?.artist ?? item?.albumTitle ?? "",
+                album: item?.albumTitle ?? "",
+                persistentID: item.map { $0.persistentID },
+                beatsPerMinute: max(70, min(190, bpm))
+            ))
+        }
+    }
+
+    func perform(_ command: @escaping @Sendable (MPMusicPlayerController) -> Void) {
+        queue.async { command(self.systemPlayer()) }
+    }
+
+    private func systemPlayer() -> MPMusicPlayerController {
+        if let player { return player }
+        let player = MPMusicPlayerController.systemMusicPlayer
+        self.player = player
+        return player
+    }
+}
+
 @MainActor
 @Observable
 final class AppleMusicManager {
@@ -40,6 +112,8 @@ final class AppleMusicManager {
     private(set) var authorizationStatus: MPMediaLibraryAuthorizationStatus = .notDetermined
     private(set) var nowPlayingTitle: String = ""
     private(set) var nowPlayingArtist: String = ""
+    private(set) var nowPlayingAlbum: String = ""
+    private(set) var nowPlayingPersistentID: UInt64?
     private(set) var isPlaying: Bool = false
     private(set) var playbackTimeSeconds: Double = 0
     private(set) var durationSeconds: Double = 0
@@ -70,18 +144,13 @@ final class AppleMusicManager {
     var currentTimeString: String { formatTime(playbackTimeSeconds) }
     var totalTimeString: String { formatTime(durationSeconds) }
 
-    /// Resolved lazily: on iOS, the first touch of `systemMusicPlayer` state
-    /// (now-playing item, playback time) presents the Media & Apple Music
-    /// permission alert. `AppleMusicManager` is built during app launch, so
-    /// the player must not be consulted until the user has authorized access
-    /// from the Music UI.
-    private var player: MPMusicPlayerController { MPMusicPlayerController.systemMusicPlayer }
-    private(set) var isObservingPlayer = false
+    private let playbackReader = AppleMusicPlaybackReader()
+    private(set) var isMonitoringPlayer = false
     private var authorizationTimeoutTask: Task<Void, Never>?
     private var playbackMonitoringStartPending = false
+    private var authorizationStatusReadPending = false
     private var lastUpdateTime: CFTimeInterval = 0
     private var monitorTask: Task<Void, Never>?
-    private var notificationObservers: [NSObjectProtocol] = []
     private var songLookup: [UInt64: MPMediaItem] = [:]
     private var playlistLookup: [UInt64: MPMediaPlaylist] = [:]
     private var albumLookup: [UInt64: MPMediaItemCollection] = [:]
@@ -96,20 +165,19 @@ final class AppleMusicManager {
         connectionErrorMessage = "Apple Music requires a physical device."
         return
         #else
-        authorizationStatus = MPMediaLibrary.authorizationStatus()
-        // Authorization and player initialization are deliberately separate.
-        // `systemMusicPlayer` may synchronously initialize the Apple-account
-        // backend, so never touch it during launch or the Connect action.
+        // MediaPlayer status checks can consult the Apple-account backend too;
+        // defer them to the same background queue as playback polling.
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            self?.refreshAuthorizationStatus()
+        }
         #endif
     }
 
-    /// Begins observing the system music player. Idempotent; must only be
-    /// called once the media library is authorized.
+    /// Starts asynchronous playback polling after media-library authorization.
     private func attachToPlayerIfNeeded() {
-        guard !isObservingPlayer else { return }
-        isObservingPlayer = true
-        player.beginGeneratingPlaybackNotifications()
-        observePlayerNotifications()
+        guard !isMonitoringPlayer else { return }
+        isMonitoringPlayer = true
     }
 
     /// Start observing playback after the user has granted media-library
@@ -127,7 +195,7 @@ final class AppleMusicManager {
     /// granted Apple Music access still get external playback updates without
     /// needing to start a track from inside Threshold.
     func ensurePlaybackMonitoringIfAuthorized() {
-        guard isAuthorized, !isObservingPlayer, !playbackMonitoringStartPending else { return }
+        guard isAuthorized, !isMonitoringPlayer, !playbackMonitoringStartPending else { return }
         playbackMonitoringStartPending = true
         Task { @MainActor [weak self] in
             await Task.yield()
@@ -135,6 +203,32 @@ final class AppleMusicManager {
             self.playbackMonitoringStartPending = false
             self.startAuthorizedPlaybackMonitoring()
         }
+    }
+
+    /// Reconcile permission changes made in Settings without showing a prompt.
+    func refreshAuthorizationStatus() {
+        #if !targetEnvironment(simulator)
+        guard !isRequestingAuthorization, !authorizationStatusReadPending else { return }
+        authorizationStatusReadPending = true
+        playbackReader.readAuthorizationStatus { [weak self] rawStatus in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.authorizationStatusReadPending = false
+                guard !self.isRequestingAuthorization,
+                      let status = MPMediaLibraryAuthorizationStatus(rawValue: rawStatus),
+                      status != self.authorizationStatus else { return }
+                self.authorizationStatus = status
+                self.connectionErrorMessage = nil
+                if status == .authorized {
+                    self.ensurePlaybackMonitoringIfAuthorized()
+                } else {
+                    self.stopMonitoring()
+                    self.clearLibrary(reason: "Apple Music access is required to browse songs and playlists.")
+                }
+                self.onStateDidChange?()
+            }
+        }
+        #endif
     }
 
     func requestAuthorization() {
@@ -262,8 +356,10 @@ final class AppleMusicManager {
         }
 
         attachToPlayerIfNeeded()
-        player.setQueue(with: MPMediaItemCollection(items: [item]))
-        player.play()
+        playbackReader.perform { player in
+            player.setQueue(with: MPMediaItemCollection(items: [item]))
+            player.play()
+        }
         startMonitoring()
         updateFrame()
     }
@@ -297,9 +393,11 @@ final class AppleMusicManager {
         }
 
         attachToPlayerIfNeeded()
-        player.shuffleMode = shuffle ? .songs : .off
-        player.setQueue(with: playlist)
-        player.play()
+        playbackReader.perform { player in
+            player.shuffleMode = shuffle ? .songs : .off
+            player.setQueue(with: playlist)
+            player.play()
+        }
         startMonitoring()
         updateFrame()
     }
@@ -319,9 +417,11 @@ final class AppleMusicManager {
         }
 
         attachToPlayerIfNeeded()
-        player.shuffleMode = shuffle ? .songs : .off
-        player.setQueue(with: album)
-        player.play()
+        playbackReader.perform { player in
+            player.shuffleMode = shuffle ? .songs : .off
+            player.setQueue(with: album)
+            player.play()
+        }
         startMonitoring()
         updateFrame()
     }
@@ -342,39 +442,55 @@ final class AppleMusicManager {
     }
 
     func togglePlayPause() {
-        if isPlaying {
-            player.pause()
-        } else {
-            player.play()
-        }
+        let shouldPlay = !isPlaying
+        playbackReader.perform { player in shouldPlay ? player.play() : player.pause() }
         updateFrame()
     }
 
     func nextTrack() {
-        player.skipToNextItem()
+        playbackReader.perform { $0.skipToNextItem() }
         updateFrame()
     }
 
     func previousTrack() {
-        player.skipToPreviousItem()
+        playbackReader.perform { $0.skipToPreviousItem() }
+        updateFrame()
+    }
+
+    func seek(to fraction: Float) {
+        let position = Double(fraction) * durationSeconds
+        playbackReader.perform { $0.currentPlaybackTime = position }
         updateFrame()
     }
 
     func updateFrame() {
-        // Reading player state before authorization triggers the system
-        // permission alert; stay inert until the user has granted access.
-        guard isAuthorized, isObservingPlayer else { return }
+        // Keep player IPC disabled until the user grants access. Reads run on
+        // the dedicated playback queue, never on the UI actor.
+        guard isAuthorized, isMonitoringPlayer else { return }
+        playbackReader.read { [weak self] snapshot in
+            Task { @MainActor [weak self] in
+                guard let self, self.isAuthorized, self.isMonitoringPlayer else { return }
+                self.apply(snapshot)
+            }
+        }
+    }
+
+    private func apply(_ snapshot: AppleMusicPlaybackSnapshot) {
         let wasPlaying = isPlaying
         let previousPlaybackTime = playbackTimeSeconds
         let previousDuration = durationSeconds
 
-        let state = player.playbackState
-        let isNowPlaying = (state == .playing)
+        let isNowPlaying = snapshot.isPlaying
         isPlaying = isNowPlaying
         isActive = isNowPlaying
-        updateMetadata()
+        nowPlayingTitle = snapshot.title
+        nowPlayingArtist = snapshot.artist
+        nowPlayingAlbum = snapshot.album
+        nowPlayingPersistentID = snapshot.persistentID
+        durationSeconds = snapshot.duration
+        playbackTimeSeconds = snapshot.playbackTime
 
-        if wasPlaying && !isNowPlaying && state == .stopped {
+        if wasPlaying && !isNowPlaying && snapshot.isStopped {
             let endThreshold = max(0.2, min(1.0, previousDuration * 0.02))
             let reachedEnd = previousDuration > 1.0 && previousPlaybackTime >= (previousDuration - endThreshold)
             if reachedEnd {
@@ -394,13 +510,7 @@ final class AppleMusicManager {
         lastUpdateTime = now
         let clampedDt = max(0.001, min(0.1, dt))
 
-        playbackTimeSeconds = max(0, player.currentPlaybackTime)
-
-        let item = player.nowPlayingItem
-
-        let bpmValue = (item?.value(forProperty: MPMediaItemPropertyBeatsPerMinute) as? NSNumber)?.floatValue ?? 120
-        let bpm = max(70, min(190, bpmValue))
-        let phase = Float(player.currentPlaybackTime) * (bpm / 60.0)
+        let phase = Float(snapshot.playbackTime) * (snapshot.beatsPerMinute / 60.0)
 
         // Beat pulse from playback time and BPM metadata
         let beatPulse = pow(max(0, sin(phase * 2.0 * .pi)), 4)
@@ -473,41 +583,6 @@ final class AppleMusicManager {
         libraryLoading = false
         libraryErrorMessage = reason
         onStateDidChange?()
-    }
-
-    private func observePlayerNotifications() {
-        let center = NotificationCenter.default
-        let playbackObserver = center.addObserver(
-            forName: .MPMusicPlayerControllerPlaybackStateDidChange,
-            object: player,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.updateFrame()
-            }
-        }
-
-        let nowPlayingObserver = center.addObserver(
-            forName: .MPMusicPlayerControllerNowPlayingItemDidChange,
-            object: player,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.updateFrame()
-            }
-        }
-
-        notificationObservers = [playbackObserver, nowPlayingObserver]
-    }
-
-    private func updateMetadata() {
-        let item = player.nowPlayingItem
-        nowPlayingTitle = item?.title ?? ""
-        nowPlayingArtist = item?.artist ?? item?.albumTitle ?? ""
-        durationSeconds = max(0, item?.playbackDuration ?? 0)
-        if !isPlaying {
-            playbackTimeSeconds = max(0, player.currentPlaybackTime)
-        }
     }
 
     private func formatTime(_ seconds: Double) -> String {
