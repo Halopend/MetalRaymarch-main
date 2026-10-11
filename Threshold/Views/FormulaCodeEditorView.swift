@@ -20,10 +20,10 @@ struct FormulaEditorWindowView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
     @State private var model: FormulaEditorModel?
+    @State private var sliderPreview = ParameterSliderPreview()
     var onClose: (() -> Void)? = nil
     #if os(iOS)
     @State private var isPreviewingRender = false
-    @State private var sliderPreview = ParameterSliderPreview()
     #endif
 
     var body: some View {
@@ -58,6 +58,8 @@ struct FormulaEditorWindowView: View {
         .onDisappear { isPreviewingRender = false }
         #else
         editorBody
+            .environment(\.parameterSliderPreview, sliderPreview)
+            .modifier(ThresholdSliderFocusPresentation(preview: sliderPreview))
         #endif
     }
 

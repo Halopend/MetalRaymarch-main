@@ -272,6 +272,8 @@ private struct ParameterNodeRow: View {
                 enabled: .constant(true),
                 onChanged: {},
                 showToggle: false,
+                compactLabelWidth: 100,
+                reservesTrailingSpace: false,
                 musicTargetID: floatNode.id
             )
 
