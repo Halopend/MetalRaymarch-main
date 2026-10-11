@@ -584,67 +584,6 @@ private struct ThresholdiOSControlsPresentation: ViewModifier {
     }
 }
 
-private struct ParameterSliderFramesKey: PreferenceKey {
-    static let defaultValue: [UUID: CGRect] = [:]
-
-    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
-    }
-}
-
-/// Cut away the panel's chrome and other rows while keeping the original
-/// active control in place. A mask changes drawing only, preserving layout,
-/// scroll position, and native slider touch ownership through release.
-struct ThresholdSliderFocusPresentation: ViewModifier {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    let preview: ParameterSliderPreview
-    @State private var frames: [UUID: CGRect] = [:]
-    @State private var lastFocusedFrames: [CGRect] = []
-
-    private var focusedFrames: [CGRect] {
-        frames.keys.sorted { $0.uuidString < $1.uuidString }
-            .filter { preview.isEditing($0) }
-            .compactMap { frames[$0] }
-    }
-
-    func body(content: Content) -> some View {
-        let activeFrames = focusedFrames
-        // Fail open until this control's current, scroll-resolved bounds arrive.
-        let isFocused = !activeFrames.isEmpty
-        content
-            .overlayPreferenceValue(ParameterSliderBoundsKey.self) { bounds in
-                GeometryReader { geometry in
-                    Color.clear
-                        .preference(key: ParameterSliderFramesKey.self,
-                                    value: bounds.mapValues { geometry[$0] })
-                }
-                .allowsHitTesting(false)
-            }
-            .onPreferenceChange(ParameterSliderFramesKey.self) { frames = $0 }
-            .onChange(of: activeFrames, initial: true) { _, updated in
-                // Retain the last row during fade-in so it never blinks away
-                // when the native slider reports the release edge.
-                if !updated.isEmpty { lastFocusedFrames = updated }
-            }
-            .compositingGroup()
-            .mask {
-                ZStack(alignment: .topLeading) {
-                    Rectangle().fill(.white).opacity(isFocused ? 0 : 1)
-                    Path { path in
-                        for frame in activeFrames.isEmpty ? lastFocusedFrames : activeFrames {
-                            path.addRoundedRect(in: frame.insetBy(dx: -8, dy: -6),
-                                                cornerSize: CGSize(width: 12, height: 12))
-                        }
-                    }
-                    .fill(.white)
-                }
-            }
-            // The transparent panel continues to own its hit targets; never
-            // replace or disable the slider in the middle of a native drag.
-            .allowsHitTesting(true)
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: isFocused)
-    }
-}
 
 private struct ThresholdiOSInspectorContent: View {
     @Environment(AppModel.self) private var appModel
